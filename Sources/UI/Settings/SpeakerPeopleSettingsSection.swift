@@ -154,9 +154,9 @@ struct SpeakerPeopleSettingsSection: View {
                     }
                 }
             } else if directoryCount > 0 {
-                VStack(alignment: .leading, spacing: 12) {
-                    LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing(count: directoryCount))
-
+                // Everyone else, by voice print: "Named automatically",
+                // "Still learning", then unnamed voices outside the open card.
+                VStack(alignment: .leading, spacing: 16) {
                     SpeakerSearchRow(model: model)
 
                     if directoryProfiles.isEmpty {
@@ -164,11 +164,11 @@ struct SpeakerPeopleSettingsSection: View {
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                     } else {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(directoryProfiles, id: \.id) { profile in
-                                SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
-                            }
-                        }
+                        SpeakerPrintSectionsView(
+                            profiles: directoryProfiles,
+                            model: model,
+                            expandedPersonID: $expandedPersonID
+                        )
                     }
                 }
             }
@@ -208,11 +208,6 @@ struct SpeakerPeopleSettingsSection: View {
         .padding(.horizontal, inset)
         .opacity(opacity)
         .accessibilityHidden(true)
-    }
-
-    private func everyoneTrailing(count: Int) -> String? {
-        guard count > 0 else { return nil }
-        return count == 1 ? "1 person" : "\(count) people"
     }
 }
 

@@ -1,28 +1,32 @@
 // NotchIslandSpeakerReviewView.swift
-// "Who was on this call?" inside the notch island, in place of the speaker
-// review window. It opens by itself after every saved meeting with a remote
-// voice:
+// "Who spoke?" inside the notch island (Prints.dc.html), in place of the
+// speaker review window. It opens by itself after every saved meeting with a
+// remote voice. Each voice is a row with the person's voice print on the left
+// (play in its middle; one ring lit per confirmed meeting, in the person's
+// color; a full print glows):
 //
-//   - voices Transcripted named on its own show as "recognized"; hovering
-//     one offers "Not Taylor?", which opens a name box to correct it
-//   - when every voice was recognized nothing is asked: the island lists
-//     who was on the call and closes itself (Done, or its ring running out)
-//   - a likely match asks "Is this Maya?" with Yes and No
-//   - No, or a voice with no guess, opens a name box with the calendar
-//     invitees as one-tap names (an arrow shows more than three) and
-//     autocomplete from people already saved in Speakers
-//   - each voice has a clip to play; while it plays the button is Pause
-//     and a ring fills around it until the clip ends
-//   - a calendar 1:1 with one unnamed remote voice fills that voice's name
-//     box with the other invitee; it saves on Done like a typed name
-//   - local mic voices sit under an "All me" toggle; an open name box
+//   - voices Transcripted named on its own show just the name; hovering one
+//     offers "Not Taylor?", which turns the title into a name field
+//   - when every voice was recognized nothing is asked: the island lists who
+//     was on the call and closes itself (Done, or its ring running out)
+//   - a likely match reads "Marcus Reed?" with a round ✕ and ✓; ✓ plays the
+//     match animation and earns the next ring, Undo takes it back
+//   - ✕, or a voice with no guess, makes the title itself the name field
+//     ("Who's this?"); with the keyboard the calendar invitees fade in under
+//     it as one-tap names (an arrow shows more than three), and typing offers
+//     people already saved in Speakers
+//   - a calendar 1:1 with one unnamed remote voice fills that voice's field
+//     with the other invitee; it saves on Done like a typed name
+//   - local mic voices sit under an "All me" toggle; an open name field
 //     offers "Not a person" for a voice that isn't one
 //
-// Done saves the answers through the same `SpeakerReviewUpdate`s the review
-// window builds, then shows "Everyone's named" with Open. Later (or its 20 s
-// ring running out) saves whatever was answered and leaves the rest for
-// Speakers. A name typed but not submitted counts on both. The ring only runs
-// while the review is on screen. The rules live in NotchIslandSpeakerReviewPolicy.
+// The footer lists, with glowing dots, the people named automatically on this
+// call, then Later and Done. Done saves the answers through the same
+// `SpeakerReviewUpdate`s the review window builds, then shows "Everyone's
+// named" with Open. Later (or its 20 s ring running out) saves whatever was
+// answered and leaves the rest for Speakers. A name typed but not submitted
+// counts on both. The ring only runs while the review is on screen. The rules
+// live in NotchIslandSpeakerReviewPolicy; rows are NotchIslandVoiceRowView.
 
 import AppKit
 import TranscriptedCore
@@ -46,14 +50,34 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     let requestID: UUID
     private let request: SpeakerNamingRequest
-    private let knownPeople: [SpeakerNameChoice]
+    let knownPeople: [SpeakerNameChoice]
     private let stack = NSStackView()
+    /// The footer's dots and "N people named automatically", refreshed in place.
+    let footerSummary = NSStackView()
+    /// The dots on screen, by who they stand for, in footer order.
+    var footerDots: [(key: String, view: NotchIslandGlowDot)] = []
+    /// Dots waiting for their print to re-form before they join.
+    var footerLandings: [String: Task<Void, Never>] = [:]
+    /// "N people named automatically", the number on its own so it can tick.
+    let footerCount = NotchIslandFooterCount()
+    let footerSpacer = NSView()
+    /// The light tip under a hovered print (one, moved to the print).
+    let printTip = NotchIslandPrintTip()
+    var tipTop: NSLayoutConstraint?
+    var tipLeading: NSLayoutConstraint?
+    var tipTask: Task<Void, Never>?
+    /// Palette index per claimed person, in row order, so nobody on the call
+    /// shares a color.
+    var colorIndices: [UUID: Int] = [:]
+    /// Everyone who has had a color on this review, in the order they got it
+    /// (NotchIslandSpeakerReviewPolicy.colorOrder), so colors stay put.
+    var colorOrder: [UUID] = []
     /// Voices the review asks about.
-    private var rows: [NotchIslandVoiceRowView] = []
+    private(set) var rows: [NotchIslandVoiceRowView] = []
     /// Voices named on their own, listed with a hover correction.
-    private var recognizedRows: [NotchIslandVoiceRowView] = []
+    private(set) var recognizedRows: [NotchIslandVoiceRowView] = []
     /// Recognized names with no clip to correct from (shown, not editable).
-    private var plainRecognizedNames: [String] = []
+    private(set) var plainRecognizedNames: [String] = []
     /// Everyone was recognized: nothing to ask, just who was on the call.
     let isRecognizedOnly: Bool
     private var meetingTitle: String?
@@ -83,7 +107,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     init(request: SpeakerNamingRequest) {
         self.request = request
         self.knownPeople = request.knownPeople.map {
-            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount)
+            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount, confirmedMeetings: $0.confirmedMeetings, isTrusted: $0.isTrusted)
         }
         self.requestID = request.id
         self.isRecognizedOnly = request.speakers.isEmpty
@@ -91,7 +115,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
-        stack.spacing = 8
+        stack.spacing = 6
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
@@ -112,13 +136,19 @@ final class NotchIslandSpeakerReviewView: NSView {
         plainRecognizedNames = request.recognizedSpeakerNames.filter {
             !correctable.contains(SpeakerNameSelectionPolicy.normalizedSearchText($0))
         }
+        printTip.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(printTip)
+        tipTop = printTip.topAnchor.constraint(equalTo: topAnchor)
+        tipLeading = printTip.leadingAnchor.constraint(equalTo: leadingAnchor)
+        NSLayoutConstraint.activate([tipTop, tipLeading].compactMap { $0 })
+        assignColors()
         rebuild()
         // The ring waits until the island reports the review on screen.
         if !isRecognizedOnly { trackShown() }
         scheduleHardCap()
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel(headerTitle)
+        setAccessibilityLabel(accessibilityTitle)
     }
 
     private func makeRow(for entry: SpeakerNamingEntry, recognized: Bool) -> NotchIslandVoiceRowView {
@@ -127,11 +157,12 @@ final class NotchIslandSpeakerReviewView: NSView {
         row.onInteract = { [weak self] in self?.stopLaterCountdown() }
         row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
         row.onSubmit = { [weak self, weak row] in self?.focusNextOpenRow(after: row) }
+        row.onPrintTip = { [weak self] text, anchor in self?.showPrintTip(text, under: anchor) }
         return row
     }
 
-    private var headerTitle: String {
-        NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: meetingTitle, recognizedOnly: isRecognizedOnly)
+    private var accessibilityTitle: String {
+        NotchIslandSpeakerReviewPolicy.accessibilityTitle(meetingTitle: meetingTitle)
     }
 
     @available(*, unavailable)
@@ -141,6 +172,8 @@ final class NotchIslandSpeakerReviewView: NSView {
         laterTask?.cancel()
         lingerTask?.cancel()
         hardCapTask?.cancel()
+        tipTask?.cancel()
+        footerLandings.values.forEach { $0.cancel() }
     }
 
     override var isFlipped: Bool { true }
@@ -152,7 +185,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     func setMeetingTitle(_ title: String?) {
         meetingTitle = title
         guard !isFinished else { return }
-        setAccessibilityLabel(headerTitle)
+        setAccessibilityLabel(accessibilityTitle)
         rebuild()
     }
 
@@ -204,18 +237,13 @@ final class NotchIslandSpeakerReviewView: NSView {
     // MARK: Building
 
     private func rebuild() {
+        hidePrintTip()
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if isFinished { return }
 
-        let header = NotchIslandPalette.label(
-            headerTitle,
-            font: .systemFont(ofSize: 15, weight: .semibold),
-            color: NotchIslandPalette.primaryText
-        )
-        header.lineBreakMode = .byTruncatingTail
-        header.widthAnchor.constraint(lessThanOrEqualToConstant: Self.contentWidth).isActive = true
+        let header = headerLine()
         stack.addArrangedSubview(header)
-        stack.setCustomSpacing(10, after: header)
+        stack.setCustomSpacing(14, after: header)
 
         var lastRow: NSView = header
         for row in recognizedRows {
@@ -234,14 +262,14 @@ final class NotchIslandSpeakerReviewView: NSView {
                 // review window's "Keep Local Mic as You" escape hatch.
                 let micHeader = micSectionHeader()
                 stack.addArrangedSubview(micHeader)
-                stack.setCustomSpacing(4, after: micHeader)
+                stack.setCustomSpacing(0, after: micHeader)
             }
             stack.addArrangedSubview(row)
             lastRow = row
         }
         refreshInvitees()
 
-        let done = NotchIslandButton(title: "Done", style: .accent, height: 30)
+        let done = NotchIslandButton(title: "Done", style: .white, height: 34)
         done.onPress = { [weak self] in self?.finishDone() }
         let buttons: NSStackView
         if isRecognizedOnly {
@@ -250,21 +278,58 @@ final class NotchIslandSpeakerReviewView: NSView {
             buttons = NSStackView(views: [done])
             startCountdownRing(on: done)
         } else {
-            let later = NotchIslandButton(title: "Later", style: .plain, height: 30)
+            let later = NotchIslandButton(title: "Later", style: .link, height: 30, fontSize: 13)
             later.onPress = { [weak self] in self?.finishLater() }
             later.setAccessibilityHelp("Save what you answered and name the rest later in Speakers.")
             startCountdownRing(on: later)
             buttons = NSStackView(views: [later, done])
         }
         buttons.orientation = .horizontal
-        buttons.spacing = 8
-        let footer = NSStackView(views: [NSView(), buttons])
+        buttons.alignment = .centerY
+        buttons.spacing = 16
+        buttons.setHuggingPriority(.required, for: .horizontal)
+        footerSummary.orientation = .horizontal
+        footerSummary.alignment = .centerY
+        footerSummary.spacing = 8
+        footerSummary.setHuggingPriority(.defaultLow, for: .horizontal)
+        footerSummary.setClippingResistancePriority(.defaultLow, for: .horizontal)
+        let footer = NSStackView(views: [footerSummary, buttons])
         footer.orientation = .horizontal
+        footer.alignment = .centerY
         footer.distribution = .fill
+        footer.spacing = 16
         footer.translatesAutoresizingMaskIntoConstraints = false
         footer.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
-        stack.setCustomSpacing(12, after: lastRow)
+        stack.setCustomSpacing(18, after: lastRow)
         stack.addArrangedSubview(footer)
+        refreshFooterSummary(animated: false)
+    }
+
+    /// "Who spoke?" with the meeting's name small and grey on the right.
+    private func headerLine() -> NSView {
+        let title = NotchIslandPalette.label(
+            NotchIslandSpeakerReviewPolicy.headerTitle,
+            font: .systemFont(ofSize: 19, weight: .semibold),
+            color: NotchIslandPalette.primaryText
+        )
+        title.setContentCompressionResistancePriority(.required, for: .horizontal)
+        title.setContentHuggingPriority(.required, for: .horizontal)
+        var views: [NSView] = [title, NSView()]
+        if let detail = NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: meetingTitle) {
+            let meeting = NotchIslandPalette.label(detail, font: .systemFont(ofSize: 12), color: NSColor(white: 1, alpha: 0.4))
+            meeting.lineBreakMode = .byTruncatingTail
+            meeting.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            views.append(meeting)
+        }
+        let line = NSStackView(views: views)
+        line.orientation = .horizontal
+        line.alignment = .firstBaseline
+        line.spacing = 12
+        line.translatesAutoresizingMaskIntoConstraints = false
+        line.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        // VoiceOver reads the review's own label instead.
+        line.setAccessibilityElement(false)
+        return line
     }
 
     private func startCountdownRing(on button: NotchIslandButton) {
@@ -278,24 +343,20 @@ final class NotchIslandSpeakerReviewView: NSView {
         let label = NotchIslandPalette.label(
             "Local mic voices",
             font: .systemFont(ofSize: 12, weight: .semibold),
-            color: NotchIslandPalette.secondaryText
+            color: NSColor(white: 1, alpha: 0.42)
         )
-        let keep = NotchIslandButton(
+        let keep = NotchIslandTextButton(
             title: NotchIslandSpeakerReviewPolicy.keepAsYouTitle(keepMicAsYou: keepMicAsYou),
-            style: .subtle,
-            height: 24,
-            fontSize: 12
+            restAlpha: 0.6
         )
         keep.onPress = { [weak self] in self?.toggleKeepMicAsYou() }
         keep.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.keepAsYouAccessibilityLabel(keepMicAsYou: keepMicAsYou))
         keep.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.keepAsYouHelp(keepMicAsYou: keepMicAsYou))
-        keep.setContentHuggingPriority(.required, for: .horizontal)
-        keep.setContentCompressionResistancePriority(.required, for: .horizontal)
         let line = NSStackView(views: [label, NSView(), keep])
         line.orientation = .horizontal
         line.alignment = .centerY
         line.spacing = 8
-        line.edgeInsets = NSEdgeInsets(top: 4, left: 4, bottom: 0, right: 0)
+        line.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 0, right: 0)
         line.translatesAutoresizingMaskIntoConstraints = false
         line.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
         return line
@@ -309,28 +370,9 @@ final class NotchIslandSpeakerReviewView: NSView {
         for row in rows where row.isMic {
             row.setKeptAsYou(keepMicAsYou)
         }
+        assignColors()
         rebuild()
         onLayoutChange?()
-    }
-
-    private func recognizedRow(_ name: String) -> NSView {
-        let check = NSImageView(image: NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .bold)) ?? NSImage())
-        check.contentTintColor = NotchIslandPalette.secondaryText
-        let nameLabel = NotchIslandPalette.label(name, font: .systemFont(ofSize: 14, weight: .semibold), color: NotchIslandPalette.primaryText)
-        let note = NotchIslandPalette.label("recognized", font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText)
-        let row = NSStackView(views: [nameLabel, NSView(), note, check])
-        row.orientation = .horizontal
-        row.spacing = 8
-        row.edgeInsets = NSEdgeInsets(top: 8, left: 12, bottom: 8, right: 12)
-        row.wantsLayer = true
-        row.layer?.backgroundColor = NSColor(white: 0.08, alpha: 1).cgColor
-        row.layer?.cornerRadius = 14
-        row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
-        row.setAccessibilityElement(true)
-        row.setAccessibilityLabel("\(name), recognized")
-        return row
     }
 
     private func refreshInvitees() {
@@ -341,7 +383,10 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func rowChanged() {
+        hidePrintTip()
         refreshInvitees()
+        assignColors()
+        refreshFooterSummary(animated: true)
         onLayoutChange?()
         closeAtHardCapIfDue()
     }
@@ -473,6 +518,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func showDone(leftForLater: Int) {
+        hidePrintTip()
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         let copy = NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: leftForLater)
         let check = NSImageView(image: NSImage(systemSymbolName: "checkmark", accessibilityDescription: nil)?
@@ -483,7 +529,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         titleRow.orientation = .horizontal
         titleRow.spacing = 7
         let detail = NotchIslandPalette.label(copy.detail, font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText)
-        let open = NotchIslandButton(title: "Open", style: .accent, height: 30)
+        let open = NotchIslandButton(title: "Open", style: .white, height: 34)
         open.onPress = { [weak self] in self?.onOpenTranscript?() }
         let footer = NSStackView(views: [NSView(), open])
         footer.orientation = .horizontal
@@ -543,17 +589,18 @@ final class NotchIslandSpeakerReviewView: NSView {
     private func trackMatchOutcomes(_ updates: [SpeakerReviewUpdate]) {
         // Recognized voices too, so a "Not Taylor?" correction reports the
         // match it overrode instead of an empty bucket.
-        let entriesByKey = NotchIslandSpeakerReviewPolicy.entriesByKey(
-            asked: request.speakers,
-            recognized: request.recognizedSpeakers,
-            key: { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) }
-        )
+        let key: (SpeakerNamingEntry) -> String = { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) }
+        let entriesByKey = NotchIslandSpeakerReviewPolicy.entriesByKey(asked: request.speakers, recognized: request.recognizedSpeakers, key: key)
+        // Named silently: a correction on one of these is a wrong silent name.
+        let autoKeys = NotchIslandSpeakerReviewPolicy.autoRecognizedKeys(asked: request.speakers, recognized: request.recognizedSpeakers, key: key)
         for update in updates {
             guard let kind = SpeakerReviewBridge.matchOutcome(for: update) else { continue }
-            let entry = entriesByKey[update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)]
+            let updateKey = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
+            let entry = entriesByKey[updateKey]
             AnalyticsReporter.track(
                 "meeting_speaker_match_reviewed",
                 properties: [
+                    "auto_recognized": NotchIslandSpeakerReviewPolicy.autoRecognizedProperty(updateKey: updateKey, autoRecognizedKeys: autoKeys),
                     "review_action": kind,
                     "similarity_bucket": SpeakerRecognitionTelemetry.similarityBucket(entry?.matchSimilarity),
                     "margin_bucket": SpeakerRecognitionTelemetry.marginBucket(

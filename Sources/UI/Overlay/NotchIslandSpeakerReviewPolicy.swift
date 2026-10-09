@@ -1,12 +1,17 @@
 // NotchIslandSpeakerReviewPolicy.swift
-// Foundation-pure rules for the island's "Who was on this call?" review:
-// which question each voice gets, which calendar invitees show as one-tap
-// names, what the name box suggests as you type, and what the island says
-// once names are saved; plus the 1:1 calendar name, "All me" (keep local mic as You),
-// and "Not a person" (discard) carried over from the review window.
-// NotchIslandSpeakerReviewView draws them.
+// Foundation-pure rules for the island's "Who spoke?" review: which question
+// each voice gets, what each row shows around its voice print (title, the line
+// under it, the buttons, how many rings are lit, when it celebrates), which
+// calendar invitees show as one-tap names, what the name field suggests as you
+// type, and what the island says once names are saved; plus the 1:1 calendar
+// name, "All me" (keep local mic as You), and "Not a person" (discard) carried
+// over from the review window. NotchIslandSpeakerReviewView and
+// NotchIslandVoiceRowView draw them.
 
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 enum NotchIslandSpeakerReviewPolicy {
     /// The Later button's ring. Touching the review (play, Yes, No, typing)
@@ -39,21 +44,279 @@ enum NotchIslandSpeakerReviewPolicy {
         return .name
     }
 
-    /// The extra line under "Is this Maya?" saying how close Maya is to being
-    /// named on her own: confirmed in `confirmed` distinct meetings before this
-    /// one, out of the `required` this meeting needs. Nil once she's at the bar
-    /// (or with nothing to count), so a recognized-enough person shows no line.
-    static func confirmationProgressNote(confirmed: Int, required: Int) -> String? {
-        guard required > 0, confirmed >= 0, confirmed < required else { return nil }
-        return "\(confirmed) of \(required) meetings confirmed"
+    // MARK: Voice prints
+
+    /// Progress toward silent naming for the person a row claims, as Core
+    /// reported it: confirmed meetings before this review, the bar this
+    /// meeting used, and whether the person is trusted (not on probation).
+    struct Progress: Equatable {
+        var confirmed: Int
+        var required: Int
+        var isTrusted: Bool
+
+        init(confirmed: Int, required: Int, isTrusted: Bool = true) {
+            self.confirmed = confirmed
+            self.required = required
+            self.isTrusted = isTrusted
+        }
+
+        var tier: SpeakerNamingTier {
+            SpeakerNamingTier.tier(confirmedMeetings: confirmed, requiredMeetings: required, isTrusted: isTrusted)
+        }
+
+        /// After one more yes in this review.
+        var afterYes: Progress {
+            Progress(confirmed: max(0, confirmed) + 1, required: required, isTrusted: isTrusted)
+        }
+
+        /// Lit rings out of five, scaled when the bar is lower than five.
+        var litRings: Int {
+            SpeakerNamingTierPresentation.filledSegments(confirmed: confirmed, required: required, tier: tier)
+        }
     }
 
-    /// The tooltip and VoiceOver hint that explain the progress line.
-    static func confirmationProgressHelp(name: String, required: Int) -> String {
-        let first = name.trimmingCharacters(in: .whitespacesAndNewlines)
-            .split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? name
-        let meetings = required == 1 ? "1 meeting" : "\(required) meetings"
-        return "Once you\u{2019}ve confirmed \(first) in \(meetings), Transcripted names them on its own."
+    /// Where a voice's name field came from, for what Undo does there.
+    enum NamingOrigin: Equatable {
+        /// No guess: the field is the question.
+        case unknownVoice
+        /// ✕ on "Marcus Reed?": Undo asks again.
+        case rejectedSuggestion
+        /// "Not Priya?" on a voice named silently: Undo keeps Priya.
+        case correctingRecognized
+    }
+
+    /// Who a typed or picked name is.
+    enum NamedAs: Equatable {
+        /// Typed: someone new, saved under this voice.
+        case newPerson
+        /// A person already in Speakers (their progress isn't in the request).
+        case savedPerson
+        /// "Me" on a local mic voice.
+        case owner
+    }
+
+    /// What one row is showing.
+    enum RowState: Equatable {
+        /// "Marcus Reed?" with ✕ and ✓.
+        case asking
+        /// ✓ was tapped.
+        case confirmed
+        /// Transcripted named this voice on its own: the name, nothing else.
+        case recognized
+        /// The title is the name field ("Who's this?").
+        case naming(NamingOrigin)
+        /// A name was typed or picked in place.
+        case named(NamedAs)
+        /// "All me" or "Not a person".
+        case locked(Lock)
+    }
+
+    /// Buttons at a row's right edge, left to right.
+    enum RowControl: Equatable {
+        /// Round dark ✕.
+        case no
+        /// Round white ✓.
+        case yes
+        /// "Undo" after an answer.
+        case undo
+        /// "Not Priya?" on hover over a voice named silently.
+        case correct
+        /// "Undo" on a "Not Priya?" field: it was Priya after all.
+        case keep
+        /// The faint × for "Not a person".
+        case discard
+        /// "Undo" on a voice marked not a person.
+        case undoDiscard
+    }
+
+    /// The row's title, or nil when the title is the name field.
+    static func rowTitle(_ state: RowState, name: String?) -> String? {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        switch state {
+        case .asking: return "\(trimmed)?"
+        case .confirmed, .recognized, .named: return trimmed
+        case .naming: return nil
+        case .locked(let lock): return lockNote(lock)
+        }
+    }
+
+    /// "Marcus Reed?" reads a little dimmer until it's answered.
+    static func titleIsUnanswered(_ state: RowState) -> Bool {
+        state == .asking
+    }
+
+    /// Rings lit in the row's print. ✓ shows the count this answer earns; a
+    /// voice the row no longer claims (a name field, All me, Not a person)
+    /// shows an empty print. A name picked from Speakers keeps that person's
+    /// print empty because the request doesn't carry their count.
+    static func litRings(_ state: RowState, progress: Progress?) -> Int {
+        switch state {
+        case .asking: return progress?.litRings ?? 0
+        case .confirmed: return progress?.afterYes.litRings ?? 0
+        case .recognized: return progress?.litRings ?? VoicePrintGeometry.ringCount
+        case .named(.newPerson): return newPersonProgress.litRings
+        // Naming a voice as someone already saved is a yes for them.
+        case .named(.savedPerson): return progress?.afterYes.litRings ?? 0
+        case .named(.owner), .naming, .locked: return 0
+        }
+    }
+
+    /// A typed name is a new person with this meeting as their first.
+    static let newPersonProgress = Progress(confirmed: 1, required: SpeakerNamingPolicy.requiredConfirmedMeetings)
+
+    /// The line under the name (shared copy in SpeakerNamingTierPresentation),
+    /// or the calendar note on a 1:1 name nobody touched.
+    static func rowHint(_ state: RowState, progress: Progress?, prefilledUntouched: Bool = false) -> SpeakerNamingTierPresentation.ReviewHint? {
+        switch state {
+        case .asking:
+            guard let progress else { return nil }
+            return SpeakerNamingTierPresentation.reviewHint(
+                moment: .asking, confirmedBefore: progress.confirmed, required: progress.required, isTrusted: progress.isTrusted
+            )
+        case .confirmed, .named(.savedPerson):
+            guard let progress else { return nil }
+            return SpeakerNamingTierPresentation.reviewHint(
+                moment: .confirmed, confirmedBefore: progress.confirmed, required: progress.required, isTrusted: progress.isTrusted
+            )
+        case .named(.newPerson):
+            return SpeakerNamingTierPresentation.reviewHint(
+                moment: .savedNew, confirmedBefore: 0, required: newPersonProgress.required, isTrusted: true
+            )
+        case .naming:
+            return prefilledUntouched ? SpeakerNamingTierPresentation.ReviewHint(text: prefillNote, usesPersonColor: false) : nil
+        case .recognized, .named(.owner), .locked:
+            return nil
+        }
+    }
+
+    /// The row's buttons. A voice named silently shows only its name until
+    /// the pointer is on the row, then "Not Priya?".
+    static func rowControls(_ state: RowState, hovered: Bool) -> [RowControl] {
+        switch state {
+        case .asking: return [.no, .yes]
+        case .confirmed, .named: return [.undo]
+        case .recognized: return hovered ? [.correct] : []
+        case .naming(.correctingRecognized): return [.keep]
+        case .naming(.rejectedSuggestion):
+            return offersDiscard(isRecognized: false, nameBoxOpen: true, keptAsYou: false) ? [.discard, .undo] : [.undo]
+        case .naming(.unknownVoice):
+            return offersDiscard(isRecognized: false, nameBoxOpen: true, keptAsYou: false) ? [.discard] : []
+        case .locked(.discarded): return [.undoDiscard]
+        case .locked(.keptAsYou): return []
+        }
+    }
+
+    /// What Undo goes back to. After ✓, or on the name field ✕ opened, it
+    /// asks "Marcus Reed?" again; after a typed or picked name it goes
+    /// back to the name field the name came from (`origin`).
+    static func undoTarget(_ state: RowState, origin: NamingOrigin) -> RowState {
+        switch state {
+        case .confirmed, .naming(.rejectedSuggestion): return .asking
+        case .named: return .naming(origin)
+        default: return state
+        }
+    }
+
+    /// Moving on after an answer opens the next open row only when its title
+    /// is the name field. An asked row has nothing to type into, so the
+    /// island doesn't take the keyboard for it.
+    static func takesKeyboardOnAdvance(_ state: RowState) -> Bool {
+        if case .naming = state { return true }
+        return false
+    }
+
+    /// The order colors are handed out in (`VoicePrintStyle.colorIndices`):
+    /// everyone who already has a color keeps their place, even after their
+    /// row stops claiming them, and new people join at the end. So a color
+    /// never moves to someone else mid-review, and nobody new takes one
+    /// that's on screen or was.
+    static func colorOrder(existing: [UUID], claims: [UUID]) -> [UUID] {
+        var order = existing
+        var seen = Set(existing)
+        for id in claims where seen.insert(id).inserted {
+            order.append(id)
+        }
+        return order
+    }
+
+    /// The match animation plays on ✓ and on naming a new voice in place;
+    /// small while the print is filling, full when it completes.
+    static func celebrates(_ state: RowState) -> Bool {
+        switch state {
+        case .confirmed, .named(.newPerson), .named(.savedPerson): return true
+        default: return false
+        }
+    }
+
+    /// The row still stands for a saved (or just named) person, so its print
+    /// takes a color on this call.
+    static func claimsPerson(_ state: RowState) -> Bool {
+        switch state {
+        case .asking, .confirmed, .recognized, .named(.newPerson), .named(.savedPerson): return true
+        case .named(.owner), .naming, .locked: return false
+        }
+    }
+
+    /// Counted (with a glowing dot) in "N people named automatically": a voice
+    /// named silently on this call, or a ✓ that completes the print.
+    static func namedAutomatically(_ state: RowState, progress: Progress?) -> Bool {
+        switch state {
+        case .recognized: return true
+        case .confirmed, .named(.savedPerson): return progress?.afterYes.tier == .auto
+        default: return false
+        }
+    }
+
+    /// Whose print a row shows: the saved person it claims (the suggested
+    /// person on "Is this …?", or the one picked in place), else the voice
+    /// itself.
+    static func printOwner(_ state: RowState, voiceID: UUID, suggestedID: UUID?, pickedID: UUID?) -> UUID {
+        switch state {
+        case .asking, .confirmed, .recognized: return suggestedID ?? voiceID
+        case .named(.savedPerson): return pickedID ?? voiceID
+        default: return voiceID
+        }
+    }
+
+    /// The hover tip on a print and its VoiceOver hint.
+    static func printExplanation(_ state: RowState, name: String?, progress: Progress?) -> String {
+        let listen = "Press play to listen."
+        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return listen }
+        let shown: Progress?
+        switch state {
+        case .asking, .recognized: shown = progress
+        case .confirmed, .named(.savedPerson): shown = progress?.afterYes
+        case .named(.newPerson): shown = newPersonProgress
+        default: shown = nil
+        }
+        guard let shown else { return listen }
+        return SpeakerNamingTierPresentation.explanation(
+            name: name, confirmed: shown.confirmed, required: shown.required, tier: shown.tier, isTrusted: shown.isTrusted
+        )
+    }
+
+    /// VoiceOver's name for a row: what it shows, then the line under it.
+    /// `corrected`: the name replaced one Transcripted gave on its own.
+    static func rowAccessibilityLabel(_ state: RowState, name: String?, hint: String?, corrected: Bool = false) -> String {
+        let trimmed = name?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let summary: String
+        switch state {
+        case .asking: summary = "Is this \(trimmed)?"
+        case .confirmed: summary = "\(trimmed), confirmed"
+        case .recognized: summary = "\(trimmed), named automatically"
+        case .named: summary = corrected ? "\(trimmed), corrected" : "\(trimmed), named"
+        case .naming: summary = "Unnamed voice"
+        case .locked(let lock): summary = lockNote(lock)
+        }
+        guard let hint, !hint.isEmpty else { return summary }
+        let endsSentence = summary.last.map { ".?!".contains($0) } ?? false
+        return endsSentence ? "\(summary) \(hint)" : "\(summary). \(hint)"
+    }
+
+    /// The invitee chips fade in under the name field only while it has the
+    /// keyboard and nothing is typed; typing swaps them for the list.
+    static func showsInviteeChips(typed: String, focused: Bool) -> Bool {
+        focused && showsInviteeChips(typed: typed)
     }
 
     /// The invitees to offer as one-tap names: people not already named in
@@ -372,6 +635,23 @@ enum NotchIslandSpeakerReviewPolicy {
         Dictionary((asked + recognized).map { (key($0), $0) }, uniquingKeysWith: { first, _ in first })
     }
 
+    /// Keys of the voices Transcripted named on its own (silently) in this
+    /// review, for `meeting_speaker_match_reviewed`'s `auto_recognized`: a
+    /// correction on one of these is a wrong silent name. Matches
+    /// `entriesByKey`, where an asked voice wins a shared key.
+    static func autoRecognizedKeys<Entry>(
+        asked: [Entry],
+        recognized: [Entry],
+        key: (Entry) -> String
+    ) -> Set<String> {
+        Set(recognized.map(key)).subtracting(asked.map(key))
+    }
+
+    /// `auto_recognized` as the analytics string.
+    static func autoRecognizedProperty(updateKey: String, autoRecognizedKeys: Set<String>) -> String {
+        autoRecognizedKeys.contains(updateKey) ? "true" : "false"
+    }
+
     // MARK: Recognized voices
 
     /// The hover offer on a voice Transcripted named by itself.
@@ -395,14 +675,18 @@ enum NotchIslandSpeakerReviewPolicy {
         return ("Names saved", "\(leftForLater) left to name in Speakers.")
     }
 
-    /// The header question, with the meeting's name when it is known.
-    /// When every voice was recognized nothing is asked, so the header just
-    /// says who was on it.
-    static func headerTitle(meetingTitle: String?, recognizedOnly: Bool = false) -> String {
+    /// The header: the same short question whether the review asks or only
+    /// lists who was on the call.
+    static let headerTitle = "Who spoke?"
+
+    /// The meeting's name, small and grey on the header's right, or nil.
+    static func headerDetail(meetingTitle: String?) -> String? {
         let trimmed = meetingTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        if recognizedOnly {
-            return trimmed.isEmpty ? "On this call" : "On \(trimmed)"
-        }
-        return trimmed.isEmpty ? "Who was on this call?" : "Who was on \(trimmed)?"
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    /// The review's VoiceOver name: the question, then the meeting.
+    static func accessibilityTitle(meetingTitle: String?) -> String {
+        headerDetail(meetingTitle: meetingTitle).map { "\(headerTitle) \($0)" } ?? headerTitle
     }
 }

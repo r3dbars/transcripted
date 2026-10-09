@@ -12,6 +12,8 @@ final class NotchIslandButton: NSButton {
         case destructive
         case warning
         case link
+        /// White with black text: the speaker review's Done and Open.
+        case white
     }
 
     var onPress: (() -> Void)?
@@ -34,13 +36,16 @@ final class NotchIslandButton: NSButton {
     init(title: String, style: Style, height: CGFloat = 32, fontSize: CGFloat = 13, symbolName: String? = nil, appIcon: NSImage? = nil) {
         self.style = style
         self.buttonHeight = height
-        self.horizontalPadding = style == .link ? 4 : (height < 26 ? 9 : 14)
+        // The review's white Done / Open pill is a little roomier (mockup: 20 px).
+        self.horizontalPadding = style == .link ? 4 : (style == .white ? 20 : (height < 26 ? 9 : 14))
         super.init(frame: .zero)
         isBordered = false
         setButtonType(.momentaryChange)
         wantsLayer = true
         layer?.cornerRadius = height / 2
-        let weight: NSFont.Weight = (style == .accent || style == .destructive || height < 26) ? .bold : .semibold
+        let weight: NSFont.Weight = style == .link
+            ? .medium
+            : ((style == .accent || style == .destructive || style == .white || height < 26) ? .bold : .semibold)
         attributedTitle = NSAttributedString(
             string: title,
             attributes: [.font: NSFont.systemFont(ofSize: fontSize, weight: weight), .foregroundColor: foreground]
@@ -128,7 +133,11 @@ final class NotchIslandButton: NSButton {
         path.closeSubpath()
         var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
         let traced: CGPath = isFlipped ? (path.copy(using: &flip) ?? path) : path
-        for (shape, color) in [(ringTrack, NSColor(white: 1, alpha: 0.10)), (ring, NSColor(white: 1, alpha: 0.85))] {
+        // On the white pill the ring is drawn dark so it still shows.
+        let ink: CGFloat = style == .white ? 0 : 1
+        let trackAlpha: CGFloat = style == .white ? 0.14 : 0.10
+        let ringAlpha: CGFloat = style == .white ? 0.6 : 0.85
+        for (shape, color) in [(ringTrack, NSColor(white: ink, alpha: trackAlpha)), (ring, NSColor(white: ink, alpha: ringAlpha))] {
             shape.path = traced
             shape.fillColor = nil
             shape.strokeColor = color.cgColor
@@ -156,7 +165,8 @@ final class NotchIslandButton: NSButton {
         case .plain, .accent, .destructive: return .white
         case .subtle: return NSColor(white: 1, alpha: 0.82)
         case .warning: return NotchIslandPalette.warning
-        case .link: return NotchIslandPalette.secondaryText
+        case .link: return NSColor(white: 1, alpha: 0.55)
+        case .white: return .black
         }
     }
 
@@ -168,6 +178,7 @@ final class NotchIslandButton: NSButton {
         case .destructive: return NotchIslandPalette.destructive
         case .warning: return NotchIslandPalette.warning.withAlphaComponent(0.22)
         case .link: return .clear
+        case .white: return .white
         }
     }
 
@@ -187,7 +198,7 @@ final class NotchIslandButton: NSButton {
     }
 
     private func updateBackground() {
-        let color = isHighlighted ? fill.blended(withFraction: 0.25, of: .black) ?? fill : fill
+        let color = isHighlighted ? fill.blended(withFraction: style == .white ? 0.12 : 0.25, of: .black) ?? fill : fill
         layer?.backgroundColor = color.cgColor
     }
 

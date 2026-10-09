@@ -853,7 +853,7 @@ extension TranscriptionTaskManager {
                     return SpeakerIdentityOption(
                         id: profile.id,
                         displayName: name,
-                        callCount: profile.callCount
+                        callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0)
                     )
                 }
             // The auto-recognition roster shown as the review sheet's payoff
@@ -867,8 +867,8 @@ extension TranscriptionTaskManager {
                 )
             }.count
 
-            let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
-            let capturedRecognizedEntries = recognizedEntries
+            let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
+            let capturedRecognizedEntries = Self.withConfirmationProgress(recognizedEntries, recognized: true, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
             // Voices auto-named in this meeting, once each, in the order heard.
             var seenRecognizedNames: Set<String> = []
             let recognizedSpeakerNames = pendingAutoAccepts.compactMap { pending -> String? in

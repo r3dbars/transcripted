@@ -234,11 +234,18 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
     public let id: UUID
     public let displayName: String
     public let callCount: Int
+    /// Distinct meetings this person was confirmed in, and whether their
+    /// lifeline is healthy, so a review that names a voice as this person can
+    /// show their voice print's progress.
+    public let confirmedMeetings: Int
+    public let isTrusted: Bool
 
-    public init(id: UUID, displayName: String, callCount: Int) {
+    public init(id: UUID, displayName: String, callCount: Int, confirmedMeetings: Int = 0, isTrusted: Bool = true) {
         self.id = id
         self.displayName = displayName
         self.callCount = callCount
+        self.confirmedMeetings = confirmedMeetings
+        self.isTrusted = isTrusted
     }
 }
 
@@ -381,9 +388,19 @@ public struct SpeakerNamingConfirmationProgress: Sendable, Equatable {
     /// or the lower lineup bar when their name is on the meeting's lineup).
     public let requiredMeetings: Int
 
-    public init(confirmedMeetings: Int, requiredMeetings: Int) {
+    /// False while the person is on probation after a correction or dispute,
+    /// so Transcripted asks again even past the bar.
+    public let isTrusted: Bool
+
+    public init(confirmedMeetings: Int, requiredMeetings: Int, isTrusted: Bool = true) {
         self.confirmedMeetings = confirmedMeetings
         self.requiredMeetings = requiredMeetings
+        self.isTrusted = isTrusted
+    }
+
+    /// New / Learning / Auto for the review's dial.
+    public var tier: SpeakerNamingTier {
+        SpeakerNamingTier.tier(confirmedMeetings: confirmedMeetings, requiredMeetings: requiredMeetings, isTrusted: isTrusted)
     }
 }
 

@@ -8,10 +8,8 @@ struct PeopleSettingsPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            // Title only — the "Needs a name" section's own helper line
-            // already explains the page's job, so a subtitle here would just
-            // say it twice.
-            SettingsPageIntro(title: "Speakers")
+            // What the voice prints mean, once, above everything else.
+            SettingsPageIntro(title: "Speakers", summary: SpeakerPrintDirectory.headerLine)
 
             SpeakerPeopleSettingsSection(
                 model: speakerPeopleModel,

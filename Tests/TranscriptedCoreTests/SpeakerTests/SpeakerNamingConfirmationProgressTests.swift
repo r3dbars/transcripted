@@ -1,10 +1,10 @@
 import XCTest
 @testable import TranscriptedCore
 
-/// Promise: an "Is this …?" row carries the person's confirmed-meeting count
-/// and the bar this meeting's silent-naming gate uses for them, so the review
-/// can say how close they are. Nothing is attached once they're at the bar or
-/// when the row asks for a name.
+/// Promise: every review row about a saved, named person (asked or recognized)
+/// carries their confirmed-meeting count, the bar this meeting's silent-naming
+/// gate uses for them, and whether they're trusted, so the review can show their
+/// New / Learning / Auto dial. A row that asks for a name carries nothing.
 @available(macOS 14.0, *)
 final class SpeakerNamingConfirmationProgressTests: XCTestCase {
     private var tempDirectory: URL!
@@ -47,7 +47,7 @@ final class SpeakerNamingConfirmationProgressTests: XCTestCase {
         XCTAssertEqual(entry?.confirmationProgress, SpeakerNamingConfirmationProgress(confirmedMeetings: 1, requiredMeetings: lineupBar))
     }
 
-    func testNoProgressAtTheBarOrOnNameRows() throws {
+    func testAtTheBarShowsAutoAndNameRowsShowNothing() throws {
         let done = try person("Sam Lee", confirmedMeetings: SpeakerNamingPolicy.requiredConfirmedMeetings)
         let unknown = try person("Ignored", confirmedMeetings: 0)
         let entries = progress(for: [
@@ -57,8 +57,49 @@ final class SpeakerNamingConfirmationProgressTests: XCTestCase {
                 sampleText: "Hi.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false
             ),
         ])
-        XCTAssertNil(entries[0].confirmationProgress, "someone already at the bar shows nothing")
+        XCTAssertEqual(entries[0].confirmationProgress?.tier, .auto, "past the bar, a weak match still asks, but the person is on Auto")
         XCTAssertNil(entries[1].confirmationProgress, "a name box has no one to count")
+    }
+
+    func testRecognizedRowsCarryProgressAndCorrectionsDropToLearning() throws {
+        let priya = try person("Priya Shah", confirmedMeetings: 7)
+        var recognizedRow = askAbout(priya, name: "Priya Shah")
+        recognizedRow = SpeakerNamingEntry(
+            id: recognizedRow.id, diarizerSpeakerId: "1", clipURL: recognizedRow.clipURL,
+            sampleText: "Hi.", currentName: "Priya Shah", matchSimilarity: 0.97, needsNaming: false, needsConfirmation: false
+        )
+        let trusted = TranscriptionTaskManager.withConfirmationProgress(
+            [recognizedRow], recognized: true, profile: { self.database.getSpeaker(id: $0) },
+            invited: [], fromInvite: false, thresholds: .weSpeaker
+        ).first
+        XCTAssertEqual(trusted?.confirmationProgress,
+                       SpeakerNamingConfirmationProgress(confirmedMeetings: 7, requiredMeetings: 5, isTrusted: true))
+        XCTAssertEqual(trusted?.confirmationProgress?.tier, .auto)
+        XCTAssertNil(TranscriptionTaskManager.withConfirmationProgress(
+            [recognizedRow], profile: { self.database.getSpeaker(id: $0) },
+            invited: [], fromInvite: false, thresholds: .weSpeaker
+        ).first?.confirmationProgress, "recognized rows only get progress when asked for")
+
+        let probation = TranscriptionTaskManager.withConfirmationProgress(
+            [recognizedRow], recognized: true, profile: { self.database.getSpeaker(id: $0) }, trusted: { _ in false },
+            invited: [], fromInvite: false, thresholds: .weSpeaker
+        ).first
+        XCTAssertEqual(probation?.confirmationProgress?.tier, .learning, "a corrected person never shows Auto")
+    }
+
+    func testTierRule() {
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 0, requiredMeetings: 5, isTrusted: true), .new)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 1, requiredMeetings: 5, isTrusted: true), .new)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 2, requiredMeetings: 5, isTrusted: true), .learning)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 4, requiredMeetings: 5, isTrusted: true), .learning)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 5, requiredMeetings: 5, isTrusted: true), .auto)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 9, requiredMeetings: 5, isTrusted: false), .learning)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 1, requiredMeetings: 5, isTrusted: false), .new)
+        // Lineup bar: 2 meetings is enough on a live meeting with the person on the lineup.
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 2, requiredMeetings: 2, isTrusted: true), .auto)
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 1, requiredMeetings: 2, isTrusted: true), .new)
+        // A bar of 0 never makes an unconfirmed person Auto.
+        XCTAssertEqual(SpeakerNamingTier.tier(confirmedMeetings: 0, requiredMeetings: 0, isTrusted: true), .new)
     }
 
     // MARK: - Helpers

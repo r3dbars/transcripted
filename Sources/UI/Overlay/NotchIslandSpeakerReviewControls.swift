@@ -1,192 +1,52 @@
 // NotchIslandSpeakerReviewControls.swift
 // Small AppKit controls used by the island's speaker review
-// (`NotchIslandSpeakerReviewView.swift`): the clip play/pause button, the
-// name box, and the suggestion rows under it.
+// (`NotchIslandSpeakerReviewView.swift`): the title that is also the name
+// field, the invitee chips and suggestion rows under it, and the faint
+// "Not a person" ×. The print, ✕ / ✓ and text buttons are in
+// NotchIslandVoicePrintControls.swift.
 
 import AppKit
 
 // MARK: - Controls
 
-/// Play / pause for a voice clip: a round 30 pt face with the glyph on
-/// top. While the clip plays, a ring fills around it; a full circle means
-/// the clip has finished. A plain view rather than an NSButton so it stays
-/// exactly square (and so exactly round) inside the row's stack.
-@available(macOS 14.0, *)
-@MainActor
-final class NotchIslandClipButton: NSView {
-    var onPress: (() -> Void)?
-    private let clipURL: URL
-    private let glyph = NSImageView()
-    private let track = CAShapeLayer()
-    private let progressRing = CAShapeLayer()
-    private var pollTimer: Timer?
-    private var observer: NSObjectProtocol?
-    private var isPlaying = false
-    private static let size: CGFloat = 30
-
-    init(clipURL: URL) {
-        self.clipURL = clipURL
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.size, height: Self.size))
-        wantsLayer = true
-        layer?.masksToBounds = false
-        translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: Self.size),
-            heightAnchor.constraint(equalToConstant: Self.size),
-        ])
-        setContentHuggingPriority(.required, for: .horizontal)
-        setContentHuggingPriority(.required, for: .vertical)
-        setContentCompressionResistancePriority(.required, for: .horizontal)
-        setContentCompressionResistancePriority(.required, for: .vertical)
-        glyph.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(glyph)
-        NSLayoutConstraint.activate([
-            glyph.centerXAnchor.constraint(equalTo: centerXAnchor, constant: 0.5),
-            glyph.centerYAnchor.constraint(equalTo: centerYAnchor),
-        ])
-        for (shape, color) in [(track, NSColor(white: 1, alpha: 0.14)), (progressRing, NSColor.white)] {
-            shape.fillColor = nil
-            shape.strokeColor = color.cgColor
-            shape.lineWidth = 2
-            shape.lineCap = .round
-            shape.isHidden = true
-            layer?.addSublayer(shape)
-        }
-        setAccessibilityElement(true)
-        setAccessibilityRole(.button)
-        observer = NotificationCenter.default.addObserver(
-            forName: SpeakerClipPlayback.stateDidChangeNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.sync() }
-        }
-        sync()
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    deinit {
-        pollTimer?.invalidate()
-        if let observer { NotificationCenter.default.removeObserver(observer) }
-    }
-
-    override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: Self.size, height: Self.size) }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-
-    override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .pointingHand)
-    }
-
-    override func layout() {
-        super.layout()
-        let side = min(bounds.width, bounds.height)
-        layer?.cornerRadius = side / 2
-        // The ring: a circle 4 pt outside the face, from the top, clockwise
-        // (y grows downward in this flipped view).
-        let center = CGPoint(x: bounds.midX, y: bounds.midY)
-        let path = CGMutablePath()
-        path.addArc(
-            center: center,
-            radius: side / 2 + 4,
-            startAngle: -.pi / 2,
-            endAngle: 1.5 * .pi,
-            clockwise: false
-        )
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        track.frame = bounds
-        progressRing.frame = bounds
-        track.path = path
-        progressRing.path = path
-        CATransaction.commit()
-    }
-
-    override func mouseDown(with event: NSEvent) {
-        layer?.opacity = 0.8
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        layer?.opacity = 1
-        guard bounds.contains(convert(event.locationInWindow, from: nil)) else { return }
-        press()
-    }
-
-    override func accessibilityPerformPress() -> Bool {
-        press()
-        return true
-    }
-
-    private func press() {
-        onPress?()
-        SpeakerClipPlayback.play(clipURL)
-        sync()
-    }
-
-    private func sync() {
-        let playing = SpeakerClipPlayback.isPlaying(clipURL)
-        isPlaying = playing
-        glyph.image = NSImage(systemSymbolName: playing ? "pause.fill" : "play.fill", accessibilityDescription: nil)?
-            .withSymbolConfiguration(.init(pointSize: 11, weight: .bold))
-        glyph.contentTintColor = playing ? .black : .white
-        layer?.backgroundColor = (playing ? NSColor.white : NotchIslandPalette.buttonPlain).cgColor
-        setAccessibilityLabel(playing ? "Pause clip" : "Play clip")
-        track.isHidden = !playing
-        progressRing.isHidden = !playing
-        pollTimer?.invalidate()
-        pollTimer = nil
-        if playing {
-            updateProgress()
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.updateProgress() }
-            }
-        }
-    }
-
-    private func updateProgress() {
-        guard let progress = SpeakerClipPlayback.progress(of: clipURL) else {
-            if !SpeakerClipPlayback.isPlaying(clipURL) { sync() }
-            return
-        }
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        progressRing.strokeEnd = CGFloat(progress)
-        CATransaction.commit()
-    }
-}
-
-/// A name box on the island's black surface. Clicking it asks for the
-/// keyboard, since the island never has it otherwise.
+/// The text part of a voice's title-as-name-field. Borderless and clear: the
+/// surrounding `NotchIslandTitleField` draws the hover and focus looks.
+/// Clicking it asks for the keyboard, since the island never has it otherwise.
 @MainActor
 final class NotchIslandNameField: NSTextField {
     var onFocusRequest: (() -> Void)?
+    /// The field took the keyboard (true) or editing ended (false).
+    var onFocusChange: ((Bool) -> Void)?
 
     init() {
         super.init(frame: .zero)
         isBezeled = false
-        drawsBackground = true
-        backgroundColor = NotchIslandPalette.buttonSubtle
+        isBordered = false
+        drawsBackground = false
         textColor = NotchIslandPalette.primaryText
-        font = .systemFont(ofSize: 14, weight: .semibold)
+        font = Self.titleFont
         focusRingType = .none
-        wantsLayer = true
-        layer?.cornerRadius = 8
-        placeholderAttributedString = NSAttributedString(
-            string: "Type a name…",
-            attributes: [
-                .foregroundColor: NotchIslandPalette.secondaryText,
-                .font: NSFont.systemFont(ofSize: 14),
-            ]
-        )
         cell?.usesSingleLineMode = true
         cell?.lineBreakMode = .byTruncatingTail
-        setAccessibilityLabel("Name for this voice")
+        setPlaceholder(alpha: 0.62)
+        setAccessibilityLabel("Name this voice")
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    static let titleFont = NSFont.systemFont(ofSize: 15, weight: .semibold)
+
+    /// "Who's this?" in white at `alpha` (brighter on hover, fainter while typing).
+    func setPlaceholder(alpha: CGFloat) {
+        placeholderAttributedString = NSAttributedString(
+            string: "Who\u{2019}s this?",
+            attributes: [
+                .foregroundColor: NSColor(white: 1, alpha: alpha),
+                .font: Self.titleFont,
+            ]
+        )
+    }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
@@ -198,8 +58,229 @@ final class NotchIslandNameField: NSTextField {
 
     override func becomeFirstResponder() -> Bool {
         onFocusRequest?()
-        return super.becomeFirstResponder()
+        let became = super.becomeFirstResponder()
+        if became { onFocusChange?(true) }
+        return became
     }
+
+    override func textDidEndEditing(_ notification: Notification) {
+        super.textDidEndEditing(notification)
+        onFocusChange?(false)
+    }
+}
+
+/// A voice's title that is also its name field ("Who's this?"). At rest it
+/// reads like any other title; on hover a faint rounded highlight and a small
+/// pencil fade in; with the keyboard it gets a thin outline. Its text lines
+/// up with the other rows' titles: the highlight reaches 9 pt to the left.
+@MainActor
+final class NotchIslandTitleField: NSView {
+    static let height: CGFloat = 30
+    /// How far the highlight reaches left of the title's text.
+    static let leadingBleed: CGFloat = 9
+
+    let field = NotchIslandNameField()
+    private let pencil = NotchIslandPencilView()
+    private var hoverArea: NSTrackingArea?
+    private var isHovered = false
+    private(set) var isFocused = false
+    /// The field took or lost the keyboard.
+    var onFocusChange: ((Bool) -> Void)?
+
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+        wantsLayer = true
+        layer?.cornerRadius = 9
+        layer?.borderWidth = 1
+        field.translatesAutoresizingMaskIntoConstraints = false
+        pencil.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(field)
+        addSubview(pencil)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: Self.height),
+            field.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.leadingBleed),
+            field.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -30),
+            field.centerYAnchor.constraint(equalTo: centerYAnchor),
+            pencil.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
+            pencil.centerYAnchor.constraint(equalTo: centerYAnchor),
+            pencil.widthAnchor.constraint(equalToConstant: 12),
+            pencil.heightAnchor.constraint(equalToConstant: 12),
+        ])
+        field.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        // AppKit can report an end of editing in the middle of a field taking
+        // the keyboard, so read the real state once the change has settled.
+        field.onFocusChange = { [weak self] _ in
+            DispatchQueue.main.async { self?.refreshFocus() }
+        }
+        updateLook(animated: false)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var isFlipped: Bool { true }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .iBeam)
+    }
+
+    /// A click on the padding around the text still starts typing.
+    override func mouseDown(with event: NSEvent) {
+        field.onFocusRequest?()
+        window?.makeKey()
+        window?.makeFirstResponder(field)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { setHovered(true) }
+    override func mouseExited(with event: NSEvent) { setHovered(false) }
+
+    private func setHovered(_ hovered: Bool) {
+        guard hovered != isHovered else { return }
+        isHovered = hovered
+        updateLook(animated: true)
+    }
+
+    /// The field is being edited right now: the window's field editor is
+    /// first responder and is editing this field.
+    func refreshFocus() {
+        guard let editor = field.currentEditor() else { return setFocused(false) }
+        setFocused(window?.firstResponder === editor)
+    }
+
+    private func setFocused(_ focused: Bool) {
+        guard focused != isFocused else { return }
+        isFocused = focused
+        updateLook(animated: true)
+        onFocusChange?(focused)
+    }
+
+    private func updateLook(animated: Bool) {
+        let background: CGFloat = isFocused ? 0.07 : (isHovered ? 0.06 : 0)
+        let border: CGFloat = isFocused ? 0.2 : 0
+        field.setPlaceholder(alpha: isFocused ? 0.32 : (isHovered ? 0.9 : 0.62))
+        let pencilAlpha: CGFloat = isHovered && !isFocused ? 0.7 : 0
+        let apply = {
+            self.layer?.backgroundColor = NSColor(white: 1, alpha: background).cgColor
+            self.layer?.borderColor = NSColor(white: 1, alpha: border).cgColor
+        }
+        if animated, !NotchIslandPalette.reduceMotion {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.15
+                context.allowsImplicitAnimation = true
+                apply()
+                pencil.animator().alphaValue = pencilAlpha
+            }
+        } else {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            apply()
+            CATransaction.commit()
+            pencil.alphaValue = pencilAlpha
+        }
+    }
+}
+
+/// The small pencil inside a hovered name field (the mockup's 12 pt path).
+@MainActor
+final class NotchIslandPencilView: NSView {
+    override var isFlipped: Bool { true }
+
+    override func draw(_ dirtyRect: NSRect) {
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: 8.2, y: 1.8))
+        path.line(to: NSPoint(x: 10.2, y: 3.8))
+        path.line(to: NSPoint(x: 4.2, y: 9.8))
+        path.line(to: NSPoint(x: 1.6, y: 10.4))
+        path.line(to: NSPoint(x: 2.2, y: 7.8))
+        path.close()
+        path.lineWidth = 1.2
+        path.lineJoinStyle = .round
+        NSColor.white.setStroke()
+        path.stroke()
+    }
+}
+
+/// A one-tap name under a focused name field: an invitee, or "Me". A click
+/// doesn't take the keyboard from the field, so the field keeps its caret
+/// and the chips stay put until one is picked.
+@MainActor
+final class NotchIslandChipButton: NSButton {
+    var onPress: (() -> Void)?
+    private var hoverArea: NSTrackingArea?
+    private var isHovered = false {
+        didSet { updateBackground() }
+    }
+
+    init(title: String) {
+        super.init(frame: .zero)
+        isBordered = false
+        setButtonType(.momentaryChange)
+        wantsLayer = true
+        layer?.cornerRadius = 13
+        attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [.font: NSFont.systemFont(ofSize: 12, weight: .medium), .foregroundColor: NSColor(white: 1, alpha: 0.9)]
+        )
+        target = self
+        action = #selector(pressed)
+        translatesAutoresizingMaskIntoConstraints = false
+        heightAnchor.constraint(equalToConstant: 26).isActive = true
+        setContentHuggingPriority(.required, for: .horizontal)
+        setContentCompressionResistancePriority(.required, for: .horizontal)
+        setAccessibilityLabel(title)
+        updateBackground()
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: ceil(super.intrinsicContentSize.width) + 22, height: 26)
+    }
+
+    override var acceptsFirstResponder: Bool {
+        guard let type = NSApp?.currentEvent?.type else { return true }
+        return ![.leftMouseDown, .rightMouseDown, .otherMouseDown].contains(type)
+    }
+
+    override var isHighlighted: Bool {
+        didSet { updateBackground() }
+    }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .pointingHand)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) { isHovered = true }
+    override func mouseExited(with event: NSEvent) { isHovered = false }
+
+    private func updateBackground() {
+        let alpha: CGFloat = isHighlighted ? 0.2 : (isHovered ? 0.16 : 0.08)
+        layer?.backgroundColor = NSColor(white: 1, alpha: alpha).cgColor
+    }
+
+    @objc private func pressed() { onPress?() }
 }
 
 /// One autocomplete row under the name box.
