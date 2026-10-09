@@ -112,6 +112,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// track was their choice. A retry marks the saved meeting mic-only
     /// instead of degraded. Missing on older rows and decoded as `false`.
     public let micOnlyByChoice: Bool
+    /// Content-derived identity retained when an imported job fails before save.
+    public let confirmationMeetingId: UUID?
 
     public init(
         id: UUID = UUID(),
@@ -126,7 +128,8 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        confirmationMeetingId: UUID? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -141,6 +144,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         self.splitLocalSpeakers = splitLocalSpeakers
         self.languageSelection = languageSelection
         self.micOnlyByChoice = micOnlyByChoice
+        self.confirmationMeetingId = confirmationMeetingId
     }
 
     enum CodingKeys: String, CodingKey {
@@ -157,6 +161,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         case splitLocalSpeakers
         case languageSelection
         case micOnlyByChoice
+        case confirmationMeetingId
     }
 
     public init(from decoder: Decoder) throws {
@@ -174,6 +179,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         splitLocalSpeakers = try container.decodeIfPresent(Bool.self, forKey: .splitLocalSpeakers) ?? false
         languageSelection = try container.decodeIfPresent(TranscriptionLanguageSelection.self, forKey: .languageSelection) ?? .automatic
         micOnlyByChoice = try container.decodeIfPresent(Bool.self, forKey: .micOnlyByChoice) ?? false
+        confirmationMeetingId = try container.decodeIfPresent(UUID.self, forKey: .confirmationMeetingId)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -188,6 +194,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
         try container.encode(retryCount, forKey: .retryCount)
         try container.encodeIfPresent(lastRetryDate, forKey: .lastRetryDate)
         try container.encodeIfPresent(errorKind, forKey: .errorKind)
+        try container.encodeIfPresent(confirmationMeetingId, forKey: .confirmationMeetingId)
         try container.encode(splitLocalSpeakers, forKey: .splitLocalSpeakers)
         try container.encode(languageSelection, forKey: .languageSelection)
         if micOnlyByChoice {

@@ -1,6 +1,7 @@
 import XCTest
 import Combine
 import FluidAudio
+import SQLite3
 @testable import TranscriptedCore
 
 /// Promise: silent naming waits for a person to be confirmed in enough
@@ -26,6 +27,60 @@ final class SpeakerImportedConfirmationDedupeTests: XCTestCase {
     }
 
     // MARK: - Meeting id
+
+    func testCopiedDatabaseKeepsModelIdentityEvenWhenRenamed() throws {
+        let original = tempDirectory.appendingPathComponent(
+            SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: "eres2net"))
+        do {
+            let database = SpeakerDatabase(path: original.path, thresholds: .eRes2Net)
+            XCTAssertEqual(database.voiceprintModel, .eRes2Net)
+        }
+        let renamed = tempDirectory.appendingPathComponent(
+            SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: "redimnet2-b4"))
+        try FileManager.default.copyItem(at: original, to: renamed)
+        let reopened = SpeakerDatabase(path: renamed.path, thresholds: .reDimNet2B4)
+        XCTAssertEqual(reopened.voiceprintModel, .eRes2Net)
+        let unknown = SpeakerDatabase(path: tempDirectory.appendingPathComponent("custom.sqlite").path)
+        XCTAssertNil(unknown.voiceprintModel)
+        let unverified = SpeakerDatabase(path: tempDirectory.appendingPathComponent("explicit/speakers_redimnet2-b4.sqlite").path,
+            thresholds: .reDimNet2B4, adoptCanonicalModelIdentity: false)
+        XCTAssertNil(unverified.voiceprintModel, "explicit unstamped files cannot establish model identity from their filename")
+    }
+
+    @MainActor
+    func testFailedImportIdentitySurvivesPersistenceAndRetryCommit() throws {
+        let harness = try makeHarness()
+        let profile = namedProfile("Fixture", in: harness)
+        let failedID = UUID(), retryTranscript = UUID(), reimportTranscript = UUID()
+        let meetingID = SpeakerConfirmationMeetingID.forImportedContent(key: String(repeating: "a1", count: 32))
+        let failed = FailedTranscription(id: failedID, micAudioURL: harness.paths.audioCaptures.appendingPathComponent("mic.wav"),
+            systemAudioURL: nil, errorMessage: "Fixture", confirmationMeetingId: meetingID)
+        let roundtrip = try JSONDecoder().decode(FailedTranscription.self, from: JSONEncoder().encode(failed))
+        harness.manager.failedTranscriptionManager.failedTranscriptions = [roundtrip]
+        harness.manager.beginTaskLifecycle(taskId: failedID, audio: nil)
+        try harness.manager.markTaskTranscriptCommitted(taskId: failedID, transcriptId: retryTranscript)
+        try harness.speakerDB.recordConfirmationMeetingAlias(transcriptId: reimportTranscript, meetingId: meetingID)
+        try harness.speakerDB.recordUserConfirmations([
+            .init(profileId: profile, transcriptId: retryTranscript, kind: .confirmed),
+            .init(profileId: profile, transcriptId: reimportTranscript, kind: .confirmed)
+        ])
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: profile)?.confirmedMeetingCount, 1)
+    }
+
+    @MainActor
+    func testAliasFailureDoesNotMarkImportJournalCommitted() throws {
+        let harness = try makeHarness()
+        let id = UUID()
+        let recovery = DedupeRecoverySession(sourceContentKey: String(repeating: "a1", count: 32))
+        harness.manager.beginTaskLifecycle(taskId: id, audio: .init(micURL: nil,
+            systemURL: harness.paths.audioCaptures.appendingPathComponent("system.wav"), meetingTitle: nil,
+            recordingDate: nil, importedRecoverySession: recovery, splitLocalSpeakers: false,
+            languageSelection: .automatic, micOnlyByChoice: false))
+        XCTAssertEqual(sqlite3_exec(harness.speakerDB.db, "DROP TABLE speaker_confirmation_meeting_aliases;", nil, nil, nil), SQLITE_OK)
+        XCTAssertThrowsError(try harness.manager.markTaskTranscriptCommitted(taskId: id, transcriptId: id))
+        XCTAssertFalse(recovery.didCommit)
+        XCTAssertEqual(harness.manager.confirmationMeetingId(for: id), SpeakerConfirmationMeetingID.forImportedContent(key: recovery.sourceContentKey!))
+    }
 
     func testImportedContentKeyMapsToOneStableMeetingId() {
         let transcriptA = UUID()
@@ -190,7 +245,7 @@ final class SpeakerImportedConfirmationDedupeTests: XCTestCase {
             languageSelection: .automatic,
             micOnlyByChoice: false
         ))
-        harness.manager.markTaskTranscriptCommitted(taskId: transcriptId, transcriptId: transcriptId)
+        XCTAssertNoThrow(try harness.manager.markTaskTranscriptCommitted(taskId: transcriptId, transcriptId: transcriptId))
         harness.manager.forgetTaskLifecycle(taskId: transcriptId)
     }
 
@@ -369,7 +424,8 @@ private final class DedupeRecoverySession: ImportedTranscriptionRecoverySession,
     let jobID = UUID()
     let sourceContentKey: String?
     init(sourceContentKey: String?) { self.sourceContentKey = sourceContentKey }
-    func transcriptCommitConfirmed() {}
+    var didCommit = false
+    func transcriptCommitConfirmed() { didCommit = true }
     func prepareForScratchCleanup() -> Bool { true }
     func scratchCleanupConfirmed() {}
     func failedQueueHandoffConfirmed() {}

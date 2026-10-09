@@ -28,10 +28,11 @@ struct MeetingImportVoiceprint {
     /// model's, e.g. "256-dimension"; nil when they match or the database is empty.
     static func dimensionMismatch(profiles: [SpeakerProfile], voiceprint: MeetingImportVoiceprint) -> String? {
         let sizes = Set(profiles.map(\.embedding.count).filter { $0 > 0 })
-        guard !sizes.isEmpty, !sizes.contains(voiceprint.dimension) else { return nil }
+        guard !sizes.isEmpty, sizes != [voiceprint.dimension] else { return nil }
         return sizes.sorted().map { "\($0)-dimension" }.joined(separator: "/")
     }
     var modelName: String { Self.displayName(embedder == nil ? .weSpeaker : model) }
+    var activeModel: Model { embedder == nil ? .weSpeaker : model }
     var summary: String { modelName + (note.map { " (\($0))" } ?? "") }
 
     static func displayName(_ model: Model) -> String {
@@ -44,7 +45,8 @@ struct MeetingImportVoiceprint {
 
     /// Reason every speaker stays numbered when the database file is missing.
     func missingDatabaseReason(fileManager: FileManager = .default) -> String {
-        let legacy = databaseURL.deletingLastPathComponent().appendingPathComponent("speakers.sqlite")
+        let legacy = databaseURL.deletingLastPathComponent().appendingPathComponent(
+            SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: nil))
         if embedder != nil, fileManager.fileExists(atPath: legacy.path) {
             return "there's no \(modelName) speaker database yet; open Transcripted once so it can carry your saved people over"
         }

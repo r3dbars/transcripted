@@ -49,7 +49,9 @@ enum MeetingImportWorkflow {
         let voiceprint = try MeetingImportModels.voiceprint(choice: command.speakerEmbedder)
         let embedder = voiceprint.embedder
         let sourceDB = command.speakerDb.map { URL(fileURLWithPath: $0) } ?? voiceprint.databaseURL
-        let snapshot = job.appendingPathComponent("speakers.sqlite")
+        let snapshotDirectory = job.appendingPathComponent("speaker-db", isDirectory: true)
+        try fm.createDirectory(at: snapshotDirectory, withIntermediateDirectories: true)
+        let snapshot = snapshotDirectory.appendingPathComponent(sourceDB.lastPathComponent)
         // Why nobody can be named this run, when that's known up front.
         var identificationUnavailable: String?
         if command.noSpeakerIdentification {
@@ -75,8 +77,16 @@ enum MeetingImportWorkflow {
         }
 
         // The snapshot holds this model's vectors, so it uses this model's bars.
-        let store = SpeakerDatabase(path: snapshot.path, thresholds: voiceprint.thresholds)
+        let store = SpeakerDatabase(path: snapshot.path, thresholds: voiceprint.thresholds,
+                                    adoptCanonicalModelIdentity: command.speakerDb == nil)
         let originalProfiles = store.allSpeakers()
+        if identificationUnavailable == nil, !originalProfiles.isEmpty,
+           store.voiceprintModel != voiceprint.activeModel {
+            if command.speakerDb != nil {
+                throw ValidationError("--speaker-db has a different or unverified voiceprint model. Use that model's canonical app database and matching --speaker-embedder.")
+            }
+            identificationUnavailable = "the saved speaker database's voiceprint model is unverified or incompatible"
+        }
         // A database holds one model's voiceprints. Another model's vectors can't
         // match anyone, so say so instead of quietly numbering everyone.
         if identificationUnavailable == nil,

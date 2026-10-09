@@ -159,7 +159,11 @@ error, never a silent fallback. The state folder follows the app's
 `TRANSCRIPTED_MEETINGS_DIR` only move where the Markdown goes. `--speaker-db`
 overrides the read-only source database; pair it with the matching
 `--speaker-embedder` (a database holding another model's voiceprints is an
-error). An invalid explicit database fails; a missing or
+error). Explicit databases must already carry the app's persisted model identity;
+an unstamped custom copy is rejected rather than guessing from its vector size.
+Open the canonical database in the updated app before copying it. Retrieval-only
+builds parse the flags but cannot run imports or validate Core model choices.
+An invalid explicit database fails; a missing or
 unreadable default database warns and produces numbered speakers. Runs from a
 script or launchd agent use the same people as long as they run as the same
 macOS user; another account has its own (usually empty) speaker database.

@@ -50,6 +50,7 @@ struct FailedMeetingRetryRow: Equatable {
     let splitLocalSpeakers: Bool
     let languageSelection: TranscriptionLanguageSelection
     let micOnlyByChoice: Bool
+    var confirmationMeetingId: UUID? = nil
 }
 
 struct MeetingTranscriptionRequestBuilder {

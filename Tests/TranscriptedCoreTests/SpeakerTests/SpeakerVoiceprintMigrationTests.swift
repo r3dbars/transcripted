@@ -364,6 +364,25 @@ final class SpeakerVoiceprintMigrationTests: XCTestCase {
 
     // MARK: - Promises
 
+    func testImportedAliasesCarryAndStayDeduplicatedAfterMigration() async throws {
+        let fixture = try makeFixture()
+        let first = UUID(), second = UUID(), meeting = UUID()
+        do {
+            let source = SpeakerDatabase(path: fixture.sourceURL.path)
+            try source.recordConfirmationMeetingAlias(transcriptId: first, meetingId: meeting)
+        }
+        let embedder = LevelEmbedder()
+        let target = makeTarget(fixture, embedder)
+        _ = try await migrate(fixture, into: target, with: embedder)
+        let before = try XCTUnwrap(target.getSpeaker(id: fixture.ann)).confirmedMeetingCount
+        try target.recordConfirmationMeetingAlias(transcriptId: second, meetingId: meeting)
+        try target.recordUserConfirmations([
+            .init(profileId: fixture.ann, transcriptId: first, kind: .confirmed),
+            .init(profileId: fixture.ann, transcriptId: second, kind: .confirmed)
+        ])
+        XCTAssertEqual(target.getSpeaker(id: fixture.ann)?.confirmedMeetingCount, before + 1)
+    }
+
     func testNamedPeopleCarryOverWithTheirIdsNamesCountsAndConfirmations() async throws {
         let fixture = try makeFixture()
         let embedder = LevelEmbedder()

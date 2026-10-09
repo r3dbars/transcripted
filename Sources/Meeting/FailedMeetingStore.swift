@@ -221,7 +221,8 @@ final class FailedMeetingStore {
             recordingDate: row.recordingDate,
             splitLocalSpeakers: row.splitLocalSpeakers,
             languageSelection: row.languageSelection,
-            micOnlyByChoice: row.micOnlyByChoice
+            micOnlyByChoice: row.micOnlyByChoice,
+            confirmationMeetingId: row.confirmationMeetingId
         )
     }
 
@@ -236,7 +237,8 @@ final class FailedMeetingStore {
         archiveAudio: Bool = true,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        confirmationMeetingId: UUID? = nil
     ) -> Bool {
         let preserved = persistFailedMeetingForRetry(
             taskId: taskId,
@@ -248,7 +250,8 @@ final class FailedMeetingStore {
             archiveAudio: archiveAudio,
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
-            micOnlyByChoice: micOnlyByChoice
+            micOnlyByChoice: micOnlyByChoice,
+            confirmationMeetingId: confirmationMeetingId
         )
         if preserved {
             publishRefresh()
@@ -414,7 +417,8 @@ final class FailedMeetingStore {
         clearRecordingJournalAfterPersistence: Bool = true,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        confirmationMeetingId: UUID? = nil
     ) -> Bool {
         taskManager.addFailedTranscriptionRetainingAvailableAudio(
             micAudioURL: micAudioURL,
@@ -427,7 +431,8 @@ final class FailedMeetingStore {
             clearRecordingJournalAfterPersistence: clearRecordingJournalAfterPersistence,
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
-            micOnlyByChoice: micOnlyByChoice
+            micOnlyByChoice: micOnlyByChoice,
+            confirmationMeetingId: confirmationMeetingId
         )
     }
 
