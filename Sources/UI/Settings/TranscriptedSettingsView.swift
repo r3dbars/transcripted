@@ -283,6 +283,8 @@ struct TranscriptedSettingsView: View {
     }
 
     func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
+        // A deep link to the queue opens the review stack, not its summary.
+        speakerPeopleModel.isReviewOpen = true
         Task { @MainActor in
             await Task.yield()
             withAnimation(.snappy(duration: 0.22)) {

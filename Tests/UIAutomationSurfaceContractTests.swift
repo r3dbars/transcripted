@@ -497,13 +497,13 @@ func testUIAutomationSurfaceContract() async {
             "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
         )
 
-        // The play control is a bare glyph (SpeakerQuietPlayButton) used by
-        // the queue row and the person card's player; a person row plays from
-        // its voice print instead. The compact icon label backs the two
-        // overflow menus.
+        // The person card's player is a bare glyph (SpeakerQuietPlayButton);
+        // queue rows and person rows play from their voice print instead (its
+        // automation id is pinned by check-ui-automation-contract.py). The
+        // compact icon label backs the two overflow menus.
         assertTrue(
-            speakersSettingsSource().components(separatedBy: "SpeakerQuietPlayButton(").count - 1 >= 2,
-            "queue and person-card play controls should both use the quiet 40pt hit-target play button"
+            speakersSettingsSource().components(separatedBy: "SpeakerQuietPlayButton(").count - 1 >= 1,
+            "the person card's play control should use the quiet 40pt hit-target play button"
         )
         assertTrue(
             speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 2,

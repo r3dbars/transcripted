@@ -10,6 +10,9 @@ struct SpeakerVoiceToNameRow: View {
     var showsMeeting = true
     /// That call's calendar invitees, offered as one-tap names.
     var invitees: [String] = []
+    /// Told who the voice became once a name is saved, so the card can keep
+    /// it on screen and light that person's print.
+    var onNamed: ((SpeakerReviewNamedVoice) -> Void)? = nil
     @State private var showsAllInvitees = false
     /// Observed directly so play/stop/finish reliably re-renders THIS row.
     /// A traced repro showed the earlier notification → parent @State bump
@@ -24,7 +27,9 @@ struct SpeakerVoiceToNameRow: View {
     @State private var isDeleting = false
     @State private var deleteErrorMessage: String?
     @State private var isMarkingAsMe = false
-    @State private var clipDuration = SpeakerClipProgressBar.fallbackDuration
+    @Environment(\.colorScheme) private var colorScheme
+
+    static let printDiameter: CGFloat = 36
 
     private var isPlaying: Bool {
         if let clipURL = group.representative.clipURL {
@@ -39,70 +44,51 @@ struct SpeakerVoiceToNameRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // The quote is the playable object: a quiet play/pause glyph sits
-            // inline with it, and while the clip plays an accent sweep runs
-            // under the words being spoken. At rest there is no bar at all.
-            HStack(alignment: .top, spacing: 4) {
-                SpeakerQuietPlayButton(
-                    hasClip: hasClip,
+            // The voice's print is the play button, like the island's review:
+            // empty rings (nobody's confirmed it yet) that ripple while the
+            // clip plays. No quote; people pick a voice by ear.
+            HStack(alignment: .center, spacing: 14) {
+                VoicePrintRepresentable(
+                    model: VoicePrintView.Model(
+                        style: printStyle,
+                        colorIndex: printStyle.preferredColorIndex,
+                        litRings: 0,
+                        surface: colorScheme == .dark ? .settingsDark : .settingsLight
+                    ),
+                    diameter: Self.printDiameter,
                     isPlaying: isPlaying,
-                    action: { model.playSample(for: group.representative) }
+                    onPlay: hasClip ? { model.playSample(for: group.representative) } : nil,
+                    accessibilityIdentifier: "transcripted.speakers.voice-to-name.play"
                 )
+                .frame(width: Self.printDiameter, height: Self.printDiameter)
+                .help(SpeakerClipPlaybackPresentation.helpText(hasClip: hasClip, isPlaying: isPlaying))
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(quoteLine)
-                        .font(LibraryTokens.body)
-                        .foregroundStyle(group.sampleText == nil ? LibraryTokens.ink2 : Color.primary)
-                        .lineLimit(3)
-                        .fixedSize(horizontal: false, vertical: true)
-
-                    SpeakerClipProgressBar(isPlaying: isPlaying, duration: clipDuration)
-                        .frame(maxWidth: 240)
-                        .opacity(isPlaying ? 1 : 0)
-                        .animation(.easeOut(duration: 0.18), value: isPlaying)
-
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Unknown voice")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundStyle(LibraryTokens.ink2)
                     Text(metaLine)
                         .font(LibraryTokens.meta)
                         .monospacedDigit()
                         .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(2)
                 }
-                .padding(.top, 11)
                 .frame(maxWidth: .infinity, alignment: .leading)
+
+                overflowMenu
             }
 
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
-                    nameField
-                    saveHint
-                    quietQueueActions
-                    Spacer(minLength: 0)
-                    overflowMenu
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    nameField
-                    HStack(spacing: 10) {
-                        saveHint
-                        quietQueueActions
-                        Spacer(minLength: 0)
-                        overflowMenu
-                    }
-                }
-            }
-            .padding(.leading, 44)
-
-            if !inviteeChoices.shown.isEmpty {
+            if !nameChips.isEmpty {
                 HStack(spacing: 6) {
-                    ForEach(inviteeChoices.shown, id: \.self) { name in
-                        Button(name) {
-                            nameDraft = name
-                            saveName()
+                    ForEach(nameChips) { chip in
+                        SpeakerNameChipButton(chip: chip, isDisabled: isSaving) {
+                            if let person = chip.person {
+                                join(person)
+                            } else {
+                                nameDraft = chip.name
+                                saveName()
+                            }
                         }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
-                        .help("\(name) was on the calendar invite.")
-                        .disabled(isSaving)
                     }
                     if inviteeChoices.hidden > 0 {
                         Button {
@@ -115,16 +101,35 @@ struct SpeakerVoiceToNameRow: View {
                         .accessibilityLabel("Show \(inviteeChoices.hidden) more invitees")
                     }
                 }
-                .padding(.leading, 44)
+                .padding(.leading, 50)
                 .accessibilityIdentifier("transcripted.speakers.voice-to-name.invitees")
             }
+
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    nameField
+                    saveHint
+                    quietQueueActions
+                    Spacer(minLength: 0)
+                }
+
+                VStack(alignment: .leading, spacing: 8) {
+                    nameField
+                    HStack(spacing: 10) {
+                        saveHint
+                        quietQueueActions
+                        Spacer(minLength: 0)
+                    }
+                }
+            }
+            .padding(.leading, 50)
 
             if let saveErrorMessage {
                 Text(saveErrorMessage)
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 44)
+                    .padding(.leading, 50)
             }
 
             if let deleteErrorMessage {
@@ -132,18 +137,13 @@ struct SpeakerVoiceToNameRow: View {
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
-                    .padding(.leading, 44)
+                    .padding(.leading, 50)
             }
         }
         .padding(.vertical, 10)
         .onAppear {
             if nameDraft.isEmpty {
                 nameDraft = group.representative.profile.displayName ?? ""
-            }
-            if let clipURL = group.representative.clipURL {
-                clipDuration = probeClipDuration(clipURL)
-            } else if let sample = group.representative.retainedAudioSample {
-                clipDuration = sample.duration
             }
         }
         .onChange(of: nameDraft) { _, _ in
@@ -169,6 +169,24 @@ struct SpeakerVoiceToNameRow: View {
             alreadyUsed: [],
             showAll: showsAllInvitees
         )
+    }
+
+    private var printStyle: VoicePrintStyle { VoicePrintStyle(id: group.id) }
+
+    /// Invitees first (each one that's a saved person shows their print),
+    /// then up to two saved people still learning who weren't invited.
+    private var nameChips: [SpeakerNameChip] {
+        let voiceID = group.representative.speakerId
+        var chips = inviteeChoices.shown.map { name -> SpeakerNameChip in
+            let person = model.uniqueSavedPerson(named: name, excluding: voiceID)
+            return SpeakerNameChip(name: name, person: person, standing: person.flatMap(model.namingStanding(for:)), isInvitee: true)
+        }
+        let taken = Set(chips.compactMap { $0.person?.id })
+        for person in model.savedPeopleStillLearning(excluding: invitees) where !taken.contains(person.id) && person.id != voiceID {
+            guard let name = person.displayName else { continue }
+            chips.append(SpeakerNameChip(name: name, person: person, standing: model.namingStanding(for: person), isInvitee: false))
+        }
+        return chips
     }
 
     private var nameSuggestions: [SpeakerNameChoice] {
@@ -253,13 +271,6 @@ struct SpeakerVoiceToNameRow: View {
         .accessibilityIdentifier("transcripted.speakers.voice-to-name.menu")
     }
 
-    private var quoteLine: String {
-        guard let sampleText = group.sampleText else {
-            return "No transcript sample for this voice."
-        }
-        return "\u{201C}\(sampleText)\u{201D}"
-    }
-
     private var metaLine: String {
         let item = group.representative
         var parts: [String] = []
@@ -289,27 +300,52 @@ struct SpeakerVoiceToNameRow: View {
         // or a typed "Alice") adds this voice to them, like the island and
         // the review window do, instead of making a second Alice.
         let voice = group.representative.profile
-        if let existing = SpeakerNameSelectionPolicy.uniqueSavedPerson(
-            named: nameDraft,
-            among: model.profiles,
-            excluding: voice.id,
-            id: \.id,
-            displayName: \.displayName
-        ) {
-            model.mergePendingReviewItem(group.representative, into: existing) { didSave in
-                isSaving = false
-                if didSave {
-                    nameDraft = ""
-                } else {
-                    saveErrorMessage = "Couldn't save — the meeting file may have moved."
-                }
-            }
+        if let existing = model.uniqueSavedPerson(named: nameDraft, excluding: voice.id) {
+            isSaving = false
+            join(existing)
             return
         }
+        let named = SpeakerReviewNamedVoice(
+            voiceID: voice.id,
+            personID: voice.id,
+            name: nameDraft.trimmingCharacters(in: .whitespacesAndNewlines),
+            confirmedBefore: 0,
+            requiredMeetings: SpeakerNamingTierPresentation.segmentCount,
+            isNewPerson: true,
+            isTrusted: true
+        )
         model.namePendingReviewItem(group.representative, to: nameDraft) { didSave in
             isSaving = false
             if didSave {
                 nameDraft = ""
+                onNamed?(named)
+            } else {
+                saveErrorMessage = "Couldn't save — the meeting file may have moved."
+            }
+        }
+    }
+
+    /// This voice joins someone already saved: a yes for them, so their
+    /// print lights one more ring on the card.
+    private func join(_ person: SpeakerProfile) {
+        guard !isSaving else { return }
+        isSaving = true
+        saveErrorMessage = nil
+        let standing = model.namingStanding(for: person)
+        let named = SpeakerReviewNamedVoice(
+            voiceID: group.representative.speakerId,
+            personID: person.id,
+            name: person.displayName ?? nameDraft,
+            confirmedBefore: standing?.confirmedMeetings ?? max(0, person.confirmedMeetingCount),
+            requiredMeetings: standing?.requiredMeetings ?? SpeakerNamingTierPresentation.segmentCount,
+            isNewPerson: false,
+            isTrusted: standing?.isTrusted ?? true
+        )
+        model.mergePendingReviewItem(group.representative, into: person) { didSave in
+            isSaving = false
+            if didSave {
+                nameDraft = ""
+                onNamed?(named)
             } else {
                 saveErrorMessage = "Couldn't save — the meeting file may have moved."
             }
