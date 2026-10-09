@@ -351,15 +351,14 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.drainForTesting()
         hal.now += 3.1
         capture.drainForTesting()
-        XCTAssertEqual(hal.starts, 3)
-        XCTAssertEqual(
-            events, [.systemWake, .recoveryAbandoned, .systemWake],
-            "the retry reports the wake it retries, not a route change"
-        )
-        XCTAssertTrue(messages.contains { $0?.contains("reconnecting") == true }, "a no-show warns like a stall")
-        XCTAssertEqual(capture.diagnostics.noFirstBufferReconnects, 1)
+        XCTAssertEqual(capture.diagnostics.rebuildRetries, 1)
+        XCTAssertEqual(capture.diagnostics.noFirstBufferReconnects, 0)
         XCTAssertEqual(capture.diagnostics.stallReconnects, 0)
-        hal.now += 0.1
+        XCTAssertEqual(events, [.systemWake], "a silent wake tap retries the same wake, not a route change")
+        XCTAssertFalse(messages.contains { $0?.contains("reconnecting") == true }, "a silent wake tap must not warn like a stall")
+        hal.now += CoreAudioSystemAudioCapture.rebuildRetryDelay(attempt: 1)
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 3)
         capture.receiveForTesting(hal.buffer())
         capture.drainForTesting()
         hal.now += 3.1
@@ -566,10 +565,20 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.drainForTesting()
         hal.now += 3.1
         capture.drainForTesting()
-        XCTAssertEqual(hal.starts, 3, "A wake reconnect that never delivers falls back to the stall reconnect")
+        XCTAssertFalse(
+            messages.contains { $0?.contains("reconnecting") == true },
+            "A silent wake tap retries the rebuild without spending the stall warning"
+        )
+        hal.now += CoreAudioSystemAudioCapture.rebuildRetryDelay(attempt: 1)
+        capture.drainForTesting()
+        capture.receiveForTesting(hal.buffer())
+        capture.drainForTesting()
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertEqual(hal.starts, 4, "A later real stall still gets its reconnect")
         XCTAssertTrue(
             messages.contains { $0?.contains("reconnecting") == true },
-            "Once the wake reconnect stalls, the user hears about it"
+            "Once a later stall happens, the user hears about it"
         )
     }
 
@@ -1380,11 +1389,39 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         )
         XCTAssertEqual(capture.diagnostics.endReason, "none")
 
-        hal.now += 0.1
+        // The tap is detached while a rebuild retry waits; finish that retry
+        // so returning audio lands on an attached tap, as it does on hardware.
+        hal.now += CoreAudioSystemAudioCapture.rebuildRetryDelay(attempt: CoreAudioSystemAudioCapture.maxRebuildRetries)
+        capture.drainForTesting()
         capture.receiveForTesting(hal.buffer())
         capture.drainForTesting()
         XCTAssertEqual(frames, 8, "The first buffer after a slow wake must still be kept")
         XCTAssertEqual(capture.diagnostics.endReason, "none")
         XCTAssertEqual(capture.diagnostics.stallReconnects, 0, "Silence after wake must not spend the stall reconnect")
+        XCTAssertGreaterThan(capture.diagnostics.rebuildRetries, 0)
+    }
+
+    func testSilentWakeTapGivesUpAfterRebuildRetries() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        var messages: [String?] = []
+        let subscription = capture.errorMessagePublisher.sink { messages.append($0) }
+        defer { withExtendedLifetime(subscription) {}; capture.stopSync() }
+        try capture.start { _ in }
+        capture.prepareForSystemSleep()
+        capture.drainForTesting()
+        capture.recoverAfterSystemWake()
+        capture.drainForTesting()
+        for attempt in 1...CoreAudioSystemAudioCapture.maxRebuildRetries {
+            hal.now += 3.1
+            capture.drainForTesting()
+            hal.now += CoreAudioSystemAudioCapture.rebuildRetryDelay(attempt: attempt)
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(capture.diagnostics.endReason, "none")
+        hal.now += 3.1
+        capture.drainForTesting()
+        XCTAssertTrue(messages.last??.contains("could not reconnect") == true)
+        XCTAssertEqual(capture.diagnostics.endReason, "reconnect_failed")
+        XCTAssertEqual(capture.diagnostics.stallReconnects, 0)
     }
 }
