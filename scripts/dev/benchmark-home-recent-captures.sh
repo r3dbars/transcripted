@@ -21,6 +21,7 @@ swiftc \
   "$ROOT_DIR/Sources/Meeting/MeetingStoragePaths.swift" \
   "$ROOT_DIR/Sources/Meeting/MeetingTranscriptStyler.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerProfile.swift" \
+  "$ROOT_DIR/Sources/TranscriptedCore/Speaker/SpeakerNamingTier.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Protocols/ImportedTranscriptionRecoverySession.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionLanguage.swift" \
   "$ROOT_DIR/Sources/TranscriptedCore/Models/TranscriptionTypes.swift" \

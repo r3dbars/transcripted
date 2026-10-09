@@ -89,13 +89,188 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(Policy.suggestions(query: "jo", people: people, invitees: [], includeOwner: true).map(\.label), ["Jordan Lee"], "Me only shows when the typing could be me")
     }
 
+    runSuite("Each review row says the approved words: a question, a name, or the name field") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.rowTitle(.asking, name: " Marcus Reed "), "Marcus Reed?", "a likely match reads as a question")
+        assertTrue(Policy.titleIsUnanswered(.asking), "and stays dimmer until answered")
+        assertEqual(Policy.rowTitle(.confirmed, name: "Marcus Reed"), "Marcus Reed", "after ✓ just the name")
+        assertFalse(Policy.titleIsUnanswered(.confirmed))
+        assertEqual(Policy.rowTitle(.recognized, name: "Priya Shah"), "Priya Shah", "a voice named silently shows only the name")
+        assertNil(Policy.rowTitle(.naming(.unknownVoice), name: nil), "an unknown voice's title is the name field")
+        assertNil(Policy.rowTitle(.naming(.rejectedSuggestion), name: "Marcus Reed"), "after ✕ the title becomes the name field")
+        assertEqual(Policy.rowTitle(.named(.newPerson), name: "Jo Park"), "Jo Park")
+        assertEqual(Policy.rowTitle(.locked(.keptAsYou), name: nil), "Saved as You")
+        assertEqual(Policy.rowTitle(.locked(.discarded), name: "Speaker 2"), "Not saved to People")
+    }
+
+    runSuite("Each review row offers the approved buttons") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.rowControls(.asking, hovered: false), [.no, .yes], "round ✕ then round ✓")
+        assertEqual(Policy.rowControls(.confirmed, hovered: false), [.undo], "an answer can be undone")
+        assertEqual(Policy.rowControls(.named(.newPerson), hovered: true), [.undo])
+        assertEqual(Policy.rowControls(.recognized, hovered: false), [], "a voice named silently: no checkmark, no buttons")
+        assertEqual(Policy.rowControls(.recognized, hovered: true), [.correct], "hovering it offers Not Priya?")
+        assertEqual(Policy.rowControls(.naming(.correctingRecognized), hovered: false), [.keep], "the correction can be taken back")
+        assertEqual(Policy.rowControls(.naming(.rejectedSuggestion), hovered: false), [.discard, .undo], "after ✕: Not a person, or ask again")
+        assertEqual(Policy.rowControls(.naming(.unknownVoice), hovered: false), [.discard], "an unknown voice can still be Not a person")
+        assertEqual(Policy.rowControls(.locked(.discarded), hovered: false), [.undoDiscard])
+        assertEqual(Policy.rowControls(.locked(.keptAsYou), hovered: true), [], "All me is undone from the section header")
+        assertEqual(Policy.correctionPrompt(name: "Priya Shah"), "Not Priya?")
+    }
+
+    runSuite("A print lights one ring per confirmed meeting, and ✓ shows the ring it earns") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let marcus = Policy.Progress(confirmed: 4, required: 5)
+        assertEqual(Policy.litRings(.asking, progress: marcus), 4, "asking shows what is already earned")
+        assertEqual(Policy.litRings(.confirmed, progress: marcus), 5, "✓ completes it")
+        assertEqual(Policy.litRings(.naming(.rejectedSuggestion), progress: marcus), 0, "after ✕ the row no longer claims Marcus")
+        let dana = Policy.Progress(confirmed: 1, required: 5)
+        assertEqual(Policy.litRings(.asking, progress: dana), 1)
+        assertEqual(Policy.litRings(.confirmed, progress: dana), 2)
+        assertEqual(Policy.litRings(.recognized, progress: Policy.Progress(confirmed: 9, required: 5)), 5, "named silently: a full print")
+        assertEqual(Policy.litRings(.recognized, progress: nil), 5, "named silently with no count reported is still a full print")
+        assertEqual(Policy.litRings(.asking, progress: nil), 0, "no count reported: an empty print")
+        assertEqual(Policy.litRings(.named(.newPerson), progress: nil), 1, "a new name lights the first ring")
+        assertEqual(Policy.litRings(.named(.savedPerson), progress: nil), 0, "a saved person's count isn't known here, so nothing is claimed")
+        assertEqual(Policy.litRings(.locked(.keptAsYou), progress: marcus), 0)
+        assertEqual(Policy.litRings(.locked(.discarded), progress: marcus), 0)
+    }
+
+    runSuite("A lineup meeting's lower bar scales the print, and probation never shows a full one") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let lineup = Policy.Progress(confirmed: 1, required: 2)
+        assertEqual(Policy.litRings(.asking, progress: lineup), 2, "1 of 2 lights half the print, rounded down")
+        assertEqual(Policy.litRings(.confirmed, progress: lineup), 5, "reaching the lineup bar completes it")
+        let probation = Policy.Progress(confirmed: 6, required: 5, isTrusted: false)
+        assertEqual(Policy.litRings(.asking, progress: probation), 4, "past the bar but on probation: one ring short")
+        assertEqual(Policy.litRings(.confirmed, progress: probation), 4, "a yes doesn't promise auto-naming the health check may withhold")
+    }
+
+    runSuite("The line under the name uses the shared copy, in the person's color for the payoff") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let marcus = Policy.Progress(confirmed: 4, required: 5)
+        assertEqual(Policy.rowHint(.asking, progress: marcus), SpeakerNamingTierPresentation.ReviewHint(text: "One more yes to auto-name", usesPersonColor: true))
+        assertEqual(Policy.rowHint(.confirmed, progress: marcus), SpeakerNamingTierPresentation.ReviewHint(text: "Named automatically from now on", usesPersonColor: true))
+        let dana = Policy.Progress(confirmed: 1, required: 5)
+        assertNil(Policy.rowHint(.asking, progress: dana), "nothing under a name with more than one yes to go")
+        assertEqual(Policy.rowHint(.confirmed, progress: dana), SpeakerNamingTierPresentation.ReviewHint(text: "3 more to go", usesPersonColor: false))
+        assertEqual(Policy.rowHint(.named(.newPerson), progress: nil), SpeakerNamingTierPresentation.ReviewHint(text: "Saved · 4 more to auto-name", usesPersonColor: false))
+        assertNil(Policy.rowHint(.recognized, progress: Policy.Progress(confirmed: 7, required: 5)), "no words under a name given silently")
+        assertNil(Policy.rowHint(.named(.savedPerson), progress: nil))
+        assertNil(Policy.rowHint(.naming(.unknownVoice), progress: nil))
+        assertEqual(
+            Policy.rowHint(.naming(.unknownVoice), progress: nil, prefilledUntouched: true)?.text,
+            "Filled in from your calendar",
+            "a calendar 1:1 name says where it came from"
+        )
+    }
+
+    runSuite("The match animation plays on ✓ and on naming a new voice, and colors go to people the rows claim") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertTrue(Policy.celebrates(.confirmed))
+        assertTrue(Policy.celebrates(.named(.newPerson)))
+        assertTrue(Policy.celebrates(.named(.savedPerson)), "picking a saved person is a yes for them, so their print animates")
+        assertFalse(Policy.celebrates(.asking))
+        assertFalse(Policy.celebrates(.recognized))
+        assertTrue(Policy.claimsPerson(.asking))
+        assertTrue(Policy.claimsPerson(.recognized))
+        assertTrue(Policy.claimsPerson(.named(.savedPerson)))
+        assertFalse(Policy.claimsPerson(.naming(.unknownVoice)), "an unnamed voice doesn't use up a color")
+        assertFalse(Policy.claimsPerson(.named(.owner)))
+        assertFalse(Policy.claimsPerson(.locked(.discarded)))
+
+        let voice = UUID(), saved = UUID(), picked = UUID()
+        assertEqual(Policy.printOwner(.asking, voiceID: voice, suggestedID: saved, pickedID: nil), saved, "Is this Marcus? draws Marcus's own print")
+        assertEqual(Policy.printOwner(.recognized, voiceID: voice, suggestedID: nil, pickedID: nil), voice)
+        assertEqual(Policy.printOwner(.named(.savedPerson), voiceID: voice, suggestedID: saved, pickedID: picked), picked, "a picked person's print")
+        assertEqual(Policy.printOwner(.named(.newPerson), voiceID: voice, suggestedID: saved, pickedID: nil), voice, "a new person keeps this voice's print")
+        assertEqual(Policy.printOwner(.naming(.rejectedSuggestion), voiceID: voice, suggestedID: saved, pickedID: nil), voice)
+    }
+
+    runSuite("The footer counts each saved person once across split voices and plain names") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let first = UUID(), second = UUID()
+        let recognized = Policy.footerPersonKey(personID: first, fallback: "recognized-row")
+        let confirmed = Policy.footerPersonKey(personID: first, fallback: "confirmed-row")
+        let plain = Policy.footerPersonKey(personID: first, name: "Maya Chen", fallback: "plain")
+        let other = Policy.footerPersonKey(personID: second, name: "Maya Chen", fallback: "other-row")
+        let entries = [(key: recognized, origin: "recognized", lands: false),
+                       (key: plain, origin: "plain", lands: false),
+                       (key: confirmed, origin: "confirmed", lands: true),
+                       (key: other, origin: "other", lands: true)]
+        let unique = Policy.uniqueFooterPeople(entries, key: { $0.key })
+        assertEqual(unique.count, 2, "three qualifying voices for one person produce only one dot")
+        assertEqual(unique.map(\.origin), ["recognized", "other"], "first qualifying origin and row order survive")
+        assertEqual(unique.map(\.lands), [false, true], "a recognized person's dot does not acquire a duplicate's delayed landing")
+        assertEqual(Policy.footerPersonKey(personID: nil, name: " Maya Chen ", fallback: "plain-one"),
+                    Policy.footerPersonKey(personID: nil, name: "maya chen", fallback: "plain-two"), "unresolved plain names deduplicate by normalized name")
+        assertFalse(recognized == other, "different saved people must not merge because their display names match")
+    }
+
+    runSuite("The footer keeps the first qualifying landing and recomputes it on undo") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        let person = UUID()
+        let key = Policy.footerPersonKey(personID: person, fallback: "unused")
+        let first = (key: key, origin: "first-row", lands: true)
+        let duplicate = (key: key, origin: "second-row", lands: true)
+        let both = Policy.uniqueFooterPeople([first, duplicate], key: { $0.key })
+        assertEqual(both.map(\.origin), ["first-row"], "one landing originates from the first qualifying row")
+        assertEqual(both.map(\.lands), [true])
+        let afterUndo = Policy.uniqueFooterPeople([duplicate], key: { $0.key })
+        assertEqual(afterUndo.map(\.origin), ["second-row"], "undoing one voice preserves the other qualifying claim")
+        assertEqual(afterUndo.map(\.key), both.map(\.key), "the same person keeps the stable footer identity")
+        let afterAllUndone = Policy.uniqueFooterPeople([first, duplicate].filter { _ in false }, key: { $0.key })
+        assertTrue(afterAllUndone.isEmpty, "undoing every qualifying row removes the person's dot and pending landing")
+    }
+
+    runSuite("The footer counts people named automatically on this call") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertTrue(Policy.namedAutomatically(.recognized, progress: nil), "a voice named silently counts")
+        assertTrue(Policy.namedAutomatically(.confirmed, progress: Policy.Progress(confirmed: 4, required: 5)), "a ✓ that completes the print joins")
+        assertFalse(Policy.namedAutomatically(.confirmed, progress: Policy.Progress(confirmed: 1, required: 5)))
+        assertFalse(Policy.namedAutomatically(.confirmed, progress: Policy.Progress(confirmed: 6, required: 5, isTrusted: false)), "probation doesn't count")
+        assertFalse(Policy.namedAutomatically(.asking, progress: Policy.Progress(confirmed: 4, required: 5)))
+        assertFalse(Policy.namedAutomatically(.naming(.correctingRecognized), progress: nil), "Not Priya? takes Priya's dot away")
+        assertEqual(SpeakerNamingTierPresentation.autoNamedFooter(count: 2), "2 people named automatically")
+        assertNil(SpeakerNamingTierPresentation.autoNamedFooter(count: 0))
+    }
+
+    runSuite("The print's tip and VoiceOver say how far the person is") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(
+            Policy.printExplanation(.asking, name: "Marcus Reed", progress: Policy.Progress(confirmed: 4, required: 5)),
+            "Confirmed in 4 meetings. One more and Transcripted names Marcus on its own."
+        )
+        assertEqual(
+            Policy.printExplanation(.confirmed, name: "Marcus Reed", progress: Policy.Progress(confirmed: 4, required: 5)),
+            "Confirmed in 5 meetings. Transcripted names Marcus on its own when the voice is a clear match.",
+            "after ✓ the tip counts the yes"
+        )
+        assertEqual(Policy.printExplanation(.naming(.unknownVoice), name: nil, progress: nil), "Press play to listen.")
+        assertEqual(Policy.rowAccessibilityLabel(.asking, name: "Marcus Reed", hint: "One more yes to auto-name"), "Is this Marcus Reed? One more yes to auto-name", "no period after a question mark")
+        assertEqual(Policy.rowAccessibilityLabel(.confirmed, name: "Marcus Reed", hint: "Named automatically from now on"), "Marcus Reed, confirmed. Named automatically from now on")
+        assertEqual(Policy.rowAccessibilityLabel(.named(.newPerson), name: "Jo Park", hint: nil), "Jo Park, named")
+        assertEqual(Policy.rowAccessibilityLabel(.named(.savedPerson), name: "Dana Lee", hint: nil, corrected: true), "Dana Lee, corrected", "a fix to a name Transcripted gave says so")
+        assertEqual(Policy.rowAccessibilityLabel(.recognized, name: "Priya Shah", hint: nil), "Priya Shah, named automatically")
+        assertEqual(Policy.rowAccessibilityLabel(.naming(.unknownVoice), name: nil, hint: nil), "Unnamed voice")
+    }
+
+    runSuite("Invitee chips fade in under the name field only while it has the keyboard") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertTrue(Policy.showsInviteeChips(typed: "", focused: true), "focused and empty: one-tap names")
+        assertFalse(Policy.showsInviteeChips(typed: "", focused: false), "not focused: just the title")
+        assertFalse(Policy.showsInviteeChips(typed: "Jo", focused: true), "typing swaps them for the list")
+    }
+
     runSuite("NotchIslandSpeakerReviewPolicy says what happened after Done") {
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).title, "Everyone’s named")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "Transcripted will know them next time.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "After a few confirmed meetings, Transcripted names them on its own.")
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 left to name in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 left to name in Speakers.")
-        assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: "Design sync"), "Who was on Design sync?")
-        assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle(meetingTitle: nil), "Who was on this call?")
+        assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle, "Who spoke?", "the header asks one short question")
+        assertEqual(NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: " Design sync "), "Design sync", "the meeting sits small on the right")
+        assertNil(NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: "  "), "no meeting name, nothing on the right")
+        assertEqual(NotchIslandSpeakerReviewPolicy.accessibilityTitle(meetingTitle: "Design sync"), "Who spoke? Design sync")
     }
 
     runSuite("NotchIslandPresentation opens the speaker review by itself once the meeting is saved") {
@@ -229,11 +404,8 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertFalse(hiddenByRecording.showsSpeakerReview, "a new recording hides the review")
     }
 
-    runSuite("A meeting where everyone was recognized still says who was on it") {
+    runSuite("A who-was-on-the-call list offers corrections and closes quietly when nothing changed") {
         typealias Policy = NotchIslandSpeakerReviewPolicy
-        assertEqual(Policy.headerTitle(meetingTitle: nil, recognizedOnly: true), "On this call")
-        assertEqual(Policy.headerTitle(meetingTitle: "Design sync", recognizedOnly: true), "On Design sync")
-        assertEqual(Policy.headerTitle(meetingTitle: "Design sync", recognizedOnly: false), "Who was on Design sync?", "a review that asks still asks")
         assertEqual(Policy.correctionPrompt(name: "Taylor Wolf"), "Not Taylor?", "hover offers a correction by first name")
         assertEqual(Policy.correctionPrompt(name: "  Cher "), "Not Cher?")
         assertFalse(Policy.doneShowsSummary(recognizedOnly: true, updates: 0), "nothing corrected: Done just closes")
@@ -271,6 +443,20 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(byKey["system_1"], Voice(key: "system_1", similarity: 0.93), "Not Taylor? finds the recognized voice")
         assertEqual(byKey["system_0"], Voice(key: "system_0", similarity: 0.61), "an asked voice wins a shared key")
         assertTrue(byKey["mic_1"] == nil)
+    }
+
+    runSuite("A verdict on a silently named voice is reported as auto_recognized, so wrong silent names can be counted") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        struct Voice { let key: String }
+        let asked = [Voice(key: "system_0"), Voice(key: "mic_0")]
+        let recognized = [Voice(key: "system_1"), Voice(key: "system_2"), Voice(key: "system_0")]
+        let auto = Policy.autoRecognizedKeys(asked: asked, recognized: recognized, key: \.key)
+        assertEqual(auto, ["system_1", "system_2"], "an asked voice wins a shared key, as in entriesByKey")
+        assertEqual(Policy.autoRecognizedProperty(updateKey: "system_1", autoRecognizedKeys: auto), "true", "Not Priya? on a recognized voice")
+        assertEqual(Policy.autoRecognizedProperty(updateKey: "system_0", autoRecognizedKeys: auto), "false", "an asked Is this …? voice")
+        assertEqual(Policy.autoRecognizedProperty(updateKey: "mic_0", autoRecognizedKeys: auto), "false")
+        assertEqual(Policy.autoRecognizedProperty(updateKey: "system_9", autoRecognizedKeys: auto), "false", "an unknown voice is not auto-recognized")
+        assertEqual(Policy.autoRecognizedKeys(asked: asked, recognized: [Voice](), key: \.key), [], "a review with nobody recognized")
     }
 
     runSuite("A calendar 1:1 fills the one unnamed remote voice with the other invitee") {
@@ -347,5 +533,56 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(Policy.discardTitle(discarded: false), "Not a person")
         assertEqual(Policy.discardTitle(discarded: true), "Undo")
         assertEqual(Policy.lockNote(.discarded), "Not saved to People")
+    }
+
+    runSuite("Undo goes back to the question, or to the field a name came from") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertEqual(Policy.undoTarget(.confirmed, origin: .rejectedSuggestion), .asking, "after ✓: Marcus Reed? again")
+        assertEqual(Policy.undoTarget(.naming(.rejectedSuggestion), origin: .rejectedSuggestion), .asking, "after ✕: Marcus Reed? again, not an empty field")
+        assertEqual(Policy.undoTarget(.named(.newPerson), origin: .rejectedSuggestion), .naming(.rejectedSuggestion), "a name typed after ✕ goes back to that field")
+        assertEqual(Policy.undoTarget(.named(.savedPerson), origin: .unknownVoice), .naming(.unknownVoice), "a name for an unknown voice goes back to Who's this?")
+        assertEqual(Policy.undoTarget(.named(.newPerson), origin: .correctingRecognized), .naming(.correctingRecognized), "a correction goes back to the Not Priya? field")
+    }
+
+    runSuite("Moving on takes the keyboard only for a row whose title is the name field") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        assertFalse(Policy.takesKeyboardOnAdvance(.asking), "Marcus Reed? has nothing to type into")
+        assertTrue(Policy.takesKeyboardOnAdvance(.naming(.unknownVoice)), "Who's this? does")
+        assertTrue(Policy.takesKeyboardOnAdvance(.naming(.rejectedSuggestion)))
+        assertFalse(Policy.takesKeyboardOnAdvance(.recognized))
+        assertFalse(Policy.takesKeyboardOnAdvance(.locked(.keptAsYou)))
+        for state in [Policy.RowState.asking, .naming(.unknownVoice), .naming(.rejectedSuggestion), .confirmed, .recognized] {
+            assertEqual(Policy.takesKeyboardOnAdvance(state), Policy.rowTitle(state, name: "Dana Lee") == nil, "keyboard only where the title is the field")
+        }
+    }
+
+    runSuite("A person's color stays theirs for the whole review") {
+        typealias Policy = NotchIslandSpeakerReviewPolicy
+        // Find two people who prefer the same color, so the second is bumped.
+        let ids = (0..<64).compactMap { UUID(uuidString: String(format: "00000000-0000-4000-8000-%012x", $0)) }
+        var byPreferred: [Int: UUID] = [:]
+        var pair: (UUID, UUID)?
+        for id in ids {
+            let preferred = VoicePrintStyle(id: id).preferredColorIndex
+            if let first = byPreferred[preferred] { pair = (first, id); break }
+            byPreferred[preferred] = id
+        }
+        guard let (first, second) = pair else { return assertTrue(false, "9 or more ids always share one of 8 colors") }
+        let start = Policy.colorOrder(existing: [], claims: [first, second])
+        let startColors = VoicePrintStyle.colorIndices(for: start)
+        assertEqual(start, [first, second], "first time: row order")
+        assertEqual(startColors, VoicePrintStyle.colorIndices(for: [first, second]), "the same colors as plain row order")
+
+        // ✕ on the first row: it stops claiming anyone. The second keeps its color.
+        let afterNo = Policy.colorOrder(existing: start, claims: [second])
+        assertEqual(VoicePrintStyle.colorIndices(for: afterNo)[second], startColors[second], "nobody is recolored when another row lets go")
+
+        // A voice named above them joins at the end and doesn't take their colors.
+        let newcomer = ids.first { $0 != first && $0 != second }!
+        let afterName = Policy.colorOrder(existing: afterNo, claims: [newcomer, first, second])
+        let colors = VoicePrintStyle.colorIndices(for: afterName)
+        assertEqual(colors[first], startColors[first])
+        assertEqual(colors[second], startColors[second])
+        assertFalse([startColors[first], startColors[second]].contains(colors[newcomer]), "a newcomer gets a color nobody on screen has")
     }
 }

@@ -234,11 +234,20 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
     public let id: UUID
     public let displayName: String
     public let callCount: Int
+    /// Distinct meetings this person was confirmed in, and whether their
+    /// lifeline is healthy, so a review that names a voice as this person can
+    /// show their voice print's progress.
+    public let confirmedMeetings: Int
+    public let isTrusted: Bool
+    public let earnsConfirmation: Bool
 
-    public init(id: UUID, displayName: String, callCount: Int) {
+    public init(id: UUID, displayName: String, callCount: Int, confirmedMeetings: Int = 0, isTrusted: Bool = true, earnsConfirmation: Bool = true) {
         self.id = id
         self.displayName = displayName
         self.callCount = callCount
+        self.confirmedMeetings = confirmedMeetings
+        self.isTrusted = isTrusted
+        self.earnsConfirmation = earnsConfirmation
     }
 }
 
@@ -334,6 +343,10 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     public let needsConfirmation: Bool      // true = known but low confidence (show confirm/deny)
     public let sessionEmbedding: [Float]?   // mean embedding from the current meeting
     public let matchedProfileSnapshot: SpeakerProfile? // pre-meeting DB profile for correction rollback
+    /// For an "Is this …?" row: how many distinct meetings this person was
+    /// confirmed in before this one, and how many this meeting needs before
+    /// Transcripted names them on its own. Nil when there's nothing to show.
+    public var confirmationProgress: SpeakerNamingConfirmationProgress?
 
     public init(
         id: UUID,
@@ -365,6 +378,34 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
         self.needsConfirmation = needsConfirmation
         self.sessionEmbedding = sessionEmbedding
         self.matchedProfileSnapshot = matchedProfileSnapshot
+    }
+}
+
+/// Progress toward silent naming for one suggested person, as the review shows it.
+public struct SpeakerNamingConfirmationProgress: Sendable, Equatable {
+    /// Distinct meetings the person was confirmed in before this review.
+    public let confirmedMeetings: Int
+    /// Confirmed meetings needed before Transcripted names them on its own in a
+    /// meeting like this one (`SpeakerNamingPolicy.requiredConfirmedMeetings`,
+    /// or the lower lineup bar when their name is on the meeting's lineup).
+    public let requiredMeetings: Int
+
+    /// False while the person is on probation after a correction or dispute,
+    /// so Transcripted asks again even past the bar.
+    public let isTrusted: Bool
+    /// False if this profile already has a confirmation for this recording.
+    public let earnsConfirmation: Bool
+
+    public init(confirmedMeetings: Int, requiredMeetings: Int, isTrusted: Bool = true, earnsConfirmation: Bool = true) {
+        self.confirmedMeetings = confirmedMeetings
+        self.requiredMeetings = requiredMeetings
+        self.isTrusted = isTrusted
+        self.earnsConfirmation = earnsConfirmation
+    }
+
+    /// New / Learning / Auto for the review's dial.
+    public var tier: SpeakerNamingTier {
+        SpeakerNamingTier.tier(confirmedMeetings: confirmedMeetings, requiredMeetings: requiredMeetings, isTrusted: isTrusted)
     }
 }
 

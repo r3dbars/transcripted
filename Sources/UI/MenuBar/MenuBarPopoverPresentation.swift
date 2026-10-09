@@ -1,14 +1,22 @@
 import AppKit
 
+enum MenuBarPopoverWindowVisibility {
+    case onActiveSpace
+    case otherSpace
+    case unknown
+}
+
 /// Keeps focus local to the menu, including when AppKit refuses its status-item
-/// anchor. The temporary anchor is only used after a refused presentation; it
-/// does not retry a popover that was shown and then dismissed.
+/// anchor or reports the popover shown while its window is on another Space.
+/// The temporary anchor is only used after one of those failures. It does not
+/// retry a popover that was shown and then dismissed.
 @MainActor
 final class MenuBarPopoverPresentation: NSObject {
     private let makeAnchorWindow: @MainActor () -> NSPanel
     private let screenFrames: @MainActor () -> [NSRect]
     private let spaceNotifications: NotificationCenter
     private let currentEvent: @MainActor () -> NSEvent?
+    private let windowVisibility: @MainActor (NSWindow) -> MenuBarPopoverWindowVisibility
     private var anchorWindow: NSPanel?
     private weak var presentedPopover: NSPopover?
     private weak var sourceButton: NSView?
@@ -27,12 +35,16 @@ final class MenuBarPopoverPresentation: NSObject {
         makeAnchorWindow: @escaping @MainActor () -> NSPanel = { MenuBarPopoverAnchorPanel() },
         screenFrames: @escaping @MainActor () -> [NSRect] = { NSScreen.screens.map(\.frame) },
         spaceNotifications: NotificationCenter = NSWorkspace.shared.notificationCenter,
-        currentEvent: @escaping @MainActor () -> NSEvent? = { NSApp.currentEvent }
+        currentEvent: @escaping @MainActor () -> NSEvent? = { NSApp.currentEvent },
+        windowVisibility: @escaping @MainActor (NSWindow) -> MenuBarPopoverWindowVisibility = { window in
+            MenuBarPopoverPresentation.visibility(of: window)
+        }
     ) {
         self.makeAnchorWindow = makeAnchorWindow
         self.screenFrames = screenFrames
         self.spaceNotifications = spaceNotifications
         self.currentEvent = currentEvent
+        self.windowVisibility = windowVisibility
         super.init()
     }
 
@@ -51,7 +63,15 @@ final class MenuBarPopoverPresentation: NSObject {
         )
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
-        if !popover.isShown, !dismissedDuringPresentation, let screenRect {
+        // isShown stays true when a regular app's popover window is committed
+        // on another Space. That is not a visible menu, so close it and retry once.
+        let shownOnAnotherSpace = popover.isShown
+            && popover.contentViewController?.view.window.map { windowVisibility($0) == .otherSpace } == true
+        if shownOnAnotherSpace {
+            closeShownOnAnotherSpace(popover)
+        }
+
+        if let screenRect, shownOnAnotherSpace || (!popover.isShown && !dismissedDuringPresentation) {
             let panel = makeAnchorWindow()
             panel.styleMask = [.borderless, .nonactivatingPanel]
             panel.isReleasedWhenClosed = false
@@ -90,6 +110,43 @@ final class MenuBarPopoverPresentation: NSObject {
 
         guard popover.isShown else { return }
         popover.contentViewController?.view.window?.makeKey()
+    }
+
+    private func closeShownOnAnotherSpace(_ popover: NSPopover) {
+        explicitlyClosing = true
+        popover.performClose(nil)
+        explicitlyClosing = false
+        dismissedDuringPresentation = false
+        dismissalClick = nil
+    }
+
+    static func visibility(
+        of window: NSWindow,
+        windowInfo: (CFArray) -> [[String: Any]]? = { numbers in
+            CGWindowListCreateDescriptionFromArray(numbers) as? [[String: Any]]
+        }
+    ) -> MenuBarPopoverWindowVisibility {
+        let number = window.windowNumber
+        guard number > 0, UInt64(number) <= UInt64(CGWindowID.max) else { return .unknown }
+        // Quartz's window-ID arrays contain integer values encoded as pointers,
+        // not CFNumber objects. Nil callbacks keep CFArray from retaining them.
+        var value = UnsafeRawPointer(bitPattern: UInt(number))
+        guard let numbers = CFArrayCreate(kCFAllocatorDefault, &value, 1, nil),
+              let info = windowInfo(numbers) else {
+            return .unknown
+        }
+        for entry in info {
+            guard (entry[kCGWindowNumber as String] as? Int) == number else { continue }
+            // This key is optional. Missing/malformed metadata is not evidence
+            // that a shown menu lives on another Space.
+            guard let isOnscreen = entry[kCGWindowIsOnscreen as String] as? Bool else { return .unknown }
+            if isOnscreen { return .onActiveSpace }
+            let layer = entry[kCGWindowLayer as String] as? Int ?? 0
+            // A level of 0 means the window server has not committed this window yet.
+            // An off-screen window that already has its popover level is on another Space.
+            return layer == 0 ? .unknown : .otherSpace
+        }
+        return .unknown
     }
 
     private func anchorScreenRect(for button: NSView) -> NSRect? {

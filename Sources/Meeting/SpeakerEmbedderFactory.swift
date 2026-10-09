@@ -130,7 +130,7 @@ enum SpeakerEmbedderFactory {
             && environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online"
         let identifier = embedder?.identifier
             ?? (onlineNemotronVoiceprints ? FluidWeSpeakerSegmentEmbedder.embedderIdentifier : nil)
-        let name = SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier: identifier)
+        let name = SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: identifier)
         return state.appendingPathComponent(name, isDirectory: false)
     }
 
@@ -139,7 +139,7 @@ enum SpeakerEmbedderFactory {
     /// the path agrees with what the meeting pipeline uses, without loading a model.
     static func activeSpeakerDBURL() -> URL {
         speakerDBURL(
-            for: makeEmbedder(for: SpeakerEmbedderPreferences.effectiveChoice()),
+            for: makeEmbedder(for: SpeakerEmbedderChoiceResolution.effectiveChoice()),
             diarizationBackend: activeDiarizationBackend()
         )
     }

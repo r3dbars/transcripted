@@ -43,6 +43,15 @@ public protocol SpeakerStore: Sendable {
     /// These rows—not passive appearances—control silent auto-recognition maturity.
     func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws
 
+    /// Make every later confirmation for `transcriptId` count toward `meetingId`
+    /// instead (an imported file's content-based meeting id), whichever path records
+    /// it: the review, a re-transcription, Settings, or a merge.
+    func recordConfirmationMeetingAlias(transcriptId: UUID, meetingId: UUID) throws
+
+    /// Whether confirming this recording adds a distinct meeting to this profile.
+    /// An explicit meeting id covers an import before its alias is committed.
+    func confirmationWouldIncreaseCount(profileId: UUID, transcriptId: UUID, meetingId: UUID?) throws -> Bool
+
     /// Merge obviously duplicate profiles (high cosine similarity)
     func mergeDuplicates()
 
@@ -90,6 +99,10 @@ public extension SpeakerStore {
     /// Back-compat default for test doubles and lightweight stores that do not
     /// persist the explicit-confirmation ledger.
     func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws {}
+
+    func recordConfirmationMeetingAlias(transcriptId: UUID, meetingId: UUID) throws {}
+
+    func confirmationWouldIncreaseCount(profileId: UUID, transcriptId: UUID, meetingId: UUID?) throws -> Bool { true }
 
     func mergeDuplicates(protecting protectedIds: Set<UUID>) {
         guard protectedIds.isEmpty else { return }

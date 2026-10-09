@@ -40,6 +40,35 @@ final class SpeakerSettingsStore: Sendable {
             preferredClipsDirectory: preferredClipsDirectory, legacyClipsDirectory: legacyClipsDirectory)
     }
 
+    /// How far each named person is toward a full voice print. One short indexed
+    /// outcome read per person, so call it off the main actor (the Speakers
+    /// snapshot queue does).
+    func namingStandings(for profiles: [SpeakerProfile]) -> [UUID: SpeakerNamingStanding] {
+        var standings: [UUID: SpeakerNamingStanding] = [:]
+        for profile in profiles where profile.displayName?.isEmpty == false {
+            let recent = speakerDatabase.recentMatchOutcomes(
+                profileId: profile.id, limit: SpeakerProfileHealth.recentOutcomeWindow
+            ).map(\.kind)
+            standings[profile.id] = SpeakerNamingStanding.of(profile, recentOutcomes: recent)
+        }
+        return standings
+    }
+
+    /// Event properties for silently named voices the user just moved to
+    /// someone else. Read before the correction runs, so the auto-accept rows
+    /// still belong to the profiles the transcript named. Off the main actor.
+    func silentNameCorrectionProperties(
+        transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice]
+    ) -> [[String: String]] {
+        let outcomes = transcriptId.map { speakerDatabase.matchOutcomes(transcriptId: $0) } ?? []
+        return voices.map { voice in
+            SpeakerSilentNameCorrectionTelemetry.properties(
+                for: voice,
+                outcome: SpeakerSilentNameCorrectionTelemetry.autoAcceptedOutcome(for: voice, in: outcomes)
+            )
+        }
+    }
+
     func getSpeaker(id: UUID) -> SpeakerProfile? { speakerDatabase.getSpeaker(id: id) }
     func allSpeakers() -> [SpeakerProfile] { speakerDatabase.allSpeakers() }
     func deleteSpeaker(id: UUID) { speakerDatabase.deleteSpeaker(id: id) }

@@ -139,13 +139,61 @@ profile-health gates as the app are applied automatically. Uncertain speakers
 stay numbered. Matching quality still depends on voices and audio quality;
 numbered speakers do not mean the import failed.
 
-`--speaker-embedder app` follows the app's stored preference/environment override.
-WeSpeaker and ERes2Net use their separate databases. Explicit `eres2net` requires
-its already-installed local model; it never downloads it. If the app preference
-selects unavailable ERes2Net, the CLI warns and falls back to WeSpeaker and its
-database, like the app. `--speaker-db` overrides the read-only source database;
-pair it with the correct embedder. An invalid explicit database fails; a missing
-or unreadable default database warns and produces numbered speakers.
+**Which voiceprints and which database.** Each voiceprint model keeps its own
+people, in `~/Library/Application Support/Transcripted/state/`:
+
+| Model | Database | Notes |
+|---|---|---|
+| ReDimNet2 | `speakers_redimnet2-b4.sqlite` | The app's default since 1.1.67. Your saved people were carried over from `speakers.sqlite` the first time the app ran it. |
+| WeSpeaker | `speakers.sqlite` | The older model. The app no longer writes this file once it's on ReDimNet2. |
+| ERes2Net | `speakers_eres2net.sqlite` | Older opt-in. |
+
+`--speaker-embedder app` (the default) picks the same model and database the app
+uses: the app's setting or `TRANSCRIPTED_SPEAKER_EMBEDDER`, ReDimNet2 when
+nothing is set, and WeSpeaker with `speakers.sqlite` when the chosen model isn't
+installed or failed to load in this app build. The app and the CLI share this
+rule, so they can't disagree. `redimnet2`, `wespeaker`, and `eres2net` pick a
+model explicitly; an explicit model that isn't installed or can't load is an
+error, never a silent fallback. The state folder follows the app's
+`TRANSCRIPTED_CONTAINER_DIR` override; `TRANSCRIPTED_DATA_DIR` and
+`TRANSCRIPTED_MEETINGS_DIR` only move where the Markdown goes. `--speaker-db`
+overrides the read-only source database; pair it with the matching
+`--speaker-embedder` (a database holding another model's voiceprints is an
+error). Explicit databases must already carry the app's persisted model identity;
+an unstamped custom copy is rejected rather than guessing from its vector size.
+Open the canonical database in the updated app before copying it. Retrieval-only
+builds parse the flags but cannot run imports or validate Core model choices.
+An invalid explicit database fails; a missing or
+unreadable default database warns and produces numbered speakers. Runs from a
+script or launchd agent use the same people as long as they run as the same
+macOS user; another account has its own (usually empty) speaker database.
+
+In 1.1.70 and earlier the CLI always read WeSpeaker's `speakers.sqlite`, so people you
+confirmed in the app after it moved to ReDimNet2 never got named by the CLI.
+
+**The 5-meeting rule.** The CLI, like the app's "Transcribe a file", names
+someone silently only after you've confirmed them in 5 distinct meetings, and
+only on a strong, unambiguous match with that model's bars (ReDimNet2's are
+stricter than WeSpeaker's). Until then the app asks "Is this NAME?" and the CLI
+leaves them numbered. Importing the same audio file again doesn't count as a new
+meeting. `--name-likely-speakers` opts in to naming someone who clears every bar
+except the confirmation count (confirmed at least once), written as
+`NAME (likely)`, with frontmatter `source: db_pending` so it never reads as a
+confirmed name. It never counts as a confirmation; confirm people in the app.
+
+**Why a speaker stayed numbered.** stderr names the voiceprint model and the
+database it read, then gives one line per speaker that wasn't named, e.g.:
+
+```text
+Voiceprints: ReDimNet2 (the app's setting). Saved speakers: /Users/you/Library/Application Support/Transcripted/state/speakers_redimnet2-b4.sqlite
+Speaker 1: matched Maya, but only 2 of 5 confirmed meetings
+Speaker 2: didn't match anyone saved in this voiceprint database
+```
+
+Other reasons: no saved database for the model (or one that hasn't been carried
+over yet: open the app once), a match below the model's similarity bar, another
+saved person too close, recent corrections, or `--no-speaker-identification`.
+stdout is unchanged: the path, or exactly one `--json` receipt.
 
 Output is no-clobber, including concurrent imports. A selected symlink library
 root is resolved once, but generated audio-directory symlinks are rejected.

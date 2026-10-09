@@ -145,24 +145,138 @@ final class MeetingImportSpeakerMappingTests: XCTestCase {
         XCTAssertTrue(resolved.databaseIDs.isEmpty)
     }
 
-    private typealias Resolution = (
-        mappings: [String: SpeakerMapping], sources: [String: String], databaseIDs: [String: UUID]
-    )
+    // MARK: - Voiceprint bars, reasons, and likely names
 
-    private func resolve(profile: SpeakerProfile, similarity: Double = 0.97) -> Resolution {
+    func testReDimNet2MatchUsesReDimNet2Bars() {
+        let profile = makeProfile()
+        // 0.93 clears WeSpeaker's 0.92 bar but not ReDimNet2's 0.946: the CLI must
+        // never be looser than the app for the model it ran.
+        XCTAssertEqual(resolve(profile: profile, similarity: 0.93).mappings["system_2"]?.displayName, "Fixture Speaker")
+        let redimnet = resolve(profile: profile, similarity: 0.93, thresholds: .reDimNet2B4)
+        assertPending(redimnet, profileID: profile.id)
+        XCTAssertEqual(redimnet.reasons["system_2"],
+                       "matched Fixture Speaker, but similarity 0.930 is not above the 0.946 silent-naming bar")
+        XCTAssertEqual(resolve(profile: profile, similarity: 0.97, thresholds: .reDimNet2B4).mappings["system_2"]?.displayName,
+                       "Fixture Speaker")
+    }
+
+    func testBelowFiveConfirmationsStaysNumberedAndSaysWhy() {
+        let profile = makeProfile(confirmedMeetingCount: 2)
+        let resolved = resolve(profile: profile, thresholds: .reDimNet2B4)
+        assertPending(resolved, profileID: profile.id)
+        XCTAssertEqual(resolved.reasons["system_2"], "matched Fixture Speaker, but only 2 of 5 confirmed meetings")
+    }
+
+    func testSilentlyNamedSpeakerHasNoReason() {
+        XCTAssertTrue(resolve(profile: makeProfile(), thresholds: .reDimNet2B4).reasons.isEmpty)
+    }
+
+    func testEveryNumberedSpeakerGetsAReason() {
+        let named = makeProfile()
+        let unnamed = makeProfile(name: nil)
+        XCTAssertEqual(resolve(profile: unnamed).reasons["system_2"], "matched a saved voice that has no name yet")
+        let stranger = MeetingImportSpeakerMapping.resolve(
+            result: makeResult(context: context(profile: makeProfile())), originalProfiles: [named], store: MappingSpeakerStore())
+        XCTAssertEqual(stranger.reasons["system_2"], "didn't match anyone saved in this voiceprint database")
+        let unavailable = MeetingImportSpeakerMapping.resolve(
+            result: makeResult(context: context(profile: named)), originalProfiles: [named], store: MappingSpeakerStore(),
+            unavailableReason: "there's no saved speaker database for ReDimNet2")
+        assertUnknown(unavailable)
+        XCTAssertEqual(unavailable.reasons["system_2"], "there's no saved speaker database for ReDimNet2")
+    }
+
+    func testLikelyNamesAreOptInHedgedAndNeverConfirmed() {
+        let profile = makeProfile(confirmedMeetingCount: 2)
+        assertPending(resolve(profile: profile, thresholds: .reDimNet2B4), profileID: profile.id)
+        let likely = resolve(profile: profile, thresholds: .reDimNet2B4, nameLikely: true)
+        XCTAssertEqual(likely.mappings["system_2"]?.displayName, "Fixture Speaker (likely)")
+        XCTAssertEqual(likely.sources["system_2"], "db_pending", "a likely name is never recorded as a confirmed identity")
+        XCTAssertEqual(likely.databaseIDs["system_2"], profile.id)
+        XCTAssertEqual(likely.reasons["system_2"], "named Fixture Speaker as likely: 2 of 5 confirmed meetings (--name-likely-speakers)")
+    }
+
+    func testLikelyNamesNeverRelaxAnyOtherBar() {
+        // Never confirmed, a weak match, a close runner-up, or a disputed profile stay numbered.
+        assertPending(resolve(profile: makeProfile(confirmedMeetingCount: 0), thresholds: .reDimNet2B4, nameLikely: true),
+                      profileID: nil)
+        assertPending(resolve(profile: makeProfile(confirmedMeetingCount: 2), similarity: 0.93,
+                              thresholds: .reDimNet2B4, nameLikely: true), profileID: nil)
+        assertPending(resolve(profile: makeProfile(confirmedMeetingCount: 2, disputeCount: 1),
+                              thresholds: .reDimNet2B4, nameLikely: true), profileID: nil)
+        let close = makeProfile(confirmedMeetingCount: 2)
+        let match = context(profile: close, similarity: 0.99, secondSimilarity: 0.70,
+                            averageSimilarity: 0.90, secondAverageSimilarity: 0.85)
+        let resolved = MeetingImportSpeakerMapping.resolve(
+            result: makeResult(context: match), originalProfiles: [close], store: MappingSpeakerStore(),
+            thresholds: .reDimNet2B4, nameLikelySpeakers: true)
+        assertPending(resolved, profileID: close.id)
+        XCTAssertTrue(resolved.reasons["system_2"]?.contains("another saved person scored too close") == true)
+    }
+
+    /// A person the app saved in its ReDimNet2 database, confirmed in five
+    /// meetings, is named by the CLI's default resolution: the database the plan
+    /// points at, read through the read-only snapshot, with ReDimNet2's bars.
+    func testPersonSavedInTheReDimNet2DatabaseIsNamed() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-redimnet-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let state = root.appendingPathComponent("state")
+        let resources = root.appendingPathComponent("Resources")
+        try FileManager.default.createDirectory(
+            at: resources.appendingPathComponent("redimnet2-voiceprint/Model.mlmodelc"), withIntermediateDirectories: true)
+        let plan = MeetingImportModels.voiceprintPlan(
+            choice: "app", environment: [:], appDefaults: nil, resourceDirectories: [resources],
+            homeDirectory: root, stateDirectory: state, appBuildKey: .some(nil))
+        XCTAssertEqual(plan.databaseURL.lastPathComponent, "speakers_redimnet2-b4.sqlite")
+
+        // Seed the app-side database as the app would, with a 192-d voiceprint.
+        var vector = [Float](repeating: 0, count: 192); vector[0] = 1
+        let live = SpeakerDatabase(path: plan.databaseURL.path, thresholds: .reDimNet2B4)
+        let seeded = live.addOrUpdateSpeaker(embedding: vector)
+        live.setDisplayName(id: seeded.id, name: "Fixture Speaker")
+        try live.recordUserConfirmations((0..<5).map { _ in
+            SpeakerUserConfirmation(profileId: seeded.id, transcriptId: UUID(), kind: .confirmed)
+        })
+        // A decoy in the legacy WeSpeaker file must not be what the CLI reads.
+        _ = SpeakerDatabase(path: state.appendingPathComponent("speakers.sqlite").path)
+
+        let snapshotURL = root.appendingPathComponent("snapshot.sqlite")
+        try SpeakerDatabaseSnapshot.create(sourceURL: plan.databaseURL, destinationURL: snapshotURL)
+        let snapshot = SpeakerDatabase(path: snapshotURL.path, thresholds: .reDimNet2B4)
+        let profiles = snapshot.allSpeakers()
+        let profile = try XCTUnwrap(profiles.first { $0.id == seeded.id })
+        XCTAssertEqual(profile.confirmedMeetingCount, 5)
+
+        let resolved = MeetingImportSpeakerMapping.resolve(
+            result: makeResult(context: context(profile: profile, similarity: 0.98, secondSimilarity: -1,
+                                                averageSimilarity: 0.98, secondAverageSimilarity: -1)),
+            originalProfiles: profiles, store: snapshot, thresholds: .reDimNet2B4)
+        XCTAssertEqual(resolved.mappings["system_2"]?.displayName, "Fixture Speaker")
+        XCTAssertEqual(resolved.sources["system_2"], "db")
+        XCTAssertEqual(resolved.databaseIDs["system_2"], seeded.id)
+    }
+
+    private typealias Resolution = MeetingImportSpeakerMapping.Resolution
+
+    private func resolve(
+        profile: SpeakerProfile, similarity: Double = 0.97,
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker, nameLikely: Bool = false
+    ) -> Resolution {
         MeetingImportSpeakerMapping.resolve(
             result: makeResult(context: context(profile: profile, similarity: similarity)),
-            originalProfiles: [profile], store: MappingSpeakerStore()
+            originalProfiles: [profile], store: MappingSpeakerStore(),
+            thresholds: thresholds, nameLikelySpeakers: nameLikely
         )
     }
 
     private func assertPending(
-        _ resolved: Resolution, profileID: UUID, file: StaticString = #filePath, line: UInt = #line
+        _ resolved: Resolution, profileID: UUID?, file: StaticString = #filePath, line: UInt = #line
     ) {
         XCTAssertEqual(resolved.mappings["system_2"]?.displayName, "Speaker 2", file: file, line: line)
         XCTAssertEqual(resolved.mappings["system_2"]?.isConfirmedIdentity, false, file: file, line: line)
         XCTAssertEqual(resolved.sources["system_2"], "db_pending", file: file, line: line)
-        XCTAssertEqual(resolved.databaseIDs["system_2"], profileID, file: file, line: line)
+        if let profileID {
+            XCTAssertEqual(resolved.databaseIDs["system_2"], profileID, file: file, line: line)
+        }
     }
 
     private func assertUnknown(

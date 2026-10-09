@@ -82,6 +82,27 @@ func testMeetingTranscriptionEntryPoint() {
         assertEqual(row.systemURL, systemURL)
     }
 
+    runSuite("Imported failure before journal creation keeps one confirmation identity across retry and reimport") {
+        let builder = MeetingTranscriptionRequestBuilder(localSpeakerPreference: { true })
+        let key = String(repeating: "a1", count: 32)
+        let row = builder.failedQueueRow(forImportedAudio: systemURL, suggestedTitle: "Synthetic",
+            recordingDate: recordingDate, errorMessage: "Queue journal could not be created",
+            languageSelection: .automatic, sourceContentKey: key)
+        let repeated = builder.failedQueueRow(forImportedAudio: systemURL, suggestedTitle: "Synthetic",
+            recordingDate: recordingDate, errorMessage: "Models unavailable",
+            languageSelection: .automatic, sourceContentKey: key)
+        assertEqual(row.confirmationMeetingId, SpeakerConfirmationMeetingID.forImportedContent(key: key))
+        assertEqual(row.confirmationMeetingId, repeated.confirmationMeetingId)
+        do {
+            let stored = FailedTranscription(micAudioURL: systemURL, systemAudioURL: systemURL,
+                errorMessage: row.errorMessage, confirmationMeetingId: row.confirmationMeetingId)
+            let reloaded = try JSONDecoder().decode(FailedTranscription.self, from: JSONEncoder().encode(stored))
+            assertEqual(reloaded.confirmationMeetingId, repeated.confirmationMeetingId)
+        } catch {
+            assertTrue(false, "Synthetic retry identity should save and reload")
+        }
+    }
+
     runSuite("A failed-queue row's People-in-the-room choice survives a save and reload") {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("meeting-entrypoint-row-\(UUID().uuidString)", isDirectory: true)

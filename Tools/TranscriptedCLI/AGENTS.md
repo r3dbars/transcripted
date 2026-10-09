@@ -59,7 +59,8 @@ Full meeting Markdown from local transcription and diarization, read-only recogn
 
 - Writes to `CaptureLibraryResolver`'s first meeting directory, or `--output-dir`.
 - Formats with `TranscriptSaver` but publishes through `MeetingImportPublisher`: exclusive, descriptor-relative writes, Markdown last as the commit marker. Do not call `TranscriptSaver.saveTranscript`: it can update app stats and has no cross-process no-clobber guarantee.
-- `SpeakerDatabase` is only opened on a private job snapshot, never the live database. `SpeakerDatabaseSnapshot` uses SQLite read-only backup including WAL. `MeetingImportSpeakerMapping` applies the app's conservative naming policy and omits temporary new profile IDs.
+- `SpeakerDatabase` is only opened on a private job snapshot, never the live database. `SpeakerDatabaseSnapshot` uses SQLite read-only backup including WAL. `MeetingImportSpeakerMapping` applies the app's conservative naming policy with the active model's thresholds, omits temporary new profile IDs, and gives a stderr reason for every numbered speaker (from Core's `SpeakerNamingPolicy.silentNamingBlockers`).
+- Voiceprint model and speaker database come from Core's `SpeakerVoiceprintSelection`, the rule the app's `SpeakerEmbedderFactory` uses too (`MeetingImportVoiceprint.swift`). Never hard-code a database filename or an allowed-model list here; the shared table `Tests/Fixtures/speaker-voiceprint-resolution.json` is asserted by Core, the app, and this package. The note date comes from Core's `ImportedRecordingDate`, shared with the app's "Transcribe a file".
 - Deliberately absent: speaker learning/review, AI styling, app stats, failed-job UI.
 - Library prints are routed to stderr (`ImportAudioProcess.swift`) so they cannot corrupt the receipt. SIGINT/SIGTERM cancel cooperatively.
 - Keep diagnostics on stderr, input audio read-only, and test libraries/databases outside real app data.
@@ -80,7 +81,8 @@ All under `Sources/TranscriptedCLI/`:
 | `ImportAudioCommand.swift`, `ImportAudioProcess.swift` | `import-audio` options, validation, stdout routing, signals |
 | `MeetingImportWorkflow.swift` | Input validation, private scratch job, WAV decode, model resolution, Core run |
 | `MeetingImportPublisher.swift` | No-clobber publish, returns `MeetingImportReceipt` |
-| `MeetingImportSpeakerMapping.swift`, `SpeakerDatabaseSnapshot.swift` | Silent-recognition policy, read-only DB snapshot |
+| `MeetingImportVoiceprint.swift` | Voiceprint model + speaker DB choice (via Core's `SpeakerVoiceprintSelection`), model loading and fallback |
+| `MeetingImportSpeakerMapping.swift`, `SpeakerDatabaseSnapshot.swift` | Silent-recognition policy, numbered-speaker reasons, `--name-likely-speakers`, read-only DB snapshot |
 
 ## Test
 

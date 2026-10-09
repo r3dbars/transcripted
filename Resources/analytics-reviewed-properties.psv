@@ -22,6 +22,7 @@ artifact_count_bucket
 artifact_kind
 artifact_retained
 attenuation_kind
+auto_recognized
 auto_send
 auto_send_block_reason
 auto_send_expected

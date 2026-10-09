@@ -83,6 +83,7 @@ extension MeetingSessionController {
         // further down for the narrower, unambiguous "capture.startRecording()
         // is actually engaging the mic" window instead.
         startRecordingCallInFlight = true
+        meetingActionIdentity = UUID()
         defer { startRecordingCallInFlight = false }
         // The call-audio ask belongs to this start: a start that ends without
         // recording drops it, so the next meeting never shows a stale one.
@@ -681,15 +682,8 @@ extension MeetingSessionController {
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
 
-        let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
-            micAudioURL: files.micURL,
-            systemAudioURL: files.systemURL,
-            errorMessage: failureMessage,
-            meetingTitle: recordingSnapshot.suggestedTitle,
-            recordingDate: recordingSnapshot.recordingStartedAt,
-            splitLocalSpeakers: LocalSpeakerPreferences.isEnabled(),
-            languageSelection: recordingSnapshot.languageSelection,
-            micOnlyByChoice: recordingSnapshot.skippedSystemAudioTap
+        let preserved = await archiveUnexpectedStoppedRecording(
+            files: files, failureMessage: failureMessage, snapshot: recordingSnapshot
         )
 
         let failureOutcome = CaptureOutcome(micURL: files.micURL, systemURL: files.systemURL, didTimeOut: stopResult.didTimeOut)
@@ -736,16 +730,6 @@ extension MeetingSessionController {
         AnalyticsReporter.track("meeting_capture_stopped_under_controller", properties: healthProperties)
         AnalyticsReporter.track("meeting_capture_health_snapshot", properties: healthProperties)
 
-        transition(
-            to: preserved
-                ? .error("Recording stopped early. Open the Meetings page to retry the saved audio.")
-                : .error("Recording stopped early and no meeting audio was saved."),
-            reason: "unexpected_capture_stop"
-        )
-        Self.runtimeDiagnosticsRecorder?.clearSession(
-            kind: "meeting",
-            outcome: preserved ? "capture_stopped_under_controller" : "capture_stopped_no_audio"
-        )
     }
 
     // preserveQueuedTranscriptionJobsForShutdown moved to

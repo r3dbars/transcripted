@@ -7,7 +7,8 @@
 // ERes2Net is a 192-dim model the bake-off found weaker than WeSpeaker; kept only
 // for anyone who chose it. Each runs after diarization to drive same-voice
 // consolidation + cross-call speaker matching, and each has its own speaker
-// database. Mirrors `TranscriptionModelPreferences`.
+// database. Which model a run actually uses is decided in Core's
+// `SpeakerVoiceprintSelection`, shared with the CLI.
 
 import Foundation
 
@@ -47,55 +48,16 @@ enum SpeakerEmbedderChoice: String, CaseIterable, Identifiable {
 }
 
 enum SpeakerEmbedderPreferences {
-    static let defaultChoice: SpeakerEmbedderChoice = .reDimNet2
-
-    private static let preferenceKey = "speaker-embedder-preference"
-    /// Dev/test override, e.g. `TRANSCRIPTED_SPEAKER_EMBEDDER=eres2net`. Wins over
-    /// the persisted preference so the feature can be exercised without UI.
-    private static let envKey = "TRANSCRIPTED_SPEAKER_EMBEDDER"
-
-    /// The user's stored choice, ignoring any environment override. A stored
-    /// WeSpeaker came from the old "Better matching on calls" switch being off;
-    /// that switch is gone and the call-audio model is always on, so it reads as
-    /// the default. WeSpeaker is still reachable through the env override and as
-    /// the fallback when ReDimNet2 can't load.
-    static func preferredChoice(userDefaults: UserDefaults = .standard) -> SpeakerEmbedderChoice {
-        guard
-            let raw = userDefaults.string(forKey: preferenceKey),
-            let choice = SpeakerEmbedderChoice(rawValue: raw),
-            choice != .weSpeaker
-        else { return defaultChoice }
-        return choice
-    }
-
-    /// The choice that should actually be used at runtime: environment override
-    /// first, then the stored preference, then the default.
-    static func effectiveChoice(
-        userDefaults: UserDefaults = .standard,
-        environment: [String: String] = ProcessInfo.processInfo.environment
-    ) -> SpeakerEmbedderChoice {
-        if let raw = environment[envKey]?.lowercased(),
-           let choice = SpeakerEmbedderChoice(rawValue: raw) {
-            return choice
-        }
-        return preferredChoice(userDefaults: userDefaults)
-    }
+    /// Must equal Core's `SpeakerVoiceprintSelection.preferenceKey` (the CLI reads
+    /// it from the app's defaults); a fast test pins the two together. Reading the
+    /// preference, the default and the fallback rules live in Core
+    /// (`SpeakerVoiceprintSelection`, reached through Meeting's
+    /// `SpeakerEmbedderChoiceResolution`) so the app and the CLI share one rule.
+    static let preferenceKey = "speaker-embedder-preference"
 
     static func setPreferredChoice(_ choice: SpeakerEmbedderChoice, userDefaults: UserDefaults = .standard) {
         userDefaults.set(choice.rawValue, forKey: preferenceKey)
         NotificationCenter.default.post(name: .speakerEmbedderPreferenceDidChange, object: nil)
-    }
-
-    /// Speaker-database filename for the embedder the meeting stack is built
-    /// around. A nil identifier (WeSpeaker, or a chosen model whose file is missing
-    /// or that failed to load on this build) maps to the legacy `speakers.sqlite`.
-    /// Any other embedder gets its own `speakers_<id>.sqlite` so vectors of
-    /// different dimensions can never share a database row. A model that fails its
-    /// background load after launch produces no vectors at all, so its database
-    /// stays dimension-pure too (SpeakerEmbedderFactory).
-    static func speakerDBFileName(forEmbedderIdentifier identifier: String?) -> String {
-        guard let identifier, !identifier.isEmpty else { return "speakers.sqlite" }
-        return "speakers_\(identifier).sqlite"
     }
 }
 

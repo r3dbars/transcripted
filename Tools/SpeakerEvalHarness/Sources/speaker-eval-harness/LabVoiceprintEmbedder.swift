@@ -99,7 +99,7 @@ struct LabVoiceprintEmbedder {
     }
 
     /// Speaker DB file for the run, named like the app names per-model databases
-    /// (`SpeakerEmbedderPreferences.speakerDBFileName`), so vectors of different
+    /// (`SpeakerVoiceprintSelection.databaseFileName`), so vectors of different
     /// models never share a database even when runs share a work folder.
     var speakerDBFileName: String { "speakers_\(embedder.identifier).sqlite" }
 

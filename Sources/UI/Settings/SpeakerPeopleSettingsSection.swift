@@ -154,9 +154,9 @@ struct SpeakerPeopleSettingsSection: View {
                     }
                 }
             } else if directoryCount > 0 {
-                VStack(alignment: .leading, spacing: 12) {
-                    LibrarySectionLabel(text: "Everyone", trailing: everyoneTrailing(count: directoryCount))
-
+                // Everyone else, by voice print: "Named automatically",
+                // "Still learning", then unnamed voices outside the open card.
+                VStack(alignment: .leading, spacing: 16) {
                     SpeakerSearchRow(model: model)
 
                     if directoryProfiles.isEmpty {
@@ -164,11 +164,11 @@ struct SpeakerPeopleSettingsSection: View {
                             .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                     } else {
-                        LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(directoryProfiles, id: \.id) { profile in
-                                SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
-                            }
-                        }
+                        SpeakerPrintSectionsView(
+                            profiles: directoryProfiles,
+                            model: model,
+                            expandedPersonID: $expandedPersonID
+                        )
                     }
                 }
             }
@@ -209,11 +209,6 @@ struct SpeakerPeopleSettingsSection: View {
         .opacity(opacity)
         .accessibilityHidden(true)
     }
-
-    private func everyoneTrailing(count: Int) -> String? {
-        guard count > 0 else { return nil }
-        return count == 1 ? "1 person" : "\(count) people"
-    }
 }
 
 // MARK: - Empty state copy + teaching view
@@ -225,7 +220,7 @@ struct SpeakerPeopleSettingsSection: View {
 enum SpeakerPeopleEmptyState {
     static let symbolName = "person.2"
     static let title = "No speakers yet"
-    static let message = "Transcripted learns each voice as you record. After your first meeting, the people in it show up here, so you can name someone once and have them recognized in every meeting after."
+    static let message = "Transcripted learns each voice as you record. After your first meeting, the people in it show up here, so you can name them. Once you’ve confirmed someone in a few meetings, Transcripted names them on its own."
     static let actionTitle = "Record a meeting"
     static let actionAutomationIdentifier = "transcripted.speakers.empty.start-meeting"
     static let noSearchMatches = "No speakers match your search."

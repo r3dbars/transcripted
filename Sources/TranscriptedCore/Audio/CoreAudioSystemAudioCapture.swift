@@ -415,16 +415,14 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         if let since = sleepPendingSince, now - since > Self.sleepPendingAwakeLimit {
             sleepPendingSince = nil
         }
-        // Zero-valued PCM is valid audio. Only absent callbacks trigger recovery.
-        // Buffers also stop while the Mac falls asleep. The wake reconnect
-        // covers that, so it must not spend the one stall reconnect: on
-        // hardware, two sleeps in a meeting otherwise end system audio.
+        // Zero PCM is valid. Absent callbacks recover. A silent wake tap
+        // retries the rebuild instead of burning the one stall reconnect.
         if now - lastBuffer > 3, sleepPendingSince == nil {
-            if let waiting = awaitingFirstBuffer, waiting != .stall, waiting != .noFirstBuffer {
-                noFirstBufferCause = waiting
-                recover(.noFirstBuffer)
-            } else {
-                recover()
+            switch awaitingFirstBuffer {
+            case .systemWake, .silentAfterWake: retryRebuild(awaitingFirstBuffer ?? .systemWake)
+            case let waiting? where waiting != .stall && waiting != .noFirstBuffer:
+                noFirstBufferCause = waiting; recover(.noFirstBuffer)
+            default: recover()
             }
             return
         }

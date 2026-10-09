@@ -205,7 +205,8 @@ final class TranscriptionQueueCoordinator {
         startTrigger: MeetingSessionController.StartTrigger,
         languageSelection: TranscriptionLanguageSelection = .automatic,
         sttModel: TranscriptionModelChoice? = nil,
-        stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil
+        stoppedAudioRecovery: DictationStoppedAudioRecovery? = nil,
+        sourceContentKey: String? = nil
     ) throws -> QueueInsertionOutcome {
         var job = QueuedTranscriptionJob(
             id: UUID(),
@@ -231,6 +232,7 @@ final class TranscriptionQueueCoordinator {
             recordingDate: recordingDate,
             sttModelRawValue: job.sttModel.rawValue,
             languageRawValue: job.languageSelection.rawValue,
+            sourceContentKey: sourceContentKey,
             journalDirectory: importedQueueJournalDirectory,
             scratchDirectory: importedAudioScratchDirectory
         )
@@ -590,6 +592,16 @@ final class TranscriptionQueueCoordinator {
             ) else {
                 continue
             }
+            let confirmationMeetingId: UUID
+            do {
+                // Restore the transcript alias before every retirement path,
+                // including missing scratch and already-persisted retry rows.
+                confirmationMeetingId = try controller.taskManager.restoreImportedConfirmationIdentity(
+                    transcriptId: record.id, sourceContentKey: record.sourceContentKey, failedAudioURL: audioURL)
+            } catch {
+                AppLogger.pipeline.warning("Imported recovery is waiting for confirmation identity persistence")
+                continue
+            }
             if failedQueueAudioURLs.contains(audioURL.standardizedFileURL) {
                 recoverySession.failedQueueHandoffConfirmed()
                 continue
@@ -649,7 +661,8 @@ final class TranscriptionQueueCoordinator {
                     errorMessage: "The transcript was saved. Imported audio was preserved because recovery could not confirm scratch cleanup.",
                     meetingTitle: "Imported audio",
                     recordingDate: record.recordingDate,
-                    languageSelection: TranscriptionLanguageSelection(rawValue: record.languageRawValue) ?? .automatic
+                    languageSelection: TranscriptionLanguageSelection(rawValue: record.languageRawValue) ?? .automatic,
+                    confirmationMeetingId: confirmationMeetingId
                 ) {
                     recoverySession.failedQueueHandoffConfirmed()
                 }
@@ -778,7 +791,8 @@ final class TranscriptionQueueCoordinator {
                 suggestedTitle: suggestedTitle,
                 recordingDate: recordingDate,
                 errorMessage: errorMessage,
-                languageSelection: job.languageSelection
+                languageSelection: job.languageSelection,
+                sourceContentKey: job.importedRecoverySession?.sourceContentKey
             )
         }
     }

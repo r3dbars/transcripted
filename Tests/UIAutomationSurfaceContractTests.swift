@@ -498,11 +498,12 @@ func testUIAutomationSurfaceContract() async {
         )
 
         // The play control is a bare glyph (SpeakerQuietPlayButton) used by
-        // the queue row, the person row and the person card's player; the
-        // compact icon label backs the two overflow menus.
+        // the queue row and the person card's player; a person row plays from
+        // its voice print instead. The compact icon label backs the two
+        // overflow menus.
         assertTrue(
-            speakersSettingsSource().components(separatedBy: "SpeakerQuietPlayButton(").count - 1 >= 3,
-            "queue, person-row, and person-card play controls should all use the quiet 40pt hit-target play button"
+            speakersSettingsSource().components(separatedBy: "SpeakerQuietPlayButton(").count - 1 >= 2,
+            "queue and person-card play controls should both use the quiet 40pt hit-target play button"
         )
         assertTrue(
             speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 2,

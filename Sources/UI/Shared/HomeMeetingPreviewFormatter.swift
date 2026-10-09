@@ -311,6 +311,30 @@ enum HomeMeetingSpeakerNamingPolicy {
         }
         return currentID
     }
+
+    /// Saved-person picks in Name speakers that move a voice Transcripted
+    /// had named silently (`source: db`) to a different saved person: a
+    /// wrong silent name. Renames to a typed name aren't counted, since
+    /// those can just as well be a spelling fix of the right person.
+    static func silentNameCorrections(
+        _ assignments: [HomeMeetingSpeakerAssignment],
+        autoRecognized: [HomeMeetingAutoRecognizedVoice]
+    ) -> [HomeMeetingSpeakerAssignment] {
+        assignments.filter { assignment in
+            guard let sourceID = assignment.identity.persistentSpeakerID,
+                  let targetID = assignment.targetProfileID, targetID != sourceID else { return false }
+            return autoRecognized.contains { voice in
+                voice.profileID == sourceID
+                    && (assignment.identity.channel == nil || voice.channel == assignment.identity.channel)
+            }
+        }
+    }
+}
+
+/// A frontmatter speaker Transcripted named on its own (`source: db`).
+struct HomeMeetingAutoRecognizedVoice: Equatable, Sendable {
+    let profileID: UUID
+    let channel: HomeMeetingSpeakerChannel
 }
 
 struct HomeMeetingPreviewContent {
@@ -324,6 +348,13 @@ struct HomeMeetingPreviewContent {
             fallbackText: readableLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines),
             transcriptLines: parseTranscriptLines(readableLines, speakers: speakers)
         )
+    }
+
+    static func autoRecognizedVoices(in markdown: String) -> [HomeMeetingAutoRecognizedVoice] {
+        frontmatterSpeakers(from: markdown).compactMap { speaker in
+            guard speaker.source == "db", let profileID = speaker.dbID else { return nil }
+            return HomeMeetingAutoRecognizedVoice(profileID: profileID, channel: speaker.channel)
+        }
     }
 
     private static func readableMarkdownLines(from markdown: String) -> [String] {
@@ -535,6 +566,7 @@ struct HomeMeetingPreviewContent {
         let channel: HomeMeetingSpeakerChannel
         let dbID: UUID?
         let name: String
+        let source: String?
     }
 
     private static func frontmatterSpeakers(from markdown: String) -> [FrontmatterSpeaker] {
@@ -555,7 +587,8 @@ struct HomeMeetingPreviewContent {
                 id: id,
                 channel: channel,
                 dbID: current["db_id"].flatMap(UUID.init(uuidString:)),
-                name: cleanSpeaker(name)
+                name: cleanSpeaker(name),
+                source: current["source"]
             ))
         }
 

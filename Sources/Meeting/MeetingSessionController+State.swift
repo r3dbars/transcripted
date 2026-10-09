@@ -60,6 +60,9 @@ final class MeetingSessionController: ObservableObject {
     /// `MeetingSessionController.State` reference resolving unchanged.
     typealias State = MeetingSessionState
 
+    /// Ownership follows meeting actions, not incidental model-warmup state.
+    /// An older archive must not settle a newer recording/import/retry.
+    var meetingActionIdentity = UUID()
     @Published private(set) var state: State = .idle {
         didSet {
             guard state != oldValue else { return }
@@ -370,6 +373,9 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         #endif
+        if MeetingSessionStateMachine.isCaptureSessionActive(newState) || newState == .transcribing {
+            meetingActionIdentity = UUID()
+        }
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
         if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
         state = newState
@@ -406,6 +412,7 @@ final class MeetingSessionController: ObservableObject {
         systemAudioPermissionRecoveryNeeded: Bool = false
     ) {
         guard MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: state) else { return }
+        meetingActionIdentity = UUID()
         transition(
             to: .error(message),
             reason: reason,
@@ -460,7 +467,7 @@ final class MeetingSessionController: ObservableObject {
         // A missing model, or one that failed to load on this build, returns nil:
         // native WeSpeaker embedding AND the default speakers.sqlite. A load that
         // fails later yields no vectors, so 256-d vectors never land in a 192-d DB.
-        let embedderChoice = SpeakerEmbedderPreferences.effectiveChoice()
+        let embedderChoice = SpeakerEmbedderChoiceResolution.effectiveChoice()
         let segmentEmbedder = SpeakerEmbedderFactory.makeEmbedder(for: embedderChoice)
         // Nemotron by default, with a hidden switch back to pyannote
         // (DiarizationBackendPreferences). Read once here, so a change takes
@@ -635,12 +642,17 @@ final class MeetingSessionController: ObservableObject {
         )
 
         wireSubscriptions()
-        transcriptionQueue.recoverImportedAudioJobs()
 
         // Recover recordings orphaned by a crash before any failed-queue entry
-        // existed — they become visible, retryable items on Home.
+        // existed — they become visible, retryable items on Home. Imported
+        // recovery writes speaker aliases, so it must wait for migration too.
+        // Reserve imported scratch before scanning for orphaned recordings.
         let scratchDirectory = storagePaths.audioCaptures
-        Task { [taskManager] in
+        Task { @MainActor [weak self, taskManager] in
+            guard let self else { return }
+            await self.voiceprintMigrationGate.waitUntilOpen()
+            guard !Task.isCancelled else { return }
+            self.transcriptionQueue.recoverImportedAudioJobs()
             await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
         }
     }

@@ -374,8 +374,45 @@ public class TranscriptionTaskManager: ObservableObject {
             .compactMap { $0?.standardizedFileURL.path }
     }
 
-    func markTaskTranscriptCommitted(taskId: UUID) {
+    /// Repair the save-to-journal crash window before any recovery journal can
+    /// retire. An existing failed row also keeps this identity for its retry.
+    /// App callers must await the voiceprint migration gate before this write.
+    public func restoreImportedConfirmationIdentity(
+        transcriptId: UUID, sourceContentKey: String?, failedAudioURL: URL? = nil
+    ) throws -> UUID {
+        let meetingId = SpeakerConfirmationMeetingID.resolve(transcriptId: transcriptId, importedContentKey: sourceContentKey)
+        try transcription.speakerDB.recordConfirmationMeetingAlias(transcriptId: transcriptId, meetingId: meetingId)
+        if let failedAudioURL {
+            let matches = failedTranscriptionManager.failedTranscriptions.filter {
+                [$0.micAudioURL, $0.systemAudioURL].compactMap { $0 }.contains {
+                    $0.standardizedFileURL == failedAudioURL.standardizedFileURL
+                }
+            }
+            for row in matches {
+                guard failedTranscriptionManager.restoreConfirmationMeetingIdentity(id: row.id, meetingId: meetingId) else {
+                    throw CocoaError(.fileWriteUnknown)
+                }
+            }
+        }
+        return meetingId
+    }
+
+    func confirmationMeetingId(for taskId: UUID) -> UUID? {
+        if let key = tasks[taskId]?.audio?.importedRecoverySession?.sourceContentKey {
+            return SpeakerConfirmationMeetingID.forImportedContent(key: key)
+        }
+        return failedTranscriptionManager.failedTranscriptions.first { $0.id == taskId }?.confirmationMeetingId
+    }
+
+    func markTaskTranscriptCommitted(taskId: UUID, transcriptId: UUID? = nil) throws {
         let audio = tasks[taskId]?.audio
+        // An imported recording's confirmations count once per recording, whichever
+        // path later records them (review, re-transcription, Settings, merge).
+        // One small SQLite insert, like the review's own confirmation writes.
+        if let transcriptId, let meetingId = confirmationMeetingId(for: taskId) {
+            try transcription.speakerDB.recordConfirmationMeetingAlias(
+                transcriptId: transcriptId, meetingId: meetingId)
+        }
         tasks[taskId] = .committed(audio: audio)
         audio?.importedRecoverySession?.transcriptCommitConfirmed()
         // The imported journal remains through scratch cleanup. The separate

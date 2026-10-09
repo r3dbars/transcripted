@@ -85,7 +85,14 @@ Two allowlisted, bucketed PostHog events (see
 
 - `meeting_speaker_match_reviewed` — one per review verdict:
   `review_action`, `similarity_bucket`, `margin_bucket`, `call_count_bucket`,
-  `channel`, `had_suggestion`, `surface`.
+  `channel`, `had_suggestion`, `auto_recognized`, `surface`. `auto_recognized`
+  is `true` when the voice had been named silently, so `corrected` with
+  `auto_recognized = true` is a wrong silent name: the error that must stay at 0.
+  The island sends it at review (`surface = speaker_review_island`); a meeting's
+  Name speakers in Settings › Meetings sends `corrected` + `auto_recognized = true`
+  with `surface = settings` when a `source: db` voice is moved to a different
+  saved person (buckets from that meeting's auto-accept row, else `unknown`).
+  Typed renames there aren't counted: they may be a spelling fix.
 - `meeting_speaker_auto_recognized` — one per silent recognition after save:
   same buckets plus `graduated` (a profile's first-ever auto-recognition).
 
@@ -113,7 +120,8 @@ meeting should trend down.
 Fleet-wide, in PostHog, the recommended standing insights:
 
 1. `meeting_speaker_match_reviewed` — % `review_action = corrected`, weekly.
-   The fleet precision trend (down = good).
+   The fleet precision trend (down = good). Separately, the count with
+   `auto_recognized = true` (wrong silent names), alerting above 0.
 2. Same event broken down by `similarity_bucket` — the calibration curve for
    the auto-accept bar.
 3. `meeting_speaker_auto_recognized` — weekly count, plus % with

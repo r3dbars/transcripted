@@ -303,6 +303,13 @@ public actor SpeakerVoiceprintMigration {
         }
         let snapshot = try loadSnapshot()
         try target.ensureVoiceprintMigrationLedger()
+        // Carry recording identities before any confirmation rows are released,
+        // including resumptions where every person was already migrated.
+        try target.performMutationBatch {
+            for (transcript, meeting) in snapshot.confirmationMeetingAliases {
+                try target.recordConfirmationMeetingAlias(transcriptId: transcript, meetingId: meeting)
+            }
+        }
 
         var report = SpeakerVoiceprintMigrationReport(
             people: [],

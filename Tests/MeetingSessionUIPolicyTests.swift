@@ -233,6 +233,90 @@ func testMeetingSessionUIPolicy() async {
         )
     }
 
+    await runSuite("An unexpected-stop archive releases capture before slow copying") {
+        var state = MeetingSessionState.stoppingRecording
+        var events: [String] = []
+        let preserved = await MeetingStopSequence.archiveUnexpectedStop(
+            releaseCapture: { state = .error("Saving audio"); events.append("release") },
+            archive: {
+                assertFalse(MeetingSessionStateMachine.isCaptureSessionActive(state), "a stopped capture must not block the next meeting during archive I/O")
+                events.append("archive")
+                await Task.yield()
+                return true
+            },
+            stillOwnsCompletion: { true },
+            finish: { saved in state = .error(saved ? "Saved" : "Not saved"); events.append("finish") }
+        )
+        assertTrue(preserved)
+        assertEqual(events, ["release", "archive", "finish"])
+        assertEqual(state, .error("Saved"))
+    }
+
+    await runSuite("An old archive cannot replace a newer recording or clear its outcome") {
+        for newerState in [MeetingSessionState.startingRecording, .recording, .transcribing, .error("New action failed")] {
+            var state = MeetingSessionState.stoppingRecording
+            var actionIdentity = UUID()
+            let archiveActionIdentity = actionIdentity
+            var finished = false
+            let preserved = await MeetingStopSequence.archiveUnexpectedStop(
+                releaseCapture: { state = .error("Saving audio") },
+                archive: {
+                    state = newerState
+                    actionIdentity = UUID()
+                    await Task.yield()
+                    return true
+                },
+                stillOwnsCompletion: { actionIdentity == archiveActionIdentity },
+                finish: { _ in finished = true; state = .error("Old archive") }
+            )
+            assertTrue(preserved, "audio preservation still completes when the UI moved on")
+            assertFalse(finished, "older recovery must not settle a newer action")
+            assertEqual(state, newerState)
+        }
+    }
+
+    await runSuite("Model readiness does not consume an unexpected-stop archive outcome") {
+        var state = MeetingSessionState.stoppingRecording
+        let actionIdentity = UUID()
+        let archiveActionIdentity = actionIdentity
+        var finished = false
+        let preserved = await MeetingStopSequence.archiveUnexpectedStop(
+            releaseCapture: { state = .error("Saving audio") },
+            archive: {
+                // Background preparation may publish ready while copying;
+                // no recording/import/retry was accepted, so ownership stays.
+                state = .ready
+                await Task.yield()
+                return true
+            },
+            stillOwnsCompletion: { actionIdentity == archiveActionIdentity },
+            finish: { _ in finished = true; state = .error("Saved audio is ready to retry") }
+        )
+        assertTrue(preserved)
+        assertTrue(finished, "incidental warmup must not hide the failed-recording recovery message")
+        assertEqual(state, .error("Saved audio is ready to retry"))
+    }
+
+    await runSuite("An accepted action owns the UI before its permission or model await") {
+        var actionIdentity = UUID()
+        let archiveActionIdentity = actionIdentity
+        var state = MeetingSessionState.stoppingRecording
+        var finished = false
+        _ = await MeetingStopSequence.archiveUnexpectedStop(
+            releaseCapture: { state = .error("Saving audio") },
+            archive: {
+                actionIdentity = UUID()
+                // The new action has not changed visible state yet.
+                await Task.yield()
+                return true
+            },
+            stillOwnsCompletion: { actionIdentity == archiveActionIdentity },
+            finish: { _ in finished = true; state = .error("Old archive") }
+        )
+        assertFalse(finished)
+        assertEqual(state, .error("Saving audio"))
+    }
+
     await runSuite("A capture stop the app already asked for is not an unexpected stop") {
         let notRecording: [MeetingSessionState] = [.stoppingRecording, .startingRecording, .transcribing, .ready, .idle, .error("synthetic")]
         for current in notRecording {

@@ -35,6 +35,7 @@ extension MeetingSessionController {
             return false
         }
 
+        meetingActionIdentity = UUID()
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_file_import_requested",
@@ -169,17 +170,19 @@ extension MeetingSessionController {
                 startTrigger: .fileImport,
                 languageSelection: importLanguage,
                 sttModel: importModel,
-                stoppedAudioRecovery: stoppedAudioRecovery
+                stoppedAudioRecovery: stoppedAudioRecovery,
+                sourceContentKey: preparedAudio.sourceContentKey
             )
         } catch {
-            let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(
-                micAudioURL: nil,
-                systemAudioURL: preparedAudio.copiedAudioURL,
-                errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
-                meetingTitle: preparedAudio.suggestedTitle,
+            let failedRow = transcriptionQueue.requestBuilder.failedQueueRow(
+                forImportedAudio: preparedAudio.copiedAudioURL,
+                suggestedTitle: preparedAudio.suggestedTitle,
                 recordingDate: preparedAudio.recordingDate,
-                languageSelection: importLanguage
+                errorMessage: ImportedAudioQueuePersistenceFailureCopy.retryEntryMessage,
+                languageSelection: importLanguage,
+                sourceContentKey: preparedAudio.sourceContentKey
             )
+            let preservedForRelaunch = failedMeetingStore.preserveFailedMeetingForRetry(failedRow)
             if !preservedForRelaunch {
                 try? FileManager.default.removeItem(at: preparedAudio.copiedAudioURL)
             }
@@ -228,6 +231,7 @@ extension MeetingSessionController {
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
+        meetingActionIdentity = UUID()
         // An in-flight imported-audio copy is cancellable too. Cancelling the
         // task makes the preparer interrupt the copy and remove the partial
         // scratch file; importAudioFile() then resets the visible state.
@@ -341,6 +345,7 @@ extension MeetingSessionController {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
+        meetingActionIdentity = UUID()
         if !voiceprintMigrationGate.isOpen {
             // Saved people are still moving to the new voiceprint model. Hold,
             // then check everything again: other work may have started since.

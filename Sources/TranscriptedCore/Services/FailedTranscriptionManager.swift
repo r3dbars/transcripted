@@ -415,7 +415,7 @@ public class FailedTranscriptionManager: ObservableObject {
 
     /// Saves failed transcriptions to disk
     @discardableResult
-    private func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
+    func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
         let activeEntries = entries ?? failedTranscriptions
         let activeIDs = Set(activeEntries.map(\.id))
         let entriesToPersist = activeEntries + unavailableRelocatedEntries.filter {
@@ -543,7 +543,8 @@ public class FailedTranscriptionManager: ObservableObject {
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        confirmationMeetingId: UUID? = nil
     ) -> Bool {
         // Security: validate incoming audio URLs before they ever reach the queue.
         // The on-disk load path already re-checks sandboxing, but without this guard an
@@ -567,7 +568,8 @@ public class FailedTranscriptionManager: ObservableObject {
             errorKind: errorKind,
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
-            micOnlyByChoice: micOnlyByChoice
+            micOnlyByChoice: micOnlyByChoice,
+            confirmationMeetingId: confirmationMeetingId
         )
 
         failedTranscriptions.append(failed)

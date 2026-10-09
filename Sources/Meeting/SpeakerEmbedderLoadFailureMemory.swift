@@ -11,14 +11,19 @@
 // the following launches fall back fully, the way a failed load used to fall back
 // on the spot. A new app build or macOS update tries the model again.
 //
-// Foundation-only so the fast-test runner can compile it.
+// Foundation plus Core's pure `SpeakerVoiceprintSelection`, so the fast-test runner
+// can compile it. The key format and lookup are shared with the CLI, which honors a
+// failure the app recorded.
 
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 // `@unchecked`: UserDefaults is thread-safe but not marked Sendable; the background
 // load records its outcome from the load queue.
 struct SpeakerEmbedderLoadFailureMemory: @unchecked Sendable {
-    static let defaultsKey = "speaker-embedder-load-failures"
+    static let defaultsKey = SpeakerVoiceprintSelection.loadFailuresKey
 
     private let userDefaults: UserDefaults
     /// App build plus macOS version. A failure only counts on the same key.
@@ -33,13 +38,15 @@ struct SpeakerEmbedderLoadFailureMemory: @unchecked Sendable {
         bundle: Bundle = .main,
         operatingSystemVersion: String = ProcessInfo.processInfo.operatingSystemVersionString
     ) -> String {
-        let build = bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
-        return "\(build)|\(operatingSystemVersion)"
+        SpeakerVoiceprintSelection.buildKey(
+            bundleVersion: bundle.object(forInfoDictionaryKey: "CFBundleVersion") as? String,
+            operatingSystemVersion: operatingSystemVersion
+        )
     }
 
     /// Whether the model with `identifier` failed to load on this build.
     func failedOnThisBuild(_ identifier: String) -> Bool {
-        failures[identifier] == buildKey
+        SpeakerVoiceprintSelection.failedOnThisBuild(identifier, recordedFailures: failures, buildKey: buildKey)
     }
 
     func recordLoadEnded(_ identifier: String, loaded: Bool) {
@@ -55,7 +62,7 @@ struct SpeakerEmbedderLoadFailureMemory: @unchecked Sendable {
     /// The voiceprint model id the meeting stack is built around this launch, nil
     /// for WeSpeaker: the chosen model's id when its file is present and it hasn't
     /// failed to load on this build. The speaker database follows from it
-    /// (`SpeakerEmbedderPreferences.speakerDBFileName(forEmbedderIdentifier:)`).
+    /// (`SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier:)`).
     func launchModelIdentifier(chosen identifier: String?, modelFileIsPresent: Bool) -> String? {
         guard let identifier, modelFileIsPresent, !failedOnThisBuild(identifier) else { return nil }
         return identifier

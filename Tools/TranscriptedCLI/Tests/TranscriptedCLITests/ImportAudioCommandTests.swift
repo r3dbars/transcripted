@@ -12,6 +12,14 @@ final class ImportAudioCommandTests: XCTestCase {
         XCTAssertFalse(command.plainFilename)
         XCTAssertFalse(command.noSpeakerIdentification)
         XCTAssertEqual(command.speakerEmbedder, "app")
+        XCTAssertFalse(command.nameLikelySpeakers, "likely names are opt-in")
+    }
+
+    func testEveryAppVoiceprintModelIsSelectable() throws {
+        for model in ["app", "redimnet2", "wespeaker", "eres2net"] {
+            XCTAssertEqual(try ImportAudio.parse(["memo.wav", "--speaker-embedder", model]).speakerEmbedder, model)
+        }
+        XCTAssertTrue(try ImportAudio.parse(["memo.wav", "--name-likely-speakers"]).nameLikelySpeakers)
     }
 
     func testOptionsAreAvailableInBothBuildModes() throws {
@@ -29,11 +37,17 @@ final class ImportAudioCommandTests: XCTestCase {
     }
 
     func testRejectsContradictoryOrEmptyOptions() {
-        for args in [["memo.wav", "--speaker-embedder", "unknown"], ["memo.wav", "--title", "  "],
+        for args in [["memo.wav", "--speaker-embedder", " "], ["memo.wav", "--title", "  "],
                      ["memo.wav", "--no-speaker-identification", "--speaker-db", "people.sqlite"],
+                     ["memo.wav", "--no-speaker-identification", "--name-likely-speakers"],
                      ["memo.wav", "--output-dir", ""], [], ["one.wav", "two.wav"]] {
             XCTAssertThrowsError(try ImportAudio.parse(args), "\(args)")
         }
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+        for model in ["unknown", "ReDimNet2"] {
+            XCTAssertThrowsError(try ImportAudio.parse(["memo.wav", "--speaker-embedder", model]))
+        }
+        #endif
     }
 
     func testRootRegistersImportWithoutChangingTranscribe() throws {

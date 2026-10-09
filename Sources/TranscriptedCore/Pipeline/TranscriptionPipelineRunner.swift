@@ -844,16 +844,16 @@ extension TranscriptionTaskManager {
             recognizedVoices: recognizedEntries.count,
             reviewListsRecognizedVoices: reviewListsRecognizedVoices
         ) {
-            // Seed knownPeople with existing named DB profiles so the sheet's combobox has
-            // suggestions. Previously this was always empty — users typed blind.
             let allProfiles = speakerDB.allSpeakers()
+            let confirmationIdentity = await MainActor.run { self.confirmationMeetingId(for: taskId) }
+            let earnsConfirmationByProfile = try Self.confirmationEligibility(profiles: allProfiles, store: speakerDB, transcriptId: transcriptId, meetingId: confirmationIdentity)
             let knownPeople: [SpeakerIdentityOption] = allProfiles
                 .compactMap { profile in
                     guard let name = profile.displayName, !name.isEmpty else { return nil }
                     return SpeakerIdentityOption(
                         id: profile.id,
                         displayName: name,
-                        callCount: profile.callCount
+                        callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0), earnsConfirmation: earnsConfirmationByProfile[profile.id] ?? false
                     )
                 }
             // The auto-recognition roster shown as the review sheet's payoff
@@ -867,8 +867,8 @@ extension TranscriptionTaskManager {
                 )
             }.count
 
-            let capturedEntries = namingEntries
-            let capturedRecognizedEntries = recognizedEntries
+            let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
+            let capturedRecognizedEntries = Self.withConfirmationProgress(recognizedEntries, recognized: true, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
             // Voices auto-named in this meeting, once each, in the order heard.
             var seenRecognizedNames: Set<String> = []
             let recognizedSpeakerNames = pendingAutoAccepts.compactMap { pending -> String? in
@@ -1196,22 +1196,25 @@ extension TranscriptionTaskManager {
     ) async throws {
         try await rollback.checkCancellation()
 
-        // Not a Task-cancellation rollback — a separate "did something else already claim this
-        // task's side effects" check (e.g. superseded by a retry). Still routes through the same
-        // registry so it undoes exactly what checkCancellation() would have.
-        let didCommit = await MainActor.run {
-            guard canCommitTaskSideEffects(taskId: taskId) else { return false }
-
-            commitSavedTranscriptSideEffects(
-                savedURL: savedURL,
-                result: result,
-                transcriptId: transcriptId,
-                meetingTitle: meetingTitle,
-                transcriptDate: transcriptDate,
-                notifier: notifier
-            )
-            markTaskTranscriptCommitted(taskId: taskId)
-            return true
+        let didCommit: Bool
+        do {
+            didCommit = try await MainActor.run {
+                guard canCommitTaskSideEffects(taskId: taskId) else { return false }
+                // Persist identity before releasing import recovery ownership.
+                try markTaskTranscriptCommitted(taskId: taskId, transcriptId: transcriptId)
+                commitSavedTranscriptSideEffects(
+                    savedURL: savedURL,
+                    result: result,
+                    transcriptId: transcriptId,
+                    meetingTitle: meetingTitle,
+                    transcriptDate: transcriptDate,
+                    notifier: notifier
+                )
+                return true
+            }
+        } catch {
+            await rollback.rollbackAll()
+            throw error
         }
 
         guard didCommit else {
@@ -1220,11 +1223,7 @@ extension TranscriptionTaskManager {
         }
     }
 
-    /// Registers the saved-transcript rollback: restore the pre-existing file when this
-    /// run replaced one in place, otherwise delete the newly saved file. The two were
-    /// always tied together 1:1 at every previous call site (`deleteSavedTranscriptOnCancellation
-    /// = (replacementTranscriptRollback == nil)`), so that derivation is folded directly into
-    /// the branch here instead of being re-computed and re-threaded by each caller.
+    /// Restore replaced Markdown or remove newly saved Markdown on rollback.
     nonisolated static func registerSavedTranscriptRollback(
         savedURL: URL,
         replacementTranscriptRollback: ReplacementTranscriptRollback?,

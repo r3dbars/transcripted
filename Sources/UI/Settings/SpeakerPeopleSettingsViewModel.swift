@@ -51,6 +51,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord] = [:]
+    private var namingStandingsByProfileID: [UUID: SpeakerNamingStanding] = [:]
     private var snapshotPublication = RefreshPublicationOrder()
     private var refreshState = CoalescedRefreshState()
     private let snapshotQueue = DispatchQueue(label: "Transcripted.SpeakerPeople.snapshot", qos: .userInitiated)
@@ -65,6 +66,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let clipURLsByProfileID: [UUID: URL]
         let reviewQueueItems: [SpeakerPendingReviewItem]
         let undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord]
+        let namingStandingsByProfileID: [UUID: SpeakerNamingStanding]
     }
 
     init(
@@ -174,9 +176,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         reviewStack.directory(filteredProfiles, isSearching: isSearching)
     }
 
-    /// Directory membership count independent of the search filter, used for
-    /// the "N people" trailing label and to decide whether the Everyone
-    /// section renders at all.
+    /// Directory membership count independent of the search filter, used to
+    /// decide whether the search field and the voice-print sections render
+    /// at all.
     var directoryCount: Int {
         reviewStack.directory(profiles, isSearching: false).count
     }
@@ -457,6 +459,23 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
     }
 
+    /// How far a named person is toward a full voice print; nil for an unnamed voice.
+    func namingStanding(for profile: SpeakerProfile) -> SpeakerNamingStanding? {
+        namingStandingsByProfileID[profile.id]
+    }
+
+    /// A meeting's Name speakers moved silently named voices to someone else.
+    /// Queued on the snapshot queue ahead of the edit itself, so the outcome
+    /// rows are read before the merge moves them.
+    func prepareSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice], completion: @escaping ([[String: String]]) -> Void) {
+        guard !voices.isEmpty else { completion([]); return }
+        let speakerDatabase = self.speakerDatabase
+        snapshotQueue.async {
+            let properties = speakerDatabase.silentNameCorrectionProperties(transcriptId: transcriptId, voices: voices)
+            DispatchQueue.main.async { completion(properties) }
+        }
+    }
+
     func duplicateCount(for profile: SpeakerProfile) -> Int {
         duplicateCountsByProfileID[profile.id] ?? 0
     }
@@ -529,6 +548,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         clipURLsByProfileID = snapshot.clipURLsByProfileID
         reviewQueueItems = snapshot.reviewQueueItems
         undoableMergesByTargetID = snapshot.undoableMergesByTargetID
+        namingStandingsByProfileID = snapshot.namingStandingsByProfileID
         hasLoadedProfiles = true
         profiles = snapshot.profiles
     }
@@ -553,6 +573,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory,
             undoableMergesByTargetID: undoableMergesByTargetID,
+            namingStandingsByProfileID: speakerDatabase.namingStandings(for: profiles),
             duplicateCache: duplicateCache
         )
     }
@@ -562,6 +583,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL,
         undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord],
+        namingStandingsByProfileID: [UUID: SpeakerNamingStanding],
         duplicateCache: SpeakerDuplicateSnapshotCache
     ) -> Snapshot {
         let duplicateCandidates = duplicateCache.candidates(from: profiles, build: duplicateCandidates)
@@ -607,7 +629,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             mergeTargetIndex: mergeTargetIndex,
             clipURLsByProfileID: clipURLsByProfileID,
             reviewQueueItems: reviewQueueItems,
-            undoableMergesByTargetID: undoableMergesByTargetID
+            undoableMergesByTargetID: undoableMergesByTargetID,
+            namingStandingsByProfileID: namingStandingsByProfileID
         )
     }
 

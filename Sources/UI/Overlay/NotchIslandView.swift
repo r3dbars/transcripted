@@ -251,7 +251,7 @@ final class NotchIslandWingView: NSView {
     private var itemWidths: [CGFloat] = []
     private var liveLabels: [(NotchIslandLiveValue, NSTextField)] = []
     private var barViews: [NotchIslandBarsView] = []
-    private var meterViews: [NotchIslandMetersView] = []
+    private var meterViews: [NotchIslandMeetingLevelsView] = []
     private var rings: [(NotchIslandItem, NotchIslandRingView)] = []
     private var items: [NotchIslandItem] = []
 
@@ -406,7 +406,7 @@ final class NotchIslandWingView: NSView {
             barViews.append(bars)
             return bars
         case .meetingMeters:
-            let meters = NotchIslandMetersView(frame: .zero)
+            let meters = NotchIslandMeetingLevelsView(frame: .zero)
             meterViews.append(meters)
             return meters
         case .dots:

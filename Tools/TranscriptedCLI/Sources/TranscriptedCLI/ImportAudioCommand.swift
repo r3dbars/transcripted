@@ -2,6 +2,9 @@ import ArgumentParser
 import Darwin
 import Foundation
 import TranscriptedCaptureKit
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+import TranscriptedCore
+#endif
 
 /// Full meeting import is additive: `transcribe` keeps its text/JSON/SRT contract.
 struct ImportAudio: AsyncParsableCommand {
@@ -9,7 +12,8 @@ struct ImportAudio: AsyncParsableCommand {
         commandName: "import-audio",
         abstract: "Transcribe and diarize a file into the Transcripted meeting library.",
         discussion: "Uses local Parakeet v3 and PyAnnote. Never records audio or deletes the input. "
-            + "Recognizes eligible saved speakers from a read-only snapshot; does not learn new people. "
+            + "Recognizes eligible saved speakers from a read-only snapshot of the app's active voiceprint database; does not learn new people. "
+            + "Says on stderr why each numbered speaker stayed numbered. "
             + "Does not use the app's Whisper/language selection. Repeated imports create distinct captures."
     )
 
@@ -34,8 +38,11 @@ struct ImportAudio: AsyncParsableCommand {
     @Option(name: .long, help: "Read-only speaker database override; must match the selected speaker embedder.")
     var speakerDb: String?
 
-    @Option(name: .long, help: "Voiceprint model: app (default), wespeaker, or eres2net. ERes2Net requires an installed local model.")
+    @Option(name: .long, help: "Voiceprint model: app (default; follows the app, ReDimNet2 unless changed), redimnet2, wespeaker, or eres2net. ReDimNet2 and ERes2Net need their installed local model.")
     var speakerEmbedder = "app"
+
+    @Flag(name: .long, help: "Also name a speaker who clears every recognition bar except the app's confirmed-meetings count (confirmed at least once), written as \"Name (likely)\". Off by default.")
+    var nameLikelySpeakers = false
 
     @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory.")
     var modelsDir: String?
@@ -50,8 +57,19 @@ struct ImportAudio: AsyncParsableCommand {
     var json = false
 
     mutating func validate() throws {
-        guard ["app", "wespeaker", "eres2net"].contains(speakerEmbedder) else {
-            throw ValidationError("--speaker-embedder must be app, wespeaker, or eres2net.")
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+        guard Self.speakerEmbedderChoices.contains(speakerEmbedder) else {
+            throw ValidationError("--speaker-embedder must be " + Self.speakerEmbedderChoices.joined(separator: ", ") + ".")
+        }
+        #else
+        // This build cannot import audio. Parse flags without duplicating
+        // Core's model registry; run() reports the missing capability.
+        guard !speakerEmbedder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ValidationError("--speaker-embedder cannot be empty.")
+        }
+        #endif
+        if noSpeakerIdentification && nameLikelySpeakers {
+            throw ValidationError("--name-likely-speakers cannot be combined with --no-speaker-identification.")
         }
         if noSpeakerIdentification && speakerDb != nil {
             throw ValidationError("--speaker-db cannot be combined with --no-speaker-identification.")
@@ -95,6 +113,14 @@ struct ImportAudio: AsyncParsableCommand {
         }
         #else
         throw ValidationError("Meeting import requires macOS 26+ and the shared meeting pipeline. Run bash build-deps.sh at the repo root, then TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift build --package-path Tools/TranscriptedCLI.")
+        #endif
+    }
+
+    static var speakerEmbedderChoices: [String] {
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+        ["app"] + SpeakerVoiceprintSelection.Model.allCases.map(\.rawValue)
+        #else
+        ["app"]
         #endif
     }
 
