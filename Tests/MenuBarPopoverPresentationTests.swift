@@ -52,6 +52,20 @@ func testMenuBarPopoverPresentation() async {
         assertTrue(fixture.fallbackPanels.isEmpty, "a shown popover does not need a second presentation")
     }
 
+    runSuite("A menu AppKit reports as shown on another Space opens on the full-screen anchor") {
+        let fixture = MenuBarPopoverPresentationFixture()
+        fixture.windowVisibility = { _ in .otherSpace }
+        fixture.popover.showResults = [true, true]
+        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+
+        assertEqual(fixture.popover.presentations.count, 2, "a shown window on another Space gets one anchor retry")
+        assertTrue(fixture.popover.isShown, "the retried menu is open")
+        guard let panel = fixture.fallbackPanels.first, let retry = fixture.popover.presentations.last else { return }
+        assertTrue(retry.view.window === panel, "the visible menu is anchored in the full-screen panel")
+        assertEqual(panel.level, .screenSaver, "the anchor sits above full-screen content")
+        assertEqual(fixture.events, ["show", "create anchor", "order anchor", "show", "focus popover"], "recovery orders the anchor before the second show")
+    }
+
     runSuite("A refused status-button presentation retries once at its original screen position") {
         let fixture = MenuBarPopoverPresentationFixture()
         fixture.popover.showResults = [false, true]
@@ -306,6 +320,7 @@ private final class MenuBarPopoverPresentationFixture {
     var fallbackPanels: [MenuBarPopoverAnchorPanel] = []
     var onShow: ((Int) -> Void)?
     var currentEvent: NSEvent?
+    var windowVisibility: (NSWindow) -> MenuBarPopoverWindowVisibility = { _ in .unknown }
     let spaceNotifications = NotificationCenter()
     let sourceWindow = MenuBarPopoverSourceWindow(
         contentRect: NSRect(x: 500, y: 800, width: 200, height: 50),
@@ -338,7 +353,8 @@ private final class MenuBarPopoverPresentationFixture {
         },
         screenFrames: { [unowned self] in self.screens },
         spaceNotifications: spaceNotifications,
-        currentEvent: { [unowned self] in self.currentEvent }
+        currentEvent: { [unowned self] in self.currentEvent },
+        windowVisibility: { [unowned self] window in self.windowVisibility(window) }
     )
 
     var anchorScreenPoint: NSPoint {
