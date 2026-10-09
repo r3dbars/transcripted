@@ -35,6 +35,7 @@ extension MeetingSessionController {
             return false
         }
 
+        meetingActionIdentity = UUID()
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_file_import_requested",
@@ -230,6 +231,7 @@ extension MeetingSessionController {
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
     func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
+        meetingActionIdentity = UUID()
         // An in-flight imported-audio copy is cancellable too. Cancelling the
         // task makes the preparer interrupt the copy and remove the partial
         // scratch file; importAudioFile() then resets the visible state.
@@ -343,6 +345,7 @@ extension MeetingSessionController {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
+        meetingActionIdentity = UUID()
         if !voiceprintMigrationGate.isOpen {
             // Saved people are still moving to the new voiceprint model. Hold,
             // then check everything again: other work may have started since.

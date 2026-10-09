@@ -17,11 +17,10 @@ extension MeetingSessionController {
         failureMessage: String,
         snapshot: RecordingStopSnapshot
     ) async -> Bool {
-        var archiveStateRevision: UInt64 = 0
+        let archiveActionIdentity = meetingActionIdentity
         return await MeetingStopSequence.archiveUnexpectedStop(
             releaseCapture: {
                 transition(to: .error("Recording stopped early. Saving audio for retry."), reason: "unexpected_capture_stop")
-                archiveStateRevision = stateRevision
                 Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "capture_stopped_under_controller")
             },
             archive: {
@@ -36,7 +35,7 @@ extension MeetingSessionController {
                     micOnlyByChoice: snapshot.skippedSystemAudioTap
                 )
             },
-            stillOwnsCompletion: { stateRevision == archiveStateRevision },
+            stillOwnsCompletion: { meetingActionIdentity == archiveActionIdentity },
             finish: { preserved in
                 transition(
                     to: preserved
@@ -101,6 +100,7 @@ extension MeetingSessionController {
             },
             prepareModelsForRetry: { [weak self] in
                 guard let self else { return false }
+                self.meetingActionIdentity = UUID()
                 // Hold while saved people move to the new voiceprint model. If
                 // a meeting started transcribing meanwhile, it goes first and
                 // the row stays retryable.
