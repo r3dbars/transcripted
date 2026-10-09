@@ -1,9 +1,11 @@
 // NotchIslandBarsView.swift
 // The island's level drawings: the scrolling bars (the dictation waveform in
 // the wing and the recording drop-down's You and Call lanes) and the meeting
-// wing's two tiny meters. Split out of NotchIslandView.swift.
+// wing's one shared row of your and the call's levels. Split out of
+// NotchIslandView.swift.
 
 import AppKit
+import QuartzCore
 
 /// Level bars that scroll: each new level pushes in from the right.
 final class NotchIslandBarsView: NSView {
@@ -79,35 +81,84 @@ final class NotchIslandBarsView: NSView {
     }
 }
 
-/// You and the call as two tiny three-bar meters.
-final class NotchIslandMetersView: NSView {
-    private var mic: CGFloat = 0
-    private var system: CGFloat = 0
-    private var phase = 0
+/// You and the call in one row (`NotchIslandMeetingLevelRow`). At rest the
+/// whole row is dim accent dots; your voice lights its bars in the full
+/// accent, the call's stay dim. A light timer steps the row while it is in a
+/// window and stops once the row is at rest with no readings (a hidden island
+/// keeps its last wing items), so nothing ticks between meetings.
+final class NotchIslandMeetingLevelsView: NSView {
+    private static let barWidth: CGFloat = 2.5
+    private static let gap: CGFloat = 2
+    private static let maxBarHeight: CGFloat = 16
+    private static let dimAlpha: CGFloat = 0.4
+
+    private var row = NotchIslandMeetingLevelRow()
+    private var stepTimer: Timer?
 
     override var isFlipped: Bool { true }
-    override var intrinsicContentSize: NSSize { NSSize(width: 26, height: 14) }
+    override var intrinsicContentSize: NSSize {
+        let count = CGFloat(NotchIslandMeetingLevelRow.count)
+        return NSSize(width: count * Self.barWidth + (count - 1) * Self.gap, height: Self.maxBarHeight)
+    }
 
     func update(mic: Float, system: Float) {
-        self.mic = NotchIslandBarsView.shaped(mic)
-        self.system = NotchIslandBarsView.shaped(system)
-        phase += 1
+        row.receive(mic: mic, system: system, at: CACurrentMediaTime())
+        if stepTimer == nil { startTimer() }
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        stopTimer()
+        startTimer()
+    }
+
+    // Target-selector timer: stopped when the wing drops the view or the row
+    // comes to rest, which also breaks the timer's hold on the view.
+    private func startTimer() {
+        guard window != nil, stepTimer == nil else { return }
+        let timer = Timer(
+            timeInterval: NotchIslandMeetingLevelRow.stepInterval,
+            target: self,
+            selector: #selector(step),
+            userInfo: nil,
+            repeats: true
+        )
+        timer.tolerance = NotchIslandMeetingLevelRow.stepInterval * 0.1
+        RunLoop.main.add(timer, forMode: .common)
+        stepTimer = timer
+    }
+
+    private func stopTimer() {
+        stepTimer?.invalidate()
+        stepTimer = nil
+    }
+
+    @objc private func step() {
+        let now = CACurrentMediaTime()
+        guard !row.isAtRest(at: now) else {
+            stopTimer()
+            return
+        }
+        row.step(at: now)
         needsDisplay = true
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        let shape: [CGFloat] = [0.55, 1, 0.7]
-        drawGroup(level: mic, originX: 0, color: NotchIslandPalette.accent, shape: shape)
-        drawGroup(level: system, originX: 16, color: NSColor(white: 1, alpha: 0.72), shape: shape.reversed())
+        let accent = NotchIslandPalette.accent
+        let dim = accent.withAlphaComponent(Self.dimAlpha)
+        for (index, slot) in row.slots.enumerated() {
+            let x = CGFloat(index) * (Self.barWidth + Self.gap)
+            if let call = slot.call { drawBar(at: x, level: call, color: dim) }
+            if let you = slot.you {
+                drawBar(at: x, level: you, color: you > NotchIslandMeetingLevelRow.audible ? accent : dim)
+            }
+        }
     }
 
-    private func drawGroup(level: CGFloat, originX: CGFloat, color: NSColor, shape: [CGFloat]) {
+    private func drawBar(at x: CGFloat, level: Float, color: NSColor) {
         color.setFill()
-        for (index, factor) in shape.enumerated() {
-            let wobble = CGFloat((phase + index * 3) % 5) * 0.04
-            let height = max(3, min(14, (level * factor + wobble) * 14))
-            let rect = NSRect(x: originX + CGFloat(index) * 4, y: (bounds.height - height) / 2, width: 2, height: height)
-            NSBezierPath(roundedRect: rect, xRadius: 1, yRadius: 1).fill()
-        }
+        let height = max(3, CGFloat(level) * Self.maxBarHeight)
+        let rect = NSRect(x: x, y: (bounds.height - height) / 2, width: Self.barWidth, height: height)
+        NSBezierPath(roundedRect: rect, xRadius: Self.barWidth / 2, yRadius: Self.barWidth / 2).fill()
     }
 }

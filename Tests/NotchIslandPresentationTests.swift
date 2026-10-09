@@ -183,7 +183,7 @@ func testNotchIslandPresentation() {
     runSuite("NotchIslandPresentation splits a dictation over a live meeting") {
         let layout = notchLayout(dictation: listening(), meeting: recording())
         assertEqual(layout.left, [.recordingDot, .live(.meetingTimer, .title)], "the meeting keeps the left wing")
-        assertEqual(layout.right, [.symbol(.mic, .accent), .dictationBars(count: 6)], "dictation takes the right")
+        assertEqual(layout.right, [.symbol(.mic, .accent), .dictationBars(count: 9)], "dictation takes the right")
     }
 
     runSuite("NotchIslandPresentation keeps a meeting's hover during a dictation in it") {
