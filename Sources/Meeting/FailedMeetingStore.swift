@@ -256,6 +256,37 @@ final class FailedMeetingStore {
         return preserved
     }
 
+    @discardableResult
+    func preserveFailedMeetingForRetryAfterArchive(
+        taskId: UUID = UUID(),
+        micAudioURL: URL?,
+        systemAudioURL: URL?,
+        errorMessage: String,
+        meetingTitle: String?,
+        recordingDate: Date? = nil,
+        archiveAudio: Bool = true,
+        splitLocalSpeakers: Bool = false,
+        languageSelection: TranscriptionLanguageSelection = .automatic,
+        micOnlyByChoice: Bool = false
+    ) async -> Bool {
+        let preserved = await taskManager.persistUnexpectedCaptureStopFailure(
+            micAudioURL: micAudioURL,
+            systemAudioURL: systemAudioURL,
+            errorMessage: errorMessage,
+            taskId: taskId,
+            meetingTitle: meetingTitle,
+            recordingDate: recordingDate,
+            archiveAudio: archiveAudio,
+            splitLocalSpeakers: splitLocalSpeakers,
+            languageSelection: languageSelection,
+            micOnlyByChoice: micOnlyByChoice
+        )
+        if preserved {
+            publishRefresh()
+        }
+        return preserved
+    }
+
     func refreshTimedOutFailedMeetingAudio(id: UUID, result: CaptureStopResult) {
         let failedMeetingIsPersisted = failedManager.failedTranscriptions
             .contains(where: { $0.id == id })

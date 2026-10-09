@@ -43,6 +43,21 @@ struct MeetingCaptureHealthEvidence: Equatable {
 enum MeetingStopSequence {
     static let unexpectedStopReason: StaticString = "unexpected_capture_stop"
 
+    /// Capture and the shared relay have already stopped. Release the capture
+    /// gate before slow archive I/O, and never overwrite a newer user action.
+    @MainActor
+    static func archiveUnexpectedStop(
+        releaseCapture: () -> Void,
+        archive: () async -> Bool,
+        stillOwnsCompletion: () -> Bool,
+        finish: (Bool) -> Void
+    ) async -> Bool {
+        releaseCapture()
+        let preserved = await archive()
+        if stillOwnsCompletion() { finish(preserved) }
+        return preserved
+    }
+
     /// Which terminal ended an app-initiated stop.
     enum StopTerminal: Equatable {
         /// Stop timed out; the meeting went to the failed queue.
