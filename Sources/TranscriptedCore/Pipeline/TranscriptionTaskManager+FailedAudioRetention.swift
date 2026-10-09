@@ -168,7 +168,8 @@ extension TranscriptionTaskManager {
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        confirmationMeetingId: UUID? = nil
     ) -> Bool {
         guard micAudioURL != nil || systemAudioURL != nil else {
             AppLogger.pipeline.error("No audio files available to retain for failed transcription", [
@@ -190,7 +191,8 @@ extension TranscriptionTaskManager {
             errorKind: errorKind,
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
-            micOnlyByChoice: micOnlyByChoice
+            micOnlyByChoice: micOnlyByChoice,
+            confirmationMeetingId: confirmationMeetingId
         )
         if didPersist, archiveAudio {
             scheduleFailedRecordingAudioArchive(
@@ -219,7 +221,8 @@ extension TranscriptionTaskManager {
         errorKind: PipelineErrorKind? = nil,
         splitLocalSpeakers: Bool = false,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        confirmationMeetingId: UUID? = nil
     ) -> Bool {
         let retainedMicURL = existingAudioURL(retainedAudio?.micURL)
         let retainedSystemURL = existingAudioURL(retainedAudio?.systemURL)
@@ -255,7 +258,8 @@ extension TranscriptionTaskManager {
             errorKind: errorKind,
             splitLocalSpeakers: splitLocalSpeakers,
             languageSelection: languageSelection,
-            micOnlyByChoice: micOnlyByChoice
+            micOnlyByChoice: micOnlyByChoice,
+            confirmationMeetingId: confirmationMeetingId ?? self.confirmationMeetingId(for: taskId)
         )
         guard didPersist else {
             if let retainedAudio {

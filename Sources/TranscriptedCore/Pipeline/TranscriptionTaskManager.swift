@@ -374,25 +374,24 @@ public class TranscriptionTaskManager: ObservableObject {
             .compactMap { $0?.standardizedFileURL.path }
     }
 
-    func markTaskTranscriptCommitted(taskId: UUID, transcriptId: UUID? = nil) {
+    func confirmationMeetingId(for taskId: UUID) -> UUID? {
+        if let key = tasks[taskId]?.audio?.importedRecoverySession?.sourceContentKey {
+            return SpeakerConfirmationMeetingID.forImportedContent(key: key)
+        }
+        return failedTranscriptionManager.failedTranscriptions.first { $0.id == taskId }?.confirmationMeetingId
+    }
+
+    func markTaskTranscriptCommitted(taskId: UUID, transcriptId: UUID? = nil) throws {
         let audio = tasks[taskId]?.audio
-        tasks[taskId] = .committed(audio: audio)
-        audio?.importedRecoverySession?.transcriptCommitConfirmed()
         // An imported recording's confirmations count once per recording, whichever
         // path later records them (review, re-transcription, Settings, merge).
         // One small SQLite insert, like the review's own confirmation writes.
-        if let transcriptId, let key = audio?.importedRecoverySession?.sourceContentKey {
-            do {
-                try transcription.speakerDB.recordConfirmationMeetingAlias(
-                    transcriptId: transcriptId,
-                    meetingId: SpeakerConfirmationMeetingID.forImportedContent(key: key)
-                )
-            } catch {
-                AppLogger.speakers.warning("Could not record the imported recording's confirmation meeting", [
-                    "error": error.localizedDescription
-                ])
-            }
+        if let transcriptId, let meetingId = confirmationMeetingId(for: taskId) {
+            try transcription.speakerDB.recordConfirmationMeetingAlias(
+                transcriptId: transcriptId, meetingId: meetingId)
         }
+        tasks[taskId] = .committed(audio: audio)
+        audio?.importedRecoverySession?.transcriptCommitConfirmed()
         // The imported journal remains through scratch cleanup. The separate
         // live-recording journal can retire once the transcript is durable.
         if let audio {

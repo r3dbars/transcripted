@@ -2,6 +2,9 @@ import ArgumentParser
 import Darwin
 import Foundation
 import TranscriptedCaptureKit
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+import TranscriptedCore
+#endif
 
 /// Full meeting import is additive: `transcribe` keeps its text/JSON/SRT contract.
 struct ImportAudio: AsyncParsableCommand {
@@ -54,9 +57,17 @@ struct ImportAudio: AsyncParsableCommand {
     var json = false
 
     mutating func validate() throws {
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
         guard Self.speakerEmbedderChoices.contains(speakerEmbedder) else {
-            throw ValidationError("--speaker-embedder must be app, redimnet2, wespeaker, or eres2net.")
+            throw ValidationError("--speaker-embedder must be " + Self.speakerEmbedderChoices.joined(separator: ", ") + ".")
         }
+        #else
+        // This build cannot import audio. Parse flags without duplicating
+        // Core's model registry; run() reports the missing capability.
+        guard !speakerEmbedder.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw ValidationError("--speaker-embedder cannot be empty.")
+        }
+        #endif
         if noSpeakerIdentification && nameLikelySpeakers {
             throw ValidationError("--name-likely-speakers cannot be combined with --no-speaker-identification.")
         }
@@ -105,7 +116,13 @@ struct ImportAudio: AsyncParsableCommand {
         #endif
     }
 
-    static let speakerEmbedderChoices = ["app", "redimnet2", "wespeaker", "eres2net"]
+    static var speakerEmbedderChoices: [String] {
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+        ["app"] + SpeakerVoiceprintSelection.Model.allCases.map(\.rawValue)
+        #else
+        ["app"]
+        #endif
+    }
 
     var resolvedOutputDirectory: URL {
         Self.outputDirectory(override: outputDir)

@@ -1196,22 +1196,25 @@ extension TranscriptionTaskManager {
     ) async throws {
         try await rollback.checkCancellation()
 
-        // Not a Task-cancellation rollback — a separate "did something else already claim this
-        // task's side effects" check (e.g. superseded by a retry). Still routes through the same
-        // registry so it undoes exactly what checkCancellation() would have.
-        let didCommit = await MainActor.run {
-            guard canCommitTaskSideEffects(taskId: taskId) else { return false }
-
-            commitSavedTranscriptSideEffects(
-                savedURL: savedURL,
-                result: result,
-                transcriptId: transcriptId,
-                meetingTitle: meetingTitle,
-                transcriptDate: transcriptDate,
-                notifier: notifier
-            )
-            markTaskTranscriptCommitted(taskId: taskId, transcriptId: transcriptId)
-            return true
+        let didCommit: Bool
+        do {
+            didCommit = try await MainActor.run {
+                guard canCommitTaskSideEffects(taskId: taskId) else { return false }
+                // Persist identity before releasing import recovery ownership.
+                try markTaskTranscriptCommitted(taskId: taskId, transcriptId: transcriptId)
+                commitSavedTranscriptSideEffects(
+                    savedURL: savedURL,
+                    result: result,
+                    transcriptId: transcriptId,
+                    meetingTitle: meetingTitle,
+                    transcriptDate: transcriptDate,
+                    notifier: notifier
+                )
+                return true
+            }
+        } catch {
+            await rollback.rollbackAll()
+            throw error
         }
 
         guard didCommit else {
@@ -1220,11 +1223,7 @@ extension TranscriptionTaskManager {
         }
     }
 
-    /// Registers the saved-transcript rollback: restore the pre-existing file when this
-    /// run replaced one in place, otherwise delete the newly saved file. The two were
-    /// always tied together 1:1 at every previous call site (`deleteSavedTranscriptOnCancellation
-    /// = (replacementTranscriptRollback == nil)`), so that derivation is folded directly into
-    /// the branch here instead of being re-computed and re-threaded by each caller.
+    /// Restore replaced Markdown or remove newly saved Markdown on rollback.
     nonisolated static func registerSavedTranscriptRollback(
         savedURL: URL,
         replacementTranscriptRollback: ReplacementTranscriptRollback?,

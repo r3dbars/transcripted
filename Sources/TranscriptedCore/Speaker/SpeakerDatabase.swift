@@ -50,7 +50,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// `CoreStoragePaths.default` layout (e.g. a host app redirecting to its own data dir).
     /// `thresholds` are the bars of the voiceprint model whose vectors this file holds; pass the
     /// diarizer's `activeSpeakerThresholds`. The default is WeSpeaker's.
-    public init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker) {
+    public init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker, adoptCanonicalModelIdentity: Bool = true) {
         dbPath = URL(fileURLWithPath: path)
         self.thresholds = thresholds
         queue.setSpecific(key: queueSpecificKey, value: 1)
@@ -60,6 +60,34 @@ public final class SpeakerDatabase: @unchecked Sendable {
         )
         openDatabase()
         createTables()
+        createVoiceprintIdentity(adoptCanonicalModelIdentity: adoptCanonicalModelIdentity)
+    }
+
+    /// Persist the model identity so a copied or renamed database cannot be
+    /// mistaken for another 192-dimensional embedding space. Old canonical
+    /// app stores are adopted through Core's filename resolver; unknown custom
+    /// stores stay unverified instead of guessing from vector length.
+    private func createVoiceprintIdentity(adoptCanonicalModelIdentity: Bool) {
+        executeSQL("CREATE TABLE IF NOT EXISTS speaker_voiceprint_identity (id INTEGER PRIMARY KEY CHECK(id = 1), model TEXT NOT NULL);")
+        guard adoptCanonicalModelIdentity else { return }
+        guard let model = SpeakerVoiceprintSelection.Model.allCases.first(where: {
+            SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: $0.embedderIdentifier) == dbPath.lastPathComponent
+        }) else { return }
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "INSERT OR IGNORE INTO speaker_voiceprint_identity (id, model) VALUES (1, ?);", -1, &statement, nil) == SQLITE_OK else { return }
+        defer { sqlite3_finalize(statement) }
+        sqlite3_bind_text(statement, 1, (model.rawValue as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        _ = sqlite3_step(statement)
+    }
+
+    public var voiceprintModel: SpeakerVoiceprintSelection.Model? {
+        queue.sync {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, "SELECT model FROM speaker_voiceprint_identity WHERE id = 1;", -1, &statement, nil) == SQLITE_OK else { return nil }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else { return nil }
+            return SpeakerVoiceprintSelection.Model(rawValue: String(cString: text))
+        }
     }
 
     deinit {

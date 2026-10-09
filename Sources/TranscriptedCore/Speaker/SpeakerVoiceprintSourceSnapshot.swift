@@ -55,6 +55,7 @@ struct SpeakerVoiceprintSourceSnapshot: Sendable {
     let exemplarStats: [UUID: ExemplarStats]
     /// Active (not undone) merges: absorbed profile id to the keeper it went into.
     let mergeTargets: [UUID: UUID]
+    let confirmationMeetingAliases: [UUID: UUID]
 
     /// The profile that now holds `id`, following merges that were not undone.
     func survivor(of id: UUID) -> UUID {
@@ -203,12 +204,20 @@ struct SpeakerVoiceprintSourceSnapshot: Sendable {
             mergeTargets[source] = target
         }
 
+        var aliases: [UUID: UUID] = [:]
+        try forEachRow(db, "SELECT transcript_id, meeting_id FROM speaker_confirmation_meeting_aliases;") { row in
+            if let transcript = text(row, 0).flatMap(UUID.init(uuidString:)),
+               let meeting = text(row, 1).flatMap(UUID.init(uuidString:)) {
+                aliases[transcript] = meeting
+            }
+        }
         return SpeakerVoiceprintSourceSnapshot(
             people: people,
             confirmations: confirmations,
             recentOutcomes: outcomes,
             exemplarStats: exemplarStats,
-            mergeTargets: mergeTargets
+            mergeTargets: mergeTargets,
+            confirmationMeetingAliases: aliases
         )
     }
 

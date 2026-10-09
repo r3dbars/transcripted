@@ -242,7 +242,7 @@ extension TranscriptionTaskManagerMetadataTests {
         // Force the task into the committed state directly, the same way
         // `commitSavedTranscriptSideEffectsUnlessCancelled` would deep inside the real pipeline —
         // this test only needs the state-machine consequence, not a full pipeline run.
-        manager.markTaskTranscriptCommitted(taskId: taskId)
+        try manager.markTaskTranscriptCommitted(taskId: taskId)
         XCTAssertTrue(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation, "a committed-but-still-occupying task still needs quit confirmation")
 
         let preserved = manager.preserveActiveTranscriptionsForShutdown(errorMessage: "shutting down")

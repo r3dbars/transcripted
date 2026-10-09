@@ -37,13 +37,17 @@ final class ImportAudioCommandTests: XCTestCase {
     }
 
     func testRejectsContradictoryOrEmptyOptions() {
-        for args in [["memo.wav", "--speaker-embedder", "unknown"], ["memo.wav", "--title", "  "],
+        for args in [["memo.wav", "--speaker-embedder", " "], ["memo.wav", "--title", "  "],
                      ["memo.wav", "--no-speaker-identification", "--speaker-db", "people.sqlite"],
                      ["memo.wav", "--no-speaker-identification", "--name-likely-speakers"],
-                     ["memo.wav", "--speaker-embedder", "ReDimNet2"],
                      ["memo.wav", "--output-dir", ""], [], ["one.wav", "two.wav"]] {
             XCTAssertThrowsError(try ImportAudio.parse(args), "\(args)")
         }
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+        for model in ["unknown", "ReDimNet2"] {
+            XCTAssertThrowsError(try ImportAudio.parse(["memo.wav", "--speaker-embedder", model]))
+        }
+        #endif
     }
 
     func testRootRegistersImportWithoutChangingTranscribe() throws {
