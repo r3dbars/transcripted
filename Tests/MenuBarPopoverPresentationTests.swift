@@ -112,6 +112,27 @@ func testMenuBarPopoverPresentation() async {
         assertEqual(fixture.events, ["show", "create anchor", "order anchor", "show", "focus popover"], "recovery orders the anchor before the second show")
     }
 
+    runSuite("A status click dismisses a menu retried from another Space without reopening on mouse up") {
+        for downType: NSEvent.EventType in [.leftMouseDown, .rightMouseDown] {
+            let fixture = MenuBarPopoverPresentationFixture()
+            fixture.windowVisibility = { _ in .otherSpace }
+            fixture.popover.showResults = [true, true, true, true]
+            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            assertEqual(fixture.popover.closeCount, 1, "the other-Space presentation is forcibly closed before the retry")
+            fixture.currentEvent = menuBarMouseEvent(downType, number: 173, at: fixture.anchorScreenPoint)
+            fixture.popover.close()
+            let upType: NSEvent.EventType = downType == .leftMouseDown ? .leftMouseUp : .rightMouseUp
+            fixture.currentEvent = menuBarMouseEvent(upType, number: 173, at: fixture.anchorScreenPoint)
+            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            assertEqual(fixture.popover.presentations.count, 2, "the dismissal's mouse up cannot reopen the retried menu")
+            assertFalse(fixture.popover.isShown, "the retried menu stays dismissed")
+            assertEqual(fixture.fallbackPanels.count, 1, "the dismissing click creates no replacement fallback")
+            fixture.currentEvent = menuBarMouseEvent(upType, number: 174, at: fixture.anchorScreenPoint)
+            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            assertEqual(fixture.popover.presentations.count, 4, "the next independent click remains usable")
+        }
+    }
+
     runSuite("A refused status-button presentation retries once at its original screen position") {
         let fixture = MenuBarPopoverPresentationFixture()
         fixture.popover.showResults = [false, true]
