@@ -642,12 +642,17 @@ final class MeetingSessionController: ObservableObject {
         )
 
         wireSubscriptions()
-        transcriptionQueue.recoverImportedAudioJobs()
 
         // Recover recordings orphaned by a crash before any failed-queue entry
-        // existed — they become visible, retryable items on Home.
+        // existed — they become visible, retryable items on Home. Imported
+        // recovery writes speaker aliases, so it must wait for migration too.
+        // Reserve imported scratch before scanning for orphaned recordings.
         let scratchDirectory = storagePaths.audioCaptures
-        Task { [taskManager] in
+        Task { @MainActor [weak self, taskManager] in
+            guard let self else { return }
+            await self.voiceprintMigrationGate.waitUntilOpen()
+            guard !Task.isCancelled else { return }
+            self.transcriptionQueue.recoverImportedAudioJobs()
             await taskManager.recoverOrphanedRecordings(in: scratchDirectory)
         }
     }

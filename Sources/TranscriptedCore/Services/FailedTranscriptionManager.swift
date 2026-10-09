@@ -415,7 +415,7 @@ public class FailedTranscriptionManager: ObservableObject {
 
     /// Saves failed transcriptions to disk
     @discardableResult
-    private func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
+    func saveFailedTranscriptions(_ entries: [FailedTranscription]? = nil) -> Bool {
         let activeEntries = entries ?? failedTranscriptions
         let activeIDs = Set(activeEntries.map(\.id))
         let entriesToPersist = activeEntries + unavailableRelocatedEntries.filter {

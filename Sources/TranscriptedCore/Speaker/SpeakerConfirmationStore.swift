@@ -301,8 +301,16 @@ extension SpeakerDatabase {
         )
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, (transcriptId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-        if sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) {
+        let result = sqlite3_step(statement)
+        if result == SQLITE_ROW {
+            guard let text = sqlite3_column_text(statement, 0) else {
+                throw SQLiteOperationError(operation: "decode confirmation meeting alias", code: SQLITE_CORRUPT,
+                                           detail: "confirmation meeting alias is null")
+            }
             return String(cString: text)
+        }
+        guard result == SQLITE_DONE else {
+            throw SQLiteOperationError(operation: "step confirmation meeting alias lookup", code: result, detail: dbErrorMessage())
         }
         return transcriptId.uuidString
     }
