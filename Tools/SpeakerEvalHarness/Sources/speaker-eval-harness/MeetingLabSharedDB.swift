@@ -217,11 +217,10 @@ enum LabSharedSpeakerDB {
     }
 
     /// Saves a shared meeting's lab_result.json with `save`, then records the
-    /// meeting in the marker.
+    /// meeting in the marker. A failed save throws and leaves the meeting marked in
+    /// progress, so the next run won't resume a DB whose results are incomplete.
     static func saveResultThenRecordApplied(_ meeting: String, workRoot: URL, save: () throws -> Void) throws {
-        do { try save() } catch {
-            FileHandle.standardError.write(Data("[lab] write failed: \(error.localizedDescription)\n".utf8))
-        }
+        try save()
         try recordApplied(meeting, workRoot: workRoot)
     }
 
