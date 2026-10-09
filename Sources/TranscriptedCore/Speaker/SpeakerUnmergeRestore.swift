@@ -192,4 +192,21 @@ extension SpeakerDatabase {
         }
         return (added, removed)
     }
+
+    /// Un-merge: move the absorbed profile's rows back from the keeper. A row the
+    /// user reassigned to someone else after the merge stays where it was put.
+    func restoreMovedProvenanceImpl(_ movedIds: [UUID], sourceId: UUID, targetId: UUID) throws {
+        guard !movedIds.isEmpty else { return }
+        let placeholders = Array(repeating: "?", count: movedIds.count).joined(separator: ",")
+        let statement = try prepareStatement(
+            "UPDATE speaker_provenance SET profile_id = ? WHERE profile_id = ? AND id IN (\(placeholders));",
+            operation: "prepare unmerge provenance restore"
+        )
+        defer { sqlite3_finalize(statement) }
+        let values = [sourceId, targetId] + movedIds
+        for (offset, value) in values.enumerated() {
+            sqlite3_bind_text(statement, Int32(offset + 1), (value.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        }
+        try requireDone(statement, operation: "step unmerge provenance restore")
+    }
 }

@@ -136,22 +136,7 @@ extension SpeakerDatabase {
         """
         executeSQL(mergeEvents)
         executeSQL("CREATE INDEX IF NOT EXISTS idx_merge_target ON speaker_merge_events(target_id);")
-
-        // One row per manual contribution move. `provenance_high_rowid` is the
-        // largest speaker_provenance rowid when the move happened, so un-merge can
-        // tell a move made after a merge (>= its marker) from an older one.
-        let reassignments = """
-        CREATE TABLE IF NOT EXISTS speaker_contribution_reassignments (
-            seq INTEGER PRIMARY KEY AUTOINCREMENT,
-            contribution_id TEXT NOT NULL,
-            from_profile_id TEXT NOT NULL,
-            to_profile_id TEXT NOT NULL,
-            provenance_high_rowid INTEGER NOT NULL,
-            reassigned_at TEXT NOT NULL
-        );
-        """
-        executeSQL(reassignments)
-        executeSQL("CREATE INDEX IF NOT EXISTS idx_reassign_contribution ON speaker_contribution_reassignments(contribution_id);")
+        createReassignmentLogTableImpl()
     }
 
     // MARK: - Recording (called on the serialized queue)
@@ -517,29 +502,8 @@ extension SpeakerDatabase {
                 // Rows moved by hand after the merge, read before anything moves back.
                 let reassigned = try postMergeReassignmentsImpl(atOrAfterRowid: markerRowid)
 
-                // Move the absorbed profile's provenance rows back, except any the user
-                // reassigned to someone else after the merge: those stay where they were put.
-                if !event.movedProvenanceIds.isEmpty {
-                    let placeholders = Array(repeating: "?", count: event.movedProvenanceIds.count).joined(separator: ",")
-                    let sql = "UPDATE speaker_provenance SET profile_id = ? WHERE profile_id = ? AND id IN (\(placeholders));"
-                    let statement = try prepareStatement(
-                        sql,
-                        operation: "prepare unmerge provenance restore"
-                    )
-                    defer { sqlite3_finalize(statement) }
-                    sqlite3_bind_text(statement, 1, (event.sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                    sqlite3_bind_text(statement, 2, (event.targetId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                    for (offset, provenanceId) in event.movedProvenanceIds.enumerated() {
-                        sqlite3_bind_text(
-                            statement,
-                            Int32(offset + 3),
-                            (provenanceId.uuidString as NSString).utf8String,
-                            -1,
-                            SQLITE_TRANSIENT
-                        )
-                    }
-                    try requireDone(statement, operation: "step unmerge provenance restore")
-                }
+                // Move the absorbed profile's rows back, except any reassigned after the merge.
+                try restoreMovedProvenanceImpl(event.movedProvenanceIds, sourceId: event.sourceId, targetId: event.targetId)
 
                 // Restore the explicit-confirmation sets before marking the merge undone.
                 // This throws on any ledger inconsistency so the transaction rolls back.
@@ -608,17 +572,7 @@ extension SpeakerDatabase {
 
         var ok = true
         transaction {
-            // Log the move first so un-merge can tell it happened after a merge.
-            execBind(
-                """
-                INSERT INTO speaker_contribution_reassignments
-                    (contribution_id, from_profile_id, to_profile_id, provenance_high_rowid, reassigned_at)
-                VALUES (?, ?, ?, (SELECT COALESCE(MAX(rowid), 0) FROM speaker_provenance), ?);
-                """,
-                [contributionId.uuidString, fromProfileId.uuidString, toProfileId.uuidString,
-                 ISO8601DateFormatter().string(from: Date())],
-                label: "log contribution reassignment"
-            )
+            logReassignmentImpl(contributionId, from: fromProfileId, to: toProfileId)
             execBind("UPDATE speaker_provenance SET profile_id = ? WHERE id = ?;",
                      [toProfileId.uuidString, contributionId.uuidString], label: "reassign contribution")
             ok = rederiveProfileFromContributionsImpl(fromProfileId) && ok
