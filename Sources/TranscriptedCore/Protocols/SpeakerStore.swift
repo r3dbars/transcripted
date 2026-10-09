@@ -48,6 +48,10 @@ public protocol SpeakerStore: Sendable {
     /// it: the review, a re-transcription, Settings, or a merge.
     func recordConfirmationMeetingAlias(transcriptId: UUID, meetingId: UUID) throws
 
+    /// Whether confirming this recording adds a distinct meeting to this profile.
+    /// An explicit meeting id covers an import before its alias is committed.
+    func confirmationWouldIncreaseCount(profileId: UUID, transcriptId: UUID, meetingId: UUID?) throws -> Bool
+
     /// Merge obviously duplicate profiles (high cosine similarity)
     func mergeDuplicates()
 
@@ -97,6 +101,8 @@ public extension SpeakerStore {
     func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws {}
 
     func recordConfirmationMeetingAlias(transcriptId: UUID, meetingId: UUID) throws {}
+
+    func confirmationWouldIncreaseCount(profileId: UUID, transcriptId: UUID, meetingId: UUID?) throws -> Bool { true }
 
     func mergeDuplicates(protecting protectedIds: Set<UUID>) {
         guard protectedIds.isEmpty else { return }

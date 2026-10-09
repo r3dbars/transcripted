@@ -844,16 +844,15 @@ extension TranscriptionTaskManager {
             recognizedVoices: recognizedEntries.count,
             reviewListsRecognizedVoices: reviewListsRecognizedVoices
         ) {
-            // Seed knownPeople with existing named DB profiles so the sheet's combobox has
-            // suggestions. Previously this was always empty — users typed blind.
             let allProfiles = speakerDB.allSpeakers()
+            let earnsConfirmationByProfile = try Self.confirmationEligibility(profiles: allProfiles, store: speakerDB, transcriptId: transcriptId, meetingId: confirmationMeetingId(for: taskId))
             let knownPeople: [SpeakerIdentityOption] = allProfiles
                 .compactMap { profile in
                     guard let name = profile.displayName, !name.isEmpty else { return nil }
                     return SpeakerIdentityOption(
                         id: profile.id,
                         displayName: name,
-                        callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0)
+                        callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0), earnsConfirmation: earnsConfirmationByProfile[profile.id] ?? false
                     )
                 }
             // The auto-recognition roster shown as the review sheet's payoff
@@ -867,8 +866,8 @@ extension TranscriptionTaskManager {
                 )
             }.count
 
-            let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
-            let capturedRecognizedEntries = Self.withConfirmationProgress(recognizedEntries, recognized: true, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
+            let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
+            let capturedRecognizedEntries = Self.withConfirmationProgress(recognizedEntries, recognized: true, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
             // Voices auto-named in this meeting, once each, in the order heard.
             var seenRecognizedNames: Set<String> = []
             let recognizedSpeakerNames = pendingAutoAccepts.compactMap { pending -> String? in

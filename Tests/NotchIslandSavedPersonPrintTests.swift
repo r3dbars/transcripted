@@ -8,6 +8,21 @@ func testNotchIslandSavedPersonPrint() {
     typealias Policy = NotchIslandSpeakerReviewPolicy
     let picked = Policy.RowState.named(.savedPerson)
 
+    runSuite("A repeated recording cannot complete an asked or picked person's print") {
+        let repeated = Policy.Progress(confirmed: 4, required: 5, earnsConfirmation: false)
+        let fresh = Policy.Progress(confirmed: 4, required: 5)
+        for state in [Policy.RowState.confirmed, picked] {
+            assertEqual(Policy.litRings(state, progress: repeated), 4)
+            assertFalse(Policy.namedAutomatically(state, progress: repeated))
+            assertEqual(Policy.rowHint(state, progress: repeated)?.text, "1 more to go")
+            assertEqual(Policy.litRings(state, progress: fresh), 5)
+            assertTrue(Policy.namedAutomatically(state, progress: fresh))
+        }
+        assertEqual(Policy.rowHint(.asking, progress: repeated), nil, "no one-more-yes promise for already-counted audio")
+        assertEqual(repeated.afterYes.confirmed, 4)
+        assertEqual(fresh.afterYes.confirmed, 5)
+    }
+
     runSuite("Picking a saved person lights their rings and the one this meeting earns") {
         assertEqual(Policy.litRings(picked, progress: Policy.Progress(confirmed: 2, required: 5)), 3, "2 before, 3 after")
         assertEqual(Policy.litRings(picked, progress: Policy.Progress(confirmed: 4, required: 5)), 5, "the fifth completes the print")

@@ -107,7 +107,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     init(request: SpeakerNamingRequest) {
         self.request = request
         self.knownPeople = request.knownPeople.map {
-            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount, confirmedMeetings: $0.confirmedMeetings, isTrusted: $0.isTrusted)
+            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount, confirmedMeetings: $0.confirmedMeetings, isTrusted: $0.isTrusted, earnsConfirmation: $0.earnsConfirmation)
         }
         self.requestID = request.id
         self.isRecognizedOnly = request.speakers.isEmpty

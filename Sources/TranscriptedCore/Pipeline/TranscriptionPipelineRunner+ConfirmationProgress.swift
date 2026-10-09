@@ -4,6 +4,16 @@ import Foundation
 
 extension TranscriptionTaskManager {
 
+    /// Snapshot eligibility for both asked rows and saved-person suggestions.
+    /// Imports supply their content identity before the transcript alias commits.
+    nonisolated static func confirmationEligibility(profiles: [SpeakerProfile], store: any SpeakerStore, transcriptId: UUID, meetingId: UUID?) throws -> [UUID: Bool] {
+        var result: [UUID: Bool] = [:]
+        for profile in profiles {
+            result[profile.id] = try store.confirmationWouldIncreaseCount(profileId: profile.id, transcriptId: transcriptId, meetingId: meetingId)
+        }
+        return result
+    }
+
     /// Adds `confirmationProgress` to every review row about a saved, named
     /// person, so the review can show their New / Learning / Auto dial: asked
     /// rows ("Is this …?") and, with `recognized`, rows Transcripted named on its
@@ -18,6 +28,7 @@ extension TranscriptionTaskManager {
         recognized: Bool = false,
         profile: (UUID) -> SpeakerProfile?,
         trusted: (SpeakerProfile) -> Bool = { _ in true },
+        earnsConfirmation: (UUID) -> Bool = { _ in true },
         invited invitedNameKeys: Set<String>,
         fromInvite lineupIsFromInvite: Bool,
         thresholds: SpeakerEmbeddingThresholds
@@ -37,7 +48,7 @@ extension TranscriptionTaskManager {
             entry.confirmationProgress = SpeakerNamingConfirmationProgress(
                 confirmedMeetings: max(0, saved.confirmedMeetingCount),
                 requiredMeetings: required,
-                isTrusted: trusted(saved)
+                isTrusted: trusted(saved), earnsConfirmation: earnsConfirmation(saved.id)
             )
             return entry
         }

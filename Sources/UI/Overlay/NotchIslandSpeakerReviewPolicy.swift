@@ -53,11 +53,13 @@ enum NotchIslandSpeakerReviewPolicy {
         var confirmed: Int
         var required: Int
         var isTrusted: Bool
+        var earnsConfirmation: Bool
 
-        init(confirmed: Int, required: Int, isTrusted: Bool = true) {
+        init(confirmed: Int, required: Int, isTrusted: Bool = true, earnsConfirmation: Bool = true) {
             self.confirmed = confirmed
             self.required = required
             self.isTrusted = isTrusted
+            self.earnsConfirmation = earnsConfirmation
         }
 
         var tier: SpeakerNamingTier {
@@ -66,7 +68,7 @@ enum NotchIslandSpeakerReviewPolicy {
 
         /// After one more yes in this review.
         var afterYes: Progress {
-            Progress(confirmed: max(0, confirmed) + 1, required: required, isTrusted: isTrusted)
+            Progress(confirmed: max(0, confirmed) + (earnsConfirmation ? 1 : 0), required: required, isTrusted: isTrusted, earnsConfirmation: earnsConfirmation)
         }
 
         /// Lit rings out of five, scaled when the bar is lower than five.
@@ -171,12 +173,12 @@ enum NotchIslandSpeakerReviewPolicy {
         case .asking:
             guard let progress else { return nil }
             return SpeakerNamingTierPresentation.reviewHint(
-                moment: .asking, confirmedBefore: progress.confirmed, required: progress.required, isTrusted: progress.isTrusted
+                moment: .asking, confirmedBefore: progress.confirmed, required: progress.required, isTrusted: progress.isTrusted, earnsConfirmation: progress.earnsConfirmation
             )
         case .confirmed, .named(.savedPerson):
             guard let progress else { return nil }
             return SpeakerNamingTierPresentation.reviewHint(
-                moment: .confirmed, confirmedBefore: progress.confirmed, required: progress.required, isTrusted: progress.isTrusted
+                moment: .confirmed, confirmedBefore: progress.confirmed, required: progress.required, isTrusted: progress.isTrusted, earnsConfirmation: progress.earnsConfirmation
             )
         case .named(.newPerson):
             return SpeakerNamingTierPresentation.reviewHint(

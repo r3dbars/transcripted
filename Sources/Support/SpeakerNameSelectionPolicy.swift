@@ -9,6 +9,7 @@ struct SpeakerNameChoice: Identifiable, Hashable {
     /// Confirmed meetings and lifeline health, for the voice print's progress.
     var confirmedMeetings: Int = 0
     var isTrusted: Bool = true
+    var earnsConfirmation: Bool = true
 }
 
 enum SpeakerNameSelectionPolicy {
