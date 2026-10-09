@@ -89,7 +89,7 @@ extension TranscriptionTaskManager {
         languageSelection: TranscriptionLanguageSelection = .automatic,
         micOnlyByChoice: Bool = false
     ) async -> Bool {
-        addFailedTranscriptionRetainingAvailableAudio(
+        await addFailedTranscriptionRetainingAvailableAudioAfterArchive(
             micAudioURL: micAudioURL,
             systemAudioURL: systemAudioURL,
             errorMessage: errorMessage,

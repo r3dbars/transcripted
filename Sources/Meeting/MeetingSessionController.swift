@@ -681,7 +681,7 @@ extension MeetingSessionController {
         activeRecordingSuggestedTitle = nil
         activeRecordingStartedAt = nil
 
-        let preserved = failedMeetingStore.preserveFailedMeetingForRetry(
+        let preserved = await failedMeetingStore.preserveFailedMeetingForRetryAfterArchive(
             micAudioURL: files.micURL,
             systemAudioURL: files.systemURL,
             errorMessage: failureMessage,
