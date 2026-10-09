@@ -28,6 +28,94 @@ final class SpeakerImportedConfirmationDedupeTests: XCTestCase {
 
     // MARK: - Meeting id
 
+    @MainActor
+    func testStableTranscriptCrashRecoveryRestoresAliasBeforeRetiringRecovery() throws {
+        let harness = try makeHarness()
+        let profile = namedProfile("Fixture", in: harness)
+        let original = UUID(), retry = UUID(), reimport = UUID()
+        let key = String(repeating: "b2", count: 32)
+        let meetingID = try harness.manager.restoreImportedConfirmationIdentity(transcriptId: original, sourceContentKey: key)
+        try harness.speakerDB.recordConfirmationMeetingAlias(transcriptId: retry, meetingId: meetingID)
+        try harness.speakerDB.recordConfirmationMeetingAlias(transcriptId: reimport, meetingId: meetingID)
+        try harness.speakerDB.recordUserConfirmations([
+            .init(profileId: profile, transcriptId: original, kind: .confirmed),
+            .init(profileId: profile, transcriptId: retry, kind: .confirmed),
+            .init(profileId: profile, transcriptId: reimport, kind: .confirmed)
+        ])
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: profile)?.confirmedMeetingCount, 1)
+        XCTAssertEqual(try harness.manager.restoreImportedConfirmationIdentity(transcriptId: UUID(), sourceContentKey: key), meetingID)
+        let legacy = UUID()
+        XCTAssertEqual(try harness.manager.restoreImportedConfirmationIdentity(transcriptId: legacy, sourceContentKey: nil), legacy)
+    }
+
+    @MainActor
+    func testStableTranscriptRecoveryAliasFailureThrowsBeforeHandoff() throws {
+        let harness = try makeHarness()
+        XCTAssertEqual(sqlite3_exec(harness.speakerDB.db, "DROP TABLE speaker_confirmation_meeting_aliases;", nil, nil, nil), SQLITE_OK)
+        XCTAssertThrowsError(try harness.manager.restoreImportedConfirmationIdentity(transcriptId: UUID(), sourceContentKey: "fixture"))
+    }
+
+    @MainActor
+    func testRecoveryRepairsAnAlreadyFailedRowBeforeJournalRetirement() throws {
+        let harness = try makeHarness()
+        let profile = namedProfile("Fixture", in: harness)
+        let original = UUID(), failedID = UUID(), retry = UUID()
+        let scratch = harness.paths.audioCaptures.appendingPathComponent("missing-import.wav")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: scratch.path), "the repair must not depend on scratch still existing")
+        harness.manager.failedTranscriptionManager.failedTranscriptions = [
+            FailedTranscription(id: failedID, micAudioURL: scratch, systemAudioURL: nil, errorMessage: "Fixture")
+        ]
+        let meetingId = try harness.manager.restoreImportedConfirmationIdentity(
+            transcriptId: original, sourceContentKey: "fixture-recording", failedAudioURL: scratch)
+        XCTAssertEqual(harness.manager.failedTranscriptionManager.failedTranscriptions.first?.confirmationMeetingId, meetingId)
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let durable = try decoder.decode([FailedTranscription].self,
+            from: Data(contentsOf: harness.paths.failedQueue))
+        XCTAssertEqual(durable.first?.confirmationMeetingId, meetingId)
+        harness.manager.beginTaskLifecycle(taskId: failedID, audio: nil)
+        try harness.manager.markTaskTranscriptCommitted(taskId: failedID, transcriptId: retry)
+        try harness.speakerDB.recordUserConfirmations([
+            .init(profileId: profile, transcriptId: original, kind: .confirmed),
+            .init(profileId: profile, transcriptId: retry, kind: .confirmed)
+        ])
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: profile)?.confirmedMeetingCount, 1)
+    }
+
+    @MainActor
+    func testFailedRowIdentityRepairRejectsConflictAndRollsBackPersistenceFailure() throws {
+        let harness = try makeHarness()
+        let manager = harness.manager.failedTranscriptionManager
+        let existingId = UUID(), establishedIdentity = UUID(), missingId = UUID()
+        let scratch = harness.paths.audioCaptures.appendingPathComponent("fixture.wav")
+        manager.failedTranscriptions = [
+            FailedTranscription(id: existingId, micAudioURL: scratch, systemAudioURL: nil,
+                errorMessage: "Fixture", confirmationMeetingId: establishedIdentity),
+            FailedTranscription(id: missingId, micAudioURL: scratch, systemAudioURL: nil, errorMessage: "Fixture")
+        ]
+        XCTAssertFalse(manager.restoreConfirmationMeetingIdentity(id: existingId, meetingId: UUID()))
+        XCTAssertEqual(manager.failedTranscriptions.first?.confirmationMeetingId, establishedIdentity)
+        try FileManager.default.createDirectory(at: harness.paths.failedQueue, withIntermediateDirectories: true)
+        XCTAssertFalse(manager.restoreConfirmationMeetingIdentity(id: missingId, meetingId: UUID()))
+        XCTAssertNil(manager.failedTranscriptions.last?.confirmationMeetingId)
+    }
+
+    @MainActor
+    func testAliasLookupStepFailureDoesNotRecordTranscriptUUIDConfirmation() throws {
+        let harness = try makeHarness()
+        let profile = namedProfile("Fixture", in: harness)
+        let transcript = UUID()
+        XCTAssertEqual(sqlite3_create_function_v2(harness.speakerDB.db, "fixture_alias_failure", 0, SQLITE_UTF8, nil,
+            { context, _, _ in sqlite3_result_error(context, "Synthetic alias lookup failure", -1) }, nil, nil, nil), SQLITE_OK)
+        XCTAssertEqual(sqlite3_exec(harness.speakerDB.db, "DROP TABLE speaker_confirmation_meeting_aliases;", nil, nil, nil), SQLITE_OK)
+        let view = "CREATE VIEW speaker_confirmation_meeting_aliases AS SELECT '\(transcript.uuidString)' AS transcript_id, fixture_alias_failure() AS meeting_id;"
+        XCTAssertEqual(sqlite3_exec(harness.speakerDB.db, view, nil, nil, nil), SQLITE_OK)
+        XCTAssertThrowsError(try harness.speakerDB.recordUserConfirmations([
+            .init(profileId: profile, transcriptId: transcript, kind: .confirmed)
+        ]))
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: profile)?.confirmedMeetingCount, 0)
+    }
+
     func testCopiedDatabaseKeepsModelIdentityEvenWhenRenamed() throws {
         let original = tempDirectory.appendingPathComponent(
             SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: "eres2net"))

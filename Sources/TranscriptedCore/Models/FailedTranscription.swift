@@ -113,7 +113,7 @@ public struct FailedTranscription: Identifiable, Codable, Equatable {
     /// instead of degraded. Missing on older rows and decoded as `false`.
     public let micOnlyByChoice: Bool
     /// Content-derived identity retained when an imported job fails before save.
-    public let confirmationMeetingId: UUID?
+    public var confirmationMeetingId: UUID?
 
     public init(
         id: UUID = UUID(),
