@@ -18,10 +18,11 @@ func testMenuBarPopoverPresentation() async {
         ]
         for (onscreen, layer, expected) in cases {
             var calls = 0
-            let actual = MenuBarPopoverPresentation.visibility(of: fixture.window) { options, queriedNumber in
+            let actual = MenuBarPopoverPresentation.visibility(of: fixture.window) { numbers in
                 calls += 1
-                assertEqual(options, .optionIncludingWindow, "do not enumerate all session windows on a menu click")
-                assertEqual(queriedNumber, CGWindowID(number), "query exactly the popover's window")
+                assertEqual(CFArrayGetCount(numbers), 1, "request exactly one window description, never a session-wide list")
+                assertEqual(UInt(bitPattern: CFArrayGetValueAtIndex(numbers, 0)), UInt(number),
+                            "Quartz receives the popover's ID as an integer value, not a boxed object")
                 var entry: [String: Any] = [kCGWindowNumber as String: number, kCGWindowLayer as String: layer]
                 entry[kCGWindowIsOnscreen as String] = onscreen
                 return [entry]
@@ -29,18 +30,30 @@ func testMenuBarPopoverPresentation() async {
             assertEqual(calls, 1, "each visibility check uses one targeted query")
             assertEqual(actual, expected, "only explicit offscreen metadata can trigger the Space retry")
         }
-        let unavailable = MenuBarPopoverPresentation.visibility(of: fixture.window) { _, _ in nil }
+        let unavailable = MenuBarPopoverPresentation.visibility(of: fixture.window) { _ in nil }
         assertEqual(unavailable, .unknown, "a failed window-server lookup does not trigger a retry")
-        let unrelated = MenuBarPopoverPresentation.visibility(of: fixture.window) { _, _ in
+        let unrelated = MenuBarPopoverPresentation.visibility(of: fixture.window) { _ in
             [[kCGWindowNumber as String: number + 1, kCGWindowIsOnscreen as String: false, kCGWindowLayer as String: 101]]
         }
         assertEqual(unrelated, .unknown, "another window's metadata cannot classify the popover")
         fixture.window.reportedWindowNumber = 0
-        let unregistered = MenuBarPopoverPresentation.visibility(of: fixture.window) { _, _ in
+        let unregistered = MenuBarPopoverPresentation.visibility(of: fixture.window) { _ in
             assertTrue(false, "an unregistered popover must not query the window server")
             return []
         }
         assertEqual(unregistered, .unknown, "a popover without a window-server ID has unknown visibility")
+        fixture.window.reportedWindowNumber = Int(CGWindowID.max) + 1
+        assertEqual(MenuBarPopoverPresentation.visibility(of: fixture.window) { _ in
+            assertTrue(false, "a window number outside Quartz's ID range must not be queried")
+            return []
+        }, .unknown)
+    }
+
+    runSuite("The production Quartz description API handles an absent window without a retry") {
+        let fixture = MenuBarPopoverPresentationFixture()
+        fixture.window.reportedWindowNumber = Int(CGWindowID.max)
+        assertEqual(MenuBarPopoverPresentation.visibility(of: fixture.window), .unknown,
+                    "a nonexistent ID returns no usable description through the real bounded API")
     }
 
     runSuite("Unknown menu visibility does not close and reopen a successfully shown popover") {

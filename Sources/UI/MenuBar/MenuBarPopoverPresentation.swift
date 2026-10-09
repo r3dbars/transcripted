@@ -122,14 +122,17 @@ final class MenuBarPopoverPresentation: NSObject {
 
     static func visibility(
         of window: NSWindow,
-        windowInfo: (CGWindowListOption, CGWindowID) -> [[String: Any]]? = { options, number in
-            CGWindowListCopyWindowInfo(options, number) as? [[String: Any]]
+        windowInfo: (CFArray) -> [[String: Any]]? = { numbers in
+            CGWindowListCreateDescriptionFromArray(numbers) as? [[String: Any]]
         }
     ) -> MenuBarPopoverWindowVisibility {
         let number = window.windowNumber
-        guard number > 0,
-              // The menu only needs its own popover, not every window in the session.
-              let info = windowInfo(.optionIncludingWindow, CGWindowID(number)) else {
+        guard number > 0, UInt64(number) <= UInt64(CGWindowID.max) else { return .unknown }
+        // Quartz's window-ID arrays contain integer values encoded as pointers,
+        // not CFNumber objects. Nil callbacks keep CFArray from retaining them.
+        var value = UnsafeRawPointer(bitPattern: UInt(number))
+        guard let numbers = CFArrayCreate(kCFAllocatorDefault, &value, 1, nil),
+              let info = windowInfo(numbers) else {
             return .unknown
         }
         for entry in info {
