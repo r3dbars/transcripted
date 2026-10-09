@@ -252,6 +252,85 @@ final class SpeakerProvenanceTests: XCTestCase {
         )
     }
 
+    // MARK: - Post-merge reassignments (#2152)
+
+    /// The contribution row on `profileId` whose stored embedding points along `axis`.
+    private func contributionId(profileId: UUID, axis: Int) -> UUID? {
+        database.queue.sync {
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            let sql = "SELECT id, embedding FROM speaker_provenance WHERE profile_id = ? AND embedding IS NOT NULL;"
+            guard sqlite3_prepare_v2(database.db, sql, -1, &statement, nil) == SQLITE_OK else { return nil }
+            sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, unsafeBitCast(-1, to: sqlite3_destructor_type.self))
+            while sqlite3_step(statement) == SQLITE_ROW {
+                guard let ptr = sqlite3_column_blob(statement, 1) else { continue }
+                let count = Int(sqlite3_column_bytes(statement, 1)) / MemoryLayout<Float>.size
+                let vector = Array(UnsafeBufferPointer(start: ptr.assumingMemoryBound(to: Float.self), count: count))
+                if cosine(vector, embedding(axis: axis)) > 0.99,
+                   let text = sqlite3_column_text(statement, 0) {
+                    return UUID(uuidString: String(cString: text))
+                }
+            }
+            return nil
+        }
+    }
+
+    func testUnmergeKeepsPreMergeRowReassignedIntoKeeperAfterMerge() throws {
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 80), existingId: nil)
+        let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 81), existingId: nil)
+        let other = database.addOrUpdateSpeaker(embedding: embedding(axis: 82), existingId: nil)
+        let otherRow = try XCTUnwrap(database.contributions(forProfileId: other.id).first)
+
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
+        // After the merge the user says this older recording was really the keeper.
+        XCTAssertTrue(database.reassignContribution(id: otherRow.id, toProfileId: target.id))
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: target.id))
+
+        let restored = try XCTUnwrap(database.getSpeaker(id: target.id))
+        XCTAssertEqual(restored.callCount, 2, "the keeper's own recording plus the one moved onto it after the merge")
+        XCTAssertGreaterThan(cosine(restored.embedding, embedding(axis: 82)), 0.5,
+                             "the recording reassigned onto the keeper must still be in its voiceprint")
+        XCTAssertTrue(database.contributions(forProfileId: target.id).contains { $0.id == otherRow.id })
+    }
+
+    func testUnmergeDropsPreMergeKeeperRowReassignedAwayAfterMerge() throws {
+        let targetId = UUID()
+        _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 83), existingId: targetId)
+        _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 84), existingId: targetId)
+        let wrongRow = try XCTUnwrap(contributionId(profileId: targetId, axis: 84))
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 85), existingId: nil)
+        let other = database.addOrUpdateSpeaker(embedding: embedding(axis: 86), existingId: nil)
+
+        try database.mergeProfiles(sourceId: source.id, into: targetId)
+        // After the merge the user moves one of the keeper's older recordings away.
+        XCTAssertTrue(database.reassignContribution(id: wrongRow, toProfileId: other.id))
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: targetId))
+
+        let restored = try XCTUnwrap(database.getSpeaker(id: targetId))
+        XCTAssertEqual(restored.callCount, 1, "the recording moved away after the merge must not come back with the snapshot")
+        XCTAssertLessThan(cosine(restored.embedding, embedding(axis: 84)), 0.5,
+                          "the moved-away voice must not be restored into the keeper's voiceprint")
+        XCTAssertTrue(database.contributions(forProfileId: other.id).contains { $0.id == wrongRow })
+    }
+
+    func testUnmergeLeavesAbsorbedRowWhereTheUserReassignedIt() throws {
+        let source = database.addOrUpdateSpeaker(embedding: embedding(axis: 87), existingId: nil)
+        _ = database.addOrUpdateSpeaker(embedding: embedding(axis: 88), existingId: source.id)
+        let movedRow = try XCTUnwrap(contributionId(profileId: source.id, axis: 88))
+        let target = database.addOrUpdateSpeaker(embedding: embedding(axis: 89), existingId: nil)
+        let other = database.addOrUpdateSpeaker(embedding: embedding(axis: 90), existingId: nil)
+
+        try database.mergeProfiles(sourceId: source.id, into: target.id)
+        XCTAssertTrue(database.reassignContribution(id: movedRow, toProfileId: other.id))
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: target.id))
+
+        XCTAssertTrue(database.contributions(forProfileId: other.id).contains { $0.id == movedRow },
+                      "un-merge must not pull a reassigned row back onto the absorbed profile")
+        let restoredSource = try XCTUnwrap(database.getSpeaker(id: source.id))
+        XCTAssertEqual(restoredSource.callCount, 1)
+        XCTAssertLessThan(cosine(restoredSource.embedding, embedding(axis: 88)), 0.5)
+    }
+
     func testUnmergeNonexistentEventIsNoop() {
         XCTAssertFalse(database.unmerge(mergeId: UUID()))
         XCTAssertFalse(database.unmergeMostRecent(forTargetId: UUID()))
