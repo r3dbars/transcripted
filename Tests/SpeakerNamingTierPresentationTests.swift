@@ -27,7 +27,7 @@ func testSpeakerNamingTierPresentation() {
         )
         assertEqual(
             P.explanation(name: "Maya Patel", confirmed: 1, required: 2, tier: .new, isTrusted: true),
-            "Confirmed in 1 meeting. One more and Transcripted names Maya on its own.",
+            "Confirmed in 1 meeting. One more and Transcripted names Maya on its own with matching meeting context.",
             "one meeting is singular, and one left says One more"
         )
         assertEqual(
@@ -42,6 +42,27 @@ func testSpeakerNamingTierPresentation() {
             P.explanation(name: "Maya Patel", confirmed: 6, required: 5, tier: .learning, isTrusted: false),
             "A recent correction paused auto-naming for Maya. Keep confirming Maya until the voice is a clear match again."
         )
+    }
+
+    runSuite("Every contextual hover and VoiceOver promise keeps its meeting scope") {
+        typealias P = SpeakerNamingTierPresentation
+        assertEqual(P.explanation(name: "Maya Patel", confirmed: 0, required: 2, tier: .new, isTrusted: true),
+                    "Not confirmed yet. After 2 meetings, Transcripted names Maya on its own with matching meeting context.")
+        assertEqual(P.explanation(name: "Maya Patel", confirmed: 1, required: 2, tier: .learning, isTrusted: true),
+                    "Confirmed in 1 meeting. One more and Transcripted names Maya on its own with matching meeting context.")
+        assertEqual(P.explanation(name: "Maya Patel", confirmed: 2, required: 4, tier: .learning, isTrusted: true),
+                    "Confirmed in 2 of 4 meetings. 2 more and Transcripted names Maya on its own with matching meeting context.")
+        assertEqual(P.explanation(name: "Maya Patel", confirmed: 2, required: 2, tier: .auto, isTrusted: true),
+                    "Confirmed in 2 meetings. Transcripted names Maya on its own when the voice is a clear match and meeting context supports it.")
+        assertEqual(P.accessibilityLabel(confirmed: 2, required: 2, tier: .auto),
+                    "Auto, names on its own with matching meeting context")
+        assertEqual(P.accessibilityLabel(confirmed: 5, required: 5, tier: .auto), "Auto, names on its own")
+        assertEqual(P.reviewHint(moment: .savedNew, confirmedBefore: 0, required: 2, isTrusted: true),
+                    P.ReviewHint(text: "Saved · 1 more to auto-name with meeting context", usesPersonColor: false))
+        assertEqual(P.reviewHint(moment: .savedNew, confirmedBefore: 0, required: 5, isTrusted: true),
+                    P.ReviewHint(text: "Saved · 4 more to auto-name", usesPersonColor: false))
+        assertEqual(P.explanation(name: "Maya Patel", confirmed: 2, required: 2, tier: .learning, isTrusted: false),
+                    "A recent correction paused auto-naming for Maya. Keep confirming Maya until the voice is a clear match again.", "context never makes probation promise auto-naming")
     }
 
     runSuite("VoiceOver hears the tier word with the count") {
