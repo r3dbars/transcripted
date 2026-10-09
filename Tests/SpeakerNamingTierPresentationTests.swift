@@ -58,7 +58,7 @@ func testSpeakerNamingTierPresentation() {
         assertEqual(P.reviewHint(moment: .asking, confirmedBefore: 2, required: 5, isTrusted: true), nil, "only the last yes is called out")
         assertEqual(P.reviewHint(moment: .asking, confirmedBefore: 4, required: 5, isTrusted: false), nil, "no promise on probation")
         assertEqual(P.reviewHint(moment: .asking, confirmedBefore: 1, required: 2, isTrusted: true),
-                    P.ReviewHint(text: "One more yes to auto-name", usesPersonColor: true), "lineup bar of 2")
+                    P.ReviewHint(text: "One more yes to auto-name with meeting context", usesPersonColor: true), "lineup bar of 2 is contextual, not generic readiness")
         assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 4, required: 5, isTrusted: true),
                     P.ReviewHint(text: "Named automatically from now on", usesPersonColor: true))
         assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 1, required: 5, isTrusted: true),
@@ -69,6 +69,16 @@ func testSpeakerNamingTierPresentation() {
                     "a corrected person past the bar isn't promised auto-naming")
         assertEqual(P.reviewHint(moment: .savedNew, confirmedBefore: 0, required: 5, isTrusted: true),
                     P.ReviewHint(text: "Saved · 4 more to auto-name", usesPersonColor: false))
+    }
+
+    runSuite("Contextual review progress does not promise automatic naming in every meeting") {
+        typealias P = SpeakerNamingTierPresentation
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 1, required: 2, isTrusted: true),
+                    P.ReviewHint(text: "Auto-named with matching meeting context", usesPersonColor: true))
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 2, required: 5, isTrusted: true),
+                    P.ReviewHint(text: "2 more to go", usesPersonColor: false), "the same saved person is still learning outside a lineup")
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 1, required: 2, isTrusted: false), nil,
+                    "context never overrides a recent correction")
     }
 
     runSuite("The review footer counts people named automatically") {
