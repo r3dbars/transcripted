@@ -158,7 +158,8 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
 
         // The only writable speaker store in this test is newly created here.
         // Keep it open during child execution so recognition must see WAL rows.
-        let speakerDBURL = root.appendingPathComponent("synthetic-speakers.sqlite")
+        let speakerDBURL = root.appendingPathComponent(
+            SpeakerVoiceprintSelection.databaseFileName(forEmbedderIdentifier: nil))
         let speakerStore = SpeakerDatabase(path: speakerDBURL.path)
         let knownName = "Fixture Voice Alpha"
         let knownID = try await seedKnownSpeaker(
