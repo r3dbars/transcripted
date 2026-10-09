@@ -403,6 +403,25 @@ func runMeetingLabSharedDBSelfTests() {
         do { try LabSharedSpeakerDB.beginMeeting("m2", workRoot: workRoot) } catch { nextRuns = false }
         check(saved && nextRuns, "a saved lab_result.json did not record m1 in the marker")
 
+        // MeetingLab's wiring: a shared meeting whose lab_result.json can't be written
+        // throws and stays in progress; a fresh-DB meeting only logs.
+        _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: [], force: true)
+        try LabSharedSpeakerDB.beginMeeting("m1", workRoot: workRoot)
+        let unwritable = scratch.appendingPathComponent("missing-dir/lab_result.json")
+        var wiringThrew = false
+        do {
+            try persistResultOrThrow(["x": 1], to: unwritable, meeting: "m1", workRoot: workRoot, recordShared: true)
+        } catch { wiringThrew = true }
+        check(wiringThrew, "persistResult swallowed a failed shared lab_result.json write")
+        var wiringAdvanced = true
+        do { try LabSharedSpeakerDB.beginMeeting("m2", workRoot: workRoot) } catch { wiringAdvanced = false }
+        check(!wiringAdvanced, "persistResult advanced the marker past an unsaved shared meeting")
+        var freshThrew = false
+        do {
+            try persistResultOrThrow(["x": 1], to: unwritable, meeting: "m1", workRoot: workRoot, recordShared: false)
+        } catch { freshThrew = true }
+        check(!freshThrew, "a fresh-DB meeting's write failure stopped the run")
+
         // Stale-result cleanup must refuse escaping IDs and symlinked meeting dirs.
         let setDirectory = scratch.appendingPathComponent("set", isDirectory: true)
         let goodMeeting = setDirectory.appendingPathComponent("m1", isDirectory: true)

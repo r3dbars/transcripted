@@ -737,14 +737,18 @@ private func encodeResult<T: Encodable>(_ value: T, to url: URL) throws {
 }
 
 /// Writes a meeting's lab_result.json. For a shared-DB meeting it also records the
-/// meeting in the marker, stopping the run if the marker can't be written.
+/// meeting in the marker, stopping the run if either step fails.
 private func persistResult<T: Encodable>(_ value: T, to url: URL, meeting: String, workRoot: URL, recordShared: Bool) {
-    guard recordShared else { write(value, to: url); return }
-    do {
-        try LabSharedSpeakerDB.saveResultThenRecordApplied(meeting, workRoot: workRoot) { try encodeResult(value, to: url) }
-    } catch {
+    do { try persistResultOrThrow(value, to: url, meeting: meeting, workRoot: workRoot, recordShared: recordShared) } catch {
         die("could not save \(meeting)'s lab_result.json or record it in the shared speaker DB marker: \(error.localizedDescription)")
     }
+}
+
+/// The throwing core of `persistResult`, split out so the self-test can drive it.
+/// A fresh-DB meeting's write failure is only logged, as before.
+func persistResultOrThrow<T: Encodable>(_ value: T, to url: URL, meeting: String, workRoot: URL, recordShared: Bool) throws {
+    guard recordShared else { write(value, to: url); return }
+    try LabSharedSpeakerDB.saveResultThenRecordApplied(meeting, workRoot: workRoot) { try encodeResult(value, to: url) }
 }
 
 private func log(_ message: String) {
