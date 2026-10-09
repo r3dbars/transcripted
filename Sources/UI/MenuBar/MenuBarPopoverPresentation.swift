@@ -7,8 +7,9 @@ enum MenuBarPopoverWindowVisibility {
 }
 
 /// Keeps focus local to the menu, including when AppKit refuses its status-item
-/// anchor. The temporary anchor is only used after a refused presentation; it
-/// does not retry a popover that was shown and then dismissed.
+/// anchor or reports the popover shown while its window is on another Space.
+/// The temporary anchor is only used after one of those failures. It does not
+/// retry a popover that was shown and then dismissed.
 @MainActor
 final class MenuBarPopoverPresentation: NSObject {
     private let makeAnchorWindow: @MainActor () -> NSPanel
@@ -62,7 +63,15 @@ final class MenuBarPopoverPresentation: NSObject {
         )
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
 
-        if !popover.isShown, !dismissedDuringPresentation, let screenRect {
+        // isShown stays true when a regular app's popover window is committed
+        // on another Space. That is not a visible menu, so close it and retry once.
+        let shownOnAnotherSpace = popover.isShown
+            && popover.contentViewController?.view.window.map { windowVisibility($0) == .otherSpace } == true
+        if shownOnAnotherSpace {
+            closeShownOnAnotherSpace(popover)
+        }
+
+        if let screenRect, shownOnAnotherSpace || (!popover.isShown && !dismissedDuringPresentation) {
             let panel = makeAnchorWindow()
             panel.styleMask = [.borderless, .nonactivatingPanel]
             panel.isReleasedWhenClosed = false
@@ -101,6 +110,14 @@ final class MenuBarPopoverPresentation: NSObject {
 
         guard popover.isShown else { return }
         popover.contentViewController?.view.window?.makeKey()
+    }
+
+    private func closeShownOnAnotherSpace(_ popover: NSPopover) {
+        explicitlyClosing = true
+        popover.performClose(nil)
+        explicitlyClosing = false
+        dismissedDuringPresentation = false
+        dismissalClick = nil
     }
 
     static func visibility(of window: NSWindow) -> MenuBarPopoverWindowVisibility {
