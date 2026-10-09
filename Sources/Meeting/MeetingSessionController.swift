@@ -83,6 +83,7 @@ extension MeetingSessionController {
         // further down for the narrower, unambiguous "capture.startRecording()
         // is actually engaging the mic" window instead.
         startRecordingCallInFlight = true
+        meetingActionIdentity = UUID()
         defer { startRecordingCallInFlight = false }
         // The call-audio ask belongs to this start: a start that ends without
         // recording drops it, so the next meeting never shows a stale one.

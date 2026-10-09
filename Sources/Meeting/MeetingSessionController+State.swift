@@ -60,9 +60,9 @@ final class MeetingSessionController: ObservableObject {
     /// `MeetingSessionController.State` reference resolving unchanged.
     typealias State = MeetingSessionState
 
-    /// Every state writer advances this, even when the visible state repeats.
-    /// Background archive completion must not settle a newer meeting action.
-    private(set) var stateRevision: UInt64 = 0
+    /// Ownership follows meeting actions, not incidental model-warmup state.
+    /// An older archive must not settle a newer recording/import/retry.
+    var meetingActionIdentity = UUID()
     @Published private(set) var state: State = .idle {
         didSet {
             guard state != oldValue else { return }
@@ -373,7 +373,9 @@ final class MeetingSessionController: ObservableObject {
             )
         }
         #endif
-        stateRevision &+= 1
+        if MeetingSessionStateMachine.isCaptureSessionActive(newState) || newState == .transcribing {
+            meetingActionIdentity = UUID()
+        }
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
         if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
         state = newState
@@ -410,6 +412,7 @@ final class MeetingSessionController: ObservableObject {
         systemAudioPermissionRecoveryNeeded: Bool = false
     ) {
         guard MeetingSessionStateMachine.mayReportUnrelatedFailureAsError(while: state) else { return }
+        meetingActionIdentity = UUID()
         transition(
             to: .error(message),
             reason: reason,
