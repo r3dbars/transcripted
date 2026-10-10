@@ -530,7 +530,6 @@ func testDictationTranscriptStore() {
             assertTrue(afterUndo.hasSuffix(targetSection + "\n"), "cycle \(cycle): undo should append the exact target bytes")
             assertTrue(!afterUndo.hasSuffix("\n\n"), "cycle \(cycle): undo should not leave trailing blank lines")
             snapshots.append(afterUndo)
-            print("DEBUG cycle \(cycle): \(afterUndo.debugDescription)")
         }
 
         // Every cycle adds one same-length newer note and nothing else, so

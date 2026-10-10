@@ -277,7 +277,7 @@ enum DictationTranscriptStore {
                 return .trashedFile(originalURL: url, trashedURL: trashedURL as URL?)
             } else {
                 let header = headerPreface(in: content)
-                let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                let rebuilt = (header + kept.map(droppingTrailingBlankLines).joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
                 try TranscriptFileRewrite.write(rebuilt, to: url)
                 FileManager.default.restrictFileToOwnerOnly(at: url)
                 return .rewrote(url: url, originalContent: content, newContent: rebuilt)
@@ -398,7 +398,7 @@ enum DictationTranscriptStore {
                 try FileManager.default.removeItem(at: url)
             } else {
                 let header = headerPreface(in: content)
-                let rebuilt = (header + kept.joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+                let rebuilt = (header + kept.map(droppingTrailingBlankLines).joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
                 try TranscriptFileRewrite.write(rebuilt, to: url)
                 FileManager.default.restrictFileToOwnerOnly(at: url)
             }
