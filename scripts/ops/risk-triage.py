@@ -12,7 +12,7 @@ runs PR code: it reads the file list and the diff as data from the API, which
 is what makes it safe to run from a pull_request_target workflow.
 
 Safety rules the gate enforces (each is a test in test-risk-triage.py):
-  * path rules decide the tier; the highest match wins; unknown paths are medium.
+  * path rules decide the tier; the highest match wins; unknown paths are high.
   * a required check counts as green only with conclusion "success" on the
     head commit. Missing, pending, skipped, neutral or cancelled is not green.
   * the AI review must exist for the head commit and report no unresolved
@@ -153,9 +153,9 @@ def classify(files: list[dict]) -> dict:
                 source_files += 1
                 source_lines += int(f.get("additions", 0)) + int(f.get("deletions", 0))
             else:
-                if risk == "low":
-                    risk = "medium"
-                reasons.append(f"{name}: not a test/doc/source path")
+                # Unknown paths fail closed: high, never auto-merged.
+                risk = "high"
+                reasons.append(f"{name}: unknown path (not test/doc/source), defaults to high")
     if risk == "low" and source_files:
         has_test = any(_any(f.get("filename", ""), LOW_PATTERNS[:4]) for f in files)
         if source_files > LOW_MAX_SOURCE_FILES or source_lines > LOW_MAX_SOURCE_LINES or not has_test:

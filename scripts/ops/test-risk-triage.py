@@ -43,8 +43,9 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(risk("Sources/UI/A.swift", "Sources/UI/B.swift", "Sources/UI/C.swift",
                               "Tests/ATests.swift", lines=1)["risk"], "medium")
 
-    def test_unknown_path_is_medium(self):
-        self.assertEqual(risk("scripts/dev/whatever.py")["risk"], "medium")
+    def test_unknown_path_is_high(self):
+        self.assertEqual(risk("scripts/dev/whatever.py")["risk"], "high")
+        self.assertEqual(risk("Sources/UI/Foo.swift", "Tests/FooTests.swift", "Makefile")["risk"], "high")
 
     def test_release_and_signing_paths_need_owner(self):
         for path in ("scripts/release/update-cask.sh", "Casks/transcripted.rb", "docs/appcast.xml",
