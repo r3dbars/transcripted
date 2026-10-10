@@ -41,9 +41,11 @@ public enum SpeakerNamingPolicy {
     }
 
     /// Whether an opt-in likely name may be written. Silent naming still uses
-    /// `shouldAutoAccept`. Likely naming never relaxes health, runner-up, or
-    /// "never confirmed" gates; it only covers confirmation count and a
-    /// similarity between this floor and the silent bar.
+    /// `shouldAutoAccept`. Likely naming never relaxes health, unknown
+    /// runner-up, or "never confirmed" gates. It covers confirmation count
+    /// and a similarity between this floor and the silent bar, and it
+    /// allows a close runner-up only when the actual margin still clears
+    /// `inviteeMarginMin`.
     public static func shouldNameAsLikely(
         blockers: [SpeakerNamingBlocker],
         thresholds: SpeakerEmbeddingThresholds = .weSpeaker
@@ -56,6 +58,8 @@ public enum SpeakerNamingPolicy {
                 continue
             case .similarityBelowBar(let similarity, _):
                 guard similarity > floor else { return false }
+            case .runnerUpTooClose(let margin, _):
+                guard margin >= thresholds.inviteeMarginMin else { return false }
             default:
                 return false
             }

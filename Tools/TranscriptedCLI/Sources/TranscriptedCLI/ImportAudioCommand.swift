@@ -44,7 +44,7 @@ struct ImportAudio: AsyncParsableCommand {
     @Option(name: .long, help: "Diarization engine: app (default; follows the app's hidden switch / TRANSCRIPTED_DIARIZATION_BACKEND, Nemotron unless changed), nemotron, or pyannote.")
     var diarizationEngine = "app"
 
-    @Flag(name: .long, help: "Also name a speaker held back only by confirmation count and/or a similarity below the silent-naming bar but above the model's invitee/suggest floor, written as \"Name (likely)\". Off by default.")
+    @Flag(name: .long, help: "Also name a speaker held back only by confirmation count and/or a similarity below the silent-naming bar but above the model's invitee/suggest floor, when the top match also beats the runner-up by the model's invitee margin, written as \"Name (likely)\". Off by default. Never a confirmed identity.")
     var nameLikelySpeakers = false
 
     @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory.")

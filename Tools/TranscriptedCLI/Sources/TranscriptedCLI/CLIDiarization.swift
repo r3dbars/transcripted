@@ -63,21 +63,50 @@ enum CLIDiarization {
 
     /// `app` follows the same rule the Mac app uses: environment, then the
     /// stored preference, then Nemotron. An explicit `nemotron` or `pyannote`
-    /// wins.
+    /// wins. An unknown explicit value is an error, never a silent Nemotron.
     static func storedAppPreference(
         appDefaults: [String: Any]? = UserDefaults.standard.persistentDomain(forName: appDefaultsDomain)
     ) -> String? {
         appDefaults?[preferenceKey] as? String
     }
 
+    struct UnknownEngine: Error, LocalizedError, Equatable {
+        let value: String
+        var errorDescription: String? {
+            "Unknown diarization engine '\(value)'. Use \(CLIDiarization.engineChoices.joined(separator: ", "))."
+        }
+    }
+
+    struct NemotronUnavailable: Error, LocalizedError, Equatable {
+        var errorDescription: String? {
+            "Nemotron diarization needs the meeting-import CLI shipped in Transcripted.app. Pass --diarization-engine pyannote, or rebuild with TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1."
+        }
+    }
+
+    struct EngineSelection: Equatable {
+        var engine: String
+        var fallbackNote: String?
+    }
+
+    static var nemotronAvailableInThisBuild: Bool {
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+        true
+        #else
+        false
+        #endif
+    }
+
     static func resolvedEngine(
         choice: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         storedPreference: String? = nil
-    ) -> String {
+    ) throws -> String {
         let trimmed = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if trimmed != "app" {
-            return engineChoices.contains(trimmed) ? trimmed : "nemotron"
+            guard engineChoices.contains(trimmed) else {
+                throw UnknownEngine(value: trimmed)
+            }
+            return trimmed
         }
         #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
         return DiarizationBackend.effective(
@@ -95,6 +124,31 @@ enum CLIDiarization {
         }
         return "nemotron"
         #endif
+    }
+
+    /// The engine this build can actually run. A thin audio-only CLI has no
+    /// Core Nemotron path, so `app` (which resolves to Nemotron) falls back
+    /// to pyannote and says so. An explicit `nemotron` still errors.
+    static func runnableEngine(
+        choice: String,
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        storedPreference: String? = nil,
+        nemotronAvailable: Bool = nemotronAvailableInThisBuild
+    ) throws -> EngineSelection {
+        let resolved = try resolvedEngine(
+            choice: choice, environment: environment, storedPreference: storedPreference
+        )
+        let trimmedChoice = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard resolved == "nemotron", !nemotronAvailable else {
+            return EngineSelection(engine: resolved, fallbackNote: nil)
+        }
+        guard trimmedChoice != "nemotron" else {
+            throw NemotronUnavailable()
+        }
+        return EngineSelection(
+            engine: "pyannote",
+            fallbackNote: "Nemotron isn't available in this CLI build; falling back to pyannote."
+        )
     }
 }
 

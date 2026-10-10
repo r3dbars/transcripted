@@ -12,10 +12,10 @@ import TranscriptedCore
 ///   - the bundle provider hands Nemotron its own folder, so a pyannote path
 ///     cannot make Nemotron fail-and-fall-back.
 final class MeetingImportDiarizationTests: XCTestCase {
-    func testAppChoiceDefaultsToTheAppNemotronEngine() {
+    func testAppChoiceDefaultsToTheAppNemotronEngine() throws {
         XCTAssertEqual(MeetingImportDiarization.hostDefault, .nemotron)
         XCTAssertEqual(
-            MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: nil),
+            try MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: nil),
             .nemotron
         )
         XCTAssertEqual(
@@ -28,14 +28,14 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
     }
 
-    func testAppChoiceHonorsTheStoredPreferenceAndEnvironment() {
+    func testAppChoiceHonorsTheStoredPreferenceAndEnvironment() throws {
         let storedPyannote: [String: Any] = [MeetingImportDiarization.preferenceKey: "pyannote"]
         XCTAssertEqual(
-            MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: storedPyannote),
+            try MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: storedPyannote),
             .pyannote
         )
         XCTAssertEqual(
-            MeetingImportDiarization.backend(
+            try MeetingImportDiarization.backend(
                 choice: "app",
                 environment: [MeetingImportDiarization.environmentKey: "NEMOTRON"],
                 appDefaults: storedPyannote
@@ -44,7 +44,7 @@ final class MeetingImportDiarizationTests: XCTestCase {
             "env wins over the stored preference, like the app"
         )
         XCTAssertEqual(
-            MeetingImportDiarization.backend(
+            try MeetingImportDiarization.backend(
                 choice: "app",
                 environment: [MeetingImportDiarization.environmentKey: "garbage"],
                 appDefaults: nil
@@ -54,19 +54,29 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
     }
 
-    func testExplicitEngineOverridesTheAppChoice() {
+    func testExplicitEngineOverridesTheAppChoice() throws {
         let storedPyannote: [String: Any] = [MeetingImportDiarization.preferenceKey: "pyannote"]
         let envNemotron = [MeetingImportDiarization.environmentKey: "nemotron"]
         XCTAssertEqual(
-            MeetingImportDiarization.backend(
+            try MeetingImportDiarization.backend(
                 choice: "pyannote", environment: envNemotron, appDefaults: ["diarization-backend-preference": "nemotron"]
             ),
             .pyannote
         )
         XCTAssertEqual(
-            MeetingImportDiarization.backend(choice: "nemotron", environment: [:], appDefaults: storedPyannote),
+            try MeetingImportDiarization.backend(choice: "nemotron", environment: [:], appDefaults: storedPyannote),
             .nemotron
         )
+    }
+
+    func testUnknownEngineIsAClearErrorInsteadOfSilentNemotron() {
+        XCTAssertThrowsError(
+            try MeetingImportDiarization.backend(choice: "sortformer", environment: [:], appDefaults: nil)
+        ) { error in
+            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            XCTAssertTrue(message.contains("sortformer"), message)
+            XCTAssertFalse(message.contains("falling back"), message)
+        }
     }
 
     func testBundleProviderDoesNotHandThePyannoteFolderToNemotron() {
@@ -82,7 +92,7 @@ final class MeetingImportDiarizationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let resources = root.appendingPathComponent("Relocated.app/Contents/Resources")
-        let bundle = resources.appendingPathComponent("nemotron-diarizer-models")
+        let bundle = resources.appendingPathComponent("nemotron-diarizer-models", isDirectory: true)
         try FileManager.default.createDirectory(
             at: bundle.appendingPathComponent("Nemotron3Diarizer_fast128.mlmodelc"),
             withIntermediateDirectories: true

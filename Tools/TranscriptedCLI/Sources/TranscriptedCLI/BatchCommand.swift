@@ -56,10 +56,14 @@ struct Batch: AsyncParsableCommand {
         // Create output directory if needed
         try FileManager.default.createDirectory(at: outDirURL, withIntermediateDirectories: true)
 
-        let engine = CLIDiarization.resolvedEngine(
+        let selection = try CLIDiarization.runnableEngine(
             choice: diarizationEngine,
             storedPreference: CLIDiarization.storedAppPreference()
         )
+        if let note = selection.fallbackNote {
+            FileHandle.standardError.write(Data(note + "\n".utf8))
+        }
+        let engine = selection.engine
         if config != nil && engine != "pyannote" {
             throw ValidationError("--config is a pyannote OfflineDiarizerConfig file. Pass --diarization-engine pyannote to use it.")
         }

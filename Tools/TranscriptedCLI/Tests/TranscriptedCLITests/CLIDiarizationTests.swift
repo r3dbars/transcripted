@@ -21,13 +21,13 @@ final class CLIDiarizationTests: XCTestCase {
         XCTAssertThrowsError(try Batch.parse(["clips", "--diarization-engine", "sortformer"]))
     }
 
-    func testAppChoiceResolvesToNemotronUnlessTheAppSaysOtherwise() {
+    func testAppChoiceResolvesToNemotronUnlessTheAppSaysOtherwise() throws {
         XCTAssertEqual(
-            CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: nil),
+            try CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: nil),
             "nemotron"
         )
         XCTAssertEqual(
-            CLIDiarization.resolvedEngine(
+            try CLIDiarization.resolvedEngine(
                 choice: "app",
                 environment: [:],
                 storedPreference: "pyannote"
@@ -35,7 +35,7 @@ final class CLIDiarizationTests: XCTestCase {
             "pyannote"
         )
         XCTAssertEqual(
-            CLIDiarization.resolvedEngine(
+            try CLIDiarization.resolvedEngine(
                 choice: "app",
                 environment: [CLIDiarization.environmentKey: "NEMOTRON"],
                 storedPreference: "pyannote"
@@ -43,9 +43,57 @@ final class CLIDiarizationTests: XCTestCase {
             "nemotron"
         )
         XCTAssertEqual(
-            CLIDiarization.resolvedEngine(choice: "pyannote", environment: [:], storedPreference: "nemotron"),
+            try CLIDiarization.resolvedEngine(choice: "pyannote", environment: [:], storedPreference: "nemotron"),
             "pyannote"
         )
+    }
+
+    func testUnknownEngineIsAClearErrorInsteadOfSilentNemotron() {
+        XCTAssertThrowsError(
+            try CLIDiarization.resolvedEngine(choice: "sortformer", environment: [:], storedPreference: nil)
+        ) { error in
+            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            XCTAssertTrue(message.contains("sortformer"), message)
+            XCTAssertTrue(message.contains("app"), message)
+            XCTAssertTrue(message.contains("nemotron"), message)
+            XCTAssertTrue(message.contains("pyannote"), message)
+            XCTAssertFalse(message.contains("falling back"), message)
+        }
+        XCTAssertThrowsError(
+            try CLIDiarization.resolvedEngine(choice: "whisper", environment: [:], storedPreference: nil)
+        )
+    }
+
+    func testThinAudioBuildFallsBackToPyannoteWhenNemotronIsUnavailable() throws {
+        let fallback = try CLIDiarization.runnableEngine(
+            choice: "app", environment: [:], storedPreference: nil, nemotronAvailable: false
+        )
+        XCTAssertEqual(fallback.engine, "pyannote")
+        let note = try XCTUnwrap(fallback.fallbackNote)
+        XCTAssertTrue(note.localizedCaseInsensitiveContains("nemotron"), note)
+        XCTAssertTrue(note.localizedCaseInsensitiveContains("pyannote"), note)
+
+        let explicitPyannote = try CLIDiarization.runnableEngine(
+            choice: "pyannote", environment: [:], storedPreference: "nemotron", nemotronAvailable: false
+        )
+        XCTAssertEqual(explicitPyannote.engine, "pyannote")
+        XCTAssertNil(explicitPyannote.fallbackNote)
+
+        let available = try CLIDiarization.runnableEngine(
+            choice: "app", environment: [:], storedPreference: nil, nemotronAvailable: true
+        )
+        XCTAssertEqual(available.engine, "nemotron")
+        XCTAssertNil(available.fallbackNote)
+    }
+
+    func testExplicitNemotronDoesNotFallBackWhenUnavailable() {
+        XCTAssertThrowsError(
+            try CLIDiarization.runnableEngine(
+                choice: "nemotron", environment: [:], storedPreference: nil, nemotronAvailable: false
+            )
+        ) { error in
+            XCTAssertTrue(error is CLIDiarization.NemotronUnavailable)
+        }
     }
 
     func testEveryCLIPathSharesTheAppTunedPyannoteWindowing() {
@@ -97,18 +145,18 @@ extension CLIDiarizationTests {
         XCTAssertEqual(diarize.minGapDuration, app.minGapDuration)
     }
 
-    func testImportAudioAndDiarizeResolveTheSameEngine() {
+    func testImportAudioAndDiarizeResolveTheSameEngine() throws {
         XCTAssertEqual(CLIDiarization.appDefaultsDomain, SpeakerVoiceprintSelection.appDefaultsDomain)
         XCTAssertEqual(CLIDiarization.preferenceKey, DiarizationBackend.preferenceKey)
         XCTAssertEqual(CLIDiarization.environmentKey, DiarizationBackend.environmentKey)
         XCTAssertEqual(
-            MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: nil).rawValue,
-            CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: nil)
+            try MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: nil).rawValue,
+            try CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: nil)
         )
         let stored: [String: Any] = [MeetingImportDiarization.preferenceKey: "pyannote"]
         XCTAssertEqual(
-            MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: stored).rawValue,
-            CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: "pyannote")
+            try MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: stored).rawValue,
+            try CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: "pyannote")
         )
     }
 }

@@ -265,18 +265,24 @@ extension TranscriptSaver {
 
             let source = utterance.channel == 0 ? "Mic" : "System"
 
+            let mapping: SpeakerMapping?
             let speakerLabel: String
             if utterance.channel == 0 {
-                let speakerKey = "mic_\(utterance.speakerId)"
-                speakerLabel = speakerMappings[speakerKey]?.displayName ?? "You"
+                mapping = speakerMappings["mic_\(utterance.speakerId)"]
+                speakerLabel = mapping?.displayName ?? "You"
             } else {
-                let speakerKey = "system_\(utterance.speakerId)"
-                speakerLabel = speakerMappings[speakerKey]?.displayName ?? "Speaker \(utterance.speakerId)"
+                mapping = speakerMappings["system_\(utterance.speakerId)"]
+                speakerLabel = mapping?.displayName ?? "Speaker \(utterance.speakerId)"
             }
 
-            // Obsidian: wrap named speakers in [[wiki links]]
+            // Obsidian: wrap confirmed names in [[wiki links]]. Likely /
+            // unconfirmed names stay plain text so they cannot create person
+            // pages or tags.
             let displayLabel: String
-            if obsidianEnabled && speakerLabel != "You" && !speakerLabel.hasPrefix("Speaker ") {
+            if obsidianEnabled,
+               mapping?.isConfirmedIdentity == true,
+               speakerLabel != "You",
+               !speakerLabel.hasPrefix("Speaker ") {
                 displayLabel = "[[\(speakerLabel)]]"
             } else {
                 displayLabel = speakerLabel

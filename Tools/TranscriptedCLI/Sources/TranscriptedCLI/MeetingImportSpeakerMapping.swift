@@ -20,7 +20,7 @@ enum MeetingImportSpeakerMapping {
     /// Suffix on a likely name (`--name-likely-speakers`), so a reader can tell it
     /// from a silent name. The frontmatter source stays `db_pending` (not `db`), so
     /// tools and the voiceprint migration never treat it as a confirmed identity.
-    static let likelyNameSuffix = " (likely)"
+    static let likelyNameSuffix = SpeakerMapping.likelyNameSuffix
 
     static func resolve(
         result: TranscriptionResult,
@@ -126,14 +126,16 @@ enum MeetingImportSpeakerMapping {
                 thresholds: thresholds
             )
             // Opt-in: a match held back only by confirmation count and/or a
-            // similarity between the model's invitee bar and the silent bar.
+            // similarity between the model's invitee bar and the silent bar,
+            // and only when the top match also beats the runner-up by
+            // inviteeMarginMin. Never a confirmed identity.
             if nameLikelySpeakers,
                SpeakerNamingPolicy.shouldNameAsLikely(blockers: blockers, thresholds: thresholds) {
                 resolution.mappings[key] = SpeakerMapping(
                     speakerId: speakerID,
                     identifiedName: name + likelyNameSuffix,
                     confidence: .medium,
-                    isConfirmedIdentity: true
+                    isConfirmedIdentity: false
                 )
                 resolution.reasons[key] = likelyReason(name: name, blockers: blockers)
                 continue

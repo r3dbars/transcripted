@@ -182,9 +182,11 @@ leaves them numbered. Importing the same audio file again doesn't count as a new
 meeting. `--name-likely-speakers` opts in to naming someone held back only by the
 confirmation count (confirmed at least once) and/or a similarity below the
 silent-naming bar but above the model's invitee/suggest floor (0.815 for
-ReDimNet2, 0.80 for WeSpeaker), written as `NAME (likely)`, with frontmatter
-`source: db_pending` so it never reads as a confirmed name. It never counts as
-a confirmation; confirm people in the app.
+ReDimNet2, 0.80 for WeSpeaker), and only when the top match also beats the
+runner-up by the model's invitee margin (0.106 / 0.10). Written as
+`NAME (likely)`, with `isConfirmedIdentity` false and frontmatter
+`source: db_pending`, so it never becomes a wiki-link, person page, or
+`speaker/` tag. It never counts as a confirmation; confirm people in the app.
 
 **Why a speaker stayed numbered.** stderr names the voiceprint model and the
 database it read, then gives one line per speaker that wasn't named, e.g.:

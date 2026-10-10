@@ -17,12 +17,16 @@ enum MeetingImportDiarization {
         appDefaults: [String: Any]? = UserDefaults.standard.persistentDomain(
             forName: CLIDiarization.appDefaultsDomain
         )
-    ) -> DiarizationBackend {
-        DiarizationBackend(rawValue: CLIDiarization.resolvedEngine(
+    ) throws -> DiarizationBackend {
+        let raw = try CLIDiarization.resolvedEngine(
             choice: choice,
             environment: environment,
             storedPreference: appDefaults?[preferenceKey] as? String
-        )) ?? hostDefault
+        )
+        guard let backend = DiarizationBackend(rawValue: raw) else {
+            throw CLIDiarization.UnknownEngine(value: raw)
+        }
+        return backend
     }
 
     /// `DiarizationService` asks for a named bundle. Nemotron and pyannote must

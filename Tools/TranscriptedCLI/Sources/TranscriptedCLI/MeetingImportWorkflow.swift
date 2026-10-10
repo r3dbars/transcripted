@@ -97,7 +97,7 @@ enum MeetingImportWorkflow {
             identificationUnavailable = "the saved speaker database holds a different voiceprint model's people"
         }
         let speech = await MainActor.run { MeetingImportSpeechEngine(manager: manager) }
-        var backend = MeetingImportDiarization.backend(choice: command.diarizationEngine)
+        var backend = try MeetingImportDiarization.backend(choice: command.diarizationEngine)
         if command.noDownload, backend == .nemotron, modelPaths.nemotron == nil {
             if command.diarizationEngine != "app" {
                 throw ValidationError("--no-download requires local Nemotron models when --diarization-engine is nemotron. Open Transcripted once or omit --no-download.")
