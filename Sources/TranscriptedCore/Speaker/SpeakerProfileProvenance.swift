@@ -542,7 +542,7 @@ extension SpeakerDatabase {
                     label: "mark event undone",
                     expectedChanges: 1
                 )
-                try trimReassignmentLogImpl()
+                try trimReassignmentLogImpl(undoing: event.rowid, movedIds: event.movedProvenanceIds, from: event.targetId, to: event.sourceId)
             }
         } catch {
             AppLogger.speakers.error("Un-merge transaction failed", [
@@ -576,8 +576,8 @@ extension SpeakerDatabase {
             // The move and its log row commit together, or not at all.
             try transaction {
                 try logReassignmentOrThrowImpl(contributionId, from: fromProfileId, to: toProfileId)
-                execBind("UPDATE speaker_provenance SET profile_id = ? WHERE id = ?;",
-                         [toProfileId.uuidString, contributionId.uuidString], label: "reassign contribution")
+                try execBindOrThrow("UPDATE speaker_provenance SET profile_id = ? WHERE id = ?;",
+                    [toProfileId.uuidString, contributionId.uuidString], label: "reassign contribution", expectedChanges: 1)
                 ok = rederiveProfileFromContributionsImpl(fromProfileId) && ok
                 ok = rederiveProfileFromContributionsImpl(toProfileId) && ok
             }

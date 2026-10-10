@@ -46,9 +46,30 @@ extension SpeakerDatabase {
         try requireDone(statement, operation: "step reassignment log insert", expectedChanges: 1)
     }
 
-    /// After an un-merge: drop moves older than every merge still undoable. They
+    /// After an un-merge. First rewrite history as if the merge never happened: a
+    /// move after it of one of the absorbed rows that left the keeper really left
+    /// the absorbed profile, so an older merge into the same keeper won't think the
+    /// keeper owned it. Then drop moves older than every merge still undoable: they
     /// are pre-merge for all of them, so no later un-merge can need them.
-    func trimReassignmentLogImpl() throws {
+    func trimReassignmentLogImpl(undoing eventRowid: Int64, movedIds: [UUID], from keeperId: UUID, to sourceId: UUID) throws {
+        if !movedIds.isEmpty {
+            let placeholders = Array(repeating: "?", count: movedIds.count).joined(separator: ",")
+            let rebase = try prepareStatement(
+                """
+                UPDATE speaker_contribution_reassignments SET from_profile_id = ?
+                WHERE merge_events_high >= ? AND from_profile_id = ? AND contribution_id IN (\(placeholders));
+                """,
+                operation: "prepare reassignment log rebase"
+            )
+            defer { sqlite3_finalize(rebase) }
+            sqlite3_bind_text(rebase, 1, (sourceId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_int64(rebase, 2, eventRowid)
+            sqlite3_bind_text(rebase, 3, (keeperId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            for (offset, id) in movedIds.enumerated() {
+                sqlite3_bind_text(rebase, Int32(offset + 4), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            }
+            try requireDone(rebase, operation: "step reassignment log rebase")
+        }
         let statement = try prepareStatement(
             """
             DELETE FROM speaker_contribution_reassignments WHERE merge_events_high < COALESCE(

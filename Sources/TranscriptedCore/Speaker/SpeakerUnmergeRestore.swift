@@ -196,8 +196,10 @@ extension SpeakerDatabase {
 
     /// Un-merge: move the absorbed profile's rows back from the keeper. A row the
     /// user reassigned after the merge (away, or away and back) stays where it was
-    /// put; `ownershipChangesImpl` then accounts for it. Every other moved row must
-    /// still be on the keeper, or the ledger is inconsistent and un-merge rolls back.
+    /// put; `ownershipChangesImpl` then accounts for it. A row moved before the
+    /// reassignment log existed isn't in `reassigned` and is no longer on the
+    /// keeper: it stays put too (snapshot-only fallback), and is logged. The
+    /// UPDATE must move exactly the rows counted on the keeper.
     func restoreMovedProvenanceImpl(
         _ movedIds: [UUID], skipping reassigned: [PostMergeReassignment], sourceId: UUID, targetId: UUID
     ) throws {
@@ -212,15 +214,34 @@ extension SpeakerDatabase {
             return
         }
         let placeholders = Array(repeating: "?", count: eligible.count).joined(separator: ",")
-        let statement = try prepareStatement(
-            "UPDATE speaker_provenance SET profile_id = ? WHERE profile_id = ? AND id IN (\(placeholders));",
-            operation: "prepare unmerge provenance restore"
-        )
-        defer { sqlite3_finalize(statement) }
-        let values = [sourceId, targetId] + eligible
-        for (offset, value) in values.enumerated() {
-            sqlite3_bind_text(statement, Int32(offset + 1), (value.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        func bound(_ sql: String, _ operation: String) throws -> OpaquePointer? {
+            let statement = try prepareStatement(sql, operation: operation)
+            let values = [sourceId, targetId] + eligible
+            for (offset, value) in values.enumerated() {
+                sqlite3_bind_text(statement, Int32(offset + 1), (value.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            }
+            return statement
         }
-        try requireDone(statement, operation: "step unmerge provenance restore", expectedChanges: Int32(eligible.count))
+        // ?1 (source) is unused by the count; binding it keeps one parameter layout.
+        let count = try bound(
+            "SELECT COUNT(*) FROM speaker_provenance WHERE ?1 IS NOT NULL AND profile_id = ?2 AND id IN (\(placeholders));",
+            "prepare unmerge provenance count"
+        )
+        defer { sqlite3_finalize(count) }
+        guard sqlite3_step(count) == SQLITE_ROW else {
+            throw SQLiteOperationError(operation: "count unmerge provenance", code: sqlite3_errcode(db), detail: dbErrorMessage())
+        }
+        let onKeeper = sqlite3_column_int(count, 0)
+        if Int(onKeeper) < eligible.count {
+            AppLogger.speakers.warning("Un-merge left absorbed rows moved before the reassignment log existed", [
+                "sourceId": sourceId.uuidString, "unlogged": "\(eligible.count - Int(onKeeper))",
+            ])
+        }
+        let update = try bound(
+            "UPDATE speaker_provenance SET profile_id = ?1 WHERE profile_id = ?2 AND id IN (\(placeholders));",
+            "prepare unmerge provenance restore"
+        )
+        defer { sqlite3_finalize(update) }
+        try requireDone(update, operation: "step unmerge provenance restore", expectedChanges: onKeeper)
     }
 }
