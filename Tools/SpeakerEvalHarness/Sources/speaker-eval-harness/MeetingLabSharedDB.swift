@@ -86,7 +86,7 @@ enum LabSharedSpeakerDB {
     /// The run fingerprint: `fingerprintArgs` plus the diarizer that actually
     /// initialized (`activeDiarizer`, from `DiarizationService.activeRunDescriptor`).
     static func runFingerprint(args: [String], activeDiarizer: String) -> [String] {
-        fingerprintArgs(args)
+        fingerprintArgs(args) + ["--active-diarizer", activeDiarizer]
     }
 
     struct EmptySelection: Error, CustomStringConvertible {
@@ -97,9 +97,15 @@ enum LabSharedSpeakerDB {
     /// The meetings `--only` / `--limit` select, in series order. Call before
     /// `prepare`, so a selection that runs nothing can't empty the DB first.
     static func selectMeetings(_ ids: [String], only: Set<String>?, limit: Int) throws -> [String] {
+        if limit <= 0 { throw EmptySelection(reason: "--limit \(limit)") }
         var selected = ids
-        if let only { selected = selected.filter { only.contains($0) } }
-        return Array(selected.prefix(max(0, limit)))
+        if let only {
+            let unknown = only.subtracting(ids)
+            if !unknown.isEmpty { throw EmptySelection(reason: "--only names unknown meeting(s): \(unknown.sorted().joined(separator: ", "))") }
+            selected = selected.filter { only.contains($0) }
+        }
+        if selected.isEmpty { throw EmptySelection(reason: "no meeting matches the selection") }
+        return Array(selected.prefix(limit))
     }
 
     /// sha256 of the files whose contents change results: the --embedder-thresholds
@@ -130,21 +136,32 @@ enum LabSharedSpeakerDB {
     }
 
     /// sha256 over every regular file in a model bundle (or the file itself),
-    /// keyed by relative path in sorted order. "unreadable" if any read fails.
-    static func bundleHash(_ url: URL, fileManager: FileManager = .default) -> String {
+    /// keyed by relative path in sorted order, following symlinks (up to 8 deep)
+    /// to the files or directories they point at. "unreadable" if any read fails.
+    static func bundleHash(_ url: URL, fileManager: FileManager = .default, depth: Int = 0) -> String {
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir) else { return "unreadable" }
         if !isDir.boolValue { return (try? sha256Hex(of: url)) ?? "unreadable" }
         guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey]) else {
             return "unreadable"
         }
-        let base = url.resolvingSymlinksInPath().path
+        let base = url.standardizedFileURL.path
         var entries: [String] = []
         for case let file as URL in enumerator {
-            guard (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            // Key by the path inside the bundle (not the resolved target), and
+            // follow symlinks: a symlinked weights file or directory is content too.
+            let filePath = file.standardizedFileURL.path
+            let rel = filePath.hasPrefix(base) ? String(filePath.dropFirst(base.count)) : filePath
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            if values?.isSymbolicLink == true {
+                guard depth < 8 else { return "unreadable" }
+                let nested = bundleHash(file.resolvingSymlinksInPath(), fileManager: fileManager, depth: depth + 1)
+                guard nested != "unreadable" else { return "unreadable" }
+                entries.append(rel + "->{" + nested + "}")
+                continue
+            }
+            guard values?.isRegularFile == true else { continue }
             guard let hash = try? sha256Hex(of: file) else { return "unreadable" }
-            let path = file.resolvingSymlinksInPath().path
-            let rel = path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
             entries.append(rel + "=" + hash)
         }
         return entries.sorted().joined(separator: "\n")
