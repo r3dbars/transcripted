@@ -415,6 +415,81 @@ func testDictationTranscriptStore() {
             "undo should restore the deleted entry once and keep every other entry exactly once"
         )
     }
+
+    runSuite("DictationTranscriptStore.restoreDeletedEntry — undo after a newer save keeps hand-edited trailing whitespace") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let dayFile = outputDir.appendingPathComponent("Dictations_2026-04-12.md")
+        let trailingBody = "hand edited body   "
+        let markdown = """
+        ---
+        title: "Dictations for April 12, 2026"
+        date: 2026-04-12
+        capture_type: dictation_day
+        ---
+
+        # Dictations for April 12, 2026
+
+        ## 10:05 AM - Hand edited note
+
+        Entry ID: `dictation-hand-edited`
+        Captured: 2026-04-12T10:05:00Z
+        Source app: Notes
+        Delivery: pasted
+        Words: 3
+        Characters: 16
+
+        \(trailingBody)
+        ## 10:10 AM - Keeper note
+
+        Entry ID: `dictation-keeper`
+        Captured: 2026-04-12T10:10:00Z
+        Source app: Notes
+        Delivery: pasted
+        Words: 2
+        Characters: 11
+
+        keeper text
+        """
+        try? markdown.write(to: dayFile, atomically: true, encoding: .utf8)
+
+        guard let edited = DictationTranscriptStore.recentSavedDictations(limit: 10, directory: outputDir)
+            .first(where: { $0.entryID == "dictation-hand-edited" }),
+            let undo = try? DictationTranscriptStore.deleteEntryReversibly(edited) else {
+            assertionFailure("Expected to delete the hand-edited entry reversibly")
+            return
+        }
+
+        _ = try? DictationTranscriptWriter.save(
+            text: "newer note after delete",
+            sourceApp: nil,
+            delivery: .pasted,
+            createdAt: isoDate("2026-04-12T10:15:00Z"),
+            directory: outputDir
+        )
+
+        do {
+            try DictationTranscriptStore.restoreDeletedEntry(undo)
+        } catch {
+            assertionFailure("restoreDeletedEntry should not throw: \(error)")
+        }
+
+        let restored = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
+        assertTrue(
+            restored.contains(trailingBody),
+            "undo should write the original section bytes, including trailing spaces the user left"
+        )
+        let texts = DictationTranscriptStore.recentSavedDictations(limit: 20, directory: outputDir).map(\.text).sorted()
+        assertEqual(
+            texts,
+            ["hand edited body", "keeper text", "newer note after delete"],
+            "undo should restore the edited entry once and keep the newer save"
+        )
+    }
 }
 
 private func temporaryDictationStoreTestRoot(fileManager: FileManager) -> URL {
