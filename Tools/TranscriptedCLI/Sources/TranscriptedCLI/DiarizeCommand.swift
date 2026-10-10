@@ -111,14 +111,14 @@ struct Diarize: AsyncParsableCommand {
             )
         }
 
-        let timings: DiarizeTimingsOutput? = result.timings.map { t in
+        let timings = result.timings.map { t in
             DiarizeTimingsOutput(
                 segmentationSeconds: t.segmentationSeconds,
                 embeddingSeconds: t.embeddingExtractionSeconds,
                 clusteringSeconds: t.speakerClusteringSeconds,
                 totalSeconds: t.totalProcessingSeconds
             )
-        }
+        } ?? .missing
 
         try DiarizeOutputBuilder.write(
             DiarizeFileOutput(

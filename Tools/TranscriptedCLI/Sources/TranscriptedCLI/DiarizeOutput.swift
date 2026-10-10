@@ -16,6 +16,15 @@ struct DiarizeTimingsOutput: Encodable, Equatable {
     let embeddingSeconds: Double
     let clusteringSeconds: Double
     let totalSeconds: Double
+
+    /// JSONEncoder drops nil optionals, which would remove the existing
+    /// `timings` key. Engines without measured stages still emit the object.
+    static let missing = DiarizeTimingsOutput(
+        segmentationSeconds: 0,
+        embeddingSeconds: 0,
+        clusteringSeconds: 0,
+        totalSeconds: 0
+    )
 }
 
 struct DiarizeFileOutput: Encodable, Equatable {
@@ -23,7 +32,7 @@ struct DiarizeFileOutput: Encodable, Equatable {
     let segments: [DiarizeSegmentOutput]
     let speakerCount: Int
     let processingSeconds: Double
-    let timings: DiarizeTimingsOutput?
+    let timings: DiarizeTimingsOutput
     let engine: String
 }
 

@@ -228,7 +228,7 @@ final class MeetingImportDiarizationTests: XCTestCase {
                 segments: [],
                 speakerCount: 0,
                 processingSeconds: 0.1,
-                timings: nil,
+                timings: .missing,
                 engine: loaded.engine
             )
         )
@@ -238,7 +238,7 @@ final class MeetingImportDiarizationTests: XCTestCase {
             "audioFile", "segments", "speakerCount", "processingSeconds", "timings"
         ]
         XCTAssertEqual(existingTopLevel.subtracting(object.keys), [])
-        XCTAssertTrue(object["timings"] is NSNull)
+        XCTAssertNotNil(object["timings"] as? [String: Any])
     }
 
     func testNoDownloadChecksOnlyTheSelectedEngineModels() {

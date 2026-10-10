@@ -58,20 +58,23 @@ final class DiarizeOutputTests: XCTestCase {
         XCTAssertEqual(object["engine"] as? String, "nemotron")
     }
 
-    func testDiarizeJSONKeepsATimingsKeyWhenTheEngineHasNone() throws {
+    func testDiarizeJSONKeepsATimingsObjectWhenTheEngineHasNone() throws {
         let data = try DiarizeOutputBuilder.encode(
             DiarizeFileOutput(
                 audioFile: "memo.wav",
                 segments: [],
                 speakerCount: 0,
                 processingSeconds: 0.5,
-                timings: nil,
+                timings: .missing,
                 engine: "nemotron"
             )
         )
         let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        XCTAssertTrue(object.keys.contains("timings"), "Nemotron still emits the existing timings key")
-        XCTAssertTrue(object["timings"] is NSNull)
+        let timings = try XCTUnwrap(object["timings"] as? [String: Any])
+        let existingTimings: Set<String> = [
+            "segmentationSeconds", "embeddingSeconds", "clusteringSeconds", "totalSeconds"
+        ]
+        XCTAssertEqual(existingTimings.subtracting(timings.keys), [])
         XCTAssertEqual(object["engine"] as? String, "nemotron")
         let existingTopLevel: Set<String> = [
             "audioFile", "segments", "speakerCount", "processingSeconds", "timings"

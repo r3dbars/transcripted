@@ -76,7 +76,7 @@ enum CLIDiarizationService {
         audioPath: String,
         elapsed: TimeInterval,
         engine: String,
-        timings: DiarizeTimingsOutput? = nil,
+        timings: DiarizeTimingsOutput = .missing,
         to path: String?
     ) throws {
         let output = DiarizeFileOutput(
