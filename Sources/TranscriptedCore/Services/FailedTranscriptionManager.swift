@@ -37,7 +37,7 @@ public class FailedTranscriptionManager: ObservableObject {
     }
 
     init(paths: CoreStoragePaths, relocatedAudioFileSystem: RelocatedCaptureAudioPolicy.FileSystem) {
-        self.relocatedAudioFileSystem = relocatedAudioFileSystem
+        self.relocatedAudioFileSystem = relocatedAudioFileSystem.withFreshReachability()
         // Ensure the parent folder exists before first save; the load pass tolerates a missing file.
         do {
             try FileManager.default.createDirectory(
