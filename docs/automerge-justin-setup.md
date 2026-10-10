@@ -21,7 +21,7 @@ Agents use your `gh` login, so "only r3dbars can merge" means every agent can.
 1. Create a separate account (e.g. `r3dbars-agents`), add as collaborator with **Write** (not Admin/Maintain).
 2. On every box/Mac that runs agents: `gh auth login` as that account; revoke your PATs/tokens there (`gh auth status`, github.com/settings/tokens).
 3. Branch protection: required approving reviews 1 (kept by dismiss_stale_reviews=true, already on). Agent PRs are then authored by the bot, so your approval counts and the bot can't self-approve. Keep enforce_admins on; you merge high risk by toggling or via a ruleset whose only bypass actor is you.
-4. Move the Codex lane automation (scripts/ops/auto-merge-gate.py --apply) to the bot login or retire it; it now refuses to merge without GATE_TOKEN anyway.
+4. The lane auto-merger (scripts/ops/auto-merge-gate.py --apply) isn't scheduled anywhere as of 2026-10-10 (see docs/auto-merge-gate.md). If you schedule it again, run it as the bot login under the App-gated flow, never as r3dbars. It refuses to merge without GATE_TOKEN anyway.
 
 ## C. Move the 6 Apple/Sparkle secrets into a main-only `release` environment (about 20 min)
 Secrets: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVELOPER_ID_CERT, DEVELOPER_ID_PASSWORD, SPARKLE_PRIVATE_KEY (all repo-wide today).

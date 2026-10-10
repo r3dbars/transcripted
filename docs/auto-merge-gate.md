@@ -57,12 +57,19 @@ python3 scripts/ops/auto-merge-gate.py --pr 2040  # explain one PR
 python3 scripts/ops/auto-merge-gate.py --apply    # merge
 ```
 
-A Codex automation on the owner's Mac runs `--apply` every 30 minutes, signed in to `gh` as `r3dbars`. Merges made this way trigger the normal push CI on main.
+**Not scheduled.** As of 2026-10-10, `--apply` isn't scheduled on any reachable machine. Checked on Justin's Mac: the Codex app automations (`~/.codex/automations` and its automations database; no job runs this script), `launchctl list`, `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons` (empty), `launchctl print system`, the user crontab (none), and running processes. Also checked: the agent box (no cron or systemd timers) and every scheduled workflow in `.github/workflows` (none runs this script). The Linux PC (`omarchy`) and the second Mac were offline and couldn't be checked. The last 30 merges to main were all made by hand or by integration PRs, with no 30-minute rhythm.
+
+Don't schedule `--apply` again, whether as a Codex automation, launchd, cron, or a workflow, unless it runs under the App-gated flow in `docs/agent-merge-policy.md` (it reads the `risk-gate` verdict only from the `transcripted-gate` App's check run) and is signed in as the agent bot account from `docs/automerge-justin-setup.md`, never as `r3dbars`. Until then, run it by hand in dry-run mode only:
+
+```bash
+python3 scripts/ops/auto-merge-gate.py            # dry run, no --apply: lists what would merge and why the rest wait
+python3 scripts/ops/auto-merge-gate.py --pr 2040  # dry run for one PR
+```
 
 ## When something goes wrong
 
 - **A merged PR broke something:** revert it, then set that lane's `enabled` to `false` in `.agents/auto-merge-lanes.json` until the cause has a check.
 - **Stop one PR:** add the `hold` label.
-- **Stop everything:** pause the Codex automation, or set every lane's `enabled` to `false`.
+- **Stop everything:** nothing is scheduled now. If a schedule is ever added under the App-gated flow, pause it, or set every lane's `enabled` to `false`.
 
 Adding a lane or widening a lane's globs is an owner-reviewed edit. Merging is still not shipping: releases stay manual.
