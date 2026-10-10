@@ -127,6 +127,15 @@ LOW_PATTERNS = (
     "**/*.xcstrings",
 )
 
+TEST_PATTERNS = LOW_PATTERNS[:4]
+MEDIUM_MAX_CHANGED_LINES = 400  # additions + deletions; bigger "medium" PRs count as high
+
+# Debt baselines: the old lane gate (auto-merge-gate.py) proves they only went
+# down. Medium, not unknown-high, so its cleanup lanes keep working. The
+# concurrency baseline can't be proven on Linux, so it stays high (unknown).
+MEDIUM_PATTERNS = (".agents/*-baseline.json",)
+MEDIUM_EXCLUDE = (".agents/concurrency-baseline.json",)
+
 SOURCE_PATTERNS = ("Sources/**", "Tools/*/Sources/**")
 
 
@@ -141,6 +150,18 @@ def _any(path: str, patterns) -> bool:
     return any(_match(path, p) for p in patterns)
 
 
+def is_test_path(path: str) -> bool:
+    return bool(path) and _any(path, TEST_PATTERNS)
+
+
+def test_removed(f: dict) -> bool:
+    """A deleted test, or a test renamed to a path outside the test folders."""
+    if f.get("status") == "removed":
+        return is_test_path(f.get("filename", ""))
+    prev = f.get("previous_filename")
+    return bool(prev) and is_test_path(prev) and not is_test_path(f.get("filename", ""))
+
+
 def classify(files: list[dict]) -> dict:
     """files: [{filename, previous_filename?, additions, deletions}] like the REST API.
 
@@ -151,10 +172,11 @@ def classify(files: list[dict]) -> dict:
         # Empty or incomplete list: assume the worst, including release paths.
         return {"risk": "high", "owner_required": True, "reasons": ["no or incomplete changed-file list"]}
     risk, owner, reasons = "low", False, []
-    if any(f.get("status") == "removed" and _any(f.get("filename", ""), LOW_PATTERNS[:4]) for f in files):
-        # Deleting a test weakens the suite: human review, never auto-merge.
+    if any(test_removed(f) for f in files):
+        # Deleting a test, or renaming it out of the test folders, weakens the
+        # suite: human review, never auto-merge. Modified tests keep the tier.
         risk = "high"
-        reasons.append("removes a test file")
+        reasons.append("removes a test file (deleted or renamed out of the test folders)")
     source_lines, source_files = 0, 0
     for f in files:
         names = [n for n in (f.get("filename"), f.get("previous_filename")) if n]
@@ -167,6 +189,10 @@ def classify(files: list[dict]) -> dict:
                 reasons.append(f"{name}: high-risk path")
             elif _any(name, LOW_PATTERNS):
                 pass
+            elif _any(name, MEDIUM_PATTERNS) and not _any(name, MEDIUM_EXCLUDE):
+                if risk == "low":
+                    risk = "medium"
+                reasons.append(f"{name}: debt baseline")
             elif _any(name, SOURCE_PATTERNS):
                 source_files += 1
                 source_lines += int(f.get("additions", 0)) + int(f.get("deletions", 0))
@@ -175,7 +201,7 @@ def classify(files: list[dict]) -> dict:
                 risk = "high"
                 reasons.append(f"{name}: unknown path (not test/doc/source), defaults to high")
     if risk == "low" and source_files:
-        has_test = any(_any(f.get("filename", ""), LOW_PATTERNS[:4]) and f.get("status") != "removed"
+        has_test = any(is_test_path(f.get("filename", "")) and f.get("status") != "removed"
                        for f in files)
         if source_files > LOW_MAX_SOURCE_FILES or source_lines > LOW_MAX_SOURCE_LINES or not has_test:
             risk = "medium"
@@ -184,6 +210,10 @@ def classify(files: list[dict]) -> dict:
                 f"test changed: {'yes' if has_test else 'no'}")
         else:
             reasons.append(f"small isolated fix: {source_files} file(s), {source_lines} line(s) with a test")
+    total = sum(int(f.get("additions", 0)) + int(f.get("deletions", 0)) for f in files)
+    if risk == "medium" and total > MEDIUM_MAX_CHANGED_LINES:
+        risk = "high"
+        reasons.append(f"{total} changed lines (over {MEDIUM_MAX_CHANGED_LINES} for medium)")
     return {"risk": risk, "owner_required": owner, "reasons": sorted(set(reasons))}
 
 

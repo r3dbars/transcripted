@@ -4,7 +4,7 @@ Every PR gets a risk label. Low and medium PRs squash-merge on their own once CI
 
 The code is `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (also part of `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them).
 
-This sits next to the older lane gate (`docs/auto-merge-gate.md`), which still runs on its own. A PR merges when either path allows it; both demand green `build-and-test` and `repo-hygiene`.
+This sits next to the older lane gate (`docs/auto-merge-gate.md`, `scripts/ops/auto-merge-gate.py`), which still runs on its own. A PR merges when either path allows it; both demand green `build-and-test` and `repo-hygiene`. **The old gate also runs this classifier and never merges a PR it calls `risk:high`**, whatever its lane allows. So a lane PR that deletes a test, renames one away, or edits a folder `AGENTS.md` now waits for Justin.
 
 ## 1. Risk tiers
 
@@ -14,10 +14,14 @@ Path rules decide the tier. Each changed file (and the old name of a renamed fil
 |---|---|---|
 | `risk:high` + owner | Release, version, Sparkle, appcast, cask, signing and notarization: `scripts/release/**`, `build*.sh`, `Casks/**`, `**/appcast*.xml`, `Info.plist` files, `server.json`, `glama.json`, `config/entitlements/**`, `*.entitlements`, any path containing `Sparkle`, `notari`, `codesign` or `Signing`, `TranscriptedAppVersion.swift`. Also every GitHub workflow and action, `CODEOWNERS`, and this policy's own files. | One approval from someone other than the author, **and** an approval from @r3dbars |
 | `risk:high` | Audio capture (`Sources/TranscriptedCore/Audio/**`, `Sources/Capture/**`, `MeetingCapture*`, `MeetingMicCapture*`, dictation audio, system/pinned mic capture); database and schema (`*Migration*`, `*Schema*`, `*Database*.swift`, `SQLite*.swift`, the speaker reassignment log); permissions (`*TCC*`, `*Permission*.swift`, `*Entitlement*`); `Package.swift` | One approval from someone other than the author |
-| `risk:medium` | Normal bug fixes: source changes under `Sources/**` or `Tools/*/Sources/**` that aren't high or low. Any path not listed anywhere is **high** (fail closed) | None (auto-merge) |
+| `risk:medium` | Normal bug fixes: source changes under `Sources/**` or `Tools/*/Sources/**` that aren't high or low, up to **400 changed lines** (additions plus deletions across the whole PR); a bigger medium PR counts as **high**. Debt baselines (`.agents/*-baseline.json`, except the concurrency baseline) are medium. Any path not listed anywhere is **high** (fail closed) | None (auto-merge) |
 | `risk:low` | Only tests, docs (`*.md`), copy (`*.strings`), review images; or a small isolated fix: at most 2 source files and 40 changed source lines, **with** a test file changed | None (auto-merge) |
 
-An empty or incomplete file list (GitHub stops at 3,000 files) is treated as high.
+Tests:
+- **Modified tests keep the PR's tier.** Most fixes edit existing tests. Weakened assertions are left to CI and the AI review's P0/P1.
+- **Deleted tests are high**, and so are tests **renamed out of the test folders** (`Tests/**`, `Tools/*/Tests/**`, `test_*.py`, `test-*.py`). A rename that stays inside the test folders keeps the tier.
+
+An empty or incomplete file list (GitHub stops at 3,000 files) is treated as high, and it needs Justin.
 
 The label is informational. The gate recomputes the tier from the file list every time, so removing or editing a label changes nothing.
 
@@ -100,4 +104,4 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - Code-owner review: GitHub never lets the author satisfy a code-owner review, and @r3dbars authors most PRs, so "Require review from Code Owners" stays **off**. Owner sign-off on release/signing paths comes from `risk-gate` (high, never auto-merged) plus the owner merging by hand.
 - Redaction is pattern-based (emails, absolute paths, URLs, credential-looking values). It cannot recognise transcript text or names; keep real transcripts out of PR diffs.
 - Known limit: a same-repo PR that adds a `pull_request` workflow could post its own `risk-gate` status (it is also the Actions app). Because `risk-gate` is not required and the gate itself only enables auto-merge after recomputing the verdict from the file list, a forged status can't make this gate merge anything; and workflow changes are high, so the gate never auto-merges them.
-- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file is high; privacy egress files (`*PayloadSanitizer*`, `*EventPolicy*`) are high; an empty or incomplete file list is high and owner-required; change requests from untrusted accounts are ignored; the behind-base guard applies to every green result, high included.
+- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file or renaming it out of the test folders is high; medium over 400 changed lines is high; the old lane gate never merges a triage-high PR; privacy egress files (`*PayloadSanitizer*`, `*EventPolicy*`) are high; an empty or incomplete file list is high and owner-required; change requests from untrusted accounts are ignored; the behind-base guard applies to every green result, high included.

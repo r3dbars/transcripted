@@ -259,6 +259,49 @@ class DecideTests(unittest.TestCase):
 
 
 
+class DesignCallTests(unittest.TestCase):
+    def test_medium_over_400_lines_is_high(self):
+        self.assertEqual(risk("Sources/UI/Foo.swift", lines=401)["risk"], "high")
+        self.assertEqual(risk("Sources/UI/Foo.swift", lines=400)["risk"], "medium")
+        two = [{"filename": "Sources/UI/A.swift", "additions": 150, "deletions": 60},
+               {"filename": "Sources/UI/B.swift", "additions": 100, "deletions": 100}]
+        self.assertEqual(rt.classify(two)["risk"], "high")  # 410 total
+
+    def test_low_docs_over_400_lines_stay_low(self):
+        self.assertEqual(risk("docs/big.md", lines=900)["risk"], "low")
+
+    def test_test_renamed_out_of_tests_is_high(self):
+        r = rt.classify([{"filename": "scripts/dev/foo_helper.py", "previous_filename": "Tests/FooTests.swift",
+                          "status": "renamed"}])
+        self.assertEqual(r["risk"], "high")
+        self.assertTrue(any("removes a test" in x for x in r["reasons"]))
+
+    def test_test_renamed_within_tests_keeps_tier(self):
+        r = rt.classify([{"filename": "Tests/Sub/FooTests.swift", "previous_filename": "Tests/FooTests.swift",
+                          "status": "renamed"}])
+        self.assertEqual(r["risk"], "low")
+
+    def test_modified_test_keeps_tier(self):
+        mod = {"filename": "Tests/FooTests.swift", "status": "modified", "additions": 2, "deletions": 8}
+        self.assertEqual(rt.classify([mod])["risk"], "low")
+        self.assertEqual(rt.classify([mod, {"filename": "Sources/UI/Foo.swift", "additions": 1}])["risk"], "low")
+        self.assertEqual(rt.classify([mod, {"filename": "Sources/UI/Foo.swift", "additions": 100}])["risk"], "medium")
+
+    def test_baselines_are_medium_except_concurrency(self):
+        self.assertEqual(risk(".agents/test-shape-baseline.json", "Tests/FooTests.swift")["risk"], "medium")
+        self.assertEqual(risk(".agents/concurrency-baseline.json")["risk"], "high")
+
+
+class LegacyGateTests(unittest.TestCase):
+    def test_legacy_gate_blocks_triage_high(self):
+        spec = importlib.util.spec_from_file_location("amg", Path(__file__).with_name("auto-merge-gate.py"))
+        amg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(amg)
+        import contextlib, io
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(amg.self_test(), 0)  # includes the "risk triage says high" cases
+
+
 class SweepTests(unittest.TestCase):
     def test_one_bad_pr_does_not_stop_the_sweep(self):
         seen = []
