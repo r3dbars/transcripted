@@ -107,8 +107,18 @@ HIGH_PATTERNS = (
     "**/*Permission*.swift",
     "**/*Entitlement*",
     # Privacy egress: sanitizers and event allowlists decide what leaves the Mac.
-    "**/*PayloadSanitizer*.swift",
+    "**/*Sanitizer*.swift",
+    "**/*Sanitization*.swift",
+    "**/*Redactor*.swift",
+    "**/*Scrubber*.swift",
+    "**/*Rescrubber*.swift",
+    "**/*Privacy*.swift",
     "**/*EventPolicy*.swift",
+    # What gets sent and whether the user opted in.
+    "Sources/Observability/SentryRuntimeConfiguration.swift",
+    "Sources/Observability/AnalyticsReporter.swift",
+    "Sources/Observability/TelemetryContext.swift",
+    "Sources/Support/AnalyticsPreferences.swift",
     # Agent instructions steer every engineer agent: treat like code that runs.
     "**/AGENTS.md",
     "**/CLAUDE.md",

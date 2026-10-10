@@ -403,6 +403,35 @@ class FailClosedTests(unittest.TestCase):
         self.assertIn("TRIAGE_RESULT: ${{ needs.triage.result }}", gate)
 
 
+class PrivacyPathTests(unittest.TestCase):
+    def test_privacy_and_redaction_files_are_high(self):
+        for p in ("Sources/Observability/PayloadSanitizationCore.swift",
+                  "Sources/Observability/ObservabilityTextRedactor.swift",
+                  "Sources/TranscriptedCore/Logging/PrivacyTextRedactor.swift",
+                  "Sources/TranscriptedCore/Logging/LogPrivacySanitizer.swift",
+                  "Sources/Observability/LocalObservabilityPayloadSanitizer.swift",
+                  "Sources/Observability/CrashReporterPrivacyOptions.swift",
+                  "Sources/Observability/SentryRuntimeConfiguration.swift",
+                  "Sources/Observability/AnalyticsReporter.swift",
+                  "Sources/Observability/TelemetryContext.swift",
+                  "Sources/Support/AnalyticsPreferences.swift",
+                  "Sources/TranscriptedWriting/Core/Text/DiagnosticsMetadataRedactor.swift",
+                  "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift",
+                  "Sources/TranscriptedWriting/Core/Text/WritingScrubberTokenIdentity.swift",
+                  "Sources/TranscriptedWriting/Runtime/SaveMyWriting/WritingDayFileRescrubber.swift"):
+            r = rt.classify([{"filename": p, "additions": 1}, {"filename": "Tests/XTests.swift"}])
+            self.assertEqual(r["risk"], "high", p)
+
+
+class GateConcurrencyTests(unittest.TestCase):
+    def test_gate_concurrency_is_per_pr_and_never_cancels(self):
+        wf = (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
+        gate = wf[wf.index("\n  gate:"):]
+        self.assertIn("group: risk-gate-${{ github.event.pull_request.number || inputs.pr || 'sweep' }}", gate)
+        self.assertIn("cancel-in-progress: false", gate)
+        self.assertNotIn("group: risk-gate\n", gate)
+
+
 class SweepTests(unittest.TestCase):
     def test_one_bad_pr_does_not_stop_the_sweep(self):
         seen = []

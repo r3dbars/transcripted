@@ -67,8 +67,14 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # One group per PR, plus one for the sweep (schedule, workflow_run, manual
+    # without a PR). GitHub keeps only one pending run per group, so a shared
+    # group let a third PR's event drop a gate still waiting to turn off a
+    # stale auto-merge. Now a pending run can only be replaced by a newer run
+    # for the same PR (which re-evaluates the same PR), and the sweep never
+    # cancels or replaces a PR's gate.
     concurrency:
-      group: risk-gate
+      group: risk-gate-${{ github.event.pull_request.number || inputs.pr || 'sweep' }}
       cancel-in-progress: false
     permissions:
       contents: write        # gh pr merge --auto
