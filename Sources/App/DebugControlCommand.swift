@@ -334,6 +334,7 @@ enum DebugControlSessionPolicy {
             return .success(next)
         }
     }
+}
 
 enum DebugControlStateCodec {
     static func encode(_ snapshot: DebugControlSessionSnapshot, pid: Int) -> [String: Any] {
