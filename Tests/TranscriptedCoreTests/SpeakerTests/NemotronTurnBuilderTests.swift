@@ -152,11 +152,34 @@ final class NemotronTurnBuilderTests: XCTestCase {
         XCTAssertEqual(shape(kept), [[0, 0, 30], [1, 70, 95]])
     }
 
-    func testDroppedDifferentSpeakerBlipDoesNotRejoinSurroundingTurns() {
-        // A, a 0.1 s flicker to B, A again: B is dropped, but A stays two turns
-        // so B's frames are not absorbed into A's time range or voiceprint.
-        let result = turns([([0: 0.9], 50), ([1: 0.95], 10), ([0: 0.9], 50)])
-        XCTAssertEqual(shape(result), [[0, 0, 50], [0, 60, 110]])
+    func testDroppedFlickerRejoinsWhenEitherSideIsUnderTheSTTFloor() {
+        // A 0.5 s, 0.1 s flicker to B, A 0.5 s: both sides are under the 1 s
+        // STT floor. Rejoin so the words are not stranded untranscribed.
+        let short = turns([([0: 0.9], 50), ([1: 0.95], 10), ([0: 0.9], 50)])
+        XCTAssertEqual(shape(short), [[0, 0, 110]])
+        XCTAssertEqual(short[0].meanActiveProbability, 0.9, accuracy: 1e-5)
+
+        // A 3.0 s, 0.1 s flicker, A 0.4 s tail: the tail would be dropped by
+        // STT if it stayed its own turn.
+        let tail = turns([([0: 0.9], 300), ([1: 0.95], 10), ([0: 0.9], 40)])
+        XCTAssertEqual(shape(tail), [[0, 0, 350]])
+        assertExclusive(tail)
+    }
+
+    func testDroppedFlickerBetweenLongTurnsStillRejoins() {
+        // 0.1 s is slot flicker, not a real interruption. Two 4 s A turns
+        // around it stay one turn.
+        let result = turns([([0: 0.9], 400), ([1: 0.95], 10), ([0: 0.9], 400)])
+        XCTAssertEqual(shape(result), [[0, 0, 810]])
+        assertExclusive(result)
+    }
+
+    func testDroppedRealBlipBetweenLongTurnsDoesNotRejoin() {
+        // 0.20 s other-speaker (above the 0.12 s flicker ceiling) between two
+        // 4 s A turns: a real interruption. A stays two turns so B's frames
+        // are not mixed into A's voiceprint.
+        let result = turns([([0: 0.9], 400), ([1: 0.95], 20), ([0: 0.9], 400)])
+        XCTAssertEqual(shape(result), [[0, 0, 400], [0, 420, 820]])
         XCTAssertEqual(result[0].meanActiveProbability, 0.9, accuracy: 1e-5)
         XCTAssertEqual(result[1].meanActiveProbability, 0.9, accuracy: 1e-5)
         assertExclusive(result)

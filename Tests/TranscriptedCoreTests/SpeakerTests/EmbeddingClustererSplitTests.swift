@@ -131,6 +131,37 @@ final class EmbeddingClustererSplitTests: XCTestCase {
         XCTAssertEqual(Set(processed.map(\.speakerId)).count, 1)
     }
 
+    func testOneCollapsedIdDoesNotFragmentAcrossRounds() {
+        // Four compact, well-separated voices under one ID. A recursive
+        // 2-means would keep splitting (0° vs 180°, then 90° vs 270°). One
+        // starting ID may produce at most one new ID, even when the caller
+        // asks for four rounds.
+        let directions: [Float] = [0, 90, 180, 270]
+        var segments: [SpeakerSegment] = []
+        var time = 0.0
+        for degrees in directions {
+            for _ in 0..<6 {
+                segments.append(segment(
+                    speakerId: 1,
+                    start: time,
+                    end: time + 10,
+                    embedding: unitVector(degrees: degrees)
+                ))
+                time += 10
+            }
+        }
+        let split = EmbeddingClusterer.splitCollapsedSpeakers(
+            segments: segments,
+            maxBetween: 0.88,
+            maxRounds: 4
+        )
+        XCTAssertEqual(
+            Set(split.map(\.speakerId)).count,
+            2,
+            "A collapsed ID splits once; leftover sides are not split again"
+        )
+    }
+
     func testSplitNeedsEnoughTalkTimeOnEachSide() {
         // Two voices, but the second only has 4 s total — below the 8 s floor.
         var segments: [SpeakerSegment] = []

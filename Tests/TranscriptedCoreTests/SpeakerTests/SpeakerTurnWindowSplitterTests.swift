@@ -33,6 +33,33 @@ final class SpeakerTurnWindowSplitterTests: XCTestCase {
         XCTAssertEqual(pieces[0].endTime, pieces[1].startTime, accuracy: 0.01)
     }
 
+    func testExactOneSecondOutlierPiecesAreAbsorbedInAMonologue() {
+        // One flipped 2 s window at a 1 s hop yields a piece of exactly 1.0 s
+        // (change point midway between window centers). Two such cough/laugh
+        // windows in a 10 s monologue must not become a second speaker.
+        let segment = SpeakerSegment(
+            speakerId: 1,
+            startTime: 0,
+            endTime: 10,
+            embedding: [1, 0],
+            qualityScore: 0.9
+        )
+        let windows = stride(from: 0.0, through: 8.0, by: 1.0).map { start -> (Double, Double, [Float]) in
+            let flipped = start == 3.0 || start == 7.0
+            return (start, start + 2, flipped ? [0, 1] : [1, 0])
+        }
+        let pieces = SpeakerTurnWindowSplitter.splitSegment(
+            segment,
+            windows: windows,
+            nextSpeakerId: 2,
+            maxBetween: 0.88
+        )
+        XCTAssertEqual(pieces.count, 1)
+        XCTAssertEqual(pieces[0].speakerId, 1)
+        XCTAssertEqual(pieces[0].startTime, 0, accuracy: 0.01)
+        XCTAssertEqual(pieces[0].endTime, 10, accuracy: 0.01)
+    }
+
     func testUnimodalLongTurnStaysOneSegment() {
         let segment = SpeakerSegment(
             speakerId: 3,

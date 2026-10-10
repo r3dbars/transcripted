@@ -21,7 +21,13 @@ enum SpeakerTurnWindowSplitter {
     static let windowSeconds: Double = 2
     static let hopSeconds: Double = 1
     static let minWindowsPerGroup = 2
+    /// Pieces at or under this length are flicker from a 1 s hop (one flipped
+    /// window yields a 1.0 s piece). Fold them into the neighbour so a cough
+    /// or laugh in a monologue cannot become its own speaker.
     static let minPieceSeconds: Double = 1
+    /// After short pieces are folded, each remaining voice still needs this
+    /// much talk time. Two isolated 1 s outliers must not become a speaker.
+    static let minGroupSeconds: Double = 2
 
     /// Re-slice long turns whose window embeddings are bimodal. Short turns
     /// and a missing/failed embedder are left alone.
@@ -105,6 +111,12 @@ enum SpeakerTurnWindowSplitter {
         let pieces = absorbShortPieces(rawPieces, minSeconds: minPieceSeconds)
         let groupsPresent = Set(pieces.map(\.group))
         guard pieces.count >= 2, groupsPresent.count == 2 else { return [segment] }
+        let secondsByGroup = Dictionary(grouping: pieces, by: \.group).mapValues { group in
+            group.reduce(0.0) { $0 + ($1.end - $1.start) }
+        }
+        guard secondsByGroup.values.allSatisfy({ $0 + 1e-9 >= minGroupSeconds }) else {
+            return [segment]
+        }
 
         return pieces.map { piece in
             let speakerId = piece.group == 0 ? segment.speakerId : nextSpeakerId
@@ -222,15 +234,16 @@ enum SpeakerTurnWindowSplitter {
         return pieces
     }
 
-    /// Fold pieces shorter than `minSeconds` into the neighbour so a 0.4 s
-    /// flicker does not become its own speaker.
-    static func absorbShortPieces(_ pieces: [Piece], minSeconds: Double) -> [Piece] {
+    /// Fold pieces at or under `minSeconds` into the neighbour. A single
+    /// flipped 2 s window at a 1 s hop produces a piece of exactly 1.0 s;
+    /// that must not survive as its own speaker.
+    private static func absorbShortPieces(_ pieces: [Piece], minSeconds: Double) -> [Piece] {
         guard pieces.count >= 2 else { return pieces }
         var result = pieces
         var index = 0
         while index < result.count {
             let duration = result[index].end - result[index].start
-            if duration + 1e-9 < minSeconds, result.count > 1 {
+            if duration <= minSeconds + 1e-9, result.count > 1 {
                 if index > 0 {
                     result[index - 1].end = result[index].end
                     result.remove(at: index)

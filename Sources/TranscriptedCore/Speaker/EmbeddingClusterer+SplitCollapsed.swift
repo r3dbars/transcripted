@@ -10,8 +10,9 @@
 // Bars are the same as `SpeakerEmbeddingBimodality`: between-centroid cosine
 // below the consolidation bar, plus a cohesion gap. Each side also needs
 // enough talk time and at least two turns, so a single noisy pair does not
-// invent a speaker. Recurses so three collapsed people can come apart across
-// rounds. Does not look at this fixture's voices or talk-time ratios.
+// invent a speaker. Each starting ID is split at most once in a pass, so a
+// smear cannot fragment into a tree of new speakers. Does not look at this
+// fixture's voices or talk-time ratios.
 
 import Foundation
 
@@ -19,7 +20,10 @@ extension EmbeddingClusterer {
     static let collapsedSplitMinSeparation: Float = SpeakerEmbeddingBimodality.defaultMinSeparation
     static let collapsedSplitMinSegmentsPerGroup = 2
     static let collapsedSplitMinSecondsPerGroup = 8.0
-    static let collapsedSplitMaxRounds = 4
+    /// One pass over the IDs that already exist. Newly created IDs and an ID
+    /// that just split are not visited again, so one collapsed cluster cannot
+    /// fragment into 3–5 speakers across rounds.
+    static let collapsedSplitMaxRounds = 1
 
     /// Split speaker IDs whose per-segment embeddings are bimodal.
     static func splitCollapsedSpeakers(
@@ -33,11 +37,13 @@ extension EmbeddingClusterer {
         guard segments.count >= minSegmentsPerGroup * 2 else { return segments }
         var result = segments
         var nextSpeakerId = (segments.map(\.speakerId).max() ?? 0) + 1
+        var alreadySplit: Set<Int> = []
 
         for _ in 0..<maxRounds {
             let groups = Dictionary(grouping: result.indices, by: { result[$0].speakerId })
             var didSplit = false
             for speakerId in groups.keys.sorted() {
+                guard !alreadySplit.contains(speakerId) else { continue }
                 guard let indices = groups[speakerId] else { continue }
                 let usable = usableMembers(indices: indices, segments: result, minCount: minSegmentsPerGroup * 2)
                 guard usable.count >= minSegmentsPerGroup * 2 else { continue }
@@ -64,6 +70,8 @@ extension EmbeddingClusterer {
                     let index = usable[local].index
                     result[index] = result[index].withSpeakerId(newId)
                 }
+                alreadySplit.insert(speakerId)
+                alreadySplit.insert(newId)
                 didSplit = true
                 AppLogger.transcription.info("Split collapsed speaker cluster", [
                     "originalSpk": "spk\(speakerId)",
