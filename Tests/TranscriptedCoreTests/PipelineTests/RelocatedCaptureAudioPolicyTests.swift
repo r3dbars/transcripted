@@ -228,4 +228,38 @@ final class RelocatedCaptureAudioPolicyTests: XCTestCase {
         )
     }
 
+    func testKeepsLaterRowsWhenAMountedVolumeDisappearsMidLoad() {
+        // First row sees a mounted volume whose library is gone, so it is
+        // dropped. Then the network drive disconnects while the queue is
+        // still loading. A cached "mounted" or "checkable" answer must not
+        // drop the next row — the audio may still come back with the share.
+        let volume = "/Volumes/Sweep Drive"
+        var volumePresent = true
+        let first = URL(fileURLWithPath: volume + "/old-library/meetings/audio/Call1_audio/microphone.wav")
+        let second = URL(fileURLWithPath: volume + "/old-library/meetings/audio/Call2_audio/microphone.wav")
+        let fs = RelocatedCaptureAudioPolicy.FileSystem(
+            fileExists: { _ in false },
+            directoryExists: { path in
+                if path == volume || path.hasPrefix(volume + "/") {
+                    return volumePresent && path == volume
+                }
+                return path == "/" || path == "/Volumes"
+            },
+            isMountPoint: { path in
+                volumePresent && path == volume
+            },
+            isAccessDenied: { _ in false }
+        )
+
+        XCTAssertFalse(
+            RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: first, systemAudioURL: nil, fileSystem: fs),
+            "a mounted volume with a missing library can drop the first row"
+        )
+        volumePresent = false
+        XCTAssertTrue(
+            RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: second, systemAudioURL: nil, fileSystem: fs),
+            "a disconnect mid-load must not drop later rows from a cached mount"
+        )
+    }
+
 }
