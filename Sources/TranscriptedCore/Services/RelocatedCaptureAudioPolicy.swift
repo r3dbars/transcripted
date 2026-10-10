@@ -18,8 +18,10 @@ import Foundation
 /// through the manager's approved audio roots. Paths without the archive
 /// layout (`/tmp`, `..` traversal, arbitrary home files) are rejected.
 ///
-/// One `FileSystem` remembers reachability per library (and per unmounted
-/// volume) so N rows on one share don't each pay fileExists / statfs / opendir.
+/// One `FileSystem` remembers unmounted volumes, denied ancestors, and
+/// per-archive checkable answers so N rows on one share don't each pay
+/// fileExists / statfs / opendir. Sibling `*_audio` folders keep their own
+/// access check.
 enum RelocatedCaptureAudioPolicy {
     /// The file-system questions the policy asks, injectable so tests never
     /// depend on real mounts or permissions.
@@ -68,36 +70,49 @@ enum RelocatedCaptureAudioPolicy {
         )
     }
 
-    /// Remembers whether a capture library — or the `/Volumes/<name>` drive
-    /// it sits on — can be looked at right now. The manager reuses one
-    /// `FileSystem` for the whole load, so the first relocated row pays the
-    /// probes and the rest reuse this answer.
+    /// Remembers reachability that applies to a whole share or a denied
+    /// ancestor. Per-archive access is not cached at the `meetings/audio`
+    /// parent: one missing sibling must not hide another archive that
+    /// returns EACCES.
     final class LibraryReachability {
         private var uncheckableVolumes: Set<String> = []
-        private var uncheckableLibraries: Set<String> = []
-        private var checkableLibraries: Set<String> = []
+        private var mountedVolumes: Set<String> = []
+        private var deniedFolders: Set<String> = []
+        private var checkableArchives: Set<String> = []
 
         func isUncheckable(_ audioFolder: URL) -> Bool {
             if let volume = Self.volumeKey(for: audioFolder),
                uncheckableVolumes.contains(volume) {
                 return true
             }
-            return uncheckableLibraries.contains(Self.libraryKey(for: audioFolder))
-        }
-
-        func isCheckable(_ audioFolder: URL) -> Bool {
-            checkableLibraries.contains(Self.libraryKey(for: audioFolder))
-        }
-
-        func rememberUncheckable(_ audioFolder: URL, volume: String?) {
-            uncheckableLibraries.insert(Self.libraryKey(for: audioFolder))
-            if let volume {
-                uncheckableVolumes.insert(volume)
+            let path = audioFolder.path
+            return deniedFolders.contains { folder in
+                path == folder || path.hasPrefix(folder + "/")
             }
         }
 
-        func rememberCheckable(_ audioFolder: URL) {
-            checkableLibraries.insert(Self.libraryKey(for: audioFolder))
+        func isCheckableArchive(_ audioFolder: URL) -> Bool {
+            checkableArchives.contains(audioFolder.path)
+        }
+
+        func isMountedVolume(_ volume: String) -> Bool {
+            mountedVolumes.contains(volume)
+        }
+
+        func rememberUncheckableVolume(_ volume: String) {
+            uncheckableVolumes.insert(volume)
+        }
+
+        func rememberDeniedFolder(_ folder: String) {
+            deniedFolders.insert(folder)
+        }
+
+        func rememberCheckableArchive(_ audioFolder: URL) {
+            checkableArchives.insert(audioFolder.path)
+        }
+
+        func rememberMountedVolume(_ volume: String) {
+            mountedVolumes.insert(volume)
         }
 
         static func volumeKey(for audioFolder: URL) -> String? {
@@ -107,20 +122,12 @@ enum RelocatedCaptureAudioPolicy {
             }
             return "/Volumes/" + components[2]
         }
-
-        static func libraryKey(for audioFolder: URL) -> String {
-            var folder = audioFolder
-            if folder.lastPathComponent.hasSuffix("_audio") {
-                folder = folder.deletingLastPathComponent()
-            }
-            return folder.path
-        }
     }
 
     private enum Checkability {
         case checkable
         case uncheckableVolume(String)
-        case uncheckableFolder
+        case uncheckableFolder(String)
     }
 
     /// Both URLs must already be canonical (standardized, symlinks resolved).
@@ -145,18 +152,18 @@ enum RelocatedCaptureAudioPolicy {
         if fileSystem.fileExists(micURL.path) {
             return systemLooksLikeArchive
         }
-        if fileSystem.reachability.isCheckable(archiveDirectory) {
+        if fileSystem.reachability.isCheckableArchive(archiveDirectory) {
             return false
         }
         switch checkability(of: archiveDirectory, fileSystem: fileSystem) {
         case .uncheckableVolume(let volume):
-            fileSystem.reachability.rememberUncheckable(archiveDirectory, volume: volume)
+            fileSystem.reachability.rememberUncheckableVolume(volume)
             return systemLooksLikeArchive
-        case .uncheckableFolder:
-            fileSystem.reachability.rememberUncheckable(archiveDirectory, volume: nil)
+        case .uncheckableFolder(let folder):
+            fileSystem.reachability.rememberDeniedFolder(folder)
             return systemLooksLikeArchive
         case .checkable:
-            fileSystem.reachability.rememberCheckable(archiveDirectory)
+            fileSystem.reachability.rememberCheckableArchive(archiveDirectory)
             return false
         }
     }
@@ -174,16 +181,24 @@ enum RelocatedCaptureAudioPolicy {
 
     private static func checkability(of audioFolder: URL, fileSystem: FileSystem) -> Checkability {
         if fileSystem.directoryExists(audioFolder.path) {
-            return fileSystem.isAccessDenied(audioFolder.path) ? .uncheckableFolder : .checkable
+            return fileSystem.isAccessDenied(audioFolder.path)
+                ? .uncheckableFolder(audioFolder.path)
+                : .checkable
         }
-        if let volume = LibraryReachability.volumeKey(for: audioFolder),
-           !fileSystem.directoryExists(volume) || !fileSystem.isMountPoint(volume) {
-            return .uncheckableVolume(volume)
+        if let volume = LibraryReachability.volumeKey(for: audioFolder) {
+            if !fileSystem.reachability.isMountedVolume(volume) {
+                if !fileSystem.directoryExists(volume) || !fileSystem.isMountPoint(volume) {
+                    return .uncheckableVolume(volume)
+                }
+                fileSystem.reachability.rememberMountedVolume(volume)
+            }
         }
         var ancestor = audioFolder.deletingLastPathComponent()
         while ancestor.path != "/", !fileSystem.directoryExists(ancestor.path) {
             ancestor = ancestor.deletingLastPathComponent()
         }
-        return fileSystem.isAccessDenied(ancestor.path) ? .uncheckableFolder : .checkable
+        return fileSystem.isAccessDenied(ancestor.path)
+            ? .uncheckableFolder(ancestor.path)
+            : .checkable
     }
 }

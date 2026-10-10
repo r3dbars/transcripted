@@ -194,4 +194,38 @@ final class RelocatedCaptureAudioPolicyTests: XCTestCase {
         )
     }
 
+    func testCheckableSiblingDoesNotSkipADeniedArchive() {
+        // Two meetings in one library: the first archive is gone from a
+        // readable disk, the second archive exists but refuses access.
+        // Caching "the library is checkable" from the first row must not
+        // drop the second — that row is still recoverable.
+        let parent = "/Users/sweeptester/old-library/meetings/audio"
+        let goneMic = URL(fileURLWithPath: parent + "/Gone_audio/microphone.wav")
+        let lockedMic = URL(fileURLWithPath: parent + "/Locked_audio/microphone.wav")
+        let lockedArchive = parent + "/Locked_audio"
+        let fs = RelocatedCaptureAudioPolicy.FileSystem(
+            fileExists: { _ in false },
+            directoryExists: {
+                [
+                    "/",
+                    "/Users",
+                    "/Users/sweeptester",
+                    "/Users/sweeptester/old-library",
+                    parent,
+                    lockedArchive
+                ].contains($0)
+            },
+            isMountPoint: { $0 == "/" },
+            isAccessDenied: { $0 == lockedArchive }
+        )
+        XCTAssertFalse(
+            RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: goneMic, systemAudioURL: nil, fileSystem: fs),
+            "a missing archive on a readable disk is dropped"
+        )
+        XCTAssertTrue(
+            RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: lockedMic, systemAudioURL: nil, fileSystem: fs),
+            "a later access-denied sibling archive must still be kept"
+        )
+    }
+
 }
