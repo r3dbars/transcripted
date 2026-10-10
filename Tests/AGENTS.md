@@ -26,7 +26,7 @@ App tests, smokes, and fixtures. Full guide with every smoke's details: `Tests/R
 - `Tests/FooTests.swift` must expose exactly one top-level `testFoo()`. A missing or duplicated entry fails before compiling.
 - Hand-kept source lists: `FAST_TEST_SOURCES` and `APP_SOURCES` in `scripts/entrypoints/run-tests.sh` (root `run-tests.sh` is a wrapper) and `scripts/entrypoints/lib/shared-smoke-sources.sh`. Moving or adding a source file a test compiles means updating them. `python3 scripts/dev/check-build-source-lists.py` checks them.
 - One suite: `bash run-tests.sh --filter <entryFn|File>` (`--list` shows entries). Compiled sources are cached in `build/fast-tests-cache/`; `TRANSCRIPTED_FAST_TESTS_NO_CACHE=1` forces a clean compile.
-- Package tests: `swift test --filter '^SpeakerTests\.'` (or any target), `swift test --filter '^TranscriptedWritingTests\.'`. Plain `swift test` is what CI runs.
+- Package tests: `swift test --filter '^SpeakerTests\.'` (or any target), `swift test --filter '^TranscriptedWritingTests\.'`. Plain `swift test` is what CI runs. Diarization split classes (`EmbeddingClustererSplitTests`, `SpeakerTurnWindowSplitterTests`, `NemotronTurnBuilderTests`) are in `SpeakerTests`; filter `^SpeakerTests\.<ClassName>`. A 0-test run is a compile miss on that target, not a missing file.
 - `bash run-tests.sh --coverage` writes LLVM coverage under `build/coverage/fast-tests/`.
 - Run `run-tests.sh`, `build.sh`, and smokes sequentially; they share `build/`. Give each run its own log file, since two runs sent to one `>` file overwrite each other and look like a flake.
 

@@ -243,9 +243,10 @@ extension Transcription {
             }
 
             // Post-process diarization segments, but skip the broad pairwise merge
-            // phase for PyAnnote/VBx output. Small-cluster absorption, same-voice
-            // consolidation (collapses one over-segmented voice so the user names
-            // each person once), and DB-informed split still run.
+            // phase for PyAnnote/VBx output. Small-cluster absorption, unsupervised
+            // split of a collapsed ID, same-voice consolidation (collapses one
+            // over-segmented voice so the user names each person once), and
+            // DB-informed split still run.
             let existingProfiles = speakerDB.allSpeakers()
             // Rejected-sample vetoes for matching (empty until a correction records one).
             let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
@@ -640,7 +641,14 @@ extension Transcription {
             //   [00:03] "Opus four point six and"
             //   [00:10] "Sonnet four point six just went live"
             // Merging produces cleaner, more readable transcripts.
-            let mergedSystemUtterances = Self.mergeConsecutiveUtterances(systemUtterances, maxGap: 1.5)
+            let remappedSpeakerSegments = speakerSegments.map { segment in
+                segment.withSpeakerId(speakerIdRemap[segment.speakerId] ?? segment.speakerId)
+            }
+            let mergedSystemUtterances = Self.mergeConsecutiveUtterances(
+                systemUtterances,
+                maxGap: 1.5,
+                interruptingSegments: remappedSpeakerSegments
+            )
             let mergedMicUtterances = Self.mergeConsecutiveUtterances(micUtterances, maxGap: 1.5)
             guard !mergedSystemUtterances.isEmpty || !mergedMicUtterances.isEmpty else {
                 AppLogger.transcription.warning("No speech detected after local transcription", [

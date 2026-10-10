@@ -85,6 +85,8 @@ func coreTestTarget(_ name: String, _ path: String) -> Target {
 // across these targets.
 let coreTestTargets: [Target] = [
     coreTestTarget("AudioTests", "Tests/TranscriptedCoreTests/AudioTests"),
+    // EmbeddingClustererSplitTests, SpeakerTurnWindowSplitterTests, and
+    // NemotronTurnBuilderTests live here. Filter: `^SpeakerTests\.<Class>`.
     coreTestTarget("SpeakerTests", "Tests/TranscriptedCoreTests/SpeakerTests"),
     coreTestTarget("PipelineTests", "Tests/TranscriptedCoreTests/PipelineTests"),
     coreTestTarget("StorageTests", "Tests/TranscriptedCoreTests/StorageTests"),

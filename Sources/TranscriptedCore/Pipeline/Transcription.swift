@@ -43,16 +43,26 @@ public class Transcription: ObservableObject {
     /// existing database should inject an isolated snapshot store. Model loading
     /// (including whether downloads are allowed) remains the injected engines'
     /// responsibility.
+    ///
+    /// File import uses the same tuned speaker-separation options as a live
+    /// meeting with no calendar invite (`SpeakerSeparationOptions.tuned`), so
+    /// CLI `import-audio` and the app's "Transcribe a file" path split as
+    /// generously as a recorded call. Callers that need the raw diarizer
+    /// labels can still pass `speakerSeparation: nil` to `transcribeMultichannel`.
     public nonisolated func transcribeAudioFile(
         at audioURL: URL,
         languageSelection: TranscriptionLanguageSelection = .automatic,
         onProgress: ((Double) -> Void)? = nil
     ) async throws -> TranscriptionResult {
         try await ensureModelsReadyForPipeline()
+        let (backend, thresholds) = await MainActor.run {
+            (self.diarization.activeRunDescriptor.backend, self.diarization.activeSpeakerThresholds)
+        }
         return try await transcribeMultichannel(
             micURL: nil,
             systemURL: audioURL,
             languageSelection: languageSelection,
+            speakerSeparation: .tuned(for: backend, invitedPeople: nil, thresholds: thresholds),
             onProgress: onProgress
         )
     }

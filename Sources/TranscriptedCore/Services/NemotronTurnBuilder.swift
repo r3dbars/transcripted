@@ -70,6 +70,17 @@ public enum NemotronTurnBuilder {
     /// same order as FluidAudio's own `Nemotron3Diarizer.segments` default (0.2 s).
     public static let defaultMinTurnSeconds: Double = 0.25
 
+    /// Dropped other-speaker runs at or under this are slot flicker (a handful
+    /// of 10 ms frames at a turn edge). They do not block the second bridge.
+    /// A longer dropped run between two transcribable turns is treated as a
+    /// real interruption: re-bridging would mix that speaker into A's window.
+    public static let defaultMaxFlickerSeconds: Double = 0.12
+
+    /// Same 1 s floor the pipeline uses before it will transcribe a turn.
+    /// If either side of a dropped gap would fall under this, we still rejoin
+    /// so the tail is not stranded with no STT.
+    public static let defaultTranscriptionFloorSeconds: Double = 1.0
+
     /// Build exclusive speaker turns from flattened `[frameCount * numSpeakers]`
     /// probabilities (frame-major: frame 0's speakers first).
     ///
@@ -79,8 +90,12 @@ public enum NemotronTurnBuilder {
     /// 3. Same-speaker runs separated only by silence shorter than
     ///    `maxBridgeGapSeconds` are joined.
     /// 4. Runs shorter than `minTurnSeconds` are dropped.
-    /// 5. Step 3 runs again, so a speaker whose turn was split by a dropped blip
-    ///    from someone else is rejoined when the resulting gap is short.
+    /// 5. Step 3 runs again. A dropped different-speaker run blocks that
+    ///    rejoin only when it is longer than slot flicker *and* both
+    ///    surrounding turns clear the 1 s STT floor. Pure flicker (a few
+    ///    10 ms frames) still lets A rejoin, so a 0.4 s tail is not stranded
+    ///    untranscribed. A 0.2 s other-speaker blip between two long A turns
+    ///    stays a gap, so B's frames do not land in A's voiceprint.
     /// 6. Speaker slots are renumbered `0..<n` in order of first appearance.
     ///
     /// When `probabilities.count` disagrees with `frameCount * numSpeakers`, only
@@ -112,8 +127,17 @@ public enum NemotronTurnBuilder {
         let minFrames = minTurnFrames(seconds: minTurnSeconds, frameSeconds: frameSeconds)
 
         var merged = bridge(runs, maxGapFrames: maxGapFrames)
+        let dropped = merged.filter { $0.end - $0.start < minFrames }
         merged = merged.filter { $0.end - $0.start >= minFrames }
-        merged = bridge(merged, maxGapFrames: maxGapFrames)
+        let flickerFrames = minTurnFrames(seconds: defaultMaxFlickerSeconds, frameSeconds: frameSeconds)
+        let floorFrames = minTurnFrames(seconds: defaultTranscriptionFloorSeconds, frameSeconds: frameSeconds)
+        merged = bridge(
+            merged,
+            maxGapFrames: maxGapFrames,
+            blockedBy: dropped,
+            flickerFrames: flickerFrames,
+            transcriptionFloorFrames: floorFrames
+        )
 
         var remap: [Int: Int] = [:]
         return merged.map { run in
@@ -210,13 +234,29 @@ public enum NemotronTurnBuilder {
     }
 
     /// Join adjacent same-speaker runs whose gap is at most `maxGapFrames`.
-    /// Runs are ordered and non-overlapping, so the gap between a run and the
-    /// previous kept run holds no other kept speaker; joining keeps exclusivity.
-    static func bridge(_ runs: [Run], maxGapFrames: Int) -> [Run] {
+    /// Runs are ordered and non-overlapping. `blockedBy` is the set of dropped
+    /// runs in a gap. A dropped different speaker blocks the join only when
+    /// `blocksRebridge` says the gap is a real interruption, not flicker.
+    static func bridge(
+        _ runs: [Run],
+        maxGapFrames: Int,
+        blockedBy: [Run] = [],
+        flickerFrames: Int = 0,
+        transcriptionFloorFrames: Int = 0
+    ) -> [Run] {
         var out: [Run] = []
         out.reserveCapacity(runs.count)
         for run in runs {
-            if var last = out.last, last.speaker == run.speaker, run.start - last.end <= maxGapFrames {
+            if var last = out.last,
+               last.speaker == run.speaker,
+               run.start - last.end <= maxGapFrames,
+               !blocksRebridge(
+                left: last,
+                right: run,
+                blockedBy: blockedBy,
+                flickerFrames: flickerFrames,
+                transcriptionFloorFrames: transcriptionFloorFrames
+               ) {
                 last.end = run.end
                 last.probabilitySum += run.probabilitySum
                 last.activeFrames += run.activeFrames
@@ -226,5 +266,28 @@ public enum NemotronTurnBuilder {
             }
         }
         return out
+    }
+
+    /// True only for a dropped other-speaker run that is longer than flicker
+    /// and sits between two turns that the pipeline would actually transcribe.
+    /// Shorter drops are slot flicker; a short tail is rejoined so it is not
+    /// lost under the 1 s STT floor.
+    static func blocksRebridge(
+        left: Run,
+        right: Run,
+        blockedBy: [Run],
+        flickerFrames: Int,
+        transcriptionFloorFrames: Int
+    ) -> Bool {
+        let others = blockedBy.filter { dropped in
+            dropped.speaker != left.speaker && dropped.start < right.start && dropped.end > left.end
+        }
+        guard let longest = others.max(by: { ($0.end - $0.start) < ($1.end - $1.start) }) else {
+            return false
+        }
+        if longest.end - longest.start <= flickerFrames { return false }
+        if left.end - left.start < transcriptionFloorFrames { return false }
+        if right.end - right.start < transcriptionFloorFrames { return false }
+        return true
     }
 }
