@@ -195,4 +195,64 @@ final class SpeakerUnmergeReassignmentTests: XCTestCase {
         XCTAssertTrue(owns(other, moved))
         XCTAssertEqual(database.getSpeaker(id: source)?.callCount, 1)
     }
+
+    // MARK: - Second review round
+
+    func testStackedUndoDoesNotChargeTheOlderKeeperForAThirdProfilesMove() throws {
+        let a = profile(axes: [160])
+        let keeper = profile(axes: [161])
+        let c = profile(axes: [162, 163])
+        let d = profile(axes: [164])
+        let cRow = try row(c, axis: 163)
+
+        try database.mergeProfiles(sourceId: a, into: keeper)
+        try database.mergeProfiles(sourceId: c, into: keeper)
+        XCTAssertTrue(database.reassignContribution(id: cRow, toProfileId: d))
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: keeper))  // undoes C→keeper
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: keeper))  // undoes A→keeper
+
+        let restored = try XCTUnwrap(database.getSpeaker(id: keeper))
+        XCTAssertEqual(restored.callCount, 1, "C's recording was never the keeper's at the A merge")
+        XCTAssertGreaterThan(cosine(restored.embedding, embedding(axis: 161)), 0.9)
+        XCTAssertEqual(database.getSpeaker(id: c)?.callCount, 1)
+        XCTAssertEqual(database.getSpeaker(id: a)?.callCount, 1)
+        XCTAssertTrue(owns(d, cRow))
+    }
+
+    func testMoveMadeBeforeTheLogExistedDoesNotBlockUndo() throws {
+        let source = profile(axes: [170, 171])
+        let target = profile(axes: [172])
+        let other = profile(axes: [173])
+        let moved = try row(source, axis: 171)
+
+        try database.mergeProfiles(sourceId: source, into: target)
+        XCTAssertTrue(database.reassignContribution(id: moved, toProfileId: other))
+        // An upgraded DB: the move happened before the log table existed.
+        XCTAssertEqual(exec("DELETE FROM speaker_contribution_reassignments;"), SQLITE_OK)
+
+        XCTAssertTrue(database.unmergeMostRecent(forTargetId: target), "an unlogged move must not make the merge un-undoable")
+        XCTAssertNotNil(database.getSpeaker(id: source))
+        XCTAssertTrue(owns(other, moved), "the unlogged move is left where the user put it")
+    }
+
+    func testFailedProvenanceUpdateRollsBackTheLogRowToo() throws {
+        let a = profile(axes: [180])
+        let b = profile(axes: [181])
+        let moved = try row(a, axis: 180)
+        XCTAssertEqual(exec("""
+            CREATE TRIGGER reject_provenance_move BEFORE UPDATE OF profile_id ON speaker_provenance
+            BEGIN SELECT RAISE(ABORT, 'forced move failure'); END;
+            """), SQLITE_OK)
+
+        XCTAssertFalse(database.reassignContribution(id: moved, toProfileId: b))
+        XCTAssertTrue(owns(a, moved))
+        let logged: Int32 = database.queue.sync {
+            var statement: OpaquePointer?
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_prepare_v2(database.db, "SELECT COUNT(*) FROM speaker_contribution_reassignments;", -1, &statement, nil) == SQLITE_OK,
+                  sqlite3_step(statement) == SQLITE_ROW else { return -1 }
+            return sqlite3_column_int(statement, 0)
+        }
+        XCTAssertEqual(logged, 0, "a move that never happened was left in the log")
+    }
 }
