@@ -88,19 +88,22 @@ final class DiarizationBackendTests: XCTestCase {
 
     func testLocalLoadFilesFindTheProvisionedCacheLayout() throws {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("nemotron-local-load-\(UUID().uuidString)")
+            .appendingPathComponent("nemotron-cache-load-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let model = root.appendingPathComponent("monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc")
+        let model = root.appendingPathComponent(
+            "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc", isDirectory: true
+        )
         try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
         try Data().write(to: root.appendingPathComponent(DiarizationBackend.nemotronCacheSilenceName))
 
         let files = try XCTUnwrap(
             DiarizationBackend.nemotronLocalLoadFiles(in: root, preset: "fast128")
         )
-        XCTAssertEqual(files.model, model)
+        XCTAssertEqual(files.model.standardizedFileURL.path, model.standardizedFileURL.path)
         XCTAssertEqual(files.companions.map(\.lastPathComponent), [DiarizationBackend.nemotronCacheSilenceName])
 
         let staged = try NemotronDiarizationRunner.directoryForLocalLoad(from: root, preset: "fast128")
+        defer { NemotronDiarizationRunner.removeStagedLocalDirectoryIfOwned(staged) }
         XCTAssertTrue(
             FileManager.default.fileExists(
                 atPath: staged.appendingPathComponent("Nemotron3Diarizer_fast128.mlmodelc").path
@@ -111,7 +114,42 @@ final class DiarizationBackendTests: XCTestCase {
                 atPath: staged.appendingPathComponent(DiarizationBackend.nemotronCacheSilenceName).path
             )
         )
-        XCTAssertNotEqual(staged, root, "nested cache is staged flat, not passed through as HuggingFace")
+        XCTAssertNotEqual(
+            staged.standardizedFileURL.path,
+            root.standardizedFileURL.path,
+            "nested cache is staged flat, not passed through as HuggingFace"
+        )
+    }
+
+    func testStagedLocalLoadDirectoryIsRemovedOnlyWhenOwned() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nemotron-cache-owned-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(
+            at: root.appendingPathComponent(
+                "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc", isDirectory: true
+            ),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: root.appendingPathComponent(DiarizationBackend.nemotronCacheSilenceName))
+
+        let staged = try NemotronDiarizationRunner.directoryForLocalLoad(from: root, preset: "fast128")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: staged.path))
+        NemotronDiarizationRunner.removeStagedLocalDirectoryIfOwned(staged)
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: staged.path),
+            "the process-temp staging folder is removed after a local load"
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: root.path),
+            "the original cache is not the staging folder"
+        )
+
+        NemotronDiarizationRunner.removeStagedLocalDirectoryIfOwned(root)
+        XCTAssertTrue(
+            FileManager.default.fileExists(atPath: root.path),
+            "a cache path without the nemotron-local- prefix is left alone"
+        )
     }
 
     func testServiceDefaultsToPyannote() async {

@@ -54,13 +54,28 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
     /// Loaded once; only touched on `queue`.
     private let config: Nemotron3Config
     private let models: Nemotron3Models
+    /// Temp symlink folder from `directoryForLocalLoad`, if one was created.
+    /// The originals stay in the cache; this is only the flat staging copy.
+    private let stagedLocalDirectory: URL?
     private let queue = DispatchQueue(label: "com.transcripted.diarization.nemotron", qos: .userInitiated)
 
     /// Internal so model-gated tests can hand in preloaded models.
-    init(presetName: String, config: Nemotron3Config, models: Nemotron3Models) {
+    init(
+        presetName: String,
+        config: Nemotron3Config,
+        models: Nemotron3Models,
+        stagedLocalDirectory: URL? = nil
+    ) {
         self.presetName = presetName
         self.config = config
         self.models = models
+        self.stagedLocalDirectory = stagedLocalDirectory
+    }
+
+    deinit {
+        if let stagedLocalDirectory {
+            Self.removeStagedLocalDirectoryIfOwned(stagedLocalDirectory)
+        }
     }
 
     // MARK: - Configuration
@@ -108,10 +123,21 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
         let units = Self.computeUnits(forPreset: presetName)
 
         let models: Nemotron3Models
+        var stagedLocalDirectory: URL?
         if let bundleDirectory = bundleProvider(Self.bundleDirectoryName) {
             AppLogger.transcription.info("Nemotron diarizer loading from local directory", ["preset": presetName])
             let local = try directoryForLocalLoad(from: bundleDirectory, preset: presetName)
-            models = try await Nemotron3Models.load(config: config, directory: local, computeUnits: units)
+            if local.lastPathComponent.hasPrefix("nemotron-local-") {
+                stagedLocalDirectory = local
+            }
+            do {
+                models = try await Nemotron3Models.load(config: config, directory: local, computeUnits: units)
+            } catch {
+                if let stagedLocalDirectory {
+                    removeStagedLocalDirectoryIfOwned(stagedLocalDirectory)
+                }
+                throw error
+            }
         } else {
             guard allowDownload else {
                 throw DiarizationDownloadDisabled(backend: DiarizationBackend.nemotron.rawValue)
@@ -121,7 +147,12 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
                 try await Nemotron3Models.loadFromHuggingFace(config: config, computeUnits: units)
             }
         }
-        return NemotronDiarizationRunner(presetName: presetName, config: config, models: models)
+        return NemotronDiarizationRunner(
+            presetName: presetName,
+            config: config,
+            models: models,
+            stagedLocalDirectory: stagedLocalDirectory
+        )
     }
 
     /// Flat bundle as-is. HuggingFace cache (`monolithic/v2/…` plus companions
@@ -151,6 +182,21 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
             )
         }
         return staged
+    }
+
+    /// Deletes a `nemotron-local-*` staging folder only when it still sits
+    /// under the process temp directory. The original cache is never removed.
+    static func removeStagedLocalDirectoryIfOwned(_ url: URL) {
+        let fm = FileManager.default
+        let staged = url.standardizedFileURL
+        guard staged.lastPathComponent.hasPrefix("nemotron-local-") else { return }
+        let temp = fm.temporaryDirectory.standardizedFileURL
+        let stagedPath = staged.path
+        let tempPath = temp.path
+        guard stagedPath == tempPath || stagedPath.hasPrefix(tempPath.hasSuffix("/") ? tempPath : tempPath + "/") else {
+            return
+        }
+        try? fm.removeItem(at: staged)
     }
 
     // MARK: - Inference
