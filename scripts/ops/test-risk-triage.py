@@ -454,6 +454,23 @@ class NoSelfMergeTests(unittest.TestCase):
         self.assertNotIn("MERGE_TOKEN", (root / "scripts/ops/risk-triage.py").read_text())
 
 
+class PaginationTests(unittest.TestCase):
+    def test_workflow_runs_for_reads_every_page(self):
+        import json
+        pages = [{"total_count": 101, "workflow_runs": [{"check_suite_id": i} for i in range(100)]},
+                 {"total_count": 101, "workflow_runs": [{"check_suite_id": 100, "path": "x"}]}]
+        calls = []
+        orig = rt.gh
+        rt.gh = lambda *a, **k: (calls.append(a), json.dumps(pages))[1]
+        try:
+            runs = rt.workflow_runs_for(SHA)
+        finally:
+            rt.gh = orig
+        self.assertIn("--paginate", calls[0])
+        self.assertEqual(len(runs), 101)
+        self.assertEqual(runs[100]["path"], "x")
+
+
 class WorkflowShapeTests(unittest.TestCase):
     def wf(self):
         return (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
@@ -696,6 +713,23 @@ class ReviewFixTests(unittest.TestCase):
         self.assertIsNotNone(rt.review_for(entry and [entry], 1, SHA, "b1"))
         self.assertIsNone(rt.review_for([entry], 1, SHA, "b2"))
         self.assertIsNone(rt.review_for([{**entry, "p0": "x"}], 1, SHA, "b1"))
+
+
+class PaginationTests(unittest.TestCase):
+    def test_workflow_runs_for_reads_every_page(self):
+        import json
+        pages = [{"total_count": 101, "workflow_runs": [{"check_suite_id": i} for i in range(100)]},
+                 {"total_count": 101, "workflow_runs": [{"check_suite_id": 100, "path": "x"}]}]
+        calls = []
+        orig = rt.gh
+        rt.gh = lambda *a, **k: (calls.append(a), json.dumps(pages))[1]
+        try:
+            runs = rt.workflow_runs_for(SHA)
+        finally:
+            rt.gh = orig
+        self.assertIn("--paginate", calls[0])
+        self.assertEqual(len(runs), 101)
+        self.assertEqual(runs[100]["path"], "x")
 
 
 class WorkflowShapeTests(unittest.TestCase):

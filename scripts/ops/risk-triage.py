@@ -548,7 +548,15 @@ def gh_json(path: str, paginate: bool = False):
     if paginate:
         flat = []
         for page in data:
-            flat.extend(page.get("check_runs", page) if isinstance(page, dict) else page)
+            if isinstance(page, dict):
+                for key in ("check_runs", "workflow_runs"):
+                    if key in page:
+                        flat.extend(page[key])
+                        break
+                else:
+                    flat.append(page)
+            else:
+                flat.extend(page)
         return flat
     return data
 
@@ -721,8 +729,8 @@ def review_for(entries: list, n: int, sha: str, base_sha: str) -> dict | None:
 
 # ------------------------------------------- job 2: gate (App token, no diffs)
 def workflow_runs_for(sha: str) -> dict:
-    data = gh_json(f"repos/{REPO}/actions/runs?head_sha={sha}&per_page=100")
-    return {r.get("check_suite_id"): r for r in (data.get("workflow_runs") or [])}
+    runs = gh_json(f"repos/{REPO}/actions/runs?head_sha={sha}&per_page=100", paginate=True)
+    return {r.get("check_suite_id"): r for r in runs if isinstance(r, dict)}
 
 
 def evaluate(n: int, entries: list) -> tuple[dict, dict, dict, dict, dict]:
