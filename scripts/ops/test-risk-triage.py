@@ -210,7 +210,7 @@ class ApprovalTests(unittest.TestCase):
 
 
 def pr(**kw):
-    base = {"draft": False, "labels": [], "head": {"repo": {"full_name": rt.REPO}}}
+    base = {"draft": False, "labels": [], "head": {"repo": {"full_name": rt.REPO}}, "base": {"ref": "main"}}
     base.update(kw)
     return base
 
@@ -600,7 +600,7 @@ class SweepTests(unittest.TestCase):
         seen = []
         orig = rt._gate_one
 
-        def fake(num, apply):
+        def fake(num, apply, entries=None):
             seen.append(num)
             if num == 2:
                 raise RuntimeError("boom")
@@ -633,6 +633,91 @@ class ExtraClassifierTests(unittest.TestCase):
         for p in ("Sources/Observability/SentryPayloadSanitizer.swift",
                   "Sources/Observability/AnalyticsEventPolicy.swift"):
             self.assertEqual(rt.classify([{"filename": p, "additions": 1}, {"filename": "Tests/XTests.swift"}])["risk"], "high", p)
+
+
+GREEN = (True, [])
+CLEAR = (True, "AI review clear")
+NOAPP = (False, "x")
+
+
+class ReviewFixTests(unittest.TestCase):
+    """#2199 review: F1 base/shared head, F2 workflow provenance, test weakening."""
+
+    def test_non_main_base_never_succeeds(self):
+        d = rt.decide(pr(base={"ref": "scratch"}), risk("docs/a.md"), GREEN, CLEAR, NOAPP)
+        self.assertEqual(d["state"], "pending")
+        self.assertFalse(d["automerge"])
+
+    def test_shared_head_holds(self):
+        d = rt.decide(pr(), risk("docs/a.md"), GREEN, CLEAR, NOAPP, shared_head=True)
+        self.assertEqual(d["state"], "pending")
+
+    def test_verdict_bound_to_pr_and_base(self):
+        v = {"sha": SHA, "pr": 1, "base_sha": "b1", "status": "ok", "p0": 0, "p1": 0}
+        self.assertTrue(rt.verdict_matches(v, SHA, 1, "b1"))
+        self.assertFalse(rt.verdict_matches(v, SHA, 2, "b1"))
+        self.assertFalse(rt.verdict_matches(v, SHA, 1, "b2"))
+
+    def test_app_verdict_requires_external_id(self):
+        import json
+        v = {"sha": SHA, "pr": 1, "base_sha": "b1", "status": "ok", "p0": 0, "p1": 0}
+        text = f"<!-- risk-triage:verdict {json.dumps(v)} -->"
+        run = {"name": rt.GATE_CONTEXT, "app": {"id": 99}, "head_sha": SHA, "output": {"text": text},
+               "external_id": rt.external_id(1, "b1", SHA)}
+        self.assertIsNotNone(rt.app_verdict([run], SHA, "99", 1, "b1")[0])
+        self.assertIsNone(rt.app_verdict([run], SHA, "99", 2, "b1")[0])
+        self.assertIsNone(rt.app_verdict([{**run, "external_id": "other"}], SHA, "99", 1, "b1")[0])
+
+    def _run(self, name, suite):
+        return {"name": name, "app": {"id": rt.ACTIONS_APP_ID}, "status": "completed",
+                "conclusion": "success", "head_sha": SHA, "check_suite": {"id": suite}}
+
+    def test_required_check_needs_expected_workflow_and_event(self):
+        runs = [self._run("build-and-test", 1), self._run("repo-hygiene", 2)]
+        good = {1: {"path": ".github/workflows/swift-ci.yml", "event": "pull_request", "head_sha": SHA},
+                2: {"path": ".github/workflows/repo-hygiene.yml", "event": "pull_request", "head_sha": SHA}}
+        self.assertTrue(rt.checks_green(runs, workflow_runs=good, head_sha=SHA)[0])
+        forged = {**good, 1: {"path": ".github/workflows/evil.yml", "event": "pull_request", "head_sha": SHA}}
+        self.assertFalse(rt.checks_green(runs, workflow_runs=forged, head_sha=SHA)[0])
+        wrong_event = {**good, 2: {**good[2], "event": "workflow_dispatch"}}
+        self.assertFalse(rt.checks_green(runs, workflow_runs=wrong_event, head_sha=SHA)[0])
+        self.assertFalse(rt.checks_green(runs, workflow_runs={}, head_sha=SHA)[0])
+
+    def test_test_weakening_is_high(self):
+        for f in ("Tests/quarantine.txt", "Tests/Fixtures/ObservabilitySanitizerCorpus.json",
+                  "Tests/flaky-allowlist.txt", "Tests/skiplist.txt", "Transcripted.xctestplan"):
+            self.assertEqual(risk(f)["risk"], "high", f)
+
+    def test_normal_test_still_low(self):
+        self.assertEqual(risk("Tests/FooTests.swift")["risk"], "low")
+
+    def test_review_job_output_rejected_on_mismatch(self):
+        entry = {"pr": 1, "sha": SHA, "base_sha": "b1", "status": "ok", "p0": 0, "p1": 0, "text": "t"}
+        self.assertIsNotNone(rt.review_for(entry and [entry], 1, SHA, "b1"))
+        self.assertIsNone(rt.review_for([entry], 1, SHA, "b2"))
+        self.assertIsNone(rt.review_for([{**entry, "p0": "x"}], 1, SHA, "b1"))
+
+
+class WorkflowShapeTests(unittest.TestCase):
+    ROOT = Path(__file__).resolve().parents[2]
+
+    def test_app_token_job_never_sees_diff_or_ai_key(self):
+        wf = (self.ROOT / ".github/workflows/risk-triage.yml").read_text()
+        review, gate = wf.split("\n  gate:\n", 1)
+        self.assertNotIn("create-github-app-token", review)
+        self.assertNotIn("AUTOMERGE_APP_PRIVATE_KEY", review)
+        self.assertNotIn("AI_REVIEW_API_KEY", gate)
+        self.assertIn("--reviews", gate)
+
+    def test_gate_never_fetches_diff(self):
+        import inspect
+        src = inspect.getsource(rt.evaluate) + inspect.getsource(rt._gate_one) + inspect.getsource(rt.cmd_gate)
+        self.assertNotIn("vnd.github.diff", src)
+        self.assertNotIn("ai_review(", src)
+
+    def test_release_candidate_uses_release_environment(self):
+        wf = (self.ROOT / ".github/workflows/release-candidate.yml").read_text()
+        self.assertIn("environment: release", wf)
 
 
 if __name__ == "__main__":

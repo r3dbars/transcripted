@@ -1,32 +1,62 @@
 # Auto-merge: steps only Justin does
 
 Agents never run these. Until A is done, risk-gate only labels and logs; nothing auto-merges.
+Order matters: **C1–C3 before merging #2199** (it adds `environment: release` to release-candidate.yml; without the environment and its secrets, release candidates fail). Then B, then A.
+
+## C. Release environment for the 6 Apple/Sparkle secrets (about 20 min) — before merging #2199
+Secrets, all repo-wide today: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVELOPER_ID_CERT, DEVELOPER_ID_PASSWORD, SPARKLE_PRIVATE_KEY.
+1. Create `release`, deployable from `main` only, with you as **mandatory** reviewer (S5, S9):
+   ```
+   ME=$(gh api user -q .id)
+   gh api -X PUT repos/r3dbars/transcripted/environments/release --input - <<JSON
+   {"reviewers":[{"type":"User","id":$ME}],"prevent_self_review":false,
+    "deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
+   JSON
+   gh api -X POST repos/r3dbars/transcripted/environments/release/deployment-branch-policies -f name=main -f type=branch
+   ```
+   The reviewer gate only means something after B (today every agent can approve as you).
+2. For each secret: `gh secret set NAME -R r3dbars/transcripted --env release` with the original value (repo secrets can't be read back; use your source copies).
+3. Merge #2199 (high risk, by hand).
+4. Dispatch RCs from main (the env policy checks the workflow ref, S6):
+   `gh workflow run release-candidate.yml -R r3dbars/transcripted --ref main -f source_ref=<prep branch>`, approve the deployment.
+5. Once an RC is green: `gh secret delete NAME -R r3dbars/transcripted` for each of the 6 repo-level copies.
+
+## B. No agent merges as you
+Agents use your `gh` login, so today "only r3dbars can merge" means every agent can.
+1. The lane auto-merger (`scripts/ops/auto-merge-gate.py --apply`) isn't scheduled anywhere as of 2026-10-10 (see docs/auto-merge-gate.md). If you schedule it again, run it as the bot login under the App-gated flow, never as r3dbars. It refuses to merge without GATE_TOKEN anyway.
+2. Create a separate account (e.g. `r3dbars-agents`) and invite it as a collaborator. Personal repos grant every collaborator write; you stay the only admin, so a Repository-admin bypass is effectively you-only (S4).
+3. On every box/Mac that runs agents: `gh auth login` as that account; revoke your PATs/tokens there (`gh auth status`, github.com/settings/tokens).
+4. Merge rules (S1): replace classic protection with a ruleset on `main` whose only bypass is Repository admin (actor_id 5 = you), then delete classic protection. Required checks `build-and-test`, `repo-hygiene` (and later `risk-gate`, A6); required approvals **0** (S2); conversation resolution on.
+   ```
+   gh api -X POST repos/r3dbars/transcripted/rulesets --input - <<'JSON'
+   {"name":"main","target":"branch","enforcement":"active",
+    "conditions":{"ref_name":{"include":["~DEFAULT_BRANCH"],"exclude":[]}},
+    "bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"always"}],
+    "rules":[{"type":"deletion"},{"type":"non_fast_forward"},
+     {"type":"pull_request","parameters":{"required_approving_review_count":0,"dismiss_stale_reviews_on_push":true,
+       "require_code_owner_review":false,"require_last_push_approval":false,"required_review_thread_resolution":true}},
+     {"type":"required_status_checks","parameters":{"strict_required_status_checks_policy":false,
+       "required_status_checks":[{"context":"build-and-test"},{"context":"repo-hygiene"}]}}]}
+   JSON
+   gh api -X DELETE repos/r3dbars/transcripted/branches/main/protection
+   ```
+   You then merge high-risk PRs (risk-gate = failure) with the admin bypass. Do **not** keep classic `enforce_admins` on alongside a required failing check: that locks you out.
+5. Why 0 approvals is safe (S2): low/medium trust comes from `risk-gate` (App-only) plus the identity split; high never auto-merges. Bot self-approval can't happen (GitHub never lets an author approve its own PR, and Actions may not approve: `can_approve_pull_request_reviews=false`, already set). The bot also has no admin bypass.
+6. Tags (S7): add a tag ruleset protecting `v*` (no create/update/delete except Repository admin), and keep `publish-mcp-registry.yml` on OIDC from tag pushes only.
 
 ## A. Create the gate App (about 30 min)
 1. github.com/settings/apps/new: name `transcripted-gate`, homepage the repo URL, webhook off.
-2. Repository permissions: Checks read/write, Contents read/write (arming squash auto-merge), Pull requests read/write, Metadata read. Nothing else.
-3. "Only on this account". Create, then Generate a private key (.pem download).
-4. Install it on `r3dbars/transcripted` only.
-5. Main-only environment holding its key:
-   gh api -X PUT repos/r3dbars/transcripted/environments/automerge-app -F 'deployment_branch_policy[protected_branches]=true' -F 'deployment_branch_policy[custom_branch_policies]=false'
-   gh secret set AUTOMERGE_APP_PRIVATE_KEY -R r3dbars/transcripted --env automerge-app < transcripted-gate.pem
-   gh variable set AUTOMERGE_APP_ID -R r3dbars/transcripted -b <app id>
-   gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted --env automerge-app
-   gh variable set AUTOMERGE_ENABLED -R r3dbars/transcripted --env automerge-app -b signal-only
-6. Watch a few PRs in `signal-only`. Then, only when you choose: `allow_auto_merge=true`, `AUTOMERGE_ENABLED=true`, and require the `risk-gate` check **pinned to the App** (branch protection "expected source" = transcripted-gate). High risk concludes failure, so you merge those as admin by hand.
-7. Delete the downloaded .pem.
+2. Repository permissions: Checks read/write, Pull requests read/write, Contents read/write (needed to arm squash auto-merge), Metadata read. Nothing else. A leaked key = push access, so the key lives only in `automerge-app` (S8).
+3. "Only on this account". Create, Generate a private key, install on `r3dbars/transcripted` only.
+4. Two main-only environments (custom policy `main`, as in C1 without reviewers):
+   - `automerge-ai`: `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted --env automerge-ai`
+   - `automerge-app`: `gh secret set AUTOMERGE_APP_PRIVATE_KEY -R r3dbars/transcripted --env automerge-app < transcripted-gate.pem`
+     and `gh variable set AUTOMERGE_ENABLED -R r3dbars/transcripted --env automerge-app -b signal-only`
+   - `gh variable set AUTOMERGE_APP_ID -R r3dbars/transcripted -b <app id>`
+5. Delete the downloaded .pem. **Never** put it on an agent box or Mac (S7).
+6. Labels: `for l in risk:low risk:medium risk:high automerge:off; do gh label create "$l" -R r3dbars/transcripted; done`
+7. Watch a few PRs in `signal-only`. Once the App has posted `risk-gate` at least once (S3), require it pinned to the App: add to the ruleset's required_status_checks `{"context":"risk-gate","integration_id":<app id>}` (UI: ruleset → Require status checks → risk-gate → source transcripted-gate).
+8. Only when you choose: `gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=true` and `gh variable set AUTOMERGE_ENABLED -R r3dbars/transcripted --env automerge-app -b true`.
 
-## B. No agent merges as you
-Agents use your `gh` login, so "only r3dbars can merge" means every agent can.
-1. Create a separate account (e.g. `r3dbars-agents`), add as collaborator with **Write** (not Admin/Maintain).
-2. On every box/Mac that runs agents: `gh auth login` as that account; revoke your PATs/tokens there (`gh auth status`, github.com/settings/tokens).
-3. Branch protection: required approving reviews 1 (kept by dismiss_stale_reviews=true, already on). Agent PRs are then authored by the bot, so your approval counts and the bot can't self-approve. Keep enforce_admins on; you merge high risk by toggling or via a ruleset whose only bypass actor is you.
-4. The lane auto-merger (scripts/ops/auto-merge-gate.py --apply) isn't scheduled anywhere as of 2026-10-10 (see docs/auto-merge-gate.md). If you schedule it again, run it as the bot login under the App-gated flow, never as r3dbars. It refuses to merge without GATE_TOKEN anyway.
-
-## C. Move the 6 Apple/Sparkle secrets into a main-only `release` environment (about 20 min)
-Secrets: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVELOPER_ID_CERT, DEVELOPER_ID_PASSWORD, SPARKLE_PRIVATE_KEY (all repo-wide today).
-1. gh api -X PUT repos/r3dbars/transcripted/environments/release -F 'deployment_branch_policy[protected_branches]=true' -F 'deployment_branch_policy[custom_branch_policies]=false'
-   (optionally add yourself as required reviewer on the environment).
-2. For each secret: `gh secret set NAME -R r3dbars/transcripted --env release` with the original value (repo secrets can't be read back; use your source copies).
-3. Merge a PR adding `environment: release` to the signing/notarize/appcast jobs in release-candidate.yml (high risk, you merge).
-4. Run a release candidate; once green, `gh secret delete NAME -R r3dbars/transcripted` for each of the 6 repo-level copies.
+## Follow-ups (not in #2199)
+Tracked in #2201: signed/off-main Sparkle feed, release keychain hardening (`-T /usr/bin/codesign` instead of `-A`, shorter lock timeout, split build from sign).

@@ -406,7 +406,7 @@ def fetch_extra(pr: dict, config: dict) -> dict:
     # risk-gate check run created by the transcripted-gate App for this head.
     rt = RISK_TRIAGE
     rt.REPO = f"{owner}/{name}"
-    verdict, verdict_why = rt.fetch_app_verdict(pr["headRefOid"])
+    verdict, verdict_why = rt.fetch_app_verdict(pr["headRefOid"], int(pr["number"]), pr.get("baseRefOid") or "")
     ai = rt.ai_clear(verdict, pr["headRefOid"]) if verdict else (False, verdict_why)
     lowered, unknown = lowered_baselines(owner, name, pr, changed_paths(changed_files, pr.get("changedFiles"))[0])
     return {

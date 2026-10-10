@@ -43,6 +43,12 @@ import urllib.request
 REPO = os.environ.get("GITHUB_REPOSITORY", "r3dbars/transcripted")
 OWNER_LOGIN = "r3dbars"
 REQUIRED_CHECKS = ("build-and-test", "repo-hygiene")
+# F2: a required check counts only from this workflow file, on a pull_request run.
+REQUIRED_WORKFLOWS = {
+    "build-and-test": ".github/workflows/swift-ci.yml",
+    "repo-hygiene": ".github/workflows/repo-hygiene.yml",
+}
+DEFAULT_BRANCH = os.environ.get("DEFAULT_BRANCH", "main")
 GATE_CONTEXT = "risk-gate"
 ACTIONS_APP_ID = 15368  # GitHub Actions; required checks must come from it
 GATE_APP_ID = os.environ.get("AUTOMERGE_APP_ID", "")  # transcripted-gate App (Justin creates it)
@@ -106,6 +112,27 @@ RELEASE_PATTERNS = (
 )
 
 # High for other reasons: CI, audio capture, database/schema, permissions.
+# Test weakening: skip/quarantine/allow lists and sanitizer corpora decide what
+# the suite checks; editing them can silently disable a test (review F-residual).
+TEST_WEAKENING_PATTERNS = (
+    "**/quarantine*",
+    "**/*Quarantine*",
+    "**/*Corpus*",
+    "**/*corpus*",
+    "**/*allowlist*",
+    "**/*Allowlist*",
+    "**/*allow-list*",
+    "**/*allow_list*",
+    "**/*skiplist*",
+    "**/*skip-list*",
+    "**/*skip_list*",
+    "**/*denylist*",
+    "**/*ignorelist*",
+    "**/*flaky*",
+    "**/*Flaky*",
+    "**/*.xctestplan",
+)
+
 HIGH_PATTERNS = (
     "Package.swift",
     "Sources/TranscriptedCore/Audio/**",
@@ -280,6 +307,9 @@ def classify(files: list[dict]) -> dict:
             elif _any(name, RELEASE_PATTERNS):
                 risk, owner = "high", True
                 reasons.append(f"{name}: release/signing path")
+            elif _any(name, TEST_WEAKENING_PATTERNS):
+                risk = "high"
+                reasons.append(f"{name}: test skip/quarantine/allow list or corpus (can weaken tests)")
             elif _any(name, HIGH_PATTERNS):
                 risk = "high"
                 reasons.append(f"{name}: high-risk path")
@@ -315,8 +345,26 @@ def classify(files: list[dict]) -> dict:
     return {"risk": risk, "owner_required": owner, "reasons": sorted(set(reasons))}
 
 
+def _run_from_expected_workflow(run: dict, workflow_runs: dict, head_sha: str | None) -> bool:
+    """F2: the check run's suite must belong to the expected workflow file, on a
+    pull_request event, for this head. Any other Actions run with the same name
+    (e.g. posted by another PR's workflow with checks: write) is ignored."""
+    want = REQUIRED_WORKFLOWS.get(run.get("name", ""))
+    if not want:
+        return False
+    suite = ((run.get("check_suite") or {}).get("id"))
+    wr = workflow_runs.get(suite)
+    if not wr:
+        return False
+    path = (wr.get("path") or "").split("@", 1)[0]
+    if path != want or wr.get("event") != "pull_request":
+        return False
+    return head_sha is None or (wr.get("head_sha") == head_sha and run.get("head_sha", head_sha) == head_sha)
+
+
 def checks_green(check_runs: list[dict], required=REQUIRED_CHECKS,
-                 actions_app_id: int = ACTIONS_APP_ID) -> tuple[bool, list[str]]:
+                 actions_app_id: int = ACTIONS_APP_ID, workflow_runs: dict | None = None,
+                 head_sha: str | None = None) -> tuple[bool, list[str]]:
     """Every required check must have succeeded on the head commit, cleanly.
 
     Only check runs from GitHub Actions count (commit statuses are ignored:
@@ -330,6 +378,8 @@ def checks_green(check_runs: list[dict], required=REQUIRED_CHECKS,
     by_name: dict[str, list[dict]] = {}
     for run in check_runs:
         if ((run.get("app") or {}).get("id")) != actions_app_id:
+            continue
+        if workflow_runs is not None and not _run_from_expected_workflow(run, workflow_runs, head_sha):
             continue
         by_name.setdefault(run.get("name", ""), []).append(run)
     problems = []
@@ -363,7 +413,24 @@ def parse_verdict(text: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-def app_verdict(check_runs: list[dict], head_sha: str, gate_app_id: str) -> tuple[dict | None, str]:
+def verdict_matches(v: dict | None, head_sha: str, pr: int | None, base_sha: str | None) -> bool:
+    """F1: a verdict is bound to {pr, base, head}; a verdict for another PR or
+    another base (same head SHA) never counts."""
+    if not v or v.get("sha") != head_sha:
+        return False
+    if pr is not None and v.get("pr") != pr:
+        return False
+    if base_sha is not None and v.get("base_sha") != base_sha:
+        return False
+    return True
+
+
+def external_id(pr: int, base_sha: str, head_sha: str) -> str:
+    return f"pr={pr};base={base_sha};head={head_sha}"
+
+
+def app_verdict(check_runs: list[dict], head_sha: str, gate_app_id: str,
+                pr: int | None = None, base_sha: str | None = None) -> tuple[dict | None, str]:
     """The AI verdict stored in a risk-gate check run created by the gate App.
 
     Unforgeable: only the App's installation token can create check runs with
@@ -375,8 +442,10 @@ def app_verdict(check_runs: list[dict], head_sha: str, gate_app_id: str) -> tupl
     mine = [r for r in check_runs if r.get("name") == GATE_CONTEXT
             and str((r.get("app") or {}).get("id")) == str(gate_app_id) and r.get("head_sha") == head_sha]
     for r in sorted(mine, key=lambda r: (r.get("started_at") or "", r.get("id") or 0), reverse=True):
+        if pr is not None and base_sha is not None and r.get("external_id") != external_id(pr, base_sha, head_sha):
+            continue
         v = parse_verdict(((r.get("output") or {}).get("text")) or "")
-        if v and v.get("sha") == head_sha:
+        if verdict_matches(v, head_sha, pr, base_sha):
             return v, "verdict from the gate App"
     return None, "no AI review"
 
@@ -433,13 +502,19 @@ def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required
 
 
 def decide(pr: dict, risk: dict, checks: tuple[bool, list[str]], ai: tuple[bool, str],
-           approvals: tuple[bool, str], changes: bool = False) -> dict:
+           approvals: tuple[bool, str], changes: bool = False, shared_head: bool = False) -> dict:
     """Pure decision. Returns {"state": success|pending|failure, "automerge": bool, "why": [...]}."""
     why: list[str] = []
     labels = {l["name"] for l in pr.get("labels", [])}
     head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
     if pr.get("draft"):
         why.append("draft")
+    if ((pr.get("base") or {}).get("ref")) != DEFAULT_BRANCH:
+        # F1: a check run on a SHA applies to every PR with that head; only PRs
+        # into the default branch are ever evaluated to success.
+        why.append(f"base is not {DEFAULT_BRANCH}: never auto-merged")
+    if shared_head:
+        why.append("another open PR has the same head commit: all held")
     if head_repo != REPO:
         why.append("fork PRs never auto-merge")
     if labels & HOLD_LABELS:
@@ -591,36 +666,87 @@ def automerge_mode() -> str:
     return v if v in ("true", "signal-only") else "off"
 
 
-def _diff_and_review(pr: dict, prior: dict | None) -> tuple[dict, dict]:
-    sha = pr["head"]["sha"]
-    if prior and prior.get("sha") == sha and prior.get("status") == "ok":
-        # Reuse the App-stored verdict for this exact commit: no second AI call.
-        return prior, {"status": "ok", "p0": prior.get("p0", 0), "p1": prior.get("p1", 0),
-                       "text": "(reused the AI review stored for this commit)"}
-    head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
-    if head_repo != REPO:
-        review = {"status": "fork-skipped", "p0": 0, "p1": 0, "text": "Fork PR: no AI call."}
-    else:
-        diff = gh("api", f"repos/{REPO}/pulls/{pr['number']}", "-H", "Accept: application/vnd.github.diff")
-        review = ai_review(diff, pr.get("title", ""))
-    verdict = {"sha": sha, "pr": pr["number"], "status": review["status"], "p0": review["p0"], "p1": review["p1"]}
-    return verdict, review
+def target_prs(n: int | None, sha: str | None) -> list[int]:
+    if n:
+        return [n]
+    if sha:
+        return prs_for_sha(sha)
+    return [p["number"] for p in gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True)]
 
 
-def evaluate(n: int) -> tuple[dict, dict, dict, dict, dict]:
+# ------------------------------------------------- job 1: review (no App token)
+def review_one(n: int) -> dict:
+    """AI review of one PR's diff. Runs in the `review` job, which never holds
+    the App token (F3). Output is plain structured data bound to pr/base/head."""
     pr = gh_json(f"repos/{REPO}/pulls/{n}")
-    sha, author = pr["head"]["sha"], pr["user"]["login"]
+    sha, base_sha = pr["head"]["sha"], pr["base"]["sha"]
+    head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
+    entry = {"pr": n, "sha": sha, "base_sha": base_sha}
+    if head_repo != REPO or pr["base"]["ref"] != DEFAULT_BRANCH:
+        return {**entry, "status": "skipped", "p0": 0, "p1": 0, "text": "Fork or non-default base: no AI call."}
+    runs = gh_json(f"repos/{REPO}/commits/{sha}/check-runs?check_name={GATE_CONTEXT}&per_page=100", paginate=True)
+    prior, _ = app_verdict(runs, sha, GATE_APP_ID, n, base_sha)
+    if prior and prior.get("status") == "ok":
+        return {**entry, "status": "ok", "p0": int(prior.get("p0", 0)), "p1": int(prior.get("p1", 0)),
+                "text": "(reused the AI review stored for this PR, base and commit)"}
+    diff = gh("api", f"repos/{REPO}/pulls/{n}", "-H", "Accept: application/vnd.github.diff")
+    r = ai_review(diff, pr.get("title", ""))
+    return {**entry, "status": r["status"], "p0": int(r["p0"]), "p1": int(r["p1"]), "text": r["text"][:60000]}
+
+
+def cmd_review(n: int | None, sha: str | None, out: str) -> int:
+    results = []
+    for num in target_prs(n, sha):
+        try:
+            results.append(review_one(num))
+        except Exception as e:  # noqa: BLE001 - one bad PR must not stop the rest
+            print(json.dumps({"pr": num, "review_error": str(e)[:300]}), file=sys.stderr)
+    with open(out, "w") as fh:
+        json.dump(results, fh)
+    return 0
+
+
+def review_for(entries: list, n: int, sha: str, base_sha: str) -> dict | None:
+    """Pick the review-job entry for exactly this pr/base/head, with sane types."""
+    for e in entries or []:
+        if not isinstance(e, dict):
+            continue
+        if e.get("pr") != n or e.get("sha") != sha or e.get("base_sha") != base_sha:
+            continue
+        if not isinstance(e.get("p0"), int) or not isinstance(e.get("p1"), int) or not isinstance(e.get("status"), str):
+            return None
+        return {"status": e["status"][:40], "p0": e["p0"], "p1": e["p1"], "text": str(e.get("text", ""))[:60000]}
+    return None
+
+
+# ------------------------------------------- job 2: gate (App token, no diffs)
+def workflow_runs_for(sha: str) -> dict:
+    data = gh_json(f"repos/{REPO}/actions/runs?head_sha={sha}&per_page=100")
+    return {r.get("check_suite_id"): r for r in (data.get("workflow_runs") or [])}
+
+
+def evaluate(n: int, entries: list) -> tuple[dict, dict, dict, dict, dict]:
+    """Never fetches the diff: only metadata, file names, checks and reviews."""
+    pr = gh_json(f"repos/{REPO}/pulls/{n}")
+    sha, author, base_sha = pr["head"]["sha"], pr["user"]["login"], pr["base"]["sha"]
     risk = classify(pr_files(n))  # recomputed: the label is informational, never trusted
     runs = gh_json(f"repos/{REPO}/commits/{sha}/check-runs?per_page=100", paginate=True)
-    prior, _ = app_verdict(runs, sha, GATE_APP_ID)
-    verdict, review = _diff_and_review(pr, prior)
+    review = review_for(entries, n, sha, base_sha)
+    if review is None:
+        prior, why = app_verdict(runs, sha, GATE_APP_ID, n, base_sha)
+        review = ({"status": "ok", "p0": int(prior.get("p0", 0)), "p1": int(prior.get("p1", 0)),
+                   "text": "(stored AI review for this PR, base and commit)"} if prior
+                  else {"status": "missing", "p0": 0, "p1": 0, "text": why})
+    verdict = {"sha": sha, "pr": n, "base_sha": base_sha, "status": review["status"],
+               "p0": review["p0"], "p1": review["p1"]}
     reviews = gh_json(f"repos/{REPO}/pulls/{n}/reviews?per_page=100", paginate=True)
-    cmp = gh_json(f"repos/{REPO}/compare/{pr['base']['sha']}...{sha}")
+    cmp = gh_json(f"repos/{REPO}/compare/{base_sha}...{sha}")
     base_now = gh_json(f"repos/{REPO}/commits/{pr['base']['ref']}")["sha"]
-    behind = int(cmp.get("behind_by", 0)) > 0 or pr["base"]["sha"] != base_now
-    result = decide(pr, risk, checks_green(runs), ai_clear(verdict, sha),
-                    approvals_ok(reviews, author, sha, risk["owner_required"]),
-                    changes_requested(reviews))
+    behind = int(cmp.get("behind_by", 0)) > 0 or base_sha != base_now
+    shared = len(prs_for_sha(sha)) > 1
+    result = decide(pr, risk, checks_green(runs, workflow_runs=workflow_runs_for(sha), head_sha=sha),
+                    ai_clear(verdict, sha), approvals_ok(reviews, author, sha, risk["owner_required"]),
+                    changes_requested(reviews), shared_head=shared)
     result = apply_gate_policy(result, behind=behind, mode=automerge_mode(), app_configured=bool(GATE_APP_ID))
     return pr, {**result, "risk": risk["risk"]}, risk, verdict, review
 
@@ -662,17 +788,20 @@ def fail_closed(num: int, why: str) -> None:
     pr = gh_json(f"repos/{REPO}/pulls/{num}")
     disable_auto(num)
     post_check({"name": GATE_CONTEXT, "head_sha": pr["head"]["sha"], "status": "in_progress",
+                "external_id": external_id(num, pr["base"]["sha"], pr["head"]["sha"]),
                 "output": {"title": f"failed closed: {why}"[:120], "summary": why}})
 
 
-def _gate_one(num: int, apply: bool) -> int:
-    pr, res, risk, verdict, review = evaluate(num)
+def _gate_one(num: int, apply: bool, entries: list) -> int:
+    pr, res, risk, verdict, review = evaluate(num, entries)
     print(json.dumps({"pr": num, **res}))
     if not apply:
         return 0
     if pr.get("auto_merge") and not res["automerge"]:
         disable_auto(num)  # before any success can be posted
-    post_check(build_check(risk, review, verdict, res))
+    body = build_check(risk, review, verdict, res)
+    body["external_id"] = external_id(num, verdict["base_sha"], verdict["sha"])
+    post_check(body)
     for label in RISK_LABELS:
         if label != f"risk:{risk['risk']}":
             subprocess.run(["gh", "pr", "edit", str(num), "-R", REPO, "--remove-label", label], capture_output=True)
@@ -687,21 +816,23 @@ def _gate_one(num: int, apply: bool) -> int:
 
 
 def prs_for_sha(sha: str) -> list[int]:
-    pulls = gh_json(f"repos/{REPO}/commits/{sha}/pulls")
-    return [p["number"] for p in pulls if p.get("state") == "open" and p["head"]["sha"] == sha]
+    pulls = gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True)
+    return [p["number"] for p in pulls if p["head"]["sha"] == sha]
 
 
-def cmd_gate(n: int | None, apply: bool, sha: str | None = None) -> int:
-    if n:
-        numbers = [n]
-    elif sha:
-        numbers = prs_for_sha(sha)
-    else:
-        numbers = [p["number"] for p in gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True)]
-    failed = 0
-    for num in numbers:
+def cmd_gate(n: int | None, apply: bool, sha: str | None = None, reviews_path: str | None = None) -> int:
+    entries: list = []
+    if reviews_path and os.path.exists(reviews_path):
         try:
-            failed += _gate_one(num, apply)
+            with open(reviews_path) as fh:
+                loaded = json.load(fh)
+            entries = loaded if isinstance(loaded, list) else []
+        except (OSError, json.JSONDecodeError):
+            entries = []
+    failed = 0
+    for num in target_prs(n, sha):
+        try:
+            failed += _gate_one(num, apply, entries)
         except Exception as e:  # one bad PR must not stop the sweep
             print(json.dumps({"pr": num, "error": str(e)[:300]}), file=sys.stderr)
             failed += 1
@@ -713,10 +844,10 @@ def cmd_gate(n: int | None, apply: bool, sha: str | None = None) -> int:
     return 1 if failed else 0
 
 
-def fetch_app_verdict(head_sha: str) -> tuple[dict | None, str]:
-    """gh-backed wrapper used by auto-merge-gate.py."""
+def fetch_app_verdict(head_sha: str, pr: int, base_sha: str) -> tuple[dict | None, str]:
+    """gh-backed wrapper used by auto-merge-gate.py; bound to pr/base/head (F1)."""
     runs = gh_json(f"repos/{REPO}/commits/{head_sha}/check-runs?check_name={GATE_CONTEXT}&per_page=100", paginate=True)
-    return app_verdict(runs, head_sha, GATE_APP_ID)
+    return app_verdict(runs, head_sha, GATE_APP_ID, pr, base_sha)
 
 
 def main(argv: list[str]) -> int:
@@ -728,11 +859,18 @@ def main(argv: list[str]) -> int:
     g.add_argument("--pr", type=int)
     g.add_argument("--sha")
     g.add_argument("--apply", action="store_true")
+    g.add_argument("--reviews", help="JSON from the review job (no diff is fetched here)")
+    rv = sub.add_parser("review")
+    rv.add_argument("--pr", type=int)
+    rv.add_argument("--sha")
+    rv.add_argument("--out", required=True)
     a = ap.parse_args(argv)
+    if a.cmd == "review":
+        return cmd_review(a.pr, a.sha, a.out)
     if a.cmd == "classify":
         print(json.dumps(classify([{"filename": f, "additions": 1} for f in a.files]), indent=2))
         return 0
-    return cmd_gate(a.pr, a.apply, a.sha)
+    return cmd_gate(a.pr, a.apply, a.sha, a.reviews)
 
 
 if __name__ == "__main__":
