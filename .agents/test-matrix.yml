@@ -246,6 +246,26 @@ rules:
     checks:
       - "python3 scripts/dev/check-qa-harness-contract.py --self-test"
       - "python3 scripts/dev/check-qa-harness-contract.py"
+
+  # Debug test control surface: compiled into build.sh only. Release exclusion
+  # is Linux-checkable (the binary grep lives in build-beta.sh).
+  - paths:
+      - "Sources/App/DebugControlChannel.swift"
+      - "Sources/App/DebugControlCommand.swift"
+      - "Sources/Support/AutomatedLaunchEnvironment.swift"
+      - "Sources/App/TranscriptedApp.swift"
+      - "scripts/entrypoints/build.sh"
+      - "scripts/entrypoints/build-beta.sh"
+      - "scripts/dev/check-debug-control-release.py"
+      - "scripts/dev/transcripted-debug.py"
+      - "docs/debug-control-surface.md"
+      - "Tests/DebugControlCommandTests.swift"
+      - "Tests/E2E/TranscriptedE2ESmoke.swift"
+    checks:
+      - "python3 scripts/dev/check-debug-control-release.py --self-test"
+      - "python3 scripts/dev/check-debug-control-release.py"
+      - "python3 scripts/dev/transcripted-debug.py --self-test"
+      - "python3 scripts/dev/check-build-source-lists.py"
   # Synced copies: CaptureLibraryPathSafety.swift lives as three real files, one
   # per build unit that can't share a module. They must stay byte-identical.
   - paths:

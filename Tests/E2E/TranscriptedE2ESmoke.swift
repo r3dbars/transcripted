@@ -67,6 +67,7 @@ private final class TranscriptedE2ESmokeHarness {
         try verifyFailedMeetingArtifact(fixtures: fixtures)
         try verifySupportDiagnosticsPrivacy(fixtures: fixtures, logsDir: logsDir)
         try verifyDeleteRemovesCanonicalArtifacts(fixtures: fixtures, captureLibrary: captureLibrary)
+        try verifyDebugControlSurface()
     }
 
     private func writeCaptureFixtures(
@@ -653,6 +654,111 @@ private final class TranscriptedE2ESmokeHarness {
         }
 
         try expect(didPersist, "Production failed transcription manager should persist failed meeting fixture")
+    }
+
+    /// Drive the debug control surface the same way `transcripted-debug`
+    /// will: parse each command, apply it to an isolated snapshot, and
+    /// read versioned state JSON. Does not launch the app or touch the
+    /// real capture library.
+    private func verifyDebugControlSurface() throws {
+        try expect(
+            !AutomatedLaunchEnvironment.isActive(environment: [:]),
+            "debug control must treat a normal environment as not a harness"
+        )
+        try expect(
+            AutomatedLaunchEnvironment.isActive(environment: ["TRANSCRIPTED_AUTOMATED_HARNESS": "1"]),
+            "debug control launch must activate AutomatedLaunchEnvironment"
+        )
+        try expect(
+            DebugControlAdmission.refusal(harnessActive: false, controlDirectory: "/tmp/ctrl") == "harness_inactive",
+            "debug control must refuse when the harness is off"
+        )
+        try expect(
+            DebugControlAdmission.refusal(harnessActive: true, controlDirectory: "/tmp/ctrl") == nil,
+            "debug control may start when the harness is on and the control dir is absolute"
+        )
+
+        var snapshot = DebugControlSessionSnapshot.idle()
+        let commands: [(String, [String])] = [
+            ("state", ["state"]),
+            ("start_dictation", ["dictation", "start"]),
+            ("stop_dictation", ["dictation", "stop"]),
+            ("start_meeting", ["meeting", "start"]),
+            ("stop_meeting", ["meeting", "stop"]),
+            ("import_audio", ["import", "/tmp/e2e-fixture.wav"]),
+            ("paste_target_open", ["paste-target", "open"]),
+            ("open_screen", ["open", "today"]),
+            ("settings_get", ["settings", "get", "show_in_dock"]),
+            ("settings_set", ["settings", "set", "show_in_dock", "false"]),
+        ]
+        for (name, argv) in commands {
+            switch DebugControlCommandParser.parseArgv(argv, id: name) {
+            case .failure(let failure):
+                throw E2ESmokeError.failed("debug control argv \(argv) failed: \(failure.error)")
+            case .success(let request):
+                switch DebugControlSessionPolicy.apply(request.action, to: snapshot) {
+                case .failure(let error):
+                    throw E2ESmokeError.failed("debug control \(name) was rejected: \(error)")
+                case .success(let next):
+                    snapshot = next
+                }
+            }
+        }
+
+        try expect(!snapshot.dictationActive, "E2E debug control should stop dictation after start/stop")
+        try expect(snapshot.meetingState == "transcribing", "E2E debug control should stop the meeting into transcribing")
+        try expect(snapshot.pasteTargetOpen, "E2E debug control should open the paste target")
+        try expect(snapshot.openScreen == "today", "E2E debug control should open the Today screen")
+        try expect(snapshot.settings["show_in_dock"] == false, "E2E debug control should set show_in_dock")
+
+        let encoded = DebugControlStateCodec.encode(snapshot, pid: 7)
+        for key in DebugControlStateCodec.requiredStateKeys() {
+            try expect(encoded[key] != nil, "debug control state JSON must include \(key)")
+        }
+        try expect(encoded["schema_version"] as? Int == DebugControlSchema.version, "debug control state JSON must carry schema_version")
+        try expect(encoded["dictation_active"] as? Bool == false, "debug control state JSON should report dictation stopped")
+        try expect(
+            (encoded["automation_ids"] as? [String: String])?["start_dictation"] == "transcripted.menubar.primary.start-dictation",
+            "debug control state JSON should expose the menu bar Dictate identifier"
+        )
+
+        let url = DebugControlCommandParser.parseURLString("transcripted-debug://settings/get?key=auto_detect_calls")
+        guard case .success(let request) = url else {
+            throw E2ESmokeError.failed("debug control URL parse should accept settings get")
+        }
+        try expect(request.action == .settingsGet(key: "auto_detect_calls"), "debug control URL should map to settings_get")
+
+        try expect(
+            DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: true),
+            "debug control start settle needs dictation and STT recording"
+        )
+        try expect(
+            !DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: false),
+            "debug control must not treat a pre-STT start snapshot as settled"
+        )
+        try expect(
+            DebugControlSettlePolicy.stoppedSettled(dictationActive: false),
+            "debug control stop settle needs dictation inactive"
+        )
+        try expect(
+            !DebugControlSettlePolicy.stoppedSettled(dictationActive: true),
+            "debug control must not treat a still-active stop snapshot as settled"
+        )
+        try expect(
+            DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 0, settled: false),
+            "debug control should keep waiting before the settle timeout"
+        )
+        try expect(
+            !DebugControlSettlePolicy.shouldKeepWaiting(
+                elapsedMilliseconds: DebugControlSettlePolicy.timeoutMilliseconds,
+                settled: false
+            ),
+            "debug control should stop waiting at the settle timeout"
+        )
+        try expect(
+            !DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 0, settled: true),
+            "debug control should return as soon as dictation has settled"
+        )
     }
 }
 
