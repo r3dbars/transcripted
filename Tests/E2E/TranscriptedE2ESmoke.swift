@@ -698,7 +698,7 @@ private final class TranscriptedE2ESmokeHarness {
             case .success(let request):
                 switch DebugControlSessionPolicy.apply(request.action, to: snapshot) {
                 case .failure(let error):
-                    throw E2ESmokeError.failed("debug control \(name) was rejected: \(error)")
+                    throw E2ESmokeError.failed("debug control \(name) was rejected: \(error.code)")
                 case .success(let next):
                     snapshot = next
                 }

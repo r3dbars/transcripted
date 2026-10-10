@@ -258,14 +258,14 @@ private func debugURL(_ raw: String) -> Result<DebugControlRequest, DebugControl
     DebugControlCommandParser.parseURLString(raw)
 }
 
-private extension Result where Success == DebugControlSessionSnapshot, Failure == String {
+private extension Result where Success == DebugControlSessionSnapshot, Failure == DebugControlSessionFailure {
     func okSnapshot() -> DebugControlSessionSnapshot? {
         if case .success(let snapshot) = self { return snapshot }
         return nil
     }
 
     func failureCode() -> String? {
-        if case .failure(let error) = self { return error }
+        if case .failure(let error) = self { return error.code }
         return nil
     }
 }

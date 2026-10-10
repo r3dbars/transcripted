@@ -269,38 +269,47 @@ enum DebugControlSettlePolicy {
     }
 }
 
+/// Fast tests compile this file without TranscriptedCore's
+/// `String: LocalizedError`, so `Result` cannot use `String` as Failure.
+struct DebugControlSessionFailure: Error, Equatable {
+    let code: String
+}
+
 enum DebugControlSessionPolicy {
     static func apply(
         _ action: DebugControlAction,
         to snapshot: DebugControlSessionSnapshot
-    ) -> Result<DebugControlSessionSnapshot, String> {
+    ) -> Result<DebugControlSessionSnapshot, DebugControlSessionFailure> {
         var next = snapshot
+        func reject(_ code: String) -> Result<DebugControlSessionSnapshot, DebugControlSessionFailure> {
+            .failure(DebugControlSessionFailure(code: code))
+        }
         switch action {
         case .ping, .state:
             return .success(next)
         case .startDictation:
-            if next.dictationActive { return .failure("dictation_already_active") }
+            if next.dictationActive { return reject("dictation_already_active") }
             next.dictationActive = true
             return .success(next)
         case .stopDictation:
-            if !next.dictationActive { return .failure("dictation_not_active") }
+            if !next.dictationActive { return reject("dictation_not_active") }
             next.dictationActive = false
             return .success(next)
         case .startMeeting:
             if let rejection = DebugControlMeetingGate.startRejection(next.meetingState) {
-                return .failure(rejection)
+                return reject(rejection)
             }
             next.meetingState = "recording"
             return .success(next)
         case .stopMeeting:
             if let rejection = DebugControlMeetingGate.stopRejection(next.meetingState) {
-                return .failure(rejection)
+                return reject(rejection)
             }
             next.meetingState = "transcribing"
             return .success(next)
         case .importAudio:
             if let rejection = DebugControlMeetingGate.importRejection(next.meetingState) {
-                return .failure(rejection)
+                return reject(rejection)
             }
             return .success(next)
         case .pasteTargetOpen:
@@ -308,24 +317,23 @@ enum DebugControlSessionPolicy {
             return .success(next)
         case .openScreen(let screen):
             guard DebugControlScreenPolicy.isAllowed(screen) else {
-                return .failure("invalid_arg:screen")
+                return reject("invalid_arg:screen")
             }
             next.openScreen = screen
             return .success(next)
         case .settingsGet(let key):
             guard DebugControlSettingsPolicy.isAllowedKey(key) else {
-                return .failure("unknown_setting")
+                return reject("unknown_setting")
             }
             return .success(next)
         case .settingsSet(let key, let value):
             guard DebugControlSettingsPolicy.isAllowedKey(key) else {
-                return .failure("unknown_setting")
+                return reject("unknown_setting")
             }
             next.settings[key] = value
             return .success(next)
         }
     }
-}
 
 enum DebugControlStateCodec {
     static func encode(_ snapshot: DebugControlSessionSnapshot, pid: Int) -> [String: Any] {
