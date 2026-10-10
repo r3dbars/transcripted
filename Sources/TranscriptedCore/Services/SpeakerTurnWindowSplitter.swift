@@ -62,7 +62,14 @@ enum SpeakerTurnWindowSplitter {
         for index in order {
             let segment = segments[index]
             let remaining = maxWindowsPerRefine - windowsUsed
-            guard segment.duration >= minSegmentSeconds, remaining >= minWindows else {
+            // Use audio that is actually in the buffer. A turn labeled 99 s
+            // that only has 0.5 s on disk must not pay a window grid.
+            let available = availableSeconds(
+                segment: segment,
+                sampleCount: samples.count,
+                sampleRate: sampleRate
+            )
+            guard available >= minSegmentSeconds, remaining >= minWindows else {
                 piecesByIndex[index] = [segment]
                 continue
             }
@@ -150,6 +157,19 @@ enum SpeakerTurnWindowSplitter {
     }
 
     // MARK: - Windowing
+
+    /// Seconds of this turn that actually sit inside `samples`.
+    static func availableSeconds(
+        segment: SpeakerSegment,
+        sampleCount: Int,
+        sampleRate: Int
+    ) -> Double {
+        guard sampleRate > 0, sampleCount > 0 else { return 0 }
+        let audioEnd = Double(sampleCount) / Double(sampleRate)
+        let start = max(segment.startTime, 0)
+        let end = min(segment.endTime, audioEnd)
+        return max(0, end - start)
+    }
 
     /// Window start times for one turn. Hop grows with duration so `maxWindows`
     /// is a hard cap and the last window still covers the end.
