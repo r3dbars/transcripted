@@ -79,8 +79,13 @@ public enum NemotronTurnBuilder {
     /// 3. Same-speaker runs separated only by silence shorter than
     ///    `maxBridgeGapSeconds` are joined.
     /// 4. Runs shorter than `minTurnSeconds` are dropped.
-    /// 5. Step 3 runs again, so a speaker whose turn was split by a dropped blip
-    ///    from someone else is rejoined when the resulting gap is short.
+    /// 5. Step 3 runs again, but only across silence. A dropped *different*
+    ///    speaker is a real occupancy of that gap (slot flicker or a short
+    ///    interjection). Re-bridging A across it would put B's frames inside
+    ///    A's time range, mix the voiceprint, and let later same-ID merges
+    ///    swallow the other person. Neighbouring A turns stay separate; the
+    ///    transcript merge may still join their words when nothing else was
+    ///    diarized in the gap.
     /// 6. Speaker slots are renumbered `0..<n` in order of first appearance.
     ///
     /// When `probabilities.count` disagrees with `frameCount * numSpeakers`, only
@@ -112,8 +117,9 @@ public enum NemotronTurnBuilder {
         let minFrames = minTurnFrames(seconds: minTurnSeconds, frameSeconds: frameSeconds)
 
         var merged = bridge(runs, maxGapFrames: maxGapFrames)
+        let dropped = merged.filter { $0.end - $0.start < minFrames }
         merged = merged.filter { $0.end - $0.start >= minFrames }
-        merged = bridge(merged, maxGapFrames: maxGapFrames)
+        merged = bridge(merged, maxGapFrames: maxGapFrames, blockedBy: dropped)
 
         var remap: [Int: Int] = [:]
         return merged.map { run in
@@ -210,13 +216,17 @@ public enum NemotronTurnBuilder {
     }
 
     /// Join adjacent same-speaker runs whose gap is at most `maxGapFrames`.
-    /// Runs are ordered and non-overlapping, so the gap between a run and the
-    /// previous kept run holds no other kept speaker; joining keeps exclusivity.
-    static func bridge(_ runs: [Run], maxGapFrames: Int) -> [Run] {
+    /// Runs are ordered and non-overlapping. `blockedBy` is the set of dropped
+    /// runs that still occupy a gap: a different speaker there means the two
+    /// sides are not "the same turn with a pause," so they stay separate.
+    static func bridge(_ runs: [Run], maxGapFrames: Int, blockedBy: [Run] = []) -> [Run] {
         var out: [Run] = []
         out.reserveCapacity(runs.count)
         for run in runs {
-            if var last = out.last, last.speaker == run.speaker, run.start - last.end <= maxGapFrames {
+            if var last = out.last,
+               last.speaker == run.speaker,
+               run.start - last.end <= maxGapFrames,
+               !gapHasDifferentSpeaker(from: last.end, to: run.start, speaker: run.speaker, blockedBy: blockedBy) {
                 last.end = run.end
                 last.probabilitySum += run.probabilitySum
                 last.activeFrames += run.activeFrames
@@ -226,5 +236,12 @@ public enum NemotronTurnBuilder {
             }
         }
         return out
+    }
+
+    static func gapHasDifferentSpeaker(from start: Int, to end: Int, speaker: Int, blockedBy: [Run]) -> Bool {
+        guard end > start else { return false }
+        return blockedBy.contains { dropped in
+            dropped.speaker != speaker && dropped.start < end && dropped.end > start
+        }
     }
 }

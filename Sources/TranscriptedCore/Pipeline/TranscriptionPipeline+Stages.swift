@@ -128,10 +128,16 @@ extension Transcription {
     ///
     /// A `maxDuration` cap prevents runaway merges — even if the speaker and gap criteria
     /// are met, an utterance won't grow beyond this many seconds of continuous speech.
+    ///
+    /// `interruptingSegments` are diarized turns (after speaker-id remap) that may
+    /// not have been transcribed — the pipeline skips slices under 1 s for STT.
+    /// A different speaker occupying `(current.end, next.start)` blocks the merge
+    /// so a dropped 0.3 s interjection still keeps the two sides as two turns.
     nonisolated static func mergeConsecutiveUtterances(
         _ utterances: [TranscriptionUtterance],
         maxGap: Double,
-        maxDuration: Double = 30.0
+        maxDuration: Double = 30.0,
+        interruptingSegments: [SpeakerSegment] = []
     ) -> [TranscriptionUtterance] {
         guard utterances.count > 1 else { return utterances }
 
@@ -143,8 +149,14 @@ extension Transcription {
                 && current.channel == next.channel
             let smallGap = (next.start - current.end) < maxGap
             let withinDurationCap = (next.end - current.start) <= maxDuration
+            let interrupted = gapHasOtherSpeaker(
+                speakerId: current.speakerId,
+                from: current.end,
+                to: next.start,
+                in: interruptingSegments
+            )
 
-            if sameSpeaker && smallGap && withinDurationCap {
+            if sameSpeaker && smallGap && withinDurationCap && !interrupted {
                 // Merge: extend current to cover both, join text
                 current = TranscriptionUtterance(
                     start: current.start,
@@ -163,6 +175,22 @@ extension Transcription {
         }
         merged.append(current)
         return merged
+    }
+
+    /// True when a different diarized speaker occupies the open gap
+    /// `(from, to)`. Same-speaker occupancy does not block a merge.
+    nonisolated static func gapHasOtherSpeaker(
+        speakerId: Int,
+        from start: Double,
+        to end: Double,
+        in segments: [SpeakerSegment]
+    ) -> Bool {
+        guard end > start else { return false }
+        return segments.contains { segment in
+            segment.speakerId != speakerId
+                && segment.startTime < end
+                && segment.endTime > start
+        }
     }
 
     // MARK: - Silence-Based Speech Segmentation

@@ -86,6 +86,48 @@ final class TranscriptionPipelineStateTests: XCTestCase {
         XCTAssertEqual(merged.count, 2)
     }
 
+    func testMergeDoesNotCrossADifferentSpeakerSegmentInTheGap() {
+        let merged = Transcription.mergeConsecutiveUtterances(
+            [
+                utterance(start: 0.0, end: 4.0, speakerId: 1, transcript: "Hello"),
+                utterance(start: 4.5, end: 8.0, speakerId: 1, transcript: "again"),
+            ],
+            maxGap: 1.5,
+            interruptingSegments: [
+                SpeakerSegment(
+                    speakerId: 2,
+                    startTime: 4.05,
+                    endTime: 4.40,
+                    embedding: nil,
+                    qualityScore: 0.8
+                )
+            ]
+        )
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.map(\.transcript), ["Hello", "again"])
+    }
+
+    func testMergeStillJoinsWhenTheGapHasNoOtherSpeaker() {
+        let merged = Transcription.mergeConsecutiveUtterances(
+            [
+                utterance(start: 0.0, end: 4.0, speakerId: 1, transcript: "Hello"),
+                utterance(start: 4.5, end: 8.0, speakerId: 1, transcript: "again"),
+            ],
+            maxGap: 1.5,
+            interruptingSegments: [
+                SpeakerSegment(
+                    speakerId: 1,
+                    startTime: 4.05,
+                    endTime: 4.40,
+                    embedding: nil,
+                    qualityScore: 0.8
+                )
+            ]
+        )
+        XCTAssertEqual(merged.count, 1)
+        XCTAssertEqual(merged[0].transcript, "Hello again")
+    }
+
     // MARK: - AudioCaptureStartState policy
 
     func testMeetingCaptureOutcomeWaitsWhenNotYetRecordingButFilePresent() {

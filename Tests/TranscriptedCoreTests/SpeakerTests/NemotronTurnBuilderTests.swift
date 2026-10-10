@@ -152,11 +152,14 @@ final class NemotronTurnBuilderTests: XCTestCase {
         XCTAssertEqual(shape(kept), [[0, 0, 30], [1, 70, 95]])
     }
 
-    func testDroppedBlipLetsTheSurroundingTurnRejoin() {
-        // A, a 0.1 s flicker to B, A again: the blip is dropped and A is one turn.
+    func testDroppedDifferentSpeakerBlipDoesNotRejoinSurroundingTurns() {
+        // A, a 0.1 s flicker to B, A again: B is dropped, but A stays two turns
+        // so B's frames are not absorbed into A's time range or voiceprint.
         let result = turns([([0: 0.9], 50), ([1: 0.95], 10), ([0: 0.9], 50)])
-        XCTAssertEqual(shape(result), [[0, 0, 110]])
+        XCTAssertEqual(shape(result), [[0, 0, 50], [0, 60, 110]])
         XCTAssertEqual(result[0].meanActiveProbability, 0.9, accuracy: 1e-5)
+        XCTAssertEqual(result[1].meanActiveProbability, 0.9, accuracy: 1e-5)
+        assertExclusive(result)
     }
 
     func testCustomParametersAreHonored() {

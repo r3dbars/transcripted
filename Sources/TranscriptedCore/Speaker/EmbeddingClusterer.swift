@@ -18,8 +18,11 @@
 //    crowded meeting do not chain-collapse.
 //
 // 3. Merging: Different speakers collapsed into one diarizer ID.
-//    Fixed by DB-informed split — compare per-segment embeddings against
-//    known speaker profiles and split clusters that contain 2+ distinct voices.
+//    Fixed first by an unsupervised 2-means split when one ID's per-segment
+//    embeddings are bimodal below the consolidation bar (no speaker DB
+//    required — import and `--no-speaker-identification` still recover the
+//    people). Then by DB-informed split when known profiles can name the
+//    voices.
 
 import Foundation
 import Accelerate
@@ -44,8 +47,9 @@ public enum EmbeddingClusterer {
     private static let knownProfileConflictThreshold: Float = 0.70
 
     /// Post-process diarization segments: merge fragmented speakers,
-    /// absorb tiny orphan clusters, then split clusters that contain
-    /// multiple known DB voices.
+    /// absorb tiny orphan clusters, split a collapsed ID whose embeddings
+    /// are bimodal, consolidate over-segmented same-voice clusters, then
+    /// split clusters that contain multiple known DB voices.
     ///
     /// - Parameter pairwiseMergeThreshold: Cosine similarity threshold for merging
     ///   fragmented speaker clusters. Pass `nil` to skip only the pairwise merge
@@ -77,6 +81,14 @@ public enum EmbeddingClusterer {
             segments: result,
             absorptionThreshold: thresholds.absorb,
             microAbsorptionThreshold: thresholds.microAbsorb
+        )
+        // Split a collapsed ID before consolidation so two real voices that
+        // already share one diarizer label are pulled apart, and so a later
+        // same-voice merge cannot glue them back (their centroids sit below
+        // the consolidation bar by construction).
+        result = splitCollapsedSpeakers(
+            segments: result,
+            maxBetween: consolidationThreshold ?? sameVoiceConsolidationThreshold
         )
         if let consolidationThreshold {
             result = consolidateSameVoiceClusters(

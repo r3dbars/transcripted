@@ -218,7 +218,10 @@ def post_process(segments: list[Segment], consolidation_threshold: float | None)
     result = absorb_small_clusters(segments)
     if consolidation_threshold is not None:
         result = consolidate_same_voice_clusters(result, consolidation_threshold)
-    # DB-informed split needs known profiles; the synthetic suite has none.
+    # Swift also runs an unsupervised collapsed-ID split before consolidation.
+    # This suite over-segments one voice into many IDs (unimodal clusters), so
+    # that pass does not fire; DB-informed split needs known profiles and the
+    # synthetic suite has none.
     return result
 
 

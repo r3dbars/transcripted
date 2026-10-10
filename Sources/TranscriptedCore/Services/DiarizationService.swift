@@ -28,6 +28,17 @@ public struct SpeakerSegment: Sendable {
     }
 
     public var duration: Double { endTime - startTime }
+
+    func withSpeakerId(_ id: Int) -> SpeakerSegment {
+        guard id != speakerId else { return self }
+        return SpeakerSegment(
+            speakerId: id,
+            startTime: startTime,
+            endTime: endTime,
+            embedding: embedding,
+            qualityScore: qualityScore
+        )
+    }
 }
 
 public enum DiarizationModelState: Equatable {
@@ -597,7 +608,12 @@ public class DiarizationService: ObservableObject {
         AppLogger.transcription.info("Re-embedded segments with \(embedder.identifier)", [
             "replaced": "\(replaced)", "total": "\(segments.count)", "dim": "\(embedder.dimension)"
         ])
-        return result
+        return SpeakerTurnWindowSplitter.refine(
+            segments: result,
+            samples: samples,
+            sampleRate: sampleRate,
+            using: embedder
+        )
     }
 
     /// Run offline speaker diarization on a WAV file.

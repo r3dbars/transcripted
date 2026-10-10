@@ -240,7 +240,9 @@ scripts/ops/speaker-naming-simulator.py --json     # machine-readable suite outp
 It generates synthetic offline-diarization output — true speakers over-segmented
 into several clusters, the way VBx splits one remote voice — and runs a faithful
 pure-Python model of `EmbeddingClusterer` post-processing (small-cluster
-absorption + same-voice consolidation). The suite reports review-row counts
+absorption + same-voice consolidation). The Swift path also splits a
+collapsed ID whose embeddings are bimodal; this suite over-segments one
+voice, so that pass does not fire. The suite reports review-row counts
 before/after consolidation, expected labels, channel role, and false-merge
 flags, so it catches the user-facing failure: duplicate speaker rows in the
 post-meeting review sheet. The fixtures cover cold unknown voices, repeated
