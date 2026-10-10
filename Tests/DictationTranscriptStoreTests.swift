@@ -490,6 +490,58 @@ func testDictationTranscriptStore() {
             "undo should restore the edited entry once and keep the newer save"
         )
     }
+
+    runSuite("DictationTranscriptStore.restoreDeletedEntry — repeated undo after newer saves does not grow the day file (#2187)") {
+        let fm = FileManager.default
+        let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
+        let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
+        try? fm.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let dayFile = outputDir.appendingPathComponent("Dictations_2026-04-13.md")
+        // Explicit escapes: the target ends with three trailing spaces and is
+        // followed by two blank lines before the next heading.
+        let targetSection = "## 10:05 AM - Target note\n\nEntry ID: `dictation-target`\nCaptured: 2026-04-13T10:05:00Z\nSource app: Notes\nDelivery: pasted\nWords: 2\nCharacters: 11\n\ntarget body\u{20}\u{20}\u{20}"
+        let keeperSection = "## 10:10 AM - Keeper note\n\nEntry ID: `dictation-keeper`\nCaptured: 2026-04-13T10:10:00Z\nSource app: Notes\nDelivery: pasted\nWords: 2\nCharacters: 11\n\nkeeper text"
+        let header = "---\ntitle: \"Dictations for April 13, 2026\"\ndate: 2026-04-13\ncapture_type: dictation_day\n---\n\n# Dictations for April 13, 2026\n\n"
+        try? (header + targetSection + "\n\n\n" + keeperSection + "\n").write(to: dayFile, atomically: true, encoding: .utf8)
+
+        var snapshots: [String] = []
+        for cycle in 0..<4 {
+            guard let target = DictationTranscriptStore.recentSavedDictations(limit: 20, directory: outputDir)
+                .first(where: { $0.entryID == "dictation-target" }),
+                let undo = try? DictationTranscriptStore.deleteEntryReversibly(target) else {
+                assertionFailure("cycle \(cycle): expected to delete the target entry reversibly")
+                return
+            }
+            _ = try? DictationTranscriptWriter.save(
+                text: "newer note \(cycle)",
+                sourceApp: nil,
+                delivery: .pasted,
+                createdAt: isoDate("2026-04-13T11:0\(cycle):00Z"),
+                directory: outputDir
+            )
+            do {
+                try DictationTranscriptStore.restoreDeletedEntry(undo)
+            } catch {
+                assertionFailure("cycle \(cycle): restoreDeletedEntry should not throw: \(error)")
+            }
+            let afterUndo = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
+            assertTrue(afterUndo.hasSuffix(targetSection + "\n"), "cycle \(cycle): undo should append the exact target bytes")
+            assertTrue(!afterUndo.hasSuffix("\n\n"), "cycle \(cycle): undo should not leave trailing blank lines")
+            snapshots.append(afterUndo)
+        }
+
+        // Every cycle adds one same-length newer note and nothing else, so
+        // the day file must grow by exactly the same number of bytes each time.
+        let sizes = snapshots.map { $0.utf8.count }
+        let deltas = zip(sizes.dropFirst(), sizes).map { $0 - $1 }
+        assertTrue(Set(deltas).count == 1, "undo cycles must not add stray bytes; size deltas were \(deltas)")
+        let expectedTail = targetSection + "\n"
+        for (cycle, snapshot) in snapshots.enumerated() {
+            assertEqual(Array(snapshot.utf8.suffix(expectedTail.utf8.count)), Array(expectedTail.utf8), "cycle \(cycle): tail must be byte-for-byte the target section plus one newline")
+        }
+    }
 }
 
 private func temporaryDictationStoreTestRoot(fileManager: FileManager) -> URL {
