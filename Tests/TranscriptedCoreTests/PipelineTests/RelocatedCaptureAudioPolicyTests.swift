@@ -88,4 +88,56 @@ final class RelocatedCaptureAudioPolicyTests: XCTestCase {
         )
     }
 
+    func testOneOfflineVolumeIsProbedOnceForManyRows() {
+        // Several failed meetings from one previous library on a drive that
+        // isn't mounted. Asking the policy about each row must not repeat
+        // fileExists / directoryExists / statfs / opendir on that share —
+        // a hung SMB/NFS mount would multiply one launch stall by the queue.
+        var fileExistsCalls: [String] = []
+        var directoryExistsCalls: [String] = []
+        var mountPointCalls: [String] = []
+        var accessDeniedCalls: [String] = []
+        let fs = RelocatedCaptureAudioPolicy.FileSystem(
+            fileExists: { path in
+                fileExistsCalls.append(path)
+                return false
+            },
+            directoryExists: { path in
+                directoryExistsCalls.append(path)
+                return path == "/" || path == "/Volumes"
+            },
+            isMountPoint: { path in
+                mountPointCalls.append(path)
+                return false
+            },
+            isAccessDenied: { path in
+                accessDeniedCalls.append(path)
+                return false
+            }
+        )
+
+        let mics = (1...4).map { index in
+            URL(fileURLWithPath: "/Volumes/Sweep Drive/old-library/meetings/audio/Call\(index)_audio/microphone.wav")
+        }
+        for mic in mics {
+            XCTAssertTrue(
+                RelocatedCaptureAudioPolicy.shouldKeep(micAudioURL: mic, systemAudioURL: nil, fileSystem: fs),
+                "an offline volume must keep every relocated row"
+            )
+        }
+
+        XCTAssertEqual(
+            fileExistsCalls.count,
+            1,
+            "one offline volume must not be file-probed once per relocated row"
+        )
+        XCTAssertEqual(
+            directoryExistsCalls.filter { $0.hasPrefix("/Volumes/Sweep Drive") }.count,
+            2,
+            "the first row may look at the archive folder and the volume; later rows must not"
+        )
+        XCTAssertTrue(mountPointCalls.isEmpty, "an absent volume folder never needs statfs")
+        XCTAssertTrue(accessDeniedCalls.isEmpty, "an absent volume folder never needs opendir")
+    }
+
 }
