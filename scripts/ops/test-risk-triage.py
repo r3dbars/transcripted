@@ -43,6 +43,15 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(risk("Sources/UI/A.swift", "Sources/UI/B.swift", "Sources/UI/C.swift",
                               "Tests/ATests.swift", lines=1)["risk"], "medium")
 
+    def test_entrypoint_build_scripts_need_owner(self):
+        for path in ("scripts/entrypoints/build-beta.sh", "scripts/entrypoints/build.sh", "scripts/entrypoints/lib/sign.sh"):
+            self.assertEqual((risk(path)["risk"], risk(path)["owner_required"]), ("high", True), path)
+
+    def test_redact(self):
+        out = rt.redact("mail a@b.com at /Users/justin/x token=abcdefghijk ghp_" + "a" * 30)
+        for bad in ("a@b.com", "justin", "abcdefghijk", "ghp_"):
+            self.assertNotIn(bad, out)
+
     def test_agent_instructions_are_high(self):
         for path in ("AGENTS.md", "CLAUDE.md", "Sources/AGENTS.md", "docs/CLAUDE.md"):
             self.assertEqual(risk(path)["risk"], "high", path)

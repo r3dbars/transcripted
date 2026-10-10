@@ -89,3 +89,8 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - `ai-findings-waived` only counts when @r3dbars added it after the current head commit was committed. A new push voids the waiver.
 - The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app; branch protection pins the required check to that app (app_id 15368).
 - If a PR has auto-merge enabled but the gate no longer passes (or it is high risk), the gate turns auto-merge off.
+- Release build entrypoints (`scripts/entrypoints/build*.sh`, `scripts/entrypoints/lib/`) are owner-required, like the root wrappers.
+- Diffs are redacted (emails, home paths, credential-looking values) before any external AI call.
+- Both jobs check out the default branch only. Reads and the `risk-gate` status use `GITHUB_TOKEN`; `AUTOMERGE_TOKEN` is used only for the merge call.
+- A PR whose branch is behind its base never gets auto-merge enabled; it must be updated so CI reruns on current main.
+- Code-owner review: GitHub never lets the author satisfy a code-owner review, and @r3dbars authors most PRs, so "Require review from Code Owners" stays **off**. Owner sign-off on release/signing paths comes from `risk-gate` (high, never auto-merged) plus the owner merging by hand.

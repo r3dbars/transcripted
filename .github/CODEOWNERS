@@ -18,6 +18,12 @@
 /build.sh                                   @r3dbars
 /build-beta.sh                              @r3dbars
 /build-deps.sh                              @r3dbars
+/scripts/entrypoints/build.sh               @r3dbars
+/scripts/entrypoints/build-beta.sh          @r3dbars
+/scripts/entrypoints/build-deps.sh          @r3dbars
+/scripts/entrypoints/lib/                   @r3dbars
+/AGENTS.md                                  @r3dbars
+/CLAUDE.md                                  @r3dbars
 /Casks/                                     @r3dbars
 /docs/appcast.xml                           @r3dbars
 /Info.plist                                 @r3dbars

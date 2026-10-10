@@ -65,6 +65,10 @@ RELEASE_PATTERNS = (
     "build.sh",
     "build-beta.sh",
     "build-deps.sh",
+    "scripts/entrypoints/build.sh",
+    "scripts/entrypoints/build-beta.sh",
+    "scripts/entrypoints/build-deps.sh",
+    "scripts/entrypoints/lib/**",
     "Casks/**",
     "**/appcast*.xml",
     "Info.plist",
@@ -299,9 +303,25 @@ def pr_files(n: int) -> list[dict]:
     return files
 
 
+_REDACTIONS = (
+    (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "<email>"),
+    (re.compile(r"(?:/Users|/home)/[^/\s'\"]+"), "<home>"),
+    (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[abpors]-[A-Za-z0-9-]{10,})\b"), "<secret>"),
+    (re.compile(r"(?i)((?:api[_-]?key|token|secret|password)\s*[:=]\s*)['\"]?[^\s'\"]{8,}"), r"\1<secret>"),
+)
+
+
+def redact(text: str) -> str:
+    """Strip emails, home paths and credential-looking values before an external AI call."""
+    for rx, repl in _REDACTIONS:
+        text = rx.sub(repl, text)
+    return text
+
+
 def ai_review(diff: str, title: str) -> dict:
+    diff, title = redact(diff), redact(title)
     key = os.environ.get("AI_REVIEW_API_KEY", "")
-    provider = os.environ.get("AI_REVIEW_PROVIDER", "anthropic")
+    provider = (os.environ.get("AI_REVIEW_PROVIDER") or "anthropic")
     if not key:
         return {"status": "no-key", "p0": 0, "p1": 0, "text": "No `AI_REVIEW_API_KEY` secret is set."}
     if len(diff) > MAX_DIFF_CHARS:
@@ -316,14 +336,14 @@ def ai_review(diff: str, title: str) -> dict:
         if provider == "openai":
             req = urllib.request.Request(
                 "https://api.openai.com/v1/chat/completions",
-                data=json.dumps({"model": os.environ.get("AI_REVIEW_MODEL", "gpt-4.1"),
+                data=json.dumps({"model": (os.environ.get("AI_REVIEW_MODEL") or "gpt-4.1"),
                                  "messages": [{"role": "user", "content": prompt}]}).encode(),
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
             text = json.load(urllib.request.urlopen(req, timeout=180))["choices"][0]["message"]["content"]
         else:
             req = urllib.request.Request(
                 "https://api.anthropic.com/v1/messages",
-                data=json.dumps({"model": os.environ.get("AI_REVIEW_MODEL", "claude-sonnet-4-5"),
+                data=json.dumps({"model": (os.environ.get("AI_REVIEW_MODEL") or "claude-sonnet-4-5"),
                                  "max_tokens": 4000,
                                  "messages": [{"role": "user", "content": prompt}]}).encode(),
                 headers={"x-api-key": key, "anthropic-version": "2023-06-01",
@@ -401,10 +421,16 @@ def evaluate(n: int) -> tuple[dict, dict]:
         waiver = (bool(adds) and (adds[-1].get("actor") or {}).get("login") == OWNER_LOGIN
                   and bool(head_at) and (adds[-1].get("created_at") or "") >= head_at)
     reviews = gh_json(f"repos/{REPO}/pulls/{n}/reviews?per_page=100", paginate=True)
+    cmp = gh_json(f"repos/{REPO}/compare/{pr['base']['sha']}...{sha}")
+    base_now = gh_json(f"repos/{REPO}/commits/{pr['base']['ref']}")["sha"]
+    behind = int(cmp.get("behind_by", 0)) > 0 or pr["base"]["sha"] != base_now
     result = decide(pr, risk, checks_green(runs, statuses),
                     ai_clear(verdict, sha, labels, waiver),
                     approvals_ok(reviews, author, sha, risk["owner_required"]),
                     changes_requested(reviews))
+    if behind and result["automerge"]:
+        # Checks ran against an older base: serialize, require a fresh run on current main.
+        result = {"state": "pending", "automerge": False, "why": ["branch is behind base; update it so CI reruns"]}
     return pr, {**result, "risk": risk["risk"]}
 
 
@@ -426,8 +452,9 @@ def cmd_gate(n: int | None, apply: bool) -> int:
             # Auto-merge stays on only while the gate passes for a low/medium PR.
             subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=False)
         if res["automerge"] and not pr.get("auto_merge"):
+            merge_env = {**os.environ, "GH_TOKEN": os.environ.get("MERGE_TOKEN") or os.environ.get("GH_TOKEN", "")}
             subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--auto", "--squash",
-                            "--match-head-commit", pr["head"]["sha"]], check=False)
+                            "--match-head-commit", pr["head"]["sha"]], check=False, env=merge_env)
     return 0
 
 
