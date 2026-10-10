@@ -828,4 +828,75 @@ extension FailedTranscriptionManagerTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: sentinelURL.path))
     }
+
+    func testAgeCleanupKeepsOfflineRelocatedRowWhenDeletionIsPending() throws {
+        // Deletion intent was saved, audio cleanup could not finish, then the
+        // old library's drive went offline. Age cleanup must not drop the only
+        // row that still names those audio paths: the next launch would decode
+        // a complete queue without it and clear the pending marker, orphaning
+        // the files when the drive returns.
+        let paths = makePaths(root: testRoot)
+        try FileManager.default.createDirectory(
+            at: paths.failedQueue.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let offlineArchiveDirectory = URL(
+            fileURLWithPath: "/Volumes/Sweep Test Drive/old-library/meetings/audio/Failed_Budget_Sync_audio",
+            isDirectory: true
+        )
+        let pendingEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date().addingTimeInterval(-30 * 24 * 60 * 60),
+            micAudioURL: offlineArchiveDirectory.appendingPathComponent("microphone.wav"),
+            systemAudioURL: offlineArchiveDirectory.appendingPathComponent("system_audio.wav"),
+            errorMessage: "Temporary transcription failure"
+        )
+        let staleEntry = FailedTranscription(
+            id: UUID(),
+            timestamp: Date().addingTimeInterval(-30 * 24 * 60 * 60),
+            micAudioURL: offlineArchiveDirectory.appendingPathComponent("stale-microphone.wav"),
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        )
+        try JSONEncoder.iso8601.encode([pendingEntry, staleEntry]).write(to: paths.failedQueue, options: .atomic)
+        let pendingDeletionURL = paths.failedQueue.deletingLastPathComponent()
+            .appendingPathComponent(FailedTranscriptionManager.pendingDeletionFilename)
+        try JSONSerialization.data(withJSONObject: [["id": pendingEntry.id.uuidString]])
+            .write(to: pendingDeletionURL, options: .atomic)
+
+        let manager = FailedTranscriptionManager(paths: paths, relocatedAudioFileSystem: .fakeUnmountedVolumes)
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(manager.hasPendingDeletion(id: pendingEntry.id))
+        XCTAssertFalse(manager.hasPendingDeletion(id: staleEntry.id))
+
+        manager.cleanupOldFailedTranscriptions(olderThanDays: 7)
+
+        let persistedAfterCleanup = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(
+            persistedAfterCleanup.map(\.id),
+            [pendingEntry.id],
+            "age cleanup must keep a pending-deletion row whose old library is offline"
+        )
+        XCTAssertEqual(persistedAfterCleanup.first?.micAudioURL, pendingEntry.micAudioURL)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+        XCTAssertTrue(manager.hasPendingDeletion(id: pendingEntry.id))
+
+        let relaunched = FailedTranscriptionManager(paths: paths, relocatedAudioFileSystem: .fakeUnmountedVolumes)
+        XCTAssertTrue(relaunched.failedTranscriptions.isEmpty)
+        XCTAssertTrue(
+            relaunched.hasPendingDeletion(id: pendingEntry.id),
+            "the next launch must still see deletion intent until the old drive returns"
+        )
+        XCTAssertEqual(
+            try JSONDecoder.iso8601.decode(
+                [FailedTranscription].self,
+                from: Data(contentsOf: paths.failedQueue)
+            ).map(\.id),
+            [pendingEntry.id]
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: pendingDeletionURL.path))
+    }
 }
