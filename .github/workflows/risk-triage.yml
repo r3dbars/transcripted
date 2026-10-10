@@ -1,0 +1,93 @@
+name: Risk Triage
+
+# Labels every PR risk:low / risk:medium / risk:high, posts an AI review
+# comment, and publishes the `risk-gate` commit status that decides whether a
+# low/medium PR may squash auto-merge. Policy: docs/agent-merge-policy.md.
+#
+# SAFETY: this uses pull_request_target, so it runs with this repo's token and
+# secrets. It therefore checks out the BASE branch only (the trusted copy of
+# scripts/ops/risk-triage.py) and reads the PR's file list and diff as data
+# through the API. Never add a checkout of the PR head, `ref:
+# github.event.pull_request.head.sha`, or any step that builds or runs PR code.
+
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
+  # No pull_request_review trigger on purpose: that event runs the workflow
+  # file from the PR itself, so a PR could rewrite the gate. Reviews are
+  # picked up by the schedule and by the next CI completion instead.
+  workflow_run:
+    workflows: ["Swift CI", "Repo Hygiene"]
+    types: [completed]
+  schedule:
+    - cron: "*/20 * * * *"
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "PR number (blank = every open PR)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  triage:
+    if: github.event_name == 'pull_request_target' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: risk-triage-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Checkout base (trusted) branch only
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+      - name: Label and AI review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          # Forks get the label but no AI call: they never auto-merge anyway.
+          AI_REVIEW_API_KEY: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.AI_REVIEW_API_KEY || '' }}
+          AI_REVIEW_PROVIDER: ${{ vars.AI_REVIEW_PROVIDER }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+        run: python3 scripts/ops/risk-triage.py triage --pr "$PR" --apply
+
+  gate:
+    needs: [triage]
+    if: always() && (needs.triage.result == 'success' || needs.triage.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    concurrency:
+      group: risk-gate
+      cancel-in-progress: false
+    permissions:
+      contents: write        # gh pr merge --auto
+      pull-requests: write
+      statuses: write
+      issues: read
+      checks: read
+    steps:
+      - name: Checkout default (trusted) branch only
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Evaluate gate
+        env:
+          # AUTOMERGE_TOKEN (optional, a fine-grained PAT or GitHub App token)
+          # makes the squash merge trigger push CI on main; GITHUB_TOKEN merges
+          # do not trigger workflows. See docs/agent-merge-policy.md.
+          GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+          PR: ${{ github.event.pull_request.number || inputs.pr }}
+        run: |
+          if [ -n "$PR" ]; then
+            python3 scripts/ops/risk-triage.py gate --pr "$PR" --apply
+          else
+            python3 scripts/ops/risk-triage.py gate --apply
+          fi
