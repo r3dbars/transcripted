@@ -327,7 +327,7 @@ enum DictationTranscriptStore {
                     // grace window — merge the trashed sections back in.
                     let current = (try? String(contentsOf: originalURL, encoding: .utf8)) ?? ""
                     let old = (try? String(contentsOf: trashedURL, encoding: .utf8)) ?? ""
-                    let oldSections = splitSections(in: old)
+                    let oldSections = splitSections(in: old).map(droppingTrailingBlankLines)
                     guard !oldSections.isEmpty else { return }
                     let rebuilt = current.trimmingCharacters(in: .whitespacesAndNewlines)
                         + "\n\n" + oldSections.joined(separator: "\n\n") + "\n"
@@ -351,6 +351,17 @@ enum DictationTranscriptStore {
         let reducedSet = Set(splitSections(in: reduced).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
         return splitSections(in: original)
             .filter { !reducedSet.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            .map(droppingTrailingBlankLines)
+    }
+
+    /// A split section carries the blank lines that separated it from the
+    /// next heading. Restore re-adds its own "\n\n" separators, so keeping
+    /// them would grow the file on every Undo (#2187). Only trailing line
+    /// breaks are dropped; trailing spaces on the last line stay (#2150).
+    private static func droppingTrailingBlankLines(_ section: String) -> String {
+        var lines = section.components(separatedBy: "\n")
+        while lines.count > 1, let last = lines.last, last.isEmpty { lines.removeLast() }
+        return lines.joined(separator: "\n")
     }
 
     /// Removes a single dictation entry by matching on its stable saved entry ID.
