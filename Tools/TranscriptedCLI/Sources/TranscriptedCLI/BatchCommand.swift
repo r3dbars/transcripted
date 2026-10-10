@@ -15,7 +15,7 @@ struct Batch: AsyncParsableCommand {
     @Argument(help: "Directory containing audio files.")
     var audioDir: String
 
-    @Option(name: .long, help: "Path to JSON config file for diarizer parameters.")
+    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required.")
     var config: String?
 
     @Option(name: .long, help: "Path to directory containing diarization models.")
@@ -56,15 +56,19 @@ struct Batch: AsyncParsableCommand {
         // Create output directory if needed
         try FileManager.default.createDirectory(at: outDirURL, withIntermediateDirectories: true)
 
-        let selection = try CLIDiarization.runnableEngine(
+        var selection = try CLIDiarization.runnableEngine(
             choice: diarizationEngine,
             storedPreference: CLIDiarization.storedAppPreference()
         )
+        let configSelection = CLIDiarization.applyConfigSelection(
+            engine: selection.engine, hasConfig: config != nil
+        )
+        selection.engine = configSelection.engine
+        if let note = configSelection.fallbackNote {
+            selection.fallbackNote = note
+        }
         CLIDiarization.writeFallbackNote(selection.fallbackNote)
         let engine = selection.engine
-        if config != nil && engine != "pyannote" {
-            throw ValidationError("--config is a pyannote OfflineDiarizerConfig file. Pass --diarization-engine pyannote to use it.")
-        }
         if engine == "nemotron" {
             #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
             try await runNemotron(audioFiles: audioFiles, outDirURL: outDirURL)
@@ -122,21 +126,27 @@ struct Batch: AsyncParsableCommand {
         }
 
         let batchElapsed = Date().timeIntervalSince(batchStart)
+        writeSummary(fileCount: audioFiles.count, elapsed: batchElapsed, outputDir: outDirURL, engine: engine)
+    }
 
-        // Summary JSON to stdout
-        let summaryJSON = """
+    private func writeSummary(fileCount: Int, elapsed: TimeInterval, outputDir: URL, engine: String) {
+        print("""
         {
-          "files_processed": \(audioFiles.count),
-          "total_processing_seconds": \(String(format: "%.1f", batchElapsed)),
-          "output_dir": "\(outDirURL.path)"
+          "files_processed": \(fileCount),
+          "total_processing_seconds": \(String(format: "%.1f", elapsed)),
+          "output_dir": "\(outputDir.path)",
+          "engine": "\(engine)"
         }
-        """
-        print(summaryJSON)
+        """)
     }
 
     #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
     private func runNemotron(audioFiles: [URL], outDirURL: URL) async throws {
-        let service = try await CLIDiarizationService.readyService(backend: .nemotron, modelsDir: modelsDir)
+        let ready = try await CLIDiarizationService.readyService(
+            backend: .nemotron, modelsDir: modelsDir, choice: diarizationEngine
+        )
+        CLIDiarization.writeFallbackNote(ready.selection.fallbackNote)
+        let service = ready.service
         let batchStart = Date()
         for (index, audioURL) in audioFiles.enumerated() {
             let fileId = audioURL.deletingPathExtension().lastPathComponent
@@ -152,13 +162,12 @@ struct Batch: AsyncParsableCommand {
         }
         let batchElapsed = Date().timeIntervalSince(batchStart)
         await MainActor.run { service.cleanup() }
-        print("""
-        {
-          "files_processed": \(audioFiles.count),
-          "total_processing_seconds": \(String(format: "%.1f", batchElapsed)),
-          "output_dir": "\(outDirURL.path)"
-        }
-        """)
+        writeSummary(
+            fileCount: audioFiles.count,
+            elapsed: batchElapsed,
+            outputDir: outDirURL,
+            engine: ready.selection.engine
+        )
     }
     #endif
 }
@@ -171,7 +180,7 @@ struct Batch: AsyncParsableCommand {
     @Argument(help: "Directory containing audio files.")
     var audioDir: String
 
-    @Option(name: .long, help: "Path to JSON config file for diarizer parameters.")
+    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required.")
     var config: String?
 
     @Option(name: .long, help: "Path to directory containing diarization models.")

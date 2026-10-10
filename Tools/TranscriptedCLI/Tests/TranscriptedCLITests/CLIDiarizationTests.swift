@@ -96,6 +96,65 @@ final class CLIDiarizationTests: XCTestCase {
         }
     }
 
+    func testExplicitNemotronErrorsWhenPyannoteLoadedInstead() {
+        XCTAssertThrowsError(
+            try CLIDiarization.acceptLoadedEngine(
+                requested: "nemotron", actual: "pyannote", choice: "nemotron"
+            )
+        ) { error in
+            XCTAssertEqual(
+                error as? CLIDiarization.RequestedEngineUnavailable,
+                CLIDiarization.RequestedEngineUnavailable(requested: "nemotron", actual: "pyannote")
+            )
+            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            XCTAssertTrue(message.contains("nemotron"), message)
+            XCTAssertTrue(message.contains("pyannote"), message)
+            XCTAssertFalse(message.contains("falling back"), message)
+        }
+    }
+
+    func testDefaultPathNotesWhenNemotronFallsBackToPyannote() throws {
+        let fallback = try CLIDiarization.acceptLoadedEngine(
+            requested: "nemotron", actual: "pyannote", choice: "app"
+        )
+        XCTAssertEqual(fallback.engine, "pyannote")
+        let note = try XCTUnwrap(fallback.fallbackNote)
+        XCTAssertTrue(note.localizedCaseInsensitiveContains("nemotron"), note)
+        XCTAssertTrue(note.localizedCaseInsensitiveContains("pyannote"), note)
+        XCTAssertTrue(note.localizedCaseInsensitiveContains("falling back"), note)
+
+        let matched = try CLIDiarization.acceptLoadedEngine(
+            requested: "nemotron", actual: "nemotron", choice: "app"
+        )
+        XCTAssertEqual(matched.engine, "nemotron")
+        XCTAssertNil(matched.fallbackNote)
+
+        let explicitPyannote = try CLIDiarization.acceptLoadedEngine(
+            requested: "pyannote", actual: "pyannote", choice: "pyannote"
+        )
+        XCTAssertEqual(explicitPyannote.engine, "pyannote")
+        XCTAssertNil(explicitPyannote.fallbackNote)
+    }
+
+    func testConfigSelectsPyannoteWithoutRequiringTheEngineFlag() throws {
+        XCTAssertEqual(try Diarize.parse(["memo.wav", "--config", "knobs.json"]).diarizationEngine, "app")
+        XCTAssertEqual(try Batch.parse(["clips", "--config", "knobs.json"]).diarizationEngine, "app")
+
+        let fromDefault = CLIDiarization.applyConfigSelection(engine: "nemotron", hasConfig: true)
+        XCTAssertEqual(fromDefault.engine, "pyannote")
+        let note = try XCTUnwrap(fromDefault.fallbackNote)
+        XCTAssertTrue(note.contains("--config"), note)
+        XCTAssertTrue(note.localizedCaseInsensitiveContains("pyannote"), note)
+
+        let alreadyPyannote = CLIDiarization.applyConfigSelection(engine: "pyannote", hasConfig: true)
+        XCTAssertEqual(alreadyPyannote.engine, "pyannote")
+        XCTAssertNil(alreadyPyannote.fallbackNote)
+
+        let noConfig = CLIDiarization.applyConfigSelection(engine: "nemotron", hasConfig: false)
+        XCTAssertEqual(noConfig.engine, "nemotron")
+        XCTAssertNil(noConfig.fallbackNote)
+    }
+
     func testEveryCLIPathSharesTheAppTunedPyannoteWindowing() {
         XCTAssertEqual(ImportAudio.sharedDiarizationWindowing, Diarize.sharedDiarizationWindowing)
         XCTAssertEqual(Diarize.sharedDiarizationWindowing, Batch.sharedDiarizationWindowing)

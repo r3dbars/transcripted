@@ -15,7 +15,7 @@ struct Diarize: AsyncParsableCommand {
     @Argument(help: "Path to audio file (WAV, M4A, etc.)")
     var audioPath: String
 
-    @Option(name: .long, help: "Path to JSON config file for diarizer parameters.")
+    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required.")
     var config: String?
 
     @Option(name: .long, help: "Path to directory containing diarization models.")
@@ -42,15 +42,19 @@ struct Diarize: AsyncParsableCommand {
             throw ValidationError("Audio file not found: \(audioPath)")
         }
 
-        let selection = try CLIDiarization.runnableEngine(
+        var selection = try CLIDiarization.runnableEngine(
             choice: diarizationEngine,
             storedPreference: CLIDiarization.storedAppPreference()
         )
+        let configSelection = CLIDiarization.applyConfigSelection(
+            engine: selection.engine, hasConfig: config != nil
+        )
+        selection.engine = configSelection.engine
+        if let note = configSelection.fallbackNote {
+            selection.fallbackNote = note
+        }
         CLIDiarization.writeFallbackNote(selection.fallbackNote)
         let engine = selection.engine
-        if config != nil && engine != "pyannote" {
-            throw ValidationError("--config is a pyannote OfflineDiarizerConfig file. Pass --diarization-engine pyannote to use it.")
-        }
         if engine == "nemotron" {
             #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
             try await runNemotron(audioURL: audioURL)
@@ -89,47 +93,26 @@ struct Diarize: AsyncParsableCommand {
 
         // Output
         if json {
-            try outputJSON(result: result, audioPath: audioPath, elapsed: elapsed)
+            try outputJSON(result: result, audioPath: audioPath, elapsed: elapsed, engine: engine)
         } else {
             let fileId = audioURL.deletingPathExtension().lastPathComponent
             try RTTMWriter.output(segments: result.segments, fileId: fileId, to: output)
         }
     }
 
-    private func outputJSON(result: DiarizationResult, audioPath: String, elapsed: TimeInterval) throws {
-        struct JSONOutput: Encodable {
-            let audioFile: String
-            let segments: [SegmentOutput]
-            let speakerCount: Int
-            let processingSeconds: Double
-            let timings: TimingsOutput?
-        }
-        struct SegmentOutput: Encodable {
-            let speakerId: String
-            let startSeconds: Float
-            let endSeconds: Float
-            let durationSeconds: Float
-            let qualityScore: Float
-        }
-        struct TimingsOutput: Encodable {
-            let segmentationSeconds: Double
-            let embeddingSeconds: Double
-            let clusteringSeconds: Double
-            let totalSeconds: Double
-        }
-
+    private func outputJSON(result: DiarizationResult, audioPath: String, elapsed: TimeInterval, engine: String) throws {
         let segments = result.segments.map { seg in
-            SegmentOutput(
+            DiarizeSegmentOutput(
                 speakerId: seg.speakerId,
-                startSeconds: seg.startTimeSeconds,
-                endSeconds: seg.endTimeSeconds,
-                durationSeconds: seg.endTimeSeconds - seg.startTimeSeconds,
+                startSeconds: Double(seg.startTimeSeconds),
+                endSeconds: Double(seg.endTimeSeconds),
+                durationSeconds: Double(seg.endTimeSeconds - seg.startTimeSeconds),
                 qualityScore: seg.qualityScore
             )
         }
 
-        let timings: TimingsOutput? = result.timings.map { t in
-            TimingsOutput(
+        let timings: DiarizeTimingsOutput? = result.timings.map { t in
+            DiarizeTimingsOutput(
                 segmentationSeconds: t.segmentationSeconds,
                 embeddingSeconds: t.embeddingExtractionSeconds,
                 clusteringSeconds: t.speakerClusteringSeconds,
@@ -137,28 +120,26 @@ struct Diarize: AsyncParsableCommand {
             )
         }
 
-        let output = JSONOutput(
-            audioFile: audioPath,
-            segments: segments,
-            speakerCount: Set(result.segments.map { $0.speakerId }).count,
-            processingSeconds: elapsed,
-            timings: timings
+        try DiarizeOutputBuilder.write(
+            DiarizeFileOutput(
+                audioFile: audioPath,
+                segments: segments,
+                speakerCount: Set(result.segments.map { $0.speakerId }).count,
+                processingSeconds: elapsed,
+                timings: timings,
+                engine: engine
+            ),
+            to: output
         )
-
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(output)
-
-        if let path = self.output {
-            try data.write(to: URL(fileURLWithPath: path))
-        } else {
-            print(String(data: data, encoding: .utf8)!)
-        }
     }
 
     #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
     private func runNemotron(audioURL: URL) async throws {
-        let service = try await CLIDiarizationService.readyService(backend: .nemotron, modelsDir: modelsDir)
+        let ready = try await CLIDiarizationService.readyService(
+            backend: .nemotron, modelsDir: modelsDir, choice: diarizationEngine
+        )
+        CLIDiarization.writeFallbackNote(ready.selection.fallbackNote)
+        let service = ready.service
         let startTime = Date()
         FileHandle.standardError.write(Data("Diarizing \(audioURL.lastPathComponent)...\n".utf8))
         let segments = try await CLIDiarizationService.segments(service: service, audioURL: audioURL)
@@ -166,7 +147,13 @@ struct Diarize: AsyncParsableCommand {
         let speakerIds = Set(segments.map(\.speakerId))
         FileHandle.standardError.write(Data("Done: \(segments.count) segments, \(speakerIds.count) speakers, \(String(format: "%.1f", elapsed))s\n".utf8))
         if json {
-            try CLIDiarizationService.writeJSON(segments: segments, audioPath: audioPath, elapsed: elapsed, to: output)
+            try CLIDiarizationService.writeJSON(
+                segments: segments,
+                audioPath: audioPath,
+                elapsed: elapsed,
+                engine: ready.selection.engine,
+                to: output
+            )
         } else {
             let fileId = audioURL.deletingPathExtension().lastPathComponent
             try RTTMText.output(fileId: fileId, segments: CLIDiarizationService.rttmSegments(from: segments), to: output)
@@ -184,7 +171,7 @@ struct Diarize: AsyncParsableCommand {
     @Argument(help: "Path to audio file (WAV, M4A, etc.)")
     var audioPath: String
 
-    @Option(name: .long, help: "Path to JSON config file for diarizer parameters.")
+    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required.")
     var config: String?
 
     @Option(name: .long, help: "Path to directory containing diarization models.")

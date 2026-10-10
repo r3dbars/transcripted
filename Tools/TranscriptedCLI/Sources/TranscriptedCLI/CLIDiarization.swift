@@ -83,6 +83,15 @@ enum CLIDiarization {
         }
     }
 
+    /// Nemotron was requested and a different engine loaded instead.
+    struct RequestedEngineUnavailable: Error, LocalizedError, Equatable {
+        let requested: String
+        let actual: String
+        var errorDescription: String? {
+            "Diarization engine \(requested) failed to start (\(actual) loaded instead). Pass --diarization-engine \(actual) to use \(actual), or install the \(requested) models."
+        }
+    }
+
     struct EngineSelection: Equatable {
         var engine: String
         var fallbackNote: String?
@@ -148,6 +157,46 @@ enum CLIDiarization {
         return EngineSelection(
             engine: "pyannote",
             fallbackNote: "Nemotron isn't available in this CLI build; falling back to pyannote."
+        )
+    }
+
+    /// After models load, the engine that actually ran may differ from the
+    /// one we asked for (Core falls back to pyannote when Nemotron fails).
+    /// An explicit `--diarization-engine nemotron` is an error; the default
+    /// `app` path notes the fallback. Both cases report `actual`.
+    static func acceptLoadedEngine(
+        requested: String,
+        actual: String,
+        choice: String
+    ) throws -> EngineSelection {
+        let requested = requested.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let actual = actual.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let choice = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if requested == actual {
+            return EngineSelection(engine: actual, fallbackNote: nil)
+        }
+        let explicit = choice != "app" && engineChoices.contains(choice)
+        if explicit {
+            throw RequestedEngineUnavailable(requested: requested, actual: actual)
+        }
+        return EngineSelection(
+            engine: actual,
+            fallbackNote: "\(requested.capitalized) failed to start; falling back to \(actual)."
+        )
+    }
+
+    /// `--config` is a pyannote `OfflineDiarizerConfig` file. It selects
+    /// pyannote; `--diarization-engine pyannote` is not required.
+    static func applyConfigSelection(
+        engine: String,
+        hasConfig: Bool
+    ) -> EngineSelection {
+        guard hasConfig, engine != "pyannote" else {
+            return EngineSelection(engine: engine, fallbackNote: nil)
+        }
+        return EngineSelection(
+            engine: "pyannote",
+            fallbackNote: "--config is a pyannote OfflineDiarizerConfig file; using pyannote."
         )
     }
 

@@ -47,10 +47,10 @@ struct ImportAudio: AsyncParsableCommand {
     @Flag(name: .long, help: "Also name a speaker held back only by confirmation count and/or a similarity below the silent-naming bar but above the model's invitee/suggest floor, when the top match also beats the runner-up by the model's invitee margin, written as \"Name (likely)\". Off by default. Never a confirmed identity.")
     var nameLikelySpeakers = false
 
-    @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory.")
+    @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory, or a flat Nemotron diarizer directory (same as diarize --models-dir).")
     var modelsDir: String?
 
-    @Option(name: .long, help: "Path to a complete offline speaker-diarization model directory.")
+    @Option(name: .long, help: "Path to a complete pyannote or Nemotron diarization model directory.")
     var diarizationModelsDir: String?
 
     @Flag(name: .long, help: "Never download models. Missing or incomplete local models are errors.")

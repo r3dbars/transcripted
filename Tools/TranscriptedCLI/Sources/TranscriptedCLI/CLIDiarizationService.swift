@@ -13,12 +13,10 @@ enum CLIDiarizationService {
         var nemotron: URL?
         if let modelsDir {
             let url = URL(fileURLWithPath: modelsDir, isDirectory: true)
-            if MeetingImportModels.completeNemotronModels(at: url) {
-                nemotron = url
-                pyannote = MeetingImportModels.bundledDiarizationModels()
-            } else if let root = MeetingImportModels.fluidAudioRoot(for: url) {
-                pyannote = root
-                nemotron = MeetingImportModels.bundledNemotronModels()
+            let found = MeetingImportModels.diarizationModelsFromDirectory(url)
+            if found.nemotron != nil || found.pyannote != nil {
+                nemotron = found.nemotron ?? MeetingImportModels.bundledNemotronModels()
+                pyannote = found.pyannote ?? MeetingImportModels.bundledDiarizationModels()
             } else {
                 pyannote = url
                 nemotron = MeetingImportModels.bundledNemotronModels()
@@ -33,7 +31,16 @@ enum CLIDiarizationService {
         )
     }
 
-    static func readyService(backend: DiarizationBackend, modelsDir: String?) async throws -> DiarizationService {
+    struct Ready {
+        let service: DiarizationService
+        let selection: CLIDiarization.EngineSelection
+    }
+
+    static func readyService(
+        backend: DiarizationBackend,
+        modelsDir: String?,
+        choice: String
+    ) async throws -> Ready {
         setenv("TRANSCRIPTED_DISABLE_FILE_LOGGER", "1", 1)
         let service = await MainActor.run { make(backend: backend, modelsDir: modelsDir) }
         await service.initialize()
@@ -41,7 +48,18 @@ enum CLIDiarizationService {
         guard ready else {
             throw ValidationError("Diarization models failed to load for \(backend.rawValue).")
         }
-        return service
+        let actual = await MainActor.run { service.activeBackend }
+        do {
+            let selection = try CLIDiarization.acceptLoadedEngine(
+                requested: backend.rawValue,
+                actual: actual.rawValue,
+                choice: choice
+            )
+            return Ready(service: service, selection: selection)
+        } catch {
+            await MainActor.run { service.cleanup() }
+            throw error
+        }
     }
 
     static func segments(service: DiarizationService, audioURL: URL) async throws -> [SpeakerSegment] {
@@ -53,24 +71,18 @@ enum CLIDiarizationService {
         segments.map { (speakerId: String($0.speakerId), start: $0.startTime, end: $0.endTime) }
     }
 
-    static func writeJSON(segments: [SpeakerSegment], audioPath: String, elapsed: TimeInterval, to path: String?) throws {
-        struct JSONOutput: Encodable {
-            let audioFile: String
-            let segments: [SegmentOutput]
-            let speakerCount: Int
-            let processingSeconds: Double
-        }
-        struct SegmentOutput: Encodable {
-            let speakerId: String
-            let startSeconds: Double
-            let endSeconds: Double
-            let durationSeconds: Double
-            let qualityScore: Float
-        }
-        let output = JSONOutput(
+    static func writeJSON(
+        segments: [SpeakerSegment],
+        audioPath: String,
+        elapsed: TimeInterval,
+        engine: String,
+        timings: DiarizeTimingsOutput? = nil,
+        to path: String?
+    ) throws {
+        let output = DiarizeFileOutput(
             audioFile: audioPath,
             segments: segments.map {
-                SegmentOutput(
+                DiarizeSegmentOutput(
                     speakerId: String($0.speakerId),
                     startSeconds: $0.startTime,
                     endSeconds: $0.endTime,
@@ -79,16 +91,11 @@ enum CLIDiarizationService {
                 )
             },
             speakerCount: Set(segments.map(\.speakerId)).count,
-            processingSeconds: elapsed
+            processingSeconds: elapsed,
+            timings: timings,
+            engine: engine
         )
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(output)
-        if let path {
-            try data.write(to: URL(fileURLWithPath: path))
-        } else {
-            print(String(data: data, encoding: .utf8)!)
-        }
+        try DiarizeOutputBuilder.write(output, to: path)
     }
 }
 #endif
