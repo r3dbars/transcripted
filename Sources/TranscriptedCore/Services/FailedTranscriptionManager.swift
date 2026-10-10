@@ -786,10 +786,9 @@ public class FailedTranscriptionManager: ObservableObject {
         // Nil-coalesce: date arithmetic rarely returns nil, but force unwrap would crash on edge cases
         let cutoffDate = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
 
-        // Rows from an unavailable old library age out too (metadata only;
-        // their audio is outside the approved roots and is never deleted).
+        // Offline-library rows age out too, except those still pending deletion.
         let previousRelocated = unavailableRelocatedEntries
-        unavailableRelocatedEntries.removeAll { $0.timestamp < cutoffDate }
+        unavailableRelocatedEntries.removeAll { entry in entry.timestamp < cutoffDate && !pendingDeletions.contains { $0.id == entry.id } }
         if unavailableRelocatedEntries.count != previousRelocated.count, !saveFailedTranscriptions() {
             unavailableRelocatedEntries = previousRelocated
         }
