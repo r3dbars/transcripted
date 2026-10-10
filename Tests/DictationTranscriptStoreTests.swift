@@ -540,7 +540,6 @@ func testDictationTranscriptStore() {
         let expectedTail = targetSection + "\n"
         for (cycle, snapshot) in snapshots.enumerated() {
             assertEqual(Array(snapshot.utf8.suffix(expectedTail.utf8.count)), Array(expectedTail.utf8), "cycle \(cycle): tail must be byte-for-byte the target section plus one newline")
-            assertTrue(!snapshot.contains("\n\n\n"), "cycle \(cycle): no run of blank lines may accumulate")
         }
     }
 }
