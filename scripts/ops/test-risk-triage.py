@@ -58,7 +58,7 @@ class ClassifierTests(unittest.TestCase):
     def test_removed_test_is_not_proof(self):
         fs = [{"filename": "Sources/UI/Foo.swift", "additions": 1, "deletions": 0},
               {"filename": "Tests/FooTests.swift", "additions": 0, "deletions": 9, "status": "removed"}]
-        self.assertEqual(rt.classify(fs)["risk"], "medium")
+        self.assertEqual(rt.classify(fs)["risk"], "high")  # removing a test needs human review
 
     def test_agent_instructions_are_high(self):
         for path in ("AGENTS.md", "CLAUDE.md", "Sources/AGENTS.md", "docs/CLAUDE.md"):
@@ -185,6 +185,9 @@ class ApprovalTests(unittest.TestCase):
     def test_owner_authored_still_blocked_by_changes_requested(self):
         self.assertFalse(rt.approvals_ok([review("alice", "CHANGES_REQUESTED")], "r3dbars", SHA, True)[0])
 
+    def test_untrusted_changes_requested_ignored(self):
+        self.assertFalse(rt.changes_requested([review("rando", "CHANGES_REQUESTED", assoc="NONE")]))
+
     def test_changes_requested_detected(self):
         self.assertTrue(rt.changes_requested([review("bob", "CHANGES_REQUESTED")]))
         self.assertFalse(rt.changes_requested([review("bob", "CHANGES_REQUESTED"), review("bob")]))
@@ -221,6 +224,20 @@ class DecideTests(unittest.TestCase):
             d = rt.decide(pr(), {"risk": tier}, OK, AI_OK, (True, "approved"), True)
             self.assertEqual((d["state"], d["automerge"]), ("pending", False), tier)
 
+    def test_waiver_on_high_risk_does_not_pass(self):
+        # ai_clear accepts an owner waiver, but high risk still never passes.
+        waived = rt.ai_clear({"sha": SHA, "status": "ok", "p0": 0, "p1": 2}, SHA, {rt.WAIVE_LABEL}, True)
+        self.assertTrue(waived[0])
+        for author in ("r3dbars", "bot"):
+            d = rt.decide(pr(labels=[{"name": rt.WAIVE_LABEL}]), {"risk": "high"}, OK, waived,
+                          rt.approvals_ok([review("r3dbars"), review("alice")], author, SHA, True))
+            self.assertEqual((d["state"], d["automerge"]), ("pending", False), author)
+
+    def test_r3dbars_authored_high_with_approvals_stays_pending(self):
+        d = rt.decide(pr(user={"login": "r3dbars"}), {"risk": "high", "owner_required": True}, OK, AI_OK,
+                      rt.approvals_ok([review("alice")], "r3dbars", SHA, True))
+        self.assertEqual((d["state"], d["automerge"]), ("pending", False))
+
     def test_owner_authored_high_stays_pending(self):
         d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, rt.approvals_ok([], "r3dbars", SHA, True))
         self.assertEqual((d["state"], d["automerge"]), ("pending", False))
@@ -238,6 +255,48 @@ class DecideTests(unittest.TestCase):
             d = rt.decide(p, {"risk": "low"}, checks, ai, NO_APPROVAL)
             self.assertFalse(d["automerge"], p)
             self.assertEqual(d["state"], "pending")
+
+
+
+
+class SweepTests(unittest.TestCase):
+    def test_one_bad_pr_does_not_stop_the_sweep(self):
+        seen = []
+        orig = rt._gate_one
+
+        def fake(num, apply):
+            seen.append(num)
+            if num == 2:
+                raise RuntimeError("boom")
+            return 0
+        rt._gate_one = fake
+        try:
+            import contextlib, io
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                orig_json = rt.gh_json
+                rt.gh_json = lambda path, paginate=False: [{"number": 1}, {"number": 2}, {"number": 3}]
+                try:
+                    code = rt.cmd_gate(None, False)
+                finally:
+                    rt.gh_json = orig_json
+        finally:
+            rt._gate_one = orig
+        self.assertEqual(seen, [1, 2, 3])
+        self.assertEqual(code, 1)
+
+
+class ExtraClassifierTests(unittest.TestCase):
+    def test_removed_test_is_high(self):
+        r = rt.classify([{"filename": "Tests/FooTests.swift", "status": "removed", "deletions": 50}])
+        self.assertEqual(r["risk"], "high")
+
+    def test_incomplete_list_requires_owner(self):
+        self.assertTrue(rt.classify([])["owner_required"])
+
+    def test_privacy_egress_is_high(self):
+        for p in ("Sources/Observability/SentryPayloadSanitizer.swift",
+                  "Sources/Observability/AnalyticsEventPolicy.swift"):
+            self.assertEqual(rt.classify([{"filename": p, "additions": 1}, {"filename": "Tests/XTests.swift"}])["risk"], "high", p)
 
 
 if __name__ == "__main__":

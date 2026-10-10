@@ -17,9 +17,9 @@ Safety rules the gate enforces (each is a test in test-risk-triage.py):
     head commit. Missing, pending, skipped, neutral or cancelled is not green.
   * the AI review must exist for the head commit and report no unresolved
     P0/P1. No AI result (no key, provider error, diff too big) blocks auto-merge.
-  * high: one APPROVED review on the head commit from someone other than the
-    author; release/signing paths also need an approval from the owner.
-  * low/medium only: squash auto-merge. High is never auto-merged by this script.
+  * high: never passes risk-gate automatically, whoever the author is and with
+    or without approvals or a waiver; the owner merges high-risk PRs by hand.
+  * low/medium only: squash auto-merge.
   * forks, drafts and hold labels never auto-merge.
 """
 from __future__ import annotations
@@ -106,6 +106,9 @@ HIGH_PATTERNS = (
     "**/*TCC*",
     "**/*Permission*.swift",
     "**/*Entitlement*",
+    # Privacy egress: sanitizers and event allowlists decide what leaves the Mac.
+    "**/*PayloadSanitizer*.swift",
+    "**/*EventPolicy*.swift",
     # Agent instructions steer every engineer agent: treat like code that runs.
     "**/AGENTS.md",
     "**/CLAUDE.md",
@@ -145,10 +148,12 @@ def classify(files: list[dict]) -> dict:
     of a rename are classified, so renaming a release file away stays high.
     """
     if not files:
-        return {"risk": "high", "owner_required": False, "reasons": ["no changed files reported"]}
+        # Empty or incomplete list: assume the worst, including release paths.
+        return {"risk": "high", "owner_required": True, "reasons": ["no or incomplete changed-file list"]}
     risk, owner, reasons = "low", False, []
     if any(f.get("status") == "removed" and _any(f.get("filename", ""), LOW_PATTERNS[:4]) for f in files):
-        risk = "medium"
+        # Deleting a test weakens the suite: human review, never auto-merge.
+        risk = "high"
         reasons.append("removes a test file")
     source_lines, source_files = 0, 0
     for f in files:
@@ -234,23 +239,27 @@ def _latest_reviews(reviews: list[dict]) -> dict[str, dict]:
 
 
 def changes_requested(reviews: list[dict]) -> bool:
-    """Any reviewer's latest review requesting changes blocks every risk level."""
-    return any(r["state"] == "CHANGES_REQUESTED" for r in _latest_reviews(reviews).values())
+    """A trusted reviewer's latest review requesting changes blocks every risk level.
+
+    Outside accounts can review a public repo; their change requests are ignored
+    here, like their approvals, so they can't stall the gate.
+    """
+    return any(r["state"] == "CHANGES_REQUESTED" and r.get("author_association") in TRUSTED_ASSOCIATIONS
+               for r in _latest_reviews(reviews).values())
 
 
 def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required: bool) -> tuple[bool, str]:
     """Latest review per reviewer counts; it must approve the head commit.
 
-    The owner (@OWNER_LOGIN) authors most PRs and GitHub won't let an author
-    approve their own PR, so an owner-authored high-risk PR passes this check
-    as "owner merges manually": the gate goes green but never auto-merges, and
-    the owner decides by merging it by hand.
+    Authorship grants nothing: agent PRs are authored by @OWNER_LOGIN too.
+    This result is informational for high risk; decide() keeps every high-risk
+    PR pending regardless, and @OWNER_LOGIN merges those by hand.
     """
     latest = _latest_reviews(reviews)
     approvers = {u for u, r in latest.items()
                  if r["state"] == "APPROVED" and r.get("commit_id") == head_sha and u and u != author
                  and r.get("author_association") in TRUSTED_ASSOCIATIONS}
-    if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
+    if changes_requested(reviews):
         return False, "a review requests changes"
     if not approvers:
         return False, "needs an approval on the head commit from someone other than the author"

@@ -28,7 +28,7 @@ On every push the triage job sends the PR diff to an AI model and posts (or upda
 - **Provider secret:** none exists today. Add repo secret `AI_REVIEW_API_KEY` (Anthropic by default). Optional repo variables: `AI_REVIEW_PROVIDER` (`anthropic` or `openai`) and `AI_REVIEW_MODEL`.
 - **Degrades safely:** no key, a provider error, an unparseable answer, a diff over 120,000 characters, or a review for an older commit all count as *no AI result*, and **no AI result means no auto-merge**.
 - The P0/P1 count is the larger of the model's `COUNTS` line and the number of tagged findings, so an under-reported count can't clear the gate.
-- **Resolving findings:** push a fix (the next review must come back clean), or, if Justin judges a finding wrong, he adds the label `ai-findings-waived`. The gate only honours that label when @r3dbars added it.
+- **Resolving findings:** push a fix (the next review must come back clean), or, if Justin judges a finding wrong, he adds the label `ai-findings-waived` and comments `ai-findings-waived <full head sha>`. The gate only honours that when @r3dbars did both, and only for low/medium: a waiver never lets a high-risk PR pass.
 - The diff is untrusted input. The prompt tells the model to ignore instructions in it, but an AI "clear" is never enough on its own: high-risk PRs still need people.
 - Fork PRs get a label but no AI call.
 
@@ -39,9 +39,10 @@ The gate publishes a commit status named `risk-gate` on the PR head. It is `succ
 1. Not a draft, branch is in this repo (forks never auto-merge), and no `hold`, `do not merge`, `needs owner review`, `waiting-on-human` or `blocked` label.
 2. `build-and-test` and `repo-hygiene` both concluded `success` on the head commit. Skipped, neutral, cancelled, pending and missing never count as green; the newest run of each check wins.
 3. The AI review exists for the head commit and has no unresolved P0/P1.
-4. High only: the latest review of at least one person other than the author is an approval of the head commit, no one's latest review requests changes, and for release/signing paths @r3dbars is among the approvers.
+4. No trusted reviewer's latest review requests changes.
+5. The PR is low or medium. **A high-risk PR never gets `success`**, whoever authored it (agent PRs are authored by @r3dbars too), however many approvals it has, and with or without `ai-findings-waived`. Its status lists what's still missing (e.g. approvals) as a note for Justin.
 
-When `risk-gate` is `success` and the PR is low or medium, the gate runs `gh pr merge --auto --squash --match-head-commit <sha>`. **High PRs are never auto-merged**; a person merges them once `risk-gate` is green.
+When `risk-gate` is `success` and the PR is low or medium, the gate runs `gh pr merge --auto --squash --match-head-commit <sha>`. **High PRs are never auto-merged**: their `risk-gate` stays pending even after approvals, and Justin merges them by hand.
 
 It runs on PR events, when Swift CI or Repo Hygiene finishes, every 20 minutes, and by hand:
 
@@ -60,26 +61,29 @@ A PR could add a workflow that posts a fake `risk-gate` status. That's why every
 
 ## 5. CODEOWNERS
 
-`.github/CODEOWNERS` assigns the release, signing, update-feed, entitlement, workflow and merge-policy paths to @r3dbars. It does nothing until "Require review from Code Owners" is on for `main` (below). Keep it in sync with `RELEASE_PATTERNS` in the script.
+`.github/CODEOWNERS` assigns the release, signing, update-feed, entitlement, workflow and merge-policy paths to @r3dbars. It only routes review requests: "Require review from Code Owners" stays off (see setup step 3), because @r3dbars authors most PRs, agent PRs included, and GitHub never counts an author's own approval. Keep it in sync with `RELEASE_PATTERNS` in the script.
 
 ## 6. Repo settings this needs (owner applies; agents don't)
 
 Read 2026-10-09: `allow_auto_merge` is off; squash, merge and rebase merges are all allowed; branch protection requires `build-and-test` and `repo-hygiene` (not strict), 0 approvals, no code-owner review, conversation resolution on, admins enforced; no rulesets; no AI provider secret.
 
 1. Turn on auto-merge: `gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=true`
-2. Add `risk-gate` to the required checks (after this PR is merged and has posted at least once):
-   `gh api -X POST repos/r3dbars/transcripted/branches/main/protection/required_status_checks/contexts -f 'contexts[]=risk-gate'`
+2. Do **not** add `risk-gate` to the required checks. High-risk PRs keep `risk-gate` pending forever by design, and with admins enforced a required pending check would block Justin's manual merge too. The gate enforces itself instead: it is the only thing that turns on auto-merge, and only for a green low/medium PR. Nothing to run for this step.
 3. Dismiss stale approvals on new pushes (code-owner review stays off):
    `gh api -X PATCH repos/r3dbars/transcripted/branches/main/protection/required_pull_request_reviews -F dismiss_stale_reviews=true` (do not enable require_code_owner_reviews: GitHub never counts self-approval, and with admins enforced it would lock @r3dbars out of their own release PRs)
 4. Add the AI key: `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted` (and optionally `gh variable set AI_REVIEW_PROVIDER -R r3dbars/transcripted -b anthropic`).
 5. Optional: `gh secret set AUTOMERGE_TOKEN -R r3dbars/transcripted` with a fine-grained token (contents, pull requests and statuses write), so auto-merges trigger push CI on `main`. Merges made with the default `GITHUB_TOKEN` don't start other workflows.
 6. Create the labels: `for l in risk:low risk:medium risk:high ai-findings-waived; do gh label create "$l" -R r3dbars/transcripted; done`
 
-Until step 1 (allow auto-merge) is done nothing auto-merges; until step 2 (risk-gate required) branch protection does not enforce the gate, so a human could still merge a PR whose gate is pending. High-risk PRs never auto-merge in any case: the gate stays pending and @r3dbars merges them by hand.
+What the settings change, exactly:
+- Before step 1, GitHub refuses `gh pr merge --auto`, so the gate can't merge anything; it only labels, comments and posts `risk-gate`. Manual merges work as today (they need `build-and-test` and `repo-hygiene`).
+- After step 1, the gate turns on squash auto-merge for low/medium PRs whose `risk-gate` is green, and turns it off again if a later push breaks the gate.
+- `risk-gate` is never a required check, so branch protection does not stop a person (or an agent with merge rights) from merging by hand while it is pending. Agents must not merge high-risk PRs; Justin merges those by hand.
+- High-risk PRs never auto-merge: `risk-gate` stays pending for them whoever the author is, approvals and `ai-findings-waived` included.
 
 ## Turning it off
 
-Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted`), or add `hold` to a single PR. Removing `risk-gate` from required checks undoes step 2.
+Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted`), or add `hold` to a single PR. Turning `allow_auto_merge` back off (`gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=false`) stops every automatic merge.
 
 ## Hardening notes
 
@@ -87,7 +91,7 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - High-risk PRs never pass `risk-gate` automatically, whoever the author is (agent PRs on `cursor/*` and `agent/*` branches are also authored by @r3dbars). The gate stays pending and Justin merges them by hand; the `ai-findings-waived` label and comment never bypass high risk.
 - A review requesting changes blocks the gate at every risk level.
 - `ai-findings-waived` only counts when @r3dbars added the label and also commented `ai-findings-waived <full head sha>` for the current head. A new push voids the waiver.
-- The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app; branch protection pins the required check to that app (app_id 15368).
+- The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app.
 - If a PR has auto-merge enabled but the gate no longer passes (or it is high risk), the gate turns auto-merge off.
 - Release build entrypoints (`scripts/entrypoints/build*.sh`, `scripts/entrypoints/lib/`) are owner-required, like the root wrappers.
 - Diffs are redacted (emails, home paths, credential-looking values) before any external AI call.
@@ -95,5 +99,5 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - A PR whose branch is behind its base never gets auto-merge enabled; it must be updated so CI reruns on current main.
 - Code-owner review: GitHub never lets the author satisfy a code-owner review, and @r3dbars authors most PRs, so "Require review from Code Owners" stays **off**. Owner sign-off on release/signing paths comes from `risk-gate` (high, never auto-merged) plus the owner merging by hand.
 - Redaction is pattern-based (emails, absolute paths, URLs, credential-looking values). It cannot recognise transcript text or names; keep real transcripts out of PR diffs.
-- Known limit: a same-repo PR that adds a `pull_request` workflow could post its own `risk-gate` status (it is also the Actions app). Same-repo push access is limited to the owner's agents; workflow changes are high/owner-only and never auto-merged by this gate.
-- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file is at least medium; the behind-base guard applies to every green result, high included.
+- Known limit: a same-repo PR that adds a `pull_request` workflow could post its own `risk-gate` status (it is also the Actions app). Because `risk-gate` is not required and the gate itself only enables auto-merge after recomputing the verdict from the file list, a forged status can't make this gate merge anything; and workflow changes are high, so the gate never auto-merges them.
+- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file is high; privacy egress files (`*PayloadSanitizer*`, `*EventPolicy*`) are high; an empty or incomplete file list is high and owner-required; change requests from untrusted accounts are ignored; the behind-base guard applies to every green result, high included.
