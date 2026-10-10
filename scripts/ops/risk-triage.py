@@ -99,6 +99,9 @@ HIGH_PATTERNS = (
     "**/*TCC*",
     "**/*Permission*.swift",
     "**/*Entitlement*",
+    # Agent instructions steer every engineer agent: treat like code that runs.
+    "**/AGENTS.md",
+    "**/CLAUDE.md",
 )
 
 # Low when every file matches one of these (tests, docs, copy).
@@ -211,16 +214,34 @@ def ai_clear(verdict: dict | None, head_sha: str, labels: set[str], waiver_by_ow
     return True, "AI review clear"
 
 
-def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required: bool) -> tuple[bool, str]:
-    """Latest review per reviewer counts; it must approve the head commit."""
+def _latest_reviews(reviews: list[dict]) -> dict[str, dict]:
     latest: dict[str, dict] = {}
     for r in reviews:
         if r.get("state") in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED"):
             latest[(r.get("user") or {}).get("login", "")] = r
+    return latest
+
+
+def changes_requested(reviews: list[dict]) -> bool:
+    """Any reviewer's latest review requesting changes blocks every risk level."""
+    return any(r["state"] == "CHANGES_REQUESTED" for r in _latest_reviews(reviews).values())
+
+
+def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required: bool) -> tuple[bool, str]:
+    """Latest review per reviewer counts; it must approve the head commit.
+
+    The owner (@OWNER_LOGIN) authors most PRs and GitHub won't let an author
+    approve their own PR, so an owner-authored high-risk PR passes this check
+    as "owner merges manually": the gate goes green but never auto-merges, and
+    the owner decides by merging it by hand.
+    """
+    latest = _latest_reviews(reviews)
     approvers = {u for u, r in latest.items()
                  if r["state"] == "APPROVED" and r.get("commit_id") == head_sha and u and u != author}
     if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
         return False, "a review requests changes"
+    if author == OWNER_LOGIN and not approvers:
+        return True, f"owner-authored: @{OWNER_LOGIN} merges manually"
     if not approvers:
         return False, "needs an approval on the head commit from someone other than the author"
     if owner_required and OWNER_LOGIN not in approvers:
@@ -229,7 +250,7 @@ def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required
 
 
 def decide(pr: dict, risk: dict, checks: tuple[bool, list[str]], ai: tuple[bool, str],
-           approvals: tuple[bool, str]) -> dict:
+           approvals: tuple[bool, str], changes: bool = False) -> dict:
     """Pure decision. Returns {"state": success|pending|failure, "automerge": bool, "why": [...]}."""
     why: list[str] = []
     labels = {l["name"] for l in pr.get("labels", [])}
@@ -240,6 +261,8 @@ def decide(pr: dict, risk: dict, checks: tuple[bool, list[str]], ai: tuple[bool,
         why.append("fork PRs never auto-merge")
     if labels & HOLD_LABELS:
         why.append("hold label: " + ", ".join(sorted(labels & HOLD_LABELS)))
+    if changes:
+        why.append("a review requests changes")
     if not checks[0]:
         why.append("required checks not green: " + "; ".join(checks[1]))
     if not ai[0]:
@@ -371,11 +394,17 @@ def evaluate(n: int) -> tuple[dict, dict]:
     if WAIVE_LABEL in labels:
         events = gh_json(f"repos/{REPO}/issues/{n}/events?per_page=100", paginate=True)
         adds = [e for e in events if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == WAIVE_LABEL]
-        waiver = bool(adds) and (adds[-1].get("actor") or {}).get("login") == OWNER_LOGIN
+        # The waiver covers only the commit it was applied to: a label added
+        # before the current head commit was committed does not count.
+        head = gh_json(f"repos/{REPO}/commits/{sha}")
+        head_at = ((head.get("commit") or {}).get("committer") or {}).get("date") or ""
+        waiver = (bool(adds) and (adds[-1].get("actor") or {}).get("login") == OWNER_LOGIN
+                  and bool(head_at) and (adds[-1].get("created_at") or "") >= head_at)
     reviews = gh_json(f"repos/{REPO}/pulls/{n}/reviews?per_page=100", paginate=True)
     result = decide(pr, risk, checks_green(runs, statuses),
                     ai_clear(verdict, sha, labels, waiver),
-                    approvals_ok(reviews, author, sha, risk["owner_required"]))
+                    approvals_ok(reviews, author, sha, risk["owner_required"]),
+                    changes_requested(reviews))
     return pr, {**result, "risk": risk["risk"]}
 
 
@@ -387,8 +416,15 @@ def cmd_gate(n: int | None, apply: bool) -> int:
         if not apply:
             continue
         desc = ("; ".join(res["why"]))[:139]
-        gh("api", f"repos/{REPO}/statuses/{pr['head']['sha']}", "-f", f"state={res['state']}",
-           "-f", f"context={GATE_CONTEXT}", "-f", f"description={desc}")
+        # The status is always posted with the workflow's GITHUB_TOKEN so it is
+        # attributed to the GitHub Actions app (branch protection pins it there).
+        status_env = {**os.environ, "GH_TOKEN": os.environ.get("GATE_STATUS_TOKEN") or os.environ.get("GH_TOKEN", "")}
+        subprocess.run(["gh", "api", f"repos/{REPO}/statuses/{pr['head']['sha']}", "-f", f"state={res['state']}",
+           "-f", f"context={GATE_CONTEXT}", "-f", f"description={desc}"],
+                       check=True, text=True, capture_output=True, env=status_env)
+        if pr.get("auto_merge") and not res["automerge"]:
+            # Auto-merge stays on only while the gate passes for a low/medium PR.
+            subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=False)
         if res["automerge"] and not pr.get("auto_merge"):
             subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--auto", "--squash",
                             "--match-head-commit", pr["head"]["sha"]], check=False)

@@ -43,6 +43,10 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(risk("Sources/UI/A.swift", "Sources/UI/B.swift", "Sources/UI/C.swift",
                               "Tests/ATests.swift", lines=1)["risk"], "medium")
 
+    def test_agent_instructions_are_high(self):
+        for path in ("AGENTS.md", "CLAUDE.md", "Sources/AGENTS.md", "docs/CLAUDE.md"):
+            self.assertEqual(risk(path)["risk"], "high", path)
+
     def test_unknown_path_is_high(self):
         self.assertEqual(risk("scripts/dev/whatever.py")["risk"], "high")
         self.assertEqual(risk("Sources/UI/Foo.swift", "Tests/FooTests.swift", "Makefile")["risk"], "high")
@@ -151,8 +155,18 @@ class ApprovalTests(unittest.TestCase):
         self.assertFalse(rt.approvals_ok([review("alice")], "bot", SHA, True)[0])
         self.assertTrue(rt.approvals_ok([review("r3dbars")], "bot", SHA, True)[0])
 
-    def test_owner_cannot_self_approve_release(self):
-        self.assertFalse(rt.approvals_ok([review("r3dbars")], "r3dbars", SHA, True)[0])
+    def test_owner_authored_high_is_owner_manual_merge(self):
+        # GitHub never lets an author approve; the owner's own PR passes as "owner merges manually".
+        ok, why = rt.approvals_ok([], "r3dbars", SHA, True)
+        self.assertTrue(ok)
+        self.assertIn("manually", why)
+
+    def test_owner_authored_still_blocked_by_changes_requested(self):
+        self.assertFalse(rt.approvals_ok([review("alice", "CHANGES_REQUESTED")], "r3dbars", SHA, True)[0])
+
+    def test_changes_requested_detected(self):
+        self.assertTrue(rt.changes_requested([review("bob", "CHANGES_REQUESTED")]))
+        self.assertFalse(rt.changes_requested([review("bob", "CHANGES_REQUESTED"), review("bob")]))
 
     def test_changes_requested_blocks(self):
         self.assertFalse(rt.approvals_ok([review("alice"), review("bob", "CHANGES_REQUESTED")], "bot", SHA, False)[0])
@@ -179,6 +193,15 @@ class DecideTests(unittest.TestCase):
         d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, NO_APPROVAL)
         self.assertEqual((d["state"], d["automerge"]), ("pending", False))
         d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, (True, "approved"))
+        self.assertEqual((d["state"], d["automerge"]), ("success", False))
+
+    def test_changes_requested_blocks_every_tier(self):
+        for tier in ("low", "medium", "high"):
+            d = rt.decide(pr(), {"risk": tier}, OK, AI_OK, (True, "approved"), True)
+            self.assertEqual((d["state"], d["automerge"]), ("pending", False), tier)
+
+    def test_owner_manual_merge_high_goes_green_without_automerge(self):
+        d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, rt.approvals_ok([], "r3dbars", SHA, True))
         self.assertEqual((d["state"], d["automerge"]), ("success", False))
 
     def test_blockers(self):

@@ -80,3 +80,12 @@ Until steps 1 and 2 are done the workflow only labels, comments and posts status
 ## Turning it off
 
 Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted`), or add `hold` to a single PR. Removing `risk-gate` from required checks undoes step 2.
+
+## Hardening notes
+
+- `AGENTS.md` and `CLAUDE.md` (any directory) are high risk: they steer every engineer agent.
+- Owner-authored high-risk PRs: GitHub won't let an author approve their own PR, so when @r3dbars is the author and no other approval exists, `risk-gate` goes green as "owner merges manually". It still never auto-merges; merging by hand is the owner's sign-off.
+- A review requesting changes blocks the gate at every risk level.
+- `ai-findings-waived` only counts when @r3dbars added it after the current head commit was committed. A new push voids the waiver.
+- The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app; branch protection pins the required check to that app (app_id 15368).
+- If a PR has auto-merge enabled but the gate no longer passes (or it is high risk), the gate turns auto-merge off.

@@ -84,6 +84,7 @@ jobs:
           # makes the squash merge trigger push CI on main; GITHUB_TOKEN merges
           # do not trigger workflows. See docs/agent-merge-policy.md.
           GH_TOKEN: ${{ secrets.AUTOMERGE_TOKEN || github.token }}
+          GATE_STATUS_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number || inputs.pr }}
         run: |
           if [ -n "$PR" ]; then
