@@ -150,6 +150,11 @@ enum CLIDiarization {
             fallbackNote: "Nemotron isn't available in this CLI build; falling back to pyannote."
         )
     }
+
+    static func writeFallbackNote(_ note: String?) {
+        guard let note, !note.isEmpty else { return }
+        FileHandle.standardError.write(Data((note + "\n").utf8))
+    }
 }
 
 extension ImportAudio {

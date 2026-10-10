@@ -60,9 +60,7 @@ struct Batch: AsyncParsableCommand {
             choice: diarizationEngine,
             storedPreference: CLIDiarization.storedAppPreference()
         )
-        if let note = selection.fallbackNote {
-            FileHandle.standardError.write(Data(note + "\n".utf8))
-        }
+        CLIDiarization.writeFallbackNote(selection.fallbackNote)
         let engine = selection.engine
         if config != nil && engine != "pyannote" {
             throw ValidationError("--config is a pyannote OfflineDiarizerConfig file. Pass --diarization-engine pyannote to use it.")
