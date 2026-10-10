@@ -43,6 +43,30 @@ extension DiarizationBackend {
         "Nemotron3Diarizer_\(preset).mlmodelc"
     }
 
+    /// Split-graph presets (`c128-split-w8a8`, `fast32-split-w8a8`) live under
+    /// `split/` and need the host-side projection file.
+    public static let nemotronProjectionFileName = "pre_encode_proj_t.bin"
+
+    public static func nemotronPresetIsSplit(_ preset: String) -> Bool {
+        preset.contains("split")
+    }
+
+    public static func nemotronCacheModelSubpaths(preset: String) -> [String] {
+        let file = nemotronModelFileName(preset: preset)
+        if nemotronPresetIsSplit(preset) {
+            return ["split/\(file)", "split/v2/\(file)", file]
+        }
+        return ["monolithic/v2/\(file)", "monolithic/\(file)", file]
+    }
+
+    public static func nemotronRequiredCompanionFiles(preset: String) -> [String] {
+        var files = [nemotronCacheSilenceName]
+        if nemotronPresetIsSplit(preset) {
+            files.append(nemotronProjectionFileName)
+        }
+        return files
+    }
+
     /// Marker file contents FluidAudio will accept (`weightsVersion` plus optional newline).
     public static func nemotronCacheHasMatchingMarker(contents: String?) -> Bool {
         guard let contents else { return false }

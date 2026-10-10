@@ -104,10 +104,22 @@ enum MeetingImportWorkflow {
             log("Nemotron models aren't local and --no-download is set; using pyannote.")
             backend = .pyannote
         }
+        let onlineWeSpeaker = MeetingImportModels.localOnlineWeSpeakerModels()
+        if command.noDownload, let error = MeetingImportModels.noDownloadWeSpeakerError(
+            engine: backend.rawValue,
+            hasInjectedEmbedder: embedder != nil,
+            hasOfflineWeSpeaker: modelPaths.diarization != nil,
+            usesOnlineWeSpeaker: ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online",
+            hasOnlineWeSpeaker: onlineWeSpeaker != nil
+        ) {
+            throw error
+        }
         let diarization = await MainActor.run {
             DiarizationService(
                 bundleProvider: MeetingImportDiarization.bundleProvider(
-                    pyannote: modelPaths.diarization, nemotron: modelPaths.nemotron
+                    pyannote: modelPaths.diarization,
+                    nemotron: modelPaths.nemotron,
+                    onlineWeSpeaker: onlineWeSpeaker
                 ),
                 segmentEmbedder: embedder,
                 backend: backend,
@@ -285,10 +297,9 @@ enum MeetingImportModels {
     static func nemotronRequiredPaths(
         environment: [String: String] = [:]
     ) -> [String] {
-        [
-            DiarizationBackend.nemotronModelFileName(preset: resolvedPreset(environment: environment)),
-            nemotronCacheSilenceName
-        ]
+        let preset = resolvedPreset(environment: environment)
+        return [DiarizationBackend.nemotronModelFileName(preset: preset)]
+            + DiarizationBackend.nemotronRequiredCompanionFiles(preset: preset)
     }
 
     static func resolvedPreset(environment: [String: String] = [:]) -> String {
@@ -403,9 +414,10 @@ enum MeetingImportModels {
 
     static func cachedNemotronModels(
         at directory: URL = defaultNemotronCacheDirectory(),
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        preset: String? = nil
     ) -> URL? {
-        completeCachedNemotronModels(at: directory, environment: environment) ? directory : nil
+        completeCachedNemotronModels(at: directory, environment: environment, preset: preset) ? directory : nil
     }
 
     /// HuggingFace layout (`monolithic/v2/…`, older `monolithic/…`, or flat)
@@ -413,25 +425,20 @@ enum MeetingImportModels {
     /// matching marker FluidAudio deletes the cache and downloads again.
     static func completeCachedNemotronModels(
         at directory: URL,
-        environment: [String: String] = [:]
+        environment: [String: String] = [:],
+        preset: String? = nil
     ) -> Bool {
         guard matchingNemotronCacheMarker(at: directory) else { return false }
+        let preset = preset ?? resolvedPreset(environment: environment)
         let fm = FileManager.default
-        let silenceCandidates = [
-            directory.appendingPathComponent(nemotronCacheSilenceName),
-            directory.appendingPathComponent("monolithic/\(nemotronCacheSilenceName)"),
-            directory.appendingPathComponent("monolithic/v2/\(nemotronCacheSilenceName)")
-        ]
-        guard silenceCandidates.contains(where: { fm.fileExists(atPath: $0.path) }) else {
-            return false
+        let companionRoots = ["", "monolithic/", "monolithic/v2/", "split/", "split/v2/"]
+        for companion in DiarizationBackend.nemotronRequiredCompanionFiles(preset: preset) {
+            let found = companionRoots.contains {
+                fm.fileExists(atPath: directory.appendingPathComponent("\($0)\(companion)").path)
+            }
+            guard found else { return false }
         }
-        let file = DiarizationBackend.nemotronModelFileName(preset: resolvedPreset(environment: environment))
-        let modelCandidates = [
-            "monolithic/v2/\(file)",
-            "monolithic/\(file)",
-            file
-        ]
-        return modelCandidates.contains {
+        return DiarizationBackend.nemotronCacheModelSubpaths(preset: preset).contains {
             fm.fileExists(atPath: directory.appendingPathComponent($0).path)
         }
     }
@@ -482,6 +489,52 @@ enum MeetingImportModels {
             break
         }
         return nil
+    }
+
+    /// Nemotron with no injected voiceprint loads WeSpeaker from the pyannote
+    /// FBank/Embedding files, or the lab-only online models. `--no-download`
+    /// must already have those files.
+    static func noDownloadWeSpeakerError(
+        engine: String,
+        hasInjectedEmbedder: Bool,
+        hasOfflineWeSpeaker: Bool,
+        usesOnlineWeSpeaker: Bool,
+        hasOnlineWeSpeaker: Bool
+    ) -> ValidationError? {
+        guard engine == "nemotron", !hasInjectedEmbedder else { return nil }
+        if usesOnlineWeSpeaker {
+            if !hasOnlineWeSpeaker {
+                return ValidationError("--no-download requires local online WeSpeaker models (online-diarizer-models) when TRANSCRIPTED_NEMOTRON_EMBEDDER=online. Open Transcripted once or omit --no-download.")
+            }
+            return nil
+        }
+        if !hasOfflineWeSpeaker {
+            return ValidationError("--no-download requires local pyannote WeSpeaker models (FBank/Embedding) when Nemotron has no injected voiceprint. Supply --diarization-models-dir or pick --speaker-embedder redimnet2.")
+        }
+        return nil
+    }
+
+    static let onlineWeSpeakerRequiredPaths = [
+        "pyannote_segmentation.mlmodelc", "wespeaker_v2.mlmodelc"
+    ]
+
+    static func localOnlineWeSpeakerModels(
+        bundledResourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
+        let bundled = bundledResourceDirectories.map {
+            $0.appendingPathComponent(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName, isDirectory: true)
+        }.first { completeOnlineWeSpeakerModels(at: $0) }
+        if let bundled { return bundled }
+        let cache = homeDirectory
+            .appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization", isDirectory: true)
+        return completeOnlineWeSpeakerModels(at: cache) ? cache : nil
+    }
+
+    static func completeOnlineWeSpeakerModels(at directory: URL) -> Bool {
+        onlineWeSpeakerRequiredPaths.allSatisfy {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
     }
 
     static func bundledNemotronModels(

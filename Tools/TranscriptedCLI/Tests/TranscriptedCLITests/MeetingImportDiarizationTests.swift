@@ -85,7 +85,13 @@ final class MeetingImportDiarizationTests: XCTestCase {
         let provider = MeetingImportDiarization.bundleProvider(pyannote: pyannote, nemotron: nemotron)
         XCTAssertEqual(provider("offline-diarizer-models"), pyannote)
         XCTAssertEqual(provider("nemotron-diarizer-models"), nemotron)
+        XCTAssertNil(provider("online-diarizer-models"))
         XCTAssertNil(provider("eres2net-embedding"))
+        let online = URL(fileURLWithPath: "/tmp/online-diarizer-models")
+        let withOnline = MeetingImportDiarization.bundleProvider(
+            pyannote: pyannote, nemotron: nemotron, onlineWeSpeaker: online
+        )
+        XCTAssertEqual(withOnline("online-diarizer-models"), online)
     }
 
     func testBundledNemotronUsesTheFlatAppLayout() throws {
@@ -376,6 +382,64 @@ final class MeetingImportDiarizationTests: XCTestCase {
             parakeet: parakeet, diarization: nil,
             nemotronAvailable: true, engineChoice: "nemotron", environment: fast32
         ))
+    }
+
+    func testCachedNemotronFindsTheSplitPresetLayout() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-split-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = root.appendingPathComponent(MeetingImportModels.nemotronCacheRelativePath, isDirectory: true)
+        try FileManager.default.createDirectory(
+            at: cache.appendingPathComponent("split/Nemotron3Diarizer_c128-split-w8a8.mlmodelc", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheSilenceName))
+        try writeNemotronCacheMarker(at: cache)
+        XCTAssertNil(
+            MeetingImportModels.cachedNemotronModels(at: cache, preset: "c128-split-w8a8"),
+            "split preset without pre_encode_proj_t.bin is incomplete"
+        )
+        try Data().write(to: cache.appendingPathComponent(DiarizationBackend.nemotronProjectionFileName))
+        XCTAssertEqual(
+            MeetingImportModels.cachedNemotronModels(at: cache, preset: "c128-split-w8a8"),
+            cache
+        )
+        XCTAssertNil(
+            MeetingImportModels.cachedNemotronModels(at: cache, preset: "fast128"),
+            "a split cache is not the default fast128 layout"
+        )
+    }
+
+    func testNoDownloadRequiresWeSpeakerAssetsWhenNemotronHasNoInjectedEmbedder() {
+        XCTAssertNotNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "nemotron", hasInjectedEmbedder: false,
+            hasOfflineWeSpeaker: false, usesOnlineWeSpeaker: false, hasOnlineWeSpeaker: false
+        ), "wespeaker + nemotron needs local FBank/Embedding")
+        XCTAssertNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "nemotron", hasInjectedEmbedder: false,
+            hasOfflineWeSpeaker: true, usesOnlineWeSpeaker: false, hasOnlineWeSpeaker: false
+        ))
+        XCTAssertNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "nemotron", hasInjectedEmbedder: true,
+            hasOfflineWeSpeaker: false, usesOnlineWeSpeaker: false, hasOnlineWeSpeaker: false
+        ), "an injected ReDimNet2 voiceprint does not need pyannote WeSpeaker")
+        XCTAssertNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "pyannote", hasInjectedEmbedder: false,
+            hasOfflineWeSpeaker: false, usesOnlineWeSpeaker: false, hasOnlineWeSpeaker: false
+        ))
+    }
+
+    func testNoDownloadBlocksOnlineWeSpeakerDownload() {
+        XCTAssertNotNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "nemotron", hasInjectedEmbedder: false,
+            hasOfflineWeSpeaker: true, usesOnlineWeSpeaker: true, hasOnlineWeSpeaker: false
+        ), "lab online WeSpeaker cannot download under --no-download")
+        XCTAssertNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "nemotron", hasInjectedEmbedder: false,
+            hasOfflineWeSpeaker: false, usesOnlineWeSpeaker: true, hasOnlineWeSpeaker: true
+        ))
+        XCTAssertFalse(
+            DiarizationService.canLoadWeSpeakerFallback(hasLocalBundle: false, allowDownload: false)
+        )
     }
 
     private func writeNemotronFixture(at directory: URL, preset: String = "fast128") throws {

@@ -121,6 +121,12 @@ public class DiarizationService: ObservableObject {
         hasLocalBundle || allowDownload
     }
 
+    /// Same rule for Nemotron's WeSpeaker fallback: local bundle, or download
+    /// when allowed. `--no-download` must not call `downloadIfNeeded()`.
+    public nonisolated static func canLoadWeSpeakerFallback(hasLocalBundle: Bool, allowDownload: Bool) -> Bool {
+        canLoadPyannote(hasLocalBundle: hasLocalBundle, allowDownload: allowDownload)
+    }
+
     public nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds {
         segmentEmbedder?.thresholds ?? .weSpeaker
     }
@@ -343,12 +349,20 @@ public class DiarizationService: ObservableObject {
                 if let bundleDirectory = bundleProvider(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName) {
                     fallbackEmbedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: bundleDirectory)
                 } else {
+                    guard allowDownload else {
+                        throw DiarizationDownloadDisabled(backend: FluidWeSpeakerSegmentEmbedder.embedderIdentifier)
+                    }
                     fallbackEmbedder = try await ModelDownloadService.withRetry {
                         try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: nil)
                     }
                 }
             } else {
                 let bundled = bundleProvider("offline-diarizer-models")
+                guard Self.canLoadWeSpeakerFallback(
+                    hasLocalBundle: bundled != nil, allowDownload: allowDownload
+                ) else {
+                    throw DiarizationDownloadDisabled(backend: FluidOfflineWeSpeakerSegmentEmbedder.embedderIdentifier)
+                }
                 fallbackEmbedder = try await ModelDownloadService.withRetry {
                     try await FluidOfflineWeSpeakerSegmentEmbedder.load(directory: bundled)
                 }

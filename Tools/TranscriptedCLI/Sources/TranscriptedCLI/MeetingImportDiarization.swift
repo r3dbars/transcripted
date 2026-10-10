@@ -32,13 +32,19 @@ enum MeetingImportDiarization {
     /// `DiarizationService` asks for a named bundle. Nemotron and pyannote must
     /// not share a folder: handing Nemotron the pyannote path makes it fail
     /// the load and fall back to pyannote.
-    static func bundleProvider(pyannote: URL?, nemotron: URL?) -> ModelBundleProvider {
+    static func bundleProvider(
+        pyannote: URL?,
+        nemotron: URL?,
+        onlineWeSpeaker: URL? = nil
+    ) -> ModelBundleProvider {
         { name in
             switch name {
             case "offline-diarizer-models":
                 return pyannote
             case "nemotron-diarizer-models":
                 return nemotron
+            case FluidWeSpeakerSegmentEmbedder.bundleDirectoryName:
+                return onlineWeSpeaker
             default:
                 return nil
             }

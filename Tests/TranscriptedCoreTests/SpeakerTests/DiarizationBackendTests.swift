@@ -38,6 +38,21 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertTrue(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: "ga-2026-09-23"))
         XCTAssertFalse(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: nil))
         XCTAssertFalse(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: "other\n"))
+        XCTAssertTrue(DiarizationBackend.nemotronPresetIsSplit("c128-split-w8a8"))
+        XCTAssertTrue(DiarizationBackend.nemotronPresetIsSplit("fast32-split-w8a8"))
+        XCTAssertFalse(DiarizationBackend.nemotronPresetIsSplit("fast128"))
+        XCTAssertEqual(
+            DiarizationBackend.nemotronCacheModelSubpaths(preset: "c128-split-w8a8").first,
+            "split/Nemotron3Diarizer_c128-split-w8a8.mlmodelc"
+        )
+        XCTAssertEqual(
+            DiarizationBackend.nemotronRequiredCompanionFiles(preset: "c128-split-w8a8"),
+            [DiarizationBackend.nemotronCacheSilenceName, DiarizationBackend.nemotronProjectionFileName]
+        )
+        XCTAssertEqual(
+            DiarizationBackend.nemotronRequiredCompanionFiles(preset: "fast128"),
+            [DiarizationBackend.nemotronCacheSilenceName]
+        )
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: nil, environment: [:]), .nemotron)
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: "pyannote", environment: [:]), .pyannote)
         XCTAssertEqual(
@@ -74,6 +89,13 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertTrue(
             DiarizationService.canLoadPyannote(hasLocalBundle: false, allowDownload: true),
             "download remains allowed when the caller did not disable it"
+        )
+        XCTAssertFalse(
+            DiarizationService.canLoadWeSpeakerFallback(hasLocalBundle: false, allowDownload: false),
+            "online or offline WeSpeaker cannot download under --no-download"
+        )
+        XCTAssertTrue(
+            DiarizationService.canLoadWeSpeakerFallback(hasLocalBundle: true, allowDownload: false)
         )
         let disabled = DiarizationDownloadDisabled(backend: DiarizationBackend.pyannote.rawValue)
         XCTAssertEqual(disabled.backend, "pyannote")
