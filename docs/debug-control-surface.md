@@ -16,7 +16,8 @@ This is not the hill-climb lab channel (`docs/lab-control-channel.md`). That one
 - **Off unless both are true:** `AutomatedLaunchEnvironment` is active (`TRANSCRIPTED_AUTOMATED_HARNESS=1`, or one of the existing launch-smoke keys) **and** `TRANSCRIPTED_DEBUG_CONTROL_DIR` is an absolute path. A `launchctl setenv` of the control dir alone is not enough.
 - Control dir / `inbox/` / `done/` must be real directories this uid owns, mode `0700`. Command files are opened `O_NOFOLLOW`. Same accept rules as the lab channel (`LabControlFilePolicy`).
 - No network. Responses never echo transcript text, titles, speaker names, emails, tokens, or file paths.
-- `launch` requires `--container DIR` (or `--use-real-library`) and refuses when `transcriptSaveLocation` is relocated, because `UserDefaults` are not isolated by `HOME` / the container. Settings get/set hit `UserDefaults.standard`, same as Settings.
+- `launch` requires `--container DIR` (or `--use-real-library`) and refuses when `transcriptSaveLocation` is relocated, because `UserDefaults` are not isolated by `HOME` / the container.
+- `settings_get` reads what this process sees (`UserDefaults.standard`, including launch-arg overrides). `settings_set` writes the **argument domain only** (volatile, not persisted) and posts the same in-process notifications the real setters post. It never calls `UserDefaults.standard.set`, so `crash_reports`, `usage_stats`, and `island_in_screen_sharing` cannot leak into the owner's `com.justinbetker.draft` plist.
 
 ## Talk to a running debug app
 
@@ -67,7 +68,7 @@ transcripted-debug://settings/set?key=show_in_dock&value=false
 | `paste_target_open` | `paste-target open` | none | debug text field is on screen | none |
 | `open_screen` | `open today` | `screen` | that screen was asked to open | `missing_arg:screen`, `invalid_arg:screen` |
 | `settings_get` | `settings get show_in_dock` | `key` | `result.<key>` is `"true"` / `"false"` | `missing_arg:key`, `unknown_setting` |
-| `settings_set` | `settings set show_in_dock false` | `key`, `value` | the allowlisted bool was written | `missing_arg:key`, `missing_arg:value`, `invalid_arg:value`, `unknown_setting` |
+| `settings_set` | `settings set show_in_dock false` | `key`, `value` | the allowlisted bool is visible to this process only (argument domain; not persisted) | `missing_arg:key`, `missing_arg:value`, `invalid_arg:value`, `unknown_setting` |
 
 `start_dictation` / `stop_dictation` / meeting start and stop call the same session APIs as the menu bar (minus bringing another app forward on dictation start). `stop_dictation` only pastes when `paste` is true.
 

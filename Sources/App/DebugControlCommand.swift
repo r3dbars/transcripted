@@ -132,6 +132,36 @@ enum DebugControlSettingsPolicy {
         default: return nil
         }
     }
+
+    /// Real `UserDefaults` keys. `settings_set` writes these into the process
+    /// argument domain (volatile, not persisted) so the live readers see them
+    /// without touching the user's `com.justinbetker.draft` plist.
+    static let persistKeys: [String: String] = [
+        "show_in_dock": "show-transcripted-in-dock",
+        "auto_detect_calls": "auto-call-detection-enabled",
+        "dictation_sounds": "enableUISounds",
+        "cleanup_pasted_text": "dictationCleanupEnabled",
+        "crash_reports": "observability-crash-reporting-enabled",
+        "usage_stats": "observability-anonymous-analytics-enabled",
+        "people_in_room": "local-speaker-split-enabled",
+        "island_in_screen_sharing": "notchIslandVisibleInScreenSharing",
+    ]
+
+    static func persistKey(_ key: String) -> String? {
+        persistKeys[key]
+    }
+
+    /// Merge a setting into a copy of the argument domain. Replacing that
+    /// domain without copying would drop launch-arg telemetry overrides.
+    static func applying(
+        _ value: Bool,
+        persistKey: String,
+        intoArgumentDomain domain: [String: Any]
+    ) -> [String: Any] {
+        var next = domain
+        next[persistKey] = value
+        return next
+    }
 }
 
 enum DebugControlScreenPolicy {

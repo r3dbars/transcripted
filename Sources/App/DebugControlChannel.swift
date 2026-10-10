@@ -409,16 +409,26 @@ final class DebugControlChannel {
     }
 
     private func applySetting(_ key: String, value: Bool) {
+        // Volatile argument domain only. The real setters write
+        // UserDefaults.standard (the owner's com.justinbetker.draft plist);
+        // HOME / TRANSCRIPTED_CONTAINER_DIR do not isolate that. Launch
+        // already puts telemetry-off flags in this domain — merge, don't replace.
+        guard let persistKey = DebugControlSettingsPolicy.persistKey(key) else { return }
+        let defaults = UserDefaults.standard
+        let domain = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        defaults.setVolatileDomain(
+            DebugControlSettingsPolicy.applying(value, persistKey: persistKey, intoArgumentDomain: domain),
+            forName: UserDefaults.argumentDomain
+        )
         switch key {
-        case "show_in_dock": DockVisibilityPreferences.setVisible(value)
-        case "auto_detect_calls": AutoCallDetectionPreferences.setEnabled(value)
-        case "dictation_sounds": UISoundPreferences.setEnabled(value)
-        case "cleanup_pasted_text": DictationCleanupPreferences.setEnabled(value)
-        case "crash_reports": CrashReportingPreferences.setEnabled(value)
-        case "usage_stats": AnalyticsPreferences.setEnabled(value)
-        case "people_in_room": LocalSpeakerPreferences.setEnabled(value)
-        case "island_in_screen_sharing": NotchIslandPreferences.setVisibleInScreenSharing(value)
-        default: break
+        case "show_in_dock":
+            NotificationCenter.default.post(name: .dockVisibilityPreferencesDidChange, object: nil)
+        case "auto_detect_calls":
+            NotificationCenter.default.post(name: .autoCallDetectionPrefsDidChange, object: nil)
+        case "people_in_room":
+            NotificationCenter.default.post(name: .localSpeakerPrefsDidChange, object: nil)
+        default:
+            break
         }
     }
 

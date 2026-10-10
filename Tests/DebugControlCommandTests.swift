@@ -116,6 +116,31 @@ func testDebugControlCommand() {
         snapshot = DebugControlSessionPolicy.apply(.pasteTargetOpen, to: snapshot).okSnapshot() ?? snapshot
         assertTrue(snapshot.pasteTargetOpen, "paste-target open should mark the debug field as shown")
         assertEqual(DebugControlSettingsPolicy.keys.count, 8, "every allowlisted setting needs a live mapping in the channel")
+        for key in DebugControlSettingsPolicy.keys {
+            assertTrue(
+                DebugControlSettingsPolicy.persistKey(key) != nil,
+                "settings_set must know the UserDefaults key for \(key)"
+            )
+        }
+        assertEqual(
+            Set(DebugControlSettingsPolicy.persistKeys.keys),
+            Set(DebugControlSettingsPolicy.keys),
+            "persist key map must cover the allowlist and nothing else"
+        )
+        let merged = DebugControlSettingsPolicy.applying(
+            false,
+            persistKey: "observability-crash-reporting-enabled",
+            intoArgumentDomain: [
+                "observability-anonymous-analytics-enabled": "NO",
+                "observability-crash-reporting-enabled": "NO",
+            ]
+        )
+        assertEqual(merged["observability-crash-reporting-enabled"] as? Bool, false)
+        assertEqual(
+            merged["observability-anonymous-analytics-enabled"] as? String,
+            "NO",
+            "settings_set must keep other argument-domain launch overrides"
+        )
         assertTrue(DebugControlScreenPolicy.ids.contains("menubar"))
         assertTrue(DebugControlScreenPolicy.ids.contains("onboarding"))
     }
