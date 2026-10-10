@@ -97,15 +97,26 @@ enum MeetingImportWorkflow {
             identificationUnavailable = "the saved speaker database holds a different voiceprint model's people"
         }
         let speech = await MainActor.run { MeetingImportSpeechEngine(manager: manager) }
+        var backend = MeetingImportDiarization.backend(choice: command.diarizationEngine)
+        if command.noDownload, backend == .nemotron, modelPaths.nemotron == nil {
+            if command.diarizationEngine != "app" {
+                throw ValidationError("--no-download requires local Nemotron models when --diarization-engine is nemotron. Open Transcripted once or omit --no-download.")
+            }
+            log("Nemotron models aren't local and --no-download is set; using pyannote.")
+            backend = .pyannote
+        }
         let pipeline = await MainActor.run {
             let diarization = DiarizationService(
-                bundleProvider: { _ in modelPaths.diarization },
-                segmentEmbedder: embedder
+                bundleProvider: MeetingImportDiarization.bundleProvider(
+                    pyannote: modelPaths.diarization, nemotron: modelPaths.nemotron
+                ),
+                segmentEmbedder: embedder,
+                backend: backend
             )
             return Transcription(speechToText: speech, diarization: diarization,
                                  speakerStore: store, speakerClipsDirectory: job.appendingPathComponent("clips"))
         }
-        log("Transcribing and separating speakers with local Parakeet v3 + PyAnnote…")
+        log("Transcribing and separating speakers with local Parakeet v3 + \(backend.footerDisplayName)…")
         try Task.checkCancellation()
         let transcribeStart = ProcessInfo.processInfo.systemUptime
         let result = try await pipeline.transcribeAudioFile(at: normalized)
@@ -235,11 +246,16 @@ private final class MeetingImportSpeechEngine: SpeechToTextEngine {
 }
 
 enum MeetingImportModels {
-    struct Paths: Sendable { let parakeet: URL?; let diarization: URL? }
+    struct Paths: Sendable { let parakeet: URL?; let diarization: URL?; let nemotron: URL? }
 
     static let diarizationRequiredPaths = [
         "Segmentation.mlmodelc", "Embedding.mlmodelc", "FBank.mlmodelc",
         "PldaRho.mlmodelc", "plda-parameters.json", "xvector-transform.json"
+    ]
+
+    /// Flat bundled Nemotron layout (`NemotronDiarizationRunner.bundleDirectoryName`).
+    static let nemotronRequiredPaths = [
+        "Nemotron3Diarizer_fast128.mlmodelc", "learnable_sil_emb.bin"
     ]
 
     static func resolve(modelsDir: String?, diarizationModelsDir: String?, noDownload: Bool) throws -> Paths {
@@ -265,10 +281,22 @@ enum MeetingImportModels {
             diarization = bundledDiarizationModels()
                 ?? fluidAudioRoot(for: cache)
         }
+        let nemotron = bundledNemotronModels()
         if noDownload && (parakeet == nil || diarization == nil) {
             throw ValidationError("--no-download requires complete local Parakeet v3 AND offline diarization models. Open Transcripted to install models or supply --models-dir and --diarization-models-dir.")
         }
-        return Paths(parakeet: parakeet, diarization: diarization)
+        return Paths(parakeet: parakeet, diarization: diarization, nemotron: nemotron)
+    }
+
+    static func bundledNemotronModels(
+        in resourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories()
+    ) -> URL? {
+        resourceDirectories.map { $0.appendingPathComponent("nemotron-diarizer-models", isDirectory: true) }
+            .first { completeNemotronModels(at: $0) }
+    }
+
+    static func completeNemotronModels(at directory: URL) -> Bool {
+        nemotronRequiredPaths.allSatisfy { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
     }
 
     static func bundledDiarizationModels(

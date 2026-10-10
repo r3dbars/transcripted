@@ -3,6 +3,9 @@ import Foundation
 
 #if TRANSCRIPTEDCLI_WITH_DIARIZATION && canImport(FluidAudio)
 import FluidAudio
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct Batch: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -18,8 +21,8 @@ struct Batch: AsyncParsableCommand {
     @Option(name: .long, help: "Path to directory containing diarization models.")
     var modelsDir: String?
 
-    @Option(name: .long, help: "Diarization engine: app (default; follows the app), nemotron, or pyannote.")
-    var diarizationEngine = "pyannote"
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app's Nemotron unless changed), nemotron, or pyannote.")
+    var diarizationEngine = "app"
 
     @Option(name: .long, help: "Output directory for RTTM files. Defaults to audio directory.")
     var outputDir: String?
@@ -52,6 +55,22 @@ struct Batch: AsyncParsableCommand {
 
         // Create output directory if needed
         try FileManager.default.createDirectory(at: outDirURL, withIntermediateDirectories: true)
+
+        let engine = CLIDiarization.resolvedEngine(
+            choice: diarizationEngine,
+            storedPreference: CLIDiarization.storedAppPreference()
+        )
+        if config != nil && engine != "pyannote" {
+            throw ValidationError("--config is a pyannote OfflineDiarizerConfig file. Pass --diarization-engine pyannote to use it.")
+        }
+        if engine == "nemotron" {
+            #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+            try await runNemotron(audioFiles: audioFiles, outDirURL: outDirURL)
+            return
+            #else
+            throw ValidationError("Nemotron diarization needs the meeting-import CLI shipped in Transcripted.app. Pass --diarization-engine pyannote, or rebuild with TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1.")
+            #endif
+        }
 
         // Load config
         let diarizerConfig: OfflineDiarizerConfig
@@ -112,6 +131,34 @@ struct Batch: AsyncParsableCommand {
         """
         print(summaryJSON)
     }
+
+    #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+    private func runNemotron(audioFiles: [URL], outDirURL: URL) async throws {
+        let service = try await CLIDiarizationService.readyService(backend: .nemotron, modelsDir: modelsDir)
+        let batchStart = Date()
+        for (index, audioURL) in audioFiles.enumerated() {
+            let fileId = audioURL.deletingPathExtension().lastPathComponent
+            let progress = "[\(index + 1)/\(audioFiles.count)]"
+            FileHandle.standardError.write(Data("\(progress) \(audioURL.lastPathComponent)...".utf8))
+            let fileStart = Date()
+            let segments = try await CLIDiarizationService.segments(service: service, audioURL: audioURL)
+            let fileElapsed = Date().timeIntervalSince(fileStart)
+            let speakerIds = Set(segments.map(\.speakerId))
+            FileHandle.standardError.write(Data(" \(speakerIds.count) speakers, \(segments.count) segments, \(String(format: "%.1f", fileElapsed))s\n".utf8))
+            let rttmPath = outDirURL.appendingPathComponent("\(fileId).rttm").path
+            try RTTMText.output(fileId: fileId, segments: CLIDiarizationService.rttmSegments(from: segments), to: rttmPath)
+        }
+        let batchElapsed = Date().timeIntervalSince(batchStart)
+        await MainActor.run { service.cleanup() }
+        print("""
+        {
+          "files_processed": \(audioFiles.count),
+          "total_processing_seconds": \(String(format: "%.1f", batchElapsed)),
+          "output_dir": "\(outDirURL.path)"
+        }
+        """)
+    }
+    #endif
 }
 #else
 struct Batch: AsyncParsableCommand {
@@ -128,8 +175,8 @@ struct Batch: AsyncParsableCommand {
     @Option(name: .long, help: "Path to directory containing diarization models.")
     var modelsDir: String?
 
-    @Option(name: .long, help: "Diarization engine: app (default; follows the app), nemotron, or pyannote.")
-    var diarizationEngine = "pyannote"
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app's Nemotron unless changed), nemotron, or pyannote.")
+    var diarizationEngine = "app"
 
     @Option(name: .long, help: "Output directory for RTTM files. Defaults to audio directory.")
     var outputDir: String?

@@ -48,7 +48,7 @@ Output rules:
 ## Offline audio commands
 
 - `transcribe <media...>`: plain text (default), `--json`, or `--srt` with the local Parakeet model. Exists so coding agents can use the on-device model on arbitrary files. Audio decodes via `AVAudioFile`; MP4/MOV/M4V fall back to `AVAssetReader` and mix all tracks to mono. WebM/MKV are not decodable; the error suggests `ffmpeg`.
-- `diarize <audio>`: RTTM or JSON. `batch <directory>`: diarize matching files.
+- `diarize <audio>`: RTTM or JSON. `batch <directory>`: diarize matching files. Default engine is Nemotron (`--diarization-engine app`), same as the app and `import-audio`. pyannote is `--diarization-engine pyannote` only. Both paths share `CLIDiarization.windowing` / `FluidAudioCompatibility.tunedOfflineDiarizerConfig()` so they cannot drift to different window counts.
 - Model lookup order: `--models-dir`, the containing app's bundled models, standard installed `Transcripted.app` locations, shared FluidAudio cache (`~/Library/Application Support/FluidAudio/Models/`), then a one-time ~600MB download there (`--no-download` fails instead).
 - Output formatting lives in dependency-free `TranscribeOutput.swift` so plain `swift test` covers it. Put new formatting there, not in the gated command.
 - `transcribe` decodes whole files to 16kHz mono Float32 in memory, about 230MB per hour of audio.
@@ -76,7 +76,7 @@ All under `Sources/TranscriptedCLI/`:
 | `CLIPathSecurity.swift` | Path validation for direct reads |
 | `TranscribeCommand.swift`, `TranscribeMediaLoader.swift`, `TranscribeOutput.swift` | Transcribe command, AVFoundation decode, formatting |
 | `CLIModelPaths.swift` | Containing-app-first model lookup, relocated apps, symlinked helper invocation |
-| `DiarizeCommand.swift`, `BatchCommand.swift`, `ConfigLoader.swift`, `RTTMWriter.swift` | Diarization commands, JSON-to-`OfflineDiarizerConfig`, RTTM output |
+| `DiarizeCommand.swift`, `BatchCommand.swift`, `ConfigLoader.swift`, `RTTMWriter.swift`, `CLIDiarization.swift`, `CLIDiarizationService.swift` | Diarization commands, shared engine/windowing, JSON-to-`OfflineDiarizerConfig`, RTTM output. Default engine is the app's (Nemotron); pyannote is `--diarization-engine pyannote`. |
 | `BuildInfoCommand.swift` | Read-only compiled-capability JSON for packaging validation |
 | `ImportAudioCommand.swift`, `ImportAudioProcess.swift` | `import-audio` options, validation, stdout routing, signals |
 | `MeetingImportWorkflow.swift` | Input validation, private scratch job, WAV decode, model resolution, Core run |

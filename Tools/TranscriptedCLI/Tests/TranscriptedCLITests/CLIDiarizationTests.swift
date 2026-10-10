@@ -96,5 +96,20 @@ extension CLIDiarizationTests {
         XCTAssertEqual(diarize.Fa, app.Fa)
         XCTAssertEqual(diarize.minGapDuration, app.minGapDuration)
     }
+
+    func testImportAudioAndDiarizeResolveTheSameEngine() {
+        XCTAssertEqual(CLIDiarization.appDefaultsDomain, SpeakerVoiceprintSelection.appDefaultsDomain)
+        XCTAssertEqual(CLIDiarization.preferenceKey, DiarizationBackend.preferenceKey)
+        XCTAssertEqual(CLIDiarization.environmentKey, DiarizationBackend.environmentKey)
+        XCTAssertEqual(
+            MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: nil).rawValue,
+            CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: nil)
+        )
+        let stored: [String: Any] = [MeetingImportDiarization.preferenceKey: "pyannote"]
+        XCTAssertEqual(
+            MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: stored).rawValue,
+            CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: "pyannote")
+        )
+    }
 }
 #endif

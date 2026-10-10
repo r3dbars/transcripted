@@ -3,6 +3,9 @@ import Foundation
 
 #if TRANSCRIPTEDCLI_WITH_DIARIZATION && canImport(FluidAudio)
 import FluidAudio
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 struct Diarize: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
@@ -18,8 +21,8 @@ struct Diarize: AsyncParsableCommand {
     @Option(name: .long, help: "Path to directory containing diarization models.")
     var modelsDir: String?
 
-    @Option(name: .long, help: "Diarization engine: app (default; follows the app), nemotron, or pyannote.")
-    var diarizationEngine = "pyannote"
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app's Nemotron unless changed), nemotron, or pyannote.")
+    var diarizationEngine = "app"
 
     @Option(name: .shortAndLong, help: "Output RTTM file path. Prints to stdout if omitted.")
     var output: String?
@@ -37,6 +40,22 @@ struct Diarize: AsyncParsableCommand {
         let audioURL = URL(fileURLWithPath: audioPath)
         guard FileManager.default.fileExists(atPath: audioURL.path) else {
             throw ValidationError("Audio file not found: \(audioPath)")
+        }
+
+        let engine = CLIDiarization.resolvedEngine(
+            choice: diarizationEngine,
+            storedPreference: CLIDiarization.storedAppPreference()
+        )
+        if config != nil && engine != "pyannote" {
+            throw ValidationError("--config is a pyannote OfflineDiarizerConfig file. Pass --diarization-engine pyannote to use it.")
+        }
+        if engine == "nemotron" {
+            #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+            try await runNemotron(audioURL: audioURL)
+            return
+            #else
+            throw ValidationError("Nemotron diarization needs the meeting-import CLI shipped in Transcripted.app. Pass --diarization-engine pyannote, or rebuild with TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1.")
+            #endif
         }
 
         // Load config
@@ -134,6 +153,25 @@ struct Diarize: AsyncParsableCommand {
             print(String(data: data, encoding: .utf8)!)
         }
     }
+
+    #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+    private func runNemotron(audioURL: URL) async throws {
+        let service = try await CLIDiarizationService.readyService(backend: .nemotron, modelsDir: modelsDir)
+        let startTime = Date()
+        FileHandle.standardError.write(Data("Diarizing \(audioURL.lastPathComponent)...\n".utf8))
+        let segments = try await CLIDiarizationService.segments(service: service, audioURL: audioURL)
+        let elapsed = Date().timeIntervalSince(startTime)
+        let speakerIds = Set(segments.map(\.speakerId))
+        FileHandle.standardError.write(Data("Done: \(segments.count) segments, \(speakerIds.count) speakers, \(String(format: "%.1f", elapsed))s\n".utf8))
+        if json {
+            try CLIDiarizationService.writeJSON(segments: segments, audioPath: audioPath, elapsed: elapsed, to: output)
+        } else {
+            let fileId = audioURL.deletingPathExtension().lastPathComponent
+            try RTTMText.output(fileId: fileId, segments: CLIDiarizationService.rttmSegments(from: segments), to: output)
+        }
+        await MainActor.run { service.cleanup() }
+    }
+    #endif
 }
 #else
 struct Diarize: AsyncParsableCommand {
@@ -150,8 +188,8 @@ struct Diarize: AsyncParsableCommand {
     @Option(name: .long, help: "Path to directory containing diarization models.")
     var modelsDir: String?
 
-    @Option(name: .long, help: "Diarization engine: app (default; follows the app), nemotron, or pyannote.")
-    var diarizationEngine = "pyannote"
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app's Nemotron unless changed), nemotron, or pyannote.")
+    var diarizationEngine = "app"
 
     @Option(name: .shortAndLong, help: "Output RTTM file path. Prints to stdout if omitted.")
     var output: String?

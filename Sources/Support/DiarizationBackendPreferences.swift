@@ -27,9 +27,11 @@ enum DiarizationBackendChoice: String, CaseIterable, Identifiable {
 enum DiarizationBackendPreferences {
     static let defaultChoice: DiarizationBackendChoice = .nemotron
 
+    /// Must equal Core's `DiarizationBackend.preferenceKey` (the CLI reads it
+    /// from the app's defaults); a fast test pins the two together.
     static let preferenceKey = "diarization-backend-preference"
     /// Dev/lab override, e.g. `TRANSCRIPTED_DIARIZATION_BACKEND=nemotron`. Wins over
-    /// the persisted preference.
+    /// the persisted preference. Must equal `DiarizationBackend.environmentKey`.
     static let envKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
 
     /// The stored choice, ignoring any environment override.

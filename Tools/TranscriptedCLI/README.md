@@ -36,8 +36,11 @@ CLI="$PWD/Tools/TranscriptedCLI/.build/debug/transcripted-cli"
 ```
 
 The basic `transcribe`, `diarize`, and retrieval commands remain available;
-their existing macOS 14 build modes and output shapes are unchanged. For raw
-text/JSON/SRT without a saved meeting, use `transcribe` instead.
+their existing macOS 14 build modes and output shapes are unchanged. `diarize`
+and `batch` default to the app's Nemotron engine (`--diarization-engine app`);
+pyannote is `--diarization-engine pyannote` only, and uses the same tuned
+windowing as `import-audio`. For raw text/JSON/SRT without a saved meeting, use
+`transcribe` instead.
 
 Explicit audio build modes fail with a dependency error if the prebuilt bundle
 is missing or incomplete; they never silently build retrieval-only instead.
@@ -176,10 +179,12 @@ someone silently only after you've confirmed them in 5 distinct meetings, and
 only on a strong, unambiguous match with that model's bars (ReDimNet2's are
 stricter than WeSpeaker's). Until then the app asks "Is this NAME?" and the CLI
 leaves them numbered. Importing the same audio file again doesn't count as a new
-meeting. `--name-likely-speakers` opts in to naming someone who clears every bar
-except the confirmation count (confirmed at least once), written as
-`NAME (likely)`, with frontmatter `source: db_pending` so it never reads as a
-confirmed name. It never counts as a confirmation; confirm people in the app.
+meeting. `--name-likely-speakers` opts in to naming someone held back only by the
+confirmation count (confirmed at least once) and/or a similarity below the
+silent-naming bar but above the model's invitee/suggest floor (0.815 for
+ReDimNet2, 0.80 for WeSpeaker), written as `NAME (likely)`, with frontmatter
+`source: db_pending` so it never reads as a confirmed name. It never counts as
+a confirmation; confirm people in the app.
 
 **Why a speaker stayed numbered.** stderr names the voiceprint model and the
 database it read, then gives one line per speaker that wasn't named, e.g.:

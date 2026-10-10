@@ -11,7 +11,7 @@ struct ImportAudio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "import-audio",
         abstract: "Transcribe and diarize a file into the Transcripted meeting library.",
-        discussion: "Uses local Parakeet v3 and PyAnnote. Never records audio or deletes the input. "
+        discussion: "Uses local Parakeet v3 and the app's diarization engine (Nemotron by default; pyannote stays available). Never records audio or deletes the input. "
             + "Recognizes eligible saved speakers from a read-only snapshot of the app's active voiceprint database; does not learn new people. "
             + "Says on stderr why each numbered speaker stayed numbered. "
             + "Does not use the app's Whisper/language selection. Repeated imports create distinct captures."
@@ -44,7 +44,7 @@ struct ImportAudio: AsyncParsableCommand {
     @Option(name: .long, help: "Diarization engine: app (default; follows the app's hidden switch / TRANSCRIPTED_DIARIZATION_BACKEND, Nemotron unless changed), nemotron, or pyannote.")
     var diarizationEngine = "app"
 
-    @Flag(name: .long, help: "Also name a speaker who clears every recognition bar except the app's confirmed-meetings count (confirmed at least once), written as \"Name (likely)\". Off by default.")
+    @Flag(name: .long, help: "Also name a speaker held back only by confirmation count and/or a similarity below the silent-naming bar but above the model's invitee/suggest floor, written as \"Name (likely)\". Off by default.")
     var nameLikelySpeakers = false
 
     @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory.")
@@ -130,13 +130,7 @@ struct ImportAudio: AsyncParsableCommand {
         #endif
     }
 
-    static var diarizationEngineChoices: [String] {
-        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
-        ["app"] + DiarizationBackend.allCases.map(\.rawValue)
-        #else
-        ["app", "nemotron", "pyannote"]
-        #endif
-    }
+    static var diarizationEngineChoices: [String] { CLIDiarization.engineChoices }
 
     var resolvedOutputDirectory: URL {
         Self.outputDirectory(override: outputDir)

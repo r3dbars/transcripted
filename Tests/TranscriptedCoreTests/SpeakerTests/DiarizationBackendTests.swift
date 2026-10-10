@@ -18,6 +18,18 @@ final class DiarizationBackendTests: XCTestCase {
             XCTAssertEqual(DiarizationBackend(rawValue: backend.rawValue), backend)
         }
         XCTAssertNil(DiarizationBackend(rawValue: "sortformer"))
+        XCTAssertEqual(DiarizationBackend.hostDefault, .nemotron)
+        XCTAssertEqual(DiarizationBackend.preferenceKey, "diarization-backend-preference")
+        XCTAssertEqual(DiarizationBackend.environmentKey, "TRANSCRIPTED_DIARIZATION_BACKEND")
+        XCTAssertEqual(DiarizationBackend.effective(storedPreference: nil, environment: [:]), .nemotron)
+        XCTAssertEqual(DiarizationBackend.effective(storedPreference: "pyannote", environment: [:]), .pyannote)
+        XCTAssertEqual(
+            DiarizationBackend.effective(
+                storedPreference: "pyannote",
+                environment: [DiarizationBackend.environmentKey: "NEMOTRON"]
+            ),
+            .nemotron
+        )
 
         let encoded = try JSONEncoder().encode(DiarizationBackend.allCases)
         XCTAssertEqual(String(data: encoded, encoding: .utf8), #"["pyannote","nemotron"]"#)

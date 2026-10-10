@@ -19,6 +19,37 @@ public enum DiarizationBackend: String, CaseIterable, Sendable, Codable {
 }
 
 extension DiarizationBackend {
+    /// Host default for the app and `import-audio`. `DiarizationService`'s init
+    /// stays `.pyannote` so library callers keep the old default; hosts opt in.
+    public static let hostDefault: DiarizationBackend = .nemotron
+    /// Stored in the app's defaults domain (`SpeakerVoiceprintSelection.appDefaultsDomain`).
+    public static let preferenceKey = "diarization-backend-preference"
+    /// Dev/lab override. Wins over the stored preference.
+    public static let environmentKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
+
+    /// The stored choice, ignoring the environment. Unknown or missing values
+    /// read as the host default.
+    public static func preferred(storedPreference: String?) -> DiarizationBackend {
+        guard let raw = storedPreference?.lowercased(),
+              let backend = DiarizationBackend(rawValue: raw) else {
+            return hostDefault
+        }
+        return backend
+    }
+
+    /// The engine a host should run: a valid environment override first (any
+    /// case), then the stored preference, then `hostDefault`.
+    public static func effective(
+        storedPreference: String?,
+        environment: [String: String]
+    ) -> DiarizationBackend {
+        if let raw = environment[environmentKey]?.lowercased(),
+           let backend = DiarizationBackend(rawValue: raw) {
+            return backend
+        }
+        return preferred(storedPreference: storedPreference)
+    }
+
     /// The `diarization_engine` frontmatter value for a meeting this backend
     /// diarized. `pyannote_offline` predates the switch, so it stays as is.
     public var transcriptEngineIdentifier: String {

@@ -1,16 +1,21 @@
 import Foundation
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+import TranscriptedCore
+#if canImport(FluidAudio)
+@preconcurrency import FluidAudio
+#endif
+#endif
 
 /// Engine choice and windowing shared by every CLI diarization path
-/// (`import-audio`, `diarize`, `batch`).
-///
-/// Stub values still match today's `diarize`/`batch` (pyannote, FluidAudio's
-/// default 0.2 step). Tests pin the app-tuned 0.266 step and the Nemotron
-/// host default so this file has to change before they go green.
+/// (`import-audio`, `diarize`, `batch`). One source so the two pyannote
+/// configs cannot drift the way 1431 vs 1903 windows did.
 enum CLIDiarization {
     static let engineChoices = ["app", "nemotron", "pyannote"]
     static let defaultEngineChoice = "app"
     static let preferenceKey = "diarization-backend-preference"
     static let environmentKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
+    /// Same domain the app writes (`SpeakerVoiceprintSelection.appDefaultsDomain`).
+    static let appDefaultsDomain = "com.justinbetker.draft"
 
     struct Windowing: Equatable {
         var windowDuration: Double
@@ -31,11 +36,19 @@ enum CLIDiarization {
         }
     }
 
-    /// Today's standalone `diarize` config: FluidAudio `OfflineDiarizerConfig.default`
-    /// uses a 0.2 step (1903 windows on a 3806 s file). The app and `import-audio`
-    /// use 0.266 (1431 windows on that file).
+    /// App-tuned pyannote knobs (`FluidAudioCompatibility.tunedOfflineDiarizerConfig`
+    /// when Core is linked) plus Nemotron's 10 s feed slice.
     static var windowing: Windowing {
-        Windowing(windowDuration: 10.0, segmentationStepRatio: 0.2, nemotronSliceSeconds: 10.0)
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore) && canImport(FluidAudio)
+        let config = FluidAudioCompatibility.tunedOfflineDiarizerConfig()
+        return Windowing(
+            windowDuration: config.windowDuration,
+            segmentationStepRatio: config.segmentationStepRatio,
+            nemotronSliceSeconds: 10.0
+        )
+        #else
+        return Windowing(windowDuration: 10.0, segmentationStepRatio: 0.266, nemotronSliceSeconds: 10.0)
+        #endif
     }
 
     static func windowCount(
@@ -48,17 +61,40 @@ enum CLIDiarization {
         return Int((audioDurationSeconds / hop).rounded())
     }
 
-    /// Today's `diarize`/`batch` always run pyannote, ignoring the app default.
+    /// `app` follows the same rule the Mac app uses: environment, then the
+    /// stored preference, then Nemotron. An explicit `nemotron` or `pyannote`
+    /// wins.
+    static func storedAppPreference(
+        appDefaults: [String: Any]? = UserDefaults.standard.persistentDomain(forName: appDefaultsDomain)
+    ) -> String? {
+        appDefaults?[preferenceKey] as? String
+    }
+
     static func resolvedEngine(
         choice: String,
-        environment: [String: String] = [:],
+        environment: [String: String] = ProcessInfo.processInfo.environment,
         storedPreference: String? = nil
     ) -> String {
-        _ = (environment, storedPreference)
-        if choice != "app", engineChoices.contains(choice) {
-            return choice
+        let trimmed = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if trimmed != "app" {
+            return engineChoices.contains(trimmed) ? trimmed : "nemotron"
         }
-        return "pyannote"
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+        return DiarizationBackend.effective(
+            storedPreference: storedPreference,
+            environment: environment
+        ).rawValue
+        #else
+        if let raw = environment[environmentKey]?.lowercased(),
+           raw == "nemotron" || raw == "pyannote" {
+            return raw
+        }
+        if let raw = storedPreference?.lowercased(),
+           raw == "nemotron" || raw == "pyannote" {
+            return raw
+        }
+        return "nemotron"
+        #endif
     }
 }
 

@@ -274,6 +274,7 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
                 arguments: ["import-audio", input.path, "--output-dir", output.path,
                             "--models-dir", configuration.models.path,
                             "--diarization-models-dir", configuration.diarizationModels.path,
+                            "--diarization-engine", "pyannote",
                             "--no-download", "--json"] + (nameLikely ? ["--name-likely-speakers"] : []),
                 root: root, timeout: 600,
                 // Pin the app's default so this run never depends on this Mac's
@@ -377,6 +378,8 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
         XCTAssertEqual(document.values["mic_speakers"], "0")
         let capture = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
         XCTAssertEqual(capture.sttEngine, SpeechTranscriptionEngineDescriptor.parakeetLocal.identifier)
+        // This E2E pins pyannote so it does not depend on bundled Nemotron models
+        // and stays off the default-engine change.
         XCTAssertEqual(capture.diarizationEngine, "pyannote_offline")
         XCTAssertFalse(capture.utterances.isEmpty)
         XCTAssertFalse(capture.speakers.isEmpty)
@@ -471,6 +474,7 @@ final class ImportAudioExecutableE2ETests: XCTestCase {
         ["import-audio", input.path, "--output-dir", output.path,
          "--models-dir", (models ?? configuration.models).path,
          "--diarization-models-dir", (diarizer ?? configuration.diarizationModels).path,
+         "--diarization-engine", "pyannote",
          "--speaker-embedder", "wespeaker", "--no-download", "--json"] + extra
     }
 

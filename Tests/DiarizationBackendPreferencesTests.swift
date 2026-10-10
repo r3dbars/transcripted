@@ -15,6 +15,9 @@ func testDiarizationBackendPreferences() {
         assertEqual(DiarizationBackendPreferences.effectiveChoice(userDefaults: d, environment: [:]).rawValue, "nemotron", "no env, no UD -> default")
         assertEqual(DiarizationBackendPreferences.envKey, envKey, "env key is the documented one")
         assertEqual(DiarizationBackendPreferences.preferenceKey, "diarization-backend-preference", "defaults key is the documented one")
+        assertEqual(DiarizationBackendPreferences.preferenceKey, DiarizationBackend.preferenceKey, "Settings writes the key the CLI reads")
+        assertEqual(DiarizationBackendPreferences.envKey, DiarizationBackend.environmentKey, "env key is the one the CLI reads")
+        assertEqual(DiarizationBackendPreferences.defaultChoice.rawValue, DiarizationBackend.hostDefault.rawValue, "app and CLI share the host default")
     }
 
     runSuite("Diarization backend honors the environment override") {

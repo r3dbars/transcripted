@@ -78,6 +78,21 @@ final class MeetingImportDiarizationTests: XCTestCase {
         XCTAssertNil(provider("eres2net-embedding"))
     }
 
+    func testBundledNemotronUsesTheFlatAppLayout() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let resources = root.appendingPathComponent("Relocated.app/Contents/Resources")
+        let bundle = resources.appendingPathComponent("nemotron-diarizer-models")
+        try FileManager.default.createDirectory(
+            at: bundle.appendingPathComponent("Nemotron3Diarizer_fast128.mlmodelc"),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: bundle.appendingPathComponent("learnable_sil_emb.bin"))
+        XCTAssertEqual(MeetingImportModels.bundledNemotronModels(in: [resources]), bundle)
+        try FileManager.default.removeItem(at: bundle.appendingPathComponent("learnable_sil_emb.bin"))
+        XCTAssertNil(MeetingImportModels.bundledNemotronModels(in: [resources]))
+    }
+
     func testBundleProviderReturnsNilWhenNemotronIsNotLocal() {
         let pyannote = URL(fileURLWithPath: "/tmp/offline-diarizer-models")
         let provider = MeetingImportDiarization.bundleProvider(pyannote: pyannote, nemotron: nil)

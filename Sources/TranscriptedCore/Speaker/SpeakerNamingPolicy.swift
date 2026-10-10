@@ -31,6 +31,38 @@ public enum SpeakerNamingPolicy {
     /// before Transcripted may silently apply their name.
     public static let requiredConfirmedMeetings = 5
 
+    /// Lower similarity floor for opt-in likely names (`import-audio
+    /// --name-likely-speakers`). Same bar the app already uses for lineup /
+    /// expected people (`inviteeSimilarity`).
+    public static func likelySimilarityFloor(
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> Double {
+        thresholds.inviteeSimilarity
+    }
+
+    /// Whether an opt-in likely name may be written. Silent naming still uses
+    /// `shouldAutoAccept`. Likely naming never relaxes health, runner-up, or
+    /// "never confirmed" gates; it only covers confirmation count and a
+    /// similarity between this floor and the silent bar.
+    public static func shouldNameAsLikely(
+        blockers: [SpeakerNamingBlocker],
+        thresholds: SpeakerEmbeddingThresholds = .weSpeaker
+    ) -> Bool {
+        guard !blockers.isEmpty else { return false }
+        let floor = likelySimilarityFloor(thresholds: thresholds)
+        for blocker in blockers {
+            switch blocker {
+            case .needsConfirmations(let have, _) where have >= 1:
+                continue
+            case .similarityBelowBar(let similarity, _):
+                guard similarity > floor else { return false }
+            default:
+                return false
+            }
+        }
+        return true
+    }
+
     /// Lower bars for calendar naming: used only when a voice's best match is a
     /// person on this meeting's calendar invite. The invite shrinks the lineup from
     /// everyone you've ever named to a handful of people, so a confident match is

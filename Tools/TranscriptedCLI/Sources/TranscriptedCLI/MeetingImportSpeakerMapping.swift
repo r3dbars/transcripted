@@ -125,23 +125,35 @@ enum MeetingImportSpeakerMapping {
                 marginSimilarities: marginSimilarities,
                 thresholds: thresholds
             )
-            // Opt-in: a match that clears every bar except the confirmation count,
-            // for a person confirmed at least once, gets a visibly hedged name.
-            if nameLikelySpeakers, blockers.count == 1,
-               case .needsConfirmations(let have, let need) = blockers[0], have >= 1 {
+            // Opt-in: a match held back only by confirmation count and/or a
+            // similarity between the model's invitee bar and the silent bar.
+            if nameLikelySpeakers,
+               SpeakerNamingPolicy.shouldNameAsLikely(blockers: blockers, thresholds: thresholds) {
                 resolution.mappings[key] = SpeakerMapping(
                     speakerId: speakerID,
                     identifiedName: name + likelyNameSuffix,
                     confidence: .medium,
                     isConfirmedIdentity: true
                 )
-                resolution.reasons[key] = "named \(name) as likely: \(have) of \(need) confirmed meetings (--name-likely-speakers)"
+                resolution.reasons[key] = likelyReason(name: name, blockers: blockers)
                 continue
             }
             resolution.reasons[key] = "matched \(name), but " + blockers.map { describe($0) }.joined(separator: "; ")
         }
 
         return resolution
+    }
+
+    static func likelyReason(name: String, blockers: [SpeakerNamingBlocker]) -> String {
+        let parts = blockers.map { blocker -> String in
+            switch blocker {
+            case .needsConfirmations(let have, let need):
+                return "\(have) of \(need) confirmed meetings"
+            default:
+                return describe(blocker)
+            }
+        }
+        return "named \(name) as likely: \(parts.joined(separator: "; ")) (--name-likely-speakers)"
     }
 
     static func describe(_ blocker: SpeakerNamingBlocker) -> String {

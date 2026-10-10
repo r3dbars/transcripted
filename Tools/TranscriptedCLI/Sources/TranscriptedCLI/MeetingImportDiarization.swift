@@ -3,32 +3,42 @@ import Foundation
 import TranscriptedCore
 
 /// Which diarization engine `import-audio` runs. `--diarization-engine app`
-/// (the default) follows the same hidden switch the app uses: the stored
-/// `diarization-backend-preference` or `TRANSCRIPTED_DIARIZATION_BACKEND`,
+/// (the default) follows Core's `DiarizationBackend.effective`, the same rule
+/// the app uses: the stored preference or `TRANSCRIPTED_DIARIZATION_BACKEND`,
 /// Nemotron when nothing is set. An explicit `nemotron` or `pyannote` wins.
 enum MeetingImportDiarization {
-    static let preferenceKey = "diarization-backend-preference"
-    static let environmentKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
-    static let hostDefault: DiarizationBackend = .nemotron
+    static let preferenceKey = DiarizationBackend.preferenceKey
+    static let environmentKey = DiarizationBackend.environmentKey
+    static let hostDefault = DiarizationBackend.hostDefault
 
     static func backend(
         choice: String,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         appDefaults: [String: Any]? = UserDefaults.standard.persistentDomain(
-            forName: SpeakerVoiceprintSelection.appDefaultsDomain
+            forName: CLIDiarization.appDefaultsDomain
         )
     ) -> DiarizationBackend {
-        // Current CLI behavior until the tests force the app-shared default:
-        // DiarizationService's library default is pyannote.
-        _ = (choice, environment, appDefaults)
-        return .pyannote
+        DiarizationBackend(rawValue: CLIDiarization.resolvedEngine(
+            choice: choice,
+            environment: environment,
+            storedPreference: appDefaults?[preferenceKey] as? String
+        )) ?? hostDefault
     }
 
-    /// `DiarizationService` asks for a named bundle. Returning the pyannote
-    /// directory for every name makes Nemotron try to load from the wrong
-    /// folder and fall back to pyannote.
+    /// `DiarizationService` asks for a named bundle. Nemotron and pyannote must
+    /// not share a folder: handing Nemotron the pyannote path makes it fail
+    /// the load and fall back to pyannote.
     static func bundleProvider(pyannote: URL?, nemotron: URL?) -> ModelBundleProvider {
-        { _ in pyannote }
+        { name in
+            switch name {
+            case "offline-diarizer-models":
+                return pyannote
+            case "nemotron-diarizer-models":
+                return nemotron
+            default:
+                return nil
+            }
+        }
     }
 }
 #endif
