@@ -172,17 +172,15 @@ class ApprovalTests(unittest.TestCase):
         self.assertFalse(rt.approvals_ok([review("alice")], "bot", SHA, True)[0])
         self.assertTrue(rt.approvals_ok([review("r3dbars")], "bot", SHA, True)[0])
 
-    def test_owner_authored_high_is_owner_manual_merge(self):
-        # GitHub never lets an author approve; the owner's own PR passes as "owner merges manually".
-        ok, why = rt.approvals_ok([], "r3dbars", SHA, True)
-        self.assertTrue(ok)
-        self.assertIn("manually", why)
+    def test_owner_authored_gets_no_exemption(self):
+        # Agent PRs are authored by r3dbars too, so authorship grants nothing.
+        self.assertFalse(rt.approvals_ok([], "r3dbars", SHA, True)[0])
 
     def test_untrusted_reviewer_does_not_count(self):
         self.assertFalse(rt.approvals_ok([review("rando", assoc="NONE")], "bot", SHA, False)[0])
 
-    def test_owner_exemption_survives_other_approvals(self):
-        self.assertTrue(rt.approvals_ok([review("alice")], "r3dbars", SHA, True)[0])
+    def test_owner_authored_release_needs_more_than_other_approval(self):
+        self.assertFalse(rt.approvals_ok([review("alice")], "r3dbars", SHA, True)[0])
 
     def test_owner_authored_still_blocked_by_changes_requested(self):
         self.assertFalse(rt.approvals_ok([review("alice", "CHANGES_REQUESTED")], "r3dbars", SHA, True)[0])
@@ -216,16 +214,17 @@ class DecideTests(unittest.TestCase):
         d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, NO_APPROVAL)
         self.assertEqual((d["state"], d["automerge"]), ("pending", False))
         d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, (True, "approved"))
-        self.assertEqual((d["state"], d["automerge"]), ("success", False))
+        self.assertEqual((d["state"], d["automerge"]), ("pending", False))
 
     def test_changes_requested_blocks_every_tier(self):
         for tier in ("low", "medium", "high"):
             d = rt.decide(pr(), {"risk": tier}, OK, AI_OK, (True, "approved"), True)
             self.assertEqual((d["state"], d["automerge"]), ("pending", False), tier)
 
-    def test_owner_manual_merge_high_goes_green_without_automerge(self):
+    def test_owner_authored_high_stays_pending(self):
         d = rt.decide(pr(), {"risk": "high"}, OK, AI_OK, rt.approvals_ok([], "r3dbars", SHA, True))
-        self.assertEqual((d["state"], d["automerge"]), ("success", False))
+        self.assertEqual((d["state"], d["automerge"]), ("pending", False))
+        self.assertTrue(any("manually" in w for w in d["why"]))
 
     def test_blockers(self):
         cases = [

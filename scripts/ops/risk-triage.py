@@ -252,8 +252,6 @@ def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required
                  and r.get("author_association") in TRUSTED_ASSOCIATIONS}
     if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
         return False, "a review requests changes"
-    if author == OWNER_LOGIN:
-        return True, f"owner-authored: @{OWNER_LOGIN} merges manually"
     if not approvers:
         return False, "needs an approval on the head commit from someone other than the author"
     if owner_required and OWNER_LOGIN not in approvers:
@@ -279,8 +277,12 @@ def decide(pr: dict, risk: dict, checks: tuple[bool, list[str]], ai: tuple[bool,
         why.append("required checks not green: " + "; ".join(checks[1]))
     if not ai[0]:
         why.append(ai[1])
-    if risk["risk"] == "high" and not approvals[0]:
-        why.append(approvals[1])
+    if risk["risk"] == "high":
+        # High risk never passes automatically, whoever authored it (agent PRs
+        # are also authored by the owner account). @OWNER_LOGIN merges by hand.
+        why.append(f"high risk: @{OWNER_LOGIN} reviews and merges manually")
+        if not approvals[0]:
+            why.append(approvals[1])
     if not why:
         return {"state": "success", "automerge": risk["risk"] in ("low", "medium"),
                 "why": [f"risk:{risk['risk']}", ai[1]] + ([approvals[1]] if risk["risk"] == "high" else [])}
@@ -434,7 +436,7 @@ def evaluate(n: int) -> tuple[dict, dict]:
     base_now = gh_json(f"repos/{REPO}/commits/{pr['base']['ref']}")["sha"]
     behind = int(cmp.get("behind_by", 0)) > 0 or pr["base"]["sha"] != base_now
     result = decide(pr, risk, checks_green(runs, statuses),
-                    ai_clear(verdict, sha, labels, waiver),
+                    ai_clear(verdict, sha, labels, waiver and risk["risk"] != "high"),
                     approvals_ok(reviews, author, sha, risk["owner_required"]),
                     changes_requested(reviews))
     if behind and result["state"] == "success":
@@ -445,11 +447,22 @@ def evaluate(n: int) -> tuple[dict, dict]:
 
 def cmd_gate(n: int | None, apply: bool) -> int:
     numbers = [n] if n else [p["number"] for p in gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True)]
+    failed = 0
     for num in numbers:
+        try:
+            failed += _gate_one(num, apply)
+        except Exception as e:  # one bad PR must not stop the sweep
+            print(json.dumps({"pr": num, "error": str(e)[:300]}), file=sys.stderr)
+            failed += 1
+    return 1 if failed else 0
+
+
+def _gate_one(num: int, apply: bool) -> int:
+    if True:
         pr, res = evaluate(num)
         print(json.dumps({"pr": num, **res}))
         if not apply:
-            continue
+            return 0
         if pr.get("auto_merge") and not res["automerge"]:
             # Turn stale auto-merge off BEFORE posting any status, so a green
             # gate on a high-risk PR can't trigger an auto-merge set earlier.

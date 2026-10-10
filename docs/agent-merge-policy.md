@@ -56,7 +56,7 @@ python3 scripts/ops/risk-triage.py gate --apply              # what the workflow
 
 The workflow needs a write token and the AI secret, so it uses `pull_request_target`, which runs the workflow file from `main`, not from the PR. It checks out only the base or default branch (`persist-credentials: false`) and reads the PR's files and diff through the API as data. It never checks out, builds or runs PR code. There is deliberately no `pull_request_review` trigger, because that event runs the PR's own copy of the workflow.
 
-A PR could add a workflow that posts a fake `risk-gate` status. That's why every file under `.github/workflows/` is high plus owner in the classifier and owned by @r3dbars in `CODEOWNERS`: with code-owner review required on `main`, such a PR can't merge without Justin.
+A PR could add a workflow that posts a fake `risk-gate` status. That's why every file under `.github/workflows/` is high plus owner in the classifier and owned by @r3dbars in `CODEOWNERS`: high risk never passes `risk-gate` automatically, so such a PR can't merge without Justin merging it by hand.
 
 ## 5. CODEOWNERS
 
@@ -69,13 +69,13 @@ Read 2026-10-09: `allow_auto_merge` is off; squash, merge and rebase merges are 
 1. Turn on auto-merge: `gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=true`
 2. Add `risk-gate` to the required checks (after this PR is merged and has posted at least once):
    `gh api -X POST repos/r3dbars/transcripted/branches/main/protection/required_status_checks/contexts -f 'contexts[]=risk-gate'`
-3. Require code-owner review (approval count stays 0, so only owned paths need one):
-   `gh api -X PATCH repos/r3dbars/transcripted/branches/main/protection/required_pull_request_reviews -F require_code_owner_reviews=true -F dismiss_stale_reviews=true`
+3. Dismiss stale approvals on new pushes (code-owner review stays off):
+   `gh api -X PATCH repos/r3dbars/transcripted/branches/main/protection/required_pull_request_reviews -F dismiss_stale_reviews=true` (do not enable require_code_owner_reviews: GitHub never counts self-approval, and with admins enforced it would lock @r3dbars out of their own release PRs)
 4. Add the AI key: `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted` (and optionally `gh variable set AI_REVIEW_PROVIDER -R r3dbars/transcripted -b anthropic`).
 5. Optional: `gh secret set AUTOMERGE_TOKEN -R r3dbars/transcripted` with a fine-grained token (contents, pull requests and statuses write), so auto-merges trigger push CI on `main`. Merges made with the default `GITHUB_TOKEN` don't start other workflows.
 6. Create the labels: `for l in risk:low risk:medium risk:high ai-findings-waived; do gh label create "$l" -R r3dbars/transcripted; done`
 
-Until steps 1 and 2 are done the workflow only labels, comments and posts statuses; nothing merges.
+Until step 1 (allow auto-merge) is done nothing auto-merges; until step 2 (risk-gate required) branch protection does not enforce the gate, so a human could still merge a PR whose gate is pending. High-risk PRs never auto-merge in any case: the gate stays pending and @r3dbars merges them by hand.
 
 ## Turning it off
 
@@ -84,7 +84,7 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 ## Hardening notes
 
 - `AGENTS.md` and `CLAUDE.md` (any directory) are high risk: they steer every engineer agent.
-- Owner-authored high-risk PRs: GitHub won't let an author approve their own PR, so when @r3dbars is the author and no other approval exists, `risk-gate` goes green as "owner merges manually". It still never auto-merges; merging by hand is the owner's sign-off.
+- High-risk PRs never pass `risk-gate` automatically, whoever the author is (agent PRs on `cursor/*` and `agent/*` branches are also authored by @r3dbars). The gate stays pending and Justin merges them by hand; the `ai-findings-waived` label and comment never bypass high risk.
 - A review requesting changes blocks the gate at every risk level.
 - `ai-findings-waived` only counts when @r3dbars added the label and also commented `ai-findings-waived <full head sha>` for the current head. A new push voids the waiver.
 - The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app; branch protection pins the required check to that app (app_id 15368).
