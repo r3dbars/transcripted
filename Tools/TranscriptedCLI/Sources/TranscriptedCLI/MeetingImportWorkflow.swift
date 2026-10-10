@@ -118,7 +118,11 @@ enum MeetingImportWorkflow {
             DiarizationService(
                 bundleProvider: MeetingImportDiarization.bundleProvider(
                     pyannote: modelPaths.diarization,
-                    nemotron: modelPaths.nemotron,
+                    nemotron: MeetingImportModels.localNemotronDirectoryForLoad(
+                        bundled: modelPaths.nemotron,
+                        cache: modelPaths.nemotronCache,
+                        allowDownload: !command.noDownload
+                    ),
                     onlineWeSpeaker: onlineWeSpeaker
                 ),
                 segmentEmbedder: embedder,
@@ -278,9 +282,10 @@ enum MeetingImportModels {
     struct Paths: Sendable {
         let parakeet: URL?
         let diarization: URL?
-        /// Flat bundled copy for `bundleProvider`. Never the HuggingFace cache.
+        /// Flat bundled copy for `bundleProvider`.
         let nemotron: URL?
-        /// FluidAudio cache, if complete. Core loads this via HuggingFace, not as a bundle.
+        /// FluidAudio cache, if complete. Passed as a local load directory only
+        /// when `--no-download` is set, so Core never calls `loadFromHuggingFace`.
         let nemotronCache: URL?
         var nemotronAvailable: Bool { nemotron != nil || nemotronCache != nil }
     }
@@ -400,7 +405,20 @@ enum MeetingImportModels {
         return (nil, nil)
     }
 
-    /// Bundle vs HuggingFace cache. Cache is availability only — never a bundle directory.
+    /// Under `--no-download`, the cache is a local load directory so Core
+    /// never calls `loadFromHuggingFace`. Downloads still use HuggingFace.
+    static func localNemotronDirectoryForLoad(
+        bundled: URL?,
+        cache: URL?,
+        allowDownload: Bool
+    ) -> URL? {
+        if let bundled { return bundled }
+        if !allowDownload { return cache }
+        return nil
+    }
+
+    /// Bundle vs HuggingFace cache. Cache is availability; `--no-download`
+    /// also passes it as a local load directory.
     static func resolveNemotronPaths(
         bundledResourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
         cacheDirectory: URL = defaultNemotronCacheDirectory(),
@@ -431,7 +449,7 @@ enum MeetingImportModels {
         guard matchingNemotronCacheMarker(at: directory) else { return false }
         let preset = preset ?? resolvedPreset(environment: environment)
         let fm = FileManager.default
-        let companionRoots = ["", "monolithic/", "monolithic/v2/", "split/", "split/v2/"]
+        let companionRoots = DiarizationBackend.nemotronCompanionSearchRoots
         for companion in DiarizationBackend.nemotronRequiredCompanionFiles(preset: preset) {
             let found = companionRoots.contains {
                 fm.fileExists(atPath: directory.appendingPathComponent("\($0)\(companion)").path)

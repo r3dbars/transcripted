@@ -15,7 +15,7 @@ struct Batch: AsyncParsableCommand {
     @Argument(help: "Directory containing audio files.")
     var audioDir: String
 
-    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required.")
+    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required. Cannot be combined with --diarization-engine nemotron.")
     var config: String?
 
     @Option(name: .long, help: "Path to directory containing diarization models.")
@@ -34,6 +34,7 @@ struct Batch: AsyncParsableCommand {
         guard CLIDiarization.engineChoices.contains(diarizationEngine) else {
             throw ValidationError("--diarization-engine must be " + CLIDiarization.engineChoices.joined(separator: ", ") + ".")
         }
+        try CLIDiarization.rejectConflictingConfig(choice: diarizationEngine, hasConfig: config != nil)
     }
 
     func run() async throws {
@@ -60,8 +61,8 @@ struct Batch: AsyncParsableCommand {
             choice: diarizationEngine,
             storedPreference: CLIDiarization.storedAppPreference()
         )
-        let configSelection = CLIDiarization.applyConfigSelection(
-            engine: selection.engine, hasConfig: config != nil
+        let configSelection = try CLIDiarization.applyConfigSelection(
+            choice: diarizationEngine, engine: selection.engine, hasConfig: config != nil
         )
         selection.engine = configSelection.engine
         if let note = configSelection.fallbackNote {
@@ -180,7 +181,7 @@ struct Batch: AsyncParsableCommand {
     @Argument(help: "Directory containing audio files.")
     var audioDir: String
 
-    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required.")
+    @Option(name: .long, help: "Path to a pyannote OfflineDiarizerConfig JSON file. Selects pyannote; --diarization-engine pyannote is not required. Cannot be combined with --diarization-engine nemotron.")
     var config: String?
 
     @Option(name: .long, help: "Path to directory containing diarization models.")
@@ -199,6 +200,7 @@ struct Batch: AsyncParsableCommand {
         guard CLIDiarization.engineChoices.contains(diarizationEngine) else {
             throw ValidationError("--diarization-engine must be " + CLIDiarization.engineChoices.joined(separator: ", ") + ".")
         }
+        try CLIDiarization.rejectConflictingConfig(choice: diarizationEngine, hasConfig: config != nil)
     }
 
     func run() async throws {

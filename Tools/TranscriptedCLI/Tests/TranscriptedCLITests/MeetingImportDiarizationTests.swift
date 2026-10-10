@@ -347,6 +347,43 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
     }
 
+    func testNoDownloadPassesCacheOnlyNemotronAsALocalBundle() throws {
+        let cache = URL(fileURLWithPath: "/tmp/nemotron-3-diarization", isDirectory: true)
+        let bundled = URL(fileURLWithPath: "/tmp/nemotron-diarizer-models", isDirectory: true)
+
+        XCTAssertEqual(
+            MeetingImportModels.localNemotronDirectoryForLoad(
+                bundled: nil, cache: cache, allowDownload: false
+            ),
+            cache,
+            "a downloaded cache is a local load directory under --no-download"
+        )
+        XCTAssertNil(
+            MeetingImportModels.localNemotronDirectoryForLoad(
+                bundled: nil, cache: cache, allowDownload: true
+            ),
+            "downloads still go through HuggingFace when allowed"
+        )
+        XCTAssertEqual(
+            MeetingImportModels.localNemotronDirectoryForLoad(
+                bundled: bundled, cache: cache, allowDownload: false
+            ),
+            bundled
+        )
+
+        let local = MeetingImportModels.localNemotronDirectoryForLoad(
+            bundled: nil, cache: cache, allowDownload: false
+        )
+        let provider = MeetingImportDiarization.bundleProvider(pyannote: nil, nemotron: local)
+        XCTAssertEqual(provider("nemotron-diarizer-models"), cache)
+        XCTAssertFalse(
+            DiarizationService.nemotronUsesHuggingFaceLoader(
+                hasLocalBundle: local != nil, allowDownload: false
+            ),
+            "cache-only --no-download must not call loadFromHuggingFace"
+        )
+    }
+
     func testNoDownloadRequiresTheResolvedNemotronPreset() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-preset-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }

@@ -67,6 +67,45 @@ extension DiarizationBackend {
         return files
     }
 
+    /// Roots FluidAudio may put companion files next to, under, or above the model.
+    public static let nemotronCompanionSearchRoots = [
+        "", "monolithic/", "monolithic/v2/", "split/", "split/v2/"
+    ]
+
+    /// Model + companion URLs for a local load (`Nemotron3Models.load`), never
+    /// HuggingFace. Flat bundle first, then the provisioned cache layout.
+    public static func nemotronLocalLoadFiles(
+        in directory: URL,
+        preset: String
+    ) -> (model: URL, companions: [URL])? {
+        let fm = FileManager.default
+        let modelName = nemotronModelFileName(preset: preset)
+        let companionNames = nemotronRequiredCompanionFiles(preset: preset)
+        let flatModel = directory.appendingPathComponent(modelName)
+        let flatCompanions = companionNames.map { directory.appendingPathComponent($0) }
+        if fm.fileExists(atPath: flatModel.path),
+           flatCompanions.allSatisfy({ fm.fileExists(atPath: $0.path) }) {
+            return (flatModel, flatCompanions)
+        }
+        guard let modelRel = nemotronCacheModelSubpaths(preset: preset).first(where: {
+            fm.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }) else {
+            return nil
+        }
+        var companions: [URL] = []
+        companions.reserveCapacity(companionNames.count)
+        for name in companionNames {
+            guard let found = nemotronCompanionSearchRoots
+                .map({ directory.appendingPathComponent("\($0)\(name)") })
+                .first(where: { fm.fileExists(atPath: $0.path) })
+            else {
+                return nil
+            }
+            companions.append(found)
+        }
+        return (directory.appendingPathComponent(modelRel), companions)
+    }
+
     /// Marker file contents FluidAudio will accept (`weightsVersion` plus optional newline).
     public static func nemotronCacheHasMatchingMarker(contents: String?) -> Bool {
         guard let contents else { return false }

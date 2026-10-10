@@ -139,20 +139,63 @@ final class CLIDiarizationTests: XCTestCase {
     func testConfigSelectsPyannoteWithoutRequiringTheEngineFlag() throws {
         XCTAssertEqual(try Diarize.parse(["memo.wav", "--config", "knobs.json"]).diarizationEngine, "app")
         XCTAssertEqual(try Batch.parse(["clips", "--config", "knobs.json"]).diarizationEngine, "app")
+        XCTAssertEqual(
+            try Diarize.parse(["memo.wav", "--diarization-engine", "pyannote", "--config", "knobs.json"]).diarizationEngine,
+            "pyannote"
+        )
+        XCTAssertEqual(
+            try Batch.parse(["clips", "--diarization-engine", "pyannote", "--config", "knobs.json"]).diarizationEngine,
+            "pyannote"
+        )
 
-        let fromDefault = CLIDiarization.applyConfigSelection(engine: "nemotron", hasConfig: true)
+        let fromDefault = try CLIDiarization.applyConfigSelection(
+            choice: "app", engine: "nemotron", hasConfig: true
+        )
         XCTAssertEqual(fromDefault.engine, "pyannote")
         let note = try XCTUnwrap(fromDefault.fallbackNote)
         XCTAssertTrue(note.contains("--config"), note)
         XCTAssertTrue(note.localizedCaseInsensitiveContains("pyannote"), note)
 
-        let alreadyPyannote = CLIDiarization.applyConfigSelection(engine: "pyannote", hasConfig: true)
+        let alreadyPyannote = try CLIDiarization.applyConfigSelection(
+            choice: "pyannote", engine: "pyannote", hasConfig: true
+        )
         XCTAssertEqual(alreadyPyannote.engine, "pyannote")
         XCTAssertNil(alreadyPyannote.fallbackNote)
 
-        let noConfig = CLIDiarization.applyConfigSelection(engine: "nemotron", hasConfig: false)
+        let noConfig = try CLIDiarization.applyConfigSelection(
+            choice: "nemotron", engine: "nemotron", hasConfig: false
+        )
         XCTAssertEqual(noConfig.engine, "nemotron")
         XCTAssertNil(noConfig.fallbackNote)
+    }
+
+    func testExplicitNemotronRejectsAPyannoteConfigFile() {
+        XCTAssertThrowsError(
+            try CLIDiarization.applyConfigSelection(
+                choice: "nemotron", engine: "nemotron", hasConfig: true
+            )
+        ) { error in
+            XCTAssertEqual(error as? CLIDiarization.ConfigConflictsWithNemotron, .init())
+            let message = (error as? LocalizedError)?.errorDescription ?? String(describing: error)
+            XCTAssertTrue(message.contains("--config"), message)
+            XCTAssertTrue(message.contains("nemotron"), message)
+            XCTAssertTrue(message.contains("pyannote"), message)
+            XCTAssertFalse(message.localizedCaseInsensitiveContains("using pyannote"), message)
+            XCTAssertFalse(message.localizedCaseInsensitiveContains("falling back"), message)
+        }
+
+        XCTAssertThrowsError(
+            try Diarize.parse(["memo.wav", "--diarization-engine", "nemotron", "--config", "knobs.json"])
+        ) { error in
+            XCTAssertTrue(
+                error is CLIDiarization.ConfigConflictsWithNemotron
+                    || String(describing: error).localizedCaseInsensitiveContains("nemotron"),
+                String(describing: error)
+            )
+        }
+        XCTAssertThrowsError(
+            try Batch.parse(["clips", "--diarization-engine", "nemotron", "--config", "knobs.json"])
+        )
     }
 
     func testEveryCLIPathSharesTheAppTunedPyannoteWindowing() {

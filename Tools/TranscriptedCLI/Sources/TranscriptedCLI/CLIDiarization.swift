@@ -104,6 +104,14 @@ enum CLIDiarization {
         }
     }
 
+    /// `--config` is pyannote-only. An explicit `--diarization-engine nemotron`
+    /// must not quietly switch engines.
+    struct ConfigConflictsWithNemotron: Error, LocalizedError, Equatable {
+        var errorDescription: String? {
+            "--config is a pyannote OfflineDiarizerConfig file and cannot be used with --diarization-engine nemotron. Pass --diarization-engine pyannote, or omit --diarization-engine."
+        }
+    }
+
     struct EngineSelection: Equatable {
         var engine: String
         var fallbackNote: String?
@@ -198,11 +206,14 @@ enum CLIDiarization {
     }
 
     /// `--config` is a pyannote `OfflineDiarizerConfig` file. It selects
-    /// pyannote; `--diarization-engine pyannote` is not required.
+    /// pyannote; `--diarization-engine pyannote` is not required. An explicit
+    /// `--diarization-engine nemotron` with `--config` is an error.
     static func applyConfigSelection(
+        choice: String,
         engine: String,
         hasConfig: Bool
-    ) -> EngineSelection {
+    ) throws -> EngineSelection {
+        try rejectConflictingConfig(choice: choice, hasConfig: hasConfig)
         guard hasConfig, engine != "pyannote" else {
             return EngineSelection(engine: engine, fallbackNote: nil)
         }
@@ -210,6 +221,12 @@ enum CLIDiarization {
             engine: "pyannote",
             fallbackNote: "--config is a pyannote OfflineDiarizerConfig file; using pyannote."
         )
+    }
+
+    static func rejectConflictingConfig(choice: String, hasConfig: Bool) throws {
+        let choice = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard hasConfig, choice == "nemotron" else { return }
+        throw ConfigConflictsWithNemotron()
     }
 
     static func writeFallbackNote(_ note: String?) {

@@ -53,6 +53,10 @@ final class DiarizationBackendTests: XCTestCase {
             DiarizationBackend.nemotronRequiredCompanionFiles(preset: "fast128"),
             [DiarizationBackend.nemotronCacheSilenceName]
         )
+        XCTAssertEqual(
+            DiarizationBackend.nemotronCompanionSearchRoots,
+            ["", "monolithic/", "monolithic/v2/", "split/", "split/v2/"]
+        )
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: nil, environment: [:]), .nemotron)
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: "pyannote", environment: [:]), .pyannote)
         XCTAssertEqual(
@@ -69,6 +73,34 @@ final class DiarizationBackendTests: XCTestCase {
     }
 
     // MARK: - DiarizationService
+
+    func testLocalLoadFilesFindTheProvisionedCacheLayout() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nemotron-local-load-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let model = root.appendingPathComponent("monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc")
+        try FileManager.default.createDirectory(at: model, withIntermediateDirectories: true)
+        try Data().write(to: root.appendingPathComponent(DiarizationBackend.nemotronCacheSilenceName))
+
+        let files = try XCTUnwrap(
+            DiarizationBackend.nemotronLocalLoadFiles(in: root, preset: "fast128")
+        )
+        XCTAssertEqual(files.model, model)
+        XCTAssertEqual(files.companions.map(\.lastPathComponent), [DiarizationBackend.nemotronCacheSilenceName])
+
+        let staged = try NemotronDiarizationRunner.directoryForLocalLoad(from: root, preset: "fast128")
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: staged.appendingPathComponent("Nemotron3Diarizer_fast128.mlmodelc").path
+            )
+        )
+        XCTAssertTrue(
+            FileManager.default.fileExists(
+                atPath: staged.appendingPathComponent(DiarizationBackend.nemotronCacheSilenceName).path
+            )
+        )
+        XCTAssertNotEqual(staged, root, "nested cache is staged flat, not passed through as HuggingFace")
+    }
 
     func testServiceDefaultsToPyannote() async {
         let defaultService = await MainActor.run { DiarizationService() }
@@ -96,6 +128,26 @@ final class DiarizationBackendTests: XCTestCase {
         )
         XCTAssertTrue(
             DiarizationService.canLoadWeSpeakerFallback(hasLocalBundle: true, allowDownload: false)
+        )
+        XCTAssertFalse(
+            DiarizationService.canLoadNemotron(hasLocalBundle: false, allowDownload: false),
+            "cache-only Nemotron must be passed as a local directory, not HuggingFace"
+        )
+        XCTAssertTrue(
+            DiarizationService.canLoadNemotron(hasLocalBundle: true, allowDownload: false)
+        )
+        XCTAssertFalse(
+            DiarizationService.nemotronUsesHuggingFaceLoader(hasLocalBundle: true, allowDownload: false)
+        )
+        XCTAssertFalse(
+            DiarizationService.nemotronUsesHuggingFaceLoader(hasLocalBundle: false, allowDownload: false),
+            "--no-download never reaches loadFromHuggingFace"
+        )
+        XCTAssertTrue(
+            DiarizationService.nemotronUsesHuggingFaceLoader(hasLocalBundle: false, allowDownload: true)
+        )
+        XCTAssertFalse(
+            DiarizationService.nemotronUsesHuggingFaceLoader(hasLocalBundle: true, allowDownload: true)
         )
         let disabled = DiarizationDownloadDisabled(backend: DiarizationBackend.pyannote.rawValue)
         XCTAssertEqual(disabled.backend, "pyannote")
