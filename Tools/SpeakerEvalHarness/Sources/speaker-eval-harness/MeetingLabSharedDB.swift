@@ -83,6 +83,31 @@ enum LabSharedSpeakerDB {
         return groups.sorted { $0.joined(separator: "\u{0}") < $1.joined(separator: "\u{0}") }.flatMap { $0 }
     }
 
+    /// The run fingerprint: `fingerprintArgs` plus the diarizer that actually
+    /// initialized (`activeDiarizer`, from `DiarizationService.activeRunDescriptor`).
+    static func runFingerprint(args: [String], activeDiarizer: String) -> [String] {
+        fingerprintArgs(args) + ["--active-diarizer", activeDiarizer]
+    }
+
+    struct EmptySelection: Error, CustomStringConvertible {
+        let reason: String
+        var description: String { "nothing to run (\(reason)); the shared speaker DB was left alone" }
+    }
+
+    /// The meetings `--only` / `--limit` select, in series order. Call before
+    /// `prepare`, so a selection that runs nothing can't empty the DB first.
+    static func selectMeetings(_ ids: [String], only: Set<String>?, limit: Int) throws -> [String] {
+        if limit <= 0 { throw EmptySelection(reason: "--limit \(limit)") }
+        var selected = ids
+        if let only {
+            let unknown = only.subtracting(ids)
+            if !unknown.isEmpty { throw EmptySelection(reason: "--only names unknown meeting(s): \(unknown.sorted().joined(separator: ", "))") }
+            selected = selected.filter { only.contains($0) }
+        }
+        if selected.isEmpty { throw EmptySelection(reason: "no meeting matches the selection") }
+        return Array(selected.prefix(limit))
+    }
+
     /// sha256 of the files whose contents change results: the --embedder-thresholds
     /// JSON and the TRANSCRIPTED_LAB_KNOBS_FILE knobs file. A file that can't be
     /// read hashes as "unreadable".
@@ -111,21 +136,32 @@ enum LabSharedSpeakerDB {
     }
 
     /// sha256 over every regular file in a model bundle (or the file itself),
-    /// keyed by relative path in sorted order. "unreadable" if any read fails.
-    static func bundleHash(_ url: URL, fileManager: FileManager = .default) -> String {
+    /// keyed by relative path in sorted order, following symlinks (up to 8 deep)
+    /// to the files or directories they point at. "unreadable" if any read fails.
+    static func bundleHash(_ url: URL, fileManager: FileManager = .default, depth: Int = 0) -> String {
         var isDir: ObjCBool = false
         guard fileManager.fileExists(atPath: url.path, isDirectory: &isDir) else { return "unreadable" }
         if !isDir.boolValue { return (try? sha256Hex(of: url)) ?? "unreadable" }
         guard let enumerator = fileManager.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey]) else {
             return "unreadable"
         }
-        let base = url.resolvingSymlinksInPath().path
+        let base = url.standardizedFileURL.path
         var entries: [String] = []
         for case let file as URL in enumerator {
-            guard (try? file.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true else { continue }
+            // Key by the path inside the bundle (not the resolved target), and
+            // follow symlinks: a symlinked weights file or directory is content too.
+            let filePath = file.standardizedFileURL.path
+            let rel = filePath.hasPrefix(base) ? String(filePath.dropFirst(base.count)) : filePath
+            let values = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey])
+            if values?.isSymbolicLink == true {
+                guard depth < 8 else { return "unreadable" }
+                let nested = bundleHash(file.resolvingSymlinksInPath(), fileManager: fileManager, depth: depth + 1)
+                guard nested != "unreadable" else { return "unreadable" }
+                entries.append(rel + "->{" + nested + "}")
+                continue
+            }
+            guard values?.isRegularFile == true else { continue }
             guard let hash = try? sha256Hex(of: file) else { return "unreadable" }
-            let path = file.resolvingSymlinksInPath().path
-            let rel = path.hasPrefix(base) ? String(path.dropFirst(base.count)) : path
             entries.append(rel + "=" + hash)
         }
         return entries.sorted().joined(separator: "\n")
@@ -421,6 +457,47 @@ func runMeetingLabSharedDBSelfTests() {
             try persistResultOrThrow(["x": 1], to: unwritable, meeting: "m1", workRoot: workRoot, recordShared: false)
         } catch { freshThrew = true }
         check(!freshThrew, "a fresh-DB meeting's write failure stopped the run")
+
+        // #2188: a run whose diarizer fell back must not resume a DB built by another.
+        let nemotronRun = config(args: ["--series", "sim/set", "--backend", "nemotron"])
+        var builtByNemotron = nemotronRun
+        builtByNemotron.runArgs = LabSharedSpeakerDB.runFingerprint(args: ["--series", "sim/set", "--backend", "nemotron"], activeDiarizer: "nemotron/wespeaker")
+        var fellBack = nemotronRun
+        fellBack.runArgs = LabSharedSpeakerDB.runFingerprint(args: ["--series", "sim/set", "--backend", "nemotron"], activeDiarizer: "pyannote/wespeaker")
+        result = try rerun(applied: ["m1"], builtWith: builtByNemotron, now: fellBack, finished: ["m1"])
+        check(result == (.refused, true), "resumed a Nemotron-built DB on a run whose diarizer fell back to pyannote")
+        result = try rerun(applied: ["m1"], builtWith: builtByNemotron, now: builtByNemotron, finished: ["m1"])
+        check(result == (.resumed, true), "the same active diarizer no longer resumes")
+
+        // #2188: a selection that runs nothing must fail before prepare touches the DB.
+        let series = ["m1", "m2", "m3"]
+        func selectionRefused(_ only: Set<String>?, _ limit: Int) -> Bool {
+            do { _ = try LabSharedSpeakerDB.selectMeetings(series, only: only, limit: limit); return false }
+            catch is LabSharedSpeakerDB.EmptySelection { return true } catch { return false }
+        }
+        check(selectionRefused(["nope"], .max), "--only with an unknown id was accepted")
+        check(selectionRefused(["m2", "typo"], .max), "--only with one unknown id among known ones was accepted")
+        check(selectionRefused(nil, 0), "--limit 0 was accepted")
+        check((try? LabSharedSpeakerDB.selectMeetings(series, only: ["m3", "m1"], limit: 1)) == ["m1"],
+              "selection lost series order or the limit")
+
+        // #2188: a symlink inside a model bundle must count toward its hash.
+        let bundle = scratch.appendingPathComponent("model.mlmodelc", isDirectory: true)
+        let outsideWeights = scratch.appendingPathComponent("weights.bin")
+        let outsideDir = scratch.appendingPathComponent("shared-weights", isDirectory: true)
+        try fm.createDirectory(at: bundle, withIntermediateDirectories: true)
+        try fm.createDirectory(at: outsideDir, withIntermediateDirectories: true)
+        try Data("meta".utf8).write(to: bundle.appendingPathComponent("model.mil"))
+        try Data("weights v1".utf8).write(to: outsideWeights)
+        try Data("nested v1".utf8).write(to: outsideDir.appendingPathComponent("coremldata.bin"))
+        try fm.createSymbolicLink(at: bundle.appendingPathComponent("weights.bin"), withDestinationURL: outsideWeights)
+        try fm.createSymbolicLink(at: bundle.appendingPathComponent("data"), withDestinationURL: outsideDir)
+        let hashBefore = LabSharedSpeakerDB.bundleHash(bundle)
+        try Data("weights v2".utf8).write(to: outsideWeights)
+        let hashAfterFile = LabSharedSpeakerDB.bundleHash(bundle)
+        check(hashBefore != hashAfterFile, "bundleHash ignored a symlinked weights file inside the bundle")
+        try Data("nested v2".utf8).write(to: outsideDir.appendingPathComponent("coremldata.bin"))
+        check(hashAfterFile != LabSharedSpeakerDB.bundleHash(bundle), "bundleHash ignored a symlinked directory inside the bundle")
 
         // Stale-result cleanup must refuse escaping IDs and symlinked meeting dirs.
         let setDirectory = scratch.appendingPathComponent("set", isDirectory: true)
