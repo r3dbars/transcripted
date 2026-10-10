@@ -350,8 +350,7 @@ enum DictationTranscriptStore {
     private static func missingSections(from original: String, comparedTo reduced: String) -> [String] {
         let reducedSet = Set(splitSections(in: reduced).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
         return splitSections(in: original)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !reducedSet.contains($0) }
+            .filter { !reducedSet.contains($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
     }
 
     /// Removes a single dictation entry by matching on its stable saved entry ID.
