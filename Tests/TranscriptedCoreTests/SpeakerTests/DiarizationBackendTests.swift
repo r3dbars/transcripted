@@ -24,6 +24,20 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertEqual(DiarizationBackend.nemotronSliceSeconds, 10)
         XCTAssertEqual(DiarizationBackend.nemotronSliceSamples, 160_000)
         XCTAssertEqual(NemotronDiarizationRunner.feedSliceSamples, DiarizationBackend.nemotronSliceSamples)
+        XCTAssertEqual(DiarizationBackend.nemotronCacheMarkerName, ".fluidaudio-nemotron3-weights")
+        XCTAssertEqual(DiarizationBackend.nemotronCacheWeightsVersion, "ga-2026-09-23")
+        XCTAssertEqual(
+            DiarizationBackend.nemotronModelFileName(preset: "fast128"),
+            "Nemotron3Diarizer_fast128.mlmodelc"
+        )
+        XCTAssertEqual(
+            DiarizationBackend.nemotronModelFileName(preset: "fast32"),
+            "Nemotron3Diarizer_fast32.mlmodelc"
+        )
+        XCTAssertTrue(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: "ga-2026-09-23\n"))
+        XCTAssertTrue(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: "ga-2026-09-23"))
+        XCTAssertFalse(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: nil))
+        XCTAssertFalse(DiarizationBackend.nemotronCacheHasMatchingMarker(contents: "other\n"))
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: nil, environment: [:]), .nemotron)
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: "pyannote", environment: [:]), .pyannote)
         XCTAssertEqual(

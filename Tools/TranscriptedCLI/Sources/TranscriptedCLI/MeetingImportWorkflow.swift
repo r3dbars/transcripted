@@ -278,10 +278,22 @@ enum MeetingImportModels {
         "PldaRho.mlmodelc", "plda-parameters.json", "xvector-transform.json"
     ]
 
-    /// Flat bundled Nemotron layout (`NemotronDiarizationRunner.bundleDirectoryName`).
-    static let nemotronRequiredPaths = [
-        "Nemotron3Diarizer_fast128.mlmodelc", "learnable_sil_emb.bin"
-    ]
+    static let nemotronCacheMarkerName = DiarizationBackend.nemotronCacheMarkerName
+    static let nemotronCacheSilenceName = DiarizationBackend.nemotronCacheSilenceName
+
+    /// Flat bundled Nemotron layout for the resolved preset.
+    static func nemotronRequiredPaths(
+        environment: [String: String] = [:]
+    ) -> [String] {
+        [
+            DiarizationBackend.nemotronModelFileName(preset: resolvedPreset(environment: environment)),
+            nemotronCacheSilenceName
+        ]
+    }
+
+    static func resolvedPreset(environment: [String: String] = [:]) -> String {
+        DiarizationService.resolvedNemotronPresetName(environment: environment)
+    }
 
     static let nemotronCacheRelativePath = "Library/Application Support/FluidAudio/Models/nemotron-3-diarization"
 
@@ -306,7 +318,7 @@ enum MeetingImportModels {
         if let modelsDir {
             let explicit = URL(fileURLWithPath: modelsDir, isDirectory: true)
             let isParakeet = AsrModels.modelsExist(at: explicit)
-            let fromDir = diarizationModelsFromDirectory(explicit)
+            let fromDir = diarizationModelsFromDirectory(explicit, environment: environment)
             guard isParakeet || fromDir.nemotron != nil else {
                 throw ValidationError("Incomplete Parakeet v3 models at --models-dir: \(modelsDir)")
             }
@@ -319,7 +331,7 @@ enum MeetingImportModels {
         let diarization: URL?
         if let diarizationModelsDir {
             let explicit = URL(fileURLWithPath: diarizationModelsDir, isDirectory: true)
-            let fromDir = diarizationModelsFromDirectory(explicit)
+            let fromDir = diarizationModelsFromDirectory(explicit, environment: environment)
             guard fromDir.pyannote != nil || fromDir.nemotron != nil else {
                 throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)")
             }
@@ -332,7 +344,8 @@ enum MeetingImportModels {
         }
         let discovered = resolveNemotronPaths(
             bundledResourceDirectories: bundledResourceDirectories,
-            cacheDirectory: defaultNemotronCacheDirectory(homeDirectory: homeDirectory)
+            cacheDirectory: defaultNemotronCacheDirectory(homeDirectory: homeDirectory),
+            environment: environment
         )
         let explicitNemotron = modelsDirNemotron ?? diarizationDirNemotron
         let paths = Paths(
@@ -363,8 +376,11 @@ enum MeetingImportModels {
 
     /// Same rule `diarize` / `batch` use for `--models-dir`: a flat Nemotron
     /// folder, else a pyannote FluidAudio root.
-    static func diarizationModelsFromDirectory(_ directory: URL) -> (pyannote: URL?, nemotron: URL?) {
-        if completeNemotronModels(at: directory) {
+    static func diarizationModelsFromDirectory(
+        _ directory: URL,
+        environment: [String: String] = [:]
+    ) -> (pyannote: URL?, nemotron: URL?) {
+        if completeNemotronModels(at: directory, environment: environment) {
             return (fluidAudioRoot(for: directory), directory)
         }
         if let root = fluidAudioRoot(for: directory) {
@@ -376,29 +392,30 @@ enum MeetingImportModels {
     /// Bundle vs HuggingFace cache. Cache is availability only — never a bundle directory.
     static func resolveNemotronPaths(
         bundledResourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
-        cacheDirectory: URL = defaultNemotronCacheDirectory()
+        cacheDirectory: URL = defaultNemotronCacheDirectory(),
+        environment: [String: String] = [:]
     ) -> (bundled: URL?, cache: URL?) {
-        (bundledNemotronModels(in: bundledResourceDirectories), cachedNemotronModels(at: cacheDirectory))
+        (
+            bundledNemotronModels(in: bundledResourceDirectories, environment: environment),
+            cachedNemotronModels(at: cacheDirectory, environment: environment)
+        )
     }
 
     static func cachedNemotronModels(
-        at directory: URL = defaultNemotronCacheDirectory()
+        at directory: URL = defaultNemotronCacheDirectory(),
+        environment: [String: String] = [:]
     ) -> URL? {
-        completeCachedNemotronModels(at: directory) ? directory : nil
+        completeCachedNemotronModels(at: directory, environment: environment) ? directory : nil
     }
 
-    /// Same files `scripts/release/provision-release-models.sh` and
-    /// `scripts/entrypoints/build-beta.sh` write into the FluidAudio cache.
-    static let nemotronCacheMarkerName = ".fluidaudio-nemotron3-weights"
-    static let nemotronCacheSilenceName = "learnable_sil_emb.bin"
-    static let nemotronCacheModelSubpaths = [
-        "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc",
-        "monolithic/Nemotron3Diarizer_fast128.mlmodelc"
-    ]
-
-    /// HuggingFace layout (`monolithic/v2/…`, older `monolithic/…`) or a flat copy.
-    static func completeCachedNemotronModels(at directory: URL) -> Bool {
-        if completeNemotronModels(at: directory) { return true }
+    /// HuggingFace layout (`monolithic/v2/…`, older `monolithic/…`, or flat)
+    /// for the resolved preset, plus FluidAudio's weights marker. Without the
+    /// matching marker FluidAudio deletes the cache and downloads again.
+    static func completeCachedNemotronModels(
+        at directory: URL,
+        environment: [String: String] = [:]
+    ) -> Bool {
+        guard matchingNemotronCacheMarker(at: directory) else { return false }
         let fm = FileManager.default
         let silenceCandidates = [
             directory.appendingPathComponent(nemotronCacheSilenceName),
@@ -408,9 +425,24 @@ enum MeetingImportModels {
         guard silenceCandidates.contains(where: { fm.fileExists(atPath: $0.path) }) else {
             return false
         }
-        return nemotronCacheModelSubpaths.contains {
+        let file = DiarizationBackend.nemotronModelFileName(preset: resolvedPreset(environment: environment))
+        let modelCandidates = [
+            "monolithic/v2/\(file)",
+            "monolithic/\(file)",
+            file
+        ]
+        return modelCandidates.contains {
             fm.fileExists(atPath: directory.appendingPathComponent($0).path)
         }
+    }
+
+    static func matchingNemotronCacheMarker(at directory: URL) -> Bool {
+        let url = directory.appendingPathComponent(nemotronCacheMarkerName)
+        guard let data = try? Data(contentsOf: url),
+              let contents = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        return DiarizationBackend.nemotronCacheHasMatchingMarker(contents: contents)
     }
 
     /// `--no-download` checks Parakeet plus the engine that will actually run,
@@ -453,14 +485,20 @@ enum MeetingImportModels {
     }
 
     static func bundledNemotronModels(
-        in resourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories()
+        in resourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
+        environment: [String: String] = [:]
     ) -> URL? {
         resourceDirectories.map { $0.appendingPathComponent("nemotron-diarizer-models", isDirectory: true) }
-            .first { completeNemotronModels(at: $0) }
+            .first { completeNemotronModels(at: $0, environment: environment) }
     }
 
-    static func completeNemotronModels(at directory: URL) -> Bool {
-        nemotronRequiredPaths.allSatisfy { FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path) }
+    static func completeNemotronModels(
+        at directory: URL,
+        environment: [String: String] = [:]
+    ) -> Bool {
+        nemotronRequiredPaths(environment: environment).allSatisfy {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
     }
 
     static func bundledDiarizationModels(

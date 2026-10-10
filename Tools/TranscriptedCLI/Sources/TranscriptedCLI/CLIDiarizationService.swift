@@ -8,22 +8,26 @@ import TranscriptedCore
 /// commands share Nemotron (and its 10 s slices) with `import-audio`.
 enum CLIDiarizationService {
     @MainActor
-    static func make(backend: DiarizationBackend, modelsDir: String?) -> DiarizationService {
+    static func make(
+        backend: DiarizationBackend,
+        modelsDir: String?,
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> DiarizationService {
         var pyannote: URL?
         var nemotron: URL?
         if let modelsDir {
             let url = URL(fileURLWithPath: modelsDir, isDirectory: true)
-            let found = MeetingImportModels.diarizationModelsFromDirectory(url)
+            let found = MeetingImportModels.diarizationModelsFromDirectory(url, environment: environment)
             if found.nemotron != nil || found.pyannote != nil {
-                nemotron = found.nemotron ?? MeetingImportModels.bundledNemotronModels()
+                nemotron = found.nemotron ?? MeetingImportModels.bundledNemotronModels(environment: environment)
                 pyannote = found.pyannote ?? MeetingImportModels.bundledDiarizationModels()
             } else {
                 pyannote = url
-                nemotron = MeetingImportModels.bundledNemotronModels()
+                nemotron = MeetingImportModels.bundledNemotronModels(environment: environment)
             }
         } else {
             pyannote = MeetingImportModels.bundledDiarizationModels()
-            nemotron = MeetingImportModels.bundledNemotronModels()
+            nemotron = MeetingImportModels.bundledNemotronModels(environment: environment)
         }
         return DiarizationService(
             bundleProvider: MeetingImportDiarization.bundleProvider(pyannote: pyannote, nemotron: nemotron),

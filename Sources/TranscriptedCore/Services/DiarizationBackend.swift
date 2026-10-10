@@ -33,6 +33,21 @@ extension DiarizationBackend {
     public static var nemotronSliceSamples: Int {
         Int((nemotronSliceSeconds * 16_000).rounded())
     }
+    /// FluidAudio `ModelNames.Nemotron3.weightsVersion`. A HuggingFace cache
+    /// without this exact marker is deleted and re-downloaded.
+    public static let nemotronCacheMarkerName = ".fluidaudio-nemotron3-weights"
+    public static let nemotronCacheWeightsVersion = "ga-2026-09-23"
+    public static let nemotronCacheSilenceName = "learnable_sil_emb.bin"
+
+    public static func nemotronModelFileName(preset: String) -> String {
+        "Nemotron3Diarizer_\(preset).mlmodelc"
+    }
+
+    /// Marker file contents FluidAudio will accept (`weightsVersion` plus optional newline).
+    public static func nemotronCacheHasMatchingMarker(contents: String?) -> Bool {
+        guard let contents else { return false }
+        return contents.trimmingCharacters(in: .whitespacesAndNewlines) == nemotronCacheWeightsVersion
+    }
 
     /// The stored choice, ignoring the environment. Unknown or missing values
     /// read as the host default.

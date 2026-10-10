@@ -129,6 +129,8 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
         XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: cache), "model without silence is incomplete")
         try Data().write(to: cache.appendingPathComponent("learnable_sil_emb.bin"))
+        XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: cache), "model without FluidAudio marker is incomplete")
+        try writeNemotronCacheMarker(at: cache)
         XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: cache), cache)
 
         let resolved = MeetingImportModels.resolveNemotronPaths(
@@ -147,6 +149,8 @@ final class MeetingImportDiarizationTests: XCTestCase {
             withIntermediateDirectories: true
         )
         try Data().write(to: root.appendingPathComponent("learnable_sil_emb.bin"))
+        XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: root), "flat cache still needs the FluidAudio marker")
+        try writeNemotronCacheMarker(at: root)
         XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: root), root)
     }
 
@@ -164,9 +168,10 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
         XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: cache), "versioned model without silence is incomplete")
         try Data().write(to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheSilenceName))
-        try Data("ga-2026-09-23\n".utf8).write(
-            to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheMarkerName)
-        )
+        XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: cache), "provisioned model without marker is incomplete")
+        try writeNemotronCacheMarker(at: cache, contents: "stale-version\n")
+        XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: cache), "wrong weights version is not local")
+        try writeNemotronCacheMarker(at: cache)
         XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: cache), cache)
         XCTAssertFalse(
             FileManager.default.fileExists(
@@ -336,12 +341,59 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
     }
 
-    private func writeNemotronFixture(at directory: URL) throws {
+    func testNoDownloadRequiresTheResolvedNemotronPreset() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-preset-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = root.appendingPathComponent(MeetingImportModels.nemotronCacheRelativePath, isDirectory: true)
         try FileManager.default.createDirectory(
-            at: directory.appendingPathComponent("Nemotron3Diarizer_fast128.mlmodelc"),
+            at: cache.appendingPathComponent("monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc", isDirectory: true),
             withIntermediateDirectories: true
         )
-        try Data().write(to: directory.appendingPathComponent("learnable_sil_emb.bin"))
+        try Data().write(to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheSilenceName))
+        try writeNemotronCacheMarker(at: cache)
+
+        let fast32 = ["TRANSCRIPTED_NEMOTRON_PRESET": "fast32"]
+        XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: cache), cache)
+        XCTAssertNil(
+            MeetingImportModels.cachedNemotronModels(at: cache, environment: fast32),
+            "a fast128 cache is not enough for TRANSCRIPTED_NEMOTRON_PRESET=fast32"
+        )
+        XCTAssertNil(MeetingImportModels.bundledNemotronModels(in: [root], environment: fast32))
+
+        let parakeet = URL(fileURLWithPath: "/tmp/parakeet")
+        XCTAssertNotNil(try MeetingImportModels.noDownloadError(
+            parakeet: parakeet, diarization: nil,
+            nemotronAvailable: MeetingImportModels.cachedNemotronModels(at: cache, environment: fast32) != nil,
+            engineChoice: "nemotron", environment: fast32
+        ), "--no-download must not treat a fast128 cache as the selected fast32 preset")
+
+        try FileManager.default.createDirectory(
+            at: cache.appendingPathComponent("monolithic/v2/Nemotron3Diarizer_fast32.mlmodelc", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: cache, environment: fast32), cache)
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
+            parakeet: parakeet, diarization: nil,
+            nemotronAvailable: true, engineChoice: "nemotron", environment: fast32
+        ))
+    }
+
+    private func writeNemotronFixture(at directory: URL, preset: String = "fast128") throws {
+        try FileManager.default.createDirectory(
+            at: directory.appendingPathComponent(DiarizationBackend.nemotronModelFileName(preset: preset)),
+            withIntermediateDirectories: true
+        )
+        try Data().write(to: directory.appendingPathComponent(MeetingImportModels.nemotronCacheSilenceName))
+    }
+
+    private func writeNemotronCacheMarker(
+        at directory: URL,
+        contents: String = DiarizationBackend.nemotronCacheWeightsVersion + "\n"
+    ) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        try Data(contents.utf8).write(
+            to: directory.appendingPathComponent(MeetingImportModels.nemotronCacheMarkerName)
+        )
     }
 }
 #endif
