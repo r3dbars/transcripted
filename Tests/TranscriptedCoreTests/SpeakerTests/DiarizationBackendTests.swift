@@ -42,8 +42,20 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertTrue(DiarizationBackend.nemotronPresetIsSplit("fast32-split-w8a8"))
         XCTAssertFalse(DiarizationBackend.nemotronPresetIsSplit("fast128"))
         XCTAssertEqual(
+            DiarizationBackend.nemotronModelFileName(preset: "c128-split-w8a8"),
+            "Nemotron3Diarizer_c128_split_w8a8.mlmodelc"
+        )
+        XCTAssertEqual(
+            DiarizationBackend.nemotronModelFileName(preset: "fast32-split-w8a8"),
+            "Nemotron3Diarizer_s32_split_w8a8.mlmodelc"
+        )
+        XCTAssertEqual(
             DiarizationBackend.nemotronCacheModelSubpaths(preset: "c128-split-w8a8").first,
-            "split/Nemotron3Diarizer_c128-split-w8a8.mlmodelc"
+            "split/Nemotron3Diarizer_c128_split_w8a8.mlmodelc"
+        )
+        XCTAssertEqual(
+            DiarizationBackend.nemotronCacheModelSubpaths(preset: "fast32-split-w8a8").first,
+            "split/Nemotron3Diarizer_s32_split_w8a8.mlmodelc"
         )
         XCTAssertEqual(
             DiarizationBackend.nemotronRequiredCompanionFiles(preset: "c128-split-w8a8"),

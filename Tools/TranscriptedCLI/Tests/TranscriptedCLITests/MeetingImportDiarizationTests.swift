@@ -425,10 +425,10 @@ final class MeetingImportDiarizationTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-split-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let cache = root.appendingPathComponent(MeetingImportModels.nemotronCacheRelativePath, isDirectory: true)
-        try FileManager.default.createDirectory(
-            at: cache.appendingPathComponent("split/Nemotron3Diarizer_c128-split-w8a8.mlmodelc", isDirectory: true),
-            withIntermediateDirectories: true
+        let published = cache.appendingPathComponent(
+            "split/Nemotron3Diarizer_c128_split_w8a8.mlmodelc", isDirectory: true
         )
+        try FileManager.default.createDirectory(at: published, withIntermediateDirectories: true)
         try Data().write(to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheSilenceName))
         try writeNemotronCacheMarker(at: cache)
         XCTAssertNil(
@@ -439,6 +439,28 @@ final class MeetingImportDiarizationTests: XCTestCase {
         XCTAssertEqual(
             MeetingImportModels.cachedNemotronModels(at: cache, preset: "c128-split-w8a8"),
             cache
+        )
+
+        try FileManager.default.createDirectory(
+            at: cache.appendingPathComponent(
+                "split/Nemotron3Diarizer_c128-split-w8a8.mlmodelc", isDirectory: true
+            ),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.removeItem(at: published)
+        XCTAssertNil(
+            MeetingImportModels.cachedNemotronModels(at: cache, preset: "c128-split-w8a8"),
+            "the published cache uses Nemotron3Diarizer_c128_split_w8a8, not the hyphenated preset string"
+        )
+
+        try FileManager.default.createDirectory(
+            at: cache.appendingPathComponent("split/Nemotron3Diarizer_s32_split_w8a8.mlmodelc", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        XCTAssertEqual(
+            MeetingImportModels.cachedNemotronModels(at: cache, preset: "fast32-split-w8a8"),
+            cache,
+            "fast32-split-w8a8 is published as s32_split_w8a8"
         )
         XCTAssertNil(
             MeetingImportModels.cachedNemotronModels(at: cache, preset: "fast128"),

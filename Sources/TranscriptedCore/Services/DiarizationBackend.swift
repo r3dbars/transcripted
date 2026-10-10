@@ -39,8 +39,22 @@ extension DiarizationBackend {
     public static let nemotronCacheWeightsVersion = "ga-2026-09-23"
     public static let nemotronCacheSilenceName = "learnable_sil_emb.bin"
 
+    /// HuggingFace / FluidAudio file for this preset. Split-graph names are
+    /// not `Nemotron3Diarizer_<preset>`: hyphens become underscores, and
+    /// `fast32-split*` is published as `s32_split*`.
     public static func nemotronModelFileName(preset: String) -> String {
-        "Nemotron3Diarizer_\(preset).mlmodelc"
+        switch preset {
+        case "c128-split-w8a8":
+            return "Nemotron3Diarizer_c128_split_w8a8.mlmodelc"
+        case "fast32-split-w8a8":
+            return "Nemotron3Diarizer_s32_split_w8a8.mlmodelc"
+        case "c128-split":
+            return "Nemotron3Diarizer_c128_split.mlmodelc"
+        case "fast32-split":
+            return "Nemotron3Diarizer_s32_split.mlmodelc"
+        default:
+            return "Nemotron3Diarizer_\(preset).mlmodelc"
+        }
     }
 
     /// Split-graph presets (`c128-split-w8a8`, `fast32-split-w8a8`) live under
