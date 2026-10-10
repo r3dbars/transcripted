@@ -216,6 +216,14 @@ enum LabSharedSpeakerDB {
         try writeMarker(marker, to: markerURL)
     }
 
+    /// Saves a shared meeting's lab_result.json with `save`, then records the
+    /// meeting in the marker. A failed save throws and leaves the meeting marked in
+    /// progress, so the next run won't resume a DB whose results are incomplete.
+    static func saveResultThenRecordApplied(_ meeting: String, workRoot: URL, save: () throws -> Void) throws {
+        try save()
+        try recordApplied(meeting, workRoot: workRoot)
+    }
+
     private static func readMarker(_ url: URL) -> Marker? {
         (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode(Marker.self, from: $0) }
     }
@@ -373,6 +381,46 @@ func runMeetingLabSharedDBSelfTests() {
         do { _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: ["m1"], force: false) }
         catch is LabSharedSpeakerDB.ResumeRefused { missingDBRefused = true }
         check(missingDBRefused, "resumed with a marker but no actual learned database")
+
+        // #2156: the marker may only advance once lab_result.json is on disk, or the
+        // next run sees a marker that no longer matches the result files.
+        struct SaveFailed: Error {}
+        _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: [], force: true)
+        try LabSharedSpeakerDB.beginMeeting("m1", workRoot: workRoot)
+        var saveFailureReported = false
+        do {
+            try LabSharedSpeakerDB.saveResultThenRecordApplied("m1", workRoot: workRoot) { throw SaveFailed() }
+        } catch is SaveFailed { saveFailureReported = true }
+        check(saveFailureReported, "a failed lab_result.json save was swallowed instead of reported")
+        var advancedPastUnsaved = true
+        do { try LabSharedSpeakerDB.beginMeeting("m2", workRoot: workRoot) } catch { advancedPastUnsaved = false }
+        check(!advancedPastUnsaved, "the marker recorded m1 as applied although its lab_result.json was never saved")
+        _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: [], force: true)
+        try LabSharedSpeakerDB.beginMeeting("m1", workRoot: workRoot)
+        var saved = false
+        try LabSharedSpeakerDB.saveResultThenRecordApplied("m1", workRoot: workRoot) { saved = true }
+        var nextRuns = true
+        do { try LabSharedSpeakerDB.beginMeeting("m2", workRoot: workRoot) } catch { nextRuns = false }
+        check(saved && nextRuns, "a saved lab_result.json did not record m1 in the marker")
+
+        // MeetingLab's wiring: a shared meeting whose lab_result.json can't be written
+        // throws and stays in progress; a fresh-DB meeting only logs.
+        _ = try LabSharedSpeakerDB.prepare(workRoot: workRoot, config: base, finished: [], force: true)
+        try LabSharedSpeakerDB.beginMeeting("m1", workRoot: workRoot)
+        let unwritable = scratch.appendingPathComponent("missing-dir/lab_result.json")
+        var wiringThrew = false
+        do {
+            try persistResultOrThrow(["x": 1], to: unwritable, meeting: "m1", workRoot: workRoot, recordShared: true)
+        } catch { wiringThrew = true }
+        check(wiringThrew, "persistResult swallowed a failed shared lab_result.json write")
+        var wiringAdvanced = true
+        do { try LabSharedSpeakerDB.beginMeeting("m2", workRoot: workRoot) } catch { wiringAdvanced = false }
+        check(!wiringAdvanced, "persistResult advanced the marker past an unsaved shared meeting")
+        var freshThrew = false
+        do {
+            try persistResultOrThrow(["x": 1], to: unwritable, meeting: "m1", workRoot: workRoot, recordShared: false)
+        } catch { freshThrew = true }
+        check(!freshThrew, "a fresh-DB meeting's write failure stopped the run")
 
         // Stale-result cleanup must refuse escaping IDs and symlinked meeting dirs.
         let setDirectory = scratch.appendingPathComponent("set", isDirectory: true)

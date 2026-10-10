@@ -586,10 +586,9 @@ func runMeetingSeries(_ args: [String]) async {
                                           rows: [], silentNames: [], utterances: [], profilesAfter: 0)
             failed.embedder = voiceprint?.embedder.identifier
             failed.embedderThresholds = voiceprint?.thresholdsSource
-            write(failed, to: outURL)
             // Timed out with the pipeline still running: leave the meeting marked
             // in progress so the next run won't resume a half-written DB.
-            if !freshDB, finished { recordSharedApplied(meeting.id, workRoot: workRoot) }
+            persistResult(failed, to: outURL, meeting: meeting.id, workRoot: workRoot, recordShared: !freshDB && finished)
             continue
         }
 
@@ -718,8 +717,7 @@ func runMeetingSeries(_ args: [String]) async {
                     truthIdentity: share.pid.flatMap { byPid[$0]?.identity }, truthShare: share.share))
             }
         }
-        write(out, to: outURL)
-        if !freshDB, namingSettled { recordSharedApplied(meeting.id, workRoot: workRoot) }
+        persistResult(out, to: outURL, meeting: meeting.id, workRoot: workRoot, recordShared: !freshDB && namingSettled)
         let remote = truth.participants.filter { $0.role == "remote" }.count
         log(String(format: "[lab] %@: %.0fs audio in %.1fs | remote true %d, found %d | rows %d, silent %d",
                    meeting.id, truth.duration_s, processing, remote, result.systemSpeakerCount, rows.count, silent.count))
@@ -729,19 +727,31 @@ func runMeetingSeries(_ args: [String]) async {
 }
 
 private func write<T: Encodable>(_ value: T, to url: URL) {
+    do { try encodeResult(value, to: url) } catch { log("[lab] write failed: \(error.localizedDescription)") }
+}
+
+private func encodeResult<T: Encodable>(_ value: T, to url: URL) throws {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys]
-    do { try encoder.encode(value).write(to: url) } catch { log("[lab] write failed: \(error.localizedDescription)") }
+    try encoder.encode(value).write(to: url)
+}
+
+/// Writes a meeting's lab_result.json. For a shared-DB meeting it also records the
+/// meeting in the marker, stopping the run if either step fails.
+private func persistResult<T: Encodable>(_ value: T, to url: URL, meeting: String, workRoot: URL, recordShared: Bool) {
+    do { try persistResultOrThrow(value, to: url, meeting: meeting, workRoot: workRoot, recordShared: recordShared) } catch {
+        die("could not save \(meeting)'s lab_result.json or record it in the shared speaker DB marker: \(error.localizedDescription)")
+    }
+}
+
+/// The throwing core of `persistResult`, split out so the self-test can drive it.
+/// A fresh-DB meeting's write failure is only logged, as before.
+func persistResultOrThrow<T: Encodable>(_ value: T, to url: URL, meeting: String, workRoot: URL, recordShared: Bool) throws {
+    guard recordShared else { write(value, to: url); return }
+    try LabSharedSpeakerDB.saveResultThenRecordApplied(meeting, workRoot: workRoot) { try encodeResult(value, to: url) }
 }
 
 private func log(_ message: String) {
     FileHandle.standardError.write(Data((message + "\n").utf8))
 }
 
-/// Records a finished shared meeting in the marker, stopping the run if the marker
-/// can't be written (the next run would otherwise see a stale marker).
-func recordSharedApplied(_ meeting: String, workRoot: URL) {
-    do { try LabSharedSpeakerDB.recordApplied(meeting, workRoot: workRoot) } catch {
-        die("could not record \(meeting) in the shared speaker DB marker: \(error.localizedDescription)")
-    }
-}
