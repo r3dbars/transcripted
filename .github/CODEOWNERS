@@ -1,0 +1,37 @@
+# Release, signing, update-feed and merge-policy paths belong to Justin.
+# With "Require review from Code Owners" on main, a PR touching these needs
+# @r3dbars's approval. Keep in sync with RELEASE_PATTERNS in
+# scripts/ops/risk-triage.py (docs/agent-merge-policy.md).
+
+/scripts/release/                           @r3dbars
+# Every workflow: a PR-added workflow could otherwise post a fake risk-gate status.
+/.github/workflows/                         @r3dbars
+/.github/actions/                           @r3dbars
+/.github/workflows/release-candidate.yml    @r3dbars
+/.github/workflows/publish-mcp-registry.yml @r3dbars
+/.github/workflows/risk-triage.yml          @r3dbars
+/.github/CODEOWNERS                         @r3dbars
+/scripts/ops/risk-triage.py                 @r3dbars
+/scripts/ops/auto-merge-gate.py             @r3dbars
+/.agents/auto-merge-lanes.json              @r3dbars
+/docs/agent-merge-policy.md                 @r3dbars
+/build.sh                                   @r3dbars
+/build-beta.sh                              @r3dbars
+/build-deps.sh                              @r3dbars
+/scripts/entrypoints/build.sh               @r3dbars
+/scripts/entrypoints/build-beta.sh          @r3dbars
+/scripts/entrypoints/build-deps.sh          @r3dbars
+/scripts/entrypoints/lib/                   @r3dbars
+/AGENTS.md                                  @r3dbars
+/CLAUDE.md                                  @r3dbars
+/Casks/                                     @r3dbars
+/docs/appcast.xml                           @r3dbars
+/Info.plist                                 @r3dbars
+**/Info.plist                               @r3dbars
+/server.json                                @r3dbars
+/glama.json                                 @r3dbars
+/config/entitlements/                       @r3dbars
+*.entitlements                              @r3dbars
+/Sources/Observability/SparkleUpdaterController.swift @r3dbars
+/Sources/Support/TranscriptedAppVersion.swift          @r3dbars
+/Sources/TranscriptedWriting/Runtime/OwnSigningTeam.swift @r3dbars
