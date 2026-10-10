@@ -187,6 +187,22 @@ Scope a loop with `swift test --filter '^SpeakerTests\.'`, or one class with
 `swift test --filter <ClassName>`. Plain `swift test` runs them all, which is
 what CI does.
 
+Diarization split tests live in `SpeakerTests` (not the root fast-test tree):
+`EmbeddingClustererSplitTests`, `SpeakerTurnWindowSplitterTests`,
+`NemotronTurnBuilderTests`. Class-name filters only see them after that
+target links:
+
+```bash
+swift test --filter '^SpeakerTests\.EmbeddingClustererSplitTests'
+swift test --filter '^SpeakerTests\.SpeakerTurnWindowSplitterTests'
+swift test --filter '^SpeakerTests\.NemotronTurnBuilderTests'
+```
+
+`Executed 0 tests` on those filters almost always means `SpeakerTests` failed
+to compile — the other four Core bundles then have nothing matching. Do not
+use `bash run-tests.sh --filter …` for these; that runner only sees
+`Tests/*Tests.swift`.
+
 ## Core Package Tests
 
 `swift test` currently exercises the standalone package seam under

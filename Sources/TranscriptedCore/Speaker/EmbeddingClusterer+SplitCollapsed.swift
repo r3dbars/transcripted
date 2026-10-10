@@ -10,14 +10,25 @@
 // Bars are the same as `SpeakerEmbeddingBimodality`: between-centroid cosine
 // below the consolidation bar, plus a cohesion gap. Each side also needs
 // enough talk time and at least two turns, so a single noisy pair does not
-// invent a speaker. Each starting ID is split at most once in a pass, so a
-// smear cannot fragment into a tree of new speakers. Does not look at this
-// fixture's voices or talk-time ratios.
+// invent a speaker. A two-run split (everyone on one side, then everyone on
+// the other) needs a wider gap than an interleaved A-B-A pattern: one person
+// talking across a long meeting drifts early-vs-late, and that is 2 runs, not
+// two people. Distinct people who happen to talk in two blocks still clear
+// the wider gap. Each starting ID is split at most once in a pass, so a smear
+// cannot fragment into a tree of new speakers. Does not look at a particular
+// file's voices or talk-time ratios.
 
 import Foundation
 
 extension EmbeddingClusterer {
     static let collapsedSplitMinSeparation: Float = SpeakerEmbeddingBimodality.defaultMinSeparation
+    /// Extra cohesion gap when the two sides are sequential in time (early vs
+    /// late) instead of interleaved. Hour-scale drift of one voice often
+    /// clears the default 0.10 hole; two real people still sit well above
+    /// this even if they never overlap.
+    static let collapsedSplitSegregatedMinSeparation: Float = 0.22
+    /// A-B-A (or more) is interleaved. A then B is two runs.
+    static let collapsedSplitInterleavedRunCount = 3
     static let collapsedSplitMinSegmentsPerGroup = 2
     static let collapsedSplitMinSecondsPerGroup = 8.0
     /// One pass over the IDs that already exist. Newly created IDs and an ID
@@ -61,6 +72,17 @@ extension EmbeddingClusterer {
                 let rightSeconds = part.right.reduce(0.0) { $0 + usable[$1].duration }
                 guard leftSeconds >= minSecondsPerGroup, rightSeconds >= minSecondsPerGroup else { continue }
 
+                let runs = temporalRunCount(
+                    left: part.left,
+                    right: part.right,
+                    members: usable,
+                    segments: result
+                )
+                let requiredSeparation = runs >= collapsedSplitInterleavedRunCount
+                    ? minSeparation
+                    : max(minSeparation, collapsedSplitSegregatedMinSeparation)
+                guard part.separation >= requiredSeparation else { continue }
+
                 let (keep, splitOff) = part.left.count >= part.right.count
                     ? (part.left, part.right)
                     : (part.right, part.left)
@@ -79,7 +101,8 @@ extension EmbeddingClusterer {
                     "kept": "\(keep.count)",
                     "split": "\(splitOff.count)",
                     "between": String(format: "%.3f", part.between),
-                    "separation": String(format: "%.3f", part.separation)
+                    "separation": String(format: "%.3f", part.separation),
+                    "runs": "\(runs)"
                 ])
             }
             if !didSplit { break }
@@ -91,6 +114,35 @@ extension EmbeddingClusterer {
         let index: Int
         let embedding: [Float]
         let duration: Double
+    }
+
+    /// How many times the two 2-means sides switch as the meeting plays.
+    /// Early-block then late-block is 2. A-B-A is 3.
+    private static func temporalRunCount(
+        left: [Int],
+        right: [Int],
+        members: [Member],
+        segments: [SpeakerSegment]
+    ) -> Int {
+        let leftSet = Set(left)
+        var labeled: [(start: Double, index: Int, group: Int)] = []
+        labeled.reserveCapacity(members.count)
+        for (local, member) in members.enumerated() {
+            let group = leftSet.contains(local) ? 0 : 1
+            labeled.append((segments[member.index].startTime, member.index, group))
+        }
+        labeled.sort {
+            if $0.start != $1.start { return $0.start < $1.start }
+            return $0.index < $1.index
+        }
+        guard let first = labeled.first else { return 0 }
+        var runs = 1
+        var current = first.group
+        for item in labeled.dropFirst() where item.group != current {
+            runs += 1
+            current = item.group
+        }
+        return runs
     }
 
     /// Prefer quality-filtered segments (same gate as the mean-embedding

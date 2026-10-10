@@ -7,20 +7,25 @@
 // cannot recover the second person. Sliding windows can: 2 s embeds at a 1 s
 // hop, then the same 2-means test as collapsed-cluster split.
 //
-// The duration floor (6 s) is "longer than a typical conversational turn,"
-// not a number fitted to the synthetic set. A unimodal 20 s monologue stays
+// Only suspect-long turns are windowed (≥8 s — two voices in one exclusive
+// turn are rarely shorter). Hop grows so a turn pays at most 8 embeds, and
+// a meeting pays at most 48, longest turns first. Split pieces reuse the
+// window centroids; they are not re-embedded. A unimodal monologue stays
 // one turn because the windows fail the cohesion-gap test. Band-limited
-// (AirPods / 16 kHz) audio is not special-cased here; if the voiceprint
-// still separates the two people in 2 s windows, the split fires, and if it
-// does not, we do not invent a speaker from noise.
+// (AirPods / 16 kHz) audio is not special-cased here.
 
 import Foundation
 
 enum SpeakerTurnWindowSplitter {
-    static let minSegmentSeconds: Double = 6
+    static let minSegmentSeconds: Double = 8
     static let windowSeconds: Double = 2
     static let hopSeconds: Double = 1
     static let minWindowsPerGroup = 2
+    /// A long monologue must not pay a 1 s grid. Eight 2 s probes are enough
+    /// to see A-then-B; hop stretches so the last window still covers the end.
+    static let maxWindowsPerSegment = 8
+    /// Meeting-wide cap. Longest turns consume the budget first.
+    static let maxWindowsPerRefine = 48
     /// Pieces at or under this length are flicker from a 1 s hop (one flipped
     /// window yields a 1.0 s piece). Fold them into the neighbour so a cough
     /// or laugh in a monologue cannot become its own speaker.
@@ -40,20 +45,35 @@ enum SpeakerTurnWindowSplitter {
         guard sampleRate > 0, !segments.isEmpty, !samples.isEmpty else { return segments }
         let maxBetween = embedder.thresholds.consolidation
         var nextSpeakerId = (segments.map(\.speakerId).max() ?? 0) + 1
-        var result: [SpeakerSegment] = []
-        result.reserveCapacity(segments.count)
+        let minWindows = minWindowsPerGroup * 2
 
-        for segment in segments {
-            guard segment.duration >= minSegmentSeconds else {
-                result.append(segment)
+        // Longest first so a 40 s mixed turn is not starved by a pile of 10 s
+        // monologues. Original order is restored when the pieces are flattened.
+        let order = segments.indices.sorted { lhs, rhs in
+            let left = segments[lhs].duration
+            let right = segments[rhs].duration
+            if left != right { return left > right }
+            return lhs < rhs
+        }
+
+        var piecesByIndex = Array(repeating: [SpeakerSegment](), count: segments.count)
+        var windowsUsed = 0
+
+        for index in order {
+            let segment = segments[index]
+            let remaining = maxWindowsPerRefine - windowsUsed
+            guard segment.duration >= minSegmentSeconds, remaining >= minWindows else {
+                piecesByIndex[index] = [segment]
                 continue
             }
             let windows = windowEmbeddings(
                 segment: segment,
                 samples: samples,
                 sampleRate: sampleRate,
-                using: embedder
+                using: embedder,
+                maxWindows: min(maxWindowsPerSegment, remaining)
             )
+            windowsUsed += windows.count
             let pieces = splitSegment(
                 segment,
                 windows: windows,
@@ -68,14 +88,11 @@ enum SpeakerTurnWindowSplitter {
                     "pieces": "\(pieces.count)",
                     "ids": "\(Set(pieces.map(\.speakerId)).count)"
                 ])
-                result.append(contentsOf: pieces.map { piece in
-                    reembedded(piece, samples: samples, sampleRate: sampleRate, using: embedder)
-                })
-            } else {
-                result.append(contentsOf: pieces)
             }
+            // Window centroids already live on the pieces. Do not re-embed.
+            piecesByIndex[index] = pieces
         }
-        return result
+        return piecesByIndex.flatMap { $0 }
     }
 
     /// Split one turn from precomputed window embeddings. Exposed so tests can
@@ -134,16 +151,46 @@ enum SpeakerTurnWindowSplitter {
 
     // MARK: - Windowing
 
+    /// Window start times for one turn. Hop grows with duration so `maxWindows`
+    /// is a hard cap and the last window still covers the end.
+    static func windowStarts(
+        startTime: Double,
+        endTime: Double,
+        maxWindows: Int = maxWindowsPerSegment
+    ) -> [Double] {
+        let duration = endTime - startTime
+        guard duration + 1e-9 >= windowSeconds, maxWindows > 0 else { return [] }
+        let span = max(duration - windowSeconds, 0)
+        let hop = maxWindows == 1
+            ? max(hopSeconds, span)
+            : max(hopSeconds, span / Double(maxWindows - 1))
+        var starts: [Double] = []
+        starts.reserveCapacity(maxWindows)
+        var time = startTime
+        while starts.count < maxWindows, time + windowSeconds <= endTime + 1e-9 {
+            starts.append(time)
+            if hop <= 0 { break }
+            time += hop
+        }
+        return starts
+    }
+
     private static func windowEmbeddings(
         segment: SpeakerSegment,
         samples: [Float],
         sampleRate: Int,
-        using embedder: any SpeakerSegmentEmbedder
+        using embedder: any SpeakerSegmentEmbedder,
+        maxWindows: Int
     ) -> [(start: Double, end: Double, embedding: [Float])] {
+        let starts = windowStarts(
+            startTime: segment.startTime,
+            endTime: segment.endTime,
+            maxWindows: maxWindows
+        )
         let total = samples.count
-        var startTime = segment.startTime
         var windows: [(start: Double, end: Double, embedding: [Float])] = []
-        while startTime + windowSeconds <= segment.endTime + 1e-9 {
+        windows.reserveCapacity(starts.count)
+        for startTime in starts {
             let endTime = min(startTime + windowSeconds, segment.endTime)
             let startSample = max(0, Int(startTime * Double(sampleRate)))
             let endSample = min(total, Int(endTime * Double(sampleRate)))
@@ -156,33 +203,8 @@ enum SpeakerTurnWindowSplitter {
             ) {
                 windows.append((startTime, endTime, embedding))
             }
-            startTime += hopSeconds
         }
         return windows
-    }
-
-    private static func reembedded(
-        _ segment: SpeakerSegment,
-        samples: [Float],
-        sampleRate: Int,
-        using embedder: any SpeakerSegmentEmbedder
-    ) -> SpeakerSegment {
-        let startSample = max(0, Int(segment.startTime * Double(sampleRate)))
-        let endSample = min(samples.count, Int(segment.endTime * Double(sampleRate)))
-        guard let embedding = embedSlice(
-            samples: samples,
-            sampleRate: sampleRate,
-            startSample: startSample,
-            endSample: endSample,
-            using: embedder
-        ) else { return segment }
-        return SpeakerSegment(
-            speakerId: segment.speakerId,
-            startTime: segment.startTime,
-            endTime: segment.endTime,
-            embedding: embedding,
-            qualityScore: segment.qualityScore
-        )
     }
 
     private static func embedSlice(

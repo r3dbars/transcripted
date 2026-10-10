@@ -79,21 +79,19 @@ final class EmbeddingClustererSplitTests: XCTestCase {
     }
 
     func testPostProcessRecoversThreePeopleWhenTwoShareADiarizerId() {
-        // meet3-shaped: A is its own ID; B and C were collapsed onto one ID.
-        // Gaps are 0.5 s. Each voice talks ~3 s per turn, many turns.
+        // meet3-shaped: A is its own ID; B and C were collapsed onto one ID
+        // and take turns (A-B-C), the way a three-person meeting actually talks.
         var segments: [SpeakerSegment] = []
         var time = 0.0
-        for _ in 0..<14 {
+        for index in 0..<14 {
             segments.append(segment(speakerId: 1, start: time, end: time + 3, embedding: [1, 0]))
             time += 3.5
-        }
-        for _ in 0..<13 {
-            segments.append(segment(speakerId: 2, start: time, end: time + 3, embedding: [0, 1]))
-            time += 3.5
-        }
-        for _ in 0..<13 {
-            segments.append(segment(speakerId: 2, start: time, end: time + 3, embedding: unitVector(degrees: 180)))
-            time += 3.5
+            if index < 13 {
+                segments.append(segment(speakerId: 2, start: time, end: time + 3, embedding: [0, 1]))
+                time += 3.5
+                segments.append(segment(speakerId: 2, start: time, end: time + 3, embedding: unitVector(degrees: 180)))
+                time += 3.5
+            }
         }
 
         let processed = EmbeddingClusterer.postProcess(
@@ -160,6 +158,42 @@ final class EmbeddingClustererSplitTests: XCTestCase {
             2,
             "A collapsed ID splits once; leftover sides are not split again"
         )
+    }
+
+    func testLongTenureDriftDoesNotInventASpeaker() {
+        // Same geometry as the interleaved test below: centroids at 0.80 cosine,
+        // cohesion gap 0.20. That clears the default 0.10 hole. Early block then
+        // late block is one voice drifting across a meeting, not two people.
+        let early: [Float] = [1, 0]
+        let late = unitVector(cosineToXAxis: 0.80)
+        var segments: [SpeakerSegment] = []
+        for index in 0..<6 {
+            segments.append(segment(speakerId: 1, start: Double(index * 10), end: Double(index * 10 + 10), embedding: early))
+        }
+        for index in 0..<6 {
+            segments.append(segment(speakerId: 1, start: Double(60 + index * 10), end: Double(70 + index * 10), embedding: late))
+        }
+        let split = EmbeddingClusterer.splitCollapsedSpeakers(segments: segments, maxBetween: 0.88)
+        XCTAssertEqual(Set(split.map(\.speakerId)), [1])
+    }
+
+    func testInterleavedVoicesStillSplitWhenTheGapIsOnlyModest() {
+        // Identical vectors to the drift test. A-B-A-B is two people taking
+        // turns, so the default cohesion gap is enough.
+        let first: [Float] = [1, 0]
+        let second = unitVector(cosineToXAxis: 0.80)
+        var segments: [SpeakerSegment] = []
+        for index in 0..<12 {
+            let embedding = index % 2 == 0 ? first : second
+            segments.append(segment(
+                speakerId: 1,
+                start: Double(index * 10),
+                end: Double(index * 10 + 10),
+                embedding: embedding
+            ))
+        }
+        let split = EmbeddingClusterer.splitCollapsedSpeakers(segments: segments, maxBetween: 0.88)
+        XCTAssertEqual(Set(split.map(\.speakerId)).count, 2)
     }
 
     func testSplitNeedsEnoughTalkTimeOnEachSide() {
