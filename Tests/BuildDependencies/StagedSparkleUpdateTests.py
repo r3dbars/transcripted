@@ -9,17 +9,20 @@ import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
 M = runpy.run_path(str(ROOT/'scripts/release/test-staged-sparkle-update.py'))
+# 1.1.71 RC pins are PENDING until the RC is verified; exercise feed logic with fixture sizes.
+M['ASSETS']['Transcripted-1.1.71.dmg'] = ('1.1.71', 'fixture', 701604387)
+M['ASSETS']['Transcripted1.1.71-1.1.70.delta'] = ('1.1.71', 'fixture', 12314150)
 NS = M['NS']
 
 class StagedUpdateTests(unittest.TestCase):
     def feed(self):
         # Independent fixture: one signed target and two prior-version deltas.
         return f'''<rss xmlns:sparkle="{NS[1:-1]}"><channel><item>
-        <sparkle:version>1.1.69</sparkle:version>
-        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.69/Transcripted-1.1.69.dmg" length="701604387" sparkle:edSignature="full-signature" />
-        <sparkle:deltas><enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.69/Transcripted1.1.69-1.1.68.delta" length="12314150" sparkle:deltaFrom="1.1.68" sparkle:edSignature="delta-signature" sparkle:deltaFromSparkleExecutableSize="977808" />
+        <sparkle:version>1.1.71</sparkle:version>
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.71/Transcripted-1.1.71.dmg" length="701604387" sparkle:edSignature="full-signature" />
+        <sparkle:deltas><enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.71/Transcripted1.1.71-1.1.70.delta" length="12314150" sparkle:deltaFrom="1.1.70" sparkle:edSignature="delta-signature" sparkle:deltaFromSparkleExecutableSize="977808" />
         <enclosure sparkle:deltaFrom="1.1.67" /></sparkle:deltas>
-        </item><item><sparkle:version>1.1.68</sparkle:version></item></channel></rss>'''.encode()
+        </item><item><sparkle:version>1.1.70</sparkle:version></item></channel></rss>'''.encode()
 
     def test_only_verified_hosted_runner_account_can_execute(self):
         good = {'CI':'true','GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted'}
@@ -42,7 +45,7 @@ class StagedUpdateTests(unittest.TestCase):
         enclosure = items[0].find('enclosure')
         self.assertEqual(enclosure.get(NS+'edSignature'),'full-signature')
         self.assertEqual(enclosure.get('length'),'701604387')
-        self.assertEqual(enclosure.get('url'),'http://127.0.0.1:8000/Transcripted-1.1.69.dmg')
+        self.assertEqual(enclosure.get('url'),'http://127.0.0.1:8000/Transcripted-1.1.71.dmg')
         self.assertEqual(original,self.feed())
 
     def test_delta_feed_preserves_delta_validation_metadata_and_full_fallback(self):
@@ -51,12 +54,12 @@ class StagedUpdateTests(unittest.TestCase):
         self.assertIsNotNone(item.find('enclosure'))
         deltas = item.find(NS+'deltas')
         self.assertEqual(len(deltas),1)
-        self.assertEqual(deltas[0].get(NS+'deltaFrom'),'1.1.68')
+        self.assertEqual(deltas[0].get(NS+'deltaFrom'),'1.1.70')
         self.assertEqual(deltas[0].get(NS+'edSignature'),'delta-signature')
         self.assertEqual(deltas[0].get(NS+'deltaFromSparkleExecutableSize'),'977808')
 
     def test_wrong_release_artifact_or_length_rejected(self):
-        for original in [self.feed().replace(b'>1.1.69<',b'>1.1.70<'),
+        for original in [self.feed().replace(b'>1.1.71<',b'>1.1.70<'),
                          self.feed().replace(b'https://github.com/',b'https://attacker.example/'),
                          self.feed().replace(b'701604387',b'701604388'),
                          self.feed().replace(b'sparkle:edSignature="full-signature"',b'')]:
@@ -64,8 +67,8 @@ class StagedUpdateTests(unittest.TestCase):
                 M['staged_feed'](original,'http://127.0.0.1:8000','full')
 
     def test_delta_fallback_cannot_be_reported_as_delta_pass(self):
-        full='/Transcripted-1.1.69.dmg'
-        delta='/Transcripted1.1.69-1.1.68.delta'
+        full='/Transcripted-1.1.71.dmg'
+        delta='/Transcripted1.1.71-1.1.70.delta'
         self.assertEqual(M['selected_transport']('full',[full]),'full')
         self.assertEqual(M['selected_transport']('delta',[delta]),'delta')
         for mode, paths in [('delta',[delta,full]),('delta',[full]),('full',[delta]),('full',[])]:
