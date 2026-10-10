@@ -168,7 +168,11 @@ final class RelocatedCaptureAudioPolicyTests: XCTestCase {
             )
         }
         XCTAssertEqual(fileExistsCalls, 3, "a checkable library still has to look at each mic file")
-        XCTAssertEqual(mountPointCalls, 1, "statfs on a mounted volume happens once, not once per row")
+        XCTAssertEqual(
+            mountPointCalls,
+            3,
+            "a still-mounted volume is rechecked before each drop so a mid-load disconnect is seen"
+        )
     }
 
     func testEachOfflineVolumeIsProbedOnce() {
