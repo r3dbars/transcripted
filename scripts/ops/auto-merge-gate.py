@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -401,15 +402,12 @@ def fetch_extra(pr: dict, config: dict) -> dict:
     if not isinstance(file_pages, list) or not all(isinstance(page, list) for page in file_pages):
         raise RuntimeError("PR files API returned malformed pages; refusing to merge")
     changed_files = [record for page in file_pages for record in page]
-    # The same trusted AI verdict risk-gate uses (risk-triage.py): current head,
-    # written by a risk-triage.yml pull_request_target run for this PR.
+    # The same trusted AI verdict risk-gate uses (risk-triage.py): stored in a
+    # risk-gate check run created by the transcripted-gate App for this head.
     rt = RISK_TRIAGE
     rt.REPO = f"{owner}/{name}"
-    rest_pr = gh_json("api", f"repos/{owner}/{name}/pulls/{number}")
-    comments = [c for page in gh_json("api", f"repos/{owner}/{name}/issues/{number}/comments?per_page=100",
-                                      "--paginate", "--slurp") for c in page]
-    verdict, verdict_why = rt.fetch_trusted_verdict(rest_pr, comments)
-    ai = rt.ai_clear(verdict, pr["headRefOid"], set(), False) if verdict else (False, verdict_why)
+    verdict, verdict_why = rt.fetch_app_verdict(pr["headRefOid"], int(pr["number"]), pr.get("baseRefOid") or "")
+    ai = rt.ai_clear(verdict, pr["headRefOid"]) if verdict else (False, verdict_why)
     lowered, unknown = lowered_baselines(owner, name, pr, changed_paths(changed_files, pr.get("changedFiles"))[0])
     return {
         "changed_files": changed_files,
@@ -431,11 +429,26 @@ def has_held_note(pr: dict, config: dict) -> bool:
                for c in pr.get("comments", []))
 
 
+def merge_env(environ=None) -> dict:
+    """Environment for the one merge call: the gate App token, or refuse."""
+    environ = dict(os.environ if environ is None else environ)
+    token = environ.get("GATE_TOKEN", "")
+    if not token:
+        raise RuntimeError("refusing to merge: no GATE_TOKEN (transcripted-gate App token); "
+                           "the gate never merges with a person's gh login")
+    return {**environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
+
+
 def merge(pr: dict, lane: dict) -> None:
     number = str(pr["number"])
     if pr.get("isDraft"):
         gh("pr", "ready", number)
-    gh("pr", "merge", number, "--merge", "--match-head-commit", pr["headRefOid"])
+    # Never merge under a person's identity: agents share Justin's gh login, so
+    # a merge with the ambient token is an agent merging as Justin. Only the
+    # transcripted-gate App's installation token (GATE_TOKEN) may merge.
+    env = merge_env()
+    subprocess.run(["gh", "pr", "merge", number, "-R", os.environ.get("GITHUB_REPOSITORY", "r3dbars/transcripted"),
+                    "--merge", "--match-head-commit", pr["headRefOid"]], check=True, env=env)
     gh("pr", "comment", number, "--body",
        f"Merged by the auto-merge gate (lane `{lane['id']}`, level {lane.get('level', 1)}): required "
        f"checks green, required reviewers reviewed the head commit, no open threads, every file "
@@ -736,6 +749,14 @@ def self_test() -> int:
     results.append(case("raised extra baseline stays outside the lane", False, pin_pr, None, "outside lane"))
     cap_reasons = changed_paths([], 3001)[1]
     results.append(held_for_human(cap_reasons) == [REST_FILE_LIMIT_REASON])
+    # Never merge as a person: no gate App token means no merge.
+    try:
+        merge_env({"GH_TOKEN": "user-token"})
+        refused = False
+    except RuntimeError:
+        refused = True
+    results.append(refused and merge_env({"GATE_TOKEN": "app"})["GH_TOKEN"] == "app")
+    print(f"{'PASS' if results[-1] else 'FAIL'} merge refuses without the gate App token")
     print(f"{'PASS' if results[-1] else 'FAIL'} permanent REST cap escalates to human")
     results.append(held_for_human(changed_paths([], 1)[1]) == [])
     print(f"{'PASS' if results[-1] else 'FAIL'} transient incomplete metadata waits")

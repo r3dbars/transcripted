@@ -1,26 +1,29 @@
 name: Risk Triage
 
-# Labels every PR risk:low / risk:medium / risk:high, posts an AI review
-# comment, and publishes the `risk-gate` commit status that decides whether a
-# low/medium PR may squash auto-merge. Policy: docs/agent-merge-policy.md.
+# Labels every PR risk:low / risk:medium / risk:high, runs the AI review, and
+# posts the `risk-gate` CHECK RUN with the transcripted-gate GitHub App's
+# token. Policy: docs/agent-merge-policy.md.
 #
-# SAFETY: this uses pull_request_target, so it runs with this repo's token and
-# secrets. It therefore checks out the BASE branch only (the trusted copy of
-# scripts/ops/risk-triage.py) and reads the PR's file list and diff as data
-# through the API. Never add a checkout of the PR head, `ref:
-# github.event.pull_request.head.sha`, or any step that builds or runs PR code.
+# Why no pull_request / pull_request_target trigger:
+#   * pull_request runs the PR's own copy of this file, so a PR could rewrite the gate.
+#   * pull_request_target is blocked by GitHub's default event policy on public
+#     repos from 2026-11-02 (docs: "Securely using pull_request_target").
+# workflow_run and schedule always run this file from the default branch, so
+# the gate's code is the reviewed copy on main, and the job may use the
+# main-only environments: `automerge-ai` (AI key, review job) and
+# `automerge-app` (App key, gate job).
+#
+# SAFETY: check out the default branch only. Never check out, build or run PR
+# code here; the PR's files and diff are read as data through the API.
 
 on:
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled, edited]
-  # No pull_request_review trigger on purpose: that event runs the workflow
-  # file from the PR itself, so a PR could rewrite the gate. Reviews are
-  # picked up by the schedule and by the next CI completion instead.
   workflow_run:
+    # Both run on every PR; "requested" triages as soon as a push lands,
+    # "completed" re-evaluates once the required checks finish.
     workflows: ["Swift CI", "Repo Hygiene"]
-    types: [completed]
+    types: [requested, completed]
   schedule:
-    - cron: "*/20 * * * *"
+    - cron: "*/20 * * * *"  # picks up reviews, labels and anything missed
   workflow_dispatch:
     inputs:
       pr:
@@ -31,79 +34,95 @@ permissions:
   contents: read
 
 jobs:
-  triage:
-    # Only PRs into the default branch: a PR into another branch would run that
-    # branch's copy of this file (see verdict_trusted in risk-triage.py).
-    if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == github.event.repository.default_branch && contains(fromJSON('["opened","synchronize","reopened","ready_for_review","edited"]'), github.event.action)
+  # F4: ignore workflow_run events from any file other than the two real CI
+  # workflows (a PR can add a workflow *named* "Swift CI").
+  # F3: two jobs. `review` reads the PR diff and calls the AI with no App
+  # token; `gate` holds the App token and never fetches PR diff content. It
+  # reads only the review job's structured JSON, re-bound to pr/base/head.
+  review:
+    if: >-
+      github.event_name != 'workflow_run' ||
+      contains(fromJSON('[".github/workflows/swift-ci.yml",".github/workflows/repo-hygiene.yml"]'), github.event.workflow_run.path)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
+    # Main-only environment (Justin creates it): AI_REVIEW_API_KEY only.
+    environment: automerge-ai
     concurrency:
-      group: risk-triage-${{ github.event.pull_request.number }}
-      cancel-in-progress: true
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
-    steps:
-      - name: Checkout base (trusted) branch only
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-      - name: Label and AI review
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR: ${{ github.event.pull_request.number }}
-          # Forks get the label but no AI call: they never auto-merge anyway.
-          AI_REVIEW_API_KEY: ${{ github.event.pull_request.head.repo.full_name == github.repository && secrets.AI_REVIEW_API_KEY || '' }}
-          AI_REVIEW_PROVIDER: ${{ vars.AI_REVIEW_PROVIDER }}
-          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
-        run: python3 scripts/ops/risk-triage.py triage --pr "$PR" --apply
-
-  gate:
-    needs: [triage]
-    # Always run, even when triage failed: the gate then fails closed (risk-gate
-    # pending, auto-merge off) instead of leaving a stale auto-merge in place.
-    if: always()
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    # One group per PR, plus one for the sweep (schedule, workflow_run, manual
-    # without a PR). GitHub keeps only one pending run per group, so a shared
-    # group let a third PR's event drop a gate still waiting to turn off a
-    # stale auto-merge. Now a pending run can only be replaced by a newer run
-    # for the same PR (which re-evaluates the same PR), and the sweep never
-    # cancels or replaces a PR's gate.
-    concurrency:
-      group: risk-gate-${{ github.event.pull_request.number || inputs.pr || 'sweep' }}
+      group: risk-review-${{ inputs.pr || github.event.workflow_run.head_sha || 'sweep' }}
       cancel-in-progress: false
     permissions:
-      contents: write        # gh pr merge --auto
-      pull-requests: write
-      statuses: write
-      issues: read
+      contents: read
+      pull-requests: read
       checks: read
-      actions: read          # verify the verdict's workflow run
     steps:
       - name: Checkout default (trusted) branch only
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
+      - name: AI review (no App token here)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTOMERGE_APP_ID: ${{ vars.AUTOMERGE_APP_ID }}
+          AI_REVIEW_API_KEY: ${{ secrets.AI_REVIEW_API_KEY }}
+          AI_REVIEW_PROVIDER: ${{ vars.AI_REVIEW_PROVIDER }}
+          AI_REVIEW_MODEL: ${{ vars.AI_REVIEW_MODEL }}
+          PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          if [ -n "$PR" ]; then set -- --pr "$PR"; elif [ -n "$HEAD_SHA" ]; then set -- --sha "$HEAD_SHA"; else set --; fi
+          python3 scripts/ops/risk-triage.py review "$@" --out reviews.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: risk-reviews
+          path: reviews.json
+          retention-days: 1
+
+  gate:
+    needs: [review]
+    # Run even when review failed: the gate then sees no review and fails closed.
+    if: always() && needs.review.result != 'skipped'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Main-only environment (Justin creates it): AUTOMERGE_APP_PRIVATE_KEY,
+    # AUTOMERGE_ENABLED. No AI key, no diffs.
+    environment: automerge-app
+    concurrency:
+      group: risk-gate-${{ inputs.pr || github.event.workflow_run.head_sha || 'sweep' }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      pull-requests: write   # risk labels, disabling auto-merge
+      issues: write          # risk labels
+      checks: read
+      actions: read          # workflow provenance of required checks (F2)
+    steps:
+      - name: Checkout default (trusted) branch only
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: risk-reviews
+      - name: Gate App token
+        id: app
+        # Until Justin creates the App, this is skipped and the gate only
+        # labels and logs: no trusted risk-gate, no auto-merge.
+        if: vars.AUTOMERGE_APP_ID != ''
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.AUTOMERGE_APP_ID }}
+          private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
       - name: Evaluate gate
         env:
-          # AUTOMERGE_TOKEN (optional, a fine-grained PAT or GitHub App token)
-          # makes the squash merge trigger push CI on main; GITHUB_TOKEN merges
-          # do not trigger workflows. See docs/agent-merge-policy.md.
-          # Reads and the risk-gate status use GITHUB_TOKEN (Actions app);
-          # only the merge call uses AUTOMERGE_TOKEN.
-          GH_TOKEN: ${{ github.token }}
-          GATE_STATUS_TOKEN: ${{ github.token }}
-          MERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
-          PR: ${{ github.event.pull_request.number || inputs.pr }}
-          TRIAGE_RESULT: ${{ needs.triage.result }}
+          GH_TOKEN: ${{ github.token }}                 # reads, labels, disabling auto-merge
+          GATE_TOKEN: ${{ steps.app.outputs.token }}    # risk-gate check run, arming auto-merge
+          AUTOMERGE_APP_ID: ${{ vars.AUTOMERGE_APP_ID }}
+          AUTOMERGE_ENABLED: ${{ vars.AUTOMERGE_ENABLED }}
+          PR: ${{ inputs.pr }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
-          if [ -n "$PR" ]; then
-            python3 scripts/ops/risk-triage.py gate --pr "$PR" --apply
-          else
-            python3 scripts/ops/risk-triage.py gate --apply
-          fi
+          if [ -n "$PR" ]; then set -- --pr "$PR"; elif [ -n "$HEAD_SHA" ]; then set -- --sha "$HEAD_SHA"; else set --; fi
+          python3 scripts/ops/risk-triage.py gate "$@" --reviews reviews.json --apply

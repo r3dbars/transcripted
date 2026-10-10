@@ -1,141 +1,70 @@
 # Agent merge policy: risk-based auto-merge
 
-Every PR gets a risk label. Low and medium PRs squash-merge on their own once CI is green and the AI review found nothing serious. High-risk PRs need a person. **Releases stay manual**: nothing here tags, builds, signs, notarizes or publishes.
+Every PR gets a risk tier. Low and medium PRs may squash-merge on their own once CI is green and the AI review found nothing serious. **High-risk PRs are always merged by Justin, by hand.** Releases stay manual: nothing here tags, builds, signs, notarizes or publishes.
 
-The code is `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (also part of `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them).
+Code: `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (run by `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them). Design: `automerge-trust-design.md` (Option A, the GitHub App check run).
 
-This sits next to the older lane gate (`docs/auto-merge-gate.md`, `scripts/ops/auto-merge-gate.py`), which still runs on its own. A PR merges when either path allows it; both demand green `build-and-test` and `repo-hygiene`. **The old gate also runs this classifier and never merges a PR it calls `risk:high`**, whatever its lane allows. It also needs the same trusted, clean AI verdict for the head commit, so no AI verdict means no merge. So a lane PR that deletes a test, renames one away, or edits a folder `AGENTS.md` now waits for Justin.
+The older lane gate (`scripts/ops/auto-merge-gate.py`, `docs/auto-merge-gate.md`) uses this classifier and the same App-stored AI verdict, never merges a `risk:high` PR, and **only merges with the gate App's token** (`GATE_TOKEN`). Run from a Mac with a person's `gh` login, it refuses to merge.
 
-## 1. Risk tiers
+## 1. The trusted signal
 
-Path rules decide the tier. Each changed file (and the old name of a renamed file) is checked, and **the highest match wins**.
+`risk-gate` is a **check run created by the `transcripted-gate` GitHub App**. Only that App's installation token can create check runs under its app id, and the ruleset requires `risk-gate` from that app. A PR's own workflow runs as the GitHub Actions app, so it cannot post a `risk-gate` that counts, and it cannot forge the AI verdict either: the verdict is stored in the App's check run (`output.text`), and both gates read it only from check runs whose `app.id` is `AUTOMERGE_APP_ID`.
 
-| Tier | What | Who must approve |
-|---|---|---|
-| `risk:high` + owner | Release, version, Sparkle, appcast, cask, signing and notarization: `scripts/release/**`, `build*.sh`, `Casks/**`, `**/appcast*.xml`, `Info.plist` files, `server.json`, `glama.json`, `config/entitlements/**`, `*.entitlements`, any path containing `Sparkle`, `notari`, `codesign` or `Signing`, `TranscriptedAppVersion.swift`. Also every GitHub workflow and action, `CODEOWNERS`, and this policy's own files. | One approval from someone other than the author, **and** an approval from @r3dbars |
-| `risk:high` | Audio capture (`Sources/TranscriptedCore/Audio/**`, `Sources/Capture/**`, `MeetingCapture*`, `MeetingMicCapture*`, dictation audio, system/pinned mic capture); database and schema (`*Migration*`, `*Schema*`, `*Database*.swift`, `SQLite*.swift`, the speaker reassignment log); permissions (`*TCC*`, `*Permission*.swift`, `*Entitlement*`); privacy egress (sanitizers, redactors, scrubbers, `*Privacy*.swift`, event policies, analytics opt-out preferences, `*CrashReport*` crash reporting and its opt-out, every `*Telemetry*.swift` file, and the whole `Sources/Observability/**` module); `Package.swift` | One approval from someone other than the author |
-| `risk:medium` | Normal bug fixes: source changes under `Sources/**` or `Tools/*/Sources/**` that aren't high or low, up to **400 changed lines** (additions plus deletions across the whole PR); a bigger medium PR counts as **high**. Debt baselines (`.agents/*-baseline.json`, except the concurrency baseline) are medium. Any path not listed anywhere is **high** (fail closed) | None (auto-merge) |
-| `risk:low` | Only tests, docs (`*.md`), copy (`*.strings`), review images; or a small isolated fix: at most 2 source files and 40 changed source lines, **with** a test file changed | None (auto-merge) |
+The workflow has no `pull_request` or `pull_request_target` trigger. It runs on `workflow_run` (Swift CI / Repo Hygiene requested or completed), every 20 minutes, and by hand. Those always run the workflow file from `main`, which is also what lets the job use the main-only `automerge-app` environment holding the App key and the AI key. (GitHub blocks `pull_request_target` on public repos by default from 2026-11-02.) The job checks out `main` only and reads the PR's files and diff through the API; it never runs PR code.
 
-Tests:
-- **Modified tests keep the PR's tier.** Most fixes edit existing tests. Weakened assertions are left to CI and the AI review's P0/P1.
-- **Deleted tests are high**, and so are tests **renamed out of the test folders** (`Tests/**`, `Tools/*/Tests/**`, `test_*.py`, `test-*.py`) or **renamed to another extension** (for example `Tests/FooTests.swift` to `Tests/FooTests.md`). A same-extension move inside the test folders keeps the tier.
+**Until Justin creates the App** (`AUTOMERGE_APP_ID` unset) the gate only labels and logs: no trusted signal, no auto-merge.
 
-An empty or incomplete file list (GitHub stops at 3,000 files) is treated as high, and it needs Justin.
+## 2. Risk tiers
 
-The label is informational. The gate recomputes the tier from the file list every time, so removing or editing a label changes nothing.
+Each changed file, and the old name of a renamed file, is checked; **the highest match wins**. The tier is recomputed every run; the label is informational.
 
-## 2. AI review
+| Tier | What |
+|---|---|
+| `risk:high` (owner paths) | Release, version, Sparkle, appcast, cask, signing, notarization, entitlements, `Info.plist`, `server.json`, `glama.json`. **Every workflow and action, `CODEOWNERS`, the gate itself** (`risk-triage.py`, `test-risk-triage.py`, `auto-merge-gate.py`, the lane file, this doc) and the **CI harness** the required checks run (`scripts/ci/**`, `scripts/dev/linux-checks.sh`, `scripts/dev/agent-preflight.sh`, `scripts/dev/check-*.py`, `run-tests.sh`, `check.sh`, `run-*-smoke.sh`). |
+| `risk:high` | Audio capture and `Sources/Speech/**`; database, schema, migrations, reassignment log; permissions/TCC/entitlements; privacy egress (sanitizers, redactors, scrubbers, `*Privacy*`, event policies, crash reporting, telemetry, all of `Sources/Observability/**`, analytics preferences); `Package.swift`; agent instructions and config (`AGENTS.md`, `CLAUDE.md`, `WORKFLOW.md`, `.claude/**`, `.codex/**`, `.cursor/**`, `.agents/**` except debt baselines, `**/skills/**`, `**/SKILL.md`, `.agent-review/*.md`, `.github/*.md`), checked before the `*.md` = low rule; and code the release-candidate job runs beside the signing keychain (`Tools/TranscriptedQA/**`, `scripts/ops/privacy-leak-sweep.py`, `scripts/entrypoints/**`, `Tools/*/Package.swift`, `Package.resolved`). `docs/appcast.xml` is the live Sparkle feed (`SUFeedURL` points at `main`), so merging it is releasing: owner path. |
+| `risk:high` (owner-protected surfaces, from `AGENTS.md`) | Meeting detection and its prompt flow (`MicActivityMonitor`, `CameraActivityMonitor`, `MeetingPromptDetector*`, `MeetingPrompt*`, `AutoCallDetectionPreferences`); the Speakers directory (`SpeakerPeople*`, `SpeakerSettingsStore`); per-app Auto Enter (`DictationAutoSendPreferences`, `AutoEnter*`); model-cache inspection (`*ModelCache*`); the status item (`StatusItem*`); meeting-audio playback (`MeetingAudioPlayback*`). |
+| `risk:high` (harness guards) | `AutomatedLaunchEnvironment*`, `NativeSmokeIsolation*`, `scripts/ops/native-smoke-isolation.py`, `scripts/vm/**`. |
+| `risk:medium` | Other source changes up to **400 changed lines** for the whole PR (bigger is high). Debt baselines except the concurrency one. **Unknown paths are high.** |
+| `risk:low` | Only tests, docs, copy; or at most 2 source files and 40 source lines **with a runnable test changed** (`.swift`, `.py`, `.sh`, `.rb` under the test folders; `Tests/README.md` or fixtures are not proof). |
 
-On every push the triage job sends the PR diff to an AI model and posts (or updates) one comment with the tier, the reasons and the findings, each tagged `[P0]` (data loss, security, crash), `[P1]` (a real bug users will hit), `[P2]` or `[P3]`. A hidden verdict line records the head commit and the P0/P1 counts.
+Deleted tests, and tests renamed out of the test folders or to another extension, are high. Modified tests keep the PR's tier. An empty or incomplete file list is high.
 
-- **Provider secret:** none exists today. Add repo secret `AI_REVIEW_API_KEY` (Anthropic by default). Optional repo variables: `AI_REVIEW_PROVIDER` (`anthropic` or `openai`) and `AI_REVIEW_MODEL`.
-- **Degrades safely:** no key, a provider error, an unparseable answer, a diff over 120,000 characters, or a review for an older commit all count as *no AI result*, and **no AI result means no auto-merge**.
-- The P0/P1 count is the larger of the model's `COUNTS` line and the number of tagged findings, so an under-reported count can't clear the gate.
-- **Resolving findings:** push a fix (the next review must come back clean), or, if Justin judges a finding wrong, he adds the label `ai-findings-waived` and comments `ai-findings-waived <full head sha>`. The gate only honours that when @r3dbars did both, and only for low/medium: a waiver never lets a high-risk PR pass.
-- The diff is untrusted input. The prompt tells the model to ignore instructions in it, but an AI "clear" is never enough on its own: high-risk PRs still need people.
-- Fork PRs get a label but no AI call.
+## 3. AI review
 
-### Which verdicts count (forgery protection)
+Sent once per head commit; the verdict (head SHA, PR, status, P0/P1 counts) is stored in the App's `risk-gate` check run and reused for that commit. No key, a provider error, an unparseable answer, a diff over 120,000 characters, or a verdict for another commit all mean **no AI result, so no auto-merge**. The P0/P1 count is the larger of the model's `COUNTS` line and the tagged findings. Before the call, the diff is redacted: emails, URLs, credential-looking values, home directories and **any absolute path** (`/Applications/...`, `/workspace/...`, `~/...`). Fork PRs get no AI call.
 
-Any workflow in this repo can comment as `github-actions[bot]`, so the author alone proves nothing. Each verdict comment records the Actions run that wrote it (`run_id`) and the PR number. Both gates (`risk-gate` and the old `auto-merge-gate.py`) accept a verdict only when all of these hold:
-- the comment is by `github-actions[bot]`;
-- the PR targets the default branch;
-- the named run is in this repo, its path is `.github/workflows/risk-triage.yml`, and its event is `pull_request_target`, so the workflow file came from `main`;
-- the run's head SHA and head branch are the PR's current head, and they match the verdict's `sha`;
-- the comment was written while that run was going.
+There is **no waiver label** any more. A label or comment from @r3dbars proves nothing, because agents use that login too. If Justin thinks a finding is wrong, he merges by hand.
 
-Triage only runs for PRs into the default branch. A PR from the same branch into any other branch could run a modified copy of the workflow for the same SHA, so if one is open, every verdict is void.
+## 4. The gate decision
 
-Triage posts a new comment for each run instead of editing the old one, so the timing check holds. The newest verdict that passes these checks is the one that counts; a newer forged comment can't hide an older genuine P1.
+`risk-gate` concludes `success` only when all of these hold; otherwise a **high-risk PR concludes `failure`** ("Justin merges by hand") and anything else stays `in_progress` with the reasons. It is never `neutral` or `skipped`, which GitHub counts as passing a required check:
 
-Remaining limit: an account with write access can still run its own workflow on a branch and read secrets. That's true of any GitHub repo. To go further, Justin can put `AI_REVIEW_API_KEY` in an environment that only `main` can deploy to (optional; see section 6).
+1. Not a draft, not a fork, no hold label (`hold`, `do not merge`, `needs owner review`, `waiting-on-human`, `blocked`, `automerge:off`).
+2. `build-and-test` and `repo-hygiene` are **GitHub Actions check runs** (app 15368) that concluded `success` on the head commit. Commit statuses don't count. Any queued or in-progress run of a check (a rerun) means pending. A failure followed by a success on the same commit means **"passed on retry": pending**.
+3. The App-stored AI verdict for the head commit has no P0/P1.
+4. No trusted reviewer is requesting changes.
+5. The PR is low or medium. **High never gets success**, whoever the author and whatever the approvals.
+6. The branch isn't behind its base.
+7. Kill switch: repo or environment variable `AUTOMERGE_ENABLED`. `true` posts success and arms squash auto-merge (`--match-head-commit`); `signal-only` posts success but never arms; anything else, or unset, holds everything.
 
-## 3. The merge gate
-
-The gate publishes a commit status named `risk-gate` on the PR head. It is `success` only when **all** of these hold:
-
-1. Not a draft, branch is in this repo (forks never auto-merge), and no `hold`, `do not merge`, `needs owner review`, `waiting-on-human` or `blocked` label. That list is `HOLD_LABELS` in `risk-triage.py`, and the old lane gate uses the same list.
-2. `build-and-test` and `repo-hygiene` both concluded `success` on the head commit. Skipped, neutral, cancelled, pending and missing never count as green; the newest run of each check wins.
-3. The AI review exists for the head commit and has no unresolved P0/P1.
-4. No trusted reviewer's latest review requests changes.
-5. The PR is low or medium. **A high-risk PR never gets `success`**, whoever authored it (agent PRs are authored by @r3dbars too), however many approvals it has, and with or without `ai-findings-waived`. Its status lists what's still missing (e.g. approvals) as a note for Justin.
-
-When `risk-gate` is `success` and the PR is low or medium, the gate runs `gh pr merge --auto --squash --match-head-commit <sha>`. **High PRs are never auto-merged**: their `risk-gate` stays pending even after approvals, and Justin merges them by hand.
-
-**Fails closed.** The gate job runs with `if: always()`, so it runs even when triage failed or was cancelled. It then posts `risk-gate` as pending and turns off any auto-merge already on the PR. An error while evaluating a PR in the sweep does the same for that PR, and the sweep moves on.
-
-It runs on PR events, when Swift CI or Repo Hygiene finishes, every 20 minutes, and by hand:
+Only the App token arms auto-merge; disabling it is done with any token, and happens before a new result is posted. An error on one PR fails that PR closed (auto-merge off, `risk-gate` in progress) and the sweep moves on.
 
 ```bash
 python3 scripts/ops/risk-triage.py classify Sources/UI/Foo.swift Tests/FooTests.swift  # offline tier
-python3 scripts/ops/risk-triage.py triage --pr 2190          # dry run: print label + comment
-python3 scripts/ops/risk-triage.py gate --pr 2190            # dry run: print the decision
-python3 scripts/ops/risk-triage.py gate --apply              # what the workflow does, every open PR
+python3 scripts/ops/risk-triage.py gate --pr 2190          # dry run: print the decision
 ```
 
-## 4. Why `pull_request_target` is safe here
+## 5. No agent merges as Justin
 
-The workflow needs a write token and the AI secret, so it uses `pull_request_target`, which runs the workflow file from `main`, not from the PR. It checks out only the base or default branch (`persist-credentials: false`) and reads the PR's files and diff through the API as data. It never checks out, builds or runs PR code. There is deliberately no `pull_request_review` trigger, because that event runs the PR's own copy of the workflow.
+Agents run `gh` as @r3dbars, so anything "only @r3dbars can do" is something every agent can do. So:
+- No code path here merges or arms auto-merge with a person's token or `GITHUB_TOKEN`; only the gate App token. A test fails if any workflow or script calls `gh pr merge ... --admin`.
+- The lane gate refuses to merge without `GATE_TOKEN`.
+- What actually stops an agent with Justin's admin token from clicking merge is outside code: see "Justin only" in `automerge-trust-design.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
 
-A PR could add a workflow that posts a fake `risk-gate` status. That's why every file under `.github/workflows/` is high plus owner in the classifier and owned by @r3dbars in `CODEOWNERS`: high risk never passes `risk-gate` automatically, so such a PR can't merge without Justin merging it by hand.
+## 6. CODEOWNERS
 
-## 5. CODEOWNERS
-
-`.github/CODEOWNERS` assigns the release, signing, update-feed, entitlement, workflow and merge-policy paths to @r3dbars. It only routes review requests: "Require review from Code Owners" stays off (see setup step 3), because @r3dbars authors most PRs, agent PRs included, and GitHub never counts an author's own approval. Keep it in sync with `RELEASE_PATTERNS` in the script.
-
-## Open design decision before enabling auto-merge
-
-**Don't do setup step 1 (`allow_auto_merge`) until Justin picks one of these.** Two known holes remain. Both come from the same root cause: `risk-gate` and the AI verdict are things any workflow in this repo can produce, and `risk-gate` isn't a required check.
-
-1. **A PR's own workflow can arm auto-merge.** A same-repo PR can edit an existing `pull_request` workflow (for example `repo-hygiene.yml`) to request a write token and run `gh pr merge --auto` on itself. With 0 required approvals, it can merge its own high-risk change before the sweep turns auto-merge off.
-2. **The AI verdict can be forged.** A PR-controlled workflow can post a clean `github-actions[bot]` verdict that names a genuine triage run and lands inside that run's time window. The run checks pass, even though that run didn't write the comment.
-
-The options:
-
-- **A. Required GitHub App check run.** Install a small GitHub App, or use a dedicated app token held only by the trusted workflow, and have the gate publish its decision and the AI verdict as a **check run from that app**. Make that check required on `main`, pinned to the app's ID. PR workflows only have `GITHUB_TOKEN` (the Actions app), so they can't produce it, and that closes both holes. High-risk PRs would then need a way for Justin to merge: have the app mark them `neutral` or `success` with "manual merge by owner", or let Justin bypass the ruleset.
-- **B. Ruleset plus signed verdicts.** Add a ruleset on `main` that needs one approving review for changes under `.github/workflows/**` (and `.github/actions/**`), so a PR can't change a workflow without someone signing off. That closes hole 1, as long as only workflows from `main` can arm auto-merge. Then move `AI_REVIEW_API_KEY`, plus a new `VERDICT_SIGNING_KEY`, into an environment only `main` can deploy to (setup step 7). Triage signs each verdict with an HMAC over `{pr, sha, run_id, p0, p1, status}`, and both gates check the signature. Workflows from PR branches can't read a main-only environment, so they can't sign. That closes hole 2.
-
-Until Justin decides, the workflow is safe to merge as-is with `allow_auto_merge` off: it only labels PRs, comments and posts `risk-gate`.
-
-## 6. Repo settings this needs (owner applies; agents don't)
-
-Read 2026-10-09: `allow_auto_merge` is off; squash, merge and rebase merges are all allowed; branch protection requires `build-and-test` and `repo-hygiene` (not strict), 0 approvals, no code-owner review, conversation resolution on, admins enforced; no rulesets; no AI provider secret.
-
-1. Turn on auto-merge: `gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=true`
-2. Do **not** add `risk-gate` to the required checks. High-risk PRs keep `risk-gate` pending forever by design, and with admins enforced a required pending check would block Justin's manual merge too. The gate enforces itself instead: it is the only thing that turns on auto-merge, and only for a green low/medium PR. Nothing to run for this step.
-3. Dismiss stale approvals on new pushes (code-owner review stays off):
-   `gh api -X PATCH repos/r3dbars/transcripted/branches/main/protection/required_pull_request_reviews -F dismiss_stale_reviews=true` (do not enable require_code_owner_reviews: GitHub never counts self-approval, and with admins enforced it would lock @r3dbars out of their own release PRs)
-4. Add the AI key: `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted` (and optionally `gh variable set AI_REVIEW_PROVIDER -R r3dbars/transcripted -b anthropic`).
-5. Optional: `gh secret set AUTOMERGE_TOKEN -R r3dbars/transcripted` with a fine-grained token (contents, pull requests and statuses write), so auto-merges trigger push CI on `main`. Merges made with the default `GITHUB_TOKEN` don't start other workflows.
-6. Create the labels: `for l in risk:low risk:medium risk:high ai-findings-waived; do gh label create "$l" -R r3dbars/transcripted; done`
-7. Optional hardening: keep the AI key in an environment only `main` can use:
-   `gh api -X PUT repos/r3dbars/transcripted/environments/ai-review -F 'deployment_branch_policy[protected_branches]=true' -F 'deployment_branch_policy[custom_branch_policies]=false'`
-   and `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted --env ai-review`. Then a follow-up PR adds `environment: ai-review` to the triage job.
-
-What the settings change, exactly:
-- Before step 1, GitHub refuses `gh pr merge --auto`, so the gate can't merge anything; it only labels, comments and posts `risk-gate`. Manual merges work as today (they need `build-and-test` and `repo-hygiene`).
-- After step 1, the gate turns on squash auto-merge for low/medium PRs whose `risk-gate` is green, and turns it off again if a later push breaks the gate.
-- `risk-gate` is never a required check, so branch protection does not stop a person (or an agent with merge rights) from merging by hand while it is pending. Agents must not merge high-risk PRs; Justin merges those by hand.
-- High-risk PRs never auto-merge: `risk-gate` stays pending for them whoever the author is, approvals and `ai-findings-waived` included.
+`.github/CODEOWNERS` routes review requests for owner paths to @r3dbars. "Require review from Code Owners" stays off: GitHub never counts an author's approval and @r3dbars authors most PRs.
 
 ## Turning it off
 
-Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted`), or add `hold` to a single PR. Turning `allow_auto_merge` back off (`gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=false`) stops every automatic merge.
-
-## Hardening notes
-
-- `AGENTS.md` and `CLAUDE.md` (any directory) are high risk: they steer every engineer agent.
-- High-risk PRs never pass `risk-gate` automatically, whoever the author is (agent PRs on `cursor/*` and `agent/*` branches are also authored by @r3dbars). The gate stays pending and Justin merges them by hand; the `ai-findings-waived` label and comment never bypass high risk.
-- A review requesting changes blocks the gate at every risk level.
-- `ai-findings-waived` only counts when @r3dbars added the label and also commented `ai-findings-waived <full head sha>` for the current head. A new push voids the waiver.
-- The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app.
-- If a PR has auto-merge enabled but the gate no longer passes (or it is high risk), the gate turns auto-merge off.
-- Release build entrypoints (`scripts/entrypoints/build*.sh`, `scripts/entrypoints/lib/`) are owner-required, like the root wrappers.
-- Diffs are redacted (emails, home paths, credential-looking values) before any external AI call.
-- Both jobs check out the default branch only. Reads and the `risk-gate` status use `GITHUB_TOKEN`; `AUTOMERGE_TOKEN` is used only for the merge call.
-- A PR whose branch is behind its base never gets auto-merge enabled; it must be updated so CI reruns on current main.
-- Code-owner review: GitHub never lets the author satisfy a code-owner review, and @r3dbars authors most PRs, so "Require review from Code Owners" stays **off**. Owner sign-off on release/signing paths comes from `risk-gate` (high, never auto-merged) plus the owner merging by hand.
-- Redaction is pattern-based (emails, absolute paths, URLs, credential-looking values). It cannot recognise transcript text or names; keep real transcripts out of PR diffs.
-- Known limit: a same-repo PR that adds a `pull_request` workflow could post its own `risk-gate` status (it is also the Actions app). Because `risk-gate` is not required and the gate itself only enables auto-merge after recomputing the verdict from the file list, a forged status can't make this gate merge anything; and workflow changes are high, so the gate never auto-merges them.
-- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file, renaming it out of the test folders, or renaming it to another extension is high; the old lane gate also requires the trusted AI verdict; medium over 400 changed lines is high; the old lane gate never merges a triage-high PR; privacy egress files (`*Sanitizer*`, `*Sanitization*`, `*Redactor*`, `*Scrubber*`, `*Privacy*`, `*EventPolicy*`, plus `SentryRuntimeConfiguration`, `AnalyticsReporter`, `TelemetryContext`, `AnalyticsPreferences`) are high; the gate runs in a per-PR concurrency group (`risk-gate-<PR>`, or `risk-gate-sweep`), so no other PR's event or the sweep can drop a PR's pending gate; an empty or incomplete file list is high and owner-required; change requests from untrusted accounts are ignored; the behind-base guard applies to every green result, high included.
+`gh variable set AUTOMERGE_ENABLED -R r3dbars/transcripted --env automerge-app -b false`, or add `automerge:off`/`hold` to one PR, or `gh workflow disable "Risk Triage" -R r3dbars/transcripted`.
