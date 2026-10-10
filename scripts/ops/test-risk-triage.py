@@ -48,8 +48,8 @@ class ClassifierTests(unittest.TestCase):
             self.assertEqual((risk(path)["risk"], risk(path)["owner_required"]), ("high", True), path)
 
     def test_redact(self):
-        out = rt.redact("mail a@b.com at /Users/justin/x token=abcdefghijk ghp_" + "a" * 30)
-        for bad in ("a@b.com", "justin", "abcdefghijk", "ghp_"):
+        out = rt.redact("mail a@b.com at /Users/justin/x /tmp/meet.wav https://x.io/q token=abcdefghijk ghp_" + "a" * 30)
+        for bad in ("a@b.com", "justin", "meet.wav", "x.io", "abcdefghijk", "ghp_"):
             self.assertNotIn(bad, out)
 
     def test_agent_instructions_are_high(self):
@@ -169,6 +169,9 @@ class ApprovalTests(unittest.TestCase):
         ok, why = rt.approvals_ok([], "r3dbars", SHA, True)
         self.assertTrue(ok)
         self.assertIn("manually", why)
+
+    def test_owner_exemption_survives_other_approvals(self):
+        self.assertTrue(rt.approvals_ok([review("alice")], "r3dbars", SHA, True)[0])
 
     def test_owner_authored_still_blocked_by_changes_requested(self):
         self.assertFalse(rt.approvals_ok([review("alice", "CHANGES_REQUESTED")], "r3dbars", SHA, True)[0])

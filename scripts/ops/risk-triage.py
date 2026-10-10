@@ -244,7 +244,7 @@ def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required
                  if r["state"] == "APPROVED" and r.get("commit_id") == head_sha and u and u != author}
     if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
         return False, "a review requests changes"
-    if author == OWNER_LOGIN and not approvers:
+    if author == OWNER_LOGIN:
         return True, f"owner-authored: @{OWNER_LOGIN} merges manually"
     if not approvers:
         return False, "needs an approval on the head commit from someone other than the author"
@@ -306,6 +306,8 @@ def pr_files(n: int) -> list[dict]:
 _REDACTIONS = (
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "<email>"),
     (re.compile(r"(?:/Users|/home)/[^/\s'\"]+"), "<home>"),
+    (re.compile(r"(?<![\w.])/(?:private|tmp|var|Volumes|opt|etc)/[^\s'\"]*"), "<path>"),
+    (re.compile(r"https?://[^\s)'\"]+"), "<url>"),
     (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[abpors]-[A-Za-z0-9-]{10,})\b"), "<secret>"),
     (re.compile(r"(?i)((?:api[_-]?key|token|secret|password)\s*[:=]\s*)['\"]?[^\s'\"]{8,}"), r"\1<secret>"),
 )
@@ -414,12 +416,11 @@ def evaluate(n: int) -> tuple[dict, dict]:
     if WAIVE_LABEL in labels:
         events = gh_json(f"repos/{REPO}/issues/{n}/events?per_page=100", paginate=True)
         adds = [e for e in events if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == WAIVE_LABEL]
-        # The waiver covers only the commit it was applied to: a label added
-        # before the current head commit was committed does not count.
-        head = gh_json(f"repos/{REPO}/commits/{sha}")
-        head_at = ((head.get("commit") or {}).get("committer") or {}).get("date") or ""
-        waiver = (bool(adds) and (adds[-1].get("actor") or {}).get("login") == OWNER_LOGIN
-                  and bool(head_at) and (adds[-1].get("created_at") or "") >= head_at)
+        # The waiver covers one exact head: the owner must also comment
+        # "ai-findings-waived <full head sha>". A new push voids it.
+        waived_head = any(c["user"]["login"] == OWNER_LOGIN and f"{WAIVE_LABEL} {sha}" in (c.get("body") or "")
+                          for c in comments)
+        waiver = bool(adds) and (adds[-1].get("actor") or {}).get("login") == OWNER_LOGIN and waived_head
     reviews = gh_json(f"repos/{REPO}/pulls/{n}/reviews?per_page=100", paginate=True)
     cmp = gh_json(f"repos/{REPO}/compare/{pr['base']['sha']}...{sha}")
     base_now = gh_json(f"repos/{REPO}/commits/{pr['base']['ref']}")["sha"]
@@ -441,6 +442,10 @@ def cmd_gate(n: int | None, apply: bool) -> int:
         print(json.dumps({"pr": num, **res}))
         if not apply:
             continue
+        if pr.get("auto_merge") and not res["automerge"]:
+            # Turn stale auto-merge off BEFORE posting any status, so a green
+            # gate on a high-risk PR can't trigger an auto-merge set earlier.
+            subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=True)
         desc = ("; ".join(res["why"]))[:139]
         # The status is always posted with the workflow's GITHUB_TOKEN so it is
         # attributed to the GitHub Actions app (branch protection pins it there).
@@ -448,9 +453,6 @@ def cmd_gate(n: int | None, apply: bool) -> int:
         subprocess.run(["gh", "api", f"repos/{REPO}/statuses/{pr['head']['sha']}", "-f", f"state={res['state']}",
            "-f", f"context={GATE_CONTEXT}", "-f", f"description={desc}"],
                        check=True, text=True, capture_output=True, env=status_env)
-        if pr.get("auto_merge") and not res["automerge"]:
-            # Auto-merge stays on only while the gate passes for a low/medium PR.
-            subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=False)
         if res["automerge"] and not pr.get("auto_merge"):
             merge_env = {**os.environ, "GH_TOKEN": os.environ.get("MERGE_TOKEN") or os.environ.get("GH_TOKEN", "")}
             subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--auto", "--squash",

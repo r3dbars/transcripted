@@ -32,7 +32,7 @@ permissions:
 
 jobs:
   triage:
-    if: github.event_name == 'pull_request_target' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review"]'), github.event.action)
+    if: github.event_name == 'pull_request_target' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review","edited"]'), github.event.action)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:

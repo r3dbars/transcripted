@@ -86,7 +86,7 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - `AGENTS.md` and `CLAUDE.md` (any directory) are high risk: they steer every engineer agent.
 - Owner-authored high-risk PRs: GitHub won't let an author approve their own PR, so when @r3dbars is the author and no other approval exists, `risk-gate` goes green as "owner merges manually". It still never auto-merges; merging by hand is the owner's sign-off.
 - A review requesting changes blocks the gate at every risk level.
-- `ai-findings-waived` only counts when @r3dbars added it after the current head commit was committed. A new push voids the waiver.
+- `ai-findings-waived` only counts when @r3dbars added the label and also commented `ai-findings-waived <full head sha>` for the current head. A new push voids the waiver.
 - The `risk-gate` status is always posted with the workflow's `GITHUB_TOKEN`, so it is attributed to the GitHub Actions app; branch protection pins the required check to that app (app_id 15368).
 - If a PR has auto-merge enabled but the gate no longer passes (or it is high risk), the gate turns auto-merge off.
 - Release build entrypoints (`scripts/entrypoints/build*.sh`, `scripts/entrypoints/lib/`) are owner-required, like the root wrappers.
@@ -94,3 +94,5 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - Both jobs check out the default branch only. Reads and the `risk-gate` status use `GITHUB_TOKEN`; `AUTOMERGE_TOKEN` is used only for the merge call.
 - A PR whose branch is behind its base never gets auto-merge enabled; it must be updated so CI reruns on current main.
 - Code-owner review: GitHub never lets the author satisfy a code-owner review, and @r3dbars authors most PRs, so "Require review from Code Owners" stays **off**. Owner sign-off on release/signing paths comes from `risk-gate` (high, never auto-merged) plus the owner merging by hand.
+- Redaction is pattern-based (emails, absolute paths, URLs, credential-looking values). It cannot recognise transcript text or names; keep real transcripts out of PR diffs.
+- Known limit: a same-repo PR that adds a `pull_request` workflow could post its own `risk-gate` status (it is also the Actions app). Same-repo push access is limited to the owner's agents; workflow changes are high/owner-only and never auto-merged by this gate.
