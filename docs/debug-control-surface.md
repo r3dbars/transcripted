@@ -60,8 +60,8 @@ transcripted-debug://settings/set?key=show_in_dock&value=false
 |---|---|---|---|---|
 | `ping` | `ping` | none | channel is up; `result.pid` | none |
 | `state` | `state` / `status` | none | snapshot in `result` | none |
-| `start_dictation` | `dictation start` | none | a dictation session began | `dictation_already_active`, `dictation_not_started` |
-| `stop_dictation` | `dictation stop` | `paste`: bool, default `false` | stop was requested | `dictation_not_active`, `invalid_arg:paste` |
+| `start_dictation` | `dictation start` | none | a dictation session began; `result` is the snapshot after the settle wait | `dictation_already_active`, `dictation_not_started` |
+| `stop_dictation` | `dictation stop` | `paste`: bool, default `false` | stop was requested; `result` is the snapshot after the settle wait | `dictation_not_active`, `invalid_arg:paste` |
 | `start_meeting` | `meeting start` | none | capture is recording | `meeting_capture_active`, `meeting_not_started` |
 | `stop_meeting` | `meeting stop` | none | capture stopped and transcription was queued | `meeting_not_recording` |
 | `import_audio` | `import /abs/path` | `path`: absolute file | import was queued | `meeting_capture_active`, `file_not_found`, `import_not_started`, `missing_arg:path`, `invalid_arg:path` |
@@ -71,6 +71,19 @@ transcripted-debug://settings/set?key=show_in_dock&value=false
 | `settings_set` | `settings set show_in_dock false` | `key`, `value` | the allowlisted bool is visible to this process only (argument domain; not persisted) | `missing_arg:key`, `missing_arg:value`, `invalid_arg:value`, `unknown_setting` |
 
 `start_dictation` / `stop_dictation` / meeting start and stop call the same session APIs as the menu bar (minus bringing another app forward on dictation start). `stop_dictation` only pastes when `paste` is true.
+
+`--dir`, `--timeout`, and `--paste` are accepted before or after the subcommand (`dictation start --dir DIR` or `--dir DIR dictation start`).
+
+### Dictation start/stop settle
+
+`startDictation` returns as soon as `isDictating` is true, while the mic/STT graph is still coming up — an immediate snapshot shows `stt_recording: false`. `stopDictationAndPaste` returns before `isDictating` flips — an immediate snapshot still shows `dictation_active: true`.
+
+The channel waits up to 2 seconds (20 ms polls) for:
+
+- start: `dictation_active && stt_recording`
+- stop: `!dictation_active`
+
+Then it writes `result` from the latest snapshot. A timeout is still `ok: true` if the session command itself succeeded — check the flags in `result`, not only `ok`. Meeting start/stop already await the session APIs, so they do not use this wait.
 
 Every command can also fail with `harness_inactive`, `control_dir_required`, `malformed_json`, `not_an_object`, `payload_too_large`, `not_a_regular_file`, `wrong_owner`, `unreadable_file`, `missing_id`, `invalid_id`, `missing_command`, `invalid_command`, `unknown_command`, `invalid_args`, `unknown_arg[:name]`, `unknown_scheme`, `malformed_url`, or `app_unavailable`.
 
@@ -152,12 +165,11 @@ python3 scripts/dev/transcripted-debug.py state --dir "$CTRL"
 # result.schema_version == 1, result.dictation_active == false
 
 python3 scripts/dev/transcripted-debug.py dictation start --dir "$CTRL"
-python3 scripts/dev/transcripted-debug.py state --dir "$CTRL"
-# result.dictation_active == true
+# that response's result.dictation_active == true and result.stt_recording == true
+# (waits up to 2 seconds; if STT never starts, ok is still true and stt_recording may stay false)
 
 python3 scripts/dev/transcripted-debug.py dictation stop --dir "$CTRL"
-python3 scripts/dev/transcripted-debug.py state --dir "$CTRL"
-# result.dictation_active == false
+# that response's result.dictation_active == false
 ```
 
 Quit the debug app when finished. A release/beta binary must not contain `TRANSCRIPTED_DEBUG_CONTROL_DIR`; `bash build-beta.sh` fails if it does.

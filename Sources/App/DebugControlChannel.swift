@@ -286,6 +286,7 @@ final class DebugControlChannel {
             guard appDelegate.sessionController.isDictating else {
                 return .failure("dictation_not_started")
             }
+            _ = await waitForDictationSettle(started: true)
             return .success()
 
         case .stopDictation(let paste):
@@ -293,6 +294,7 @@ final class DebugControlChannel {
                 return .failure("dictation_not_active")
             }
             appDelegate.sessionController.stopDictationAndPaste(trigger: .menu, autoPaste: paste)
+            _ = await waitForDictationSettle(started: false)
             return .success()
 
         case .startMeeting:
@@ -344,6 +346,24 @@ final class DebugControlChannel {
         case .settingsSet(let key, let value):
             applySetting(key, value: value)
             return .success([key: value ? "true" : "false"])
+        }
+    }
+
+    /// Yields on the main actor so session/STT work can run, then returns
+    /// whether the start or stop predicate settled before the timeout.
+    private func waitForDictationSettle(started: Bool) async -> Bool {
+        let startedAt = LabControlClock.monotonicMilliseconds()
+        while true {
+            let active = appDelegate?.sessionController.isDictating ?? false
+            let recording = appDelegate?.appState.sttRouter.isRecording ?? false
+            let settled = started
+                ? DebugControlSettlePolicy.startedSettled(dictationActive: active, sttRecording: recording)
+                : DebugControlSettlePolicy.stoppedSettled(dictationActive: active)
+            let elapsed = LabControlClock.monotonicMilliseconds() - startedAt
+            if !DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: elapsed, settled: settled) {
+                return settled
+            }
+            try? await Task.sleep(nanoseconds: UInt64(DebugControlSettlePolicy.pollMilliseconds) * 1_000_000)
         }
     }
 

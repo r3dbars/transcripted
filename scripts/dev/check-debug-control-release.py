@@ -87,6 +87,10 @@ def channel_is_guarded(text: str) -> list[str]:
         problems.append(f"{CHANNEL}: wrap the whole file in one `#if {COMPILE_FLAG}`")
     if CONTROL_DIR not in text:
         problems.append(f"{CHANNEL}: must name {CONTROL_DIR} (the release binary grep target)")
+    if "waitForDictationSettle" not in text:
+        problems.append(f"{CHANNEL}: start/stop dictation must wait for the settle transition")
+    if "DebugControlSettlePolicy" not in text:
+        problems.append(f"{CHANNEL}: must use DebugControlSettlePolicy for the dictation wait")
     return problems
 
 
@@ -216,6 +220,8 @@ def check(root: Path) -> list[str]:
             problems.append(f"{DOCS}: must name the {URL_SCHEME} URL scheme")
         if CONTROL_DIR not in docs:
             problems.append(f"{DOCS}: must name {CONTROL_DIR}")
+        if "waits up to 2 seconds" not in docs:
+            problems.append(f"{DOCS}: must document the dictation start/stop settle wait")
 
     return problems
 
@@ -239,7 +245,10 @@ def self_test() -> None:
     good = {
         CHANNEL: (
             f"// header\n#if {COMPILE_FLAG}\n"
-            f'static let environmentKey = "{CONTROL_DIR}"\n#endif\n'
+            f'static let environmentKey = "{CONTROL_DIR}"\n'
+            "func waitForDictationSettle(started: Bool) async -> Bool { true }\n"
+            "DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: true)\n"
+            "#endif\n"
         ),
         COMMAND: "enum DebugControlCommandParser {}\n",
         APP: (
@@ -275,6 +284,7 @@ def self_test() -> None:
             "schema_version\n"
             + "\n".join(REQUIRED_COMMANDS)
             + f"\n{URL_SCHEME}\n{CONTROL_DIR}\n"
+            + "waits up to 2 seconds\n"
         ),
         INFO_PLIST: "<plist></plist>\n",
     }
@@ -292,6 +302,8 @@ def self_test() -> None:
     cases = [
         (CHANNEL, f"#if {COMPILE_FLAG}", "#if DEBUG", "unguarded channel"),
         (CHANNEL, CONTROL_DIR, "OTHER_DIR", "channel missing distinctive string"),
+        (CHANNEL, "waitForDictationSettle", "waitForever", "channel missing dictation settle wait"),
+        (CHANNEL, "DebugControlSettlePolicy", "OtherPolicy", "channel missing settle policy"),
         (COMMAND, "enum DebugControlCommandParser {}", f"let x = \"{CONTROL_DIR}\"", "command leaked env name"),
         (ALE, HARNESS_KEY, "OTHER_HARNESS", "ALE missing harness key"),
         (ALE, f'static let keys = ["{HARNESS_KEY}"]\n', f'static let keys = ["{HARNESS_KEY}", "{CONTROL_DIR}"]\n', "ALE leaked env name"),
@@ -304,6 +316,7 @@ def self_test() -> None:
         (INFO_PLIST, "<plist></plist>", f"<string>{URL_SCHEME}</string>", "repo Info.plist registered scheme"),
         (CLI, HARNESS_KEY, "OTHER", "CLI missing harness key"),
         (DOCS, "schema_version", "no_schema", "docs missing schema"),
+        (DOCS, "waits up to 2 seconds", "no settle wait", "docs missing settle wait"),
     ]
     for rel, old, new, why in cases:
         broken = dict(good)

@@ -247,6 +247,28 @@ enum DebugControlMeetingGate {
     }
 }
 
+/// `startDictation` returns once `isDictating` is true while the mic/STT
+/// graph is still coming up. `stopDictationAndPaste` returns before
+/// `isDictating` flips. The channel waits on these predicates (20 ms
+/// polls, 2 s cap) and then snapshots live state. A timeout still
+/// returns `ok: true` with the latest flags.
+enum DebugControlSettlePolicy {
+    static let timeoutMilliseconds = 2_000
+    static let pollMilliseconds = 20
+
+    static func startedSettled(dictationActive: Bool, sttRecording: Bool) -> Bool {
+        dictationActive && sttRecording
+    }
+
+    static func stoppedSettled(dictationActive: Bool) -> Bool {
+        !dictationActive
+    }
+
+    static func shouldKeepWaiting(elapsedMilliseconds: Int, settled: Bool) -> Bool {
+        !settled && elapsedMilliseconds < timeoutMilliseconds
+    }
+}
+
 enum DebugControlSessionPolicy {
     static func apply(
         _ action: DebugControlAction,

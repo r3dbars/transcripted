@@ -29,8 +29,9 @@ import time
 import unittest
 import uuid
 from collections.abc import Callable, Mapping
+from os import PathLike
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional, Union
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CONTROL_ENV = "TRANSCRIPTED_DEBUG_CONTROL_DIR"
@@ -68,7 +69,7 @@ class DebugControlError(RuntimeError):
     pass
 
 
-def control_dir(raw: str | os.PathLike[str]) -> Path:
+def control_dir(raw: Union[str, PathLike]) -> Path:
     return Path(raw).expanduser().resolve()
 
 
@@ -156,7 +157,7 @@ def read_complete_lines(path: Path, offset: int) -> tuple[list[str], int]:
     return lines, offset + len(complete)
 
 
-def wait_for_response(root: Path, command_id: str, timeout_s: float, start_offset: int = 0) -> dict[str, Any] | None:
+def wait_for_response(root: Path, command_id: str, timeout_s: float, start_offset: int = 0) -> Optional[dict[str, Any]]:
     responses = root / "responses.jsonl"
     offset = start_offset
     deadline = time.monotonic() + timeout_s
@@ -181,7 +182,7 @@ def responses_size(root: Path) -> int:
         return 0
 
 
-def send(root: Path, command: str, args: Mapping[str, Any], timeout_s: float, command_id: str | None = None) -> tuple[int, dict[str, Any]]:
+def send(root: Path, command: str, args: Mapping[str, Any], timeout_s: float, command_id: Optional[str] = None) -> tuple[int, dict[str, Any]]:
     command_id = command_id or new_command_id()
     start_offset = responses_size(root)
     path = write_command(root, command, args, command_id)
@@ -214,9 +215,9 @@ def resolve_executable(app: Path) -> Path:
 def launch_plan(
     root: Path,
     app: Path,
-    container: Path | None = None,
+    container: Optional[Path] = None,
     allow_second_instance: bool = False,
-    use_open: bool | None = None,
+    use_open: Optional[bool] = None,
     telemetry_off: bool = True,
 ) -> dict[str, Any]:
     app_args = list(TELEMETRY_OFF_ARGS) if telemetry_off else []
@@ -239,10 +240,12 @@ def launch_plan(
     return {"argv": argv, "env": extra_env, "uses_open": use_open}
 
 
-DefaultsReader = Callable[[str, str], str | None]
+# PEP 604 `X | Y` crashes macOS /usr/bin/python3 3.9.6 at runtime on
+# assignment (from __future__ import annotations does not postpone aliases).
+DefaultsReader = Callable[[str, str], Optional[str]]
 
 
-def read_default(domain: str, key: str) -> str | None:
+def read_default(domain: str, key: str) -> Optional[str]:
     try:
         result = subprocess.run(
             ["defaults", "read", domain, key],
@@ -259,9 +262,9 @@ def read_default(domain: str, key: str) -> str | None:
 
 
 def launch_safety_problems(
-    container: Path | None,
+    container: Optional[Path],
     use_real_library: bool,
-    reader: DefaultsReader | None = None,
+    reader: Optional[DefaultsReader] = None,
 ) -> list[str]:
     problems: list[str] = []
     if container is None and not use_real_library:
@@ -292,11 +295,11 @@ def launch(
     root: Path,
     app: Path,
     wait_s: float,
-    container: Path | None = None,
+    container: Optional[Path] = None,
     use_real_library: bool = False,
     allow_second_instance: bool = False,
-    use_open: bool | None = None,
-    reader: DefaultsReader | None = None,
+    use_open: Optional[bool] = None,
+    reader: Optional[DefaultsReader] = None,
 ) -> tuple[int, dict[str, Any]]:
     problems = launch_safety_problems(container, use_real_library, reader)
     if problems:
@@ -405,6 +408,81 @@ class DebugControlSelfTests(unittest.TestCase):
             self.assertEqual(report["response"]["schema_version"], SCHEMA_VERSION)
             self.assertTrue(report["response"]["ok"])
 
+    def test_dir_is_accepted_after_the_subcommand(self) -> None:
+        parser = build_parser()
+        after = parser.parse_args(["dictation", "start", "--dir", "/tmp/ctrl"])
+        self.assertEqual(after.dir, "/tmp/ctrl")
+        self.assertEqual(after.verb, "dictation")
+        self.assertEqual(after.action, "start")
+
+        before = parser.parse_args(["--dir", "/tmp/ctrl", "dictation", "start"])
+        self.assertEqual(before.dir, "/tmp/ctrl")
+
+        launch = parser.parse_args([
+            "launch",
+            "--app",
+            "/tmp/Transcripted.app",
+            "--dir",
+            "/tmp/ctrl",
+            "--container",
+            "/tmp/c",
+        ])
+        self.assertEqual(launch.dir, "/tmp/ctrl")
+        self.assertEqual(launch.app, "/tmp/Transcripted.app")
+        self.assertEqual(launch.container, "/tmp/c")
+
+        parent_timeout = parser.parse_args(["--timeout", "5", "state", "--dir", "/tmp/ctrl"])
+        self.assertEqual(parent_timeout.timeout, 5.0)
+        self.assertEqual(parent_timeout.dir, "/tmp/ctrl")
+
+        after_timeout = parser.parse_args(["state", "--dir", "/tmp/ctrl", "--timeout", "8"])
+        self.assertEqual(after_timeout.timeout, 8.0)
+
+        paste_after = parser.parse_args(["dictation", "stop", "--dir", "/tmp/ctrl", "--paste"])
+        self.assertTrue(paste_after.paste)
+        paste_before = parser.parse_args(["--paste", "dictation", "stop", "--dir", "/tmp/ctrl"])
+        self.assertTrue(paste_before.paste)
+
+    def test_runtime_type_aliases_stay_python39_safe(self) -> None:
+        import ast
+
+        tree = ast.parse(Path(__file__).read_text(encoding="utf-8"))
+        bit_or_lines = [
+            node.lineno
+            for node in ast.walk(tree)
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr)
+        ]
+        self.assertEqual(
+            bit_or_lines,
+            [],
+            "PEP 604 X|Y unions crash macOS /usr/bin/python3 3.9.6; use Optional/Union",
+        )
+        from typing import get_args
+
+        self.assertEqual(
+            set(get_args(DefaultsReader.__args__[-1])),
+            {str, type(None)},
+            "DefaultsReader must use Optional[str], not a PEP 604 union",
+        )
+
+
+def add_shared_runtime_flags(target: argparse.ArgumentParser, *, include_timeout_and_paste: bool = True) -> None:
+    """Accept --dir (and the other globals) after the subcommand too.
+
+    default=SUPPRESS so a parent-level flag is not overwritten when the
+    same flag is omitted after the verb.
+    """
+    target.add_argument("--dir", default=argparse.SUPPRESS, help=f"control directory ({CONTROL_ENV})")
+    if not include_timeout_and_paste:
+        return
+    target.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="seconds to wait for a response")
+    target.add_argument(
+        "--paste",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="stop_dictation only: paste into the frontmost app",
+    )
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -414,33 +492,39 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--self-test", action="store_true")
     sub = parser.add_subparsers(dest="verb")
     launch_cmd = sub.add_parser("launch")
+    add_shared_runtime_flags(launch_cmd, include_timeout_and_paste=False)
     launch_cmd.add_argument("--app", required=True)
     launch_cmd.add_argument("--container")
     launch_cmd.add_argument("--use-real-library", action="store_true")
     launch_cmd.add_argument("--allow-second-instance", action="store_true")
     launch_cmd.add_argument("--exec", action="store_true", help="run the binary directly instead of open -n")
     launch_cmd.add_argument("--wait", type=float, default=30.0)
-    sub.add_parser("state")
-    sub.add_parser("status")
-    sub.add_parser("ping")
+    for name in ("state", "status", "ping"):
+        add_shared_runtime_flags(sub.add_parser(name))
     dictation = sub.add_parser("dictation")
+    add_shared_runtime_flags(dictation)
     dictation.add_argument("action", choices=["start", "stop"])
     meeting = sub.add_parser("meeting")
+    add_shared_runtime_flags(meeting)
     meeting.add_argument("action", choices=["start", "stop"])
     import_cmd = sub.add_parser("import")
+    add_shared_runtime_flags(import_cmd)
     import_cmd.add_argument("path")
     paste_target = sub.add_parser("paste-target")
+    add_shared_runtime_flags(paste_target)
     paste_target.add_argument("action", choices=["open"])
     open_cmd = sub.add_parser("open")
+    add_shared_runtime_flags(open_cmd)
     open_cmd.add_argument("screen")
     settings = sub.add_parser("settings")
+    add_shared_runtime_flags(settings)
     settings.add_argument("action", choices=["get", "set"])
     settings.add_argument("key")
     settings.add_argument("value", nargs="?")
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: Optional[list[str]] = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.self_test:

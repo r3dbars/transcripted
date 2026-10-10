@@ -727,6 +727,38 @@ private final class TranscriptedE2ESmokeHarness {
             throw E2ESmokeError.failed("debug control URL parse should accept settings get")
         }
         try expect(request.action == .settingsGet(key: "auto_detect_calls"), "debug control URL should map to settings_get")
+
+        try expect(
+            DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: true),
+            "debug control start settle needs dictation and STT recording"
+        )
+        try expect(
+            !DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: false),
+            "debug control must not treat a pre-STT start snapshot as settled"
+        )
+        try expect(
+            DebugControlSettlePolicy.stoppedSettled(dictationActive: false),
+            "debug control stop settle needs dictation inactive"
+        )
+        try expect(
+            !DebugControlSettlePolicy.stoppedSettled(dictationActive: true),
+            "debug control must not treat a still-active stop snapshot as settled"
+        )
+        try expect(
+            DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 0, settled: false),
+            "debug control should keep waiting before the settle timeout"
+        )
+        try expect(
+            !DebugControlSettlePolicy.shouldKeepWaiting(
+                elapsedMilliseconds: DebugControlSettlePolicy.timeoutMilliseconds,
+                settled: false
+            ),
+            "debug control should stop waiting at the settle timeout"
+        )
+        try expect(
+            !DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 0, settled: true),
+            "debug control should return as soon as dictation has settled"
+        )
     }
 }
 

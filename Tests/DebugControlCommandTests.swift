@@ -1,7 +1,8 @@
 // Covers the pure half of the debug test control surface
 // (DebugControlCommand.swift): every command through JSON, argv and the
 // URL scheme; the AutomatedLaunchEnvironment gate; settings and screen
-// allowlists; session start/stop; and the versioned state JSON. The
+// allowlists; session start/stop; dictation settle predicates; and the
+// versioned state JSON. The
 // runtime half (DebugControlChannel.swift) is compiled only into debug
 // builds (`build.sh`) and is driven on a Mac with
 // scripts/dev/transcripted-debug.py.
@@ -103,6 +104,64 @@ func testDebugControlCommand() {
         snapshot.meetingState = "ready"
         assertEqual(DebugControlSessionPolicy.apply(.stopMeeting, to: snapshot).failureCode(), "meeting_not_recording")
         assertNil(DebugControlSessionPolicy.apply(.importAudio(path: "/tmp/x.wav"), to: snapshot).failureCode())
+    }
+
+    runSuite("DebugControl waits for dictation start and stop to settle before snapshotting state") {
+        assertTrue(
+            DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: true),
+            "start is settled when the session is active and STT is recording"
+        )
+        assertFalse(
+            DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: false),
+            "start is not settled until STT is recording"
+        )
+        assertFalse(
+            DebugControlSettlePolicy.startedSettled(dictationActive: false, sttRecording: false),
+            "start is not settled when dictation never became active"
+        )
+        assertFalse(
+            DebugControlSettlePolicy.startedSettled(dictationActive: false, sttRecording: true),
+            "STT alone is not a started dictation"
+        )
+        assertTrue(
+            DebugControlSettlePolicy.stoppedSettled(dictationActive: false),
+            "stop is settled when dictation is no longer active"
+        )
+        assertFalse(
+            DebugControlSettlePolicy.stoppedSettled(dictationActive: true),
+            "stop is not settled while dictation is still active"
+        )
+
+        assertTrue(DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 0, settled: false))
+        assertTrue(
+            DebugControlSettlePolicy.shouldKeepWaiting(
+                elapsedMilliseconds: DebugControlSettlePolicy.timeoutMilliseconds - 1,
+                settled: false
+            ),
+            "keep polling until the timeout"
+        )
+        assertFalse(
+            DebugControlSettlePolicy.shouldKeepWaiting(
+                elapsedMilliseconds: DebugControlSettlePolicy.timeoutMilliseconds,
+                settled: false
+            ),
+            "stop waiting at the timeout even if not settled"
+        )
+        assertFalse(
+            DebugControlSettlePolicy.shouldKeepWaiting(
+                elapsedMilliseconds: DebugControlSettlePolicy.timeoutMilliseconds + 50,
+                settled: false
+            )
+        )
+        assertFalse(
+            DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 0, settled: true),
+            "do not wait once settled"
+        )
+        assertFalse(DebugControlSettlePolicy.shouldKeepWaiting(elapsedMilliseconds: 100, settled: true))
+        assertTrue(DebugControlSettlePolicy.timeoutMilliseconds > DebugControlSettlePolicy.pollMilliseconds)
+        assertTrue(DebugControlSettlePolicy.pollMilliseconds > 0)
+        assertEqual(DebugControlSettlePolicy.timeoutMilliseconds, 2_000)
+        assertEqual(DebugControlSettlePolicy.pollMilliseconds, 20)
     }
 
     runSuite("DebugControl settings and screens stay on the allowlist") {
