@@ -1,5 +1,6 @@
 import Combine
 import Foundation
+import SQLite3
 import TranscriptedCore
 
 /// Actual model/store integration with a fresh database, Markdown and defaults
@@ -178,6 +179,38 @@ import TranscriptedCore
             "failed completion also sees a refreshed snapshot")
     }
 
+    @MainActor static func databaseRejectionRestoresWrittenMeetings() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let voice = try fixture.voice()
+        let first = try fixture.meeting(voice: voice, filename: "first")
+        let second = try fixture.meeting(voice: voice, filename: "second")
+        let originals = try [first, second].map { try String(contentsOf: $0, encoding: .utf8) }
+        let model = await fixture.load()
+        var connection: OpaquePointer?
+        let opened = sqlite3_open(fixture.root.appendingPathComponent("speakers.sqlite").path, &connection)
+        check(opened == SQLITE_OK, "failure injection opens only the temporary database")
+        defer { sqlite3_close(connection) }
+        // Fail the identity step after production has rewritten the Markdown.
+        // This exercises its real file rollback rather than faking a store.
+        let trigger = sqlite3_exec(connection, """
+            CREATE TRIGGER reject_test_name BEFORE UPDATE OF display_name ON speakers
+            BEGIN SELECT RAISE(ABORT, 'synthetic identity rejection'); END;
+            """, nil, nil, nil)
+        check(trigger == SQLITE_OK, "synthetic database rejection is installed")
+        let saved = await save(model, item: model.reviewQueueItems[0], name: "Alex")
+        check(saved == nil, "identity rejection returns no saved result")
+        check(fixture.database.getSpeaker(id: voice.id)?.displayName == nil
+              && fixture.database.getSpeaker(id: voice.id)?.confirmedMeetingCount == 0,
+            "rejected identity leaves the actual database unchanged")
+        for (file, original) in zip([first, second], originals) {
+            check(try String(contentsOf: file, encoding: .utf8) == original,
+                "identity rejection restores every rewritten meeting")
+        }
+        check(model.reviewQueueItems.count == 2 && model.profiles.first?.displayName == nil,
+            "rejected completion publishes the restored queue")
+    }
+
     @MainActor static func main() async throws {
         guard ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1" else {
             fatalError("Smoke requires file logging disabled")
@@ -185,6 +218,7 @@ import TranscriptedCore
         try await newNameConfirmsAllDistinctMeetings()
         try await existingNameJoinsAndDeduplicatesMeetings()
         try await failedSaveReturnsNoCelebrationOrMutation()
+        try await databaseRejectionRestoresWrittenMeetings()
         print("Speaker settings model smoke: \(assertions) assertions passed")
     }
 }
