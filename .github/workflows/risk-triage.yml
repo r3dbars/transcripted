@@ -32,7 +32,9 @@ permissions:
 
 jobs:
   triage:
-    if: github.event_name == 'pull_request_target' && contains(fromJSON('["opened","synchronize","reopened","ready_for_review","edited"]'), github.event.action)
+    # Only PRs into the default branch: a PR into another branch would run that
+    # branch's copy of this file (see verdict_trusted in risk-triage.py).
+    if: github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == github.event.repository.default_branch && contains(fromJSON('["opened","synchronize","reopened","ready_for_review","edited"]'), github.event.action)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -60,7 +62,9 @@ jobs:
 
   gate:
     needs: [triage]
-    if: always() && (needs.triage.result == 'success' || needs.triage.result == 'skipped')
+    # Always run, even when triage failed: the gate then fails closed (risk-gate
+    # pending, auto-merge off) instead of leaving a stale auto-merge in place.
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     concurrency:
@@ -72,6 +76,7 @@ jobs:
       statuses: write
       issues: read
       checks: read
+      actions: read          # verify the verdict's workflow run
     steps:
       - name: Checkout default (trusted) branch only
         uses: actions/checkout@v5
@@ -89,6 +94,7 @@ jobs:
           GATE_STATUS_TOKEN: ${{ github.token }}
           MERGE_TOKEN: ${{ secrets.AUTOMERGE_TOKEN }}
           PR: ${{ github.event.pull_request.number || inputs.pr }}
+          TRIAGE_RESULT: ${{ needs.triage.result }}
         run: |
           if [ -n "$PR" ]; then
             python3 scripts/ops/risk-triage.py gate --pr "$PR" --apply

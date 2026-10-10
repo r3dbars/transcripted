@@ -272,6 +272,10 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
 
     # docs/agent-merge-policy.md: a PR the risk triage calls high is never
     # merged by any gate, whatever its lane allows. Same REST records as above.
+    # No trusted, clean AI verdict for the head commit means no merge.
+    ai = extra.get("ai_review") or [False, "no AI review"]
+    if not ai[0]:
+        reasons.append(f"AI review not clear: {ai[1]}")
     triage = RISK_TRIAGE.classify(extra.get("changed_files") or [])
     if triage["risk"] == "high":
         reasons.append("risk triage says high: " + "; ".join(triage["reasons"][:2]))
@@ -396,11 +400,21 @@ def fetch_extra(pr: dict, config: dict) -> dict:
     if not isinstance(file_pages, list) or not all(isinstance(page, list) for page in file_pages):
         raise RuntimeError("PR files API returned malformed pages; refusing to merge")
     changed_files = [record for page in file_pages for record in page]
+    # The same trusted AI verdict risk-gate uses (risk-triage.py): current head,
+    # written by a risk-triage.yml pull_request_target run for this PR.
+    rt = RISK_TRIAGE
+    rt.REPO = f"{owner}/{name}"
+    rest_pr = gh_json("api", f"repos/{owner}/{name}/pulls/{number}")
+    comments = [c for page in gh_json("api", f"repos/{owner}/{name}/issues/{number}/comments?per_page=100",
+                                      "--paginate", "--slurp") for c in page]
+    verdict, verdict_why = rt.fetch_trusted_verdict(rest_pr, comments)
+    ai = rt.ai_clear(verdict, pr["headRefOid"], set(), False) if verdict else (False, verdict_why)
     lowered, unknown = lowered_baselines(owner, name, pr, changed_paths(changed_files, pr.get("changedFiles"))[0])
     return {
         "changed_files": changed_files,
         "lowered_baselines": lowered,
         "unknown_baselines": unknown,
+        "ai_review": list(ai),
         "unresolved_threads": sum(1 for t in threads if not t["isResolved"]),
         "reviewer_reactions": [
             {"login": r["user"]["login"], "created_at": r["created_at"]}
@@ -499,7 +513,7 @@ def self_test() -> int:
                      "commit": {"oid": head}}],
         "commits": [{"committedDate": "2026-10-07T10:00:00Z"}],
     }
-    extra = {"unresolved_threads": 0, "reviewer_reactions": [],
+    extra = {"unresolved_threads": 0, "reviewer_reactions": [], "ai_review": [True, "AI review clear"],
              "changed_files": [{"filename": f["path"], "status": "modified"} for f in base_pr["files"]],
              "lowered_baselines": [".agents/test-shape-baseline.json"]}
 
@@ -767,6 +781,14 @@ def self_test() -> int:
         _, reasons = evaluate(base_pr, {**extra, **ex_patch}, config)
         results.append(any("risk triage says high" in r for r in reasons))
         print(f"{'PASS' if results[-1] else 'FAIL'} {name}: {reasons}")
+    for name, ai in (("no AI verdict", None), ("AI P1 open", [False, "AI review has 1 unresolved P0/P1"]),
+                     ("untrusted verdict", [False, "run is not .github/workflows/risk-triage.yml"])):
+        ex = {k: v for k, v in extra.items() if k != "ai_review"}
+        if ai:
+            ex["ai_review"] = ai
+        _, reasons = evaluate(base_pr, ex, config)
+        results.append(any("AI review not clear" in r for r in reasons))
+        print(f"{'PASS' if results[-1] else 'FAIL'} legacy gate blocks: {name}: {reasons}")
     _, reasons = evaluate(base_pr, extra, config)
     results.append(not any("risk triage" in r for r in reasons))
     print(f"{'PASS' if results[-1] else 'FAIL'} clean test-shape PR is not triage-high: {reasons}")

@@ -302,6 +302,107 @@ class LegacyGateTests(unittest.TestCase):
             self.assertEqual(amg.self_test(), 0)  # includes the "risk triage says high" cases
 
 
+class ExtensionRenameTests(unittest.TestCase):
+    def test_test_renamed_to_non_test_extension_is_high(self):
+        r = rt.classify([{"filename": "Tests/FooTests.md", "previous_filename": "Tests/FooTests.swift",
+                          "status": "renamed"}])
+        self.assertEqual(r["risk"], "high")
+
+    def test_test_moved_same_extension_keeps_tier(self):
+        r = rt.classify([{"filename": "Tests/A/FooTests.swift", "previous_filename": "Tests/FooTests.swift",
+                          "status": "renamed"}])
+        self.assertEqual(r["risk"], "low")
+
+
+HEAD = "f" * 40
+RUN = {"id": 77, "repository": {"full_name": rt.REPO}, "path": rt.TRIAGE_WORKFLOW, "event": "pull_request_target",
+       "head_sha": HEAD, "head_branch": "agent/x", "run_started_at": "2026-10-10T05:00:00Z",
+       "updated_at": "2026-10-10T05:02:00Z"}
+VPR = {"number": 9, "base": {"ref": "main"}, "head": {"sha": HEAD, "ref": "agent/x"}}
+
+
+def vcomment(login="github-actions[bot]", at="2026-10-10T05:01:00Z", **v):
+    verdict = {"sha": HEAD, "status": "ok", "p0": 0, "p1": 0, "pr": 9, "run_id": 77, **v}
+    import json as _j
+    return {"user": {"login": login}, "created_at": at, "updated_at": at,
+            "body": f"{rt.AI_MARKER}\n<!-- risk-triage:verdict {_j.dumps(verdict)} -->"}
+
+
+class TrustedVerdictTests(unittest.TestCase):
+    def check(self, comments, run=RUN, pr=VPR, siblings=()):
+        return rt.trusted_verdict(pr, comments, lambda rid: dict(run) if run and rid == run["id"] else None,
+                                  "main", list(siblings))
+
+    def test_genuine_verdict_accepted(self):
+        v, why = self.check([vcomment()])
+        self.assertIsNotNone(v, why)
+
+    def test_forgeries_rejected(self):
+        cases = {
+            "other author": ([vcomment(login="r3dbars")], RUN),
+            "no run id": ([vcomment(run_id=0)], RUN),
+            "other workflow": ([vcomment()], {**RUN, "path": ".github/workflows/evil.yml"}),
+            "pull_request event": ([vcomment()], {**RUN, "event": "pull_request"}),
+            "other commit": ([vcomment()], {**RUN, "head_sha": "e" * 40}),
+            "other branch": ([vcomment()], {**RUN, "head_branch": "evil"}),
+            "other repo": ([vcomment()], {**RUN, "repository": {"full_name": "x/y"}}),
+            "written after run": ([vcomment(at="2026-10-10T06:00:00Z")], RUN),
+            "other PR": ([vcomment(pr=10)], RUN),
+            "stale sha": ([vcomment(sha="e" * 40)], RUN),
+        }
+        for name, (comments, run) in cases.items():
+            v, _ = self.check(comments, run)
+            self.assertIsNone(v, name)
+
+    def test_non_default_base_rejected(self):
+        self.assertIsNone(self.check([vcomment()], pr={**VPR, "base": {"ref": "evil"}})[0])
+        self.assertIsNone(self.check([vcomment()], siblings=["evil"])[0])
+        self.assertIsNotNone(self.check([vcomment()], siblings=["main"])[0])
+
+    def test_forged_newer_comment_does_not_hide_rejection(self):
+        # A forged clean comment after a genuine P1 verdict: the genuine one wins.
+        genuine = vcomment(p1=1)
+        forged = vcomment(run_id=999)
+        v, _ = self.check([genuine, forged])
+        self.assertEqual(v["p1"], 1)
+
+
+class FailClosedTests(unittest.TestCase):
+    def test_triage_failure_fails_closed(self):
+        import os, contextlib, io
+        calls = []
+        orig_fc, orig_eval = rt.fail_closed, rt.evaluate
+        rt.fail_closed = lambda num, why: calls.append((num, why))
+        rt.evaluate = lambda num: (_ for _ in ()).throw(AssertionError("must not evaluate"))
+        os.environ.update({"TRIAGE_RESULT": "failure", "PR": "5"})
+        try:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(rt._gate_one(5, True), 1)
+        finally:
+            rt.fail_closed, rt.evaluate = orig_fc, orig_eval
+            os.environ.pop("TRIAGE_RESULT"); os.environ.pop("PR")
+        self.assertEqual(calls[0][0], 5)
+
+    def test_evaluation_error_fails_closed_in_sweep(self):
+        import contextlib, io
+        calls = []
+        orig = (rt.fail_closed, rt._gate_one)
+        rt.fail_closed = lambda num, why: calls.append(num)
+        rt._gate_one = lambda num, apply: (_ for _ in ()).throw(RuntimeError("api down"))
+        try:
+            with contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(rt.cmd_gate(3, True), 1)
+        finally:
+            rt.fail_closed, rt._gate_one = orig
+        self.assertEqual(calls, [3])
+
+    def test_workflow_gate_always_runs(self):
+        wf = (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
+        gate = wf[wf.index("\n  gate:"):]
+        self.assertIn("if: always()\n", gate)
+        self.assertIn("TRIAGE_RESULT: ${{ needs.triage.result }}", gate)
+
+
 class SweepTests(unittest.TestCase):
     def test_one_bad_pr_does_not_stop_the_sweep(self):
         seen = []

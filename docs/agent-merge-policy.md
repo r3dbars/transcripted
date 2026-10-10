@@ -4,7 +4,7 @@ Every PR gets a risk label. Low and medium PRs squash-merge on their own once CI
 
 The code is `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (also part of `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them).
 
-This sits next to the older lane gate (`docs/auto-merge-gate.md`, `scripts/ops/auto-merge-gate.py`), which still runs on its own. A PR merges when either path allows it; both demand green `build-and-test` and `repo-hygiene`. **The old gate also runs this classifier and never merges a PR it calls `risk:high`**, whatever its lane allows. So a lane PR that deletes a test, renames one away, or edits a folder `AGENTS.md` now waits for Justin.
+This sits next to the older lane gate (`docs/auto-merge-gate.md`, `scripts/ops/auto-merge-gate.py`), which still runs on its own. A PR merges when either path allows it; both demand green `build-and-test` and `repo-hygiene`. **The old gate also runs this classifier and never merges a PR it calls `risk:high`**, whatever its lane allows. It also needs the same trusted, clean AI verdict for the head commit, so no AI verdict means no merge. So a lane PR that deletes a test, renames one away, or edits a folder `AGENTS.md` now waits for Justin.
 
 ## 1. Risk tiers
 
@@ -19,7 +19,7 @@ Path rules decide the tier. Each changed file (and the old name of a renamed fil
 
 Tests:
 - **Modified tests keep the PR's tier.** Most fixes edit existing tests. Weakened assertions are left to CI and the AI review's P0/P1.
-- **Deleted tests are high**, and so are tests **renamed out of the test folders** (`Tests/**`, `Tools/*/Tests/**`, `test_*.py`, `test-*.py`). A rename that stays inside the test folders keeps the tier.
+- **Deleted tests are high**, and so are tests **renamed out of the test folders** (`Tests/**`, `Tools/*/Tests/**`, `test_*.py`, `test-*.py`) or **renamed to another extension** (for example `Tests/FooTests.swift` to `Tests/FooTests.md`). A same-extension move inside the test folders keeps the tier.
 
 An empty or incomplete file list (GitHub stops at 3,000 files) is treated as high, and it needs Justin.
 
@@ -36,6 +36,21 @@ On every push the triage job sends the PR diff to an AI model and posts (or upda
 - The diff is untrusted input. The prompt tells the model to ignore instructions in it, but an AI "clear" is never enough on its own: high-risk PRs still need people.
 - Fork PRs get a label but no AI call.
 
+### Which verdicts count (forgery protection)
+
+Any workflow in this repo can comment as `github-actions[bot]`, so the author alone proves nothing. Each verdict comment records the Actions run that wrote it (`run_id`) and the PR number. Both gates (`risk-gate` and the old `auto-merge-gate.py`) accept a verdict only when all of these hold:
+- the comment is by `github-actions[bot]`;
+- the PR targets the default branch;
+- the named run is in this repo, its path is `.github/workflows/risk-triage.yml`, and its event is `pull_request_target`, so the workflow file came from `main`;
+- the run's head SHA and head branch are the PR's current head, and they match the verdict's `sha`;
+- the comment was written while that run was going.
+
+Triage only runs for PRs into the default branch. A PR from the same branch into any other branch could run a modified copy of the workflow for the same SHA, so if one is open, every verdict is void.
+
+Triage posts a new comment for each run instead of editing the old one, so the timing check holds. The newest verdict that passes these checks is the one that counts; a newer forged comment can't hide an older genuine P1.
+
+Remaining limit: an account with write access can still run its own workflow on a branch and read secrets. That's true of any GitHub repo. To go further, Justin can put `AI_REVIEW_API_KEY` in an environment that only `main` can deploy to (optional; see section 6).
+
 ## 3. The merge gate
 
 The gate publishes a commit status named `risk-gate` on the PR head. It is `success` only when **all** of these hold:
@@ -47,6 +62,8 @@ The gate publishes a commit status named `risk-gate` on the PR head. It is `succ
 5. The PR is low or medium. **A high-risk PR never gets `success`**, whoever authored it (agent PRs are authored by @r3dbars too), however many approvals it has, and with or without `ai-findings-waived`. Its status lists what's still missing (e.g. approvals) as a note for Justin.
 
 When `risk-gate` is `success` and the PR is low or medium, the gate runs `gh pr merge --auto --squash --match-head-commit <sha>`. **High PRs are never auto-merged**: their `risk-gate` stays pending even after approvals, and Justin merges them by hand.
+
+**Fails closed.** The gate job runs with `if: always()`, so it runs even when triage failed or was cancelled. It then posts `risk-gate` as pending and turns off any auto-merge already on the PR. An error while evaluating a PR in the sweep does the same for that PR, and the sweep moves on.
 
 It runs on PR events, when Swift CI or Repo Hygiene finishes, every 20 minutes, and by hand:
 
@@ -78,6 +95,9 @@ Read 2026-10-09: `allow_auto_merge` is off; squash, merge and rebase merges are 
 4. Add the AI key: `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted` (and optionally `gh variable set AI_REVIEW_PROVIDER -R r3dbars/transcripted -b anthropic`).
 5. Optional: `gh secret set AUTOMERGE_TOKEN -R r3dbars/transcripted` with a fine-grained token (contents, pull requests and statuses write), so auto-merges trigger push CI on `main`. Merges made with the default `GITHUB_TOKEN` don't start other workflows.
 6. Create the labels: `for l in risk:low risk:medium risk:high ai-findings-waived; do gh label create "$l" -R r3dbars/transcripted; done`
+7. Optional hardening: keep the AI key in an environment only `main` can use:
+   `gh api -X PUT repos/r3dbars/transcripted/environments/ai-review -F 'deployment_branch_policy[protected_branches]=true' -F 'deployment_branch_policy[custom_branch_policies]=false'`
+   and `gh secret set AI_REVIEW_API_KEY -R r3dbars/transcripted --env ai-review`. Then a follow-up PR adds `environment: ai-review` to the triage job.
 
 What the settings change, exactly:
 - Before step 1, GitHub refuses `gh pr merge --auto`, so the gate can't merge anything; it only labels, comments and posts `risk-gate`. Manual merges work as today (they need `build-and-test` and `repo-hygiene`).
@@ -104,4 +124,4 @@ Disable the workflow (`gh workflow disable "Risk Triage" -R r3dbars/transcripted
 - Code-owner review: GitHub never lets the author satisfy a code-owner review, and @r3dbars authors most PRs, so "Require review from Code Owners" stays **off**. Owner sign-off on release/signing paths comes from `risk-gate` (high, never auto-merged) plus the owner merging by hand.
 - Redaction is pattern-based (emails, absolute paths, URLs, credential-looking values). It cannot recognise transcript text or names; keep real transcripts out of PR diffs.
 - Known limit: a same-repo PR that adds a `pull_request` workflow could post its own `risk-gate` status (it is also the Actions app). Because `risk-gate` is not required and the gate itself only enables auto-merge after recomputing the verdict from the file list, a forged status can't make this gate merge anything; and workflow changes are high, so the gate never auto-merges them.
-- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file or renaming it out of the test folders is high; medium over 400 changed lines is high; the old lane gate never merges a triage-high PR; privacy egress files (`*PayloadSanitizer*`, `*EventPolicy*`) are high; an empty or incomplete file list is high and owner-required; change requests from untrusted accounts are ignored; the behind-base guard applies to every green result, high included.
+- Reviews count only from OWNER/MEMBER/COLLABORATOR; `Sources/Speech/**` is high; removing a test file, renaming it out of the test folders, or renaming it to another extension is high; the old lane gate also requires the trusted AI verdict; medium over 400 changed lines is high; the old lane gate never merges a triage-high PR; privacy egress files (`*PayloadSanitizer*`, `*EventPolicy*`) are high; an empty or incomplete file list is high and owner-required; change requests from untrusted accounts are ignored; the behind-base guard applies to every green result, high included.

@@ -27,6 +27,7 @@ No lane may touch `deny_always`: the TranscriptedCore, Meeting, Speech and Obser
 All of these, checked on every run:
 
 0. The PR risk triage (`scripts/ops/risk-triage.py`, `docs/agent-merge-policy.md`) doesn't call it `risk:high`. This gate never merges a high-risk PR, whatever its lane allows: deleted tests, tests renamed out of the test folders, folder `AGENTS.md` files and medium PRs over 400 lines all wait for a person.
+0a. A trusted, clean AI verdict exists for the head commit. It must come from a `risk-triage.yml` `pull_request_target` run for this PR's exact head and have no unresolved P0/P1 (see `docs/agent-merge-policy.md`, "Which verdicts count"). No verdict means no merge.
 
 1. Main is green: the latest finished Swift CI run on main succeeded.
 2. Author `r3dbars`, branch in this repo, branch in an enabled lane.

@@ -158,8 +158,12 @@ def test_removed(f: dict) -> bool:
     """A deleted test, or a test renamed to a path outside the test folders."""
     if f.get("status") == "removed":
         return is_test_path(f.get("filename", ""))
-    prev = f.get("previous_filename")
-    return bool(prev) and is_test_path(prev) and not is_test_path(f.get("filename", ""))
+    prev, new = f.get("previous_filename"), f.get("filename", "")
+    if not (prev and is_test_path(prev)):
+        return False
+    # Out of the test folders, or to another extension (FooTests.swift -> FooTests.md
+    # stays under Tests/ but no longer compiles as a test).
+    return not is_test_path(new) or os.path.splitext(prev)[1] != os.path.splitext(new)[1]
 
 
 def classify(files: list[dict]) -> dict:
@@ -245,6 +249,94 @@ def parse_ai_comment(body: str) -> dict | None:
     except json.JSONDecodeError:
         return None
     return data if isinstance(data, dict) else None
+
+
+TRIAGE_WORKFLOW = ".github/workflows/risk-triage.yml"
+BOT_LOGIN = "github-actions[bot]"
+RUN_SLACK_SECONDS = 120
+
+
+def _ts(value: str | None) -> float:
+    from datetime import datetime
+    if not value:
+        return 0.0
+    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+
+
+def verdict_trusted(comment: dict, verdict: dict, pr: dict, run: dict | None, default_branch: str) -> tuple[bool, str]:
+    """Is this verdict comment really from a risk-triage.yml run for this PR head?
+
+    Any same-repo workflow can comment as github-actions[bot], so the author
+    alone proves nothing. The verdict names the Actions run that wrote it, and
+    the run must be: this repo, path .github/workflows/risk-triage.yml, event
+    pull_request_target (so the workflow file came from the base branch), the
+    PR's exact head SHA and head branch, and the comment must have been
+    written while that run was going. The PR must target the default branch.
+    """
+    if (comment.get("user") or {}).get("login") != BOT_LOGIN:
+        return False, "verdict not posted by github-actions[bot]"
+    if verdict.get("pr") != pr.get("number"):
+        return False, "verdict is for another PR"
+    if (pr.get("base") or {}).get("ref") != default_branch:
+        return False, "PR does not target the default branch"
+    if not run:
+        return False, "verdict's workflow run not found"
+    head = pr.get("head") or {}
+    checks = [
+        (run.get("id") == verdict.get("run_id"), "run id mismatch"),
+        (((run.get("repository") or {}).get("full_name")) == REPO, "run is from another repo"),
+        (run.get("path") == TRIAGE_WORKFLOW, f"run is not {TRIAGE_WORKFLOW}"),
+        (run.get("event") == "pull_request_target", "run was not pull_request_target"),
+        (run.get("head_sha") == head.get("sha") == verdict.get("sha"), "run is for another commit"),
+        (run.get("head_branch") == head.get("ref"), "run is for another branch"),
+    ]
+    for ok, why in checks:
+        if not ok:
+            return False, why
+    written = _ts(comment.get("updated_at") or comment.get("created_at"))
+    if not (_ts(run.get("run_started_at")) - 5 <= written <= _ts(run.get("updated_at")) + RUN_SLACK_SECONDS):
+        return False, "verdict was not written during its run"
+    return True, "verdict from risk-triage.yml"
+
+
+def trusted_verdict(pr: dict, comments: list[dict], get_run, default_branch: str,
+                    sibling_bases: list[str]) -> tuple[dict | None, str]:
+    """Newest verdict comment that passes verdict_trusted(), or (None, why).
+
+    sibling_bases: base branches of other open PRs from the same head branch.
+    A sibling into a non-default branch could run a modified risk-triage.yml
+    for the same head SHA, so any such sibling voids every verdict.
+    """
+    if any(b != default_branch for b in sibling_bases):
+        return None, "another open PR from this branch targets a non-default branch"
+    why = "no AI review"
+    for c in reversed(comments):
+        if AI_MARKER not in (c.get("body") or ""):
+            continue
+        v = parse_ai_comment(c.get("body", ""))
+        if not v:
+            continue
+        run = get_run(v.get("run_id")) if v.get("run_id") else None
+        ok, why = verdict_trusted(c, v, pr, run, default_branch)
+        if ok:
+            return v, why
+    return None, why
+
+
+def fetch_trusted_verdict(pr: dict, comments: list[dict]) -> tuple[dict | None, str]:
+    """gh-backed wrapper used by this gate and by auto-merge-gate.py."""
+    default_branch = gh_json(f"repos/{REPO}")["default_branch"]
+    head = pr["head"]
+    owner = (head.get("repo") or {}).get("owner", {}).get("login", REPO.split("/")[0])
+    siblings = gh_json(f"repos/{REPO}/pulls?state=open&head={owner}:{head['ref']}&per_page=100", paginate=True)
+    sibling_bases = [p["base"]["ref"] for p in siblings if p.get("number") != pr.get("number")]
+
+    def get_run(run_id):
+        try:
+            return gh_json(f"repos/{REPO}/actions/runs/{int(run_id)}")
+        except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
+            return None
+    return trusted_verdict(pr, comments, get_run, default_branch, sibling_bases)
 
 
 def ai_clear(verdict: dict | None, head_sha: str, labels: set[str], waiver_by_owner: bool) -> tuple[bool, str]:
@@ -425,7 +517,8 @@ def cmd_triage(n: int, apply: bool) -> int:
     print(json.dumps({"pr": n, **risk}, indent=2))
     diff = gh("api", f"repos/{REPO}/pulls/{n}", "-H", "Accept: application/vnd.github.diff")
     review = ai_review(diff, pr.get("title", ""))
-    verdict = {"sha": pr["head"]["sha"], "status": review["status"], "p0": review["p0"], "p1": review["p1"]}
+    verdict = {"sha": pr["head"]["sha"], "status": review["status"], "p0": review["p0"], "p1": review["p1"],
+               "pr": n, "run_id": int(os.environ.get("GITHUB_RUN_ID") or 0)}
     body = (f"{AI_MARKER}\n<!-- risk-triage:verdict {json.dumps(verdict)} -->\n"
             f"### Risk triage: `risk:{risk['risk']}`" + (" (owner approval required)" if risk["owner_required"] else "")
             + "\n\n" + "\n".join(f"- {r}" for r in risk["reasons"])
@@ -436,11 +529,8 @@ def cmd_triage(n: int, apply: bool) -> int:
         print(body)
         return 0
     comments = gh_json(f"repos/{REPO}/issues/{n}/comments?per_page=100", paginate=True)
-    mine = [c for c in comments if AI_MARKER in c.get("body", "") and c["user"]["login"] == "github-actions[bot]"]
-    if mine:
-        gh("api", "-X", "PATCH", f"repos/{REPO}/issues/comments/{mine[-1]['id']}", "-F", "body=@-", input_text=body)
-    else:
-        gh("api", f"repos/{REPO}/issues/{n}/comments", "-F", "body=@-", input_text=body)
+    # Always a new comment: its timestamps must fall inside this run (verdict_trusted).
+    gh("api", f"repos/{REPO}/issues/{n}/comments", "-F", "body=@-", input_text=body)
     # Labels last and best-effort: a missing label must not lose the comment.
     for label in RISK_LABELS:
         if label != f"risk:{risk['risk']}":
@@ -456,10 +546,7 @@ def evaluate(n: int) -> tuple[dict, dict]:
     runs = gh_json(f"repos/{REPO}/commits/{sha}/check-runs?per_page=100", paginate=True)
     statuses = gh_json(f"repos/{REPO}/commits/{sha}/statuses?per_page=100")
     comments = gh_json(f"repos/{REPO}/issues/{n}/comments?per_page=100", paginate=True)
-    verdict = None
-    for c in comments:
-        if c["user"]["login"] == "github-actions[bot]":
-            verdict = parse_ai_comment(c.get("body", "")) or verdict
+    verdict, _verdict_why = fetch_trusted_verdict(pr, comments)
     labels = {l["name"] for l in pr.get("labels", [])}
     waiver = False
     if WAIVE_LABEL in labels:
@@ -493,10 +580,29 @@ def cmd_gate(n: int | None, apply: bool) -> int:
         except Exception as e:  # one bad PR must not stop the sweep
             print(json.dumps({"pr": num, "error": str(e)[:300]}), file=sys.stderr)
             failed += 1
+            if apply:
+                try:
+                    fail_closed(num, "risk-gate evaluation failed; auto-merge off")
+                except Exception as e2:  # noqa: BLE001 - keep sweeping
+                    print(json.dumps({"pr": num, "fail_closed_error": str(e2)[:300]}), file=sys.stderr)
     return 1 if failed else 0
 
 
+def fail_closed(num: int, why: str) -> None:
+    """Triage or evaluation failed: post risk-gate pending and turn auto-merge off."""
+    pr = gh_json(f"repos/{REPO}/pulls/{num}")
+    subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=False, capture_output=True)
+    gh("api", f"repos/{REPO}/statuses/{pr['head']['sha']}", "-f", "state=pending",
+       "-f", f"context={GATE_CONTEXT}", "-f", f"description={why[:139]}")
+
+
 def _gate_one(num: int, apply: bool) -> int:
+    triage_result = os.environ.get("TRIAGE_RESULT", "")
+    if triage_result in ("failure", "cancelled") and os.environ.get("PR") == str(num):
+        print(json.dumps({"pr": num, "state": "pending", "why": [f"triage {triage_result}"]}))
+        if apply:
+            fail_closed(num, f"risk triage {triage_result}: no verdict, auto-merge off")
+        return 1
     if True:
         pr, res = evaluate(num)
         print(json.dumps({"pr": num, **res}))
