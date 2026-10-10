@@ -32,6 +32,7 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 
 ## Testing and QA
 
+- `docs/debug-control-surface.md` — debug-only CLI / URL hook to drive the app and read JSON state (compiled out of release)
 - `docs/qa-test-bench.md` — the orchestrated QA bench (`scripts/ops/transcripted-qa-bench.sh`) and its modes
 - `docs/qa/manual-10-minute-checklist.md` — the 10-minute manual pass after a local build
 - `docs/audio-reliability-daily-check.md` — daily manual audio reliability loop

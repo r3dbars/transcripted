@@ -75,7 +75,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
 - `.github/` — issue templates, PR template, and repository workflows
 - `Sources/` — macOS app target
-- `Sources/App/` — app-shell helpers: the lab control channel and Email Support / Send diagnostics
+- `Sources/App/` — app-shell helpers: the lab control channel, the debug test control surface, and Email Support / Send diagnostics
 - `Sources/Accessibility/` — AX helpers for overlay positioning
 - `Sources/App/` — app shell: `TranscriptedApp`, the delegate extensions, command menus
 - `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
