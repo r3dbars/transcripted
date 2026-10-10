@@ -32,7 +32,8 @@
 `TranscriptedSettingsView.swift` holds stored state, `init`, `body`, and the Home row actions (copy, re-transcribe, expansion, row menus, delete with undo). It still owns every Home side effect (delete, rename, copy, retranscribe, the shared root alert, undo staging, analytics). The rest are extensions:
 
 - `+Pages.swift` - sidebar, detail column, page routing, page hosts.
-- `+HomeMeetingActions.swift` - `RootAlert`, rename, speaker naming, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts.
+- `+HomeMeetingActions.swift` - `RootAlert`, rename, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts.
+- `+HomeSpeakerVoiceprints.swift` - Home "Name speakers" persistence, including re-embed from retained audio for unlinked voices.
 - `+GeneralEditors.swift` - the combined page and its injected `general*Editor` properties (model, speaker matching, shortcuts, Bluetooth mic, microphone, auto-send, permissions, mic processing, reporting).
 - `+ShortcutEditor.swift` - shortcut recorder editor (dictation key, its behavior, meetings).
 - `+DictationMuffle.swift` - the "Muffle other audio" toggle; turning it on asks for System Audio Recording here, so dictation never prompts.
@@ -79,7 +80,8 @@ The combined settings page is card-based: every setting is an always-visible row
 - `HomeMeetingSearchIndex.swift` / `HomeSearchMatching.swift` - Foundation-pure index over every saved meeting (title, date words, named speakers), built off-main from `RecentMeetingsScanner.loadSearchIndex`; audio is resolved only for shown matches.
 - `HomeView.swift` - row actions, the ⋯ menu, inline failed-meeting row, feedback sheet, Load more. Kept together because the contract test reads it.
 - `HomeCaptureList.swift`, `HomeScanWarningCard.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift` - list, warning card, value types, feedback types.
-- `QuietHomeLibrary.swift` - Meetings rows and in-place expansion with speaker labels and naming.
+- `QuietHomeLibrary.swift` - Meetings rows and in-place expansion.
+- `HomeMeetingSpeakerNamingViews.swift` - speaker label, picker, Name speakers sheet, and the transcript-only voiceprint notice.
 - `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color palette.
 - Foundation-pure policies and copy: `HomePresentation.swift`, `HomeRootAlertPolicy.swift` (single alert presenter, `HomeActionFailureCopy`), `HomeDeleteConfirmationPolicy.swift`, `HomeScanWarningPolicy.swift`, `HomeTranscriptionActivityPresentation.swift` / `HomeTranscriptionActivityCopy.swift`, `HomeFailedMeetingInlinePresentation.swift`, `FailedMeetingRecoveryPresentation.swift`.
 - `QuietDictationLibrary.swift` - Dictations cards: bar on top, text clamped to four lines with Show more, Copy and ⋯ on hover. `DictationPlaybackBar.swift` is the bar and inline player (Reduce Motion becomes plain state changes). `DictationPlaybackController.swift` plays one take at a time with `AVAudioPlayer` (output only) and lazily reads kept-audio length. `DictationCardPresentation.swift` holds the metadata line and Transcribe again rules. `DictationTranscribeAgainRunner.swift` runs one at a time through `STTRouter.transcribeSavedDictation`, which keeps `isTranscribing` true so a new dictation queues behind it; never an audio engine.

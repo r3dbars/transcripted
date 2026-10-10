@@ -88,6 +88,10 @@ public class DiarizationService: ObservableObject {
     /// off-main-actor `diarizeOffline` path can read it without an actor hop.
     private nonisolated let segmentEmbedder: (any SpeakerSegmentEmbedder)?
 
+    /// The injected voiceprint model, when this launch has one. Nil means
+    /// WeSpeaker-native embeddings and `speakers.sqlite`.
+    public var injectedSegmentEmbedder: (any SpeakerSegmentEmbedder)? { segmentEmbedder }
+
     /// - Parameter backend: which diarization model to run. `.nemotron` also reads
     ///   the lab-only `TRANSCRIPTED_NEMOTRON_PRESET` environment override when it
     ///   initializes (see `NemotronDiarizationRunner.presetEnvironmentKey`).

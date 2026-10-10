@@ -283,6 +283,14 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         XCTAssertEqual(harness.manager.displayStatus, .transcriptSaved, "a missing confirmation row used to fail the save")
         let saved = try String(contentsOf: meeting.transcriptURL, encoding: .utf8)
         XCTAssertTrue(saved.contains("[System/Blake] No sample here."), saved)
+        XCTAssertNil(
+            harness.speakerDB.getSpeaker(id: rowProfile.id),
+            "without a session embedding the name is transcript-only; no voiceprint is created"
+        )
+        XCTAssertTrue(
+            harness.speakerDB.allSpeakers().allSatisfy { $0.displayName != "Blake" },
+            "a transcript-only name must not mint a saved person"
+        )
     }
 
     @MainActor

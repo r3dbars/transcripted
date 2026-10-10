@@ -163,7 +163,8 @@ enum MeetingImportWorkflow {
         let identities = MeetingImportSpeakerMapping.resolve(
             result: result, originalProfiles: originalProfiles, store: store,
             thresholds: voiceprint.thresholds, nameLikelySpeakers: command.nameLikelySpeakers,
-            unavailableReason: identificationUnavailable
+            unavailableReason: identificationUnavailable,
+            speakerDatabaseFilename: sourceDB.lastPathComponent
         )
         for key in identities.reasons.keys.sorted() {
             let label = identities.mappings[key].map { $0.isConfirmedIdentity ? $0.displayName : "Speaker \($0.speakerId)" } ?? key
