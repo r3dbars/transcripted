@@ -40,6 +40,7 @@ REQUIRED_CHECKS = ("build-and-test", "repo-hygiene")
 GATE_CONTEXT = "risk-gate"
 AI_MARKER = "<!-- risk-triage:ai-review -->"
 RISK_LABELS = ("risk:low", "risk:medium", "risk:high")
+# The one hold-label list: risk-gate and the old lane gate (auto-merge-gate.py) both use it.
 HOLD_LABELS = {"hold", "do not merge", "needs owner review", "waiting-on-human", "blocked"}
 WAIVE_LABEL = "ai-findings-waived"  # owner-only override for P0/P1 the owner judged wrong
 # Only reviews from people with repo access count (public repos accept anyone's review).
@@ -115,6 +116,11 @@ HIGH_PATTERNS = (
     "**/*Privacy*.swift",
     "**/*EventPolicy*.swift",
     # What gets sent and whether the user opted in.
+    # Crash reporting, telemetry and the whole Observability module (Sentry
+    # beforeSend, opt-out guards, event writers): what leaves the Mac.
+    "**/*CrashReport*",
+    "**/*Telemetry*.swift",
+    "Sources/Observability/**",
     "Sources/Observability/SentryRuntimeConfiguration.swift",
     "Sources/Observability/AnalyticsReporter.swift",
     "Sources/Observability/TelemetryContext.swift",

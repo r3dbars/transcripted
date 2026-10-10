@@ -13,7 +13,7 @@ Path rules decide the tier. Each changed file (and the old name of a renamed fil
 | Tier | What | Who must approve |
 |---|---|---|
 | `risk:high` + owner | Release, version, Sparkle, appcast, cask, signing and notarization: `scripts/release/**`, `build*.sh`, `Casks/**`, `**/appcast*.xml`, `Info.plist` files, `server.json`, `glama.json`, `config/entitlements/**`, `*.entitlements`, any path containing `Sparkle`, `notari`, `codesign` or `Signing`, `TranscriptedAppVersion.swift`. Also every GitHub workflow and action, `CODEOWNERS`, and this policy's own files. | One approval from someone other than the author, **and** an approval from @r3dbars |
-| `risk:high` | Audio capture (`Sources/TranscriptedCore/Audio/**`, `Sources/Capture/**`, `MeetingCapture*`, `MeetingMicCapture*`, dictation audio, system/pinned mic capture); database and schema (`*Migration*`, `*Schema*`, `*Database*.swift`, `SQLite*.swift`, the speaker reassignment log); permissions (`*TCC*`, `*Permission*.swift`, `*Entitlement*`); privacy egress (sanitizers, redactors, scrubbers, `*Privacy*.swift`, event policies, Sentry runtime config, the analytics reporter, telemetry context and analytics opt-out preferences); `Package.swift` | One approval from someone other than the author |
+| `risk:high` | Audio capture (`Sources/TranscriptedCore/Audio/**`, `Sources/Capture/**`, `MeetingCapture*`, `MeetingMicCapture*`, dictation audio, system/pinned mic capture); database and schema (`*Migration*`, `*Schema*`, `*Database*.swift`, `SQLite*.swift`, the speaker reassignment log); permissions (`*TCC*`, `*Permission*.swift`, `*Entitlement*`); privacy egress (sanitizers, redactors, scrubbers, `*Privacy*.swift`, event policies, analytics opt-out preferences, `*CrashReport*` crash reporting and its opt-out, every `*Telemetry*.swift` file, and the whole `Sources/Observability/**` module); `Package.swift` | One approval from someone other than the author |
 | `risk:medium` | Normal bug fixes: source changes under `Sources/**` or `Tools/*/Sources/**` that aren't high or low, up to **400 changed lines** (additions plus deletions across the whole PR); a bigger medium PR counts as **high**. Debt baselines (`.agents/*-baseline.json`, except the concurrency baseline) are medium. Any path not listed anywhere is **high** (fail closed) | None (auto-merge) |
 | `risk:low` | Only tests, docs (`*.md`), copy (`*.strings`), review images; or a small isolated fix: at most 2 source files and 40 changed source lines, **with** a test file changed | None (auto-merge) |
 
@@ -55,7 +55,7 @@ Remaining limit: an account with write access can still run its own workflow on 
 
 The gate publishes a commit status named `risk-gate` on the PR head. It is `success` only when **all** of these hold:
 
-1. Not a draft, branch is in this repo (forks never auto-merge), and no `hold`, `do not merge`, `needs owner review`, `waiting-on-human` or `blocked` label.
+1. Not a draft, branch is in this repo (forks never auto-merge), and no `hold`, `do not merge`, `needs owner review`, `waiting-on-human` or `blocked` label. That list is `HOLD_LABELS` in `risk-triage.py`, and the old lane gate uses the same list.
 2. `build-and-test` and `repo-hygiene` both concluded `success` on the head commit. Skipped, neutral, cancelled, pending and missing never count as green; the newest run of each check wins.
 3. The AI review exists for the head commit and has no unresolved P0/P1.
 4. No trusted reviewer's latest review requests changes.
@@ -83,6 +83,20 @@ A PR could add a workflow that posts a fake `risk-gate` status. That's why every
 ## 5. CODEOWNERS
 
 `.github/CODEOWNERS` assigns the release, signing, update-feed, entitlement, workflow and merge-policy paths to @r3dbars. It only routes review requests: "Require review from Code Owners" stays off (see setup step 3), because @r3dbars authors most PRs, agent PRs included, and GitHub never counts an author's own approval. Keep it in sync with `RELEASE_PATTERNS` in the script.
+
+## Open design decision before enabling auto-merge
+
+**Don't do setup step 1 (`allow_auto_merge`) until Justin picks one of these.** Two known holes remain. Both come from the same root cause: `risk-gate` and the AI verdict are things any workflow in this repo can produce, and `risk-gate` isn't a required check.
+
+1. **A PR's own workflow can arm auto-merge.** A same-repo PR can edit an existing `pull_request` workflow (for example `repo-hygiene.yml`) to request a write token and run `gh pr merge --auto` on itself. With 0 required approvals, it can merge its own high-risk change before the sweep turns auto-merge off.
+2. **The AI verdict can be forged.** A PR-controlled workflow can post a clean `github-actions[bot]` verdict that names a genuine triage run and lands inside that run's time window. The run checks pass, even though that run didn't write the comment.
+
+The options:
+
+- **A. Required GitHub App check run.** Install a small GitHub App, or use a dedicated app token held only by the trusted workflow, and have the gate publish its decision and the AI verdict as a **check run from that app**. Make that check required on `main`, pinned to the app's ID. PR workflows only have `GITHUB_TOKEN` (the Actions app), so they can't produce it, and that closes both holes. High-risk PRs would then need a way for Justin to merge: have the app mark them `neutral` or `success` with "manual merge by owner", or let Justin bypass the ruleset.
+- **B. Ruleset plus signed verdicts.** Add a ruleset on `main` that needs one approving review for changes under `.github/workflows/**` (and `.github/actions/**`), so a PR can't change a workflow without someone signing off. That closes hole 1, as long as only workflows from `main` can arm auto-merge. Then move `AI_REVIEW_API_KEY`, plus a new `VERDICT_SIGNING_KEY`, into an environment only `main` can deploy to (setup step 7). Triage signs each verdict with an HMAC over `{pr, sha, run_id, p0, p1, status}`, and both gates check the signature. Workflows from PR branches can't read a main-only environment, so they can't sign. That closes hole 2.
+
+Until Justin decides, the workflow is safe to merge as-is with `allow_auto_merge` off: it only labels PRs, comments and posts `risk-gate`.
 
 ## 6. Repo settings this needs (owner applies; agents don't)
 

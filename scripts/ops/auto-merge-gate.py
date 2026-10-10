@@ -238,7 +238,8 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
         if needed not in labels:
             reasons.append(f"missing label '{needed}'")
     # Human hand-off labels always block, whatever the lane file lists.
-    blocked = sorted(labels & (set(config["blocking_labels"]) | HUMAN_LABELS))
+    # One shared hold list (risk-triage.HOLD_LABELS) plus anything the lane file adds.
+    blocked = sorted(labels & (set(config["blocking_labels"]) | HUMAN_LABELS | RISK_TRIAGE.HOLD_LABELS))
     if blocked:
         reasons.append(f"blocking label: {', '.join(blocked)}")
 
@@ -781,6 +782,10 @@ def self_test() -> int:
         _, reasons = evaluate(base_pr, {**extra, **ex_patch}, config)
         results.append(any("risk triage says high" in r for r in reasons))
         print(f"{'PASS' if results[-1] else 'FAIL'} {name}: {reasons}")
+    for hold in sorted(RISK_TRIAGE.HOLD_LABELS):
+        _, reasons = evaluate({**base_pr, "labels": base_pr["labels"] + [{"name": hold}]}, extra, config)
+        results.append(any("blocking label" in r and hold in r for r in reasons))
+        print(f"{'PASS' if results[-1] else 'FAIL'} legacy gate honors shared hold label '{hold}': {reasons}")
     for name, ai in (("no AI verdict", None), ("AI P1 open", [False, "AI review has 1 unresolved P0/P1"]),
                      ("untrusted verdict", [False, "run is not .github/workflows/risk-triage.yml"])):
         ex = {k: v for k, v in extra.items() if k != "ai_review"}

@@ -423,6 +423,32 @@ class PrivacyPathTests(unittest.TestCase):
             self.assertEqual(r["risk"], "high", p)
 
 
+class CrashTelemetryPathTests(unittest.TestCase):
+    def test_crash_and_telemetry_files_are_high(self):
+        for p in ("Sources/Observability/CrashReporter.swift",
+                  "Sources/Observability/CrashReportingPreferences.swift",
+                  "Sources/Observability/EventReporter.swift",
+                  "Sources/Observability/InstallIdentity.swift",
+                  "Sources/Observability/SupportDiagnosticsBundle.swift",
+                  "Sources/Meeting/MeetingPromptTelemetry.swift",
+                  "Sources/UI/Overlay/DictationSessionController+Telemetry.swift",
+                  "Tools/TranscriptedMCP/Sources/TranscriptedMCP/AgentCaptureQueryTelemetry.swift"):
+            r = rt.classify([{"filename": p, "additions": 1}, {"filename": "Tests/XTests.swift"}])
+            self.assertEqual(r["risk"], "high", p)
+
+
+class SharedHoldLabelTests(unittest.TestCase):
+    def test_blocked_holds_both_gates(self):
+        self.assertIn("blocked", rt.HOLD_LABELS)
+        d = rt.decide(pr(labels=[{"name": "blocked"}]), {"risk": "low"}, OK, AI_OK, NO_APPROVAL)
+        self.assertEqual((d["state"], d["automerge"]), ("pending", False))
+        spec = importlib.util.spec_from_file_location("amg2", Path(__file__).with_name("auto-merge-gate.py"))
+        amg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(amg)
+        self.assertTrue(rt.HOLD_LABELS <= amg.RISK_TRIAGE.HOLD_LABELS)
+        self.assertIn("RISK_TRIAGE.HOLD_LABELS", Path(amg.__file__).read_text())
+
+
 class GateConcurrencyTests(unittest.TestCase):
     def test_gate_concurrency_is_per_pr_and_never_cancels(self):
         wf = (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
