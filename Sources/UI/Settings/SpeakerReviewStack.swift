@@ -74,15 +74,3 @@ struct SpeakerReviewStack {
         profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
     }
 }
-
-/// UI completion ownership, independent of the disk edit itself. Leaving a
-/// card invalidates its callbacks even if the same call is opened again.
-struct SpeakerReviewVisit {
-    private(set) var token = UUID()
-
-    mutating func invalidate() { token = UUID() }
-
-    func accepts(_ submittedToken: UUID, isOpen: Bool) -> Bool {
-        isOpen && submittedToken == token
-    }
-}

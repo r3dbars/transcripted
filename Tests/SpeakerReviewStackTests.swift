@@ -19,16 +19,6 @@ func testSpeakerReviewStack() {
         )
     }
 
-    runSuite("Closing or leaving review rejects an earlier naming completion") {
-        var visit = SpeakerReviewVisit()
-        let submitted = visit.token
-        assertTrue(visit.accepts(submitted, isOpen: true))
-        assertFalse(visit.accepts(submitted, isOpen: false))
-        visit.invalidate()
-        assertFalse(visit.accepts(submitted, isOpen: true), "reopening must not revive an old completion")
-        assertTrue(visit.accepts(visit.token, isOpen: true), "the new visit accepts its own completion")
-    }
-
     runSuite("Voices on review cards below the top one stay listed in Everyone") {
         let fixture = ReviewStackFixture()
         let stack = fixture.stack()

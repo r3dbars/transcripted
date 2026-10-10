@@ -209,6 +209,15 @@ Use this when changing:
 
 ## Integration Smoke
 
+Speakers settings saves have an actual model/store harness:
+`bash scripts/dev/test-speaker-settings-model.sh` (requires `bash build-deps.sh`).
+It uses temporary SQLite, Markdown, clips and a dedicated defaults suite to
+check new names, existing-person joins, distinct-meeting progress and failed
+save rollback. Calendar, playback and telemetry trap if accessed. It does not
+prove native card animation or live voice identity; those remain UI checks.
+`bash run-tests.sh --filter SpeakerReviewSession` covers review visit transitions
+and stale completions with pure fixtures.
+
 Parakeet model-lifecycle changes also have a deterministic executor harness:
 `bash scripts/dev/test-parakeet-lifecycle.sh`. It compiles the production
 lifecycle extension against delayed fake models (no network, cache writes, or

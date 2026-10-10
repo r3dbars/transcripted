@@ -133,6 +133,15 @@ rules:
       - "bash run-integration-smoke.sh"
 
   - paths:
+      - "Sources/UI/Settings/SpeakerPeopleSettingsViewModel*.swift"
+      - "Sources/UI/Settings/SpeakerReviewSession.swift"
+      - "Tests/Integration/SpeakerSettingsModel*.swift"
+      - "scripts/dev/test-speaker-settings-model.sh"
+    checks:
+      - "bash -n scripts/dev/test-speaker-settings-model.sh"
+      - "bash scripts/dev/test-speaker-settings-model.sh"
+
+  - paths:
       - "run-daily-audio-reliability.sh"
       - "scripts/ops/daily-audio-reliability-check.sh"
     checks:
