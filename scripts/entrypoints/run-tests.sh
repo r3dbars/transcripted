@@ -402,7 +402,6 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerVoiceprintSelection.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerConfirmationMeetingID.swift"
     "Sources/Support/DiarizationBackendPreferences.swift"
-    "Sources/TranscriptedCore/Services/DiarizationBackend.swift"
     "Sources/Support/DockVisibilityPreferences.swift"
     "Sources/Support/MicrophoneProcessingPreferences.swift"
     "Sources/Support/CallAppMicrophoneSharingMonitor.swift"
