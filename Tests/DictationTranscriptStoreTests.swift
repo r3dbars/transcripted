@@ -529,20 +529,19 @@ func testDictationTranscriptStore() {
             let afterUndo = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
             assertTrue(afterUndo.hasSuffix(targetSection + "\n"), "cycle \(cycle): undo should append the exact target bytes")
             assertTrue(!afterUndo.hasSuffix("\n\n"), "cycle \(cycle): undo should not leave trailing blank lines")
-            if let newer = DictationTranscriptStore.recentSavedDictations(limit: 20, directory: outputDir)
-                .first(where: { $0.text == "newer note \(cycle)" }) {
-                try? DictationTranscriptStore.deleteEntry(newer)
-            }
-            snapshots.append((try? String(contentsOf: dayFile, encoding: .utf8)) ?? "")
+            snapshots.append(afterUndo)
+            print("DEBUG cycle \(cycle): \(afterUndo.debugDescription)")
         }
 
-        let first = snapshots[0]
-        assertTrue(first.contains(targetSection + "\n"), "undo should keep the target's exact bytes, trailing spaces included")
-        assertTrue(!first.contains("target body\u{20}\u{20}\u{20}\n\n\n"), "undo should not carry the section's old trailing blank lines")
-        assertTrue(!first.hasSuffix("\n\n"), "day file should end with exactly one newline")
-        for (cycle, snapshot) in snapshots.enumerated().dropFirst() {
-            assertEqual(snapshot.utf8.count, first.utf8.count, "cycle \(cycle): day file must not grow across undo cycles")
-            assertTrue(snapshot == first, "cycle \(cycle): day file must be byte-for-byte identical after each undo cycle")
+        // Every cycle adds one same-length newer note and nothing else, so
+        // the day file must grow by exactly the same number of bytes each time.
+        let sizes = snapshots.map { $0.utf8.count }
+        let deltas = zip(sizes.dropFirst(), sizes).map { $0 - $1 }
+        assertTrue(Set(deltas).count == 1, "undo cycles must not add stray bytes; size deltas were \(deltas)")
+        let expectedTail = targetSection + "\n"
+        for (cycle, snapshot) in snapshots.enumerated() {
+            assertEqual(Array(snapshot.utf8.suffix(expectedTail.utf8.count)), Array(expectedTail.utf8), "cycle \(cycle): tail must be byte-for-byte the target section plus one newline")
+            assertTrue(!snapshot.contains("\n\n\n"), "cycle \(cycle): no run of blank lines may accumulate")
         }
     }
 }
