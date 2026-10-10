@@ -636,6 +636,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/VoicePrintGeometry.swift"
     "Sources/UI/Shared/VoicePrintCascadePlan.swift"
     "Sources/UI/Settings/SpeakerPrintDirectory.swift"
+    "Sources/UI/Settings/SpeakerReviewCardProgress.swift"
     "Sources/Meeting/SpeakerNamingStanding.swift"
     "Sources/Meeting/SpeakerSilentNameCorrectionTelemetry.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerEmbeddingThresholds.swift"

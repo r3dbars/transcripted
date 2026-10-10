@@ -58,6 +58,9 @@ struct SpeakerPersonRow: View {
                     diameter: Self.printDiameter,
                     isPlaying: isPlaying,
                     accessibilityName: profile.displayName,
+                    // A yes for them from this page (a voice joined them)
+                    // plays the island's match animation here too.
+                    celebrateToken: model.celebrationTokens[profile.id] ?? 0,
                     onPlay: hasClip ? { model.playSample(for: profile.id) } : nil,
                     accessibilityIdentifier: "transcripted.speakers.person.play"
                 )
@@ -101,6 +104,14 @@ struct SpeakerPersonRow: View {
                 .accessibilityHint(standingExplanation ?? "")
 
                 Spacer(minLength: 12)
+
+                // An unnamed voice says what to do with it.
+                if profile.displayName == nil, !isExpandedRow {
+                    Button("Name") { toggleExpansion() }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("transcripted.speakers.person.name")
+                }
 
                 // Always present so the row keeps one constant height; hover
                 // only fades ••• in and tints the background, no size change,
@@ -258,6 +269,21 @@ struct SpeakerPersonRow: View {
 
             expansionPlayerRow
             expansionRenameRow
+            if !joinChips.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Or pick someone you already saved. It counts as a yes for them.")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(LibraryTokens.ink3)
+                    HStack(spacing: 6) {
+                        ForEach(joinChips) { chip in
+                            SpeakerNameChipButton(chip: chip, isDisabled: isSavingRename) {
+                                if let person = chip.person { join(person) }
+                            }
+                        }
+                    }
+                }
+                .accessibilityIdentifier("transcripted.speakers.person.expansion.join")
+            }
             if let renameErrorMessage {
                 Text(renameErrorMessage).font(LibraryTokens.meta).foregroundStyle(LibraryTokens.attention)
             }
@@ -381,6 +407,33 @@ struct SpeakerPersonRow: View {
 
     private var nameSuggestions: [SpeakerNameChoice] {
         SpeakerNameSuggestionSource.options(from: model.profiles, excluding: profile.id)
+    }
+
+    /// For an unnamed voice that still has a queued meeting: saved people
+    /// still learning, offered the way its review card offers them.
+    private var joinChips: [SpeakerNameChip] {
+        guard profile.displayName == nil, model.canJoinSavedPerson(profile) else { return [] }
+        return model.savedPeopleStillLearning(excluding: [], limit: 3)
+            .filter { $0.id != profile.id }
+            .compactMap { person in
+                person.displayName.map {
+                    SpeakerNameChip(name: $0, person: person, standing: model.namingStanding(for: person), isInvitee: false)
+                }
+            }
+    }
+
+    private func join(_ person: SpeakerProfile) {
+        guard !isSavingRename else { return }
+        isSavingRename = true
+        renameErrorMessage = nil
+        model.joinSavedPerson(profile, into: person) { didSave in
+            isSavingRename = false
+            if didSave {
+                expandedPersonID = nil
+            } else {
+                renameErrorMessage = "Couldn't save — the meeting file may have moved."
+            }
+        }
     }
 
     private func commitRename() {

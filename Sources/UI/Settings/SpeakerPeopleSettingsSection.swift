@@ -77,6 +77,11 @@ struct SpeakerPeopleSettingsSection: View {
     /// row) so opening one person always closes any other — one person open
     /// at a time, per spec.
     @State private var expandedPersonID: UUID?
+    /// Invalidates presentation callbacks after Close, Later, Skip or Next.
+    /// The underlying save still finishes; it cannot reopen an old card.
+    @State private var reviewVisit = SpeakerReviewVisit()
+    /// Voices named on a card this visit, by call, newest last.
+    @State private var namedVoices: [String: [SpeakerReviewNamedVoice]] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -95,13 +100,31 @@ struct SpeakerPeopleSettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            if let current = meetingGroups.first {
+            let current = model.heldReviewCall ?? meetingGroups.first
+            let heldIsExtra = model.heldReviewCall.map { held in !meetingGroups.contains { $0.id == held.id } } ?? false
+            let total = meetingGroups.count + (heldIsExtra ? 1 : 0)
+            let visitToken = reviewVisit.token
+
+            if let current, !model.isReviewOpen {
+                // Closed: one line about what's waiting, and Review.
+                SpeakerReviewSummaryCard(calls: meetingGroups.isEmpty ? [current] : meetingGroups) {
+                    withAnimation(.snappy(duration: 0.24)) { model.isReviewOpen = true }
+                }
+                .id(ScrollTarget.reviewQueue)
+                .accessibilityIdentifier("transcripted.speakers.inbox")
+            } else if let current {
                 VStack(alignment: .leading, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
-                        LibrarySectionLabel(
-                            text: "Review and name these people",
-                            trailing: meetingGroups.count == 1 ? "1 call left" : "\(meetingGroups.count) calls left"
-                        )
+                        HStack(alignment: .firstTextBaseline) {
+                            LibrarySectionLabel(
+                                text: "Review and name these people",
+                                trailing: total == 1 ? "1 call left" : "\(total) calls left"
+                            )
+                            SpeakerQuietLinkButton(title: "Close") {
+                                withAnimation(.snappy(duration: 0.24)) { closeReview() }
+                            }
+                            .accessibilityIdentifier("transcripted.speakers.review.close")
+                        }
 
                         Text("One call at a time. Play a clip, then tap a name from the invite or type one. It updates every meeting they're in.")
                             .font(LibraryTokens.meta)
@@ -116,9 +139,18 @@ struct SpeakerPeopleSettingsSection: View {
                     VStack(spacing: 0) {
                         SpeakerCallReviewCard(
                             group: current,
+                            pendingVoices: pendingVoices(of: current, in: meetingGroups),
+                            named: namedVoices[current.id] ?? [],
                             model: model,
                             position: 1,
-                            total: meetingGroups.count
+                            total: total,
+                            onNamed: { voice in
+                                guard reviewVisit.accepts(visitToken, isOpen: model.isReviewOpen) else { return }
+                                model.heldReviewCall = current
+                                namedVoices[current.id, default: []].append(voice)
+                            },
+                            onLeave: { leave(current) },
+                            onNext: { withAnimation(.snappy(duration: 0.3)) { finish(current, total: total) } }
                         )
                         .id(current.id)
                         .transition(.asymmetric(
@@ -127,11 +159,11 @@ struct SpeakerPeopleSettingsSection: View {
                         ))
                         .zIndex(2)
 
-                        if meetingGroups.count > 1 {
+                        if total > 1 {
                             stackEdge(inset: 12, opacity: 1)
                                 .zIndex(1)
                         }
-                        if meetingGroups.count > 2 {
+                        if total > 2 {
                             stackEdge(inset: 24, opacity: 0.6)
                         }
                     }
@@ -185,7 +217,36 @@ struct SpeakerPeopleSettingsSection: View {
         .onDisappear {
             expandedPersonID = nil
             SpeakerClipPlayback.stop()
+            closeReview()
         }
+    }
+
+    /// The card's voices still waiting: the call's voices in the latest
+    /// queue, minus any just named here that the refresh hasn't dropped yet.
+    private func pendingVoices(of call: SpeakerPendingMeetingGroup, in calls: [SpeakerPendingMeetingGroup]) -> [SpeakerPendingVoiceGroup] {
+        let named = Set((namedVoices[call.id] ?? []).map(\.voiceID))
+        let voices = calls.first { $0.id == call.id }?.voices ?? []
+        return voices.filter { !named.contains($0.id) }
+    }
+
+    /// Later or Skip this call: the card leaves, so stop holding it.
+    private func leave(_ call: SpeakerPendingMeetingGroup) {
+        reviewVisit.invalidate()
+        if model.heldReviewCall?.id == call.id { model.heldReviewCall = nil }
+        namedVoices[call.id] = nil
+    }
+
+    /// "Next call" on a finished card; on the last one it closes the stack.
+    private func finish(_ call: SpeakerPendingMeetingGroup, total: Int) {
+        leave(call)
+        if total <= 1 { model.isReviewOpen = false }
+    }
+
+    private func closeReview() {
+        reviewVisit.invalidate()
+        model.isReviewOpen = false
+        model.heldReviewCall = nil
+        namedVoices = [:]
     }
 
     /// The lower edge of a card waiting under the top one.
@@ -272,9 +333,18 @@ private struct SpeakersEmptyStateView: View {
 /// voice still waiting for a name, with the call's invitees as one-tap names.
 private struct SpeakerCallReviewCard: View {
     let group: SpeakerPendingMeetingGroup
+    /// Voices on this card still waiting for a name.
+    let pendingVoices: [SpeakerPendingVoiceGroup]
+    /// Voices named on this card this visit; they stay, lit up.
+    let named: [SpeakerReviewNamedVoice]
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
     var position = 1
     var total = 1
+    let onNamed: (SpeakerReviewNamedVoice) -> Void
+    let onLeave: () -> Void
+    let onNext: () -> Void
+
+    private var isDone: Bool { pendingVoices.isEmpty }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -294,27 +364,47 @@ private struct SpeakerCallReviewCard: View {
                         .font(LibraryTokens.meta)
                         .monospacedDigit()
                         .foregroundStyle(LibraryTokens.ink3)
+                }
+                if total > 1, !isDone {
                     SpeakerQuietLinkButton(title: "Later") {
+                        onLeave()
                         model.sendCallToBack(group)
                     }
                     .help("Put this call at the back of the stack.")
                     .accessibilityIdentifier("transcripted.speakers.call-review.later")
                 }
-                SpeakerQuietLinkButton(title: "Skip this call") {
-                    model.skipCall(group)
+                if !isDone {
+                    SpeakerQuietLinkButton(title: "Skip this call") {
+                        onLeave()
+                        model.skipCall(group)
+                    }
+                    .help("Stop asking about this call. Its voices stay under Not named yet.")
+                    .accessibilityIdentifier("transcripted.speakers.call-review.skip")
                 }
-                .help("Stop asking about this call. Its voices stay under Everyone.")
-                .accessibilityIdentifier("transcripted.speakers.call-review.skip")
             }
-            ForEach(group.voices) { voice in
+            ForEach(pendingVoices) { voice in
                 SpeakerVoiceToNameRow(
                     group: voice,
                     model: model,
                     showsMeeting: false,
-                    invitees: model.inviteesByCallKey[group.id] ?? []
+                    invitees: model.inviteesByCallKey[group.id] ?? [],
+                    onNamed: onNamed
+                )
+            }
+            ForEach(named) { voice in
+                SpeakerReviewNamedRow(voice: voice, model: model)
+                    .transition(.opacity)
+            }
+            if isDone {
+                SpeakerReviewDoneFooter(
+                    callTitle: group.meetingTitle,
+                    namedCount: named.count,
+                    callsAfterThis: total - 1,
+                    onNext: onNext
                 )
             }
         }
+        .animation(.snappy(duration: 0.28), value: named.map(\.id))
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(
@@ -327,7 +417,7 @@ private struct SpeakerCallReviewCard: View {
         )
         .onAppear { model.loadInvitees(for: group) }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(group.meetingTitle), \(group.voices.count == 1 ? "1 voice" : "\(group.voices.count) voices") to name")
+        .accessibilityLabel("\(group.meetingTitle), \(pendingVoices.count == 1 ? "1 voice" : "\(pendingVoices.count) voices") to name")
     }
 
     private var metaLine: String {
@@ -339,8 +429,11 @@ private struct SpeakerCallReviewCard: View {
         if let seconds = group.durationSeconds, seconds > 0 {
             parts.append(Self.durationText(seconds))
         }
-        let voices = group.voices.count == 1 ? "1 person to name" : "\(group.voices.count) people to name"
-        parts.append(voices)
+        switch pendingVoices.count {
+        case 0: break
+        case 1: parts.append("1 person to name")
+        default: parts.append("\(pendingVoices.count) people to name")
+        }
         return parts.joined(separator: " · ")
     }
 

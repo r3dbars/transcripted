@@ -43,9 +43,14 @@ struct SpeakerReviewStack {
     /// The Everyone list from `profiles` (already sorted and, when searching,
     /// already filtered). A search shows every match, including voices on
     /// the open card, so any voice can always be found by search.
-    func directory(_ profiles: [SpeakerProfile], isSearching: Bool) -> [SpeakerProfile] {
+    func directory(_ profiles: [SpeakerProfile], isSearching: Bool, heldCallID: String? = nil) -> [SpeakerProfile] {
         guard !isSearching else { return profiles }
-        return profiles.filter { Self.isNamed($0) || !topCardVoiceIDs.contains($0.id) }
+        // A completed call can stay visible for its celebration. The next
+        // queued call is not visible yet, so its voices must remain listed.
+        let visibleVoiceIDs = heldCallID.map { id in
+            Set(calls.first { $0.id == id }?.voices.map(\.id) ?? [])
+        } ?? topCardVoiceIDs
+        return profiles.filter { Self.isNamed($0) || !visibleVoiceIDs.contains($0.id) }
     }
 
     /// Whether this Everyone row is an unnamed voice sitting on a review card.
@@ -67,5 +72,17 @@ struct SpeakerReviewStack {
 
     private static func isNamed(_ profile: SpeakerProfile) -> Bool {
         profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false
+    }
+}
+
+/// UI completion ownership, independent of the disk edit itself. Leaving a
+/// card invalidates its callbacks even if the same call is opened again.
+struct SpeakerReviewVisit {
+    private(set) var token = UUID()
+
+    mutating func invalidate() { token = UUID() }
+
+    func accepts(_ submittedToken: UUID, isOpen: Bool) -> Bool {
+        isOpen && submittedToken == token
     }
 }

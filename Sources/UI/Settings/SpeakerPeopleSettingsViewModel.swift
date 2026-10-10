@@ -33,6 +33,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
     /// Calendar invitees per call, offered as one-tap names on its card.
     @Published private(set) var inviteesByCallKey: [String: [String]] = [:]
+    /// The review stack opens from its summary card's Review button (or a
+    /// deep link to the queue). Closed, every voice stays listed below.
+    @Published var isReviewOpen = false
+    /// The call retained on screen after naming, shared with directory
+    /// filtering so a newly queued top card never hides unseen voices.
+    @Published var heldReviewCall: SpeakerPendingMeetingGroup?
+    /// Bumped per person when a yes for them lands from this page, so their
+    /// print in the list plays the match animation. See `celebrate(_:)`.
+    @Published private(set) var celebrationTokens: [UUID: Int] = [:]
     private var inviteeLookupsStarted: Set<String> = []
 
     /// Mirrors the meeting controller's voiceprint migration gate: saved people
@@ -170,17 +179,24 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// review card right above it (named, deleted, or "This is me" there).
     /// Voices on cards further down the stack stay here, badged "Waiting in
     /// review", so they can be renamed, merged, or deleted without cycling
-    /// the stack, and a search never hides a match.
+    /// the stack, and a search never hides a match. While the stack is
+    /// closed to its summary card nothing is hidden.
     /// See `SpeakerReviewStack.directory`.
     var directoryProfiles: [SpeakerProfile] {
-        reviewStack.directory(filteredProfiles, isSearching: isSearching)
+        reviewStack.directory(filteredProfiles, isSearching: isSearching || !isReviewOpen, heldCallID: heldReviewCall?.id)
     }
 
     /// Directory membership count independent of the search filter, used to
     /// decide whether the search field and the voice-print sections render
     /// at all.
     var directoryCount: Int {
-        reviewStack.directory(profiles, isSearching: false).count
+        reviewStack.directory(profiles, isSearching: !isReviewOpen, heldCallID: heldReviewCall?.id).count
+    }
+
+    /// Plays `personID`'s match animation in the list (after their new
+    /// confirmation is in the snapshot, so the print grows to the new count).
+    func celebrate(_ personID: UUID) {
+        celebrationTokens[personID, default: 0] += 1
     }
 
     private var isSearching: Bool {
