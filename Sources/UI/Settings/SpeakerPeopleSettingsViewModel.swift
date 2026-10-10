@@ -36,6 +36,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// The review stack opens from its summary card's Review button (or a
     /// deep link to the queue). Closed, every voice stays listed below.
     @Published var isReviewOpen = false
+    /// The call retained on screen after naming, shared with directory
+    /// filtering so a newly queued top card never hides unseen voices.
+    @Published var heldReviewCall: SpeakerPendingMeetingGroup?
     /// Bumped per person when a yes for them lands from this page, so their
     /// print in the list plays the match animation. See `celebrate(_:)`.
     @Published private(set) var celebrationTokens: [UUID: Int] = [:]
@@ -180,14 +183,14 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// closed to its summary card nothing is hidden.
     /// See `SpeakerReviewStack.directory`.
     var directoryProfiles: [SpeakerProfile] {
-        reviewStack.directory(filteredProfiles, isSearching: isSearching || !isReviewOpen)
+        reviewStack.directory(filteredProfiles, isSearching: isSearching || !isReviewOpen, heldCallID: heldReviewCall?.id)
     }
 
     /// Directory membership count independent of the search filter, used to
     /// decide whether the search field and the voice-print sections render
     /// at all.
     var directoryCount: Int {
-        reviewStack.directory(profiles, isSearching: !isReviewOpen).count
+        reviewStack.directory(profiles, isSearching: !isReviewOpen, heldCallID: heldReviewCall?.id).count
     }
 
     /// Plays `personID`'s match animation in the list (after their new

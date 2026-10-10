@@ -11,10 +11,10 @@ import Foundation
 func testSpeakerReviewCardProgress() {
     typealias Progress = SpeakerReviewCardProgress
 
-    func voice(before: Int, isNew: Bool = false, trusted: Bool = true) -> SpeakerReviewNamedVoice {
+    func voice(before: Int, after: Int? = nil, isNew: Bool = false, trusted: Bool = true) -> SpeakerReviewNamedVoice {
         SpeakerReviewNamedVoice(
             voiceID: UUID(), personID: UUID(), name: "Marcus Reed",
-            confirmedBefore: before, requiredMeetings: 5,
+            confirmedBefore: before, confirmedAfter: after ?? before + 1, requiredMeetings: 5,
             isNewPerson: isNew, isTrusted: trusted
         )
     }
@@ -69,5 +69,20 @@ func testSpeakerReviewCardProgress() {
         assertEqual(Progress.summarySource(callTitles: ["Weekly sync", "Design review", "Planning"]), "From Weekly sync and 2 other calls")
         assertNil(Progress.summarySource(callTitles: []))
         assertNil(Progress.summarySource(callTitles: [" "]), "blank titles say nothing rather than \"From \"")
+    }
+
+    runSuite("Saved progress reflects distinct meetings rather than clicks") {
+        let duplicate = voice(before: 4, after: 4)
+        assertEqual(Progress.litRingsAfter(duplicate), 4)
+        assertEqual(Progress.hint(duplicate)?.text, "1 more to go")
+        let multiple = voice(before: 2, after: 5)
+        assertEqual(Progress.litRingsAfter(multiple), 5)
+        assertEqual(Progress.hint(multiple)?.text, "Named automatically from now on")
+        let newAcrossCalls = voice(before: 0, after: 3, isNew: true)
+        assertEqual(Progress.litRingsAfter(newAcrossCalls), 3)
+        assertEqual(Progress.hint(newAcrossCalls)?.text, "Saved · 2 more to auto-name")
+        let untrustedNew = voice(before: 0, after: 5, isNew: true, trusted: false)
+        assertEqual(Progress.litRingsAfter(untrustedNew), 4)
+        assertNil(Progress.hint(untrustedNew))
     }
 }

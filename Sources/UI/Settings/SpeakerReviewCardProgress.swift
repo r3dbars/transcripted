@@ -23,20 +23,22 @@ struct SpeakerReviewNamedVoice: Equatable, Identifiable {
     let name: String
     /// Confirmed meetings before this answer (0 for someone new).
     let confirmedBefore: Int
+    /// The refreshed store count after saving, not an assumed one-meeting increment.
+    var confirmedAfter: Int = 0
     /// The confirmed-meeting bar for auto-naming.
-    let requiredMeetings: Int
+    var requiredMeetings: Int
     /// Saved under a new name rather than joining someone already saved.
     let isNewPerson: Bool
     /// `SpeakerNamingStanding.isTrusted` for the person it joined.
-    let isTrusted: Bool
+    var isTrusted: Bool
 
     var id: UUID { voiceID }
 }
 
 enum SpeakerReviewCardProgress {
-    /// Confirmed meetings after this answer. A new person starts at one.
+    /// Distinct confirmed meetings persisted by the answer, including all queued calls.
     static func confirmedAfter(_ voice: SpeakerReviewNamedVoice) -> Int {
-        voice.isNewPerson ? 1 : max(0, voice.confirmedBefore) + 1
+        max(0, voice.confirmedAfter)
     }
 
     /// Rings lit before the answer: the print the person had walking in.
@@ -52,12 +54,15 @@ enum SpeakerReviewCardProgress {
 
     /// The line under the name, the island's words for the same moment.
     static func hint(_ voice: SpeakerReviewNamedVoice) -> SpeakerNamingTierPresentation.ReviewHint? {
-        SpeakerNamingTierPresentation.reviewHint(
-            moment: voice.isNewPerson ? .savedNew : .confirmed,
-            confirmedBefore: voice.isNewPerson ? 0 : voice.confirmedBefore,
+        let hint = SpeakerNamingTierPresentation.reviewHint(
+            moment: .confirmed,
+            confirmedBefore: confirmedAfter(voice),
             required: voice.requiredMeetings,
-            isTrusted: voice.isNewPerson || voice.isTrusted
+            isTrusted: voice.isTrusted,
+            earnsConfirmation: false
         )
+        guard voice.isNewPerson, let hint, !hint.usesPersonColor else { return hint }
+        return .init(text: "Saved · \(max(0, voice.requiredMeetings - confirmedAfter(voice))) more to auto-name", usesPersonColor: false)
     }
 
     /// "Weekly sync is done · 2 voices named", or just "Weekly sync is done".
@@ -96,7 +101,7 @@ enum SpeakerReviewCardProgress {
     }
 
     private static func litRings(confirmed: Int, voice: SpeakerReviewNamedVoice) -> Int {
-        let trusted = voice.isNewPerson || voice.isTrusted
+        let trusted = voice.isTrusted
         let tier = SpeakerNamingTier.tier(
             confirmedMeetings: confirmed,
             requiredMeetings: voice.requiredMeetings,

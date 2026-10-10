@@ -318,15 +318,15 @@ struct SpeakerVoiceToNameRow: View {
             isSaving = false
             if didSave {
                 nameDraft = ""
-                onNamed?(named)
+                onNamed?(savedProgress(named))
             } else {
                 saveErrorMessage = "Couldn't save — the meeting file may have moved."
             }
         }
     }
 
-    /// This voice joins someone already saved: a yes for them, so their
-    /// print lights one more ring on the card.
+    /// This voice joins someone already saved. The refreshed store decides
+    /// how many distinct meetings that answer confirmed.
     private func join(_ person: SpeakerProfile) {
         guard !isSaving else { return }
         isSaving = true
@@ -345,11 +345,23 @@ struct SpeakerVoiceToNameRow: View {
             isSaving = false
             if didSave {
                 nameDraft = ""
-                onNamed?(named)
+                onNamed?(savedProgress(named))
             } else {
                 saveErrorMessage = "Couldn't save — the meeting file may have moved."
             }
         }
+    }
+
+    /// Save completion runs after the store snapshot is refreshed. One action
+    /// can confirm several meetings, or no new meeting for a split voice.
+    private func savedProgress(_ voice: SpeakerReviewNamedVoice) -> SpeakerReviewNamedVoice {
+        var saved = voice
+        let profile = model.profiles.first { $0.id == voice.personID }
+        let standing = profile.flatMap { model.namingStanding(for: $0) }
+        saved.confirmedAfter = standing?.confirmedMeetings ?? profile?.confirmedMeetingCount ?? voice.confirmedBefore
+        saved.requiredMeetings = standing?.requiredMeetings ?? voice.requiredMeetings
+        saved.isTrusted = standing?.isTrusted ?? false
+        return saved
     }
 
     private func markAsMe() {

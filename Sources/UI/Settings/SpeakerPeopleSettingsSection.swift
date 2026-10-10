@@ -77,10 +77,9 @@ struct SpeakerPeopleSettingsSection: View {
     /// row) so opening one person always closes any other — one person open
     /// at a time, per spec.
     @State private var expandedPersonID: UUID?
-    /// The open card's call, held after its last voice is named so its
-    /// prints can finish lighting and "Next call" moves on. The queue
-    /// refresh has already dropped it by then.
-    @State private var heldCall: SpeakerPendingMeetingGroup?
+    /// Invalidates presentation callbacks after Close, Later, Skip or Next.
+    /// The underlying save still finishes; it cannot reopen an old card.
+    @State private var reviewVisit = SpeakerReviewVisit()
     /// Voices named on a card this visit, by call, newest last.
     @State private var namedVoices: [String: [SpeakerReviewNamedVoice]] = [:]
 
@@ -101,9 +100,10 @@ struct SpeakerPeopleSettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            let current = heldCall ?? meetingGroups.first
-            let heldIsExtra = heldCall.map { held in !meetingGroups.contains { $0.id == held.id } } ?? false
+            let current = model.heldReviewCall ?? meetingGroups.first
+            let heldIsExtra = model.heldReviewCall.map { held in !meetingGroups.contains { $0.id == held.id } } ?? false
             let total = meetingGroups.count + (heldIsExtra ? 1 : 0)
+            let visitToken = reviewVisit.token
 
             if let current, !model.isReviewOpen {
                 // Closed: one line about what's waiting, and Review.
@@ -145,7 +145,8 @@ struct SpeakerPeopleSettingsSection: View {
                             position: 1,
                             total: total,
                             onNamed: { voice in
-                                heldCall = current
+                                guard reviewVisit.accepts(visitToken, isOpen: model.isReviewOpen) else { return }
+                                model.heldReviewCall = current
                                 namedVoices[current.id, default: []].append(voice)
                             },
                             onLeave: { leave(current) },
@@ -230,7 +231,8 @@ struct SpeakerPeopleSettingsSection: View {
 
     /// Later or Skip this call: the card leaves, so stop holding it.
     private func leave(_ call: SpeakerPendingMeetingGroup) {
-        if heldCall?.id == call.id { heldCall = nil }
+        reviewVisit.invalidate()
+        if model.heldReviewCall?.id == call.id { model.heldReviewCall = nil }
         namedVoices[call.id] = nil
     }
 
@@ -241,8 +243,9 @@ struct SpeakerPeopleSettingsSection: View {
     }
 
     private func closeReview() {
+        reviewVisit.invalidate()
         model.isReviewOpen = false
-        heldCall = nil
+        model.heldReviewCall = nil
         namedVoices = [:]
     }
 

@@ -4,6 +4,31 @@ import Foundation
 // only the top card is drawn, so every voice not on it must stay reachable from
 // Everyone, a search must reach any voice, and Home must not count skipped calls.
 func testSpeakerReviewStack() {
+    runSuite("A completed held call never hides the next call's voices") {
+        let fixture = ReviewStackFixture()
+        let advanced = fixture.stack(skipping: [fixture.designKey])
+        assertEqual(
+            advanced.directory(fixture.profiles, isSearching: false, heldCallID: fixture.designKey).map(\.id),
+            fixture.profiles.map(\.id),
+            "the old call is still displayed, so every queued voice stays reachable"
+        )
+        assertEqual(
+            advanced.directory(fixture.profiles, isSearching: false, heldCallID: fixture.standupKey).map(\.id),
+            [fixture.ada, fixture.dee, fixture.named],
+            "once the next call is displayed only its voices are hidden"
+        )
+    }
+
+    runSuite("Closing or leaving review rejects an earlier naming completion") {
+        var visit = SpeakerReviewVisit()
+        let submitted = visit.token
+        assertTrue(visit.accepts(submitted, isOpen: true))
+        assertFalse(visit.accepts(submitted, isOpen: false))
+        visit.invalidate()
+        assertFalse(visit.accepts(submitted, isOpen: true), "reopening must not revive an old completion")
+        assertTrue(visit.accepts(visit.token, isOpen: true), "the new visit accepts its own completion")
+    }
+
     runSuite("Voices on review cards below the top one stay listed in Everyone") {
         let fixture = ReviewStackFixture()
         let stack = fixture.stack()
