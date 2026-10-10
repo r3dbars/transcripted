@@ -42,6 +42,8 @@ AI_MARKER = "<!-- risk-triage:ai-review -->"
 RISK_LABELS = ("risk:low", "risk:medium", "risk:high")
 HOLD_LABELS = {"hold", "do not merge", "needs owner review", "waiting-on-human", "blocked"}
 WAIVE_LABEL = "ai-findings-waived"  # owner-only override for P0/P1 the owner judged wrong
+# Only reviews from people with repo access count (public repos accept anyone's review).
+TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 TIERS = {"low": 0, "medium": 1, "high": 2}
 MAX_DIFF_CHARS = 120_000
 LOW_MAX_SOURCE_LINES = 40
@@ -90,6 +92,7 @@ HIGH_PATTERNS = (
     "Package.swift",
     "Sources/TranscriptedCore/Audio/**",
     "Sources/Capture/**",
+    "Sources/Speech/**",
     "Sources/Meeting/MeetingCapture*",
     "Sources/Meeting/MeetingMicCapture*",
     "Sources/Dictation/*Audio*",
@@ -144,6 +147,9 @@ def classify(files: list[dict]) -> dict:
     if not files:
         return {"risk": "high", "owner_required": False, "reasons": ["no changed files reported"]}
     risk, owner, reasons = "low", False, []
+    if any(f.get("status") == "removed" and _any(f.get("filename", ""), LOW_PATTERNS[:4]) for f in files):
+        risk = "medium"
+        reasons.append("removes a test file")
     source_lines, source_files = 0, 0
     for f in files:
         names = [n for n in (f.get("filename"), f.get("previous_filename")) if n]
@@ -164,7 +170,8 @@ def classify(files: list[dict]) -> dict:
                 risk = "high"
                 reasons.append(f"{name}: unknown path (not test/doc/source), defaults to high")
     if risk == "low" and source_files:
-        has_test = any(_any(f.get("filename", ""), LOW_PATTERNS[:4]) for f in files)
+        has_test = any(_any(f.get("filename", ""), LOW_PATTERNS[:4]) and f.get("status") != "removed"
+                       for f in files)
         if source_files > LOW_MAX_SOURCE_FILES or source_lines > LOW_MAX_SOURCE_LINES or not has_test:
             risk = "medium"
             reasons.append(
@@ -241,7 +248,8 @@ def approvals_ok(reviews: list[dict], author: str, head_sha: str, owner_required
     """
     latest = _latest_reviews(reviews)
     approvers = {u for u, r in latest.items()
-                 if r["state"] == "APPROVED" and r.get("commit_id") == head_sha and u and u != author}
+                 if r["state"] == "APPROVED" and r.get("commit_id") == head_sha and u and u != author
+                 and r.get("author_association") in TRUSTED_ASSOCIATIONS}
     if any(r["state"] == "CHANGES_REQUESTED" for r in latest.values()):
         return False, "a review requests changes"
     if author == OWNER_LOGIN:
@@ -429,7 +437,7 @@ def evaluate(n: int) -> tuple[dict, dict]:
                     ai_clear(verdict, sha, labels, waiver),
                     approvals_ok(reviews, author, sha, risk["owner_required"]),
                     changes_requested(reviews))
-    if behind and result["automerge"]:
+    if behind and result["state"] == "success":
         # Checks ran against an older base: serialize, require a fresh run on current main.
         result = {"state": "pending", "automerge": False, "why": ["branch is behind base; update it so CI reruns"]}
     return pr, {**result, "risk": risk["risk"]}

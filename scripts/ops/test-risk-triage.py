@@ -52,6 +52,14 @@ class ClassifierTests(unittest.TestCase):
         for bad in ("a@b.com", "justin", "meet.wav", "x.io", "abcdefghijk", "ghp_"):
             self.assertNotIn(bad, out)
 
+    def test_speech_engine_is_high(self):
+        self.assertEqual(risk("Sources/Speech/ParakeetAudioTap.swift", "Tests/XTests.swift", lines=1)["risk"], "high")
+
+    def test_removed_test_is_not_proof(self):
+        fs = [{"filename": "Sources/UI/Foo.swift", "additions": 1, "deletions": 0},
+              {"filename": "Tests/FooTests.swift", "additions": 0, "deletions": 9, "status": "removed"}]
+        self.assertEqual(rt.classify(fs)["risk"], "medium")
+
     def test_agent_instructions_are_high(self):
         for path in ("AGENTS.md", "CLAUDE.md", "Sources/AGENTS.md", "docs/CLAUDE.md"):
             self.assertEqual(risk(path)["risk"], "high", path)
@@ -146,8 +154,8 @@ class AiTests(unittest.TestCase):
         self.assertIsNone(rt.parse_ai_comment("<!-- risk-triage:verdict {} -->"))
 
 
-def review(user, state="APPROVED", sha=SHA):
-    return {"user": {"login": user}, "state": state, "commit_id": sha}
+def review(user, state="APPROVED", sha=SHA, assoc="COLLABORATOR"):
+    return {"user": {"login": user}, "state": state, "commit_id": sha, "author_association": assoc}
 
 
 class ApprovalTests(unittest.TestCase):
@@ -169,6 +177,9 @@ class ApprovalTests(unittest.TestCase):
         ok, why = rt.approvals_ok([], "r3dbars", SHA, True)
         self.assertTrue(ok)
         self.assertIn("manually", why)
+
+    def test_untrusted_reviewer_does_not_count(self):
+        self.assertFalse(rt.approvals_ok([review("rando", assoc="NONE")], "bot", SHA, False)[0])
 
     def test_owner_exemption_survives_other_approvals(self):
         self.assertTrue(rt.approvals_ok([review("alice")], "r3dbars", SHA, True)[0])
