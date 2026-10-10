@@ -12,10 +12,16 @@ import TranscriptedCore
 enum CLIDiarization {
     static let engineChoices = ["app", "nemotron", "pyannote"]
     static let defaultEngineChoice = "app"
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+    static let preferenceKey = DiarizationBackend.preferenceKey
+    static let environmentKey = DiarizationBackend.environmentKey
+    static let appDefaultsDomain = SpeakerVoiceprintSelection.appDefaultsDomain
+#else
     static let preferenceKey = "diarization-backend-preference"
     static let environmentKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
     /// Same domain the app writes (`SpeakerVoiceprintSelection.appDefaultsDomain`).
     static let appDefaultsDomain = "com.justinbetker.draft"
+#endif
 
     struct Windowing: Equatable {
         var windowDuration: Double
@@ -37,14 +43,20 @@ enum CLIDiarization {
     }
 
     /// App-tuned pyannote knobs (`FluidAudioCompatibility.tunedOfflineDiarizerConfig`
-    /// when Core is linked) plus Nemotron's 10 s feed slice.
+    /// when Core is linked) plus Nemotron's shared feed-slice length.
     static var windowing: Windowing {
         #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore) && canImport(FluidAudio)
         let config = FluidAudioCompatibility.tunedOfflineDiarizerConfig()
         return Windowing(
             windowDuration: config.windowDuration,
             segmentationStepRatio: config.segmentationStepRatio,
-            nemotronSliceSeconds: 10.0
+            nemotronSliceSeconds: DiarizationBackend.nemotronSliceSeconds
+        )
+        #elseif TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+        return Windowing(
+            windowDuration: 10.0,
+            segmentationStepRatio: 0.266,
+            nemotronSliceSeconds: DiarizationBackend.nemotronSliceSeconds
         )
         #else
         return Windowing(windowDuration: 10.0, segmentationStepRatio: 0.266, nemotronSliceSeconds: 10.0)

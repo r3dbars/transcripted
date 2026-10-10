@@ -208,6 +208,7 @@ extension CLIDiarizationTests {
         XCTAssertEqual(CLIDiarization.appDefaultsDomain, SpeakerVoiceprintSelection.appDefaultsDomain)
         XCTAssertEqual(CLIDiarization.preferenceKey, DiarizationBackend.preferenceKey)
         XCTAssertEqual(CLIDiarization.environmentKey, DiarizationBackend.environmentKey)
+        XCTAssertEqual(CLIDiarization.windowing.nemotronSliceSeconds, DiarizationBackend.nemotronSliceSeconds)
         XCTAssertEqual(
             try MeetingImportDiarization.backend(choice: "app", environment: [:], appDefaults: nil).rawValue,
             try CLIDiarization.resolvedEngine(choice: "app", environment: [:], storedPreference: nil)

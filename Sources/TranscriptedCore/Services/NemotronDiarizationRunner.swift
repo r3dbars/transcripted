@@ -45,10 +45,10 @@ final class NemotronDiarizationRunner: @unchecked Sendable {
     /// `~/Library/Application Support/FluidAudio/Models/nemotron-3-diarization/`.
     static let bundleDirectoryName = "nemotron-diarizer-models"
 
-    /// Samples appended to the streaming diarizer per call (10 s at 16 kHz). One
-    /// whole-buffer append would copy the recording into the frontend, so feed it
-    /// in slices.
-    static let feedSliceSamples = 160_000
+    /// Samples appended to the streaming diarizer per call
+    /// (`DiarizationBackend.nemotronSliceSeconds` at 16 kHz). One whole-buffer
+    /// append would copy the recording into the frontend, so feed it in slices.
+    static let feedSliceSamples = DiarizationBackend.nemotronSliceSamples
 
     let presetName: String
     /// Loaded once; only touched on `queue`.

@@ -39,7 +39,8 @@ enum MeetingImportWorkflow {
             modelsDir: command.modelsDir,
             diarizationModelsDir: command.diarizationModelsDir,
             noDownload: command.noDownload,
-            engineChoice: command.diarizationEngine
+            engineChoice: command.diarizationEngine,
+            storedPreference: CLIDiarization.storedAppPreference()
         )
         let manager = try await TranscribeModelResolver.loadManager(
             modelsDir: modelPaths.parakeet?.path,
@@ -109,7 +110,8 @@ enum MeetingImportWorkflow {
                     pyannote: modelPaths.diarization, nemotron: modelPaths.nemotron
                 ),
                 segmentEmbedder: embedder,
-                backend: backend
+                backend: backend,
+                allowDownload: !command.noDownload
             )
         }
         await diarization.initialize()
@@ -339,16 +341,13 @@ enum MeetingImportModels {
             nemotron: explicitNemotron ?? discovered.bundled,
             nemotronCache: explicitNemotron == nil ? discovered.cache : nil
         )
-        if noDownload, let error = noDownloadError(
+        if noDownload, let error = try noDownloadError(
             parakeet: paths.parakeet,
             diarization: paths.diarization,
             nemotronAvailable: paths.nemotronAvailable,
-            engine: try CLIDiarization.resolvedEngine(
-                choice: engineChoice,
-                environment: environment,
-                storedPreference: storedPreference
-            ),
-            choice: engineChoice
+            engineChoice: engineChoice,
+            environment: environment,
+            storedPreference: storedPreference
         ) {
             throw error
         }
@@ -388,30 +387,51 @@ enum MeetingImportModels {
         completeCachedNemotronModels(at: directory) ? directory : nil
     }
 
-    /// HuggingFace layout (`nemotron-3-diarization/monolithic/…`) or a flat copy.
+    /// Same files `scripts/release/provision-release-models.sh` and
+    /// `scripts/entrypoints/build-beta.sh` write into the FluidAudio cache.
+    static let nemotronCacheMarkerName = ".fluidaudio-nemotron3-weights"
+    static let nemotronCacheSilenceName = "learnable_sil_emb.bin"
+    static let nemotronCacheModelSubpaths = [
+        "monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc",
+        "monolithic/Nemotron3Diarizer_fast128.mlmodelc"
+    ]
+
+    /// HuggingFace layout (`monolithic/v2/…`, older `monolithic/…`) or a flat copy.
     static func completeCachedNemotronModels(at directory: URL) -> Bool {
         if completeNemotronModels(at: directory) { return true }
-        let monolithic = directory.appendingPathComponent("monolithic", isDirectory: true)
-        let model = monolithic.appendingPathComponent("Nemotron3Diarizer_fast128.mlmodelc")
-        let silenceRoot = directory.appendingPathComponent("learnable_sil_emb.bin")
-        let silenceNested = monolithic.appendingPathComponent("learnable_sil_emb.bin")
-        return FileManager.default.fileExists(atPath: model.path)
-            && (FileManager.default.fileExists(atPath: silenceRoot.path)
-                || FileManager.default.fileExists(atPath: silenceNested.path))
+        let fm = FileManager.default
+        let silenceCandidates = [
+            directory.appendingPathComponent(nemotronCacheSilenceName),
+            directory.appendingPathComponent("monolithic/\(nemotronCacheSilenceName)"),
+            directory.appendingPathComponent("monolithic/v2/\(nemotronCacheSilenceName)")
+        ]
+        guard silenceCandidates.contains(where: { fm.fileExists(atPath: $0.path) }) else {
+            return false
+        }
+        return nemotronCacheModelSubpaths.contains {
+            fm.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
     }
 
-    /// `--no-download` checks Parakeet plus the engine that will actually run.
+    /// `--no-download` checks Parakeet plus the engine that will actually run,
+    /// including `--diarization-engine app` resolved against the stored preference.
     static func noDownloadError(
         parakeet: URL?,
         diarization: URL?,
         nemotronAvailable: Bool,
-        engine: String,
-        choice: String
-    ) -> ValidationError? {
+        engineChoice: String,
+        environment: [String: String] = [:],
+        storedPreference: String? = nil
+    ) throws -> ValidationError? {
         if parakeet == nil {
             return ValidationError("--no-download requires complete local Parakeet v3 models. Open Transcripted to install models or supply --models-dir.")
         }
-        let trimmed = choice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let engine = try CLIDiarization.resolvedEngine(
+            choice: engineChoice,
+            environment: environment,
+            storedPreference: storedPreference
+        )
+        let trimmed = engineChoice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch engine {
         case "pyannote":
             if diarization == nil {

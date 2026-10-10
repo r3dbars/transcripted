@@ -21,6 +21,9 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertEqual(DiarizationBackend.hostDefault, .nemotron)
         XCTAssertEqual(DiarizationBackend.preferenceKey, "diarization-backend-preference")
         XCTAssertEqual(DiarizationBackend.environmentKey, "TRANSCRIPTED_DIARIZATION_BACKEND")
+        XCTAssertEqual(DiarizationBackend.nemotronSliceSeconds, 10)
+        XCTAssertEqual(DiarizationBackend.nemotronSliceSamples, 160_000)
+        XCTAssertEqual(NemotronDiarizationRunner.feedSliceSamples, DiarizationBackend.nemotronSliceSamples)
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: nil, environment: [:]), .nemotron)
         XCTAssertEqual(DiarizationBackend.effective(storedPreference: "pyannote", environment: [:]), .pyannote)
         XCTAssertEqual(
@@ -43,6 +46,24 @@ final class DiarizationBackendTests: XCTestCase {
         XCTAssertEqual(defaultService.backend, .pyannote)
         let embedderOnly = await MainActor.run { DiarizationService(segmentEmbedder: StubEmbedder(result: nil)) }
         XCTAssertEqual(embedderOnly.backend, .pyannote)
+    }
+
+    func testNoDownloadCannotFetchPyannoteAfterNemotronFails() {
+        XCTAssertFalse(
+            DiarizationService.canLoadPyannote(hasLocalBundle: false, allowDownload: false),
+            "no local pyannote + no download must not call the downloader"
+        )
+        XCTAssertTrue(
+            DiarizationService.canLoadPyannote(hasLocalBundle: true, allowDownload: false),
+            "a local pyannote bundle may load without downloading"
+        )
+        XCTAssertTrue(
+            DiarizationService.canLoadPyannote(hasLocalBundle: false, allowDownload: true),
+            "download remains allowed when the caller did not disable it"
+        )
+        let disabled = DiarizationDownloadDisabled(backend: DiarizationBackend.pyannote.rawValue)
+        XCTAssertEqual(disabled.backend, "pyannote")
+        XCTAssertTrue(disabled.errorDescription?.contains("download is disabled") == true)
     }
 
     func testServiceKeepsRequestedBackend() async {

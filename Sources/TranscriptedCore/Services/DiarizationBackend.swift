@@ -26,6 +26,13 @@ extension DiarizationBackend {
     public static let preferenceKey = "diarization-backend-preference"
     /// Dev/lab override. Wins over the stored preference.
     public static let environmentKey = "TRANSCRIPTED_DIARIZATION_BACKEND"
+    /// Nemotron feed-slice length in seconds. The runner appends
+    /// `nemotronSliceSamples` (16 kHz); CLI window counts use the same value
+    /// so they cannot drift from a second hard-coded 10.
+    public static let nemotronSliceSeconds: Double = 10
+    public static var nemotronSliceSamples: Int {
+        Int((nemotronSliceSeconds * 16_000).rounded())
+    }
 
     /// The stored choice, ignoring the environment. Unknown or missing values
     /// read as the host default.

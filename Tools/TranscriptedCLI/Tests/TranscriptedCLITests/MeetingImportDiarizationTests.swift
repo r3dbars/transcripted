@@ -20,11 +20,11 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
         XCTAssertEqual(
             MeetingImportDiarization.preferenceKey,
-            "diarization-backend-preference"
+            DiarizationBackend.preferenceKey
         )
         XCTAssertEqual(
             MeetingImportDiarization.environmentKey,
-            "TRANSCRIPTED_DIARIZATION_BACKEND"
+            DiarizationBackend.environmentKey
         )
     }
 
@@ -59,7 +59,7 @@ final class MeetingImportDiarizationTests: XCTestCase {
         let envNemotron = [MeetingImportDiarization.environmentKey: "nemotron"]
         XCTAssertEqual(
             try MeetingImportDiarization.backend(
-                choice: "pyannote", environment: envNemotron, appDefaults: ["diarization-backend-preference": "nemotron"]
+                choice: "pyannote", environment: envNemotron, appDefaults: [MeetingImportDiarization.preferenceKey: "nemotron"]
             ),
             .pyannote
         )
@@ -150,6 +150,32 @@ final class MeetingImportDiarizationTests: XCTestCase {
         XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: root), root)
     }
 
+    func testCachedNemotronFindsTheProvisionedVersionedLayout() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-nemotron-v2-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = root.appendingPathComponent(MeetingImportModels.nemotronCacheRelativePath, isDirectory: true)
+        // Exact layout from scripts/release/provision-release-models.sh:
+        //   monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc
+        //   learnable_sil_emb.bin
+        //   .fluidaudio-nemotron3-weights
+        try FileManager.default.createDirectory(
+            at: cache.appendingPathComponent("monolithic/v2/Nemotron3Diarizer_fast128.mlmodelc", isDirectory: true),
+            withIntermediateDirectories: true
+        )
+        XCTAssertNil(MeetingImportModels.cachedNemotronModels(at: cache), "versioned model without silence is incomplete")
+        try Data().write(to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheSilenceName))
+        try Data("ga-2026-09-23\n".utf8).write(
+            to: cache.appendingPathComponent(MeetingImportModels.nemotronCacheMarkerName)
+        )
+        XCTAssertEqual(MeetingImportModels.cachedNemotronModels(at: cache), cache)
+        XCTAssertFalse(
+            FileManager.default.fileExists(
+                atPath: cache.appendingPathComponent("monolithic/Nemotron3Diarizer_fast128.mlmodelc").path
+            ),
+            "the provisioned cache has no unversioned monolithic/ model"
+        )
+    }
+
     func testImportAudioModelsDirHonorsNemotronLikeDiarizeAndBatch() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("cli-models-dir-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
@@ -208,12 +234,11 @@ final class MeetingImportDiarizationTests: XCTestCase {
         )
         XCTAssertEqual(paths.nemotron?.path, modelsDir.path)
         XCTAssertTrue(paths.nemotronAvailable)
-        XCTAssertNil(MeetingImportModels.noDownloadError(
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
             parakeet: URL(fileURLWithPath: "/parakeet"),
             diarization: paths.diarization,
             nemotronAvailable: paths.nemotronAvailable,
-            engine: "nemotron",
-            choice: "app"
+            engineChoice: "app"
         ))
 
         let loaded = try CLIDiarization.acceptLoadedEngine(
@@ -241,49 +266,74 @@ final class MeetingImportDiarizationTests: XCTestCase {
         XCTAssertNotNil(object["timings"] as? [String: Any])
     }
 
-    func testNoDownloadChecksOnlyTheSelectedEngineModels() {
+    func testNoDownloadChecksOnlyTheSelectedEngineModels() throws {
         let parakeet = URL(fileURLWithPath: "/tmp/parakeet")
         let pyannote = URL(fileURLWithPath: "/tmp/pyannote")
 
-        XCTAssertNil(MeetingImportModels.noDownloadError(
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: nil, nemotronAvailable: true,
-            engine: "nemotron", choice: "nemotron"
+            engineChoice: "nemotron"
         ), "Nemotron does not need pyannote")
-        XCTAssertNotNil(MeetingImportModels.noDownloadError(
+        XCTAssertNotNil(try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: nil, nemotronAvailable: true,
-            engine: "pyannote", choice: "pyannote"
+            engineChoice: "pyannote"
         ), "pyannote still needs its own models")
-        XCTAssertNil(MeetingImportModels.noDownloadError(
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: pyannote, nemotronAvailable: false,
-            engine: "pyannote", choice: "pyannote"
+            engineChoice: "pyannote"
         ), "pyannote does not need Nemotron")
 
-        XCTAssertNotNil(MeetingImportModels.noDownloadError(
+        XCTAssertNotNil(try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: pyannote, nemotronAvailable: false,
-            engine: "nemotron", choice: "nemotron"
+            engineChoice: "nemotron"
         ), "explicit Nemotron cannot borrow pyannote")
-        XCTAssertNil(MeetingImportModels.noDownloadError(
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: pyannote, nemotronAvailable: false,
-            engine: "nemotron", choice: "app"
+            engineChoice: "app"
         ), "default app path may fall back to local pyannote")
-        XCTAssertNil(MeetingImportModels.noDownloadError(
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: nil, nemotronAvailable: true,
-            engine: "nemotron", choice: "app"
+            engineChoice: "app"
         ))
 
-        let neither = MeetingImportModels.noDownloadError(
+        let neither = try MeetingImportModels.noDownloadError(
             parakeet: parakeet, diarization: nil, nemotronAvailable: false,
-            engine: "nemotron", choice: "app"
+            engineChoice: "app"
         )
         XCTAssertNotNil(neither)
-        let missingParakeet = MeetingImportModels.noDownloadError(
+        let missingParakeet = try MeetingImportModels.noDownloadError(
             parakeet: nil, diarization: pyannote, nemotronAvailable: true,
-            engine: "nemotron", choice: "nemotron"
+            engineChoice: "nemotron"
         )
         XCTAssertNotNil(missingParakeet)
         let message = String(describing: missingParakeet!)
         XCTAssertTrue(message.contains("Parakeet"), message)
         XCTAssertFalse(message.contains("AND offline"), message)
+    }
+
+    func testNoDownloadUsesTheResolvedAppEngineNotAlwaysNemotron() throws {
+        let parakeet = URL(fileURLWithPath: "/tmp/parakeet")
+        XCTAssertNotNil(try MeetingImportModels.noDownloadError(
+            parakeet: parakeet, diarization: nil, nemotronAvailable: true,
+            engineChoice: "app", storedPreference: "pyannote"
+        ), "app + saved pyannote must require pyannote even when Nemotron is local")
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
+            parakeet: parakeet, diarization: URL(fileURLWithPath: "/tmp/pyannote"),
+            nemotronAvailable: false, engineChoice: "app", storedPreference: "pyannote"
+        ))
+        XCTAssertNil(try MeetingImportModels.noDownloadError(
+            parakeet: parakeet, diarization: nil, nemotronAvailable: true,
+            engineChoice: "app", storedPreference: nil
+        ), "app with no saved preference still uses Nemotron")
+    }
+
+    func testNoDownloadBlocksPyannoteFallbackDownload() {
+        XCTAssertFalse(
+            DiarizationService.canLoadPyannote(hasLocalBundle: false, allowDownload: false)
+        )
+        XCTAssertTrue(
+            DiarizationService.canLoadPyannote(hasLocalBundle: true, allowDownload: false)
+        )
     }
 
     private func writeNemotronFixture(at directory: URL) throws {
