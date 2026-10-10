@@ -438,13 +438,24 @@ func runMeetingSeries(_ args: [String]) async {
     // run or --force starts it empty; any other mismatch stops here and asks for
     // --force (LabSharedSpeakerDB).
     let sharedDBDir = LabSharedSpeakerDB.directory(workRoot: workRoot)
+    // The diarizer that actually loaded (a Nemotron load failure runs pyannote).
+    let activeDiarizer = await MainActor.run { () -> String in
+        let run = diarization.activeRunDescriptor
+        return "\(run.backend.rawValue)/\(run.voiceprintModel ?? "native")"
+    }
+    if activeDiarizer.split(separator: "/").first.map(String.init) != backend.rawValue {
+        log("[lab] requested --backend \(backend.rawValue) but \(activeDiarizer) loaded; the shared DB fingerprint records what loaded")
+    }
+    // Validate --only / --limit before prepare can empty the DB for a run of nothing.
+    do { _ = try LabSharedSpeakerDB.selectMeetings(series.meetings.map(\.id), only: only, limit: limit) }
+    catch { die("\(error)") }
     let sharedMeetings = series.meetings.filter { !($0.fresh_db ?? true) }.map(\.id)
     let sharedConfig = LabSharedSpeakerDB.Config(
         set: series.set,
         workRoot: workRoot.standardizedFileURL.path,
         sharedMeetings: sharedMeetings,
         speakerDBFile: voiceprint?.speakerDBFileName ?? "speakers.sqlite",
-        runArgs: LabSharedSpeakerDB.fingerprintArgs(args),
+        runArgs: LabSharedSpeakerDB.runFingerprint(args: args, activeDiarizer: activeDiarizer),
         fileHashes: LabSharedSpeakerDB.fileHashes(args: args, environment: ProcessInfo.processInfo.environment)
     )
     let finishedShared = Set(sharedMeetings.filter { id in
