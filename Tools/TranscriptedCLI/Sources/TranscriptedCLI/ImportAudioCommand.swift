@@ -11,7 +11,7 @@ struct ImportAudio: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "import-audio",
         abstract: "Transcribe and diarize a file into the Transcripted meeting library.",
-        discussion: "Uses local Parakeet v3 and PyAnnote. Never records audio or deletes the input. "
+        discussion: "Uses local Parakeet v3 and the app's diarization engine (Nemotron by default; pyannote stays available). Never records audio or deletes the input. "
             + "Recognizes eligible saved speakers from a read-only snapshot of the app's active voiceprint database; does not learn new people. "
             + "Says on stderr why each numbered speaker stayed numbered. "
             + "Does not use the app's Whisper/language selection. Repeated imports create distinct captures."
@@ -41,13 +41,16 @@ struct ImportAudio: AsyncParsableCommand {
     @Option(name: .long, help: "Voiceprint model: app (default; follows the app, ReDimNet2 unless changed), redimnet2, wespeaker, or eres2net. ReDimNet2 and ERes2Net need their installed local model.")
     var speakerEmbedder = "app"
 
-    @Flag(name: .long, help: "Also name a speaker who clears every recognition bar except the app's confirmed-meetings count (confirmed at least once), written as \"Name (likely)\". Off by default.")
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app's hidden switch / TRANSCRIPTED_DIARIZATION_BACKEND, Nemotron unless changed), nemotron, or pyannote.")
+    var diarizationEngine = "app"
+
+    @Flag(name: .long, help: "Also name a speaker held back only by confirmation count and/or a similarity below the silent-naming bar but above the model's invitee/suggest floor, when the top match also beats the runner-up by the model's invitee margin, written as \"Name (likely)\". Off by default. Never a confirmed identity.")
     var nameLikelySpeakers = false
 
-    @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory.")
+    @Option(name: .long, help: "Path to a complete Parakeet TDT v3 model directory, or a flat Nemotron diarizer directory (same as diarize --models-dir).")
     var modelsDir: String?
 
-    @Option(name: .long, help: "Path to a complete offline speaker-diarization model directory.")
+    @Option(name: .long, help: "Path to a complete pyannote or Nemotron diarization model directory.")
     var diarizationModelsDir: String?
 
     @Flag(name: .long, help: "Never download models. Missing or incomplete local models are errors.")
@@ -68,6 +71,9 @@ struct ImportAudio: AsyncParsableCommand {
             throw ValidationError("--speaker-embedder cannot be empty.")
         }
         #endif
+        guard Self.diarizationEngineChoices.contains(diarizationEngine) else {
+            throw ValidationError("--diarization-engine must be " + Self.diarizationEngineChoices.joined(separator: ", ") + ".")
+        }
         if noSpeakerIdentification && nameLikelySpeakers {
             throw ValidationError("--name-likely-speakers cannot be combined with --no-speaker-identification.")
         }
@@ -123,6 +129,8 @@ struct ImportAudio: AsyncParsableCommand {
         ["app"]
         #endif
     }
+
+    static var diarizationEngineChoices: [String] { CLIDiarization.engineChoices }
 
     var resolvedOutputDirectory: URL {
         Self.outputDirectory(override: outputDir)

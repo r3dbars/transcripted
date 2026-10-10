@@ -65,4 +65,37 @@ final class SpeakerNamingBlockerTests: XCTestCase {
         XCTAssertEqual(at(.weSpeaker), [])
         XCTAssertEqual(at(.reDimNet2B4), [.similarityBelowBar(similarity: 0.93, bar: SpeakerEmbeddingThresholds.reDimNet2B4.autoAcceptSimilarity)])
     }
+
+    func testLikelyNamingUsesTheInviteeSimilarityFloor() {
+        XCTAssertEqual(SpeakerNamingPolicy.likelySimilarityFloor(thresholds: .reDimNet2B4), 0.815)
+        XCTAssertEqual(SpeakerNamingPolicy.likelySimilarityFloor(thresholds: .weSpeaker), 0.80)
+        let belowSilent = [SpeakerNamingBlocker.similarityBelowBar(similarity: 0.891, bar: 0.946)]
+        XCTAssertTrue(SpeakerNamingPolicy.shouldNameAsLikely(blockers: belowSilent, thresholds: .reDimNet2B4))
+        let belowFloor = [SpeakerNamingBlocker.similarityBelowBar(similarity: 0.814, bar: 0.946)]
+        XCTAssertFalse(SpeakerNamingPolicy.shouldNameAsLikely(blockers: belowFloor, thresholds: .reDimNet2B4))
+        let confirmations = [SpeakerNamingBlocker.needsConfirmations(have: 2, need: 5)]
+        XCTAssertTrue(SpeakerNamingPolicy.shouldNameAsLikely(blockers: confirmations, thresholds: .reDimNet2B4))
+        XCTAssertFalse(SpeakerNamingPolicy.shouldNameAsLikely(blockers: [.recentCorrections], thresholds: .reDimNet2B4))
+        XCTAssertFalse(SpeakerNamingPolicy.shouldNameAsLikely(blockers: [], thresholds: .reDimNet2B4))
+    }
+
+    func testLikelyNamingRejectsAnAmbiguousRunnerUp() {
+        // 0.891 vs 0.85: clears the invitee floor, but the 0.041 gap is
+        // below ReDimNet2's inviteeMarginMin (0.106).
+        let ambiguous: [SpeakerNamingBlocker] = [
+            .similarityBelowBar(similarity: 0.891, bar: 0.946),
+            .runnerUpTooClose(margin: 0.891 - 0.85, needed: 0.128),
+        ]
+        XCTAssertEqual(SpeakerEmbeddingThresholds.reDimNet2B4.inviteeMarginMin, 0.106)
+        XCTAssertFalse(SpeakerNamingPolicy.shouldNameAsLikely(blockers: ambiguous, thresholds: .reDimNet2B4))
+    }
+
+    func testLikelyNamingAcceptsAClearRunnerUpMargin() {
+        // 0.891 vs 0.70: same floor, 0.191 gap beats inviteeMarginMin.
+        let clear: [SpeakerNamingBlocker] = [
+            .similarityBelowBar(similarity: 0.891, bar: 0.946),
+            .runnerUpTooClose(margin: 0.891 - 0.70, needed: 0.128),
+        ]
+        XCTAssertTrue(SpeakerNamingPolicy.shouldNameAsLikely(blockers: clear, thresholds: .reDimNet2B4))
+    }
 }

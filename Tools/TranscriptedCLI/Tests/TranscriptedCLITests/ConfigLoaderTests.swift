@@ -106,7 +106,7 @@ extension ConfigLoaderTests {
         let json = """
         {
             "clusteringThreshold": 0.55,
-            "Fa": 0.25,
+            "Fa": 0.11,
             "Fb": 0.63,
             "windowDuration": 8.0,
             "segmentationStepRatio": 0.3,
@@ -118,7 +118,7 @@ extension ConfigLoaderTests {
             "speechOffsetThreshold": 0.4,
             "segmentationMinDurationOn": 0.1,
             "segmentationMinDurationOff": 0.25,
-            "maxVBxIterations": 24,
+            "maxVBxIterations": 12,
             "convergenceTolerance": 0.0002
         }
         """
@@ -128,7 +128,7 @@ extension ConfigLoaderTests {
         // The file's cosine 0.55 becomes FluidAudio 0.17's cut distance sqrt(2 - 2 * 0.55).
         XCTAssertEqual(config.clusteringThreshold, 0.9.squareRoot(), accuracy: 1e-12)
         XCTAssertFalse(config.clustering.constrainedAssignment)
-        XCTAssertEqual(config.Fa, 0.25)
+        XCTAssertEqual(config.Fa, 0.11)
         XCTAssertEqual(config.Fb, 0.63)
         XCTAssertEqual(config.windowDuration, 8.0)
         XCTAssertEqual(config.segmentationStepRatio, 0.3)
@@ -140,7 +140,7 @@ extension ConfigLoaderTests {
         XCTAssertEqual(config.speechOffsetThreshold, 0.4)
         XCTAssertEqual(config.segmentationMinDurationOn, 0.1)
         XCTAssertEqual(config.segmentationMinDurationOff, 0.25)
-        XCTAssertEqual(config.maxVBxIterations, 24)
+        XCTAssertEqual(config.maxVBxIterations, 12)
         XCTAssertEqual(config.convergenceTolerance, 0.0002)
 
         // Values actually moved away from the CLI defaults.

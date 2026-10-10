@@ -68,6 +68,9 @@ struct DiarizeConfig: Codable {
 
 #if TRANSCRIPTEDCLI_WITH_DIARIZATION && canImport(FluidAudio)
 import FluidAudio
+#if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 /// FluidAudio 0.17 changed two things under the CLI's diarizer defaults and
 /// config files. These helpers keep what 0.15.x did (mirrors TranscriptedCore's
@@ -82,13 +85,34 @@ enum DiarizerCompatibility {
         return max(0, 2 - 2 * clamped).squareRoot()
     }
 
-    /// 0.15.x's `OfflineDiarizerConfig.default`: the same community values, with
-    /// the cosine 0.6 threshold and independent (unconstrained) assignment.
+    /// The app-tuned offline config `import-audio` already uses. Sharing it here
+    /// is what stops `diarize` from using FluidAudio's 0.2 step (1903 windows)
+    /// while `import-audio` uses 0.266 (1431 windows) on the same file.
+    /// Long-meeting drift / VBx linking are not changed.
     static var legacyDefaultConfig: OfflineDiarizerConfig {
-        var config = OfflineDiarizerConfig.default
-        config.clusteringThreshold = clusteringDistance(fromCosineSimilarity: 0.6)
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
+        return FluidAudioCompatibility.tunedOfflineDiarizerConfig()
+        #else
+        var config = OfflineDiarizerConfig(
+            clusteringThreshold: clusteringDistance(fromCosineSimilarity: 0.6),
+            Fa: 0.25,
+            Fb: 0.63,
+            windowDuration: CLIDiarization.windowing.windowDuration,
+            segmentationStepRatio: CLIDiarization.windowing.segmentationStepRatio,
+            embeddingBatchSize: 32,
+            embeddingExcludeOverlap: true,
+            minSegmentDuration: 1.1821,
+            minGapDuration: 0.2874,
+            speechOnsetThreshold: 0.4472,
+            speechOffsetThreshold: 0.4472,
+            segmentationMinDurationOn: 0.0,
+            segmentationMinDurationOff: 0.2738,
+            maxVBxIterations: 24,
+            convergenceTolerance: 0.0001
+        )
         config.clustering.constrainedAssignment = false
         return config
+        #endif
     }
 
     /// 0.17 pins the diarizer repo to one commit and deletes caches without a

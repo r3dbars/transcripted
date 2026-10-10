@@ -144,12 +144,14 @@ enum SpeakerEmbedderFactory {
         )
     }
 
-    /// Core's backend for the hidden diarization switch (see DiarizationBackendPreferences).
+    /// Core's backend for the hidden diarization switch. Same rule `import-audio`
+    /// uses (`DiarizationBackend.effective`): env, then the stored preference,
+    /// then Nemotron.
     static func activeDiarizationBackend() -> DiarizationBackend {
-        switch DiarizationBackendPreferences.effectiveChoice() {
-        case .pyannote: return .pyannote
-        case .nemotron: return .nemotron
-        }
+        DiarizationBackend.effective(
+            storedPreference: UserDefaults.standard.string(forKey: DiarizationBackend.preferenceKey),
+            environment: ProcessInfo.processInfo.environment
+        )
     }
 
     /// The ReDimNet2 model's location, without loading it (Settings uses this to

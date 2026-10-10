@@ -38,7 +38,9 @@ enum MeetingImportWorkflow {
         let modelPaths = try MeetingImportModels.resolve(
             modelsDir: command.modelsDir,
             diarizationModelsDir: command.diarizationModelsDir,
-            noDownload: command.noDownload
+            noDownload: command.noDownload,
+            engineChoice: command.diarizationEngine,
+            storedPreference: CLIDiarization.storedAppPreference()
         )
         let manager = try await TranscribeModelResolver.loadManager(
             modelsDir: modelPaths.parakeet?.path,
@@ -97,15 +99,57 @@ enum MeetingImportWorkflow {
             identificationUnavailable = "the saved speaker database holds a different voiceprint model's people"
         }
         let speech = await MainActor.run { MeetingImportSpeechEngine(manager: manager) }
-        let pipeline = await MainActor.run {
-            let diarization = DiarizationService(
-                bundleProvider: { _ in modelPaths.diarization },
-                segmentEmbedder: embedder
-            )
-            return Transcription(speechToText: speech, diarization: diarization,
-                                 speakerStore: store, speakerClipsDirectory: job.appendingPathComponent("clips"))
+        var backend = try MeetingImportDiarization.backend(choice: command.diarizationEngine)
+        if command.noDownload, backend == .nemotron, !modelPaths.nemotronAvailable {
+            log("Nemotron models aren't local and --no-download is set; using pyannote.")
+            backend = .pyannote
         }
-        log("Transcribing and separating speakers with local Parakeet v3 + PyAnnote…")
+        let onlineWeSpeaker = MeetingImportModels.localOnlineWeSpeakerModels()
+        if command.noDownload, let error = MeetingImportModels.noDownloadWeSpeakerError(
+            engine: backend.rawValue,
+            hasInjectedEmbedder: embedder != nil,
+            hasOfflineWeSpeaker: modelPaths.diarization != nil,
+            usesOnlineWeSpeaker: ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_EMBEDDER"] == "online",
+            hasOnlineWeSpeaker: onlineWeSpeaker != nil
+        ) {
+            throw error
+        }
+        let diarization = await MainActor.run {
+            DiarizationService(
+                bundleProvider: MeetingImportDiarization.bundleProvider(
+                    pyannote: modelPaths.diarization,
+                    nemotron: MeetingImportModels.localNemotronDirectoryForLoad(
+                        bundled: modelPaths.nemotron,
+                        cache: modelPaths.nemotronCache,
+                        allowDownload: !command.noDownload
+                    ),
+                    onlineWeSpeaker: onlineWeSpeaker
+                ),
+                segmentEmbedder: embedder,
+                backend: backend,
+                allowDownload: !command.noDownload
+            )
+        }
+        await diarization.initialize()
+        let ready = await MainActor.run { diarization.isReady }
+        guard ready else {
+            throw ValidationError("Diarization models failed to load for \(backend.rawValue).")
+        }
+        let actual = await MainActor.run { diarization.activeBackend }
+        let loaded = try CLIDiarization.acceptLoadedEngine(
+            requested: backend.rawValue,
+            actual: actual.rawValue,
+            choice: command.diarizationEngine
+        )
+        if let note = loaded.fallbackNote {
+            log(note)
+        }
+        let running = DiarizationBackend(rawValue: loaded.engine) ?? actual
+        let pipeline = await MainActor.run {
+            Transcription(speechToText: speech, diarization: diarization,
+                          speakerStore: store, speakerClipsDirectory: job.appendingPathComponent("clips"))
+        }
+        log("Transcribing and separating speakers with local Parakeet v3 + \(running.footerDisplayName)…")
         try Task.checkCancellation()
         let transcribeStart = ProcessInfo.processInfo.systemUptime
         let result = try await pipeline.transcribeAudioFile(at: normalized)
@@ -235,40 +279,297 @@ private final class MeetingImportSpeechEngine: SpeechToTextEngine {
 }
 
 enum MeetingImportModels {
-    struct Paths: Sendable { let parakeet: URL?; let diarization: URL? }
+    struct Paths: Sendable {
+        let parakeet: URL?
+        let diarization: URL?
+        /// Flat bundled copy for `bundleProvider`.
+        let nemotron: URL?
+        /// FluidAudio cache, if complete. Passed as a local load directory only
+        /// when `--no-download` is set, so Core never calls `loadFromHuggingFace`.
+        let nemotronCache: URL?
+        var nemotronAvailable: Bool { nemotron != nil || nemotronCache != nil }
+    }
 
     static let diarizationRequiredPaths = [
         "Segmentation.mlmodelc", "Embedding.mlmodelc", "FBank.mlmodelc",
         "PldaRho.mlmodelc", "plda-parameters.json", "xvector-transform.json"
     ]
 
-    static func resolve(modelsDir: String?, diarizationModelsDir: String?, noDownload: Bool) throws -> Paths {
-        let fm = FileManager.default
+    static let nemotronCacheMarkerName = DiarizationBackend.nemotronCacheMarkerName
+    static let nemotronCacheSilenceName = DiarizationBackend.nemotronCacheSilenceName
+
+    /// Flat bundled Nemotron layout for the resolved preset.
+    static func nemotronRequiredPaths(
+        environment: [String: String] = [:]
+    ) -> [String] {
+        let preset = resolvedPreset(environment: environment)
+        return [DiarizationBackend.nemotronModelFileName(preset: preset)]
+            + DiarizationBackend.nemotronRequiredCompanionFiles(preset: preset)
+    }
+
+    static func resolvedPreset(environment: [String: String] = [:]) -> String {
+        DiarizationService.resolvedNemotronPresetName(environment: environment)
+    }
+
+    static let nemotronCacheRelativePath = "Library/Application Support/FluidAudio/Models/nemotron-3-diarization"
+
+    static func defaultNemotronCacheDirectory(
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL {
+        homeDirectory.appendingPathComponent(nemotronCacheRelativePath, isDirectory: true)
+    }
+
+    static func resolve(
+        modelsDir: String?,
+        diarizationModelsDir: String?,
+        noDownload: Bool,
+        engineChoice: String = "app",
+        environment: [String: String] = ProcessInfo.processInfo.environment,
+        storedPreference: String? = nil,
+        bundledResourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) throws -> Paths {
+        var modelsDirNemotron: URL?
         let parakeet: URL?
         if let modelsDir {
             let explicit = URL(fileURLWithPath: modelsDir, isDirectory: true)
-            guard AsrModels.modelsExist(at: explicit) else { throw ValidationError("Incomplete Parakeet v3 models at --models-dir: \(modelsDir)") }
-            parakeet = explicit
+            let isParakeet = AsrModels.modelsExist(at: explicit)
+            let fromDir = diarizationModelsFromDirectory(explicit, environment: environment)
+            guard isParakeet || fromDir.nemotron != nil else {
+                throw ValidationError("Incomplete Parakeet v3 models at --models-dir: \(modelsDir)")
+            }
+            parakeet = isParakeet ? explicit : bundledOrCachedParakeet()
+            modelsDirNemotron = fromDir.nemotron
         } else {
-            let cache = AsrModels.defaultCacheDirectory(for: .v3)
-            let legacy = cache.deletingLastPathComponent().appendingPathComponent(cache.lastPathComponent + "-coreml")
-            parakeet = (TranscribeModelResolver.candidateBundledModelDirectories() + [cache, legacy])
-                .first { AsrModels.modelsExist(at: $0) }
+            parakeet = bundledOrCachedParakeet()
         }
+        var diarizationDirNemotron: URL?
         let diarization: URL?
         if let diarizationModelsDir {
             let explicit = URL(fileURLWithPath: diarizationModelsDir, isDirectory: true)
-            guard let root = fluidAudioRoot(for: explicit) else { throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)") }
-            diarization = root
+            let fromDir = diarizationModelsFromDirectory(explicit, environment: environment)
+            guard fromDir.pyannote != nil || fromDir.nemotron != nil else {
+                throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)")
+            }
+            diarization = fromDir.pyannote
+            diarizationDirNemotron = fromDir.nemotron
         } else {
-            let cache = fm.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
-            diarization = bundledDiarizationModels()
+            let cache = homeDirectory.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
+            diarization = bundledDiarizationModels(in: bundledResourceDirectories)
                 ?? fluidAudioRoot(for: cache)
         }
-        if noDownload && (parakeet == nil || diarization == nil) {
-            throw ValidationError("--no-download requires complete local Parakeet v3 AND offline diarization models. Open Transcripted to install models or supply --models-dir and --diarization-models-dir.")
+        let discovered = resolveNemotronPaths(
+            bundledResourceDirectories: bundledResourceDirectories,
+            cacheDirectory: defaultNemotronCacheDirectory(homeDirectory: homeDirectory),
+            environment: environment
+        )
+        let explicitNemotron = modelsDirNemotron ?? diarizationDirNemotron
+        let paths = Paths(
+            parakeet: parakeet,
+            diarization: diarization,
+            nemotron: explicitNemotron ?? discovered.bundled,
+            nemotronCache: explicitNemotron == nil ? discovered.cache : nil
+        )
+        if noDownload, let error = try noDownloadError(
+            parakeet: paths.parakeet,
+            diarization: paths.diarization,
+            nemotronAvailable: paths.nemotronAvailable,
+            engineChoice: engineChoice,
+            environment: environment,
+            storedPreference: storedPreference
+        ) {
+            throw error
         }
-        return Paths(parakeet: parakeet, diarization: diarization)
+        return paths
+    }
+
+    static func bundledOrCachedParakeet() -> URL? {
+        let cache = AsrModels.defaultCacheDirectory(for: .v3)
+        let legacy = cache.deletingLastPathComponent().appendingPathComponent(cache.lastPathComponent + "-coreml")
+        return (TranscribeModelResolver.candidateBundledModelDirectories() + [cache, legacy])
+            .first { AsrModels.modelsExist(at: $0) }
+    }
+
+    /// Same rule `diarize` / `batch` use for `--models-dir`: a flat Nemotron
+    /// folder, else a pyannote FluidAudio root.
+    static func diarizationModelsFromDirectory(
+        _ directory: URL,
+        environment: [String: String] = [:]
+    ) -> (pyannote: URL?, nemotron: URL?) {
+        if completeNemotronModels(at: directory, environment: environment) {
+            return (fluidAudioRoot(for: directory), directory)
+        }
+        if let root = fluidAudioRoot(for: directory) {
+            return (root, nil)
+        }
+        return (nil, nil)
+    }
+
+    /// Under `--no-download`, the cache is a local load directory so Core
+    /// never calls `loadFromHuggingFace`. Downloads still use HuggingFace.
+    static func localNemotronDirectoryForLoad(
+        bundled: URL?,
+        cache: URL?,
+        allowDownload: Bool
+    ) -> URL? {
+        if let bundled { return bundled }
+        if !allowDownload { return cache }
+        return nil
+    }
+
+    /// Bundle vs HuggingFace cache. Cache is availability; `--no-download`
+    /// also passes it as a local load directory.
+    static func resolveNemotronPaths(
+        bundledResourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
+        cacheDirectory: URL = defaultNemotronCacheDirectory(),
+        environment: [String: String] = [:]
+    ) -> (bundled: URL?, cache: URL?) {
+        (
+            bundledNemotronModels(in: bundledResourceDirectories, environment: environment),
+            cachedNemotronModels(at: cacheDirectory, environment: environment)
+        )
+    }
+
+    static func cachedNemotronModels(
+        at directory: URL = defaultNemotronCacheDirectory(),
+        environment: [String: String] = [:],
+        preset: String? = nil
+    ) -> URL? {
+        completeCachedNemotronModels(at: directory, environment: environment, preset: preset) ? directory : nil
+    }
+
+    /// HuggingFace layout (`monolithic/v2/…`, older `monolithic/…`, or flat)
+    /// for the resolved preset, plus FluidAudio's weights marker. Without the
+    /// matching marker FluidAudio deletes the cache and downloads again.
+    static func completeCachedNemotronModels(
+        at directory: URL,
+        environment: [String: String] = [:],
+        preset: String? = nil
+    ) -> Bool {
+        guard matchingNemotronCacheMarker(at: directory) else { return false }
+        let preset = preset ?? resolvedPreset(environment: environment)
+        let fm = FileManager.default
+        let companionRoots = DiarizationBackend.nemotronCompanionSearchRoots
+        for companion in DiarizationBackend.nemotronRequiredCompanionFiles(preset: preset) {
+            let found = companionRoots.contains {
+                fm.fileExists(atPath: directory.appendingPathComponent("\($0)\(companion)").path)
+            }
+            guard found else { return false }
+        }
+        return DiarizationBackend.nemotronCacheModelSubpaths(preset: preset).contains {
+            fm.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
+    }
+
+    static func matchingNemotronCacheMarker(at directory: URL) -> Bool {
+        let url = directory.appendingPathComponent(nemotronCacheMarkerName)
+        guard let data = try? Data(contentsOf: url),
+              let contents = String(data: data, encoding: .utf8) else {
+            return false
+        }
+        return DiarizationBackend.nemotronCacheHasMatchingMarker(contents: contents)
+    }
+
+    /// `--no-download` checks Parakeet plus the engine that will actually run,
+    /// including `--diarization-engine app` resolved against the stored preference.
+    static func noDownloadError(
+        parakeet: URL?,
+        diarization: URL?,
+        nemotronAvailable: Bool,
+        engineChoice: String,
+        environment: [String: String] = [:],
+        storedPreference: String? = nil
+    ) throws -> ValidationError? {
+        if parakeet == nil {
+            return ValidationError("--no-download requires complete local Parakeet v3 models. Open Transcripted to install models or supply --models-dir.")
+        }
+        let engine = try CLIDiarization.resolvedEngine(
+            choice: engineChoice,
+            environment: environment,
+            storedPreference: storedPreference
+        )
+        let trimmed = engineChoice.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        switch engine {
+        case "pyannote":
+            if diarization == nil {
+                return ValidationError("--no-download requires complete local pyannote diarization models when that engine is selected. Open Transcripted to install models or supply --diarization-models-dir.")
+            }
+        case "nemotron":
+            if !nemotronAvailable {
+                if trimmed == "nemotron" {
+                    return ValidationError("--no-download requires local Nemotron models when --diarization-engine is nemotron. Open Transcripted once or omit --no-download.")
+                }
+                if diarization == nil {
+                    return ValidationError("--no-download requires local Nemotron or pyannote diarization models. Open Transcripted to install models, or supply --diarization-models-dir.")
+                }
+            }
+        default:
+            break
+        }
+        return nil
+    }
+
+    /// Nemotron with no injected voiceprint loads WeSpeaker from the pyannote
+    /// FBank/Embedding files, or the lab-only online models. `--no-download`
+    /// must already have those files.
+    static func noDownloadWeSpeakerError(
+        engine: String,
+        hasInjectedEmbedder: Bool,
+        hasOfflineWeSpeaker: Bool,
+        usesOnlineWeSpeaker: Bool,
+        hasOnlineWeSpeaker: Bool
+    ) -> ValidationError? {
+        guard engine == "nemotron", !hasInjectedEmbedder else { return nil }
+        if usesOnlineWeSpeaker {
+            if !hasOnlineWeSpeaker {
+                return ValidationError("--no-download requires local online WeSpeaker models (online-diarizer-models) when TRANSCRIPTED_NEMOTRON_EMBEDDER=online. Open Transcripted once or omit --no-download.")
+            }
+            return nil
+        }
+        if !hasOfflineWeSpeaker {
+            return ValidationError("--no-download requires local pyannote WeSpeaker models (FBank/Embedding) when Nemotron has no injected voiceprint. Supply --diarization-models-dir or pick --speaker-embedder redimnet2.")
+        }
+        return nil
+    }
+
+    static let onlineWeSpeakerRequiredPaths = [
+        "pyannote_segmentation.mlmodelc", "wespeaker_v2.mlmodelc"
+    ]
+
+    static func localOnlineWeSpeakerModels(
+        bundledResourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
+        homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser
+    ) -> URL? {
+        let bundled = bundledResourceDirectories.map {
+            $0.appendingPathComponent(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName, isDirectory: true)
+        }.first { completeOnlineWeSpeakerModels(at: $0) }
+        if let bundled { return bundled }
+        let cache = homeDirectory
+            .appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization", isDirectory: true)
+        return completeOnlineWeSpeakerModels(at: cache) ? cache : nil
+    }
+
+    static func completeOnlineWeSpeakerModels(at directory: URL) -> Bool {
+        onlineWeSpeakerRequiredPaths.allSatisfy {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
+    }
+
+    static func bundledNemotronModels(
+        in resourceDirectories: [URL] = CLIModelPaths.bundledResourceDirectories(),
+        environment: [String: String] = [:]
+    ) -> URL? {
+        resourceDirectories.map { $0.appendingPathComponent("nemotron-diarizer-models", isDirectory: true) }
+            .first { completeNemotronModels(at: $0, environment: environment) }
+    }
+
+    static func completeNemotronModels(
+        at directory: URL,
+        environment: [String: String] = [:]
+    ) -> Bool {
+        nemotronRequiredPaths(environment: environment).allSatisfy {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent($0).path)
+        }
     }
 
     static func bundledDiarizationModels(

@@ -37,6 +37,16 @@ public enum DiarizationModelState: Equatable {
     case failed(String)
 }
 
+/// Thrown when a diarizer or its WeSpeaker fallback is not local and
+/// `DiarizationService` was created with `allowDownload: false` (CLI `--no-download`).
+public struct DiarizationDownloadDisabled: Error, LocalizedError, Equatable, Sendable {
+    public let backend: String
+    public init(backend: String) { self.backend = backend }
+    public var errorDescription: String? {
+        "\(backend) models are not local and download is disabled"
+    }
+}
+
 @available(macOS 14.0, *)
 @MainActor
 public class DiarizationService: ObservableObject {
@@ -64,8 +74,13 @@ public class DiarizationService: ObservableObject {
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
     /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
-    /// from the provider falls through to HuggingFace download via `ModelDownloadService`.
+    /// from the provider falls through to HuggingFace download via `ModelDownloadService`
+    /// only when `allowDownload` is true.
     private let bundleProvider: ModelBundleProvider
+    /// When false, pyannote and Nemotron load only from a local directory.
+    /// A Nemotron load failure then cannot call `prepareModels()` / download,
+    /// and Nemotron itself cannot call `loadFromHuggingFace`.
+    private let allowDownload: Bool
 
     /// Optional override that re-derives each diarized segment's speaker embedding
     /// with a different model (e.g. ERes2Net) after diarization. When nil, the
@@ -76,15 +91,19 @@ public class DiarizationService: ObservableObject {
     /// - Parameter backend: which diarization model to run. `.nemotron` also reads
     ///   the lab-only `TRANSCRIPTED_NEMOTRON_PRESET` environment override when it
     ///   initializes (see `NemotronDiarizationRunner.presetEnvironmentKey`).
+    /// - Parameter allowDownload: when false, pyannote loads only from a local
+    ///   bundle. A Nemotron failure then errors instead of downloading pyannote.
     public init(
         bundleProvider: @escaping ModelBundleProvider = defaultModelBundleProvider,
         segmentEmbedder: (any SpeakerSegmentEmbedder)? = nil,
-        backend: DiarizationBackend = .pyannote
+        backend: DiarizationBackend = .pyannote,
+        allowDownload: Bool = true
     ) {
         self.bundleProvider = bundleProvider
         self.segmentEmbedder = segmentEmbedder
         self.backend = backend
         self.activeBackend = backend
+        self.allowDownload = allowDownload
         // Before any diarizer model loads: keep 0.15.x-era (and bundled) pyannote
         // caches valid under FluidAudio 0.17's pinned revision.
         FluidAudioCompatibility.keepUnpinnedDiarizerCaches()
@@ -96,6 +115,34 @@ public class DiarizationService: ObservableObject {
     /// (`FluidWeSpeakerSegmentEmbedder`) is WeSpeaker too, so the default holds
     /// there as well. `nonisolated` so the off-main-actor pipeline reads it
     /// without an actor hop.
+    /// pyannote may load from a local bundle, or by downloading when allowed.
+    /// `--no-download` sets `allowDownload` false, so a Nemotron failure
+    /// cannot fetch pyannote.
+    public nonisolated static func canLoadPyannote(hasLocalBundle: Bool, allowDownload: Bool) -> Bool {
+        hasLocalBundle || allowDownload
+    }
+
+    /// Same rule for Nemotron's WeSpeaker fallback: local bundle, or download
+    /// when allowed. `--no-download` must not call `downloadIfNeeded()`.
+    public nonisolated static func canLoadWeSpeakerFallback(hasLocalBundle: Bool, allowDownload: Bool) -> Bool {
+        canLoadPyannote(hasLocalBundle: hasLocalBundle, allowDownload: allowDownload)
+    }
+
+    /// Nemotron itself: a local bundle (or a cache passed as one) loads without
+    /// HuggingFace. `--no-download` must not call `loadFromHuggingFace`.
+    public nonisolated static func canLoadNemotron(hasLocalBundle: Bool, allowDownload: Bool) -> Bool {
+        hasLocalBundle || allowDownload
+    }
+
+    /// True only when there is no local Nemotron directory and downloads are
+    /// allowed. A cache-only `--no-download` path must stay false.
+    public nonisolated static func nemotronUsesHuggingFaceLoader(
+        hasLocalBundle: Bool,
+        allowDownload: Bool
+    ) -> Bool {
+        !hasLocalBundle && allowDownload
+    }
+
     public nonisolated var activeSpeakerThresholds: SpeakerEmbeddingThresholds {
         segmentEmbedder?.thresholds ?? .weSpeaker
     }
@@ -192,6 +239,12 @@ public class DiarizationService: ObservableObject {
                     ])
                     nemotronRunner = nil
                     nemotronFallbackEmbedder = nil
+                    let hasLocalPyannote = bundleProvider("offline-diarizer-models") != nil
+                    guard Self.canLoadPyannote(
+                        hasLocalBundle: hasLocalPyannote, allowDownload: allowDownload
+                    ) else {
+                        throw error
+                    }
                     try await initializeOffline()
                     activeBackend = .pyannote
                 }
@@ -222,6 +275,9 @@ public class DiarizationService: ObservableObject {
             let models = try await OfflineDiarizerModels.load(from: bundlePath)
             manager.initialize(models: models)
         } else {
+            guard allowDownload else {
+                throw DiarizationDownloadDisabled(backend: DiarizationBackend.pyannote.rawValue)
+            }
             AppLogger.transcription.info("Offline diarizer models not bundled, loading from cache or downloading")
             try await ModelDownloadService.withRetry {
                 try await manager.prepareModels()
@@ -297,7 +353,15 @@ public class DiarizationService: ObservableObject {
             "backend": backend.rawValue, "preset": presetName
         ])
 
-        let runner = try await NemotronDiarizationRunner.load(presetName: presetName, bundleProvider: bundleProvider)
+        let local = bundleProvider(NemotronDiarizationRunner.bundleDirectoryName)
+        guard Self.canLoadNemotron(hasLocalBundle: local != nil, allowDownload: allowDownload) else {
+            throw DiarizationDownloadDisabled(backend: DiarizationBackend.nemotron.rawValue)
+        }
+        let runner = try await NemotronDiarizationRunner.load(
+            presetName: presetName,
+            bundleProvider: bundleProvider,
+            allowDownload: allowDownload
+        )
 
         // Voiceprints come from the same offline WeSpeaker model the pyannote backend
         // uses, so Nemotron turns match the people already in speakers.sqlite
@@ -309,12 +373,20 @@ public class DiarizationService: ObservableObject {
                 if let bundleDirectory = bundleProvider(FluidWeSpeakerSegmentEmbedder.bundleDirectoryName) {
                     fallbackEmbedder = try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: bundleDirectory)
                 } else {
+                    guard allowDownload else {
+                        throw DiarizationDownloadDisabled(backend: FluidWeSpeakerSegmentEmbedder.embedderIdentifier)
+                    }
                     fallbackEmbedder = try await ModelDownloadService.withRetry {
                         try await FluidWeSpeakerSegmentEmbedder.load(bundleDirectory: nil)
                     }
                 }
             } else {
                 let bundled = bundleProvider("offline-diarizer-models")
+                guard Self.canLoadWeSpeakerFallback(
+                    hasLocalBundle: bundled != nil, allowDownload: allowDownload
+                ) else {
+                    throw DiarizationDownloadDisabled(backend: FluidOfflineWeSpeakerSegmentEmbedder.embedderIdentifier)
+                }
                 fallbackEmbedder = try await ModelDownloadService.withRetry {
                     try await FluidOfflineWeSpeakerSegmentEmbedder.load(directory: bundled)
                 }

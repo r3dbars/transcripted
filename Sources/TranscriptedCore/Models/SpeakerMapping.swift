@@ -7,11 +7,18 @@ public struct SpeakerMapping: Sendable {
     public var confidence: SpeakerConfidence?
     public var isConfirmedIdentity: Bool
 
+    /// Suffix written by `--name-likely-speakers`. Shown in persisted
+    /// artifacts so the hedge is visible; the identity stays unconfirmed.
+    public static let likelyNameSuffix = " (likely)"
+
     /// Display name used in persisted artifacts.
     /// Suggested identities remain generic until the user confirms them.
+    /// An opt-in likely name is written as-is (`Name (likely)`) so the hedge
+    /// is visible; it is never a confirmed identity.
     public var displayName: String {
-        if isConfirmedIdentity, let name = identifiedName {
-            return name
+        if let name = identifiedName, !name.isEmpty {
+            if isConfirmedIdentity { return name }
+            if name.hasSuffix(Self.likelyNameSuffix) { return name }
         }
         return "Speaker \(speakerId)"
     }
