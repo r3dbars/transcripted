@@ -18,11 +18,20 @@ struct Diarize: AsyncParsableCommand {
     @Option(name: .long, help: "Path to directory containing diarization models.")
     var modelsDir: String?
 
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app), nemotron, or pyannote.")
+    var diarizationEngine = "pyannote"
+
     @Option(name: .shortAndLong, help: "Output RTTM file path. Prints to stdout if omitted.")
     var output: String?
 
     @Flag(name: .long, help: "Output JSON with full segment data instead of RTTM.")
     var json: Bool = false
+
+    mutating func validate() throws {
+        guard CLIDiarization.engineChoices.contains(diarizationEngine) else {
+            throw ValidationError("--diarization-engine must be " + CLIDiarization.engineChoices.joined(separator: ", ") + ".")
+        }
+    }
 
     func run() async throws {
         let audioURL = URL(fileURLWithPath: audioPath)
@@ -141,11 +150,20 @@ struct Diarize: AsyncParsableCommand {
     @Option(name: .long, help: "Path to directory containing diarization models.")
     var modelsDir: String?
 
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app), nemotron, or pyannote.")
+    var diarizationEngine = "pyannote"
+
     @Option(name: .shortAndLong, help: "Output RTTM file path. Prints to stdout if omitted.")
     var output: String?
 
     @Flag(name: .long, help: "Output JSON with full segment data instead of RTTM.")
     var json: Bool = false
+
+    mutating func validate() throws {
+        guard CLIDiarization.engineChoices.contains(diarizationEngine) else {
+            throw ValidationError("--diarization-engine must be " + CLIDiarization.engineChoices.joined(separator: ", ") + ".")
+        }
+    }
 
     func run() async throws {
         throw ValidationError("Offline diarization dependencies are unavailable. Run `bash build-deps.sh` from the repo root, then rebuild with `TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1`.")
