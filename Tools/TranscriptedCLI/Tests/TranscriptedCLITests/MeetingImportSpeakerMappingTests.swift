@@ -195,12 +195,47 @@ final class MeetingImportSpeakerMappingTests: XCTestCase {
         XCTAssertEqual(likely.reasons["system_2"], "named Fixture Speaker as likely: 2 of 5 confirmed meetings (--name-likely-speakers)")
     }
 
-    func testLikelyNamesNeverRelaxAnyOtherBar() {
-        // Never confirmed, a weak match, a close runner-up, or a disputed profile stay numbered.
+    func testLikelyNamesIncludeMatchesBelowTheSilentSimilarityBar() {
+        // Tester case: 0.891 clears ReDimNet2's invitee/suggest bar (0.815) but
+        // not the 0.946 silent-naming bar. The flag's job is to write that name.
+        let profile = makeProfile()
+        assertPending(resolve(profile: profile, similarity: 0.891, thresholds: .reDimNet2B4),
+                      profileID: profile.id)
+        let likely = resolve(profile: profile, similarity: 0.891, thresholds: .reDimNet2B4, nameLikely: true)
+        XCTAssertEqual(likely.mappings["system_2"]?.displayName, "Fixture Speaker (likely)")
+        XCTAssertEqual(likely.sources["system_2"], "db_pending")
+        XCTAssertEqual(likely.databaseIDs["system_2"], profile.id)
+        XCTAssertEqual(
+            likely.reasons["system_2"],
+            "named Fixture Speaker as likely: similarity 0.891 is not above the 0.946 silent-naming bar (--name-likely-speakers)"
+        )
+    }
+
+    func testLikelyNamesUseTheInviteeSimilarityFloor() {
+        // Below the model's invitee bar stays numbered even with the flag.
+        // 0.860 (tester's second match) is above ReDimNet2's 0.815 invitee bar.
+        let profile = makeProfile()
+        assertPending(resolve(profile: profile, similarity: 0.814, thresholds: .reDimNet2B4, nameLikely: true),
+                      profileID: profile.id)
+        let aboveFloor = resolve(profile: profile, similarity: 0.860, thresholds: .reDimNet2B4, nameLikely: true)
+        XCTAssertEqual(aboveFloor.mappings["system_2"]?.displayName, "Fixture Speaker (likely)")
+        XCTAssertEqual(aboveFloor.sources["system_2"], "db_pending")
+    }
+
+    func testLikelyNamesWhenConfirmationsAndSimilarityAreBothShort() {
+        let profile = makeProfile(confirmedMeetingCount: 2)
+        let likely = resolve(profile: profile, similarity: 0.891, thresholds: .reDimNet2B4, nameLikely: true)
+        XCTAssertEqual(likely.mappings["system_2"]?.displayName, "Fixture Speaker (likely)")
+        XCTAssertEqual(likely.sources["system_2"], "db_pending")
+        XCTAssertEqual(
+            likely.reasons["system_2"],
+            "named Fixture Speaker as likely: 2 of 5 confirmed meetings; similarity 0.891 is not above the 0.946 silent-naming bar (--name-likely-speakers)"
+        )
+    }
+
+    func testLikelyNamesNeverRelaxHealthMarginOrNeverConfirmed() {
         assertPending(resolve(profile: makeProfile(confirmedMeetingCount: 0), thresholds: .reDimNet2B4, nameLikely: true),
                       profileID: nil)
-        assertPending(resolve(profile: makeProfile(confirmedMeetingCount: 2), similarity: 0.93,
-                              thresholds: .reDimNet2B4, nameLikely: true), profileID: nil)
         assertPending(resolve(profile: makeProfile(confirmedMeetingCount: 2, disputeCount: 1),
                               thresholds: .reDimNet2B4, nameLikely: true), profileID: nil)
         let close = makeProfile(confirmedMeetingCount: 2)

@@ -12,6 +12,7 @@ final class ImportAudioCommandTests: XCTestCase {
         XCTAssertFalse(command.plainFilename)
         XCTAssertFalse(command.noSpeakerIdentification)
         XCTAssertEqual(command.speakerEmbedder, "app")
+        XCTAssertEqual(command.diarizationEngine, "app", "import-audio follows the app's diarization engine by default")
         XCTAssertFalse(command.nameLikelySpeakers, "likely names are opt-in")
     }
 
@@ -20,6 +21,9 @@ final class ImportAudioCommandTests: XCTestCase {
             XCTAssertEqual(try ImportAudio.parse(["memo.wav", "--speaker-embedder", model]).speakerEmbedder, model)
         }
         XCTAssertTrue(try ImportAudio.parse(["memo.wav", "--name-likely-speakers"]).nameLikelySpeakers)
+        for engine in ["app", "nemotron", "pyannote"] {
+            XCTAssertEqual(try ImportAudio.parse(["memo.wav", "--diarization-engine", engine]).diarizationEngine, engine)
+        }
     }
 
     func testOptionsAreAvailableInBothBuildModes() throws {
@@ -40,12 +44,16 @@ final class ImportAudioCommandTests: XCTestCase {
         for args in [["memo.wav", "--speaker-embedder", " "], ["memo.wav", "--title", "  "],
                      ["memo.wav", "--no-speaker-identification", "--speaker-db", "people.sqlite"],
                      ["memo.wav", "--no-speaker-identification", "--name-likely-speakers"],
+                     ["memo.wav", "--diarization-engine", "sortformer"],
                      ["memo.wav", "--output-dir", ""], [], ["one.wav", "two.wav"]] {
             XCTAssertThrowsError(try ImportAudio.parse(args), "\(args)")
         }
         #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
         for model in ["unknown", "ReDimNet2"] {
             XCTAssertThrowsError(try ImportAudio.parse(["memo.wav", "--speaker-embedder", model]))
+        }
+        for engine in ["Nemotron", "unknown"] {
+            XCTAssertThrowsError(try ImportAudio.parse(["memo.wav", "--diarization-engine", engine]))
         }
         #endif
     }

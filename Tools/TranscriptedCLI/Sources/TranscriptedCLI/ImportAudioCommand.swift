@@ -41,6 +41,9 @@ struct ImportAudio: AsyncParsableCommand {
     @Option(name: .long, help: "Voiceprint model: app (default; follows the app, ReDimNet2 unless changed), redimnet2, wespeaker, or eres2net. ReDimNet2 and ERes2Net need their installed local model.")
     var speakerEmbedder = "app"
 
+    @Option(name: .long, help: "Diarization engine: app (default; follows the app's hidden switch / TRANSCRIPTED_DIARIZATION_BACKEND, Nemotron unless changed), nemotron, or pyannote.")
+    var diarizationEngine = "app"
+
     @Flag(name: .long, help: "Also name a speaker who clears every recognition bar except the app's confirmed-meetings count (confirmed at least once), written as \"Name (likely)\". Off by default.")
     var nameLikelySpeakers = false
 
@@ -68,6 +71,9 @@ struct ImportAudio: AsyncParsableCommand {
             throw ValidationError("--speaker-embedder cannot be empty.")
         }
         #endif
+        guard Self.diarizationEngineChoices.contains(diarizationEngine) else {
+            throw ValidationError("--diarization-engine must be " + Self.diarizationEngineChoices.joined(separator: ", ") + ".")
+        }
         if noSpeakerIdentification && nameLikelySpeakers {
             throw ValidationError("--name-likely-speakers cannot be combined with --no-speaker-identification.")
         }
@@ -121,6 +127,14 @@ struct ImportAudio: AsyncParsableCommand {
         ["app"] + SpeakerVoiceprintSelection.Model.allCases.map(\.rawValue)
         #else
         ["app"]
+        #endif
+    }
+
+    static var diarizationEngineChoices: [String] {
+        #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT
+        ["app"] + DiarizationBackend.allCases.map(\.rawValue)
+        #else
+        ["app", "nemotron", "pyannote"]
         #endif
     }
 
