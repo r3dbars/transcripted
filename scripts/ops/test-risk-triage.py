@@ -100,13 +100,14 @@ class ClassifierTests(unittest.TestCase):
         self.assertEqual(rt.classify([])["risk"], "high")
 
 
-def run(name, status="completed", conclusion="success", t="1"):
-    return {"name": name, "status": status, "conclusion": conclusion, "started_at": t}
+def run(name, status="completed", conclusion="success", t="1", app=15368, rid=1):
+    return {"name": name, "status": status, "conclusion": conclusion, "completed_at": t, "id": rid,
+            "app": {"id": app}}
 
 
 class ChecksTests(unittest.TestCase):
     def test_all_success(self):
-        self.assertTrue(rt.checks_green([run("build-and-test"), run("repo-hygiene")], [])[0])
+        self.assertTrue(rt.checks_green([run("build-and-test"), run("repo-hygiene")])[0])
 
     def test_missing_skipped_pending_neutral_are_not_green(self):
         for bad in ([run("build-and-test")],
@@ -114,15 +115,28 @@ class ChecksTests(unittest.TestCase):
                     [run("build-and-test"), run("repo-hygiene", status="in_progress", conclusion=None)],
                     [run("build-and-test"), run("repo-hygiene", conclusion="neutral")],
                     [run("build-and-test"), run("repo-hygiene", conclusion="cancelled")]):
-            self.assertFalse(rt.checks_green(bad, [])[0], bad)
+            self.assertFalse(rt.checks_green(bad)[0], bad)
 
     def test_newest_run_wins(self):
         runs = [run("build-and-test"), run("repo-hygiene", t="1"),
-                run("repo-hygiene", conclusion="failure", t="2")]
-        self.assertFalse(rt.checks_green(runs, [])[0])
+                run("repo-hygiene", conclusion="failure", t="2", rid=2)]
+        self.assertFalse(rt.checks_green(runs)[0])
 
-    def test_commit_status_counts(self):
-        self.assertTrue(rt.checks_green([run("build-and-test")], [{"context": "repo-hygiene", "state": "success"}])[0])
+    def test_other_apps_do_not_count(self):
+        self.assertFalse(rt.checks_green([run("build-and-test"), run("repo-hygiene", app=999)])[0])
+
+    def test_queued_rerun_beats_older_success(self):  # P1 #7
+        runs = [run("build-and-test"), run("repo-hygiene", t="1"),
+                {"name": "repo-hygiene", "status": "queued", "conclusion": None, "completed_at": None,
+                 "id": 9, "app": {"id": 15368}}]
+        ok, why = rt.checks_green(runs)
+        self.assertFalse(ok)
+        self.assertIn("pending", why[0])
+
+    def test_passed_on_retry_stays_pending(self):
+        runs = [run("build-and-test"), run("repo-hygiene", conclusion="failure", t="1"),
+                run("repo-hygiene", t="2", rid=2)]
+        self.assertEqual(rt.checks_green(runs), (False, ["repo-hygiene: passed on retry"]))
 
 
 class AiTests(unittest.TestCase):
@@ -130,28 +144,27 @@ class AiTests(unittest.TestCase):
         return {"sha": SHA, "status": "ok", "p0": 0, "p1": 0, **kw}
 
     def test_clear(self):
-        self.assertTrue(rt.ai_clear(self.verdict(), SHA, set(), False)[0])
+        self.assertTrue(rt.ai_clear(self.verdict(), SHA)[0])
 
     def test_no_result_blocks(self):
-        self.assertFalse(rt.ai_clear(None, SHA, set(), False)[0])
-        self.assertFalse(rt.ai_clear(self.verdict(status="no-key"), SHA, set(), False)[0])
-        self.assertFalse(rt.ai_clear(self.verdict(sha="old"), SHA, set(), False)[0])
+        self.assertFalse(rt.ai_clear(None, SHA)[0])
+        self.assertFalse(rt.ai_clear(self.verdict(status="no-key"), SHA)[0])
+        self.assertFalse(rt.ai_clear(self.verdict(sha="old"), SHA)[0])
 
-    def test_p1_blocks_unless_owner_waived(self):
-        v = self.verdict(p1=1)
-        self.assertFalse(rt.ai_clear(v, SHA, set(), False)[0])
-        self.assertFalse(rt.ai_clear(v, SHA, {rt.WAIVE_LABEL}, False)[0])
-        self.assertTrue(rt.ai_clear(v, SHA, {rt.WAIVE_LABEL}, True)[0])
+    def test_p1_always_blocks_no_waiver(self):
+        # The ai-findings-waived label is gone: any agent using Justin's login could add it.
+        self.assertFalse(rt.ai_clear(self.verdict(p1=1), SHA)[0])
+        self.assertFalse(hasattr(rt, "WAIVE_LABEL"))
 
     def test_parse_text_needs_counts_and_takes_max(self):
         self.assertEqual(rt.parse_ai_text("looks fine")["status"], "unparseable")
         r = rt.parse_ai_text("[P1] bug\n[P1] another\nCOUNTS P0=0 P1=0")
         self.assertEqual((r["status"], r["p1"]), ("ok", 2))
 
-    def test_comment_round_trip(self):
-        body = f'{rt.AI_MARKER}\n<!-- risk-triage:verdict {{"sha": "{SHA}", "status": "ok", "p0": 0, "p1": 0}} -->'
-        self.assertEqual(rt.parse_ai_comment(body)["sha"], SHA)
-        self.assertIsNone(rt.parse_ai_comment("<!-- risk-triage:verdict {} -->"))
+    def test_verdict_round_trip(self):
+        body = f'<!-- risk-triage:verdict {{"sha": "{SHA}", "status": "ok", "p0": 0, "p1": 0}} -->'
+        self.assertEqual(rt.parse_verdict(body)["sha"], SHA)
+        self.assertIsNone(rt.parse_verdict("<!-- risk-triage:verdict [] -->"))
 
 
 def review(user, state="APPROVED", sha=SHA, assoc="COLLABORATOR"):
@@ -224,12 +237,9 @@ class DecideTests(unittest.TestCase):
             d = rt.decide(pr(), {"risk": tier}, OK, AI_OK, (True, "approved"), True)
             self.assertEqual((d["state"], d["automerge"]), ("pending", False), tier)
 
-    def test_waiver_on_high_risk_does_not_pass(self):
-        # ai_clear accepts an owner waiver, but high risk still never passes.
-        waived = rt.ai_clear({"sha": SHA, "status": "ok", "p0": 0, "p1": 2}, SHA, {rt.WAIVE_LABEL}, True)
-        self.assertTrue(waived[0])
+    def test_high_never_passes_even_with_owner_approval(self):
         for author in ("r3dbars", "bot"):
-            d = rt.decide(pr(labels=[{"name": rt.WAIVE_LABEL}]), {"risk": "high"}, OK, waived,
+            d = rt.decide(pr(user={"login": author}), {"risk": "high"}, OK, AI_OK,
                           rt.approvals_ok([review("r3dbars"), review("alice")], author, SHA, True))
             self.assertEqual((d["state"], d["automerge"]), ("pending", False), author)
 
@@ -315,74 +325,216 @@ class ExtensionRenameTests(unittest.TestCase):
 
 
 HEAD = "f" * 40
-RUN = {"id": 77, "repository": {"full_name": rt.REPO}, "path": rt.TRIAGE_WORKFLOW, "event": "pull_request_target",
-       "head_sha": HEAD, "head_branch": "agent/x", "run_started_at": "2026-10-10T05:00:00Z",
-       "updated_at": "2026-10-10T05:02:00Z"}
-VPR = {"number": 9, "base": {"ref": "main"}, "head": {"sha": HEAD, "ref": "agent/x"}}
+APP = "424242"
 
 
-def vcomment(login="github-actions[bot]", at="2026-10-10T05:01:00Z", **v):
-    verdict = {"sha": HEAD, "status": "ok", "p0": 0, "p1": 0, "pr": 9, "run_id": 77, **v}
+def gate_run(app=APP, sha=HEAD, t="2026-10-10T05:00:00Z", rid=1, **v):
     import json as _j
-    return {"user": {"login": login}, "created_at": at, "updated_at": at,
-            "body": f"{rt.AI_MARKER}\n<!-- risk-triage:verdict {_j.dumps(verdict)} -->"}
+    verdict = {"sha": sha, "status": "ok", "p0": 0, "p1": 0, "pr": 9, **v}
+    return {"id": rid, "name": "risk-gate", "head_sha": sha, "started_at": t, "app": {"id": int(app)},
+            "output": {"text": f"<!-- risk-triage:verdict {_j.dumps(verdict)} -->"}}
 
 
-class TrustedVerdictTests(unittest.TestCase):
-    def check(self, comments, run=RUN, pr=VPR, siblings=()):
-        return rt.trusted_verdict(pr, comments, lambda rid: dict(run) if run and rid == run["id"] else None,
-                                  "main", list(siblings))
+class AppVerdictTests(unittest.TestCase):
+    """P1s 1, 2, 3: the verdict lives in a check run only the gate App can create."""
 
-    def test_genuine_verdict_accepted(self):
-        v, why = self.check([vcomment()])
+    def test_genuine_app_verdict_accepted(self):
+        v, why = rt.app_verdict([gate_run()], HEAD, APP)
         self.assertIsNotNone(v, why)
 
     def test_forgeries_rejected(self):
         cases = {
-            "other author": ([vcomment(login="r3dbars")], RUN),
-            "no run id": ([vcomment(run_id=0)], RUN),
-            "other workflow": ([vcomment()], {**RUN, "path": ".github/workflows/evil.yml"}),
-            "pull_request event": ([vcomment()], {**RUN, "event": "pull_request"}),
-            "other commit": ([vcomment()], {**RUN, "head_sha": "e" * 40}),
-            "other branch": ([vcomment()], {**RUN, "head_branch": "evil"}),
-            "other repo": ([vcomment()], {**RUN, "repository": {"full_name": "x/y"}}),
-            "written after run": ([vcomment(at="2026-10-10T06:00:00Z")], RUN),
-            "other PR": ([vcomment(pr=10)], RUN),
-            "stale sha": ([vcomment(sha="e" * 40)], RUN),
+            "posted by GitHub Actions (a PR workflow)": gate_run(app="15368"),
+            "posted by another app": gate_run(app="1"),
+            "other commit run": gate_run(sha="e" * 40),
+            "verdict names another sha": dict(gate_run(), output={"text": gate_run(sha="e" * 40)["output"]["text"]}),
+            "other check name": dict(gate_run(), name="risk-gate-x"),
+            "no verdict block": dict(gate_run(), output={"text": "all good"}),
         }
-        for name, (comments, run) in cases.items():
-            v, _ = self.check(comments, run)
-            self.assertIsNone(v, name)
+        for name, r in cases.items():
+            self.assertIsNone(rt.app_verdict([r], HEAD, APP)[0], name)
 
-    def test_non_default_base_rejected(self):
-        self.assertIsNone(self.check([vcomment()], pr={**VPR, "base": {"ref": "evil"}})[0])
-        self.assertIsNone(self.check([vcomment()], siblings=["evil"])[0])
-        self.assertIsNotNone(self.check([vcomment()], siblings=["main"])[0])
+    def test_no_app_configured_means_no_verdict(self):
+        v, why = rt.app_verdict([gate_run()], HEAD, "")
+        self.assertIsNone(v)
+        self.assertIn("not configured", why)
 
-    def test_forged_newer_comment_does_not_hide_rejection(self):
-        # A forged clean comment after a genuine P1 verdict: the genuine one wins.
-        genuine = vcomment(p1=1)
-        forged = vcomment(run_id=999)
-        v, _ = self.check([genuine, forged])
-        self.assertEqual(v["p1"], 1)
+    def test_newest_app_run_wins(self):
+        runs = [gate_run(p1=0, t="2026-10-10T05:00:00Z", rid=1), gate_run(p1=2, t="2026-10-10T06:00:00Z", rid=2),
+                gate_run(app="15368", p1=0, t="2026-10-10T07:00:00Z", rid=3)]
+        self.assertEqual(rt.app_verdict(runs, HEAD, APP)[0]["p1"], 2)
+
+
+class GatePolicyTests(unittest.TestCase):
+    SUCCESS = {"state": "success", "automerge": True, "why": ["risk:low"]}
+
+    def test_kill_switch_off_holds(self):
+        r = rt.apply_gate_policy(self.SUCCESS, behind=False, mode="off", app_configured=True)
+        self.assertEqual((r["state"], r["automerge"]), ("pending", False))
+
+    def test_signal_only_posts_success_without_arming(self):
+        r = rt.apply_gate_policy(self.SUCCESS, behind=False, mode="signal-only", app_configured=True)
+        self.assertEqual((r["state"], r["automerge"]), ("success", False))
+
+    def test_enabled_arms(self):
+        r = rt.apply_gate_policy(self.SUCCESS, behind=False, mode="true", app_configured=True)
+        self.assertEqual((r["state"], r["automerge"]), ("success", True))
+
+    def test_no_app_or_behind_holds(self):
+        for kw in ({"behind": False, "app_configured": False}, {"behind": True, "app_configured": True}):
+            r = rt.apply_gate_policy(self.SUCCESS, mode="true", **kw)
+            self.assertEqual((r["state"], r["automerge"]), ("pending", False), kw)
+
+    def test_mode_defaults_off(self):
+        import os
+        old = os.environ.pop("AUTOMERGE_ENABLED", None)
+        try:
+            self.assertEqual(rt.automerge_mode(), "off")
+            os.environ["AUTOMERGE_ENABLED"] = "yes"
+            self.assertEqual(rt.automerge_mode(), "off")
+        finally:
+            os.environ.pop("AUTOMERGE_ENABLED", None)
+            if old is not None:
+                os.environ["AUTOMERGE_ENABLED"] = old
+
+    def test_automerge_off_label_holds(self):
+        d = rt.decide(pr(labels=[{"name": "automerge:off"}]), {"risk": "low"}, OK, AI_OK, NO_APPROVAL)
+        self.assertEqual(d["state"], "pending")
+
+    def test_high_check_never_completes(self):
+        body = rt.build_check({"risk": "high", "reasons": ["x"]}, {"status": "ok", "p0": 0, "p1": 0, "text": ""},
+                              {"sha": HEAD, "pr": 9, "status": "ok", "p0": 0, "p1": 0},
+                              {"state": "pending", "automerge": False, "why": ["high risk"]})
+        self.assertEqual((body["status"], body["conclusion"]), ("completed", "failure"))
+        self.assertEqual(rt.parse_verdict(body["output"]["text"])["sha"], HEAD)
+
+    def test_conclusion_per_tier_never_neutral(self):  # adversarial P0-4
+        v = {"sha": HEAD, "pr": 9, "status": "ok", "p0": 0, "p1": 0}
+        rv = {"status": "ok", "p0": 0, "p1": 0, "text": ""}
+        ok = {"state": "success", "automerge": True, "why": ["clear"]}
+        wait = {"state": "pending", "automerge": False, "why": ["checks pending"]}
+        cases = {("low", "s"): ("completed", "success"), ("medium", "s"): ("completed", "success"),
+                 ("low", "p"): ("in_progress", None), ("medium", "p"): ("in_progress", None),
+                 ("high", "p"): ("completed", "failure")}
+        for (tier, st), want in cases.items():
+            b = rt.build_check({"risk": tier, "reasons": []}, rv, v, ok if st == "s" else wait)
+            self.assertEqual((b["status"], b.get("conclusion")), want, (tier, st))
+            self.assertNotIn(b.get("conclusion"), ("neutral", "skipped", "action_required" if tier != "high" else "x"))
+
+
+class NoSelfMergeTests(unittest.TestCase):
+    """No merge or arm with a person's token; only the gate App token."""
+
+    def test_arm_needs_app_token(self):
+        import os
+        saved = os.environ.pop("GATE_TOKEN", None)
+        orig_app = rt.GATE_APP_ID
+        try:
+            rt.GATE_APP_ID = APP
+            self.assertIsNone(rt._app_env())
+            os.environ["GATE_TOKEN"] = "app-token"
+            self.assertEqual(rt._app_env()["GH_TOKEN"], "app-token")
+            rt.GATE_APP_ID = ""
+            self.assertIsNone(rt._app_env())
+        finally:
+            rt.GATE_APP_ID = orig_app
+            os.environ.pop("GATE_TOKEN", None)
+            if saved is not None:
+                os.environ["GATE_TOKEN"] = saved
+
+    def test_no_admin_merges_or_merge_token_anywhere(self):
+        root = Path(__file__).resolve().parents[2]
+        paths = (list((root / ".github/workflows").glob("*.yml")) + list((root / "scripts").rglob("*.py"))
+                 + list((root / "scripts").rglob("*.sh")))
+        for p in paths:
+            if p.name == "test-risk-triage.py":
+                continue
+            self.assertNotRegex(p.read_text(errors="ignore"), r"gh pr merge[^\n]*--admin", str(p))
+        self.assertNotIn("AUTOMERGE_TOKEN", (root / ".github/workflows/risk-triage.yml").read_text())
+        self.assertNotIn("MERGE_TOKEN", (root / "scripts/ops/risk-triage.py").read_text())
+
+
+class WorkflowShapeTests(unittest.TestCase):
+    def wf(self):
+        return (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
+
+    def test_no_pull_request_target(self):
+        # GitHub blocks pull_request_target on public repos by default from 2026-11-02.
+        wf = self.wf()
+        self.assertNotRegex(wf, r"(?m)^\s+pull_request_target:")
+        self.assertNotRegex(wf, r"(?m)^\s+pull_request:")
+        self.assertIn("workflow_run:", wf)
+
+    def test_gate_uses_app_token_in_main_only_env(self):
+        wf = self.wf()
+        self.assertIn("environment: automerge-app", wf)
+        self.assertIn("actions/create-github-app-token", wf)
+        self.assertIn("GATE_TOKEN: ${{ steps.app.outputs.token }}", wf)
+        self.assertNotIn("ref: ${{ github.event.workflow_run.head", wf)
+
+    def test_gate_concurrency_is_per_pr_and_never_cancels(self):
+        wf = self.wf()
+        self.assertIn("cancel-in-progress: false", wf)
+        self.assertIn("group: risk-gate-${{ inputs.pr || github.event.workflow_run.head_sha || 'sweep' }}", wf)
+
+
+class Phase1PathTests(unittest.TestCase):
+    def tier(self, p):
+        return rt.classify([{"filename": p, "additions": 1}, {"filename": "Tests/XTests.swift"}])
+
+    def test_meeting_detection_is_high(self):  # P1 #5
+        for p in ("Sources/Meeting/MicActivityMonitor.swift", "Sources/Meeting/CameraActivityMonitor.swift",
+                  "Sources/Meeting/MeetingPromptDetector.swift", "Sources/Meeting/MeetingPromptDetector+Backoff.swift",
+                  "Sources/Support/AutoCallDetectionPreferences.swift"):
+            self.assertEqual(self.tier(p)["risk"], "high", p)
+
+    def test_owner_protected_surfaces_are_high(self):  # P1 #9
+        for p in ("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift", "Sources/Meeting/SpeakerSettingsStore.swift",
+                  "Sources/Support/DictationAutoSendPreferences.swift",
+                  "Sources/UI/Settings/AutoEnterDisplayNameResolver.swift",
+                  "Sources/Support/ModelCacheInventory.swift", "Sources/UI/MenuBar/StatusItemPresentation.swift",
+                  "Sources/UI/Shared/MeetingAudioPlayback.swift"):
+            r = self.tier(p)
+            self.assertEqual(r["risk"], "high", p)
+            self.assertTrue(any("owner-protected" in x for x in r["reasons"]), p)
+
+    def test_harness_guards_are_high(self):  # P1 #10
+        for p in ("Sources/Support/AutomatedLaunchEnvironment.swift",
+                  "Tools/TranscriptedQA/Sources/TranscriptedQA/Utilities/NativeSmokeIsolation.swift"):
+            self.assertEqual(self.tier(p)["risk"], "high", p)
+
+    def test_gate_ci_and_agent_config_are_always_high(self):
+        for p in (".github/workflows/repo-hygiene.yml", ".github/workflows/new.yml", ".github/actions/x/action.yml",
+                  "scripts/ops/risk-triage.py", "scripts/ops/test-risk-triage.py", "scripts/ops/auto-merge-gate.py",
+                  "scripts/dev/linux-checks.sh", "scripts/dev/check-file-size.py", "scripts/ci/pick-ci-runner.py",
+                  "CLAUDE.md", ".claude/settings.json", ".codex/config.toml", "AGENTS.md"):
+            self.assertEqual(self.tier(p)["risk"], "high", p)
+
+    def test_agent_instructions_and_release_job_code_are_high(self):  # adversarial P0-3, P0-5, P0-6
+        for p in (".claude/agents/test-writer.md", ".codex/prompts/x.md", ".agents/skills/verify/SKILL.md",
+                  "skills/foo/SKILL.md", ".agent-review/notes.md", ".github/pull_request_template.md",
+                  "WORKFLOW.md", "Sources/AGENTS.md", "docs/appcast.xml",
+                  "Tools/TranscriptedQA/Sources/TranscriptedQA/main.swift", "scripts/ops/privacy-leak-sweep.py",
+                  "scripts/entrypoints/run.sh", "Tools/TranscriptedMCP/Package.swift", "Package.resolved"):
+            self.assertEqual(self.tier(p)["risk"], "high", p)
+        self.assertEqual(rt.classify([{"filename": ".agents/test-shape-baseline.json", "additions": 1}])["risk"], "medium")
+
+    def test_only_runnable_tests_are_proof(self):  # P1 #4
+        src = {"filename": "Sources/UI/Foo.swift", "additions": 5}
+        self.assertEqual(rt.classify([src, {"filename": "Tests/README.md", "additions": 1}])["risk"], "medium")
+        self.assertEqual(rt.classify([src, {"filename": "Tests/Fixtures/x.json", "additions": 1}])["risk"], "medium")
+        self.assertEqual(rt.classify([src, {"filename": "Tests/FooTests.swift", "additions": 1}])["risk"], "low")
+
+    def test_any_absolute_path_is_redacted(self):  # P1 #8
+        out = rt.redact("at /Applications/Transcripted.app/Contents and /workspace/a/b and ~/Library/X\n"
+                        "+++ b/Sources/Foo.swift x / y")
+        for leaked in ("/Applications", "/workspace", "~/Library"):
+            self.assertNotIn(leaked, out)
+        self.assertIn("b/Sources/Foo.swift", out)
+        self.assertIn("x / y", out)
 
 
 class FailClosedTests(unittest.TestCase):
-    def test_triage_failure_fails_closed(self):
-        import os, contextlib, io
-        calls = []
-        orig_fc, orig_eval = rt.fail_closed, rt.evaluate
-        rt.fail_closed = lambda num, why: calls.append((num, why))
-        rt.evaluate = lambda num: (_ for _ in ()).throw(AssertionError("must not evaluate"))
-        os.environ.update({"TRIAGE_RESULT": "failure", "PR": "5"})
-        try:
-            with contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(rt._gate_one(5, True), 1)
-        finally:
-            rt.fail_closed, rt.evaluate = orig_fc, orig_eval
-            os.environ.pop("TRIAGE_RESULT"); os.environ.pop("PR")
-        self.assertEqual(calls[0][0], 5)
-
     def test_evaluation_error_fails_closed_in_sweep(self):
         import contextlib, io
         calls = []
@@ -395,12 +547,6 @@ class FailClosedTests(unittest.TestCase):
         finally:
             rt.fail_closed, rt._gate_one = orig
         self.assertEqual(calls, [3])
-
-    def test_workflow_gate_always_runs(self):
-        wf = (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
-        gate = wf[wf.index("\n  gate:"):]
-        self.assertIn("if: always()\n", gate)
-        self.assertIn("TRIAGE_RESULT: ${{ needs.triage.result }}", gate)
 
 
 class PrivacyPathTests(unittest.TestCase):
@@ -447,15 +593,6 @@ class SharedHoldLabelTests(unittest.TestCase):
         spec.loader.exec_module(amg)
         self.assertTrue(rt.HOLD_LABELS <= amg.RISK_TRIAGE.HOLD_LABELS)
         self.assertIn("RISK_TRIAGE.HOLD_LABELS", Path(amg.__file__).read_text())
-
-
-class GateConcurrencyTests(unittest.TestCase):
-    def test_gate_concurrency_is_per_pr_and_never_cancels(self):
-        wf = (Path(__file__).resolve().parents[2] / ".github/workflows/risk-triage.yml").read_text()
-        gate = wf[wf.index("\n  gate:"):]
-        self.assertIn("group: risk-gate-${{ github.event.pull_request.number || inputs.pr || 'sweep' }}", gate)
-        self.assertIn("cancel-in-progress: false", gate)
-        self.assertNotIn("group: risk-gate\n", gate)
 
 
 class SweepTests(unittest.TestCase):

@@ -1,26 +1,32 @@
 #!/usr/bin/env python3
-"""Risk triage and merge gate for pull requests (docs/agent-merge-policy.md).
+"""Risk triage and trusted merge gate for pull requests (docs/agent-merge-policy.md).
 
-Three subcommands, python3 stdlib plus the `gh` CLI only:
-
-    risk-triage.py classify FILE...            # offline: print the risk for these paths
-    risk-triage.py triage   --pr N [--apply]   # label risk:*, post the AI review comment
-    risk-triage.py gate     [--pr N] [--apply] # set the risk-gate status, enable auto-merge
+    risk-triage.py classify FILE...                      # offline: print the risk for these paths
+    risk-triage.py gate [--pr N | --sha SHA] [--apply]   # triage + AI review + risk-gate check run
 
 Without --apply nothing is written to GitHub. The script never checks out or
-runs PR code: it reads the file list and the diff as data from the API, which
-is what makes it safe to run from a pull_request_target workflow.
+runs PR code: it reads the file list and the diff as data from the API.
 
-Safety rules the gate enforces (each is a test in test-risk-triage.py):
+The trusted signal is a CHECK RUN named `risk-gate` created with the
+transcripted-gate GitHub App's installation token (GATE_TOKEN). Only that App
+can create check runs under its app id, so neither the gate result nor the AI
+verdict stored in it can be forged by a PR's own workflow (GITHUB_TOKEN is the
+GitHub Actions app). Without the App configured the gate only labels and logs:
+it never posts a trusted signal and never merges.
+
+Safety rules (each is a test in test-risk-triage.py):
   * path rules decide the tier; the highest match wins; unknown paths are high.
-  * a required check counts as green only with conclusion "success" on the
-    head commit. Missing, pending, skipped, neutral or cancelled is not green.
-  * the AI review must exist for the head commit and report no unresolved
-    P0/P1. No AI result (no key, provider error, diff too big) blocks auto-merge.
-  * high: never passes risk-gate automatically, whoever the author is and with
-    or without approvals or a waiver; the owner merges high-risk PRs by hand.
-  * low/medium only: squash auto-merge.
-  * forks, drafts and hold labels never auto-merge.
+  * workflows, the gate's own code and tests, the CI harness, agent
+    instructions and owner-protected product surfaces are always high.
+  * required checks count only as check runs from GitHub Actions (app 15368)
+    that concluded "success" on the head commit. Missing, queued, in progress,
+    skipped, neutral, cancelled or "passed on retry" is not green.
+  * the AI verdict must be stored in a risk-gate check run from the gate App
+    for the head commit, with no P0/P1. No verdict blocks auto-merge.
+  * high risk never gets success; Justin merges those by hand.
+  * low/medium squash auto-merge only when AUTOMERGE_ENABLED == "true", and
+    only with the App token (never a user's or GITHUB_TOKEN).
+  * forks, drafts and hold labels (incl. automerge:off) never auto-merge.
 """
 from __future__ import annotations
 
@@ -38,11 +44,13 @@ REPO = os.environ.get("GITHUB_REPOSITORY", "r3dbars/transcripted")
 OWNER_LOGIN = "r3dbars"
 REQUIRED_CHECKS = ("build-and-test", "repo-hygiene")
 GATE_CONTEXT = "risk-gate"
+ACTIONS_APP_ID = 15368  # GitHub Actions; required checks must come from it
+GATE_APP_ID = os.environ.get("AUTOMERGE_APP_ID", "")  # transcripted-gate App (Justin creates it)
+RUNNABLE_TEST_EXTS = (".swift", ".py", ".sh", ".rb")
 AI_MARKER = "<!-- risk-triage:ai-review -->"
 RISK_LABELS = ("risk:low", "risk:medium", "risk:high")
 # The one hold-label list: risk-gate and the old lane gate (auto-merge-gate.py) both use it.
-HOLD_LABELS = {"hold", "do not merge", "needs owner review", "waiting-on-human", "blocked"}
-WAIVE_LABEL = "ai-findings-waived"  # owner-only override for P0/P1 the owner judged wrong
+HOLD_LABELS = {"hold", "do not merge", "needs owner review", "waiting-on-human", "blocked", "automerge:off"}
 # Only reviews from people with repo access count (public repos accept anyone's review).
 TRUSTED_ASSOCIATIONS = {"OWNER", "MEMBER", "COLLABORATOR"}
 TIERS = {"low": 0, "medium": 1, "high": 2}
@@ -61,6 +69,15 @@ RELEASE_PATTERNS = (
     ".github/workflows/risk-triage.yml",
     "scripts/ops/risk-triage.py",
     "scripts/ops/auto-merge-gate.py",
+    "scripts/ops/test-risk-triage.py",
+    # CI harness: what the required checks actually run.
+    "scripts/ci/**",
+    "scripts/dev/linux-checks.sh",
+    "scripts/dev/agent-preflight.sh",
+    "scripts/dev/check-*.py",
+    "run-tests.sh",
+    "check.sh",
+    "run-*-smoke.sh",
     ".agents/auto-merge-lanes.json",
     "docs/agent-merge-policy.md",
     "docs/*release*",
@@ -128,6 +145,56 @@ HIGH_PATTERNS = (
     # Agent instructions steer every engineer agent: treat like code that runs.
     "**/AGENTS.md",
     "**/CLAUDE.md",
+    ".claude/**",
+    ".codex/**",
+    ".cursor/**",
+    ".agents/**",          # baselines are matched first and stay medium
+    "**/skills/**",
+    "**/SKILL.md",
+    ".agent-review/*.md",
+    ".agent-review/**/*.md",
+    ".github/*.md",
+    "**/.cursorrules",
+    "**/.windsurfrules",
+    "**/GEMINI.md",
+    "**/WORKFLOW.md",
+    # Code the release-candidate job runs next to the unlocked signing keychain.
+    "Tools/TranscriptedQA/**",
+    "scripts/ops/privacy-leak-sweep.py",
+    "scripts/entrypoints/**",
+    "Tools/*/Package.swift",
+    "**/Package.resolved",
+)
+
+# AGENTS.md "Keep the product surface": changing these needs the owner.
+PROTECTED_SURFACE_PATTERNS = (
+    # automatic meeting detection and its record / dismiss / remind flow
+    "Sources/Meeting/MicActivityMonitor*",
+    "Sources/Meeting/CameraActivityMonitor*",
+    "Sources/Meeting/MeetingPromptDetector*",
+    "Sources/Meeting/MeetingPrompt*",
+    "Sources/Support/AutoCallDetectionPreferences*",
+    # Speakers directory: review, rename, merge, delete
+    "Sources/UI/Settings/SpeakerPeople*",
+    "Sources/Meeting/SpeakerPeople*",
+    "Sources/Meeting/SpeakerSettingsStore*",
+    # per-app dictation Auto Enter
+    "Sources/Support/DictationAutoSendPreferences*",
+    "Sources/UI/Settings/AutoEnter*",
+    # model-cache inspection and cleanup
+    "**/*ModelCache*",
+    # status item click behaviour
+    "Sources/UI/MenuBar/StatusItem*",
+    # retained meeting-audio playback
+    "**/MeetingAudioPlayback*",
+)
+
+# Harness isolation guards: keep automated launches and smokes away from real data.
+HARNESS_GUARD_PATTERNS = (
+    "Sources/Support/AutomatedLaunchEnvironment*",
+    "**/NativeSmokeIsolation*",
+    "scripts/ops/native-smoke-isolation.py",
+    "scripts/vm/**",
 )
 
 # Low when every file matches one of these (tests, docs, copy).
@@ -170,6 +237,11 @@ def is_test_path(path: str) -> bool:
     return bool(path) and _any(path, TEST_PATTERNS)
 
 
+def is_runnable_test(path: str) -> bool:
+    """Only files the test suites execute count as proof (not Tests/README.md)."""
+    return is_test_path(path) and path.endswith(RUNNABLE_TEST_EXTS)
+
+
 def test_removed(f: dict) -> bool:
     """A deleted test, or a test renamed to a path outside the test folders."""
     if f.get("status") == "removed":
@@ -201,18 +273,24 @@ def classify(files: list[dict]) -> dict:
     for f in files:
         names = [n for n in (f.get("filename"), f.get("previous_filename")) if n]
         for name in names:
-            if _any(name, RELEASE_PATTERNS):
+            if _any(name, MEDIUM_PATTERNS) and not _any(name, MEDIUM_EXCLUDE):
+                if risk == "low":
+                    risk = "medium"
+                reasons.append(f"{name}: debt baseline")
+            elif _any(name, RELEASE_PATTERNS):
                 risk, owner = "high", True
                 reasons.append(f"{name}: release/signing path")
             elif _any(name, HIGH_PATTERNS):
                 risk = "high"
                 reasons.append(f"{name}: high-risk path")
+            elif _any(name, PROTECTED_SURFACE_PATTERNS):
+                risk = "high"
+                reasons.append(f"{name}: owner-protected product surface")
+            elif _any(name, HARNESS_GUARD_PATTERNS):
+                risk = "high"
+                reasons.append(f"{name}: harness isolation guard")
             elif _any(name, LOW_PATTERNS):
                 pass
-            elif _any(name, MEDIUM_PATTERNS) and not _any(name, MEDIUM_EXCLUDE):
-                if risk == "low":
-                    risk = "medium"
-                reasons.append(f"{name}: debt baseline")
             elif _any(name, SOURCE_PATTERNS):
                 source_files += 1
                 source_lines += int(f.get("additions", 0)) + int(f.get("deletions", 0))
@@ -221,7 +299,7 @@ def classify(files: list[dict]) -> dict:
                 risk = "high"
                 reasons.append(f"{name}: unknown path (not test/doc/source), defaults to high")
     if risk == "low" and source_files:
-        has_test = any(is_test_path(f.get("filename", "")) and f.get("status") != "removed"
+        has_test = any(is_runnable_test(f.get("filename", "")) and f.get("status") != "removed"
                        for f in files)
         if source_files > LOW_MAX_SOURCE_FILES or source_lines > LOW_MAX_SOURCE_LINES or not has_test:
             risk = "medium"
@@ -237,27 +315,45 @@ def classify(files: list[dict]) -> dict:
     return {"risk": risk, "owner_required": owner, "reasons": sorted(set(reasons))}
 
 
-def checks_green(check_runs: list[dict], statuses: list[dict], required=REQUIRED_CHECKS) -> tuple[bool, list[str]]:
-    """Every required context must have succeeded on the head commit.
+def checks_green(check_runs: list[dict], required=REQUIRED_CHECKS,
+                 actions_app_id: int = ACTIONS_APP_ID) -> tuple[bool, list[str]]:
+    """Every required check must have succeeded on the head commit, cleanly.
 
-    Takes the newest check run per name. Anything but conclusion "success"
-    (skipped, neutral, cancelled, pending, missing) is not green.
+    Only check runs from GitHub Actions count (commit statuses are ignored:
+    anyone with write access can post one). Per name:
+      * any queued or in-progress run (a rerun) means pending, whatever older
+        runs say: a rerun never inherits an old success;
+      * a failed attempt plus a later success means "passed on retry": pending,
+        so a flaky pass needs a fresh push or a human;
+      * otherwise the single completed result must be "success".
     """
-    latest: dict[str, str] = {}
-    for run in sorted(check_runs, key=lambda r: r.get("started_at") or ""):
-        state = run.get("conclusion") if run.get("status") == "completed" else "pending"
-        latest[run.get("name", "")] = state or "pending"
-    for st in sorted(statuses, key=lambda s: s.get("updated_at") or "", reverse=True):
-        latest.setdefault(st.get("context", ""), st.get("state") or "pending")
-    problems = [f"{c}: {latest.get(c, 'missing')}" for c in required if latest.get(c) != "success"]
+    by_name: dict[str, list[dict]] = {}
+    for run in check_runs:
+        if ((run.get("app") or {}).get("id")) != actions_app_id:
+            continue
+        by_name.setdefault(run.get("name", ""), []).append(run)
+    problems = []
+    for name in required:
+        runs = by_name.get(name, [])
+        if not runs:
+            problems.append(f"{name}: missing")
+            continue
+        if any(r.get("status") != "completed" for r in runs):
+            problems.append(f"{name}: pending (a run is queued or in progress)")
+            continue
+        conclusions = [r.get("conclusion") for r in sorted(runs, key=lambda r: (r.get("completed_at") or "", r.get("id") or 0))]
+        if conclusions[-1] != "success":
+            problems.append(f"{name}: {conclusions[-1]}")
+        elif any(c != "success" for c in conclusions[:-1]):
+            problems.append(f"{name}: passed on retry")
     return (not problems, problems)
 
 
-def parse_ai_comment(body: str) -> dict | None:
-    """Read the verdict block the triage step writes into its comment."""
-    if AI_MARKER not in body:
-        return None
-    m = re.search(r"<!-- risk-triage:verdict (\{.*?\}) -->", body)
+VERDICT_RE = re.compile(r"<!-- risk-triage:verdict (\{.*?\}) -->")
+
+
+def parse_verdict(text: str) -> dict | None:
+    m = VERDICT_RE.search(text or "")
     if not m:
         return None
     try:
@@ -267,95 +363,25 @@ def parse_ai_comment(body: str) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
-TRIAGE_WORKFLOW = ".github/workflows/risk-triage.yml"
-BOT_LOGIN = "github-actions[bot]"
-RUN_SLACK_SECONDS = 120
+def app_verdict(check_runs: list[dict], head_sha: str, gate_app_id: str) -> tuple[dict | None, str]:
+    """The AI verdict stored in a risk-gate check run created by the gate App.
 
-
-def _ts(value: str | None) -> float:
-    from datetime import datetime
-    if not value:
-        return 0.0
-    return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
-
-
-def verdict_trusted(comment: dict, verdict: dict, pr: dict, run: dict | None, default_branch: str) -> tuple[bool, str]:
-    """Is this verdict comment really from a risk-triage.yml run for this PR head?
-
-    Any same-repo workflow can comment as github-actions[bot], so the author
-    alone proves nothing. The verdict names the Actions run that wrote it, and
-    the run must be: this repo, path .github/workflows/risk-triage.yml, event
-    pull_request_target (so the workflow file came from the base branch), the
-    PR's exact head SHA and head branch, and the comment must have been
-    written while that run was going. The PR must target the default branch.
+    Unforgeable: only the App's installation token can create check runs with
+    its app id. Runs from any other app (GitHub Actions, a PR workflow) are
+    ignored. The newest App run for this head commit wins.
     """
-    if (comment.get("user") or {}).get("login") != BOT_LOGIN:
-        return False, "verdict not posted by github-actions[bot]"
-    if verdict.get("pr") != pr.get("number"):
-        return False, "verdict is for another PR"
-    if (pr.get("base") or {}).get("ref") != default_branch:
-        return False, "PR does not target the default branch"
-    if not run:
-        return False, "verdict's workflow run not found"
-    head = pr.get("head") or {}
-    checks = [
-        (run.get("id") == verdict.get("run_id"), "run id mismatch"),
-        (((run.get("repository") or {}).get("full_name")) == REPO, "run is from another repo"),
-        (run.get("path") == TRIAGE_WORKFLOW, f"run is not {TRIAGE_WORKFLOW}"),
-        (run.get("event") == "pull_request_target", "run was not pull_request_target"),
-        (run.get("head_sha") == head.get("sha") == verdict.get("sha"), "run is for another commit"),
-        (run.get("head_branch") == head.get("ref"), "run is for another branch"),
-    ]
-    for ok, why in checks:
-        if not ok:
-            return False, why
-    written = _ts(comment.get("updated_at") or comment.get("created_at"))
-    if not (_ts(run.get("run_started_at")) - 5 <= written <= _ts(run.get("updated_at")) + RUN_SLACK_SECONDS):
-        return False, "verdict was not written during its run"
-    return True, "verdict from risk-triage.yml"
+    if not gate_app_id:
+        return None, "gate App not configured (AUTOMERGE_APP_ID unset): no trusted verdict"
+    mine = [r for r in check_runs if r.get("name") == GATE_CONTEXT
+            and str((r.get("app") or {}).get("id")) == str(gate_app_id) and r.get("head_sha") == head_sha]
+    for r in sorted(mine, key=lambda r: (r.get("started_at") or "", r.get("id") or 0), reverse=True):
+        v = parse_verdict(((r.get("output") or {}).get("text")) or "")
+        if v and v.get("sha") == head_sha:
+            return v, "verdict from the gate App"
+    return None, "no AI review"
 
 
-def trusted_verdict(pr: dict, comments: list[dict], get_run, default_branch: str,
-                    sibling_bases: list[str]) -> tuple[dict | None, str]:
-    """Newest verdict comment that passes verdict_trusted(), or (None, why).
-
-    sibling_bases: base branches of other open PRs from the same head branch.
-    A sibling into a non-default branch could run a modified risk-triage.yml
-    for the same head SHA, so any such sibling voids every verdict.
-    """
-    if any(b != default_branch for b in sibling_bases):
-        return None, "another open PR from this branch targets a non-default branch"
-    why = "no AI review"
-    for c in reversed(comments):
-        if AI_MARKER not in (c.get("body") or ""):
-            continue
-        v = parse_ai_comment(c.get("body", ""))
-        if not v:
-            continue
-        run = get_run(v.get("run_id")) if v.get("run_id") else None
-        ok, why = verdict_trusted(c, v, pr, run, default_branch)
-        if ok:
-            return v, why
-    return None, why
-
-
-def fetch_trusted_verdict(pr: dict, comments: list[dict]) -> tuple[dict | None, str]:
-    """gh-backed wrapper used by this gate and by auto-merge-gate.py."""
-    default_branch = gh_json(f"repos/{REPO}")["default_branch"]
-    head = pr["head"]
-    owner = (head.get("repo") or {}).get("owner", {}).get("login", REPO.split("/")[0])
-    siblings = gh_json(f"repos/{REPO}/pulls?state=open&head={owner}:{head['ref']}&per_page=100", paginate=True)
-    sibling_bases = [p["base"]["ref"] for p in siblings if p.get("number") != pr.get("number")]
-
-    def get_run(run_id):
-        try:
-            return gh_json(f"repos/{REPO}/actions/runs/{int(run_id)}")
-        except (subprocess.CalledProcessError, ValueError, json.JSONDecodeError):
-            return None
-    return trusted_verdict(pr, comments, get_run, default_branch, sibling_bases)
-
-
-def ai_clear(verdict: dict | None, head_sha: str, labels: set[str], waiver_by_owner: bool) -> tuple[bool, str]:
+def ai_clear(verdict: dict | None, head_sha: str) -> tuple[bool, str]:
     if not verdict:
         return False, "no AI review"
     if verdict.get("sha") != head_sha:
@@ -363,7 +389,7 @@ def ai_clear(verdict: dict | None, head_sha: str, labels: set[str], waiver_by_ow
     if verdict.get("status") != "ok":
         return False, f"AI review unavailable ({verdict.get('status')})"
     blocking = int(verdict.get("p0", 0)) + int(verdict.get("p1", 0))
-    if blocking and not (WAIVE_LABEL in labels and waiver_by_owner):
+    if blocking:
         return False, f"AI review has {blocking} unresolved P0/P1"
     return True, "AI review clear"
 
@@ -463,7 +489,9 @@ def pr_files(n: int) -> list[dict]:
 _REDACTIONS = (
     (re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}"), "<email>"),
     (re.compile(r"(?:/Users|/home)/[^/\s'\"]+"), "<home>"),
-    (re.compile(r"(?<![\w.])/(?:private|tmp|var|Volumes|opt|etc)/[^\s'\"]*"), "<path>"),
+    # Any absolute path with at least two segments (/Applications/X, /Library/..., /workspace/...).
+    (re.compile(r"(?<![\w.:/~])/(?:[\w.@+-]+/)+[\w.@+-]*"), "<path>"),
+    (re.compile(r"~/[\w.@+/-]+"), "<path>"),
     (re.compile(r"https?://[^\s)'\"]+"), "<url>"),
     (re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|sk-[A-Za-z0-9_-]{20,}|AKIA[0-9A-Z]{16}|xox[abpors]-[A-Za-z0-9-]{10,})\b"), "<secret>"),
     (re.compile(r"(?i)((?:api[_-]?key|token|secret|password)\s*[:=]\s*)['\"]?[^\s'\"]{8,}"), r"\1<secret>"),
@@ -527,68 +555,149 @@ def parse_ai_text(text: str) -> dict:
     return {"status": "ok", "p0": p0, "p1": p1, "text": text}
 
 
-def cmd_triage(n: int, apply: bool) -> int:
-    pr = gh_json(f"repos/{REPO}/pulls/{n}")
-    risk = classify(pr_files(n))
-    print(json.dumps({"pr": n, **risk}, indent=2))
-    diff = gh("api", f"repos/{REPO}/pulls/{n}", "-H", "Accept: application/vnd.github.diff")
-    review = ai_review(diff, pr.get("title", ""))
-    verdict = {"sha": pr["head"]["sha"], "status": review["status"], "p0": review["p0"], "p1": review["p1"],
-               "pr": n, "run_id": int(os.environ.get("GITHUB_RUN_ID") or 0)}
-    body = (f"{AI_MARKER}\n<!-- risk-triage:verdict {json.dumps(verdict)} -->\n"
-            f"### Risk triage: `risk:{risk['risk']}`" + (" (owner approval required)" if risk["owner_required"] else "")
-            + "\n\n" + "\n".join(f"- {r}" for r in risk["reasons"])
-            + f"\n\n### AI review for `{verdict['sha'][:10]}`: {review['status']}, P0={review['p0']} P1={review['p1']}\n\n"
-            + review["text"][:60000]
-            + "\n\n_No AI result means no auto-merge. See docs/agent-merge-policy.md._")
-    if not apply:
-        print(body)
-        return 0
-    comments = gh_json(f"repos/{REPO}/issues/{n}/comments?per_page=100", paginate=True)
-    # Always a new comment: its timestamps must fall inside this run (verdict_trusted).
-    gh("api", f"repos/{REPO}/issues/{n}/comments", "-F", "body=@-", input_text=body)
-    # Labels last and best-effort: a missing label must not lose the comment.
-    for label in RISK_LABELS:
-        if label != f"risk:{risk['risk']}":
-            subprocess.run(["gh", "pr", "edit", str(n), "-R", REPO, "--remove-label", label], capture_output=True)
-    subprocess.run(["gh", "pr", "edit", str(n), "-R", REPO, "--add-label", f"risk:{risk['risk']}"], check=False)
-    return 0
+def build_check(risk: dict, review: dict, verdict: dict, result: dict) -> dict:
+    """The risk-gate check-run payload: decision, tier, reasons, AI findings, verdict."""
+    passing = result["state"] == "success"
+    title = (f"risk:{risk['risk']}: " + ("clear" if passing else "; ".join(result["why"])))[:120]
+    summary = ("\n".join(f"- {w}" for w in result["why"]) + "\n\n**Path reasons**\n"
+               + "\n".join(f"- {r}" for r in risk["reasons"])
+               + f"\n\n**AI review** for `{verdict['sha'][:10]}`: {review['status']}, "
+               f"P0={review['p0']} P1={review['p1']}")[:60000]
+    body = {"name": GATE_CONTEXT, "head_sha": verdict["sha"],
+            "output": {"title": title, "summary": summary,
+                       "text": f"<!-- risk-triage:verdict {json.dumps(verdict)} -->\n\n" + review["text"][:60000]}}
+    if passing:
+        body.update(status="completed", conclusion="success")
+    elif risk["risk"] == "high":
+        # High risk concludes FAILURE, never neutral/skipped (GitHub treats those
+        # as passing a required check). Justin merges high PRs by hand via bypass.
+        body.update(status="completed", conclusion="failure")
+        body["output"]["title"] = ("risk:high: Justin reviews and merges by hand; " + "; ".join(result["why"]))[:120]
+    else:
+        # Never a conclusion that could satisfy a required check: high risk and
+        # every other blocker stay in progress until the next evaluation.
+        body.update(status="in_progress")
+    return body
 
 
-def evaluate(n: int) -> tuple[dict, dict]:
+def automerge_mode() -> str:
+    """Kill switch (repo/env variable AUTOMERGE_ENABLED).
+
+    "true": post success and arm auto-merge for low/medium.
+    "signal-only": post success but never arm (smoke tests, Justin merges).
+    anything else (default): hold everything; no success, no auto-merge.
+    """
+    v = (os.environ.get("AUTOMERGE_ENABLED") or "").strip().lower()
+    return v if v in ("true", "signal-only") else "off"
+
+
+def _diff_and_review(pr: dict, prior: dict | None) -> tuple[dict, dict]:
+    sha = pr["head"]["sha"]
+    if prior and prior.get("sha") == sha and prior.get("status") == "ok":
+        # Reuse the App-stored verdict for this exact commit: no second AI call.
+        return prior, {"status": "ok", "p0": prior.get("p0", 0), "p1": prior.get("p1", 0),
+                       "text": "(reused the AI review stored for this commit)"}
+    head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
+    if head_repo != REPO:
+        review = {"status": "fork-skipped", "p0": 0, "p1": 0, "text": "Fork PR: no AI call."}
+    else:
+        diff = gh("api", f"repos/{REPO}/pulls/{pr['number']}", "-H", "Accept: application/vnd.github.diff")
+        review = ai_review(diff, pr.get("title", ""))
+    verdict = {"sha": sha, "pr": pr["number"], "status": review["status"], "p0": review["p0"], "p1": review["p1"]}
+    return verdict, review
+
+
+def evaluate(n: int) -> tuple[dict, dict, dict, dict, dict]:
     pr = gh_json(f"repos/{REPO}/pulls/{n}")
     sha, author = pr["head"]["sha"], pr["user"]["login"]
     risk = classify(pr_files(n))  # recomputed: the label is informational, never trusted
     runs = gh_json(f"repos/{REPO}/commits/{sha}/check-runs?per_page=100", paginate=True)
-    statuses = gh_json(f"repos/{REPO}/commits/{sha}/statuses?per_page=100")
-    comments = gh_json(f"repos/{REPO}/issues/{n}/comments?per_page=100", paginate=True)
-    verdict, _verdict_why = fetch_trusted_verdict(pr, comments)
-    labels = {l["name"] for l in pr.get("labels", [])}
-    waiver = False
-    if WAIVE_LABEL in labels:
-        events = gh_json(f"repos/{REPO}/issues/{n}/events?per_page=100", paginate=True)
-        adds = [e for e in events if e.get("event") == "labeled" and (e.get("label") or {}).get("name") == WAIVE_LABEL]
-        # The waiver covers one exact head: the owner must also comment
-        # "ai-findings-waived <full head sha>". A new push voids it.
-        waived_head = any(c["user"]["login"] == OWNER_LOGIN and f"{WAIVE_LABEL} {sha}" in (c.get("body") or "")
-                          for c in comments)
-        waiver = bool(adds) and (adds[-1].get("actor") or {}).get("login") == OWNER_LOGIN and waived_head
+    prior, _ = app_verdict(runs, sha, GATE_APP_ID)
+    verdict, review = _diff_and_review(pr, prior)
     reviews = gh_json(f"repos/{REPO}/pulls/{n}/reviews?per_page=100", paginate=True)
     cmp = gh_json(f"repos/{REPO}/compare/{pr['base']['sha']}...{sha}")
     base_now = gh_json(f"repos/{REPO}/commits/{pr['base']['ref']}")["sha"]
     behind = int(cmp.get("behind_by", 0)) > 0 or pr["base"]["sha"] != base_now
-    result = decide(pr, risk, checks_green(runs, statuses),
-                    ai_clear(verdict, sha, labels, waiver and risk["risk"] != "high"),
+    result = decide(pr, risk, checks_green(runs), ai_clear(verdict, sha),
                     approvals_ok(reviews, author, sha, risk["owner_required"]),
                     changes_requested(reviews))
-    if behind and result["state"] == "success":
-        # Checks ran against an older base: serialize, require a fresh run on current main.
-        result = {"state": "pending", "automerge": False, "why": ["branch is behind base; update it so CI reruns"]}
-    return pr, {**result, "risk": risk["risk"]}
+    result = apply_gate_policy(result, behind=behind, mode=automerge_mode(), app_configured=bool(GATE_APP_ID))
+    return pr, {**result, "risk": risk["risk"]}, risk, verdict, review
 
 
-def cmd_gate(n: int | None, apply: bool) -> int:
-    numbers = [n] if n else [p["number"] for p in gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True)]
+def apply_gate_policy(result: dict, behind: bool, mode: str, app_configured: bool) -> dict:
+    """Post-decision holds: stale base, kill switch, no App. Pure, tested."""
+    if result["state"] != "success":
+        return result
+    if behind:
+        return {"state": "pending", "automerge": False, "why": ["branch is behind base; update it so CI reruns"]}
+    if mode == "off":
+        return {"state": "pending", "automerge": False, "why": ["auto-merge kill switch is off (AUTOMERGE_ENABLED)"]}
+    if not app_configured:
+        return {"state": "pending", "automerge": False, "why": ["gate App not configured: no trusted signal"]}
+    return {**result, "automerge": result["automerge"] and mode == "true"}
+
+
+def _app_env() -> dict | None:
+    token = os.environ.get("GATE_TOKEN", "")
+    return {**os.environ, "GH_TOKEN": token} if token and GATE_APP_ID else None
+
+
+def post_check(body: dict) -> None:
+    env = _app_env()
+    if env is None:
+        print(json.dumps({"advisory": "no gate App token; risk-gate not posted", "title": body["output"]["title"]}))
+        return
+    subprocess.run(["gh", "api", "-X", "POST", f"repos/{REPO}/check-runs", "--input", "-"],
+                   input=json.dumps(body), text=True, capture_output=True, check=True, env=env)
+
+
+def disable_auto(num: int) -> None:
+    # Turning auto-merge OFF is always safe, so any token may do it.
+    subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=False, capture_output=True)
+
+
+def fail_closed(num: int, why: str) -> None:
+    """Evaluation failed: auto-merge off, and risk-gate (if the App is set up) in progress."""
+    pr = gh_json(f"repos/{REPO}/pulls/{num}")
+    disable_auto(num)
+    post_check({"name": GATE_CONTEXT, "head_sha": pr["head"]["sha"], "status": "in_progress",
+                "output": {"title": f"failed closed: {why}"[:120], "summary": why}})
+
+
+def _gate_one(num: int, apply: bool) -> int:
+    pr, res, risk, verdict, review = evaluate(num)
+    print(json.dumps({"pr": num, **res}))
+    if not apply:
+        return 0
+    if pr.get("auto_merge") and not res["automerge"]:
+        disable_auto(num)  # before any success can be posted
+    post_check(build_check(risk, review, verdict, res))
+    for label in RISK_LABELS:
+        if label != f"risk:{risk['risk']}":
+            subprocess.run(["gh", "pr", "edit", str(num), "-R", REPO, "--remove-label", label], capture_output=True)
+    subprocess.run(["gh", "pr", "edit", str(num), "-R", REPO, "--add-label", f"risk:{risk['risk']}"],
+                   check=False, capture_output=True)
+    env = _app_env()
+    if res["automerge"] and not pr.get("auto_merge") and env is not None:
+        # Only the App ever arms auto-merge: never a user's token, never GITHUB_TOKEN.
+        subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--auto", "--squash",
+                        "--match-head-commit", pr["head"]["sha"]], check=False, env=env)
+    return 0
+
+
+def prs_for_sha(sha: str) -> list[int]:
+    pulls = gh_json(f"repos/{REPO}/commits/{sha}/pulls")
+    return [p["number"] for p in pulls if p.get("state") == "open" and p["head"]["sha"] == sha]
+
+
+def cmd_gate(n: int | None, apply: bool, sha: str | None = None) -> int:
+    if n:
+        numbers = [n]
+    elif sha:
+        numbers = prs_for_sha(sha)
+    else:
+        numbers = [p["number"] for p in gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True)]
     failed = 0
     for num in numbers:
         try:
@@ -604,42 +713,10 @@ def cmd_gate(n: int | None, apply: bool) -> int:
     return 1 if failed else 0
 
 
-def fail_closed(num: int, why: str) -> None:
-    """Triage or evaluation failed: post risk-gate pending and turn auto-merge off."""
-    pr = gh_json(f"repos/{REPO}/pulls/{num}")
-    subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=False, capture_output=True)
-    gh("api", f"repos/{REPO}/statuses/{pr['head']['sha']}", "-f", "state=pending",
-       "-f", f"context={GATE_CONTEXT}", "-f", f"description={why[:139]}")
-
-
-def _gate_one(num: int, apply: bool) -> int:
-    triage_result = os.environ.get("TRIAGE_RESULT", "")
-    if triage_result in ("failure", "cancelled") and os.environ.get("PR") == str(num):
-        print(json.dumps({"pr": num, "state": "pending", "why": [f"triage {triage_result}"]}))
-        if apply:
-            fail_closed(num, f"risk triage {triage_result}: no verdict, auto-merge off")
-        return 1
-    if True:
-        pr, res = evaluate(num)
-        print(json.dumps({"pr": num, **res}))
-        if not apply:
-            return 0
-        if pr.get("auto_merge") and not res["automerge"]:
-            # Turn stale auto-merge off BEFORE posting any status, so a green
-            # gate on a high-risk PR can't trigger an auto-merge set earlier.
-            subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--disable-auto"], check=True)
-        desc = ("; ".join(res["why"]))[:139]
-        # The status is always posted with the workflow's GITHUB_TOKEN so it is
-        # attributed to the GitHub Actions app (branch protection pins it there).
-        status_env = {**os.environ, "GH_TOKEN": os.environ.get("GATE_STATUS_TOKEN") or os.environ.get("GH_TOKEN", "")}
-        subprocess.run(["gh", "api", f"repos/{REPO}/statuses/{pr['head']['sha']}", "-f", f"state={res['state']}",
-           "-f", f"context={GATE_CONTEXT}", "-f", f"description={desc}"],
-                       check=True, text=True, capture_output=True, env=status_env)
-        if res["automerge"] and not pr.get("auto_merge"):
-            merge_env = {**os.environ, "GH_TOKEN": os.environ.get("MERGE_TOKEN") or os.environ.get("GH_TOKEN", "")}
-            subprocess.run(["gh", "pr", "merge", str(num), "-R", REPO, "--auto", "--squash",
-                            "--match-head-commit", pr["head"]["sha"]], check=False, env=merge_env)
-    return 0
+def fetch_app_verdict(head_sha: str) -> tuple[dict | None, str]:
+    """gh-backed wrapper used by auto-merge-gate.py."""
+    runs = gh_json(f"repos/{REPO}/commits/{head_sha}/check-runs?check_name={GATE_CONTEXT}&per_page=100", paginate=True)
+    return app_verdict(runs, head_sha, GATE_APP_ID)
 
 
 def main(argv: list[str]) -> int:
@@ -647,19 +724,15 @@ def main(argv: list[str]) -> int:
     sub = ap.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("classify")
     c.add_argument("files", nargs="+")
-    t = sub.add_parser("triage")
-    t.add_argument("--pr", type=int, required=True)
-    t.add_argument("--apply", action="store_true")
     g = sub.add_parser("gate")
     g.add_argument("--pr", type=int)
+    g.add_argument("--sha")
     g.add_argument("--apply", action="store_true")
     a = ap.parse_args(argv)
     if a.cmd == "classify":
         print(json.dumps(classify([{"filename": f, "additions": 1} for f in a.files]), indent=2))
         return 0
-    if a.cmd == "triage":
-        return cmd_triage(a.pr, a.apply)
-    return cmd_gate(a.pr, a.apply)
+    return cmd_gate(a.pr, a.apply, a.sha)
 
 
 if __name__ == "__main__":
