@@ -75,14 +75,18 @@ public enum SpeakerTranscriptVoiceprintEnrollment {
     }
 
     /// Write `embedding` as a new person or as more evidence for someone who
-    /// already exists (the picked id, else the same typed name). No vector
-    /// means the name stays in the transcript only.
+    /// already exists (the picked id, else a same-typed-name person whose
+    /// voice already clears `thresholds.matchManySegments`). A typed name
+    /// alone is not enough: two people can share a name, and teaching the
+    /// busiest one poisons that voiceprint. No vector means the name stays
+    /// in the transcript only.
     public static func enroll(
         name: String,
         embedding: [Float]?,
         targetProfileID: UUID?,
         transcriptID: UUID?,
-        speakerDB: any SpeakerStore
+        speakerDB: any SpeakerStore,
+        thresholds: SpeakerEmbeddingThresholds
     ) -> Outcome {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let embedding, isUsable(embedding) else {
@@ -94,11 +98,12 @@ public enum SpeakerTranscriptVoiceprintEnrollment {
         }
 
         let nameKey = normalize(trimmed)
-        let existing = speakerDB.allSpeakers()
-            .filter { normalize($0.displayName ?? "") == nameKey }
-            .sorted { $0.callCount > $1.callCount }
-            .first
-        if let existing {
+        if let existing = closestSameNameMatch(
+            nameKey: nameKey,
+            embedding: embedding,
+            speakerDB: speakerDB,
+            matchBar: thresholds.matchManySegments
+        ) {
             return teach(existing.id, embedding: embedding, transcriptID: transcriptID, speakerDB: speakerDB)
         }
 
@@ -119,6 +124,30 @@ public enum SpeakerTranscriptVoiceprintEnrollment {
             ])
             return .transcriptOnly
         }
+    }
+
+    /// Closest same-name person whose voiceprint already clears the model's
+    /// many-segment match floor. Call count is not a vote.
+    private static func closestSameNameMatch(
+        nameKey: String,
+        embedding: [Float],
+        speakerDB: any SpeakerStore,
+        matchBar: Double
+    ) -> SpeakerProfile? {
+        var best: (profile: SpeakerProfile, score: Double)?
+        for profile in speakerDB.allSpeakers() {
+            guard normalize(profile.displayName ?? "") == nameKey else { continue }
+            let score = SpeakerVectorMath.bestSimilarity(
+                candidate: embedding,
+                average: profile.embedding,
+                exemplars: profile.exemplars
+            )
+            guard score >= matchBar else { continue }
+            if score > (best?.score ?? -.infinity) {
+                best = (profile, score)
+            }
+        }
+        return best?.profile
     }
 
     private static func teach(

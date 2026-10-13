@@ -8,7 +8,10 @@ import XCTest
 ///   - no embedder, no retained audio, or silent audio → transcript-only, no
 ///     person is created;
 ///   - usable retained audio + the active embedder → a voiceprint is written
-///     (new person, or taught to the same-named / picked person);
+///     (new person, or taught to a picked person / a same-named person whose
+///     voice already clears the model's match floor);
+///   - a typed name with no picker choice never teaches the busiest same-name
+///     person, and never teaches a same-name person whose voice is far away;
 ///   - the transcript file is never given a biometric sidecar.
 @available(macOS 14.0, *)
 final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
@@ -48,7 +51,8 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
                 embedding: nil,
                 targetProfileID: nil,
                 transcriptID: UUID(),
-                speakerDB: db
+                speakerDB: db,
+                thresholds: LevelEmbedder().thresholds
             ),
             .transcriptOnly
         )
@@ -96,7 +100,8 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
             embedding: embedding,
             targetProfileID: nil,
             transcriptID: transcriptID,
-            speakerDB: db
+            speakerDB: db,
+            thresholds: embedder.thresholds
         )
         guard case .enrolled(let id) = outcome else {
             return XCTFail("expected a new person, got \(outcome)")
@@ -111,24 +116,115 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         )
     }
 
-    func testSameTypedNameTeachesTheExistingPerson() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("enroll-teach-\(UUID().uuidString)")
+    func testSameTypedNameWithCloseVoiceTeachesTheExistingPerson() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("enroll-teach-close-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let db = SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
-        let existing = db.addOrUpdateSpeaker(embedding: LevelEmbedder.vector(slot: 1), existingId: nil)
-        db.setDisplayName(id: existing.id, name: "Stephen", source: NameSource.userManual)
+        let existing = try seedPerson(named: "Stephen", slot: 1, callCount: 1, in: db)
 
         let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
             name: "stephen",
-            embedding: LevelEmbedder.vector(slot: 2),
+            embedding: LevelEmbedder.vector(slot: 1),
             targetProfileID: nil,
             transcriptID: UUID(),
-            speakerDB: db
+            speakerDB: db,
+            thresholds: LevelEmbedder().thresholds
         )
         XCTAssertEqual(outcome, .taught(existing.id))
-        XCTAssertEqual(db.allSpeakers().count, 1, "a same-named person must not be duplicated")
+        XCTAssertEqual(db.allSpeakers().count, 1, "a matching same-named person must not be duplicated")
         XCTAssertEqual(db.getSpeaker(id: existing.id)?.displayName, "Stephen")
+        XCTAssertEqual(db.getSpeaker(id: existing.id)?.callCount, 2)
+    }
+
+    func testSameTypedNameWithFarVoiceCreatesANewPerson() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("enroll-teach-far-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let db = SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
+        let existing = try seedPerson(named: "Stephen", slot: 1, callCount: 3, in: db)
+        let far = LevelEmbedder.vector(slot: 2)
+        XCTAssertLessThan(
+            SpeakerVectorMath.bestSimilarity(
+                candidate: far,
+                average: existing.embedding,
+                exemplars: existing.exemplars
+            ),
+            LevelEmbedder().thresholds.matchManySegments
+        )
+
+        let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
+            name: "stephen",
+            embedding: far,
+            targetProfileID: nil,
+            transcriptID: UUID(),
+            speakerDB: db,
+            thresholds: LevelEmbedder().thresholds
+        )
+        guard case .enrolled(let createdID) = outcome else {
+            return XCTFail("a far same-name voice must mint a new person, got \(outcome)")
+        }
+        XCTAssertNotEqual(createdID, existing.id)
+        XCTAssertEqual(db.allSpeakers().count, 2)
+        XCTAssertEqual(db.getSpeaker(id: existing.id)?.callCount, 3, "the existing person must not be taught")
+        XCTAssertGreaterThan(
+            SpeakerVectorMath.cosineSimilarity(
+                try XCTUnwrap(db.getSpeaker(id: existing.id)?.embedding),
+                LevelEmbedder.vector(slot: 1)
+            ),
+            0.99,
+            "the existing voiceprint must not be blended with the new voice"
+        )
+        XCTAssertEqual(db.getSpeaker(id: createdID)?.displayName, "stephen")
+        XCTAssertEqual(db.getSpeaker(id: createdID)?.callCount, 1)
+    }
+
+    func testTwoSameNamePeopleTeachesTheClosestVoiceNotTheMostCalls() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("enroll-two-daniels-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let db = SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
+        let wrongDaniel = try seedPerson(named: "Daniel", slot: 3, callCount: 5, in: db)
+        let rightDaniel = try seedPerson(named: "Daniel", slot: 1, callCount: 1, in: db)
+        let newVoice = LevelEmbedder.vector(slot: 1)
+        let bars = LevelEmbedder().thresholds
+        XCTAssertLessThan(
+            SpeakerVectorMath.bestSimilarity(
+                candidate: newVoice,
+                average: wrongDaniel.embedding,
+                exemplars: wrongDaniel.exemplars
+            ),
+            bars.matchManySegments
+        )
+        XCTAssertGreaterThan(
+            SpeakerVectorMath.bestSimilarity(
+                candidate: newVoice,
+                average: rightDaniel.embedding,
+                exemplars: rightDaniel.exemplars
+            ),
+            bars.matchManySegments
+        )
+
+        let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
+            name: "Daniel",
+            embedding: newVoice,
+            targetProfileID: nil,
+            transcriptID: UUID(),
+            speakerDB: db,
+            thresholds: bars
+        )
+        XCTAssertEqual(outcome, .taught(rightDaniel.id), "the closer voice must be taught, not the busier Daniel")
+        XCTAssertEqual(db.allSpeakers().count, 2, "must reuse a same-name person, not mint a third")
+        XCTAssertEqual(db.getSpeaker(id: wrongDaniel.id)?.callCount, 5, "the busy wrong voice must stay untouched")
+        XCTAssertEqual(db.getSpeaker(id: rightDaniel.id)?.callCount, 2)
+        XCTAssertGreaterThan(
+            SpeakerVectorMath.cosineSimilarity(
+                try XCTUnwrap(db.getSpeaker(id: wrongDaniel.id)?.embedding),
+                LevelEmbedder.vector(slot: 3)
+            ),
+            0.99,
+            "the busy Daniel's voiceprint must not be poisoned"
+        )
     }
 
     func testPickedPersonIsTaughtEvenWhenTheTypedNameDiffers() throws {
@@ -144,7 +240,8 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
             embedding: LevelEmbedder.vector(slot: 2),
             targetProfileID: picked.id,
             transcriptID: nil,
-            speakerDB: db
+            speakerDB: db,
+            thresholds: LevelEmbedder().thresholds
         )
         XCTAssertEqual(outcome, .taught(picked.id))
         XCTAssertEqual(db.getSpeaker(id: picked.id)?.displayName, "Alex", "teaching must not rename the picked person")
@@ -174,6 +271,25 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
             recordingURL: recordingURL,
             markdown: importedMarkdown(name: "Speaker 2")
         )
+    }
+
+    private func seedPerson(
+        named name: String,
+        slot: Int,
+        callCount: Int,
+        in db: SpeakerDatabase
+    ) throws -> SpeakerProfile {
+        XCTAssertGreaterThanOrEqual(callCount, 1)
+        let embedding = LevelEmbedder.vector(slot: slot)
+        var profile = db.addOrUpdateSpeaker(embedding: embedding, existingId: nil)
+        db.setDisplayName(id: profile.id, name: name, source: NameSource.userManual)
+        for _ in 1..<callCount {
+            profile = db.addOrUpdateSpeaker(embedding: embedding, existingId: profile.id)
+        }
+        let saved = try XCTUnwrap(db.getSpeaker(id: profile.id))
+        XCTAssertEqual(saved.callCount, callCount)
+        XCTAssertEqual(saved.displayName, name)
+        return saved
     }
 
     private func importedMarkdown(name: String) -> String {

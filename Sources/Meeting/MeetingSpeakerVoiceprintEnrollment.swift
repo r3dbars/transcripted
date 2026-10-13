@@ -55,7 +55,8 @@ extension MeetingSessionController {
                 embedding: embedding,
                 targetProfileID: targetProfileID,
                 transcriptID: transcriptID,
-                speakerDB: speakerDB
+                speakerDB: speakerDB,
+                thresholds: speakerDB.thresholds
             ) {
             case .enrolled(let id), .taught(let id):
                 return .saved(id)
