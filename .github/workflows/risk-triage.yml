@@ -115,6 +115,10 @@ jobs:
         with:
           app-id: ${{ vars.AUTOMERGE_APP_ID }}
           private-key: ${{ secrets.AUTOMERGE_APP_PRIVATE_KEY }}
+          # Only what the gate uses, not everything the install grants.
+          permission-checks: write
+          permission-pull-requests: write
+          permission-contents: write
       - name: Evaluate gate
         env:
           GH_TOKEN: ${{ github.token }}                 # reads, labels, disabling auto-merge

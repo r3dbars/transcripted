@@ -1,6 +1,7 @@
 # Release, signing, update-feed and merge-policy paths belong to Justin.
-# With "Require review from Code Owners" on main, a PR touching these needs
-# @r3dbars's approval. Keep in sync with RELEASE_PATTERNS in
+# This routes review requests to @r3dbars. "Require review from Code Owners"
+# stays off (GitHub never counts an author's own approval); risk-triage.py
+# holds these paths as risk:high instead. Keep in sync with RELEASE_PATTERNS in
 # scripts/ops/risk-triage.py (docs/agent-merge-policy.md).
 
 /scripts/release/                           @r3dbars

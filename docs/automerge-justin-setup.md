@@ -1,9 +1,9 @@
 # Auto-merge: steps only Justin does
 
 Agents never run these. Until A is done, risk-gate only labels and logs; nothing auto-merges.
-Order matters: **C1–C3 before merging #2199** (it adds `environment: release` to release-candidate.yml; without the environment and its secrets, release candidates fail). Then A (the App must have posted `risk-gate` once), then B: the bot gets write access only after the ruleset requires `risk-gate` (N1).
+Order matters: **C1–C3 before relying on release approvals.** #2199 adds `environment: release` to release-candidate.yml. Until C1 exists, GitHub creates that environment unprotected on the first run and repo-level secrets still apply, so RCs keep working with no approval step. **Set `AUTOMERGE_APP_ID` (A4) before `AI_REVIEW_API_KEY`**: the review job makes no AI calls until the App ID is set. Then A (the App must have posted `risk-gate` once), then B: the bot gets write access only after the ruleset requires `risk-gate` (N1).
 
-## C. Release environment for the 6 Apple/Sparkle secrets (about 20 min) — before merging #2199
+## C. Release environment for the 6 Apple/Sparkle secrets (about 20 min)
 Secrets, all repo-wide today: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVELOPER_ID_CERT, DEVELOPER_ID_PASSWORD, SPARKLE_PRIVATE_KEY.
 1. Create `release`, deployable from `main` only, with you as **mandatory** reviewer (S5, S9):
    ```
@@ -18,7 +18,7 @@ Secrets, all repo-wide today: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVEL
 2. For each secret: `gh secret set NAME -R r3dbars/transcripted --env release` with the original value (repo secrets can't be read back; use your source copies).
 3. Merge #2199 (high risk, by hand).
 4. Dispatch RCs from main (the env policy checks the workflow ref, S6):
-   `gh workflow run release-candidate.yml -R r3dbars/transcripted --ref main -f source_ref=<prep branch>`, approve the deployment.
+   `gh workflow run release-candidate.yml -R r3dbars/transcripted --ref main -f source_ref=<prep branch> -f version=<x.y.z>`, approve the deployment.
 5. Once an RC is green: `gh secret delete NAME -R r3dbars/transcripted` for each of the 6 repo-level copies.
 
 ## A. Create the gate App (about 30 min)

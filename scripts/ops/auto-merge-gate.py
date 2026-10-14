@@ -749,6 +749,7 @@ def self_test() -> int:
     results.append(case("raised extra baseline stays outside the lane", False, pin_pr, None, "outside lane"))
     cap_reasons = changed_paths([], 3001)[1]
     results.append(held_for_human(cap_reasons) == [REST_FILE_LIMIT_REASON])
+    print(f"{'PASS' if results[-1] else 'FAIL'} permanent REST cap escalates to human")
     # Never merge as a person: no gate App token means no merge.
     try:
         merge_env({"GH_TOKEN": "user-token"})
@@ -757,7 +758,6 @@ def self_test() -> int:
         refused = True
     results.append(refused and merge_env({"GATE_TOKEN": "app"})["GH_TOKEN"] == "app")
     print(f"{'PASS' if results[-1] else 'FAIL'} merge refuses without the gate App token")
-    print(f"{'PASS' if results[-1] else 'FAIL'} permanent REST cap escalates to human")
     results.append(held_for_human(changed_paths([], 1)[1]) == [])
     print(f"{'PASS' if results[-1] else 'FAIL'} transient incomplete metadata waits")
     held_ok = held_for_human(["touches protected files: X", "check build-and-test is pending",

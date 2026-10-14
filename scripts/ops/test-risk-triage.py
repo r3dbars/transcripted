@@ -442,6 +442,22 @@ class NoSelfMergeTests(unittest.TestCase):
             if saved is not None:
                 os.environ["GATE_TOKEN"] = saved
 
+    def test_no_ai_call_before_the_app_is_configured(self):
+        pr = {"head": {"sha": "h" * 40, "repo": {"full_name": rt.REPO}},
+              "base": {"sha": "b" * 40, "ref": rt.DEFAULT_BRANCH}, "title": "t"}
+        calls = []
+        orig = (rt.GATE_APP_ID, rt.gh_json, rt.gh, rt.ai_review)
+        try:
+            rt.GATE_APP_ID = ""
+            rt.gh_json = lambda path, **_: pr
+            rt.gh = lambda *a, **k: calls.append(("diff", a)) or ""
+            rt.ai_review = lambda *a, **k: calls.append(("ai", a)) or {"status": "ok", "p0": 0, "p1": 0, "text": ""}
+            out = rt.review_one(7)
+        finally:
+            rt.GATE_APP_ID, rt.gh_json, rt.gh, rt.ai_review = orig
+        self.assertEqual(out["status"], "skipped")
+        self.assertEqual(calls, [], "no diff fetch or AI call without AUTOMERGE_APP_ID")
+
     def test_no_admin_merges_or_merge_token_anywhere(self):
         root = Path(__file__).resolve().parents[2]
         paths = (list((root / ".github/workflows").glob("*.yml")) + list((root / "scripts").rglob("*.py"))

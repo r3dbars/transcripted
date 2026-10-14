@@ -692,6 +692,11 @@ def review_one(n: int) -> dict:
     entry = {"pr": n, "sha": sha, "base_sha": base_sha}
     if head_repo != REPO or pr["base"]["ref"] != DEFAULT_BRANCH:
         return {**entry, "status": "skipped", "p0": 0, "p1": 0, "text": "Fork or non-default base: no AI call."}
+    if not GATE_APP_ID:
+        # Without the App nothing can store or trust a verdict, so every
+        # 20-minute run would pay for a fresh AI call per open PR.
+        return {**entry, "status": "skipped", "p0": 0, "p1": 0,
+                "text": "Gate App not configured (AUTOMERGE_APP_ID): no AI call."}
     runs = gh_json(f"repos/{REPO}/commits/{sha}/check-runs?check_name={GATE_CONTEXT}&per_page=100", paginate=True)
     prior, _ = app_verdict(runs, sha, GATE_APP_ID, n, base_sha)
     if prior and prior.get("status") == "ok":
@@ -813,8 +818,12 @@ def _gate_one(num: int, apply: bool, entries: list) -> int:
     for label in RISK_LABELS:
         if label != f"risk:{risk['risk']}":
             subprocess.run(["gh", "pr", "edit", str(num), "-R", REPO, "--remove-label", label], capture_output=True)
-    subprocess.run(["gh", "pr", "edit", str(num), "-R", REPO, "--add-label", f"risk:{risk['risk']}"],
-                   check=False, capture_output=True)
+    labeled = subprocess.run(["gh", "pr", "edit", str(num), "-R", REPO, "--add-label", f"risk:{risk['risk']}"],
+                             check=False, capture_output=True, text=True)
+    if labeled.returncode != 0:
+        # Usually the label doesn't exist yet (setup step A6).
+        print(json.dumps({"pr": num, "label_error": f"risk:{risk['risk']}",
+                          "detail": (labeled.stderr or "")[:200]}), file=sys.stderr)
     env = _app_env()
     if res["automerge"] and not pr.get("auto_merge") and env is not None:
         # Only the App ever arms auto-merge: never a user's token, never GITHUB_TOKEN.
