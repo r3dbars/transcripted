@@ -28,8 +28,9 @@ func testSentryRuntimeConfiguration() {
             SentryRuntimeConfiguration.dsnInfoKey: "https://plist@example.invalid/1",
         ]
         for key in AutomatedLaunchEnvironment.keys {
+            let value = key == AutomatedLaunchEnvironment.harnessKey ? "1" : "/tmp/report.json"
             assertNil(
-                SentryRuntimeConfiguration.dsn(environment: [key: "/tmp/report.json"], infoDictionary: info),
+                SentryRuntimeConfiguration.dsn(environment: [key: value], infoDictionary: info),
                 "\(key) launches must not report crashes under the release's name"
             )
         }

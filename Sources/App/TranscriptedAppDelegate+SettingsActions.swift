@@ -167,6 +167,7 @@ extension TranscriptedAppDelegate {
             micActivityMonitor.start()
             cameraActivityMonitor.start()
         } else {
+            appState.meetingSession.disableCallEndDetection()
             micActivityMonitor.stop()
             cameraActivityMonitor.stop()
             // Drop any in-flight mic/output/camera candidates so a stale call can't prompt.

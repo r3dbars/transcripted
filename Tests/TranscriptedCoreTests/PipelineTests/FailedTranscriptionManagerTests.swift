@@ -1060,6 +1060,47 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertEqual(Set(persisted.map(\.id)), Set([relocatedEntry.id, manager.failedTranscriptions[0].id]))
     }
 
+    func testLoadProbesOneOfflineVolumeOnceForManyRelocatedRows() throws {
+        let paths = makePaths(root: testRoot)
+        let rows = (1...4).map { index in
+            FailedTranscription(
+                id: UUID(),
+                timestamp: Date(timeIntervalSince1970: Double(index)),
+                micAudioURL: URL(
+                    fileURLWithPath: "/Volumes/Sweep Test Drive/old-library/meetings/audio/Call\(index)_audio/microphone.wav"
+                ),
+                systemAudioURL: nil,
+                errorMessage: "Temporary transcription failure"
+            )
+        }
+        try writeQueue(rows, to: paths)
+
+        var fileExistsOnShare = 0
+        var directoryExistsOnShare = 0
+        let fs = RelocatedCaptureAudioPolicy.FileSystem(
+            fileExists: { path in
+                if path.hasPrefix("/Volumes/Sweep Test Drive") { fileExistsOnShare += 1 }
+                return false
+            },
+            directoryExists: { path in
+                if path.hasPrefix("/Volumes/Sweep Test Drive") { directoryExistsOnShare += 1 }
+                return path == "/" || path == "/Volumes"
+            },
+            isMountPoint: { _ in false },
+            isAccessDenied: { _ in false }
+        )
+        let manager = FailedTranscriptionManager(paths: paths, relocatedAudioFileSystem: fs)
+
+        XCTAssertTrue(manager.failedTranscriptions.isEmpty)
+        let persisted = try JSONDecoder.iso8601.decode(
+            [FailedTranscription].self,
+            from: Data(contentsOf: paths.failedQueue)
+        )
+        XCTAssertEqual(Set(persisted.map(\.id)), Set(rows.map(\.id)))
+        XCTAssertEqual(fileExistsOnShare, 1, "loading the queue must not file-probe one offline volume once per row")
+        XCTAssertEqual(directoryExistsOnShare, 2, "the first row may look at the archive and the volume; later rows must not")
+    }
+
     func testLoadKeepsOutOfRootRowWhenItsOldLibraryIsOffline() throws {
         // Old library sat on a drive that is not mounted at launch, so the
         // row's audio can't be checked right now. The row must survive in

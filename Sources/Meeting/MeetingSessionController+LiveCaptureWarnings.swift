@@ -18,6 +18,10 @@ extension MeetingSessionController {
 
     func dismissAudioInactivityWarning() {
         guard audioInactivityWarning != nil else { return }
+        if audioInactivityWarning?.kind == .callEnded {
+            keepRecordingAfterCallEnd()
+            return
+        }
         applyAudioInactivityEvent(audioInactivityDetector.dismissWarning())
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -215,8 +219,25 @@ extension MeetingSessionController {
         )
     }
 
-    func endRecordingFromAudioInactivityPrompt(automatic: Bool) async {
+    func endRecordingFromAudioInactivityPrompt(automatic: Bool,
+                                              expectedWarning: MeetingAudioInactivityWarning? = nil) async {
         guard let warning = audioInactivityWarning else { return }
+        if let expectedWarning, expectedWarning != warning { return }
+        if warning.kind == .callEnded {
+            guard isRecording, warning.recordingIdentity == activeRecordingIdentity else { return }
+            guard !automatic || canAutomaticallyStopEndedCall(warning) else { return }
+            DiagnosticsTrail.record(
+                level: automatic ? .warning : .info,
+                engine: "meeting",
+                event: automatic ? "meeting_call_end_timeout" : "meeting_call_end_stop_requested",
+                message: automatic
+                    ? "Meeting recording ended after the call-end countdown"
+                    : "Meeting recording ended from the call-end prompt",
+                context: baseDiagnosticsContext(extra: ["duration_ms": "\(Int(recordingDuration * 1000))"])
+            )
+            await stopRecording(reason: automatic ? .detectedCallEndTimeout : .detectedCallEndPrompt)
+            return
+        }
         if automatic, !warning.automaticStopAllowed {
             let diagnostics = currentAudioInactivityDiagnostics()
             applyAudioInactivityEvent(audioInactivityDetector.dismissWarning())
@@ -259,6 +280,7 @@ extension MeetingSessionController {
 
     func observeAudioActivity() {
         guard isRecording else { return }
+        noteAudioLevelsForCallEnd(micLevel: latestMicLevel, systemLevel: latestSystemLevel)
         applyAudioInactivityEvent(
             audioInactivityDetector.observe(
                 micLevel: latestMicLevel,
@@ -288,7 +310,9 @@ extension MeetingSessionController {
                 durationSeconds: recordingDuration,
                 diagnostics: diagnostics
             )
-            audioInactivityWarning = presentedWarning
+            let displayed = MeetingRecordingWarningOwner.displayed(callEnd: audioInactivityWarning, silence: presentedWarning)
+            guard displayed != audioInactivityWarning else { return }
+            audioInactivityWarning = displayed
             DiagnosticsTrail.record(
                 level: .warning,
                 engine: "meeting",
@@ -308,8 +332,9 @@ extension MeetingSessionController {
                 )
             )
         case .warningCleared:
-            guard audioInactivityWarning != nil else { return }
-            audioInactivityWarning = nil
+            let displayed = MeetingRecordingWarningOwner.displayed(callEnd: audioInactivityWarning, silence: nil)
+            guard displayed != audioInactivityWarning else { return }
+            audioInactivityWarning = displayed
             DiagnosticsTrail.record(
                 engine: "meeting",
                 event: "meeting_audio_inactivity_warning_cleared",

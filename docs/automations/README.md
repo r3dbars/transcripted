@@ -4,7 +4,7 @@ Scheduled jobs that keep Transcripted moving without Justin. Each runs as a Code
 
 | Job | Every | Playbook | What it does |
 |---|---|---|---|
-| Auto-merge gate | 30 min | `docs/auto-merge-gate.md` | Marks lane drafts ready once only the review is missing; merges lane PRs that pass every check |
+| Auto-merge gate | **Not scheduled** (see below) | `docs/auto-merge-gate.md` | Dry run by hand only, until the App-gated flow and bot identity are in place |
 | Finding responder | Hourly | `docs/automations/finding-responder.md` | Fixes real Codex review findings, answers wrong ones with evidence, hands unclear ones to Justin |
 | Docs drift | Nightly, 11:00 PM | `docs/automations/docs-drift.md` | Fixes folder `AGENTS.md` and `docs/` statements the code no longer matches, in `docs` lane PRs |
 | Stale PRs | Nightly, midnight | `docs/automations/stale-prs.md` | Closes PRs whose work already landed, updates conflicted lane branches, flags red or quiet PRs |
@@ -22,7 +22,9 @@ In this job's dedicated Transcripted automation worktree, acquire an exclusive f
 Read <playbook path> and do exactly what it says. Report only if you acted or hit an error.
 ```
 
-The gate is a script, so its prompt can run it directly:
+**The auto-merge gate isn't scheduled.** As of 2026-10-10 no reachable machine runs it. The checks covered Justin's Mac (Codex automations, launchd agents and daemons, crontab), the agent box, and the repo workflows. The Linux PC and second Mac were offline. Don't re-enable it except under the App-gated flow (`docs/agent-merge-policy.md`) and signed in as the agent bot account (`docs/automerge-justin-setup.md`), never as `r3dbars`. Until then, run it only as a dry run: `python3 scripts/ops/auto-merge-gate.py` (no `--apply`). Details are in `docs/auto-merge-gate.md`.
+
+If it's re-enabled under that flow, its prompt can run the script directly:
 
 ```text
 In this job's dedicated Transcripted automation worktree, acquire an exclusive filesystem lock before any git command and hold it until this entire run finishes. If the lock is already held, stop without touching the checkout. Release only the lock this run acquired, including on failure. Never reuse another job's worktree. Then: if git status --porcelain isn't empty, stop and report. Otherwise git fetch --prune, then git checkout --detach origin/main.

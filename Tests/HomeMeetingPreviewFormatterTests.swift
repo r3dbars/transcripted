@@ -161,6 +161,47 @@ func testHomeMeetingPreviewFormatter() {
             "Cyclic saved-person merges should fail before any profile is changed"
         )
     }
+
+    // A 1.1.72 CLI retest: a meeting the app didn't record (CLI import
+    // or an older file) has numbered speakers with no db_id. Naming that voice
+    // from Home must not pretend a saved person exists — assignmentPlan can
+    // only rewrite this transcript. A voiceprint, if any, has to be enrolled
+    // separately from retained audio.
+    runSuite("Naming an unlinked imported voice stays transcript-local") {
+        let importedVoice = HomeMeetingSpeakerIdentity(
+            displayName: "Speaker 2",
+            rawLabel: "System/Speaker 2",
+            channel: .system,
+            diarizerSpeakerID: "2",
+            persistentSpeakerID: nil
+        )
+        let assignment = HomeMeetingSpeakerAssignment(
+            identity: importedVoice,
+            newName: "Priya",
+            targetProfileID: nil
+        )
+        let line = HomeMeetingTranscriptLine(
+            time: "00:00",
+            identity: importedVoice,
+            text: "Hello from an imported meeting."
+        )
+        let plan = HomeMeetingSpeakerNamingPolicy.assignmentPlan(
+            for: [assignment],
+            transcriptLines: [line],
+            availableProfileIDs: []
+        )
+        assertEqual(plan?.localAssignments.count, 1, "an unlinked CLI/imported voice has no saved profile to edit")
+        assertEqual(plan?.savedAssignments.count, 0, "Home must not route an unlinked name through the speaker store")
+        assertEqual(plan?.localAssignments.first?.targetProfileID, nil, "typed names stay transcript-only until a voiceprint is enrolled")
+        assertEqual(
+            HomeMeetingSpeakerNamingCopy.transcriptOnlyNoVoiceprint,
+            "Named in this transcript only, no voiceprint saved"
+        )
+        let enrolledID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
+        let linked = HomeMeetingSpeakerVoiceprintSave.linking(assignment, to: enrolledID)
+        assertEqual(linked.targetProfileID, enrolledID, "a later enrollment should attach the new person to this row")
+        assertEqual(linked.newName, "Priya")
+    }
 }
 
 private func styledMeetingMarkdown() -> String {

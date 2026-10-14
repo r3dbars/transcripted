@@ -682,3 +682,104 @@ instead of also sending `meeting_prompt_outcome_recorded` with
 `outcome_kind=suppressed`, and each candidate + reason reports at most once per
 15 minutes instead of every 90 s. Those two cut about 33k and most of the
 remaining ~33k monthly suppression events (86.9% of prompt-family events).
+
+
+## End detection for prompt-started recordings
+
+A recording accepted from a detected-call prompt can also detect when its
+source app releases its audio streams. After 10 seconds of continuously
+confirmed inactivity, the island shows **Call ended** / "Call audio stopped."
+with **Continue** and **Stop** and a "Stops in 30s" countdown, the same shape
+as the **No sound** warning. Doing nothing stops and transcribes when the
+countdown reaches zero. Returning source activity cancels the countdown.
+Continue disables this call-end detector for the current recording and
+dismisses any pending silence warning with it, so neither prompt returns until
+real audio activity does. The timings (10 s, 30 s, the 12 s freshness limit)
+live in `MeetingEndDetectionPolicy`.
+
+Only the countdown reaching zero stops the recording; scheduled polls never
+stop it on their own. At zero the session takes a fresh call-activity reading
+on the monitor's queue (`callActivitySampler`). Every interval runs on sample
+time, so that reading is always sampled at or after the deadline: if the call
+is still gone the recording stops right then, and if it came back in the last
+seconds the warning clears. There's no "checking" wait.
+
+The automatic stop is vetoed, and the prompt stays up with Continue / Stop and
+no countdown, when:
+
+- mic or system audio went over the silence threshold while the warning was up
+  (people still talking in the room after the remote side hung up, or the call
+  moved to another device), or
+- the fresh reading failed or is stale.
+
+The accepted source is captured before permission dialogs and bound only after
+capture succeeds. Native calls bind to their conferencing bundle family;
+browser calls bind to the one browser family holding input, regardless of
+whether the tab names Meet, Zoom, or Teams. Safari and WebKit are one family.
+Multiple active browsers and camera-only prompts cannot establish a safe
+source, so those recordings keep the existing manual/silence behavior. Manual
+menu/hotkey recordings do not arm this detector. Disabling auto call detection
+also disarms it for the current recording.
+
+Each CoreAudio poll supplies raw input and output activity without the start
+signal's sustain delay. Output stays observable while a browser microphone is
+muted. Transcripted and its helpers are excluded. Activity in another app does
+not sustain the bound call; activity in another tab of the same browser may.
+Any active camera conservatively prevents stopping, because camera activity
+cannot be attributed to an app. Before a warning, failed or stale audio/camera
+reads and gaps in polling reset the interval instead of treating missing
+evidence as a hangup. While a warning is up, one failed read holds it (it can't
+authorize a stop) so the prompt doesn't flap; a polling gap still clears it. Each
+reading carries when it was sampled, not just when it arrived, so a slow sensor
+read is judged by its sampling time. A read with no usable sampling time is
+unknown, never inactive.
+Timeout and Stop callbacks carry the warning's recording identity so they
+cannot stop a later recording. Call-end warnings own their countdown separately
+from waveform-level silence; room speech does not cancel them (it vetoes only
+the automatic stop), and clearing one restores a silence warning that was
+already pending, except when the recording is stopping.
+
+This is an inference about audio-device ownership, not a meeting-platform
+lifecycle API. A long mute that releases all streams and turns the camera off
+can resemble a hangup. Calls that retain streams between meetings can merge.
+Use Continue or stop manually in those cases. Calendar end times and
+foreground/window changes do not authorize an automatic stop.
+
+### Research behind the approach
+
+- [Circleback desktop recording](https://circleback.ai/docs/support/recording/desktop-app/record-meetings-with-the-desktop-app)
+  documents microphone release and a Keep Recording override.
+- [Kalima meeting detection](https://meetkalima.com/docs/desktop/meeting-detection)
+  scopes auto-stop to detected recordings and checks consecutive observations.
+- [Driffle recording lifecycle](https://driffle.ai/blog/ai-notetaker-stop-recording-when-meeting-ends/)
+  documents debounce, reconnect grace, a cancellable countdown and Keep recording.
+- [Granola transcription](https://docs.granola.ai/help-center/taking-notes/transcription)
+  documents microphone release for ad-hoc calls and the back-to-back-call gap.
+- [Apple CoreAudio input state](https://developer.apple.com/documentation/coreaudio/kaudioprocesspropertyisrunninginput)
+  is the existing native metadata primitive; no meeting bot or new platform
+  credentials are needed.
+
+These examples support the design pattern; the 10-second confirmation and
+30-second countdown are Transcripted's initial policy values, not an industry
+standard or proof that every conferencing app releases streams identically.
+
+### Validation
+
+Deterministic tests in `Tests/MeetingEndDetectionPolicyTests.swift` exercise raw
+sensor failures, family binding, native and browser mute/output, ambiguous
+sources, sample gaps, reconnection, suppression and recording-identity guards.
+They also pin the deadline rule directly: an inactive reading sampled before the
+deadline cannot stop, activity sampled after it cancels the warning, inactivity
+sampled after it permits stopping, and a reading sampled before the deadline but
+delivered after it proves nothing. Existing prompt, sustain, silence, priority
+and stop-sequence tests cover the surrounding lifecycle. Run `bash check.sh`,
+followed by `bash scripts/dev/verify-change.sh`.
+
+Real-call acceptance still requires Zoom and Google Meet checks on a supported
+Mac: accept Record, stay muted longer than the countdown, leave while talking
+in the room, rejoin during confirmation and countdown, switch input devices,
+click both prompt actions, let it expire with the island hidden, disable
+detection, and record manually. Verify one saved artifact through the normal
+transcription path. Also test back-to-back calls and another audio tab in the
+same browser; record the observed limitations rather than claiming isolation
+at a meeting-tab level.

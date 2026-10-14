@@ -41,6 +41,7 @@ from __future__ import annotations
 import argparse
 import fnmatch
 import json
+import os
 import re
 import subprocess
 import sys
@@ -66,6 +67,18 @@ HUMAN_LABELS = {HUMAN_LABEL, "needs owner review"}
 HELD_MARKER = "<!-- auto-merge-gate:held -->"
 UNTRUSTED_REASONS = ("PR comes from a fork", "author ")
 DISABLED_LANE = re.compile(r"lane \S+ is disabled$")
+
+
+def _risk_triage():
+    """The PR risk classifier (scripts/ops/risk-triage.py); this gate never merges risk:high."""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("risk_triage", Path(__file__).with_name("risk-triage.py"))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+RISK_TRIAGE = _risk_triage()
 
 
 def gh(*args: str) -> str:
@@ -226,7 +239,8 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
         if needed not in labels:
             reasons.append(f"missing label '{needed}'")
     # Human hand-off labels always block, whatever the lane file lists.
-    blocked = sorted(labels & (set(config["blocking_labels"]) | HUMAN_LABELS))
+    # One shared hold list (risk-triage.HOLD_LABELS) plus anything the lane file adds.
+    blocked = sorted(labels & (set(config["blocking_labels"]) | HUMAN_LABELS | RISK_TRIAGE.HOLD_LABELS))
     if blocked:
         reasons.append(f"blocking label: {', '.join(blocked)}")
 
@@ -257,6 +271,16 @@ def evaluate(pr: dict, extra: dict, config: dict) -> tuple[dict | None, list[str
         reasons.append("bug fix without a test change")
     if lane.get("require_verify"):
         reasons.extend(verify_problems(pr.get("body") or "", pr["headRefOid"]))
+
+    # docs/agent-merge-policy.md: a PR the risk triage calls high is never
+    # merged by any gate, whatever its lane allows. Same REST records as above.
+    # No trusted, clean AI verdict for the head commit means no merge.
+    ai = extra.get("ai_review") or [False, "no AI review"]
+    if not ai[0]:
+        reasons.append(f"AI review not clear: {ai[1]}")
+    triage = RISK_TRIAGE.classify(extra.get("changed_files") or [])
+    if triage["risk"] == "high":
+        reasons.append("risk triage says high: " + "; ".join(triage["reasons"][:2]))
 
     size = pr.get("additions", 0) + pr.get("deletions", 0)
     if size > lane["max_changed_lines"]:
@@ -378,11 +402,18 @@ def fetch_extra(pr: dict, config: dict) -> dict:
     if not isinstance(file_pages, list) or not all(isinstance(page, list) for page in file_pages):
         raise RuntimeError("PR files API returned malformed pages; refusing to merge")
     changed_files = [record for page in file_pages for record in page]
+    # The same trusted AI verdict risk-gate uses (risk-triage.py): stored in a
+    # risk-gate check run created by the transcripted-gate App for this head.
+    rt = RISK_TRIAGE
+    rt.REPO = f"{owner}/{name}"
+    verdict, verdict_why = rt.fetch_app_verdict(pr["headRefOid"], int(pr["number"]), pr.get("baseRefOid") or "")
+    ai = rt.ai_clear(verdict, pr["headRefOid"]) if verdict else (False, verdict_why)
     lowered, unknown = lowered_baselines(owner, name, pr, changed_paths(changed_files, pr.get("changedFiles"))[0])
     return {
         "changed_files": changed_files,
         "lowered_baselines": lowered,
         "unknown_baselines": unknown,
+        "ai_review": list(ai),
         "unresolved_threads": sum(1 for t in threads if not t["isResolved"]),
         "reviewer_reactions": [
             {"login": r["user"]["login"], "created_at": r["created_at"]}
@@ -398,11 +429,26 @@ def has_held_note(pr: dict, config: dict) -> bool:
                for c in pr.get("comments", []))
 
 
+def merge_env(environ=None) -> dict:
+    """Environment for the one merge call: the gate App token, or refuse."""
+    environ = dict(os.environ if environ is None else environ)
+    token = environ.get("GATE_TOKEN", "")
+    if not token:
+        raise RuntimeError("refusing to merge: no GATE_TOKEN (transcripted-gate App token); "
+                           "the gate never merges with a person's gh login")
+    return {**environ, "GH_TOKEN": token, "GITHUB_TOKEN": token}
+
+
 def merge(pr: dict, lane: dict) -> None:
     number = str(pr["number"])
     if pr.get("isDraft"):
         gh("pr", "ready", number)
-    gh("pr", "merge", number, "--merge", "--match-head-commit", pr["headRefOid"])
+    # Never merge under a person's identity: agents share Justin's gh login, so
+    # a merge with the ambient token is an agent merging as Justin. Only the
+    # transcripted-gate App's installation token (GATE_TOKEN) may merge.
+    env = merge_env()
+    subprocess.run(["gh", "pr", "merge", number, "-R", os.environ.get("GITHUB_REPOSITORY", "r3dbars/transcripted"),
+                    "--merge", "--match-head-commit", pr["headRefOid"]], check=True, env=env)
     gh("pr", "comment", number, "--body",
        f"Merged by the auto-merge gate (lane `{lane['id']}`, level {lane.get('level', 1)}): required "
        f"checks green, required reviewers reviewed the head commit, no open threads, every file "
@@ -481,7 +527,7 @@ def self_test() -> int:
                      "commit": {"oid": head}}],
         "commits": [{"committedDate": "2026-10-07T10:00:00Z"}],
     }
-    extra = {"unresolved_threads": 0, "reviewer_reactions": [],
+    extra = {"unresolved_threads": 0, "reviewer_reactions": [], "ai_review": [True, "AI review clear"],
              "changed_files": [{"filename": f["path"], "status": "modified"} for f in base_pr["files"]],
              "lowered_baselines": [".agents/test-shape-baseline.json"]}
 
@@ -519,9 +565,14 @@ def self_test() -> int:
              None, "protected files"),
         case("root AGENTS.md is protected", False,
              {"headRefName": "cleanup/file-size/x", "files": [{"path": "AGENTS.md"}]}, None, "protected files"),
-        case("folder AGENTS.md allowed in file-size lane", True,
+        # Folder AGENTS.md files are risk:high in the triage, so no lane merges them.
+        case("folder AGENTS.md blocked by risk triage in file-size lane", False,
              {"headRefName": "cleanup/file-size/x",
-              "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "Sources/UI/Home/HomeView.swift"}]}),
+              "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "Sources/UI/Home/HomeView.swift"}]},
+             None, "risk triage says high"),
+        case("file-size lane merges a source split", True,
+             {"headRefName": "cleanup/file-size/x",
+              "files": [{"path": "Sources/UI/Home/HomeView.swift"}, {"path": "Sources/UI/Home/HomeView+Rows.swift"}]}),
         case("Sources file outside test-shape lane", False,
              {"files": [{"path": "Sources/UI/Home/HomeView.swift"}]}, None, "outside lane"),
         case("rename from protected source blocks", False,
@@ -555,9 +606,11 @@ def self_test() -> int:
         case("protected deletion blocks", False,
              {"files": [{"path": "AGENTS.md"}]},
              {"changed_files": [{"filename": "AGENTS.md", "status": "removed"}]}, "protected files"),
-        case("allowed deletion merges", True,
+        # A deleted test is risk:high in the triage, so it waits for a human.
+        case("test deletion blocked by risk triage", False,
              {"files": [{"path": "Tests/FooTests.swift"}]},
-             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "removed"}]}),
+             {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "removed"}]},
+             "risk triage says high"),
         case("rename without source fails closed", False,
              {"files": [{"path": "Tests/FooTests.swift"}]},
              {"changed_files": [{"filename": "Tests/FooTests.swift", "status": "renamed"}]},
@@ -651,9 +704,13 @@ def self_test() -> int:
         case("concurrency baseline is never in a lane", False,
              {"files": [{"path": "Tests/FooTests.swift"}, {"path": ".agents/concurrency-baseline.json"}]},
              None, "outside lane"),
-        case("docs lane merges folder docs", True,
+        case("docs lane merges docs", True,
              {"headRefName": "garden/docs/ui", "labels": [{"name": "gardener"}],
-              "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "docs/storage-paths.md"}]}),
+              "files": [{"path": "docs/storage-paths.md"}]}),
+        case("docs lane folder AGENTS.md blocked by risk triage", False,
+             {"headRefName": "garden/docs/ui", "labels": [{"name": "gardener"}],
+              "files": [{"path": "Sources/UI/AGENTS.md"}, {"path": "docs/storage-paths.md"}]},
+             None, "risk triage says high"),
         case("docs lane can't touch release docs", False,
              {"headRefName": "garden/docs/x", "labels": [{"name": "gardener"}],
               "files": [{"path": "docs/release-packaging.md"}]}, None, "protected files"),
@@ -693,6 +750,14 @@ def self_test() -> int:
     cap_reasons = changed_paths([], 3001)[1]
     results.append(held_for_human(cap_reasons) == [REST_FILE_LIMIT_REASON])
     print(f"{'PASS' if results[-1] else 'FAIL'} permanent REST cap escalates to human")
+    # Never merge as a person: no gate App token means no merge.
+    try:
+        merge_env({"GH_TOKEN": "user-token"})
+        refused = False
+    except RuntimeError:
+        refused = True
+    results.append(refused and merge_env({"GATE_TOKEN": "app"})["GH_TOKEN"] == "app")
+    print(f"{'PASS' if results[-1] else 'FAIL'} merge refuses without the gate App token")
     results.append(held_for_human(changed_paths([], 1)[1]) == [])
     print(f"{'PASS' if results[-1] else 'FAIL'} transient incomplete metadata waits")
     held_ok = held_for_human(["touches protected files: X", "check build-and-test is pending",
@@ -722,6 +787,37 @@ def self_test() -> int:
     results.append(held_for_human(reasons) == [] and bool(held_for_human(
         [r for r in reasons if not DISABLED_LANE.match(r)])))
     print(f"{'PASS' if results[-1] else 'FAIL'} disabled lane never labels or comments: {reasons}")
+
+    # High risk from the triage classifier blocks every lane.
+    for name, ex_patch in (
+        ("triage high: test renamed out of tests", {"changed_files": [
+            {"filename": "docs/old.md", "previous_filename": "Tests/FooTests.swift", "status": "renamed"},
+            {"filename": ".agents/test-shape-baseline.json", "status": "modified"}]}),
+        ("triage high: deleted test", {"changed_files": [
+            {"filename": "Tests/FooTests.swift", "status": "removed", "deletions": 30},
+            {"filename": ".agents/test-shape-baseline.json", "status": "modified"}]}),
+        ("triage high: medium over 400 lines", {"changed_files": [
+            {"filename": "Tests/FooTests.swift", "status": "modified", "additions": 300},
+            {"filename": ".agents/test-shape-baseline.json", "status": "modified", "additions": 150}]}),
+    ):
+        _, reasons = evaluate(base_pr, {**extra, **ex_patch}, config)
+        results.append(any("risk triage says high" in r for r in reasons))
+        print(f"{'PASS' if results[-1] else 'FAIL'} {name}: {reasons}")
+    for hold in sorted(RISK_TRIAGE.HOLD_LABELS):
+        _, reasons = evaluate({**base_pr, "labels": base_pr["labels"] + [{"name": hold}]}, extra, config)
+        results.append(any("blocking label" in r and hold in r for r in reasons))
+        print(f"{'PASS' if results[-1] else 'FAIL'} legacy gate honors shared hold label '{hold}': {reasons}")
+    for name, ai in (("no AI verdict", None), ("AI P1 open", [False, "AI review has 1 unresolved P0/P1"]),
+                     ("untrusted verdict", [False, "run is not .github/workflows/risk-triage.yml"])):
+        ex = {k: v for k, v in extra.items() if k != "ai_review"}
+        if ai:
+            ex["ai_review"] = ai
+        _, reasons = evaluate(base_pr, ex, config)
+        results.append(any("AI review not clear" in r for r in reasons))
+        print(f"{'PASS' if results[-1] else 'FAIL'} legacy gate blocks: {name}: {reasons}")
+    _, reasons = evaluate(base_pr, extra, config)
+    results.append(not any("risk triage" in r for r in reasons))
+    print(f"{'PASS' if results[-1] else 'FAIL'} clean test-shape PR is not triage-high: {reasons}")
 
     failed = results.count(False)
     print(f"{len(results) - failed}/{len(results)} passed")

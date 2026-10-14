@@ -26,9 +26,13 @@ No lane may touch `deny_always`: the TranscriptedCore, Meeting, Speech and Obser
 
 All of these, checked on every run:
 
+0. The PR risk triage (`scripts/ops/risk-triage.py`, `docs/agent-merge-policy.md`) doesn't call it `risk:high`. This gate never merges a high-risk PR, whatever its lane allows: deleted tests, tests renamed out of the test folders, folder `AGENTS.md` files and medium PRs over 400 lines all wait for a person.
+0a. A clean AI verdict for the head commit, read from a `risk-gate` check run created by the `transcripted-gate` App (see `docs/agent-merge-policy.md`). No verdict means no merge.
+0b. The merge itself uses the gate App's token (`GATE_TOKEN`). Without it the gate refuses to merge: it never merges under a person's `gh` login.
+
 1. Main is green: the latest finished Swift CI run on main succeeded.
 2. Author `r3dbars`, branch in this repo, branch in an enabled lane.
-3. The lane's label. No `needs owner review`, `do not merge`, `hold` or `waiting-on-human` label.
+3. The lane's label. No hold label: `needs owner review`, `do not merge`, `hold`, `waiting-on-human` or `blocked`. That's the shared `HOLD_LABELS` list in `scripts/ops/risk-triage.py`, plus anything in the lane file's `blocking_labels`.
 4. Every changed path inside the lane, none protected, within the size limit. The gate reads every page of the REST PR files API and checks both `filename` and `previous_filename` for renames; deletions check the removed path. Missing or malformed rename metadata and a file count that disagrees with GitHub's total block merging.
 5. `build-and-test` and `repo-hygiene` succeeded on the head commit.
 6. No conflicts, no review requesting changes, no unresolved review thread.
@@ -53,12 +57,19 @@ python3 scripts/ops/auto-merge-gate.py --pr 2040  # explain one PR
 python3 scripts/ops/auto-merge-gate.py --apply    # merge
 ```
 
-A Codex automation on the owner's Mac runs `--apply` every 30 minutes, signed in to `gh` as `r3dbars`. Merges made this way trigger the normal push CI on main.
+**Not scheduled.** As of 2026-10-10, `--apply` isn't scheduled on any reachable machine. Checked on Justin's Mac: the Codex app automations (`~/.codex/automations` and its automations database; no job runs this script), `launchctl list`, `~/Library/LaunchAgents`, `/Library/LaunchAgents`, `/Library/LaunchDaemons` (empty), `launchctl print system`, the user crontab (none), and running processes. Also checked: the agent box (no cron or systemd timers) and every scheduled workflow in `.github/workflows` (none runs this script). The Linux PC (`omarchy`) and the second Mac were offline and couldn't be checked. The last 30 merges to main were all made by hand or by integration PRs, with no 30-minute rhythm.
+
+Don't schedule `--apply` again, whether as a Codex automation, launchd, cron, or a workflow, unless it runs under the App-gated flow in `docs/agent-merge-policy.md` (it reads the `risk-gate` verdict only from the `transcripted-gate` App's check run) and is signed in as the agent bot account from `docs/automerge-justin-setup.md`, never as `r3dbars`. Until then, run it by hand in dry-run mode only:
+
+```bash
+python3 scripts/ops/auto-merge-gate.py            # dry run, no --apply: lists what would merge and why the rest wait
+python3 scripts/ops/auto-merge-gate.py --pr 2040  # dry run for one PR
+```
 
 ## When something goes wrong
 
 - **A merged PR broke something:** revert it, then set that lane's `enabled` to `false` in `.agents/auto-merge-lanes.json` until the cause has a check.
 - **Stop one PR:** add the `hold` label.
-- **Stop everything:** pause the Codex automation, or set every lane's `enabled` to `false`.
+- **Stop everything:** nothing is scheduled now. If a schedule is ever added under the App-gated flow, pause it, or set every lane's `enabled` to `false`.
 
 Adding a lane or widening a lane's globs is an owner-reviewed edit. Merging is still not shipping: releases stay manual.

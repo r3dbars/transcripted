@@ -43,7 +43,8 @@ extension MeetingSessionController {
     func startRecording(
         trigger: StartTrigger = .unknown,
         suggestedTitle: String? = nil,
-        promptTelemetryProperties: [String: String]? = nil
+        promptTelemetryProperties: [String: String]? = nil,
+        detectedCallCandidate: MeetingPromptDetector.Candidate? = nil
     ) async -> Bool {
         let admission = MeetingSessionStateMachine.startAdmission(
             startCallInFlight: startRecordingCallInFlight,
@@ -82,6 +83,7 @@ extension MeetingSessionController {
         // would see one of those values and slip past a `state`-only guard. `.startingRecording` is used
         // further down for the narrower, unambiguous "capture.startRecording()
         // is actually engaging the mic" window instead.
+        let callFamilies = trigger == .detectedPrompt ? callEndFamilies(for: detectedCallCandidate) : nil
         startRecordingCallInFlight = true
         meetingActionIdentity = UUID()
         defer { startRecordingCallInFlight = false }
@@ -168,6 +170,7 @@ extension MeetingSessionController {
         )
         activeRecordingTrigger = trigger
         activeRecordingIdentity = UUID()
+        disableCallEndDetection()
         micBoostPromptRecordingIdentity = nil
         micBoostPromptOutcome = .notShown
         micBoostArmPendingIdentity = nil
@@ -270,6 +273,9 @@ extension MeetingSessionController {
             )
         }
         transition(to: .recording, reason: "capture_start_confirmed")
+        if AutoCallDetectionPreferences.isEnabled(), let callFamilies, let identity = activeRecordingIdentity {
+            callEndTracking = MeetingCallEndTracking(recordingIdentity: identity, families: callFamilies)
+        }
         refreshSystemAudioSignalVerification(shouldWarn: startDecision.systemAudioPermissionCheckWasInconclusive)
         if startDecision.mayRaiseSystemAudioPermissionPrompt {
             micOnlyNotice = MeetingMicOnlyNoticePolicy.noticeAfterStart(
@@ -312,6 +318,7 @@ extension MeetingSessionController {
     /// Returns once the finished audio has either started transcribing or been
     /// placed behind the current background task.
     func stopRecording(reason: StopReason = .unknown) async {
+        disableCallEndDetection(restoringSilenceWarning: false)
         guard case .recording = state else { return }
         transition(to: .stoppingRecording, reason: "stop_requested")
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")

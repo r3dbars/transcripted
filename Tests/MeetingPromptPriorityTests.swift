@@ -381,4 +381,30 @@ func testMeetingPromptPriority() {
             "every signal still hot and a prompt still marked current, but recording stopped — nothing shows"
         )
     }
+
+    runSuite("Inactivity countdown expiry — waveform silence keeps its own deadline") {
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: true),
+            .stop,
+            "a silence warning stops at its deadline without waiting for call-end evidence"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: false),
+            .noAutomaticStop,
+            "a degraded route never auto-stops, even when its countdown expires"
+        )
+    }
+
+    runSuite("Inactivity countdown expiry — a call-ended warning confirms at zero, never waits for a poll") {
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: true),
+            .confirmCallEndedThenStop,
+            "at zero the session takes a fresh reading and stops then, with no Checking call gap"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: false),
+            .noAutomaticStop,
+            "a held call-end warning (room audio, unconfirmed read) never stops on its own"
+        )
+    }
 }

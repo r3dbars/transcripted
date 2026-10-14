@@ -130,7 +130,7 @@ enum MicEngineConfigurationChangePolicy {
         case ignore
         /// The engine kept delivering audio through the change.
         case stillFlowing
-        /// Another recovery owns the graph right now; look again shortly.
+        /// Another recovery owns the published graph; look again shortly.
         case waitForRecovery
         /// A recovery just ended, or this streak used up its attempts.
         /// Leave it to the watchdog's slower cooldown and give-up instead of
@@ -153,7 +153,6 @@ enum MicEngineConfigurationChangePolicy {
         isRecording: Bool,
         isSystemSleeping: Bool,
         isRecovering: Bool,
-        changedEngineIsPublishedGraph: Bool,
         changedEngineIsRunning: Bool,
         deliveredNewBuffer: Bool,
         secondsSinceLastRecoveryEnded: TimeInterval?,
@@ -162,7 +161,6 @@ enum MicEngineConfigurationChangePolicy {
     ) -> Decision {
         guard sessionIsCurrent, isRecording, !isSystemSleeping else { return .ignore }
         guard !isRecovering else { return .waitForRecovery }
-        guard changedEngineIsPublishedGraph else { return .ignore }
         // A running engine was not stopped by the change. A stopped one can
         // still hand over one queued tap block afterwards, so a new buffer
         // only means "flowing" while the engine runs.
@@ -902,121 +900,5 @@ extension Audio {
             before: previousBufferCount,
             after: micBufferCount
         )
-    }
-}
-
-// MARK: - Engine Configuration Change
-
-extension Audio {
-
-    func installMicEngineConfigurationChangeObserver() {
-        guard micEngineConfigurationObserver == nil else { return }
-        // object: nil because every recovery publishes a fresh engine. The
-        // check below only acts on the live meeting graph, so dictation's own
-        // engine and detached graphs that are still being built are ignored.
-        micEngineConfigurationObserver = NotificationCenter.default.addObserver(
-            forName: .AVAudioEngineConfigurationChange,
-            object: nil,
-            queue: nil
-        ) { [weak self] notification in
-            guard let changedEngine = notification.object as? AVAudioEngine else { return }
-            self?.handleMicEngineConfigurationChange(changedEngine)
-        }
-    }
-
-    /// Posted on an arbitrary thread, possibly while a graph build holds the
-    /// graph lock. Snapshot lock-free state here and do the real check on a
-    /// background queue after a short settle.
-    func handleMicEngineConfigurationChange(_ changedEngine: AVAudioEngine) {
-        scheduleMicEngineConfigurationCheck(
-            changedEngine: changedEngine,
-            sessionGeneration: recordingSessionGeneration,
-            bufferCountAtChange: micBufferCount,
-            delay: MicEngineConfigurationChangePolicy.settleSeconds,
-            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits
-        )
-    }
-
-    private func scheduleMicEngineConfigurationCheck(
-        changedEngine: AVAudioEngine,
-        sessionGeneration: UInt64,
-        bufferCountAtChange: Int,
-        delay: TimeInterval,
-        remainingRecoveryWaits: Int
-    ) {
-        // `isRecording` belongs to main, so read it there, then decide off
-        // main. Stop advances the generation, so a stop that lands in
-        // between still fails the `sessionIsCurrent` check.
-        DispatchQueue.main.asyncAfter(
-            deadline: .now() + delay
-        ) { [weak self, weak changedEngine] in
-            guard let self else { return }
-            let isRecording = self.isRecording
-            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak changedEngine] in
-                guard let self else { return }
-                self.checkMicEngineConfigurationChange(
-                    changedEngine: changedEngine,
-                    sessionGeneration: sessionGeneration,
-                    isRecording: isRecording,
-                    bufferCountAtChange: bufferCountAtChange,
-                    remainingRecoveryWaits: remainingRecoveryWaits
-                )
-            }
-        }
-    }
-
-    private func checkMicEngineConfigurationChange(
-        changedEngine: AVAudioEngine?,
-        sessionGeneration: UInt64,
-        isRecording: Bool,
-        bufferCountAtChange: Int,
-        remainingRecoveryWaits: Int
-    ) {
-        let (publishedEngine, changedEngineIsRunning) = self.withAudioGraphLock {
-            (self.engine, changedEngine?.isRunning ?? false)
-        }
-        let decision = MicEngineConfigurationChangePolicy.decision(
-            sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
-            isRecording: isRecording,
-            isSystemSleeping: self.isSystemSleepPending(for: sessionGeneration),
-            isRecovering: self.isMicRecovering,
-            changedEngineIsPublishedGraph: changedEngine != nil
-                && changedEngine === publishedEngine,
-            changedEngineIsRunning: changedEngineIsRunning,
-            deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
-                before: bufferCountAtChange,
-                after: self.micBufferCount
-            ),
-            secondsSinceLastRecoveryEnded: self.lastRecoveryEndTime.map {
-                Date().timeIntervalSince($0)
-            },
-            recoveryAttemptsUsed: self.recoveryAttemptCount,
-            maxRecoveryAttempts: self.maxRecoveryAttempts
-        )
-
-        switch decision {
-        case .ignore:
-            return
-        case .stillFlowing:
-            AppLogger.audioMic.info("Microphone kept delivering audio through an audio route change")
-        case .waitForRecovery:
-            guard remainingRecoveryWaits > 0, let changedEngine else { return }
-            self.scheduleMicEngineConfigurationCheck(
-                changedEngine: changedEngine,
-                sessionGeneration: sessionGeneration,
-                bufferCountAtChange: bufferCountAtChange,
-                delay: MicEngineConfigurationChangePolicy.recoveryWaitSeconds,
-                remainingRecoveryWaits: remainingRecoveryWaits - 1
-            )
-        case .leaveToWatchdog:
-            AppLogger.audioMic.info("Audio route changed right after a mic recovery; leaving it to the watchdog")
-        case .engineStillRunning:
-            AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
-        case .recover:
-            // Restarts in place when the pinned mic is still bound, so a
-            // route change does not reopen the default input.
-            AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
-            self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
-        }
     }
 }

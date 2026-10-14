@@ -72,6 +72,7 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/UI/Shared/CaptureUndo.swift"
     "Sources/UI/Shared/LibraryTokens.swift"
     "Sources/UI/Shared/HomeMeetingPreviewFormatter.swift"
+    "Sources/UI/Shared/HomeMeetingSpeakerNamingCopy.swift"
     "Sources/UI/Shared/MeetingAudioArchiveResolver.swift"
     "Sources/UI/Shared/RecentCaptureScanners.swift"
     "Sources/UI/Shared/RecentMeetingsScanner.swift"

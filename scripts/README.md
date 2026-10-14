@@ -57,6 +57,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
 - `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up; with `--pr` it first checks whether that PR is merged or its head is already on `origin/main`
+- `scripts/dev/transcripted-debug.py` — drive a local `build.sh` app through the debug control surface (launch, state, dictation, meeting, settings); `--self-test`; see `docs/debug-control-surface.md`
 - `scripts/dev/mutation-probe.py` — mutation-testing probe for one `Sources/**/*.swift` file: flips one operator or literal at a time, runs your `--test` command, and reports KILLED/SURVIVED/COMPILE-ERROR plus a mutation score (JSON under `build/mutation/`). Refuses dirty files and a red baseline, and always restores the source. `--list` plans without running; `--self-test`. See `docs/mutation-testing.md`
 - `scripts/ci/pick-ci-runner.py` — Swift CI's `pick-runner` job: sends `checks` and `spm-tests` to the owner's Mac when its heartbeat says it is free and nothing is queued for it, hosted macos-26 otherwise; `--reroute` (from `.github/workflows/mac-runner-sweep.yml`) re-runs on hosted any run stuck behind a Mac that went quiet; `--self-test` checks the rules
 - `scripts/ci/mac-runner.sh` — run on the owner's Mac: `install`, `status`, `pause`, `resume`, `rebuild`, `uninstall` the service that runs each Mac CI job in a fresh throwaway Tart VM, plus the VM-side fork-refusing `job-started-hook`; see `docs/self-hosted-mac-runner.md`
@@ -101,6 +102,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/check-file-size.py` — fails on a new Swift file over 800 lines or a grandfathered one that grew (`.agents/file-size-baseline.json`; `--shrink`, `--hotspots`)
 - `scripts/dev/concurrency-census.sh` — Swift 6 strict-concurrency warning counts per folder against `.agents/concurrency-baseline.json` (needs the Swift toolchain and prebuilt deps; CI runs it in `.github/workflows/concurrency-census.yml`)
 - `scripts/dev/check-telemetry-keys.py` — fails when an allowlisted analytics property or Sentry tag key contains a sensitive-key fragment the sanitizers drop (mirrors `PayloadSanitizationCore.shouldDrop`, Sentry's `explicitlySafeKeys`); `--self-test`
+- `scripts/dev/check-debug-control-release.py` — fails if the debug test control surface could ship in a release build (channel not `#if`-wrapped, distinctive env-var name leaked into always-compiled sources, `build-beta.sh` missing the binary grep); `--self-test`
 
 ## Clean test VM
 

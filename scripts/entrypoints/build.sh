@@ -587,6 +587,11 @@ echo "Dependencies found"
 # build-beta.sh so dev and shipped builds cannot diverge.
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
 build_app_swiftc_args
+# Local/debug builds compile the agent test control surface. Release
+# builds (build-beta.sh) never set this flag and fail if the compiled
+# binary contains the channel's env-var name.
+echo "DEBUG CONTROL: compiling the test control surface (-D TRANSCRIPTED_DEBUG_CONTROL). Absent from release builds."
+APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_DEBUG_CONTROL)
 if [ "$TRANSCRIPTED_LAB_BUILD" = "1" ]; then
     echo "LAB BUILD: compiling in the lab control channel (-D TRANSCRIPTED_LAB_CONTROL). Local use only; never distribute this app."
     APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_LAB_CONTROL)

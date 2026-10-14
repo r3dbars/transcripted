@@ -90,3 +90,27 @@ enum MeetingPromptPriority {
         return nil
     }
 }
+
+/// What the meeting overlay does when an audio-inactivity countdown reaches
+/// zero.
+///
+/// The call-ended kind needs a reading sampled at or after its deadline before
+/// it may stop: the call can rejoin in the gap between the last poll and zero.
+/// So at zero the session takes that reading itself and stops right then, or
+/// leaves Continue / Stop up without a countdown. Waveform silence keeps its
+/// existing deadline behavior. Pure so the user-visible branch is testable without the
+/// AppKit controller.
+enum MeetingInactivityCountdownExpiry: Equatable {
+    case stop
+    /// A call-end stop needs a fresh read of the call app's audio first.
+    case confirmCallEndedThenStop
+    case noAutomaticStop
+
+    static func resolve(
+        isCallEnded: Bool,
+        automaticStopAllowed: Bool
+    ) -> Self {
+        guard automaticStopAllowed else { return .noAutomaticStop }
+        return isCallEnded ? .confirmCallEndedThenStop : .stop
+    }
+}

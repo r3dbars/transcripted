@@ -261,7 +261,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     return await self.appState.meetingSession.startRecording(
                         trigger: .detectedPrompt,
                         suggestedTitle: candidate.suggestedTranscriptTitle,
-                        promptTelemetryProperties: promptTelemetryProperties
+                        promptTelemetryProperties: promptTelemetryProperties,
+                        detectedCallCandidate: candidate
                     )
                 },
                 onCompleted: { [weak self] candidate, started in
@@ -441,34 +442,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             meetingPromptDetector.isMicInputPromptEnabled = {
                 AutoCallDetectionPreferences.isEnabled()
             }
-            // Assigned before start(), same contract as onChange/onOutputChange
-            // below. Injected rather than a direct `DefaultInputDeviceMonitor
-            // .shared` reference inside MicActivityMonitor.swift itself, so
-            // that file's pure attribution helpers (Tests/MicActivityMonitorTests.swift)
-            // stay compilable by the fast-test runner without pulling in
-            // DefaultInputDeviceMonitor.swift's EventReporter dependency graph.
-            micActivityMonitor.defaultInputDeviceMonitor = DefaultInputDeviceMonitor.shared
-            micActivityMonitor.onChange = { [weak self] micUsers in
-                self?.meetingPromptDetector.updateMicInputUsers(micUsers)
-            }
-            // Native-app audio output is the listen-only call signal (remote
-            // people talking, nothing holding the mic here). Same prompt pipe;
-            // the detector de-dupes it against the mic and camera signals.
-            micActivityMonitor.onOutputChange = { [weak self] outputUsers in
-                self?.meetingPromptDetector.updateAudioOutputUsers(outputUsers)
-            }
-            // A browser playing audio while it holds the mic: corroboration
-            // that an unrecognized browser mic is a conversation. Never a
-            // prompt on its own.
-            micActivityMonitor.onBrowserOutputChange = { [weak self] browserOutputUsers in
-                self?.meetingPromptDetector.updateBrowserOutputUsers(browserOutputUsers)
-            }
-            // Camera-on is a second, complementary call sensor (e.g. a camera-on,
-            // mic-muted Meet join). It feeds the same prompt; the detector de-dupes
-            // it against the mic signal so a normal video call prompts once.
-            cameraActivityMonitor.onChange = { [weak self] cameraInUse in
-                self?.meetingPromptDetector.updateCameraInUse(cameraInUse)
-            }
+            configureCallActivityMonitors()
             meetingPromptDetector.start()
             applyAutoCallDetectionPreference()
             observeAutoCallDetectionPreference()
@@ -561,6 +535,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         #if TRANSCRIPTED_LAB_CONTROL
         // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
         LabControlChannel.startIfRequested(appDelegate: self)
+        #endif
+        #if TRANSCRIPTED_DEBUG_CONTROL
+        // Debug builds only (`build.sh`); see docs/debug-control-surface.md.
+        DebugControlChannel.startIfRequested(appDelegate: self)
         #endif
     }
 

@@ -4,23 +4,27 @@ struct MeetingAudioInactivityWarning: Equatable {
     enum Kind: String, Equatable {
         case noAudio = "no_audio"
         case degradedRoute = "degraded_route"
+        case callEnded = "call_ended"
     }
 
     let inactiveDuration: TimeInterval
     let countdownSeconds: Int
     let kind: Kind
     let automaticStopAllowed: Bool
+    let recordingIdentity: UUID?
 
     init(
         inactiveDuration: TimeInterval,
         countdownSeconds: Int,
         kind: Kind = .noAudio,
-        automaticStopAllowed: Bool = true
+        automaticStopAllowed: Bool = true,
+        recordingIdentity: UUID? = nil
     ) {
         self.inactiveDuration = inactiveDuration
         self.countdownSeconds = countdownSeconds
         self.kind = kind
         self.automaticStopAllowed = automaticStopAllowed
+        self.recordingIdentity = recordingIdentity
     }
 }
 
@@ -113,5 +117,15 @@ struct MeetingAudioInactivityDetector {
         warning = nil
         snoozedUntilAudioActivity = true
         return .warningCleared
+    }
+}
+
+/// Call ownership changes independently of the waveform. The underlying
+/// silence detector keeps observing so its warning can be restored later.
+enum MeetingRecordingWarningOwner {
+    static func displayed(callEnd: MeetingAudioInactivityWarning?,
+                          silence: MeetingAudioInactivityWarning?) -> MeetingAudioInactivityWarning? {
+        if let callEnd, callEnd.kind == .callEnded { return callEnd }
+        return silence
     }
 }
