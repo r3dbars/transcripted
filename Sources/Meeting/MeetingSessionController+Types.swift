@@ -27,6 +27,8 @@ extension MeetingSessionController {
         case quitConfirmation = "quit_confirmation"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
+        case detectedCallEndPrompt = "detected_call_end_prompt"
+        case detectedCallEndTimeout = "detected_call_end_timeout"
         case audioRouteWarning = "audio_route_warning"
         case systemAudioWarning = "system_audio_warning"
         case unknown = "unknown"

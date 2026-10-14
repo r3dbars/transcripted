@@ -26,19 +26,15 @@
 //
 // The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
 // wires those up.
-
 import AppKit
 import Combine
 import Foundation
 import TranscriptedCore
-
 @available(macOS 14.0, *)
 @MainActor
 final class MeetingSessionController: ObservableObject {
     static var runtimeDiagnosticsRecorder: RuntimeDiagnostics?
-
     typealias ModelWarmupStatus = MeetingWarmupStatus
-
     // Moved to FailedMeetingStore.swift / TranscriptionQueueCoordinator.swift
     // (audit 2026-07-08 wave 2, W2-B). Typealiases keep every existing
     // reference — including `MeetingSessionController.FailedMeetingItem` in
@@ -46,7 +42,6 @@ final class MeetingSessionController: ObservableObject {
     typealias FailedMeetingItem = FailedMeetingStore.FailedMeetingItem
     typealias QueuedTranscriptionJob = TranscriptionQueueCoordinator.QueuedTranscriptionJob
     typealias BackgroundTranscriptionWorkSnapshot = TranscriptionQueueCoordinator.BackgroundTranscriptionWorkSnapshot
-
     // Members without `private` below are internal only so the
     // MeetingSessionController+*.swift extensions can reach them. Not API:
     // UI code reads the published state and calls the public methods.
@@ -246,6 +241,11 @@ final class MeetingSessionController: ObservableObject {
     var recordingSTTModel: TranscriptionModelChoice = TranscriptionModelPreferences.defaultModel
     var shouldSurfaceMeetingWarmupFailure = false
     var audioInactivityDetector = MeetingAudioInactivityDetector()
+    var callEndTracking: MeetingCallEndTracking?
+    var latestCallActivity = MeetingCallActivitySnapshot.unknown
+    var latestCallActivityAt: TimeInterval?
+    var callCameraInUse: Bool?
+    var callCameraSampledAt: TimeInterval?
     var latestMicLevel: Float = 0
     var latestSystemLevel: Float = 0
     var activeQueuedTranscriptionJobID: UUID?

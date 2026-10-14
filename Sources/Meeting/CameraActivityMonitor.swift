@@ -41,6 +41,7 @@ final class CameraActivityMonitor: @unchecked Sendable {
     /// running continuously for `sustainInterval`, `false` on the inactive edge.
     /// Assign before calling `start()` and do not mutate while running.
     var onChange: ((Bool) -> Void)?
+    var onCallCameraActivity: (@MainActor @Sendable (Bool?, TimeInterval) -> Void)?
 
     private let queue = DispatchQueue(label: "CameraActivityMonitor.cmio-devices", qos: .utility)
     private let debounceInterval: TimeInterval
@@ -120,7 +121,14 @@ final class CameraActivityMonitor: @unchecked Sendable {
     }
 
     private func scanAndEmit() {
-        let inUse = Self.isCameraInUse(deviceRunningStates: cameraDeviceIDs().map(isRunningSomewhere))
+        // Same convention as the mic monitor's snapshot: the timestamp describes
+        // the instant the scan began, not when a slow CMIO read finished.
+        let sampledAt = ProcessInfo.processInfo.systemUptime
+        let readings = cameraDeviceIDsIfAvailable()?.map(isRunningSomewhereIfAvailable)
+        let callActivity = MeetingCallActivitySnapshot.cameraInUse(readings: readings)
+        let activityCallback = onCallCameraActivity
+        DispatchQueue.main.async { activityCallback?(callActivity, sampledAt) }
+        let inUse = Self.isCameraInUse(deviceRunningStates: (readings ?? []).map { $0 ?? false })
         let now = Date()
         let outcome = SustainedActivityConfirmer.confirm(
             raw: inUse ? [Self.cameraKey] : [],
@@ -218,6 +226,10 @@ final class CameraActivityMonitor: @unchecked Sendable {
     // MARK: - CMIO reads (on `queue`; read-only, no stored-state mutation)
 
     private func cameraDeviceIDs() -> [CMIOObjectID] {
+        cameraDeviceIDsIfAvailable() ?? []
+    }
+
+    private func cameraDeviceIDsIfAvailable() -> [CMIOObjectID]? {
         var address = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIOHardwarePropertyDevices),
             mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
@@ -226,7 +238,7 @@ final class CameraActivityMonitor: @unchecked Sendable {
         var dataSize: UInt32 = 0
         guard CMIOObjectGetPropertyDataSize(
             CMIOObjectID(kCMIOObjectSystemObject), &address, 0, nil, &dataSize
-        ) == noErr else { return [] }
+        ) == noErr else { return nil }
 
         let count = Int(dataSize) / MemoryLayout<CMIOObjectID>.size
         guard count > 0 else { return [] }
@@ -235,10 +247,14 @@ final class CameraActivityMonitor: @unchecked Sendable {
         let status = CMIOObjectGetPropertyData(
             CMIOObjectID(kCMIOObjectSystemObject), &address, 0, nil, dataSize, &used, &ids
         )
-        return status == noErr ? ids : []
+        return status == noErr ? ids : nil
     }
 
     private func isRunningSomewhere(_ device: CMIOObjectID) -> Bool {
+        isRunningSomewhereIfAvailable(device) ?? false
+    }
+
+    private func isRunningSomewhereIfAvailable(_ device: CMIOObjectID) -> Bool? {
         var address = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere),
             mScope: CMIOObjectPropertyScope(kCMIOObjectPropertyScopeGlobal),
@@ -248,6 +264,6 @@ final class CameraActivityMonitor: @unchecked Sendable {
         var used: UInt32 = 0
         let size = UInt32(MemoryLayout<UInt32>.size)
         let status = CMIOObjectGetPropertyData(device, &address, 0, nil, size, &used, &value)
-        return status == noErr && value != 0
+        return status == noErr ? value != 0 : nil
     }
 }

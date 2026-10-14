@@ -71,6 +71,9 @@ import Foundation
 
 @available(macOS 14.0, *)
 final class MicActivityMonitor: @unchecked Sendable {
+    /// Raw source activity for end detection, emitted on every scan. A failed
+    /// read is unknown; the start detector's empty/false fallback cannot stop a call.
+    var onCallActivitySnapshot: (@MainActor @Sendable (MeetingCallActivitySnapshot) -> Void)?
     /// Delivered on the main actor with the set of non-self bundle IDs currently
     /// holding the mic input. An empty set is the explicit "inactive" edge (the
     /// last mic user stopped). Assign before calling `start()` and do not mutate
@@ -329,6 +332,9 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     private func scanAndEmit() {
+        let snapshot = Self.currentCallActivitySnapshot(ownBundleID: ownBundleID)
+        let snapshotCallback = onCallActivitySnapshot
+        DispatchQueue.main.async { snapshotCallback?(snapshot) }
         let processes = currentProcessAudioState()
         let now = Date()
 
@@ -598,6 +604,10 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     private static func processObjectIDs() -> [AudioObjectID] {
+        processObjectIDsIfAvailable() ?? []
+    }
+
+    private static func processObjectIDsIfAvailable() -> [AudioObjectID]? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -606,7 +616,7 @@ final class MicActivityMonitor: @unchecked Sendable {
         var dataSize: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize
-        ) == noErr else { return [] }
+        ) == noErr else { return nil }
 
         let count = Int(dataSize) / MemoryLayout<AudioObjectID>.size
         guard count > 0 else { return [] }
@@ -614,7 +624,31 @@ final class MicActivityMonitor: @unchecked Sendable {
         let status = AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &dataSize, &ids
         )
-        return status == noErr ? ids : []
+        return status == noErr ? ids : nil
+    }
+
+    private static func currentCallActivitySnapshot(ownBundleID: String) -> MeetingCallActivitySnapshot {
+        // Stamped before the reads: the snapshot describes the audio system at
+        // the instant the scan starts. Stamping after the reads would let a slow
+        // scan claim it observed a state that only existed after the call-end
+        // deadline it has to prove.
+        let sampledAt = ProcessInfo.processInfo.systemUptime
+        var snapshot = MeetingCallActivitySnapshot.read(objects: processObjectIDsIfAvailable(), ownBundleID: ownBundleID,
+            bundleID: rawBundleIDProperty,
+            input: { runningProperty($0, selector: kAudioProcessPropertyIsRunningInput) },
+            output: { runningProperty($0, selector: kAudioProcessPropertyIsRunningOutput) })
+        snapshot.sampledAt = sampledAt
+        return snapshot
+    }
+
+    private static func runningProperty(_ object: AudioObjectID,
+                                        selector: AudioObjectPropertySelector) -> Bool? {
+        var address = AudioObjectPropertyAddress(mSelector: selector,
+            mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
+        var value: UInt32 = 0
+        var size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectGetPropertyData(object, &address, 0, nil, &size, &value)
+        return status == noErr ? value != 0 : nil
     }
 
     private static func isRunningInputProperty(_ object: AudioObjectID) -> Bool {

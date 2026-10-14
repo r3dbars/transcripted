@@ -381,4 +381,45 @@ func testMeetingPromptPriority() {
             "every signal still hot and a prompt still marked current, but recording stopped — nothing shows"
         )
     }
+
+    runSuite("Inactivity countdown expiry — waveform silence keeps its own deadline") {
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: false, automaticStopAllowed: true, callEndStopIsAuthorized: false
+            ),
+            .stop,
+            "a silence warning stops at its deadline without waiting for call-end evidence"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: false, automaticStopAllowed: false, callEndStopIsAuthorized: false
+            ),
+            .noAutomaticStop,
+            "a degraded route never auto-stops, even when its countdown expires"
+        )
+    }
+
+    runSuite("Inactivity countdown expiry — a call-ended warning waits for a post-deadline reading") {
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: true, automaticStopAllowed: true, callEndStopIsAuthorized: false
+            ),
+            .waitForCallEndConfirmation,
+            "the countdown expiring proves nothing while the newest reading predates its deadline"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: true, automaticStopAllowed: true, callEndStopIsAuthorized: true
+            ),
+            .stop,
+            "post-deadline inactivity still stops the recording"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: true, automaticStopAllowed: false, callEndStopIsAuthorized: true
+            ),
+            .noAutomaticStop,
+            "call-end evidence never overrides a degraded-route veto"
+        )
+    }
 }
