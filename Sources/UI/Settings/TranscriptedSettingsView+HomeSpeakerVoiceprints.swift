@@ -30,6 +30,18 @@ extension TranscriptedSettingsView {
         let prepared = await enrollUnlinkedHomeSpeakers(assignments, in: preview)
         let working = prepared.assignments
         let namedTranscriptOnly = prepared.namedTranscriptOnly
+        let newlyEnrolledIDs = prepared.newlyEnrolledIDs
+        let newlyEnrolledNames = prepared.newlyEnrolledNames
+
+        // A new person exists only to be linked from this transcript. If the
+        // batch doesn't land, remove them so a retry can't teach the orphan.
+        func discardNewlyEnrolled() {
+            guard !newlyEnrolledIDs.isEmpty else { return }
+            Task { @MainActor in
+                await meetingSession.discardEnrolledSpeakers(newlyEnrolledIDs)
+                speakerPeopleModel.refresh()
+            }
+        }
 
         let referencedProfileIDs = Set(working.flatMap { assignment in
             [assignment.identity.persistentSpeakerID, assignment.targetProfileID].compactMap { $0 }
@@ -42,6 +54,7 @@ extension TranscriptedSettingsView {
             transcriptLines: preview.content.transcriptLines,
             availableProfileIDs: availableProfileIDs
         ) else {
+            discardNewlyEnrolled()
             speakerPeopleModel.refresh()
             completion(false)
             return
@@ -55,6 +68,7 @@ extension TranscriptedSettingsView {
                 localAssignments,
                 after: savedAssignmentsInCommitOrder
             ) else {
+            discardNewlyEnrolled()
             completion(false)
             return
         }
@@ -73,6 +87,7 @@ extension TranscriptedSettingsView {
             $0.targetProfileID.map(profileIDs.contains) ?? true
         }
         guard savedProfilesAreCurrent, localTargetsAreCurrent else {
+            discardNewlyEnrolled()
             speakerPeopleModel.refresh()
             completion(false)
             return
@@ -81,6 +96,7 @@ extension TranscriptedSettingsView {
         var savedAssignmentCount = 0
 
         func finish(_ didSave: Bool) {
+            if !didSave { discardNewlyEnrolled() }
             // A late completion must not replace whichever meeting the user
             // opened while the persistence work was running.
             reloadExpandedMeetingPreview(preview)
@@ -100,7 +116,9 @@ extension TranscriptedSettingsView {
         func finishPartialFailure() {
             // At least one canonical mutation committed, so the old drafts are
             // no longer a safe retry surface. Close the sheet, reload persisted
-            // truth, and tell the user to review the remaining voices.
+            // truth, and tell the user to review the remaining voices. New
+            // people are only linked by the local rewrite, which didn't land.
+            discardNewlyEnrolled()
             reloadExpandedMeetingPreview(preview)
             refreshRecentCaptures(force: true)
             completion(true)
@@ -124,8 +142,12 @@ extension TranscriptedSettingsView {
             let resolvedLocalAssignments = localAssignmentsAfterSavedMerges.compactMap { assignment
                 -> HomeMeetingSpeakerAssignment? in
                 guard let targetID = assignment.targetProfileID else { return assignment }
-                guard let profile = speakerPeopleModel.profiles.first(where: { $0.id == targetID }),
-                      let canonicalName = profile.displayName?
+                // A person enrolled moments ago isn't in the model's async
+                // snapshot yet; their name is the one just typed.
+                let profileName = speakerPeopleModel.profiles.first(where: { $0.id == targetID })?.displayName
+                    ?? newlyEnrolledNames[targetID]
+                    ?? speakerPeopleModel.currentProfile(id: targetID)?.displayName
+                guard let canonicalName = profileName?
                         .trimmingCharacters(in: .whitespacesAndNewlines),
                       !canonicalName.isEmpty else { return nil }
                 return HomeMeetingSpeakerAssignment(
@@ -200,12 +222,19 @@ extension TranscriptedSettingsView {
     private func enrollUnlinkedHomeSpeakers(
         _ assignments: [HomeMeetingSpeakerAssignment],
         in preview: HomeMeetingPreview
-    ) async -> (assignments: [HomeMeetingSpeakerAssignment], namedTranscriptOnly: Bool) {
+    ) async -> (
+        assignments: [HomeMeetingSpeakerAssignment],
+        namedTranscriptOnly: Bool,
+        newlyEnrolledIDs: [UUID],
+        newlyEnrolledNames: [UUID: String]
+    ) {
         let audioURLs = preview.audio?.retranscriptionURLs ?? preview.audio?.urls ?? []
         let transcriptID = TranscriptFrontmatter.values(in: preview.markdown)
             .flatMap(TranscriptFrontmatter.captureID(in:))
         var working = assignments
         var namedTranscriptOnly = false
+        var newlyEnrolledIDs: [UUID] = []
+        var newlyEnrolledNames: [UUID: String] = [:]
 
         for index in working.indices {
             let assignment = working[index]
@@ -222,6 +251,10 @@ extension TranscriptedSettingsView {
             switch outcome {
             case .saved(let profileID):
                 working[index] = HomeMeetingSpeakerVoiceprintSave.linking(assignment, to: profileID)
+            case .enrolledNew(let profileID):
+                working[index] = HomeMeetingSpeakerVoiceprintSave.linking(assignment, to: profileID)
+                newlyEnrolledIDs.append(profileID)
+                newlyEnrolledNames[profileID] = assignment.newName
             case .transcriptOnly:
                 if assignment.targetProfileID == nil {
                     namedTranscriptOnly = true
@@ -232,7 +265,7 @@ extension TranscriptedSettingsView {
         if working.contains(where: { $0.targetProfileID != nil }) {
             speakerPeopleModel.refresh()
         }
-        return (working, namedTranscriptOnly)
+        return (working, namedTranscriptOnly, newlyEnrolledIDs, newlyEnrolledNames)
     }
 
     /// Snapshot before the merge moves the match outcomes. Emission waits for

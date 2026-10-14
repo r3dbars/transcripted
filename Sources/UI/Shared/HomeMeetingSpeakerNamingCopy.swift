@@ -6,6 +6,10 @@ enum HomeMeetingSpeakerNamingCopy {
     /// voiceprint was saved — CLI-imported or older meetings with no
     /// retained audio, or a WeSpeaker-native launch with no embedder.
     static let transcriptOnlyNoVoiceprint = "Named in this transcript only, no voiceprint saved"
+    /// Before saving: whether a voiceprint lands depends on retained audio,
+    /// which the picker can't know yet.
+    static let learnsVoiceIfAudioKept = "Updates this meeting, and learns the voice if its audio was kept."
+    static let thisMeeting = "This meeting"
 
     static let renamesSavedPerson = "Renames this saved person in linked meetings."
     static let usesSavedPerson = "Uses this saved person in linked meetings."
@@ -16,11 +20,11 @@ enum HomeMeetingSpeakerNamingCopy {
         if isSavedPerson {
             return selectedProfileID == nil ? renamesSavedPerson : usesSavedPerson
         }
-        return selectedProfileID == nil ? transcriptOnlyNoVoiceprint : linksToSavedPerson
+        return selectedProfileID == nil ? learnsVoiceIfAudioKept : linksToSavedPerson
     }
 
     static func rowScope(isSavedPerson: Bool) -> String {
-        isSavedPerson ? linkedMeetings : transcriptOnlyNoVoiceprint
+        isSavedPerson ? linkedMeetings : thisMeeting
     }
 }
 

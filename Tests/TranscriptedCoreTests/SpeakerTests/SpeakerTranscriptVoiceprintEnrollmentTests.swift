@@ -47,7 +47,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
 
         XCTAssertEqual(
             SpeakerTranscriptVoiceprintEnrollment.enroll(
-                name: "Stephen",
+                name: "Priya",
                 embedding: nil,
                 targetProfileID: nil,
                 transcriptID: UUID(),
@@ -96,7 +96,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         let db = SpeakerDatabase(path: fixture.root.appendingPathComponent("speakers.sqlite").path)
         let transcriptID = UUID(uuidString: "00000000-0000-0000-0000-00000000A011")!
         let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
-            name: "Stephen",
+            name: "Priya",
             embedding: embedding,
             targetProfileID: nil,
             transcriptID: transcriptID,
@@ -107,7 +107,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
             return XCTFail("expected a new person, got \(outcome)")
         }
         let profile = try XCTUnwrap(db.getSpeaker(id: id))
-        XCTAssertEqual(profile.displayName, "Stephen")
+        XCTAssertEqual(profile.displayName, "Priya")
         XCTAssertEqual(profile.nameSource, NameSource.userManual)
         XCTAssertEqual(profile.confirmedMeetingCount, 1)
         XCTAssertGreaterThan(
@@ -121,7 +121,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let db = SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
-        let existing = try seedPerson(named: "Stephen", slot: 1, callCount: 1, in: db)
+        let existing = try seedPerson(named: "Priya", slot: 1, callCount: 1, in: db)
 
         let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
             name: "stephen",
@@ -133,7 +133,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         )
         XCTAssertEqual(outcome, .taught(existing.id))
         XCTAssertEqual(db.allSpeakers().count, 1, "a matching same-named person must not be duplicated")
-        XCTAssertEqual(db.getSpeaker(id: existing.id)?.displayName, "Stephen")
+        XCTAssertEqual(db.getSpeaker(id: existing.id)?.displayName, "Priya")
         XCTAssertEqual(db.getSpeaker(id: existing.id)?.callCount, 2)
     }
 
@@ -142,7 +142,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let db = SpeakerDatabase(path: root.appendingPathComponent("speakers.sqlite").path)
-        let existing = try seedPerson(named: "Stephen", slot: 1, callCount: 3, in: db)
+        let existing = try seedPerson(named: "Priya", slot: 1, callCount: 3, in: db)
         let far = LevelEmbedder.vector(slot: 2)
         XCTAssertLessThan(
             SpeakerVectorMath.bestSimilarity(

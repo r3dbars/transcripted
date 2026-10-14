@@ -162,7 +162,7 @@ func testHomeMeetingPreviewFormatter() {
         )
     }
 
-    // Stephen's 1.1.72 CLI retest: a meeting the app didn't record (CLI import
+    // A 1.1.72 CLI retest: a meeting the app didn't record (CLI import
     // or an older file) has numbered speakers with no db_id. Naming that voice
     // from Home must not pretend a saved person exists — assignmentPlan can
     // only rewrite this transcript. A voiceprint, if any, has to be enrolled
@@ -177,7 +177,7 @@ func testHomeMeetingPreviewFormatter() {
         )
         let assignment = HomeMeetingSpeakerAssignment(
             identity: importedVoice,
-            newName: "Stephen",
+            newName: "Priya",
             targetProfileID: nil
         )
         let line = HomeMeetingTranscriptLine(
@@ -200,7 +200,7 @@ func testHomeMeetingPreviewFormatter() {
         let enrolledID = UUID(uuidString: "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA")!
         let linked = HomeMeetingSpeakerVoiceprintSave.linking(assignment, to: enrolledID)
         assertEqual(linked.targetProfileID, enrolledID, "a later enrollment should attach the new person to this row")
-        assertEqual(linked.newName, "Stephen")
+        assertEqual(linked.newName, "Priya")
     }
 }
 

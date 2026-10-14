@@ -4,7 +4,11 @@ import TranscriptedCore
 /// App-facing result of trying to save a voiceprint for a Home-named speaker.
 /// UISettings cannot name Core enrollment types, so this stays in Meeting.
 enum MeetingSpeakerVoiceprintSave: Equatable, Sendable {
+    /// Taught an existing saved person.
     case saved(UUID)
+    /// Created a new person. If the transcript rewrite then fails, the caller
+    /// discards it so no orphan is left for a retry to teach again.
+    case enrolledNew(UUID)
     case transcriptOnly
 }
 
@@ -35,7 +39,10 @@ extension MeetingSessionController {
         default:
             channel = nil
         }
-        let labels = Set([displayName, currentLabel].map {
+        // Only the voice being named. Rows already labeled with the new name
+        // can belong to someone else (an auto-recognized saved "Maya", or an
+        // earlier transcript-only "Maya"), and pooling them blends two voices.
+        let labels = Set([currentLabel].map {
             $0.trimmingCharacters(in: .whitespacesAndNewlines)
         }.filter { !$0.isEmpty })
 
@@ -58,11 +65,22 @@ extension MeetingSessionController {
                 speakerDB: speakerDB,
                 thresholds: speakerDB.thresholds
             ) {
-            case .enrolled(let id), .taught(let id):
+            case .enrolled(let id):
+                return .enrolledNew(id)
+            case .taught(let id):
                 return .saved(id)
             case .transcriptOnly:
                 return .transcriptOnly
             }
+        }.value
+    }
+
+    /// Undo `enrolledNew` people whose transcript rewrite never landed.
+    func discardEnrolledSpeakers(_ ids: [UUID]) async {
+        guard !ids.isEmpty else { return }
+        let speakerDB = speakerDatabase
+        await Task.detached(priority: .userInitiated) {
+            for id in ids { speakerDB.deleteSpeaker(id: id) }
         }.value
     }
 }
