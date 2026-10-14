@@ -176,13 +176,46 @@ final class MeetingImportSpeakerMappingTests: XCTestCase {
         let unnamed = makeProfile(name: nil)
         XCTAssertEqual(resolve(profile: unnamed).reasons["system_2"], "matched a saved voice that has no name yet")
         let stranger = MeetingImportSpeakerMapping.resolve(
-            result: makeResult(context: context(profile: makeProfile())), originalProfiles: [named], store: MappingSpeakerStore())
-        XCTAssertEqual(stranger.reasons["system_2"], "didn't match anyone saved in this voiceprint database")
+            result: makeResult(context: context(profile: makeProfile())), originalProfiles: [named], store: MappingSpeakerStore(),
+            speakerDatabaseFilename: "speakers_redimnet2-b4.sqlite")
+        XCTAssertEqual(
+            stranger.reasons["system_2"],
+            "didn't match anyone saved in this voiceprint database (best score 1.000, 1 person in speakers_redimnet2-b4.sqlite)"
+        )
         let unavailable = MeetingImportSpeakerMapping.resolve(
             result: makeResult(context: context(profile: named)), originalProfiles: [named], store: MappingSpeakerStore(),
             unavailableReason: "there's no saved speaker database for ReDimNet2")
         assertUnknown(unavailable)
         XCTAssertEqual(unavailable.reasons["system_2"], "there's no saved speaker database for ReDimNet2")
+    }
+
+    func testUnmatchedReasonReportsBestScorePeopleCountAndDatabaseFile() {
+        let saved = makeProfile(embedding: [1, 0, 0])
+        let other = makeProfile(embedding: [0, 1, 0])
+        XCTAssertEqual(
+            MeetingImportSpeakerMapping.unmatchedReason(
+                sessionEmbedding: other.embedding,
+                originalProfiles: [saved],
+                databaseFilename: "speakers_redimnet2-b4.sqlite"
+            ),
+            "didn't match anyone saved in this voiceprint database (best score 0.000, 1 person in speakers_redimnet2-b4.sqlite)"
+        )
+        XCTAssertEqual(
+            MeetingImportSpeakerMapping.unmatchedReason(
+                sessionEmbedding: nil,
+                originalProfiles: [saved, other],
+                databaseFilename: "speakers.sqlite"
+            ),
+            "didn't match anyone saved in this voiceprint database (best score unknown, 2 people in speakers.sqlite)"
+        )
+        XCTAssertEqual(
+            MeetingImportSpeakerMapping.unmatchedReason(
+                sessionEmbedding: nil,
+                originalProfiles: [],
+                databaseFilename: ""
+            ),
+            "didn't match anyone saved in this voiceprint database (best score n/a, 0 people)"
+        )
     }
 
     func testLikelyNamesAreOptInHedgedAndNeverConfirmed() {
@@ -392,11 +425,12 @@ final class MeetingImportSpeakerMappingTests: XCTestCase {
     }
 
     private func makeProfile(
-        name: String? = "Fixture Speaker", confirmedMeetingCount: Int = 5, disputeCount: Int = 0
+        name: String? = "Fixture Speaker", confirmedMeetingCount: Int = 5, disputeCount: Int = 0,
+        embedding: [Float] = [1, 0, 0]
     ) -> SpeakerProfile {
         SpeakerProfile(
             id: UUID(), displayName: name, nameSource: NameSource.userManual,
-            embedding: [1, 0, 0], firstSeen: .distantPast, lastSeen: .distantPast,
+            embedding: embedding, firstSeen: .distantPast, lastSeen: .distantPast,
             callCount: 10, confidence: 0.9, disputeCount: disputeCount,
             confirmedMeetingCount: confirmedMeetingCount
         )

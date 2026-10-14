@@ -194,7 +194,7 @@ database it read, then gives one line per speaker that wasn't named, e.g.:
 ```text
 Voiceprints: ReDimNet2 (the app's setting). Saved speakers: /Users/you/Library/Application Support/Transcripted/state/speakers_redimnet2-b4.sqlite
 Speaker 1: matched Maya, but only 2 of 5 confirmed meetings
-Speaker 2: didn't match anyone saved in this voiceprint database
+Speaker 2: didn't match anyone saved in this voiceprint database (best score 0.412, 3 people in speakers_redimnet2-b4.sqlite)
 ```
 
 Other reasons: no saved database for the model (or one that hasn't been carried

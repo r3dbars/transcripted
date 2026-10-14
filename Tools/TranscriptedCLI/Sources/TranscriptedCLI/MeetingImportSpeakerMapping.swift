@@ -28,7 +28,8 @@ enum MeetingImportSpeakerMapping {
         store: any SpeakerStore,
         thresholds: SpeakerEmbeddingThresholds = .weSpeaker,
         nameLikelySpeakers: Bool = false,
-        unavailableReason: String? = nil
+        unavailableReason: String? = nil,
+        speakerDatabaseFilename: String = ""
     ) -> Resolution {
         let profilesByID = Dictionary(
             originalProfiles.map { ($0.id, $0) },
@@ -51,7 +52,11 @@ enum MeetingImportSpeakerMapping {
             let utterance = result.systemUtterances.first { String($0.speakerId) == speakerID }
             guard let profileID = context?.persistentSpeakerId ?? utterance?.persistentSpeakerId,
                   let profile = profilesByID[profileID] else {
-                resolution.reasons[key] = "didn't match anyone saved in this voiceprint database"
+                resolution.reasons[key] = unmatchedReason(
+                    sessionEmbedding: context?.sessionEmbedding,
+                    originalProfiles: originalProfiles,
+                    databaseFilename: speakerDatabaseFilename
+                )
                 continue
             }
             guard let name = profile.displayName,
@@ -144,6 +149,42 @@ enum MeetingImportSpeakerMapping {
         }
 
         return resolution
+    }
+
+    /// Why a numbered speaker stayed numbered when Core did not link it to a
+    /// saved person. Includes the best cosine against the snapshot DB (no
+    /// threshold applied), how many people that file holds, and which file
+    /// was read — the Voiceprints line already printed the full path.
+    static func unmatchedReason(
+        sessionEmbedding: [Float]?,
+        originalProfiles: [SpeakerProfile],
+        databaseFilename: String
+    ) -> String {
+        let people = originalProfiles.count
+        let peopleWord = people == 1 ? "person" : "people"
+        let scoreText: String
+        if let sessionEmbedding {
+            let best = originalProfiles.reduce(-1.0) { partial, profile in
+                max(
+                    partial,
+                    SpeakerVectorMath.bestSimilarity(
+                        candidate: sessionEmbedding,
+                        average: profile.embedding,
+                        exemplars: profile.exemplars
+                    )
+                )
+            }
+            scoreText = best < 0
+                ? "best score unknown"
+                : String(format: "best score %.3f", best)
+        } else {
+            scoreText = people == 0 ? "best score n/a" : "best score unknown"
+        }
+        let file = databaseFilename.trimmingCharacters(in: .whitespacesAndNewlines)
+        if file.isEmpty {
+            return "didn't match anyone saved in this voiceprint database (\(scoreText), \(people) \(peopleWord))"
+        }
+        return "didn't match anyone saved in this voiceprint database (\(scoreText), \(people) \(peopleWord) in \(file))"
     }
 
     static func likelyReason(name: String, blockers: [SpeakerNamingBlocker]) -> String {
