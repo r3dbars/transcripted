@@ -42,20 +42,6 @@ func testDebugControlCommand() {
         assertEqual(debugArgv(["settings", "set", "crash_reports", "false"]), .success(DebugControlRequest(id: "cli", commandName: "settings_set", action: .settingsSet(key: "crash_reports", value: false))))
     }
 
-    runSuite("DebugControl parses the URL scheme for every command") {
-        assertEqual(debugURL("transcripted-debug://state"), .success(DebugControlRequest(id: "url", commandName: "state", action: .state)))
-        assertEqual(debugURL("transcripted-debug://dictation/start"), .success(DebugControlRequest(id: "url", commandName: "start_dictation", action: .startDictation)))
-        assertEqual(debugURL("transcripted-debug://dictation/stop?paste=true"), .success(DebugControlRequest(id: "url", commandName: "stop_dictation", action: .stopDictation(paste: true))))
-        assertEqual(debugURL("transcripted-debug://meeting/start"), .success(DebugControlRequest(id: "url", commandName: "start_meeting", action: .startMeeting)))
-        assertEqual(debugURL("transcripted-debug://meeting/stop"), .success(DebugControlRequest(id: "url", commandName: "stop_meeting", action: .stopMeeting)))
-        assertEqual(debugURL("transcripted-debug://import?path=/tmp/x.wav"), .success(DebugControlRequest(id: "url", commandName: "import_audio", action: .importAudio(path: "/tmp/x.wav"))))
-        assertEqual(debugURL("transcripted-debug://paste-target/open"), .success(DebugControlRequest(id: "url", commandName: "paste_target_open", action: .pasteTargetOpen)))
-        assertEqual(debugURL("transcripted-debug://open?screen=menubar"), .success(DebugControlRequest(id: "url", commandName: "open_screen", action: .openScreen(screen: "menubar"))))
-        assertEqual(debugURL("transcripted-debug://settings/get?key=show_in_dock"), .success(DebugControlRequest(id: "url", commandName: "settings_get", action: .settingsGet(key: "show_in_dock"))))
-        assertEqual(debugURL("transcripted-debug://settings/set?key=show_in_dock&value=true"), .success(DebugControlRequest(id: "url", commandName: "settings_set", action: .settingsSet(key: "show_in_dock", value: true))))
-        assertEqual(debugURL("https://example.com/state").error, "unknown_scheme")
-    }
-
     runSuite("DebugControl rejects bad payloads without losing a usable id") {
         assertEqual(debugParseError(#"{"id":"b1","command":"launch_rockets"}"#), DebugControlParseFailure(id: "b1", commandName: "launch_rockets", error: "unknown_command"))
         assertEqual(debugParseError("{not json"), DebugControlParseFailure(id: nil, commandName: nil, error: "malformed_json"))
@@ -84,6 +70,10 @@ func testDebugControlCommand() {
         assertFalse(
             AutomatedLaunchEnvironment.isActive(environment: [:]),
             "a normal launch is not a harness launch"
+        )
+        assertFalse(
+            AutomatedLaunchEnvironment.isActive(environment: ["TRANSCRIPTED_AUTOMATED_HARNESS": "0"]),
+            "a stray harness key that isn't 1 must not turn a shipped app into a harness launch"
         )
     }
 
@@ -252,10 +242,6 @@ private func debugParseError(_ json: String) -> DebugControlParseFailure? {
 
 private func debugArgv(_ argv: [String]) -> Result<DebugControlRequest, DebugControlParseFailure> {
     DebugControlCommandParser.parseArgv(argv)
-}
-
-private func debugURL(_ raw: String) -> Result<DebugControlRequest, DebugControlParseFailure> {
-    DebugControlCommandParser.parseURLString(raw)
 }
 
 private extension Result where Success == DebugControlSessionSnapshot, Failure == DebugControlSessionFailure {

@@ -722,11 +722,11 @@ private final class TranscriptedE2ESmokeHarness {
             "debug control state JSON should expose the menu bar Dictate identifier"
         )
 
-        let url = DebugControlCommandParser.parseURLString("transcripted-debug://settings/get?key=auto_detect_calls")
-        guard case .success(let request) = url else {
-            throw E2ESmokeError.failed("debug control URL parse should accept settings get")
+        let argv = DebugControlCommandParser.parseArgv(["settings", "get", "auto_detect_calls"])
+        guard case .success(let request) = argv else {
+            throw E2ESmokeError.failed("debug control argv parse should accept settings get")
         }
-        try expect(request.action == .settingsGet(key: "auto_detect_calls"), "debug control URL should map to settings_get")
+        try expect(request.action == .settingsGet(key: "auto_detect_calls"), "debug control argv should map to settings_get")
 
         try expect(
             DebugControlSettlePolicy.startedSettled(dictationActive: true, sttRecording: true),

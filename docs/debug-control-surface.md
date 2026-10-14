@@ -12,7 +12,7 @@ This is not the hill-climb lab channel (`docs/lab-control-channel.md`). That one
 
 ## Safety
 
-- **Debug builds only.** `build.sh` always passes `-D TRANSCRIPTED_DEBUG_CONTROL`. `build-beta.sh` never does, refuses if that flag is set, and fails if the compiled binary contains `TRANSCRIPTED_DEBUG_CONTROL_DIR`. The repo `Info.plist` does not register the URL scheme; only the copied debug plist does.
+- **Debug builds only.** `build.sh` always passes `-D TRANSCRIPTED_DEBUG_CONTROL`. `build-beta.sh` never does, refuses if that flag is set, and fails if the compiled binary contains `TRANSCRIPTED_DEBUG_CONTROL_DIR`. There's no URL scheme: commands only arrive as files in the private control directory, so another local process or a web page can't drive a harness-launched app. `check-debug-control-release.py` fails if a URL hook comes back.
 - **Off unless both are true:** `AutomatedLaunchEnvironment` is active (`TRANSCRIPTED_AUTOMATED_HARNESS=1`, or one of the existing launch-smoke keys) **and** `TRANSCRIPTED_DEBUG_CONTROL_DIR` is an absolute path. A `launchctl setenv` of the control dir alone is not enough.
 - Control dir / `inbox/` / `done/` must be real directories this uid owns, mode `0700`. Command files are opened `O_NOFOLLOW`. Same accept rules as the lab channel (`LabControlFilePolicy`).
 - No network. Responses never echo transcript text, titles, speaker names, emails, tokens, or file paths.
@@ -38,21 +38,6 @@ Drop a JSON file in `$TRANSCRIPTED_DEBUG_CONTROL_DIR/inbox/` (write `*.json.tmp`
 ```
 
 `id` is 1–128 chars of `[A-Za-z0-9._:-]`. Unknown commands, bad args, and files over 64 KB get `ok: false` and still move to `done/`.
-
-URL scheme (debug Info.plist only; still needs the harness + control dir so the response can be written):
-
-```
-transcripted-debug://state
-transcripted-debug://dictation/start
-transcripted-debug://dictation/stop?paste=true
-transcripted-debug://meeting/start
-transcripted-debug://meeting/stop
-transcripted-debug://import?path=/tmp/x.wav
-transcripted-debug://paste-target/open
-transcripted-debug://open?screen=today
-transcripted-debug://settings/get?key=show_in_dock
-transcripted-debug://settings/set?key=show_in_dock&value=false
-```
 
 ## Commands
 

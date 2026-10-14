@@ -377,7 +377,6 @@ enum DebugControlCommandParser {
     static let maxIDLength = 128
     static let maxFileNameLength = 200
     static let maxPathLength = 4096
-    static let urlScheme = "transcripted-debug"
 
     private static let idScalars: CharacterSet = {
         var set = CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
@@ -541,85 +540,7 @@ enum DebugControlCommandParser {
                 return .failure(DebugControlParseFailure(id: id, commandName: nil, error: "unknown_command"))
             }
         default:
-            if first.hasPrefix("\(urlScheme):") {
-                return parseURLString(first, id: id)
-            }
             return .failure(DebugControlParseFailure(id: id, commandName: isEchoableWord(first) ? first : nil, error: "unknown_command"))
-        }
-    }
-
-    static func parseURLString(_ raw: String, id: String = "url") -> Result<DebugControlRequest, DebugControlParseFailure> {
-        guard let url = URL(string: raw) else {
-            return .failure(DebugControlParseFailure(id: id, commandName: nil, error: "malformed_url"))
-        }
-        return parseURL(url, id: id)
-    }
-
-    static func parseURL(_ url: URL, id: String = "url") -> Result<DebugControlRequest, DebugControlParseFailure> {
-        guard url.scheme == urlScheme else {
-            return .failure(DebugControlParseFailure(id: id, commandName: nil, error: "unknown_scheme"))
-        }
-        let host = url.host ?? ""
-        let pathParts = url.path.split(separator: "/").map(String.init).filter { !$0.isEmpty }
-        var parts = [host].filter { !$0.isEmpty } + pathParts
-        if parts.isEmpty, let hostless = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/")).split(separator: "/").first {
-            parts = [String(hostless)]
-        }
-        let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
-        func queryValue(_ name: String) -> String? {
-            query.first(where: { $0.name == name })?.value
-        }
-
-        let requestID = queryValue("id").flatMap { isValidID($0) ? $0 : nil } ?? id
-        func request(_ name: DebugControlCommandName, args: [String: Any] = [:]) -> Result<DebugControlRequest, DebugControlParseFailure> {
-            parseDictionary(["id": requestID, "command": name.rawValue, "args": args])
-        }
-
-        switch parts {
-        case ["state"], ["status"], ["ping"]:
-            return request(DebugControlCommandName(rawValue: parts[0]) ?? .state)
-        case ["dictation", "start"]:
-            return request(.startDictation)
-        case ["dictation", "stop"]:
-            var paste = false
-            if let rawPaste = queryValue("paste") {
-                guard let value = DebugControlSettingsPolicy.parseBool(rawPaste) else {
-                    return .failure(DebugControlParseFailure(id: requestID, commandName: "stop_dictation", error: "invalid_arg:paste"))
-                }
-                paste = value
-            }
-            return request(.stopDictation, args: ["paste": paste])
-        case ["meeting", "start"]:
-            return request(.startMeeting)
-        case ["meeting", "stop"]:
-            return request(.stopMeeting)
-        case ["import"]:
-            guard let path = queryValue("path") else {
-                return .failure(DebugControlParseFailure(id: requestID, commandName: "import_audio", error: "missing_arg:path"))
-            }
-            return request(.importAudio, args: ["path": path])
-        case ["paste-target", "open"], ["paste_target", "open"]:
-            return request(.pasteTargetOpen)
-        case ["open"]:
-            guard let screen = queryValue("screen") else {
-                return .failure(DebugControlParseFailure(id: requestID, commandName: "open_screen", error: "missing_arg:screen"))
-            }
-            return request(.openScreen, args: ["screen": screen])
-        case ["settings", "get"]:
-            guard let key = queryValue("key") else {
-                return .failure(DebugControlParseFailure(id: requestID, commandName: "settings_get", error: "missing_arg:key"))
-            }
-            return request(.settingsGet, args: ["key": key])
-        case ["settings", "set"]:
-            guard let key = queryValue("key") else {
-                return .failure(DebugControlParseFailure(id: requestID, commandName: "settings_set", error: "missing_arg:key"))
-            }
-            guard let value = queryValue("value") else {
-                return .failure(DebugControlParseFailure(id: requestID, commandName: "settings_set", error: "missing_arg:value"))
-            }
-            return request(.settingsSet, args: ["key": key, "value": value])
-        default:
-            return .failure(DebugControlParseFailure(id: requestID, commandName: nil, error: "unknown_command"))
         }
     }
 

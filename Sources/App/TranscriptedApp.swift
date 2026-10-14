@@ -542,12 +542,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         #endif
     }
 
-    #if TRANSCRIPTED_DEBUG_CONTROL
-    func application(_ application: NSApplication, open urls: [URL]) {
-        DebugControlChannel.handleOpenURLs(urls, appDelegate: self)
-    }
-    #endif
-
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if flag {
             // Let AppKit do its default handling (bring an existing

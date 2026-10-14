@@ -79,38 +79,6 @@ final class DebugControlChannel {
         fputs("DEBUG_CONTROL | enabled (pid \(ProcessInfo.processInfo.processIdentifier))\n", stderr)
     }
 
-    static func handleOpenURLs(_ urls: [URL], appDelegate: TranscriptedAppDelegate) {
-        startIfRequested(appDelegate: appDelegate)
-        guard let channel = active else { return }
-        for url in urls where url.scheme == DebugControlCommandParser.urlScheme {
-            Task { @MainActor in
-                await channel.handleURL(url)
-            }
-        }
-    }
-
-    private func handleURL(_ url: URL) async {
-        switch DebugControlCommandParser.parseURL(url) {
-        case .success(let request):
-            let outcome = await execute(request.action)
-            appendResponse(DebugControlResponse(
-                id: request.id,
-                command: request.commandName,
-                outcome: outcome,
-                at: isoFormatter.string(from: Date()),
-                extraResult: extraResult(for: request.action, outcome: outcome)
-            ))
-        case .failure(let failure):
-            appendResponse(DebugControlResponse(
-                id: failure.id,
-                command: failure.commandName,
-                outcome: .failure(failure.error),
-                at: isoFormatter.string(from: Date()),
-                extraResult: [:]
-            ))
-        }
-    }
-
     private enum PathStatus {
         case missing
         case present(mode: UInt32, ownerUID: UInt32)

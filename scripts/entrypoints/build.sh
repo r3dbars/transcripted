@@ -561,13 +561,6 @@ fi
 
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
-# Debug-only URL scheme for the test control surface. The repo Info.plist
-# does not register it, so release/beta copies never accept these URLs.
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string com.justinbetker.draft.debug-control" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
-/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string transcripted-debug" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :TranscriptedBuildChannel local" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :TranscriptedBuildChannel string local" "$APP_BUNDLE/Contents/Info.plist"
 BUILD_REVISION="$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"

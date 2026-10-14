@@ -159,11 +159,14 @@ def check(root: Path) -> list[str]:
 
     if app:
         if f"#if {COMPILE_FLAG}" not in app:
-            problems.append(f"{APP}: launch/URL hooks must sit behind `#if {COMPILE_FLAG}`")
+            problems.append(f"{APP}: launch hook must sit behind `#if {COMPILE_FLAG}`")
         if "DebugControlChannel.startIfRequested" not in app:
             problems.append(f"{APP}: missing DebugControlChannel.startIfRequested hook")
-        if "DebugControlChannel.handleOpenURLs" not in app:
-            problems.append(f"{APP}: missing DebugControlChannel.handleOpenURLs URL-scheme hook")
+        if "open urls: [URL]" in app or "handleOpenURLs" in app:
+            problems.append(
+                f"{APP}: the debug channel takes file drops only; a URL hook lets any "
+                "local process or web page drive a harness-launched app"
+            )
         unguarded = unguarded_channel_refs(app)
         if unguarded:
             problems.append(
@@ -181,10 +184,8 @@ def check(root: Path) -> list[str]:
                 f"{BUILD_SH}: `{SWIFTC_DEFINE}` must stay on every local build, "
                 "not only `--lab`"
             )
-        if URL_SCHEME not in build_sh:
-            problems.append(f"{BUILD_SH}: must register the {URL_SCHEME} URL scheme on the copied Info.plist")
-        if "CFBundleURLSchemes" not in build_sh:
-            problems.append(f"{BUILD_SH}: must add CFBundleURLSchemes for the debug URL hook")
+        if URL_SCHEME in build_sh or "CFBundleURLSchemes" in build_sh:
+            problems.append(f"{BUILD_SH}: must not register a {URL_SCHEME} URL scheme; the channel is file-drop only")
 
     if build_beta:
         if 'TRANSCRIPTED_DEBUG_CONTROL:-0' not in build_beta and "${TRANSCRIPTED_DEBUG_CONTROL:-0}" not in build_beta:
@@ -199,7 +200,7 @@ def check(root: Path) -> list[str]:
 
     if info and URL_SCHEME in info:
         problems.append(
-            f"{INFO_PLIST}: must not register {URL_SCHEME}; only the copied debug Info.plist does"
+            f"{INFO_PLIST}: must not register {URL_SCHEME}; the channel is file-drop only"
         )
 
     if cli:
@@ -216,8 +217,6 @@ def check(root: Path) -> list[str]:
         missing = [name for name in REQUIRED_COMMANDS if name not in docs]
         if missing:
             problems.append(f"{DOCS}: missing command(s): {', '.join(missing)}")
-        if URL_SCHEME not in docs:
-            problems.append(f"{DOCS}: must name the {URL_SCHEME} URL scheme")
         if CONTROL_DIR not in docs:
             problems.append(f"{DOCS}: must name {CONTROL_DIR}")
         if "waits up to 2 seconds" not in docs:
@@ -255,11 +254,6 @@ def self_test() -> None:
             f"#if {COMPILE_FLAG}\n"
             "DebugControlChannel.startIfRequested(appDelegate: self)\n"
             "#endif\n"
-            f"#if {COMPILE_FLAG}\n"
-            "func application(_ application: NSApplication, open urls: [URL]) {\n"
-            "    DebugControlChannel.handleOpenURLs(urls, appDelegate: self)\n"
-            "}\n"
-            "#endif\n"
         ),
         ALE: f'static let keys = ["{HARNESS_KEY}"]\n',
         BUILD_SH: (
@@ -267,7 +261,6 @@ def self_test() -> None:
             'if [ "$TRANSCRIPTED_LAB_BUILD" = "1" ]; then\n'
             "    APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_LAB_CONTROL)\n"
             "fi\n"
-            "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string transcripted-debug\n"
         ),
         BUILD_BETA: (
             'if [ "${TRANSCRIPTED_DEBUG_CONTROL:-0}" != "0" ]; then\n'
@@ -283,7 +276,7 @@ def self_test() -> None:
         DOCS: (
             "schema_version\n"
             + "\n".join(REQUIRED_COMMANDS)
-            + f"\n{URL_SCHEME}\n{CONTROL_DIR}\n"
+            + f"\n{CONTROL_DIR}\n"
             + "waits up to 2 seconds\n"
         ),
         INFO_PLIST: "<plist></plist>\n",
@@ -310,7 +303,8 @@ def self_test() -> None:
         (APP, "DebugControlChannel.startIfRequested(appDelegate: self)\n", "", "missing start hook"),
         (APP, f"#if {COMPILE_FLAG}\nDebugControlChannel.startIfRequested(appDelegate: self)\n#endif\n", "DebugControlChannel.startIfRequested(appDelegate: self)\n", "unguarded start hook"),
         (BUILD_SH, SWIFTC_DEFINE, "", "build.sh missing define"),
-        (BUILD_SH, URL_SCHEME, "other-scheme", "build.sh missing URL scheme"),
+        (BUILD_SH, "fi\n", "fi\nAdd :CFBundleURLTypes:0:CFBundleURLSchemes:0 string transcripted-debug\n", "build.sh registered URL scheme"),
+        (APP, "#endif\n", "#endif\nfunc application(_ application: NSApplication, open urls: [URL]) {}\n", "app URL hook"),
         (BUILD_BETA, BINARY_GREP, "grep -a -q -F OTHER", "build-beta missing binary grep"),
         (BUILD_BETA, 'if [ "${TRANSCRIPTED_DEBUG_CONTROL:-0}" != "0" ]; then', "if false; then", "build-beta missing refuse"),
         (INFO_PLIST, "<plist></plist>", f"<string>{URL_SCHEME}</string>", "repo Info.plist registered scheme"),
