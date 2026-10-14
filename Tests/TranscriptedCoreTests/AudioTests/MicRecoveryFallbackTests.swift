@@ -1,3 +1,4 @@
+@preconcurrency import AVFoundation
 import CoreAudio
 import XCTest
 @testable import TranscriptedCore
@@ -35,11 +36,6 @@ final class MicRecoveryFallbackTests: XCTestCase {
     }
 
     func testRouteChangeIgnoresOtherEnginesAndFinishedRecordings() {
-        XCTAssertEqual(
-            configurationDecision(changedEngineIsPublishedGraph: false),
-            .ignore,
-            "dictation's engine and detached graphs are not the meeting mic"
-        )
         XCTAssertEqual(configurationDecision(sessionIsCurrent: false), .ignore)
         XCTAssertEqual(configurationDecision(isRecording: false), .ignore)
         XCTAssertEqual(
@@ -80,6 +76,78 @@ final class MicRecoveryFallbackTests: XCTestCase {
             configurationDecision(changedEngineIsRunning: true),
             .engineStillRunning
         )
+    }
+
+    func testConfigurationCheckForANonPublishedEngineDoesNothing() {
+        let audio = makeAudio()
+        audio.isRecording = true
+        XCTAssertNil(audio.engine, "the meeting graph has not published an engine")
+
+        let decision = audio.checkMicEngineConfigurationChange(
+            changedEngineID: ObjectIdentifier(TestWriter()),
+            sessionGeneration: audio.recordingSessionGeneration,
+            isRecording: true,
+            bufferCountAtChange: audio.micBufferCount,
+            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits
+        )
+
+        XCTAssertNil(
+            decision,
+            "a check for an engine that is not the published meeting graph is a no-op"
+        )
+        XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertEqual(audio.recoveryAttemptCount, 0)
+        XCTAssertNil(audio.engine)
+    }
+
+    func testConfigurationCheckForADetachedEngineLeavesThePublishedGraphAlone() {
+        let audio = makeAudio()
+        let published = AVAudioEngine()
+        // Allocate only. Do not read inputNode: that binds the macOS default
+        // input and can flip AirPods into call mode.
+        audio.withAudioGraphLock { audio.engine = published }
+        audio.isRecording = true
+
+        let decision = audio.checkMicEngineConfigurationChange(
+            changedEngineID: ObjectIdentifier(TestWriter()),
+            sessionGeneration: audio.recordingSessionGeneration,
+            isRecording: true,
+            bufferCountAtChange: audio.micBufferCount,
+            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits
+        )
+
+        XCTAssertNil(
+            decision,
+            "a published graph must ignore a configuration change from another engine"
+        )
+        XCTAssertTrue(audio.engine === published)
+        XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertEqual(audio.recoveryAttemptCount, 0)
+    }
+
+    func testConfigurationCheckForThePublishedEngineRunsThePolicy() {
+        let audio = makeAudio()
+        let published = AVAudioEngine()
+        audio.withAudioGraphLock { audio.engine = published }
+        audio.isRecording = true
+
+        let decision = audio.checkMicEngineConfigurationChange(
+            changedEngineID: ObjectIdentifier(published),
+            sessionGeneration: audio.recordingSessionGeneration,
+            isRecording: true,
+            bufferCountAtChange: audio.micBufferCount,
+            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits,
+            applyRecovery: false
+        )
+
+        XCTAssertEqual(
+            decision,
+            .recover,
+            "a matching published identity must reach the policy, not return nil"
+        )
+        XCTAssertTrue(audio.engine === published)
+        XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertEqual(audio.recoveryAttemptCount, 0)
     }
 
     // MARK: - Built-in fallback during recovery
@@ -394,12 +462,30 @@ final class MicRecoveryFallbackTests: XCTestCase {
 
     private final class TestWriter {}
 
+    private func makeAudio() -> Audio {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "MicRecoveryFallbackTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        return Audio(
+            paths: CoreStoragePaths(
+                transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+                speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+                statsDB: root.appendingPathComponent("state/stats.sqlite"),
+                failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+                speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+                audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+                logs: root.appendingPathComponent("logs", isDirectory: true)
+            )
+        )
+    }
+
     private func configurationDecision(
         sessionIsCurrent: Bool = true,
         isRecording: Bool = true,
         isSystemSleeping: Bool = false,
         isRecovering: Bool = false,
-        changedEngineIsPublishedGraph: Bool = true,
         changedEngineIsRunning: Bool = false,
         deliveredNewBuffer: Bool = false,
         secondsSinceLastRecoveryEnded: TimeInterval? = nil,
@@ -410,7 +496,6 @@ final class MicRecoveryFallbackTests: XCTestCase {
             isRecording: isRecording,
             isSystemSleeping: isSystemSleeping,
             isRecovering: isRecovering,
-            changedEngineIsPublishedGraph: changedEngineIsPublishedGraph,
             changedEngineIsRunning: changedEngineIsRunning,
             deliveredNewBuffer: deliveredNewBuffer,
             secondsSinceLastRecoveryEnded: secondsSinceLastRecoveryEnded,
