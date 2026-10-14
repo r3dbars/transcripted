@@ -924,12 +924,11 @@ extension Audio {
         }
     }
 
-    /// Posted on an arbitrary thread, possibly while a graph build holds the
-    /// graph lock. Snapshot lock-free state here and do the real check on a
-    /// background queue after a short settle.
+    /// Posted on an arbitrary thread, possibly while a graph build holds
+    /// the graph lock. Snapshot lock-free state and check after a settle.
     func handleMicEngineConfigurationChange(_ changedEngine: AVAudioEngine) {
         scheduleMicEngineConfigurationCheck(
-            changedEngine: changedEngine,
+            changedEngineID: ObjectIdentifier(changedEngine),
             sessionGeneration: recordingSessionGeneration,
             bufferCountAtChange: micBufferCount,
             delay: MicEngineConfigurationChangePolicy.settleSeconds,
@@ -938,24 +937,23 @@ extension Audio {
     }
 
     private func scheduleMicEngineConfigurationCheck(
-        changedEngine: AVAudioEngine,
+        changedEngineID: ObjectIdentifier,
         sessionGeneration: UInt64,
         bufferCountAtChange: Int,
         delay: TimeInterval,
         remainingRecoveryWaits: Int
     ) {
-        // `isRecording` belongs to main, so read it there, then decide off
-        // main. Stop advances the generation, so a stop that lands in
-        // between still fails the `sessionIsCurrent` check.
+        // `isRecording` belongs to main; read it there, then decide off main.
+        // ObjectIdentifier, not `[weak changedEngine]` (APPLE-MACOS-4J / 3C).
         DispatchQueue.main.asyncAfter(
             deadline: .now() + delay
-        ) { [weak self, weak changedEngine] in
+        ) { [weak self] in
             guard let self else { return }
             let isRecording = self.isRecording
-            DispatchQueue.global(qos: .userInitiated).async { [weak self, weak changedEngine] in
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
                 guard let self else { return }
                 self.checkMicEngineConfigurationChange(
-                    changedEngine: changedEngine,
+                    changedEngineID: changedEngineID,
                     sessionGeneration: sessionGeneration,
                     isRecording: isRecording,
                     bufferCountAtChange: bufferCountAtChange,
@@ -965,44 +963,47 @@ extension Audio {
         }
     }
 
-    private func checkMicEngineConfigurationChange(
-        changedEngine: AVAudioEngine?,
+    @discardableResult
+    func checkMicEngineConfigurationChange(
+        changedEngineID: ObjectIdentifier,
         sessionGeneration: UInt64,
         isRecording: Bool,
         bufferCountAtChange: Int,
         remainingRecoveryWaits: Int
-    ) {
-        let (publishedEngine, changedEngineIsRunning) = self.withAudioGraphLock {
-            (self.engine, changedEngine?.isRunning ?? false)
+    ) -> MicEngineConfigurationChangePolicy.Decision? {
+        let (matchesPublished, changedEngineIsRunning) = withAudioGraphLock {
+            guard let published = engine, ObjectIdentifier(published) == changedEngineID
+            else { return (false, false) }
+            return (true, published.isRunning)
         }
+        guard matchesPublished else { return nil }
         let decision = MicEngineConfigurationChangePolicy.decision(
-            sessionIsCurrent: sessionGeneration == self.recordingSessionGeneration,
+            sessionIsCurrent: sessionGeneration == recordingSessionGeneration,
             isRecording: isRecording,
-            isSystemSleeping: self.isSystemSleepPending(for: sessionGeneration),
-            isRecovering: self.isMicRecovering,
-            changedEngineIsPublishedGraph: changedEngine != nil
-                && changedEngine === publishedEngine,
+            isSystemSleeping: isSystemSleepPending(for: sessionGeneration),
+            isRecovering: isMicRecovering,
+            changedEngineIsPublishedGraph: true,
             changedEngineIsRunning: changedEngineIsRunning,
             deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
                 before: bufferCountAtChange,
-                after: self.micBufferCount
+                after: micBufferCount
             ),
-            secondsSinceLastRecoveryEnded: self.lastRecoveryEndTime.map {
+            secondsSinceLastRecoveryEnded: lastRecoveryEndTime.map {
                 Date().timeIntervalSince($0)
             },
-            recoveryAttemptsUsed: self.recoveryAttemptCount,
-            maxRecoveryAttempts: self.maxRecoveryAttempts
+            recoveryAttemptsUsed: recoveryAttemptCount,
+            maxRecoveryAttempts: maxRecoveryAttempts
         )
 
         switch decision {
         case .ignore:
-            return
+            break
         case .stillFlowing:
             AppLogger.audioMic.info("Microphone kept delivering audio through an audio route change")
         case .waitForRecovery:
-            guard remainingRecoveryWaits > 0, let changedEngine else { return }
-            self.scheduleMicEngineConfigurationCheck(
-                changedEngine: changedEngine,
+            guard remainingRecoveryWaits > 0 else { break }
+            scheduleMicEngineConfigurationCheck(
+                changedEngineID: changedEngineID,
                 sessionGeneration: sessionGeneration,
                 bufferCountAtChange: bufferCountAtChange,
                 delay: MicEngineConfigurationChangePolicy.recoveryWaitSeconds,
@@ -1013,10 +1014,9 @@ extension Audio {
         case .engineStillRunning:
             AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
         case .recover:
-            // Restarts in place when the pinned mic is still bound, so a
-            // route change does not reopen the default input.
             AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
-            self.recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+            recoverFromDeviceChange(sessionGeneration: sessionGeneration)
         }
+        return decision
     }
 }

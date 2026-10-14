@@ -82,6 +82,44 @@ final class MicRecoveryFallbackTests: XCTestCase {
         )
     }
 
+    func testConfigurationCheckForANonPublishedEngineDoesNothing() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent(
+                "MicRecoveryFallbackTests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+        defer { try? FileManager.default.removeItem(at: root) }
+        let audio = Audio(
+            paths: CoreStoragePaths(
+                transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+                speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+                statsDB: root.appendingPathComponent("state/stats.sqlite"),
+                failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+                speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+                audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+                logs: root.appendingPathComponent("logs", isDirectory: true)
+            )
+        )
+        audio.isRecording = true
+        XCTAssertNil(audio.engine, "the meeting graph has not published an engine")
+
+        let decision = audio.checkMicEngineConfigurationChange(
+            changedEngineID: ObjectIdentifier(TestWriter()),
+            sessionGeneration: audio.recordingSessionGeneration,
+            isRecording: true,
+            bufferCountAtChange: audio.micBufferCount,
+            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits
+        )
+
+        XCTAssertNil(
+            decision,
+            "a check for an engine that is not the published meeting graph is a no-op"
+        )
+        XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertEqual(audio.recoveryAttemptCount, 0)
+        XCTAssertNil(audio.engine)
+    }
+
     // MARK: - Built-in fallback during recovery
 
     func testFirstRecoveryOfAWorkingMicKeepsThePinnedMic() {
