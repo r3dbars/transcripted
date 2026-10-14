@@ -31,6 +31,13 @@ final class NameVariantsTests: XCTestCase {
         XCTAssertTrue(expanded.isEmpty)
     }
 
+    func testSteveStevenStephenAreOneFamily() {
+        // A bulk test-fixture rename once rewrote this real nickname table.
+        XCTAssertTrue(NameVariants.areNameVariants("Steve", "Stephen"))
+        XCTAssertTrue(NameVariants.areNameVariants("Stephen", "Steven"))
+        XCTAssertFalse(NameVariants.areNameVariants("Steve", "Priya"))
+    }
+
     func testAreVariantsSymmetric() {
         XCTAssertEqual(
             NameVariants.areNameVariants("Mike", "Michael"),
