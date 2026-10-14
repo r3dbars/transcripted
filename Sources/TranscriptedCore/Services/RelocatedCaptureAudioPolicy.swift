@@ -48,7 +48,9 @@ enum RelocatedCaptureAudioPolicy {
             )
         }
 
-        static let live = FileSystem(
+        /// Computed so every caller gets its own reachability cache; a
+        /// stored `static let` would share one unlocked cache process-wide.
+        static var live: FileSystem { FileSystem(
             fileExists: { FileManager.default.fileExists(atPath: $0) },
             directoryExists: { path in
                 var isDirectory: ObjCBool = false
@@ -69,7 +71,7 @@ enum RelocatedCaptureAudioPolicy {
                 }
                 return errno == EACCES || errno == EPERM
             }
-        )
+        ) }
     }
 
     /// Remembers only conclusions that keep a row: an unmounted volume or a
