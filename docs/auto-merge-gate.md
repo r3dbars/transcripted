@@ -26,9 +26,12 @@ No lane may touch `deny_always`: the TranscriptedCore, Meeting, Speech and Obser
 
 All of these, checked on every run:
 
+0. The PR risk triage (`scripts/ops/risk-triage.py`, `docs/agent-merge-policy.md`) doesn't call it `risk:high`. This gate never merges a high-risk PR, whatever its lane allows: deleted tests, tests renamed out of the test folders, folder `AGENTS.md` files and medium PRs over 400 lines all wait for a person.
+0a. A trusted, clean AI verdict exists for the head commit. It must come from a `risk-triage.yml` `pull_request_target` run for this PR's exact head and have no unresolved P0/P1 (see `docs/agent-merge-policy.md`, "Which verdicts count"). No verdict means no merge.
+
 1. Main is green: the latest finished Swift CI run on main succeeded.
 2. Author `r3dbars`, branch in this repo, branch in an enabled lane.
-3. The lane's label. No `needs owner review`, `do not merge`, `hold` or `waiting-on-human` label.
+3. The lane's label. No hold label: `needs owner review`, `do not merge`, `hold`, `waiting-on-human` or `blocked`. That's the shared `HOLD_LABELS` list in `scripts/ops/risk-triage.py`, plus anything in the lane file's `blocking_labels`.
 4. Every changed path inside the lane, none protected, within the size limit. The gate reads every page of the REST PR files API and checks both `filename` and `previous_filename` for renames; deletions check the removed path. Missing or malformed rename metadata and a file count that disagrees with GitHub's total block merging.
 5. `build-and-test` and `repo-hygiene` succeeded on the head commit.
 6. No conflicts, no review requesting changes, no unresolved review thread.
