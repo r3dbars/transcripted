@@ -124,7 +124,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         let existing = try seedPerson(named: "Priya", slot: 1, callCount: 1, in: db)
 
         let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
-            name: "stephen",
+            name: "priya",
             embedding: LevelEmbedder.vector(slot: 1),
             targetProfileID: nil,
             transcriptID: UUID(),
@@ -154,7 +154,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
         )
 
         let outcome = SpeakerTranscriptVoiceprintEnrollment.enroll(
-            name: "stephen",
+            name: "priya",
             embedding: far,
             targetProfileID: nil,
             transcriptID: UUID(),
@@ -175,7 +175,7 @@ final class SpeakerTranscriptVoiceprintEnrollmentTests: XCTestCase {
             0.99,
             "the existing voiceprint must not be blended with the new voice"
         )
-        XCTAssertEqual(db.getSpeaker(id: createdID)?.displayName, "stephen")
+        XCTAssertEqual(db.getSpeaker(id: createdID)?.displayName, "priya")
         XCTAssertEqual(db.getSpeaker(id: createdID)?.callCount, 1)
     }
 
