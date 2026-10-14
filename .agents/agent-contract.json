@@ -95,9 +95,9 @@
     {
       "id": "support",
       "path_prefixes": ["Sources/Support/"],
-      "docs": ["Sources/Support/AGENTS.md", "docs/storage-paths.md", "docs/capture-format.md", "docs/lab-control-channel.md"],
-      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install", "capture library", "saved transcript", "capture format", "frontmatter", "lab control", "start meeting", "stop meeting", "transcript format", "markdown format", "another process"],
-      "owns": "Shared preferences, permissions, paths, paste helpers, launch behavior, the capture library and its file format, and the lab control channel.",
+      "docs": ["Sources/Support/AGENTS.md", "docs/storage-paths.md", "docs/capture-format.md", "docs/lab-control-channel.md", "docs/debug-control-surface.md"],
+      "keywords": ["preferences", "permissions", "storage", "path", "clipboard", "launch", "install", "capture library", "saved transcript", "capture format", "frontmatter", "lab control", "debug control", "start meeting", "stop meeting", "transcript format", "markdown format", "another process"],
+      "owns": "Shared preferences, permissions, paths, paste helpers, launch behavior, the capture library and its file format, and the lab and debug control surfaces.",
       "invariants": [
         "Keep app-owned state under Transcripted Application Support.",
         "Preserve legacy migration fallbacks without writing new data to legacy paths."
@@ -356,9 +356,9 @@
       "id": "app-shell",
       "path_prefixes": ["Sources/"],
       "fallback": true,
-      "docs": ["Sources/AGENTS.md"],
-      "keywords": ["app shell", "app delegate", "bootstrap", "application state"],
-      "owns": "Top-level application bootstrap, shared app state, and subsystem wiring.",
+      "docs": ["Sources/AGENTS.md", "Sources/App/AGENTS.md", "docs/debug-control-surface.md"],
+      "keywords": ["app shell", "app delegate", "bootstrap", "application state", "debug control"],
+      "owns": "Top-level application bootstrap, shared app state, subsystem wiring, and the debug test control surface.",
       "invariants": [
         "Keep product decisions in the owning subsystem instead of the app shell.",
         "Preserve the TranscriptedCore library boundary."

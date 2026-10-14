@@ -562,7 +562,17 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Lab builds only (`build.sh --lab`); see docs/lab-control-channel.md.
         LabControlChannel.startIfRequested(appDelegate: self)
         #endif
+        #if TRANSCRIPTED_DEBUG_CONTROL
+        // Debug builds only (`build.sh`); see docs/debug-control-surface.md.
+        DebugControlChannel.startIfRequested(appDelegate: self)
+        #endif
     }
+
+    #if TRANSCRIPTED_DEBUG_CONTROL
+    func application(_ application: NSApplication, open urls: [URL]) {
+        DebugControlChannel.handleOpenURLs(urls, appDelegate: self)
+    }
+    #endif
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         if flag {

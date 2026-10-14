@@ -502,6 +502,7 @@ APP_SOURCES=(
     "Sources/Support/AppTerminationSequence.swift"
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/App/LabControlCommand.swift"
+    "Sources/App/DebugControlCommand.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingPipelinePhaseCadence.swift"
     "Sources/Meeting/LiveTranscriptPrewarmPolicy.swift"

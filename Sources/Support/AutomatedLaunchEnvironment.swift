@@ -9,6 +9,7 @@ enum AutomatedLaunchEnvironment {
     static let keys = [
         "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT",
         "TRANSCRIPTED_FIRST_RUN_RELIABILITY_REPORT",
+        "TRANSCRIPTED_AUTOMATED_HARNESS",
     ]
 
     static func isActive(

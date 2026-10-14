@@ -561,6 +561,13 @@ fi
 
 # Copy Info.plist
 cp Info.plist "$APP_BUNDLE/Contents/"
+# Debug-only URL scheme for the test control surface. The repo Info.plist
+# does not register it, so release/beta copies never accept these URLs.
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes array" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0 dict" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLName string com.justinbetker.draft.debug-control" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes array" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :CFBundleURLTypes:0:CFBundleURLSchemes:0 string transcripted-debug" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Set :TranscriptedBuildChannel local" "$APP_BUNDLE/Contents/Info.plist" 2>/dev/null \
     || /usr/libexec/PlistBuddy -c "Add :TranscriptedBuildChannel string local" "$APP_BUNDLE/Contents/Info.plist"
 BUILD_REVISION="$(git rev-parse --short=12 HEAD 2>/dev/null || printf 'unknown')"
@@ -587,6 +594,11 @@ echo "Dependencies found"
 # build-beta.sh so dev and shipped builds cannot diverge.
 source "$ENTRYPOINT_DIR/lib/swiftc-app-args.sh"
 build_app_swiftc_args
+# Local/debug builds compile the agent test control surface. Release
+# builds (build-beta.sh) never set this flag and fail if the compiled
+# binary contains the channel's env-var name.
+echo "DEBUG CONTROL: compiling the test control surface (-D TRANSCRIPTED_DEBUG_CONTROL). Absent from release builds."
+APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_DEBUG_CONTROL)
 if [ "$TRANSCRIPTED_LAB_BUILD" = "1" ]; then
     echo "LAB BUILD: compiling in the lab control channel (-D TRANSCRIPTED_LAB_CONTROL). Local use only; never distribute this app."
     APP_SWIFTC_TAIL_ARGS+=(-D TRANSCRIPTED_LAB_CONTROL)

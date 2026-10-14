@@ -27,6 +27,12 @@ if [ "${TRANSCRIPTED_LAB_BUILD:-0}" != "0" ]; then
     echo "❌ TRANSCRIPTED_LAB_BUILD is set. Lab builds (build.sh --lab) are local-only; unset it for beta/release builds."
     exit 1
 fi
+# Same for the debug-only test control surface. Local `build.sh` sets
+# TRANSCRIPTED_DEBUG_CONTROL; beta/release must not.
+if [ "${TRANSCRIPTED_DEBUG_CONTROL:-0}" != "0" ]; then
+    echo "❌ TRANSCRIPTED_DEBUG_CONTROL is set. The test control surface is debug-only; unset it for beta/release builds."
+    exit 1
+fi
 SKIP_NOTARIZATION="${SKIP_NOTARIZATION:-0}"
 TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE="${TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE:-0}"
 if [ "$TRANSCRIPTED_HEADLESS_PACKAGE_SMOKE" = "1" ] && [ "$SKIP_NOTARIZATION" != "1" ]; then
@@ -709,6 +715,10 @@ fi
 # file directly (no pipe, so pipefail/SIGPIPE cannot mask a match).
 if grep -a -q -F "TRANSCRIPTED_LAB_CONTROL_DIR" "$APP_BINARY"; then
     echo "❌ The app binary contains the lab control channel. Beta/release builds must not define TRANSCRIPTED_LAB_CONTROL."
+    exit 1
+fi
+if grep -a -q -F "TRANSCRIPTED_DEBUG_CONTROL_DIR" "$APP_BINARY"; then
+    echo "❌ The app binary contains the debug test control surface. Beta/release builds must not define TRANSCRIPTED_DEBUG_CONTROL."
     exit 1
 fi
 

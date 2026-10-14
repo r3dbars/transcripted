@@ -87,6 +87,11 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         }
     }
 
+    /// Screen id the debug control surface reports. Nil when the window is closed.
+    func automationScreenName() -> String? {
+        navigationModel.isWindowOpen ? navigationModel.selectedPage.analyticsValue : nil
+    }
+
     func windowWillClose(_ notification: Notification) {
         SpeakerClipPlayback.stop()
         // Not a cancel: Home's search, playback and Today's data stay as they
