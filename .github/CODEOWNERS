@@ -35,3 +35,22 @@
 /Sources/Observability/SparkleUpdaterController.swift @r3dbars
 /Sources/Support/TranscriptedAppVersion.swift          @r3dbars
 /Sources/TranscriptedWriting/Runtime/OwnSigningTeam.swift @r3dbars
+/scripts/ops/test-risk-triage.py            @r3dbars
+/scripts/ci/                                @r3dbars
+/scripts/dev/linux-checks.sh                @r3dbars
+# Agent instructions and config: steer every agent (adversarial review P0-3).
+/.claude/                                   @r3dbars
+/.codex/                                    @r3dbars
+/.cursor/                                   @r3dbars
+/.agents/                                   @r3dbars
+**/skills/                                  @r3dbars
+**/SKILL.md                                 @r3dbars
+**/AGENTS.md                                @r3dbars
+**/CLAUDE.md                                @r3dbars
+/WORKFLOW.md                                @r3dbars
+# Live Sparkle feed: main IS the update channel (P0-5).
+/docs/appcast.xml                           @r3dbars
+# Runs inside the signing job (P0-6).
+/Tools/TranscriptedQA/                      @r3dbars
+/scripts/ops/privacy-leak-sweep.py          @r3dbars
+/scripts/entrypoints/                       @r3dbars

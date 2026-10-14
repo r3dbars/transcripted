@@ -18,6 +18,11 @@ permissions:
 jobs:
   build-notarized-candidate:
     runs-on: macos-26
+    # Signing/notarization/Sparkle secrets live in the main-only `release`
+    # environment with Justin as required reviewer. Justin must create that
+    # environment (and move the 6 secrets) BEFORE this merges, or RCs fail.
+    # Dispatch from main: gh workflow run release-candidate.yml --ref main -f source_ref=<prep branch>
+    environment: release
     timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
