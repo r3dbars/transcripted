@@ -153,7 +153,6 @@ enum MicEngineConfigurationChangePolicy {
         isRecording: Bool,
         isSystemSleeping: Bool,
         isRecovering: Bool,
-        changedEngineIsPublishedGraph: Bool,
         changedEngineIsRunning: Bool,
         deliveredNewBuffer: Bool,
         secondsSinceLastRecoveryEnded: TimeInterval?,
@@ -162,7 +161,6 @@ enum MicEngineConfigurationChangePolicy {
     ) -> Decision {
         guard sessionIsCurrent, isRecording, !isSystemSleeping else { return .ignore }
         guard !isRecovering else { return .waitForRecovery }
-        guard changedEngineIsPublishedGraph else { return .ignore }
         // A running engine was not stopped by the change. A stopped one can
         // still hand over one queued tap block afterwards, so a new buffer
         // only means "flowing" while the engine runs.
@@ -962,27 +960,29 @@ extension Audio {
         }
     }
 
+    /// Internal `@testable` seam only. An unpublished or replaced engine
+    /// returns nil here — no 6×0.5s `waitForRecovery` retry. The watchdog
+    /// covers a still-stopped mic.
     @discardableResult
     func checkMicEngineConfigurationChange(
         changedEngineID: ObjectIdentifier,
         sessionGeneration: UInt64,
         isRecording: Bool,
         bufferCountAtChange: Int,
-        remainingRecoveryWaits: Int
+        remainingRecoveryWaits: Int,
+        applyRecovery: Bool = true
     ) -> MicEngineConfigurationChangePolicy.Decision? {
         let (matchesPublished, changedEngineIsRunning) = withAudioGraphLock {
             guard let published = engine, ObjectIdentifier(published) == changedEngineID
             else { return (false, false) }
             return (true, published.isRunning)
         }
-        // Detached or replaced graphs no-op before isRecovering / waitForRecovery.
         guard matchesPublished else { return nil }
         let decision = MicEngineConfigurationChangePolicy.decision(
             sessionIsCurrent: sessionGeneration == recordingSessionGeneration,
             isRecording: isRecording,
             isSystemSleeping: isSystemSleepPending(for: sessionGeneration),
             isRecovering: isMicRecovering,
-            changedEngineIsPublishedGraph: true,
             changedEngineIsRunning: changedEngineIsRunning,
             deliveredNewBuffer: MicRecoveryReadinessPolicy.deliveredNewBuffer(
                 before: bufferCountAtChange,
@@ -1015,7 +1015,7 @@ extension Audio {
             AppLogger.audioMic.info("Audio route changed but the mic engine is still running; leaving it to the watchdog")
         case .recover:
             AppLogger.audioMic.warning("Audio route change stopped the microphone; recovering now")
-            recoverFromDeviceChange(sessionGeneration: sessionGeneration)
+            if applyRecovery { recoverFromDeviceChange(sessionGeneration: sessionGeneration) }
         }
         return decision
     }

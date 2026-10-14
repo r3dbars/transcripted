@@ -36,11 +36,6 @@ final class MicRecoveryFallbackTests: XCTestCase {
     }
 
     func testRouteChangeIgnoresOtherEnginesAndFinishedRecordings() {
-        XCTAssertEqual(
-            configurationDecision(changedEngineIsPublishedGraph: false),
-            .ignore,
-            "dictation's engine and detached graphs are not the meeting mic"
-        )
         XCTAssertEqual(configurationDecision(sessionIsCurrent: false), .ignore)
         XCTAssertEqual(configurationDecision(isRecording: false), .ignore)
         XCTAssertEqual(
@@ -135,21 +130,24 @@ final class MicRecoveryFallbackTests: XCTestCase {
         let published = AVAudioEngine()
         audio.withAudioGraphLock { audio.engine = published }
         audio.isRecording = true
-        // Spent attempts leave the route change to the watchdog, so this
-        // matching identity runs the policy without recoverFromDeviceChange.
-        audio.recoveryAttemptCount = audio.maxRecoveryAttempts
 
         let decision = audio.checkMicEngineConfigurationChange(
             changedEngineID: ObjectIdentifier(published),
             sessionGeneration: audio.recordingSessionGeneration,
             isRecording: true,
             bufferCountAtChange: audio.micBufferCount,
-            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits
+            remainingRecoveryWaits: MicEngineConfigurationChangePolicy.maxRecoveryWaits,
+            applyRecovery: false
         )
 
-        XCTAssertEqual(decision, .leaveToWatchdog)
+        XCTAssertEqual(
+            decision,
+            .recover,
+            "a matching published identity must reach the policy, not return nil"
+        )
         XCTAssertTrue(audio.engine === published)
         XCTAssertFalse(audio.isMicRecovering)
+        XCTAssertEqual(audio.recoveryAttemptCount, 0)
     }
 
     // MARK: - Built-in fallback during recovery
@@ -488,7 +486,6 @@ final class MicRecoveryFallbackTests: XCTestCase {
         isRecording: Bool = true,
         isSystemSleeping: Bool = false,
         isRecovering: Bool = false,
-        changedEngineIsPublishedGraph: Bool = true,
         changedEngineIsRunning: Bool = false,
         deliveredNewBuffer: Bool = false,
         secondsSinceLastRecoveryEnded: TimeInterval? = nil,
@@ -499,7 +496,6 @@ final class MicRecoveryFallbackTests: XCTestCase {
             isRecording: isRecording,
             isSystemSleeping: isSystemSleeping,
             isRecovering: isRecovering,
-            changedEngineIsPublishedGraph: changedEngineIsPublishedGraph,
             changedEngineIsRunning: changedEngineIsRunning,
             deliveredNewBuffer: deliveredNewBuffer,
             secondsSinceLastRecoveryEnded: secondsSinceLastRecoveryEnded,
