@@ -961,8 +961,9 @@ extension Audio {
     }
 
     /// Internal `@testable` seam only. An unpublished or replaced engine
-    /// returns nil here — no 6×0.5s `waitForRecovery` retry. The watchdog
-    /// covers a still-stopped mic.
+    /// returns nil, except while a recovery is still building its graph:
+    /// that engine may be published next, so keep the 6×0.5s
+    /// `waitForRecovery` retry for it. The watchdog covers a still-stopped mic.
     @discardableResult
     func checkMicEngineConfigurationChange(
         changedEngineID: ObjectIdentifier,
@@ -977,7 +978,22 @@ extension Audio {
             else { return (false, false) }
             return (true, published.isRunning)
         }
-        guard matchesPublished else { return nil }
+        guard matchesPublished else {
+            // A route change on the graph a recovery is still building fires
+            // before that engine is published; re-check once it lands.
+            guard isMicRecovering,
+                  sessionGeneration == recordingSessionGeneration,
+                  remainingRecoveryWaits > 0
+            else { return nil }
+            scheduleMicEngineConfigurationCheck(
+                changedEngineID: changedEngineID,
+                sessionGeneration: sessionGeneration,
+                bufferCountAtChange: bufferCountAtChange,
+                delay: MicEngineConfigurationChangePolicy.recoveryWaitSeconds,
+                remainingRecoveryWaits: remainingRecoveryWaits - 1
+            )
+            return .waitForRecovery
+        }
         let decision = MicEngineConfigurationChangePolicy.decision(
             sessionIsCurrent: sessionGeneration == recordingSessionGeneration,
             isRecording: isRecording,

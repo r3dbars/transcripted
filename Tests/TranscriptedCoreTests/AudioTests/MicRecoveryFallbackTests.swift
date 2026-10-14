@@ -125,6 +125,41 @@ final class MicRecoveryFallbackTests: XCTestCase {
         XCTAssertEqual(audio.recoveryAttemptCount, 0)
     }
 
+    func testConfigurationCheckForAnEngineARecoveryIsStillBuildingWaitsForIt() {
+        let audio = makeAudio()
+        let published = AVAudioEngine()
+        audio.withAudioGraphLock { audio.engine = published }
+        audio.isRecording = true
+        audio._micRecoverySessionGeneration = audio.recordingSessionGeneration
+        let building = TestWriter()
+
+        let waiting = audio.checkMicEngineConfigurationChange(
+            changedEngineID: ObjectIdentifier(building),
+            sessionGeneration: audio.recordingSessionGeneration,
+            isRecording: true,
+            bufferCountAtChange: audio.micBufferCount,
+            remainingRecoveryWaits: 1,
+            applyRecovery: false
+        )
+        let outOfWaits = audio.checkMicEngineConfigurationChange(
+            changedEngineID: ObjectIdentifier(building),
+            sessionGeneration: audio.recordingSessionGeneration,
+            isRecording: true,
+            bufferCountAtChange: audio.micBufferCount,
+            remainingRecoveryWaits: 0,
+            applyRecovery: false
+        )
+
+        XCTAssertEqual(
+            waiting,
+            .waitForRecovery,
+            "a change on the graph a recovery is building must be re-checked once it is published"
+        )
+        XCTAssertNil(outOfWaits, "once the waits run out, an unpublished engine is left to the watchdog")
+        XCTAssertTrue(audio.engine === published)
+        audio._micRecoverySessionGeneration = nil
+    }
+
     func testConfigurationCheckForThePublishedEngineRunsThePolicy() {
         let audio = makeAudio()
         let published = AVAudioEngine()
