@@ -28,21 +28,27 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         didSet { rebuildReviewStack() }
     }
     /// Calls skipped with "Skip this call". Saved, so they stay skipped.
-    @Published private(set) var skippedCallKeys: Set<String> = SpeakerReviewSkippedCalls.load() {
+    @Published private(set) var skippedCallKeys: Set<String> {
         didSet { rebuildReviewStack() }
     }
     /// Calendar invitees per call, offered as one-tap names on its card.
     @Published private(set) var inviteesByCallKey: [String: [String]] = [:]
-    /// The review stack opens from its summary card's Review button (or a
-    /// deep link to the queue). Closed, every voice stays listed below.
-    @Published var isReviewOpen = false
-    /// The call retained on screen after naming, shared with directory
-    /// filtering so a newly queued top card never hides unseen voices.
-    @Published var heldReviewCall: SpeakerPendingMeetingGroup?
+    /// One owner for review visibility, held cards and save completions.
+    @Published private(set) var reviewSession = SpeakerReviewSession()
     /// Bumped per person when a yes for them lands from this page, so their
     /// print in the list plays the match animation. See `celebrate(_:)`.
     @Published private(set) var celebrationTokens: [UUID: Int] = [:]
     private var inviteeLookupsStarted: Set<String> = []
+
+    func openReview() { reviewSession.open() }
+    func closeReview() { reviewSession.close() }
+    func leaveReview(_ call: SpeakerPendingMeetingGroup) { reviewSession.leave(call) }
+    func finishReview(_ call: SpeakerPendingMeetingGroup, total: Int) {
+        reviewSession.finish(call, total: total)
+    }
+    func recordReviewName(_ voice: SpeakerReviewNamedVoice, on call: SpeakerPendingMeetingGroup, visitToken: UUID) {
+        reviewSession.record(voice, on: call, visit: visitToken)
+    }
 
     /// Mirrors the meeting controller's voiceprint migration gate: saved people
     /// moving into a new voice model's database. Edits made meanwhile wait in
@@ -52,6 +58,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var editsWaitingForVoiceprintMigration: [() -> Void] = []
 
     private let speakerDatabase: SpeakerSettingsStore
+    private let transcriptDirectory: URL
+    private let reviewDefaults: UserDefaults
     private let preferredClipsDirectory: URL
     private let legacyClipsDirectory: URL
     private(set) var duplicateCandidates: [SpeakerDuplicateCandidate] = []
@@ -83,7 +91,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         transcriptDirectory: URL = SpeakerSettingsStore.defaultTranscriptDirectory,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL = SpeakerSettingsStore.defaultLegacyClipsDirectory,
-        voiceprintMigrationGate: SpeakerSettingsMigration? = nil
+        voiceprintMigrationGate: SpeakerSettingsMigration? = nil,
+        reviewDefaults: UserDefaults = .standard
     ) {
         self.speakerDatabase = speakerDatabase.configured(
             transcriptDirectory: transcriptDirectory, preferredClipsDirectory: preferredClipsDirectory,
@@ -91,6 +100,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         )
         self.preferredClipsDirectory = preferredClipsDirectory
         self.legacyClipsDirectory = legacyClipsDirectory
+        self.transcriptDirectory = transcriptDirectory
+        self.reviewDefaults = reviewDefaults
+        self.skippedCallKeys = SpeakerReviewSkippedCalls.load(defaults: reviewDefaults)
         if let voiceprintMigrationGate {
             voiceprintMigrationPhase = voiceprintMigrationGate.phase
             // Synchronous on purpose: the mirror changes in the same step as
@@ -151,6 +163,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     func sendCallToBack(_ group: SpeakerPendingMeetingGroup) {
+        leaveReview(group)
         laterCallKeys.removeAll { $0 == group.id }
         laterCallKeys.append(group.id)
     }
@@ -158,7 +171,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// Skips a whole call. Its voices move to Everyone (still unnamed, still
     /// mergeable) and the card stays gone after a restart.
     func skipCall(_ group: SpeakerPendingMeetingGroup) {
-        SpeakerReviewSkippedCalls.add(group.id)
+        leaveReview(group)
+        SpeakerReviewSkippedCalls.add(group.id, defaults: reviewDefaults)
         skippedCallKeys.insert(group.id)
     }
 
@@ -183,14 +197,14 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// closed to its summary card nothing is hidden.
     /// See `SpeakerReviewStack.directory`.
     var directoryProfiles: [SpeakerProfile] {
-        reviewStack.directory(filteredProfiles, isSearching: isSearching || !isReviewOpen, heldCallID: heldReviewCall?.id)
+        reviewStack.directory(filteredProfiles, isSearching: isSearching || !reviewSession.isOpen, heldCallID: reviewSession.heldCall?.id)
     }
 
     /// Directory membership count independent of the search filter, used to
     /// decide whether the search field and the voice-print sections render
     /// at all.
     var directoryCount: Int {
-        reviewStack.directory(profiles, isSearching: !isReviewOpen, heldCallID: heldReviewCall?.id).count
+        reviewStack.directory(profiles, isSearching: !reviewSession.isOpen, heldCallID: reviewSession.heldCall?.id).count
     }
 
     /// Plays `personID`'s match animation in the list (after their new
@@ -238,12 +252,14 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private func startRefresh() {
         let revision = snapshotPublication.beginRead()
         let speakerDatabase = self.speakerDatabase
+        let transcriptDirectory = self.transcriptDirectory
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         let duplicateCache = self.duplicateCache
         snapshotQueue.async { [weak self] in
             let snapshot = Self.snapshot(
                 from: speakerDatabase,
+                transcriptDirectory: transcriptDirectory,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory,
                 duplicateCache: duplicateCache
@@ -532,6 +548,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         _ edit: @escaping @Sendable () -> Bool
     ) {
         let speakerDatabase = self.speakerDatabase
+        let transcriptDirectory = self.transcriptDirectory
         let preferredClipsDirectory = self.preferredClipsDirectory
         let legacyClipsDirectory = self.legacyClipsDirectory
         let duplicateCache = self.duplicateCache
@@ -543,6 +560,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                     let didSucceed = edit()
                     let snapshot = Self.snapshot(
                         from: speakerDatabase,
+                        transcriptDirectory: transcriptDirectory,
                         preferredClipsDirectory: preferredClipsDirectory,
                         legacyClipsDirectory: legacyClipsDirectory,
                         duplicateCache: duplicateCache
@@ -571,6 +589,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     nonisolated private static func snapshot(
         from speakerDatabase: SpeakerSettingsStore,
+        transcriptDirectory: URL,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL,
         duplicateCache: SpeakerDuplicateSnapshotCache
@@ -586,6 +605,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
         return snapshot(
             from: profiles,
+            transcriptDirectory: transcriptDirectory,
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory,
             undoableMergesByTargetID: undoableMergesByTargetID,
@@ -596,6 +616,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     nonisolated private static func snapshot(
         from profiles: [SpeakerProfile],
+        transcriptDirectory: URL,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL,
         undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord],
@@ -633,6 +654,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         }
 
         let reviewQueueItems = SpeakerReviewQueueScanner.loadPendingItems(
+            transcriptsDirectory: transcriptDirectory,
             profiles: profiles,
             clipURLsByProfileID: clipURLsByProfileID
         )

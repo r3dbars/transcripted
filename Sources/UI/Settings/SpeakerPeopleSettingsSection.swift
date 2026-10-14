@@ -77,11 +77,6 @@ struct SpeakerPeopleSettingsSection: View {
     /// row) so opening one person always closes any other — one person open
     /// at a time, per spec.
     @State private var expandedPersonID: UUID?
-    /// Invalidates presentation callbacks after Close, Later, Skip or Next.
-    /// The underlying save still finishes; it cannot reopen an old card.
-    @State private var reviewVisit = SpeakerReviewVisit()
-    /// Voices named on a card this visit, by call, newest last.
-    @State private var namedVoices: [String: [SpeakerReviewNamedVoice]] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
@@ -100,15 +95,14 @@ struct SpeakerPeopleSettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            let current = model.heldReviewCall ?? meetingGroups.first
-            let heldIsExtra = model.heldReviewCall.map { held in !meetingGroups.contains { $0.id == held.id } } ?? false
-            let total = meetingGroups.count + (heldIsExtra ? 1 : 0)
-            let visitToken = reviewVisit.token
+            let current = model.reviewSession.currentCall(in: meetingGroups)
+            let total = model.reviewSession.callCount(in: meetingGroups)
+            let visitToken = model.reviewSession.visitToken
 
-            if let current, !model.isReviewOpen {
+            if let current, !model.reviewSession.isOpen {
                 // Closed: one line about what's waiting, and Review.
                 SpeakerReviewSummaryCard(calls: meetingGroups.isEmpty ? [current] : meetingGroups) {
-                    withAnimation(.snappy(duration: 0.24)) { model.isReviewOpen = true }
+                    withAnimation(.snappy(duration: 0.24)) { model.openReview() }
                 }
                 .id(ScrollTarget.reviewQueue)
                 .accessibilityIdentifier("transcripted.speakers.inbox")
@@ -121,7 +115,7 @@ struct SpeakerPeopleSettingsSection: View {
                                 trailing: total == 1 ? "1 call left" : "\(total) calls left"
                             )
                             SpeakerQuietLinkButton(title: "Close") {
-                                withAnimation(.snappy(duration: 0.24)) { closeReview() }
+                                withAnimation(.snappy(duration: 0.24)) { model.closeReview() }
                             }
                             .accessibilityIdentifier("transcripted.speakers.review.close")
                         }
@@ -139,18 +133,15 @@ struct SpeakerPeopleSettingsSection: View {
                     VStack(spacing: 0) {
                         SpeakerCallReviewCard(
                             group: current,
-                            pendingVoices: pendingVoices(of: current, in: meetingGroups),
-                            named: namedVoices[current.id] ?? [],
+                            pendingVoices: model.reviewSession.pendingVoices(on: current, in: meetingGroups),
+                            named: model.reviewSession.namedVoices(on: current),
                             model: model,
                             position: 1,
                             total: total,
                             onNamed: { voice in
-                                guard reviewVisit.accepts(visitToken, isOpen: model.isReviewOpen) else { return }
-                                model.heldReviewCall = current
-                                namedVoices[current.id, default: []].append(voice)
+                                model.recordReviewName(voice, on: current, visitToken: visitToken)
                             },
-                            onLeave: { leave(current) },
-                            onNext: { withAnimation(.snappy(duration: 0.3)) { finish(current, total: total) } }
+                            onNext: { withAnimation(.snappy(duration: 0.3)) { model.finishReview(current, total: total) } }
                         )
                         .id(current.id)
                         .transition(.asymmetric(
@@ -217,36 +208,8 @@ struct SpeakerPeopleSettingsSection: View {
         .onDisappear {
             expandedPersonID = nil
             SpeakerClipPlayback.stop()
-            closeReview()
+            model.closeReview()
         }
-    }
-
-    /// The card's voices still waiting: the call's voices in the latest
-    /// queue, minus any just named here that the refresh hasn't dropped yet.
-    private func pendingVoices(of call: SpeakerPendingMeetingGroup, in calls: [SpeakerPendingMeetingGroup]) -> [SpeakerPendingVoiceGroup] {
-        let named = Set((namedVoices[call.id] ?? []).map(\.voiceID))
-        let voices = calls.first { $0.id == call.id }?.voices ?? []
-        return voices.filter { !named.contains($0.id) }
-    }
-
-    /// Later or Skip this call: the card leaves, so stop holding it.
-    private func leave(_ call: SpeakerPendingMeetingGroup) {
-        reviewVisit.invalidate()
-        if model.heldReviewCall?.id == call.id { model.heldReviewCall = nil }
-        namedVoices[call.id] = nil
-    }
-
-    /// "Next call" on a finished card; on the last one it closes the stack.
-    private func finish(_ call: SpeakerPendingMeetingGroup, total: Int) {
-        leave(call)
-        if total <= 1 { model.isReviewOpen = false }
-    }
-
-    private func closeReview() {
-        reviewVisit.invalidate()
-        model.isReviewOpen = false
-        model.heldReviewCall = nil
-        namedVoices = [:]
     }
 
     /// The lower edge of a card waiting under the top one.
@@ -341,7 +304,6 @@ private struct SpeakerCallReviewCard: View {
     var position = 1
     var total = 1
     let onNamed: (SpeakerReviewNamedVoice) -> Void
-    let onLeave: () -> Void
     let onNext: () -> Void
 
     private var isDone: Bool { pendingVoices.isEmpty }
@@ -367,7 +329,6 @@ private struct SpeakerCallReviewCard: View {
                 }
                 if total > 1, !isDone {
                     SpeakerQuietLinkButton(title: "Later") {
-                        onLeave()
                         model.sendCallToBack(group)
                     }
                     .help("Put this call at the back of the stack.")
@@ -375,7 +336,6 @@ private struct SpeakerCallReviewCard: View {
                 }
                 if !isDone {
                     SpeakerQuietLinkButton(title: "Skip this call") {
-                        onLeave()
                         model.skipCall(group)
                     }
                     .help("Stop asking about this call. Its voices stay under Not named yet.")

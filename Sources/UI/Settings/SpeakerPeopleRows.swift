@@ -296,33 +296,11 @@ struct SpeakerVoiceToNameRow: View {
         guard canSave, !isSaving else { return }
         isSaving = true
         saveErrorMessage = nil
-        // A name that already belongs to one saved person (an invitee chip
-        // or a typed "Alice") adds this voice to them, like the island and
-        // the review window do, instead of making a second Alice.
-        let voice = group.representative.profile
-        if let existing = model.uniqueSavedPerson(named: nameDraft, excluding: voice.id) {
+        model.saveReviewName(group.representative, to: nameDraft) { saved in
             isSaving = false
-            join(existing)
-            return
-        }
-        let named = SpeakerReviewNamedVoice(
-            voiceID: voice.id,
-            personID: voice.id,
-            name: nameDraft.trimmingCharacters(in: .whitespacesAndNewlines),
-            confirmedBefore: 0,
-            requiredMeetings: SpeakerNamingTierPresentation.segmentCount,
-            isNewPerson: true,
-            isTrusted: true
-        )
-        model.namePendingReviewItem(group.representative, to: nameDraft) { didSave in
-            isSaving = false
-            if let kept = SpeakerReviewNamedRetention.retainedVoice(
-                after: .typedName,
-                didSave: didSave,
-                named: savedProgress(named)
-            ) {
+            if let saved {
                 nameDraft = ""
-                onNamed?(kept)
+                onNamed?(saved)
             } else {
                 saveErrorMessage = "Couldn't save — the meeting file may have moved."
             }
@@ -335,72 +313,25 @@ struct SpeakerVoiceToNameRow: View {
         guard !isSaving else { return }
         isSaving = true
         saveErrorMessage = nil
-        let standing = model.namingStanding(for: person)
-        let named = SpeakerReviewNamedVoice(
-            voiceID: group.representative.speakerId,
-            personID: person.id,
-            name: person.displayName ?? nameDraft,
-            confirmedBefore: standing?.confirmedMeetings ?? max(0, person.confirmedMeetingCount),
-            requiredMeetings: standing?.requiredMeetings ?? SpeakerNamingTierPresentation.segmentCount,
-            isNewPerson: false,
-            isTrusted: standing?.isTrusted ?? true
-        )
-        model.mergePendingReviewItem(group.representative, into: person) { didSave in
+        model.joinReviewVoice(group.representative, into: person) { saved in
             isSaving = false
-            if let kept = SpeakerReviewNamedRetention.retainedVoice(
-                after: .joinedSavedPerson,
-                didSave: didSave,
-                named: savedProgress(named)
-            ) {
+            if let saved {
                 nameDraft = ""
-                onNamed?(kept)
+                onNamed?(saved)
             } else {
                 saveErrorMessage = "Couldn't save — the meeting file may have moved."
             }
         }
     }
 
-    /// Save completion runs after the store snapshot is refreshed. One action
-    /// can confirm several meetings, or no new meeting for a split voice.
-    private func savedProgress(_ voice: SpeakerReviewNamedVoice) -> SpeakerReviewNamedVoice {
-        var saved = voice
-        let profile = model.profiles.first { $0.id == voice.personID }
-        let standing = profile.flatMap { model.namingStanding(for: $0) }
-        saved.confirmedAfter = standing?.confirmedMeetings ?? profile?.confirmedMeetingCount ?? voice.confirmedBefore
-        saved.requiredMeetings = standing?.requiredMeetings ?? voice.requiredMeetings
-        saved.isTrusted = standing?.isTrusted ?? false
-        return saved
-    }
-
     private func markAsMe() {
         guard !isSaving, !isMarkingAsMe else { return }
         isMarkingAsMe = true
         saveErrorMessage = nil
-        let voice = group.representative
-        let existingOwner = model.profiles.first {
-            $0.id != voice.speakerId && SpeakerNameSelectionPolicy.isOwnerLabel($0.displayName ?? "")
-        }
-        let standing = existingOwner.flatMap { model.namingStanding(for: $0) }
-        let named = SpeakerReviewNamedRetention.thisIsMe(
-            voiceID: voice.speakerId,
-            existingOwner: existingOwner.map {
-                SpeakerReviewNamedRetention.Owner(
-                    id: $0.id,
-                    name: $0.displayName ?? SpeakerNameSelectionPolicy.ownerLabel,
-                    confirmedMeetings: standing?.confirmedMeetings ?? max(0, $0.confirmedMeetingCount),
-                    requiredMeetings: standing?.requiredMeetings ?? SpeakerNamingTierPresentation.segmentCount,
-                    isTrusted: standing?.isTrusted ?? true
-                )
-            }
-        )
-        model.markPendingReviewItemAsMe(voice) { didSave in
+        model.markReviewVoiceAsMe(group.representative) { saved in
             isMarkingAsMe = false
-            if let kept = SpeakerReviewNamedRetention.retainedVoice(
-                after: .markedAsMe,
-                didSave: didSave,
-                named: savedProgress(named)
-            ) {
-                onNamed?(kept)
+            if let saved {
+                onNamed?(saved)
             } else {
                 saveErrorMessage = "Couldn't save — the meeting file may have moved."
             }

@@ -4,6 +4,98 @@ import TranscriptedCore
 /// The review stack's naming helpers: who to offer as one-tap names, and
 /// naming a voice from the list by picking someone already saved.
 extension SpeakerPeopleSettingsViewModel {
+    /// The card receives a complete saved result. Choosing an existing person
+    /// and reading the refreshed confirmation count belong to the model, not
+    /// to the row that draws the print.
+    func saveReviewName(
+        _ item: SpeakerPendingReviewItem,
+        to name: String,
+        completion: @escaping @MainActor (SpeakerReviewNamedVoice?) -> Void
+    ) {
+        if let person = uniqueSavedPerson(named: name, excluding: item.speakerId) {
+            joinReviewVoice(item, into: person, completion: completion)
+            return
+        }
+        let named = SpeakerReviewNamedVoice(
+            voiceID: item.speakerId,
+            personID: item.speakerId,
+            name: name.trimmingCharacters(in: .whitespacesAndNewlines),
+            confirmedBefore: 0,
+            requiredMeetings: SpeakerNamingTierPresentation.segmentCount,
+            isNewPerson: true,
+            isTrusted: true
+        )
+        namePendingReviewItem(item, to: name) { didSave in
+            completion(didSave ? self.savedReviewResult(named) : nil)
+        }
+    }
+
+    /// Joining a saved person returns their stored progress after the edit.
+    /// One answer can confirm several meetings, or no new distinct meeting.
+    func joinReviewVoice(
+        _ item: SpeakerPendingReviewItem,
+        into person: SpeakerProfile,
+        completion: @escaping @MainActor (SpeakerReviewNamedVoice?) -> Void
+    ) {
+        let standing = namingStanding(for: person)
+        let named = SpeakerReviewNamedVoice(
+            voiceID: item.speakerId,
+            personID: person.id,
+            name: person.displayName ?? "",
+            confirmedBefore: standing?.confirmedMeetings ?? max(0, person.confirmedMeetingCount),
+            requiredMeetings: standing?.requiredMeetings ?? SpeakerNamingTierPresentation.segmentCount,
+            isNewPerson: false,
+            isTrusted: standing?.isTrusted ?? true
+        )
+        mergePendingReviewItem(item, into: person) { didSave in
+            completion(didSave ? self.savedReviewResult(named) : nil)
+        }
+    }
+
+    /// "This is me" is a naming too: the card keeps a You row, either a new
+    /// owner or this voice joined to the existing one.
+    func markReviewVoiceAsMe(
+        _ item: SpeakerPendingReviewItem,
+        completion: @escaping @MainActor (SpeakerReviewNamedVoice?) -> Void
+    ) {
+        let existingOwner = profiles.first {
+            $0.id != item.speakerId && SpeakerNameSelectionPolicy.isOwnerLabel($0.displayName ?? "")
+        }
+        let standing = existingOwner.flatMap(namingStanding(for:))
+        let named = SpeakerReviewNamedRetention.thisIsMe(
+            voiceID: item.speakerId,
+            existingOwner: existingOwner.map {
+                SpeakerReviewNamedRetention.Owner(
+                    id: $0.id,
+                    name: $0.displayName ?? SpeakerNameSelectionPolicy.ownerLabel,
+                    confirmedMeetings: standing?.confirmedMeetings ?? max(0, $0.confirmedMeetingCount),
+                    requiredMeetings: standing?.requiredMeetings ?? SpeakerNamingTierPresentation.segmentCount,
+                    isTrusted: standing?.isTrusted ?? true
+                )
+            }
+        )
+        markPendingReviewItemAsMe(item) { didSave in
+            let kept = SpeakerReviewNamedRetention.retainedVoice(
+                after: .markedAsMe,
+                didSave: didSave,
+                named: named
+            )
+            completion(kept.map(self.savedReviewResult))
+        }
+    }
+
+    /// Edit completions run after the snapshot is published. Keep the result
+    /// tied to that stored count rather than guessing that a click adds one.
+    private func savedReviewResult(_ voice: SpeakerReviewNamedVoice) -> SpeakerReviewNamedVoice {
+        var saved = voice
+        let profile = profiles.first { $0.id == voice.personID }
+        let standing = profile.flatMap(namingStanding(for:))
+        saved.confirmedAfter = standing?.confirmedMeetings ?? profile?.confirmedMeetingCount ?? voice.confirmedBefore
+        saved.requiredMeetings = standing?.requiredMeetings ?? voice.requiredMeetings
+        saved.isTrusted = standing?.isTrusted ?? false
+        return saved
+    }
+
     /// Saved people still learning (named, not yet named on their own, no
     /// recent correction), the closest to a full print first, so picking one
     /// for a voice is a yes that moves them along. At most `limit`.
