@@ -130,7 +130,7 @@ enum MicEngineConfigurationChangePolicy {
         case ignore
         /// The engine kept delivering audio through the change.
         case stillFlowing
-        /// Another recovery owns the graph right now; look again shortly.
+        /// Another recovery owns the published graph; look again shortly.
         case waitForRecovery
         /// A recovery just ended, or this streak used up its attempts.
         /// Leave it to the watchdog's slower cooldown and give-up instead of
@@ -924,8 +924,7 @@ extension Audio {
         }
     }
 
-    /// Posted on an arbitrary thread, possibly while a graph build holds
-    /// the graph lock. Snapshot lock-free state and check after a settle.
+    /// Posted off the graph-lock thread; snapshot lock-free state and check after a settle.
     func handleMicEngineConfigurationChange(_ changedEngine: AVAudioEngine) {
         scheduleMicEngineConfigurationCheck(
             changedEngineID: ObjectIdentifier(changedEngine),
@@ -976,6 +975,7 @@ extension Audio {
             else { return (false, false) }
             return (true, published.isRunning)
         }
+        // Detached or replaced graphs no-op before isRecovering / waitForRecovery.
         guard matchesPublished else { return nil }
         let decision = MicEngineConfigurationChangePolicy.decision(
             sessionIsCurrent: sessionGeneration == recordingSessionGeneration,
