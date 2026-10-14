@@ -331,6 +331,16 @@ final class MicActivityMonitor: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + debounceInterval, execute: item)
     }
 
+    /// One call-activity read right now, on `queue` like every other HAL
+    /// read, delivered on main. The call-end countdown uses it at zero.
+    func sampleCallActivityNow(_ completion: @escaping @MainActor @Sendable (MeetingCallActivitySnapshot) -> Void) {
+        let ownBundleID = ownBundleID
+        queue.async {
+            let snapshot = Self.currentCallActivitySnapshot(ownBundleID: ownBundleID)
+            DispatchQueue.main.async { completion(snapshot) }
+        }
+    }
+
     private func scanAndEmit() {
         let snapshot = Self.currentCallActivitySnapshot(ownBundleID: ownBundleID)
         let snapshotCallback = onCallActivitySnapshot

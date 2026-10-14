@@ -384,42 +384,27 @@ func testMeetingPromptPriority() {
 
     runSuite("Inactivity countdown expiry — waveform silence keeps its own deadline") {
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(
-                isCallEnded: false, automaticStopAllowed: true, callEndStopIsAuthorized: false
-            ),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: true),
             .stop,
             "a silence warning stops at its deadline without waiting for call-end evidence"
         )
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(
-                isCallEnded: false, automaticStopAllowed: false, callEndStopIsAuthorized: false
-            ),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: false),
             .noAutomaticStop,
             "a degraded route never auto-stops, even when its countdown expires"
         )
     }
 
-    runSuite("Inactivity countdown expiry — a call-ended warning waits for a post-deadline reading") {
+    runSuite("Inactivity countdown expiry — a call-ended warning confirms at zero, never waits for a poll") {
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(
-                isCallEnded: true, automaticStopAllowed: true, callEndStopIsAuthorized: false
-            ),
-            .waitForCallEndConfirmation,
-            "the countdown expiring proves nothing while the newest reading predates its deadline"
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: true),
+            .confirmCallEndedThenStop,
+            "at zero the session takes a fresh reading and stops then, with no Checking call gap"
         )
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(
-                isCallEnded: true, automaticStopAllowed: true, callEndStopIsAuthorized: true
-            ),
-            .stop,
-            "post-deadline inactivity still stops the recording"
-        )
-        assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(
-                isCallEnded: true, automaticStopAllowed: false, callEndStopIsAuthorized: true
-            ),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: false),
             .noAutomaticStop,
-            "call-end evidence never overrides a degraded-route veto"
+            "a held call-end warning (room audio, unconfirmed read) never stops on its own"
         )
     }
 }

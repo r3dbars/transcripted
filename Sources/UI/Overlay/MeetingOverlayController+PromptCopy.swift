@@ -40,8 +40,7 @@ extension MeetingOverlayController {
     }
     func audioInactivityPromptDisplay(
         warning: MeetingAudioInactivityWarning,
-        countdownSeconds: Int,
-        showingCallEndConfirmation: Bool = false
+        countdownSeconds: Int
     ) -> PromptDisplay {
         if warning.kind == .degradedRoute {
             return PromptDisplay(
@@ -55,15 +54,16 @@ extension MeetingOverlayController {
             )
         }
 
+        // Same shape as every recording warning: a short statement, one terse
+        // detail line, Continue / Stop (the island draws "Stop" red).
         return PromptDisplay(
-            title: warning.kind == .callEnded ? "Meeting ended?" : "No sound",
-            detail: warning.kind == .callEnded ? "The call app is no longer using audio." : "Nothing heard for \(formatInactiveDuration(warning.inactiveDuration)).",
-            countdownText: showingCallEndConfirmation
-                ? "Checking call…"
-                : "Stops in \(max(0, countdownSeconds))s",
-            secondaryTitle: warning.kind == .callEnded ? "Keep recording" : "Continue",
+            title: warning.kind == .callEnded ? "Call ended" : "No sound",
+            detail: warning.kind == .callEnded ? "Call audio stopped." : "Nothing heard for \(formatInactiveDuration(warning.inactiveDuration)).",
+            // A warning that won't stop on its own shows no countdown.
+            countdownText: warning.automaticStopAllowed ? "Stops in \(max(0, countdownSeconds))s" : "",
+            secondaryTitle: "Continue",
             secondaryAccessibilityLabel: "Keep recording",
-            primaryTitle: warning.kind == .callEnded ? "Stop now" : "Stop",
+            primaryTitle: "Stop",
             primaryAccessibilityLabel: "Stop and transcribe the meeting"
         )
     }

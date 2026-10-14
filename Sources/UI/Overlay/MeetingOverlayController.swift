@@ -75,11 +75,6 @@ final class MeetingOverlayController: NSObject {
     private var lastAppliedAudioInactivityWarning: MeetingAudioInactivityWarning?
     private var promptCountdownTask: Task<Void, Never>?
     private var promptSecondsRemaining = 0
-    /// Set when the call-end countdown reaches zero before the monitor has
-    /// delivered a reading sampled after its deadline. The panel stops saying
-    /// "Stops in 0s" and waits for the next ordinary poll instead, because a
-    /// call that rejoined in the gap must not be cut off by the older reading.
-    private var awaitingCallEndConfirmation = false
     // Transcription progress for the "Transcribing meeting…" pill. Nil when
     // the pipeline has no number to show.
     private var currentTranscriptionProgress: Double?
@@ -444,11 +439,6 @@ final class MeetingOverlayController: NSObject {
             return
         }
 
-        // Any newly resolved display starts its own countdown. Only the expiry
-        // path below sets this back on, and only while the same warning stays
-        // visible, so it is cleared before the new display is built.
-        awaitingCallEndConfirmation = false
-
         guard let display = promptDisplay(
             for: resolvedKind,
             inactivity: inactivity,
@@ -527,10 +517,6 @@ final class MeetingOverlayController: NSObject {
             return (systemAudioWarningPromptDisplay(warning: systemAudio), 0, false)
         case .audioInactivity:
             guard let inactivity else { return nil }
-            // A pending "Checking call…" wait never reaches here: the same
-            // warning is still installed, so applyWarningPrompt early-returns
-            // before rebuilding. The wait's display comes from
-            // refreshPromptCountdownDisplay, which keeps its countdown at zero.
             let seconds = inactivity.automaticStopAllowed ? max(1, inactivity.countdownSeconds) : 0
             return (
                 audioInactivityPromptDisplay(warning: inactivity, countdownSeconds: seconds),
@@ -561,7 +547,6 @@ final class MeetingOverlayController: NSObject {
     /// a previously-active warning prompt.
     private func clearWarningPrompt() {
         promptCountdownTask?.cancel()
-        awaitingCallEndConfirmation = false
         promptKind = nil
         currentPrompt = nil
 
@@ -624,10 +609,6 @@ final class MeetingOverlayController: NSObject {
         case .recording, .stoppingRecording:
             break
         default:
-            // A pending "Checking call…" wait belongs to the recording that is
-            // ending. Every state that is not actively recording clears it, so a
-            // stale flag cannot leak into a later prompt.
-            awaitingCallEndConfirmation = false
             micOnlyNotice = meetingSession?.micOnlyNotice
         }
         switch sessionState {
@@ -921,7 +902,6 @@ final class MeetingOverlayController: NSObject {
 
     private func dismissPrompt() {
         promptCountdownTask?.cancel()
-        awaitingCallEndConfirmation = false
         missedCallPrompt = nil
         promptKind = nil
         currentPrompt = nil
@@ -961,8 +941,7 @@ final class MeetingOverlayController: NSObject {
                 )
             currentPrompt = audioInactivityPromptDisplay(
                 warning: warning,
-                countdownSeconds: promptSecondsRemaining,
-                showingCallEndConfirmation: awaitingCallEndConfirmation && warning.kind == .callEnded
+                countdownSeconds: promptSecondsRemaining
             )
         case .micBoost:
             currentPrompt = micBoostPromptDisplay()
@@ -993,13 +972,17 @@ final class MeetingOverlayController: NSObject {
             guard let warning = meetingSession?.audioInactivityWarning else { return }
             switch MeetingInactivityCountdownExpiry.resolve(
                 isCallEnded: warning.kind == .callEnded,
-                automaticStopAllowed: warning.automaticStopAllowed,
-                callEndStopIsAuthorized: meetingSession?.canAutomaticallyStopEndedCall(warning) == true
+                automaticStopAllowed: warning.automaticStopAllowed
             ) {
             case .noAutomaticStop:
                 return
-            case .waitForCallEndConfirmation:
-                beginCallEndConfirmationWait()
+            case .confirmCallEndedThenStop:
+                // The session reads the call app's audio now and either stops
+                // at 0 or leaves Continue / Stop up without a countdown.
+                Task { @MainActor [weak self] in
+                    guard let session = self?.meetingSession else { return }
+                    await session.resolveCallEndCountdownExpiry(warning)
+                }
             case .stop:
                 Task { @MainActor [weak self] in
                     guard let session = self?.meetingSession else { return }
@@ -1012,17 +995,6 @@ final class MeetingOverlayController: NSObject {
         case .none:
             dismissPrompt()
         }
-    }
-
-    /// The call-end countdown expired, but the monitor's newest reading was
-    /// sampled before the deadline — the call could have rejoined since. Wait
-    /// for the next ordinary poll instead of stopping on that older reading: a
-    /// reading sampled after the deadline stops the recording, and returning
-    /// activity clears the warning through the normal subscription.
-    private func beginCallEndConfirmationWait() {
-        awaitingCallEndConfirmation = true
-        refreshPromptCountdownDisplay()
-        pushToView()
     }
 
     // MARK: - Notch island

@@ -318,7 +318,7 @@ extension MeetingSessionController {
     /// Returns once the finished audio has either started transcribing or been
     /// placed behind the current background task.
     func stopRecording(reason: StopReason = .unknown) async {
-        disableCallEndDetection()
+        disableCallEndDetection(restoringSilenceWarning: false)
         guard case .recording = state else { return }
         transition(to: .stoppingRecording, reason: "stop_requested")
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")

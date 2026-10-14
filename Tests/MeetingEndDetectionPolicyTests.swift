@@ -366,17 +366,18 @@ func testMeetingEndDetectionPolicy() {
         assertFalse(policy.canStop(at: 151), "the new warning never inherits the old expired deadline")
     }
 
-    runSuite("Meeting end detection — an unknown read cancels the warning and cannot stop the call") {
+    runSuite("Meeting end detection — an unknown read holds the warning and cannot stop the call") {
         var policy = MeetingEndDetectionPolicy()
         _ = policy.observe(.inactive, sampledAt: 100, at: 100)
         _ = policy.observe(.inactive, sampledAt: 110, at: 110)
         _ = policy.observe(.inactive, sampledAt: 120, at: 120)
         _ = policy.observe(.inactive, sampledAt: 130, at: 130)
-        assertEqual(policy.observe(.unknown, sampledAt: 140, at: 140), .warningCleared, "a failed read at expiry cancels the warning")
+        assertEqual(policy.observe(.unknown, sampledAt: 140, at: 140), .none,
+                    "one failed read keeps the visible warning instead of restarting the cycle")
         assertFalse(policy.canStop(at: 140), "unknown evidence cannot authorize stopping")
-        _ = policy.observe(.inactive, sampledAt: 141, at: 141)
-        assertEqual(policy.observe(.inactive, sampledAt: 150, at: 150), .none, "recovery needs a new uninterrupted interval")
-        assertEqual(policy.observe(.inactive, sampledAt: 151, at: 151), .warningStarted, "reliable recovered evidence can warn again")
+        assertEqual(policy.observe(.inactive, sampledAt: 141, at: 141), .stop,
+                    "a reliable inactive read after the deadline still confirms the end")
+        assertEqual(policy.observe(.active, sampledAt: 142, at: 142), .warningCleared, "only real activity clears it")
     }
 
     runSuite("Meeting end detection — an unknown read also resets inactivity before a warning") {
@@ -488,5 +489,29 @@ func testMeetingEndDetectionPolicy() {
         assertFalse(policy.canStop(at: 141), "delivery time must not stand in for sampling time")
         assertEqual(policy.observe(.inactive, sampledAt: 146, at: 146), .stop,
                     "the next reading actually sampled after the deadline stops the recording")
+    }
+
+    runSuite("Meeting end detection — the deadline runs on sample time, so a read taken at zero confirms it") {
+        var policy = MeetingEndDetectionPolicy()
+        _ = policy.observe(.inactive, sampledAt: 100, at: 100.4)
+        assertEqual(policy.observe(.inactive, sampledAt: 110, at: 111.5), .warningStarted,
+                    "a read sampled at 110s opens the warning even if it arrives late")
+        _ = policy.observe(.inactive, sampledAt: 135, at: 135.2)
+        // The prompt appeared at 111.5s, so its 30s countdown hits zero at
+        // 141.5s, when the session takes a fresh read.
+        assertEqual(policy.observe(.inactive, sampledAt: 141.5, at: 141.6), .stop,
+                    "the read taken at zero is sampled after the 140s deadline")
+        assertTrue(policy.canStop(at: 141.6), "so the recording stops at zero, with no wait for the next poll")
+    }
+
+    runSuite("Meeting end detection tracking — audio heard during the warning vetoes the automatic stop") {
+        let identity = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        var tracking = MeetingCallEndTracking(recordingIdentity: identity, families: zoom)
+        for time in [100.0, 110, 120, 130, 140] { _ = tracking.policy.observe(.inactive, sampledAt: time, at: time) }
+        assertTrue(tracking.canStop(currentIdentity: identity, warningIdentity: identity, activity: .inactive, at: 140),
+                   "a silent room with the call app gone stops at the deadline")
+        tracking.heardAudioDuringWarning = true
+        assertFalse(tracking.canStop(currentIdentity: identity, warningIdentity: identity, activity: .inactive, at: 140),
+                    "people still talking after the remote side hung up keep the recording going")
     }
 }

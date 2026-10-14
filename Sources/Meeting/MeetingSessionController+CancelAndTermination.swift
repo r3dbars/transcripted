@@ -27,7 +27,7 @@ extension MeetingSessionController {
     /// Cancel capture after an explicit confirmation, without queueing
     /// transcription or saving a transcript.
     func cancelRecording(reason: RecordingCancelReason = .unknown) async {
-        disableCallEndDetection()
+        disableCallEndDetection(restoringSilenceWarning: false)
         guard case .recording = state else { return }
         transition(to: .stoppingRecording, reason: "cancel_requested")
         _ = audioInactivityDetector.stopRecording()

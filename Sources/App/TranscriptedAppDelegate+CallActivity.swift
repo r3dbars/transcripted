@@ -16,6 +16,10 @@ extension TranscriptedAppDelegate {
             guard let self, AutoCallDetectionPreferences.isEnabled() else { return }
             self.appState.meetingSession.observeCallActivity(snapshot)
         }
+        let monitor = micActivityMonitor
+        appState.meetingSession.callActivitySampler = { [weak monitor] completion in
+            monitor?.sampleCallActivityNow(completion)
+        }
         cameraActivityMonitor.onChange = { [weak self] inUse in
             self?.meetingPromptDetector.updateCameraInUse(inUse)
         }

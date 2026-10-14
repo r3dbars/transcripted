@@ -14,7 +14,7 @@ struct MeetingCallActivitySnapshot: Equatable {
                         isBrowserCall: Bool, cameraOnly: Bool,
                         sampledAt: TimeInterval?, now: TimeInterval) -> Set<String>? {
         guard detectedPrompt, !cameraOnly, isReliable, let sampledAt,
-              now >= sampledAt, now - sampledAt <= 12 else { return nil }
+              now >= sampledAt, now - sampledAt <= MeetingEndDetectionPolicy.sampleFreshness else { return nil }
         if isBrowserCall {
             let families = Set(inputUsers.compactMap(MeetingPromptProvider.browserFamily(forBundleID:))
                 .map(MeetingPromptProvider.browserAppFamily(forBundleFamily:)))
@@ -72,11 +72,16 @@ struct MeetingCallEndTracking {
     let recordingIdentity: UUID
     let families: Set<String>
     var policy = MeetingEndDetectionPolicy()
+    /// Mic or system audio went over the silence threshold while the warning
+    /// was up. Room speech doesn't clear the warning (the call app is still
+    /// gone), but it vetoes the automatic stop: people may still be talking
+    /// after the remote side hung up. The user can still press Stop.
+    var heardAudioDuringWarning = false
 
     func canStop(currentIdentity: UUID?, warningIdentity: UUID?, activity: MeetingEndDetectionPolicy.Activity,
                  at now: TimeInterval) -> Bool {
         recordingIdentity == currentIdentity && recordingIdentity == warningIdentity
-            && activity == .inactive && policy.canStop(at: now)
+            && activity == .inactive && !heardAudioDuringWarning && policy.canStop(at: now)
     }
 }
 
@@ -85,6 +90,10 @@ struct MeetingCallEndTracking {
 struct MeetingEndDetectionPolicy {
     enum Activity { case active, inactive, unknown }
     enum Event: Equatable { case none, warningStarted, warningCleared, stop }
+
+    /// A reading older than this can't stand for the call's current state:
+    /// two missed 5 s polls plus slack.
+    static let sampleFreshness: TimeInterval = 12
 
     let inactivityInterval: TimeInterval
     let countdownInterval: TimeInterval
@@ -100,16 +109,18 @@ struct MeetingEndDetectionPolicy {
     private var suppressed = false
 
     init(inactivityInterval: TimeInterval = 10, countdownInterval: TimeInterval = 30,
-         maximumSampleGap: TimeInterval = 12) {
+         maximumSampleGap: TimeInterval = MeetingEndDetectionPolicy.sampleFreshness) {
         self.inactivityInterval = inactivityInterval
         self.countdownInterval = countdownInterval
         self.maximumSampleGap = maximumSampleGap
     }
 
     /// `sampledAt` is when the sensor actually read the system; `now` is when
-    /// that read arrived. They differ enough to matter: the poll that closes the
-    /// race is sampled at or after the deadline, and a read delivered after the
-    /// deadline but sampled before it must not stand in for one.
+    /// that read arrived. Every interval runs on sample time, so the deadline
+    /// is exactly `countdownInterval` after the read that started the warning,
+    /// and the fresh read taken when the visible countdown hits zero is always
+    /// sampled at or after it. A read delivered after the deadline but sampled
+    /// before it must not stand in for one.
     mutating func observe(_ activity: Activity, sampledAt: TimeInterval, at now: TimeInterval) -> Event {
         guard !suppressed else { return .none }
         let gap = lastSampleAt.map { now - $0 }
@@ -117,24 +128,30 @@ struct MeetingEndDetectionPolicy {
         if let gap, gap < 0 || gap > maximumSampleGap {
             let event = clearWarning()
             // A new sample starts a fresh interval after a suspended monitor.
-            inactiveSince = activity == .inactive ? now : nil
+            inactiveSince = activity == .inactive ? sampledAt : nil
             if activity == .inactive { lastInactiveSampleAt = sampledAt }
             return event
         }
         switch activity {
-        case .active, .unknown:
+        case .active:
             return clearWarning()
+        case .unknown:
+            // While the warning is up, one failed read (a process exiting
+            // mid-scan, a camera erroring) holds it instead of restarting the
+            // whole cycle. It can't authorize a stop: only an inactive read
+            // sampled after the deadline does.
+            return deadline == nil ? clearWarning() : .none
         case .inactive:
             lastInactiveSampleAt = sampledAt
             if let deadline {
                 return now >= deadline && sampledAt >= deadline ? .stop : .none
             }
             guard let inactiveSince else {
-                self.inactiveSince = now
+                self.inactiveSince = sampledAt
                 return .none
             }
-            guard now - inactiveSince >= inactivityInterval else { return .none }
-            deadline = now + countdownInterval
+            guard sampledAt - inactiveSince >= inactivityInterval else { return .none }
+            deadline = sampledAt + countdownInterval
             return .warningStarted
         }
     }

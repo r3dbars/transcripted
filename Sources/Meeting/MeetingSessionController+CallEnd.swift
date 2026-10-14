@@ -9,14 +9,13 @@ extension MeetingSessionController {
         guard let candidate else { return nil }
         return latestCallActivity.sourceFamilies(detectedPrompt: true, provider: candidate.provider,
             isBrowserCall: candidate.isBrowserCall, cameraOnly: candidate.reason == .cameraInput,
-            sampledAt: latestCallActivityAt, now: ProcessInfo.processInfo.systemUptime)
+            sampledAt: latestCallActivity.sampledAt, now: ProcessInfo.processInfo.systemUptime)
     }
 
     func observeCallActivity(_ snapshot: MeetingCallActivitySnapshot) {
         let now = ProcessInfo.processInfo.systemUptime
         latestCallActivity = snapshot
-        latestCallActivityAt = snapshot.sampledAt
-        guard isRecording, var tracking = callEndTracking,
+        guard isRecording, let tracking = callEndTracking,
               tracking.recordingIdentity == activeRecordingIdentity else { return }
         // The snapshot carries when the audio system was actually read, which can
         // be seconds before this delivery. A read with no usable sampling time,
@@ -24,58 +23,112 @@ extension MeetingSessionController {
         // like a released stream or hold up a countdown.
         let sampledAt = snapshot.sampledAt
         let activity: MeetingEndDetectionPolicy.Activity
-        if let sampledAt, sampledAt <= now, now - sampledAt <= 12 {
+        if let sampledAt, sampledAt <= now, now - sampledAt <= tracking.policy.maximumSampleGap {
             activity = snapshot.activity(in: tracking.families, cameraInUse: freshCallCameraActivity(at: now))
         } else {
             activity = .unknown
         }
-        let event = tracking.policy.observe(activity, sampledAt: sampledAt ?? now, at: now)
-        callEndTracking = tracking
-        applyCallEndEvent(event, tracking: tracking)
-    }
-
-    private func applyCallEndEvent(_ event: MeetingEndDetectionPolicy.Event,
-                                   tracking: MeetingCallEndTracking) {
-        switch event {
-        case .none:
-            break
-        case .warningStarted:
-            audioInactivityWarning = MeetingAudioInactivityWarning(inactiveDuration: 10,
-                countdownSeconds: 30, kind: .callEnded, recordingIdentity: tracking.recordingIdentity)
-        case .warningCleared:
-            clearCallEndWarning()
-        case .stop:
-            let warning = audioInactivityWarning
-            Task { @MainActor [weak self] in
-                guard let self, let warning, warning.kind == .callEnded else { return }
-                await self.endRecordingFromAudioInactivityPrompt(automatic: true, expectedWarning: warning)
-            }
-        }
+        observeCallEnd(activity, sampledAt: sampledAt ?? now, at: now)
     }
 
     func updateCallCameraInUse(_ inUse: Bool?, sampledAt: TimeInterval) {
         callCameraInUse = inUse
         callCameraSampledAt = sampledAt
-        if inUse != false, var tracking = callEndTracking {
-            // A camera is not attributable to an app. Treat it conservatively
-            // as a veto, never as proof that a particular call ended.
-            _ = tracking.policy.observe(inUse == true ? .active : .unknown, sampledAt: sampledAt,
-                                        at: ProcessInfo.processInfo.systemUptime)
-            callEndTracking = tracking
+        // A camera is not attributable to an app. In use is a conservative
+        // veto; a failed read only holds. Neither is proof a call ended.
+        guard inUse != false, callEndTracking != nil else { return }
+        observeCallEnd(inUse == true ? .active : .unknown, sampledAt: sampledAt,
+                       at: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func observeCallEnd(_ activity: MeetingEndDetectionPolicy.Activity,
+                                sampledAt: TimeInterval, at now: TimeInterval) {
+        guard var tracking = callEndTracking else { return }
+        let event = tracking.policy.observe(activity, sampledAt: sampledAt, at: now)
+        if event == .warningStarted || event == .warningCleared {
+            tracking.heardAudioDuringWarning = false
+        }
+        callEndTracking = tracking
+        switch event {
+        case .none, .stop:
+            // Only the visible countdown reaching zero stops the recording
+            // (resolveCallEndCountdownExpiry), so a poll can't stop it early
+            // or a few seconds after the prompt already said 0.
+            break
+        case .warningStarted:
+            audioInactivityWarning = MeetingAudioInactivityWarning(
+                inactiveDuration: tracking.policy.inactivityInterval,
+                countdownSeconds: Int(tracking.policy.countdownInterval),
+                kind: .callEnded,
+                recordingIdentity: tracking.recordingIdentity
+            )
+            recordCallEndDiagnostic("meeting_call_end_warning_started", "Call app stopped using audio; call-end countdown shown")
+        case .warningCleared:
             clearCallEndWarning()
         }
     }
 
-    func disableCallEndDetection() {
+    /// Room speech or other playback while "Call ended" is up. It doesn't
+    /// clear the warning, but it vetoes the automatic stop.
+    func noteAudioLevelsForCallEnd(micLevel: Float, systemLevel: Float) {
+        guard audioInactivityWarning?.kind == .callEnded,
+              callEndTracking?.heardAudioDuringWarning == false else { return }
+        let threshold = MeetingAudioInactivityDetector.Configuration.default.activeLevelThreshold
+        guard micLevel > threshold || systemLevel > threshold else { return }
+        callEndTracking?.heardAudioDuringWarning = true
+    }
+
+    /// The visible countdown reached zero. Read the call app's audio right now
+    /// rather than waiting up to a poll for the next scheduled read, so the
+    /// recording stops at 0 and a call that came back in the last seconds is
+    /// still seen. If it can't safely stop (room audio, a failed read), the
+    /// prompt stays with Continue / Stop and no countdown.
+    func resolveCallEndCountdownExpiry(_ warning: MeetingAudioInactivityWarning) async {
+        guard warning.kind == .callEnded, audioInactivityWarning == warning, isRecording else { return }
+        if let snapshot = await freshCallActivitySnapshot() {
+            observeCallActivity(snapshot)
+        }
+        // A returning call clears the warning; a manual answer replaces it.
+        guard audioInactivityWarning == warning, isRecording else { return }
+        if canAutomaticallyStopEndedCall(warning) {
+            await endRecordingFromAudioInactivityPrompt(automatic: true, expectedWarning: warning)
+            return
+        }
+        let heardAudio = callEndTracking?.heardAudioDuringWarning == true
+        audioInactivityWarning = MeetingAudioInactivityWarning(
+            inactiveDuration: warning.inactiveDuration,
+            countdownSeconds: warning.countdownSeconds,
+            kind: .callEnded,
+            automaticStopAllowed: false,
+            recordingIdentity: warning.recordingIdentity
+        )
+        recordCallEndDiagnostic("meeting_call_end_auto_stop_held",
+                                "Call-end countdown expired; left for the user to decide",
+                                extra: ["hold_reason": heardAudio ? "audio_heard" : "unconfirmed_read"])
+    }
+
+    private func freshCallActivitySnapshot() async -> MeetingCallActivitySnapshot? {
+        guard let sampler = callActivitySampler else { return nil }
+        let once = CallActivitySampleOnce()
+        return await withCheckedContinuation { continuation in
+            once.continuation = continuation
+            sampler { snapshot in once.resume(snapshot) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                MainActor.assumeIsolated { once.resume(nil) }
+            }
+        }
+    }
+
+    func disableCallEndDetection(restoringSilenceWarning: Bool = true) {
         callEndTracking = nil
         latestCallActivity = .unknown
-        latestCallActivityAt = nil
-        clearCallEndWarning()
+        clearCallEndWarning(restoringSilenceWarning: restoringSilenceWarning)
     }
 
     func keepRecordingAfterCallEnd() {
         callEndTracking?.policy.keepRecording()
         _ = audioInactivityDetector.dismissWarning()
+        recordCallEndDiagnostic("meeting_call_end_kept", "Call-end warning answered with Continue")
         clearCallEndWarning()
     }
 
@@ -88,14 +141,35 @@ extension MeetingSessionController {
     }
 
     private func freshCallCameraActivity(at now: TimeInterval) -> Bool? {
-        guard let sampledAt = callCameraSampledAt, now >= sampledAt, now - sampledAt <= 12 else { return nil }
+        guard let sampledAt = callCameraSampledAt, now >= sampledAt,
+              now - sampledAt <= MeetingEndDetectionPolicy.sampleFreshness else { return nil }
         return callCameraInUse
     }
 
-    private func clearCallEndWarning() {
+    private func clearCallEndWarning(restoringSilenceWarning: Bool = true) {
         if audioInactivityWarning?.kind == .callEnded {
             audioInactivityWarning = nil
-            if let fallback = audioInactivityDetector.warning { applyAudioInactivityEvent(.warningStarted(fallback)) }
+            // Stop and cancel pass false: a pending "No sound" must not flash
+            // up while the recording is ending.
+            if restoringSilenceWarning, let fallback = audioInactivityDetector.warning {
+                applyAudioInactivityEvent(.warningStarted(fallback))
+            }
         }
+    }
+
+    private func recordCallEndDiagnostic(_ event: String, _ message: String, extra: [String: String] = [:]) {
+        DiagnosticsTrail.record(engine: "meeting", event: event, message: message,
+                                context: baseDiagnosticsContext(extra: extra))
+    }
+}
+
+/// Resumes a fresh-sample wait exactly once: the sample or the timeout.
+@MainActor
+private final class CallActivitySampleOnce {
+    var continuation: CheckedContinuation<MeetingCallActivitySnapshot?, Never>?
+
+    func resume(_ snapshot: MeetingCallActivitySnapshot?) {
+        continuation?.resume(returning: snapshot)
+        continuation = nil
     }
 }

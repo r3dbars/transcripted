@@ -688,23 +688,29 @@ remaining ~33k monthly suppression events (86.9% of prompt-family events).
 
 A recording accepted from a detected-call prompt can also detect when its
 source app releases its audio streams. After 10 seconds of continuously
-confirmed inactivity, the island asks **Meeting ended?** with **Keep recording**
-and **Stop now**. Doing nothing stops and transcribes after another 30 seconds.
-Returning source activity cancels the countdown. Keep recording disables this
-call-end detector for the current recording and dismisses any pending silence
-warning with it, so neither prompt returns until real audio activity does. The
-deadline also runs while the island is hidden.
+confirmed inactivity, the island shows **Call ended** / "Call audio stopped."
+with **Continue** and **Stop** and a "Stops in 30s" countdown, the same shape
+as the **No sound** warning. Doing nothing stops and transcribes when the
+countdown reaches zero. Returning source activity cancels the countdown.
+Continue disables this call-end detector for the current recording and
+dismisses any pending silence warning with it, so neither prompt returns until
+real audio activity does. The timings (10 s, 30 s, the 12 s freshness limit)
+live in `MeetingEndDetectionPolicy`.
 
-The stop is authorized only by a reading sampled at or after that deadline.
-The countdown can expire while the newest poll still predates a rejoin, and
-Transcripted keeps its own microphone device active, so the aggregate device
-listener may not produce a fresh edge. When the newest reading predates the
-deadline, the island shows **Checking call…** and waits for the next ordinary
-poll instead of stopping on evidence gathered before the call could have come
-back. The next reading stops the recording if the call is still gone, and
-returning activity cancels the warning through the normal path. A reading that
-arrives after the deadline but was sampled before it never authorizes a stop.
-The wait adds about one poll before a real stop.
+Only the countdown reaching zero stops the recording; scheduled polls never
+stop it on their own. At zero the session takes a fresh call-activity reading
+on the monitor's queue (`callActivitySampler`). Every interval runs on sample
+time, so that reading is always sampled at or after the deadline: if the call
+is still gone the recording stops right then, and if it came back in the last
+seconds the warning clears. There's no "checking" wait.
+
+The automatic stop is vetoed, and the prompt stays up with Continue / Stop and
+no countdown, when:
+
+- mic or system audio went over the silence threshold while the warning was up
+  (people still talking in the room after the remote side hung up, or the call
+  moved to another device), or
+- the fresh reading failed or is stale.
 
 The accepted source is captured before permission dialogs and bound only after
 capture succeeds. Native calls bind to their conferencing bundle family;
@@ -720,20 +726,23 @@ signal's sustain delay. Output stays observable while a browser microphone is
 muted. Transcripted and its helpers are excluded. Activity in another app does
 not sustain the bound call; activity in another tab of the same browser may.
 Any active camera conservatively prevents stopping, because camera activity
-cannot be attributed to an app. Failed or stale audio/camera reads and gaps in
-polling clear the warning instead of treating missing evidence as a hangup. Each
+cannot be attributed to an app. Before a warning, failed or stale audio/camera
+reads and gaps in polling reset the interval instead of treating missing
+evidence as a hangup. While a warning is up, one failed read holds it (it can't
+authorize a stop) so the prompt doesn't flap; a polling gap still clears it. Each
 reading carries when it was sampled, not just when it arrived, so a slow sensor
 read is judged by its sampling time. A read with no usable sampling time is
 unknown, never inactive.
-Timeout and Stop now callbacks carry the warning's recording identity so they
+Timeout and Stop callbacks carry the warning's recording identity so they
 cannot stop a later recording. Call-end warnings own their countdown separately
-from waveform-level silence; room speech does not cancel them, and clearing one
-restores a silence warning that was already pending.
+from waveform-level silence; room speech does not cancel them (it vetoes only
+the automatic stop), and clearing one restores a silence warning that was
+already pending, except when the recording is stopping.
 
 This is an inference about audio-device ownership, not a meeting-platform
 lifecycle API. A long mute that releases all streams and turns the camera off
 can resemble a hangup. Calls that retain streams between meetings can merge.
-Use Keep recording or stop manually in those cases. Calendar end times and
+Use Continue or stop manually in those cases. Calendar end times and
 foreground/window changes do not authorize an automatic stop.
 
 ### Research behind the approach

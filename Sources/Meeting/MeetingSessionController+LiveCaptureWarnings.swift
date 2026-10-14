@@ -226,6 +226,15 @@ extension MeetingSessionController {
         if warning.kind == .callEnded {
             guard isRecording, warning.recordingIdentity == activeRecordingIdentity else { return }
             guard !automatic || canAutomaticallyStopEndedCall(warning) else { return }
+            DiagnosticsTrail.record(
+                level: automatic ? .warning : .info,
+                engine: "meeting",
+                event: automatic ? "meeting_call_end_timeout" : "meeting_call_end_stop_requested",
+                message: automatic
+                    ? "Meeting recording ended after the call-end countdown"
+                    : "Meeting recording ended from the call-end prompt",
+                context: baseDiagnosticsContext(extra: ["duration_ms": "\(Int(recordingDuration * 1000))"])
+            )
             await stopRecording(reason: automatic ? .detectedCallEndTimeout : .detectedCallEndPrompt)
             return
         }
@@ -271,6 +280,7 @@ extension MeetingSessionController {
 
     func observeAudioActivity() {
         guard isRecording else { return }
+        noteAudioLevelsForCallEnd(micLevel: latestMicLevel, systemLevel: latestSystemLevel)
         applyAudioInactivityEvent(
             audioInactivityDetector.observe(
                 micLevel: latestMicLevel,

@@ -243,7 +243,8 @@ final class MeetingSessionController: ObservableObject {
     var audioInactivityDetector = MeetingAudioInactivityDetector()
     var callEndTracking: MeetingCallEndTracking?
     var latestCallActivity = MeetingCallActivitySnapshot.unknown
-    var latestCallActivityAt: TimeInterval?
+    /// Takes a fresh call-activity reading off main (the app wires it to the mic monitor's queue).
+    var callActivitySampler: (@MainActor (@escaping @MainActor @Sendable (MeetingCallActivitySnapshot) -> Void) -> Void)?
     var callCameraInUse: Bool?
     var callCameraSampledAt: TimeInterval?
     var latestMicLevel: Float = 0
