@@ -496,7 +496,9 @@ func testMeetingEndDetectionPolicy() {
         _ = policy.observe(.inactive, sampledAt: 100, at: 100.4)
         assertEqual(policy.observe(.inactive, sampledAt: 110, at: 111.5), .warningStarted,
                     "a read sampled at 110s opens the warning even if it arrives late")
-        _ = policy.observe(.inactive, sampledAt: 135, at: 135.2)
+        for sample in [116.5, 121.5, 126.5, 131.5, 136.5] {
+            _ = policy.observe(.inactive, sampledAt: sample, at: sample + 0.2)
+        }
         // The prompt appeared at 111.5s, so its 30s countdown hits zero at
         // 141.5s, when the session takes a fresh read.
         assertEqual(policy.observe(.inactive, sampledAt: 141.5, at: 141.6), .stop,

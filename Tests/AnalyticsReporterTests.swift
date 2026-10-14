@@ -216,7 +216,9 @@ func testAnalyticsReporter() {
             "a normal launch keeps its analytics key"
         )
         for key in AutomatedLaunchEnvironment.keys {
-            let environment = [key: "/tmp/report.json", "POSTHOG_API_KEY": "phc_env"]
+            // The report keys carry a path; the generic harness key must be "1".
+            let value = key == AutomatedLaunchEnvironment.harnessKey ? "1" : "/tmp/report.json"
+            let environment = [key: value, "POSTHOG_API_KEY": "phc_env"]
             assertTrue(
                 AutomatedLaunchEnvironment.isActive(environment: environment),
                 "\(key) marks an automated launch"
