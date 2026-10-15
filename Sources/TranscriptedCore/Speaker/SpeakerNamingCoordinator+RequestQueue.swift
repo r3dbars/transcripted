@@ -179,6 +179,30 @@ extension TranscriptionTaskManager {
         promoteNextSpeakerNamingRequestIfNeeded()
     }
 
+    /// Dismiss only the review generation whose saved meeting has been deleted.
+    /// A cancelled confirmation or a busy replacement must leave the review intact.
+    /// Unlike completing with no answers, this never persists deferred naming state.
+    @discardableResult
+    public func dismissDeletedSpeakerNamingRequest(transcriptId: UUID, requestId: UUID) -> Bool {
+        let requests = [speakerNamingRequest].compactMap { $0 }
+            + pendingSpeakerNamingRequests
+            + Array(deferredSpeakerNamingRequests.values)
+        guard let request = requests.first(where: {
+            $0.transcriptId == transcriptId && $0.id == requestId
+        }) else { return false }
+
+        return TranscriptSaver.serializeTranscriptFileUpdate {
+            guard !TranscriptSaver.hasReplacementReservation(at: request.transcriptURL),
+                  !TranscriptSaver.hasReplacementReservation(transcriptId: transcriptId),
+                  TranscriptSaver.existingTranscriptURL(
+                    in: request.transcriptURL.deletingLastPathComponent(), transcriptId: transcriptId
+                  ) == nil
+            else { return false }
+            cancelSpeakerNamingRequest(transcriptId: transcriptId, requestId: requestId)
+            return true
+        }
+    }
+
     func cancelSpeakerNamingRequest(transcriptId: UUID) {
         removeSpeakerNamingRequests(
             transcriptId: transcriptId,

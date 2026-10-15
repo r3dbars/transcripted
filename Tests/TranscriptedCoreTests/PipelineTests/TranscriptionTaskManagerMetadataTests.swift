@@ -487,6 +487,71 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(manager.pendingSpeakerNamingRequests.isEmpty)
     }
 
+    func testDeletedReviewDismissalRequiresAbsentTranscriptAndPreservesOtherReview() throws {
+        let manager = makeManager()
+        let firstId = UUID()
+        let secondId = UUID()
+        let firstURL = tempDirectory.appendingPathComponent("first.md")
+        let renamedURL = tempDirectory.appendingPathComponent("renamed.md")
+        try transcriptContent(id: firstId, title: "Synthetic meeting").write(
+            to: firstURL, atomically: true, encoding: .utf8
+        )
+        var completionCount = 0
+        let first = SpeakerNamingRequest(
+            speakers: [], transcriptURL: firstURL, transcriptId: firstId,
+            systemAudioURL: tempDirectory.appendingPathComponent("audio/first.wav"),
+            micAudioURL: nil, onComplete: { _ in completionCount += 1 }
+        )
+        let second = SpeakerNamingRequest(
+            speakers: [], transcriptURL: tempDirectory.appendingPathComponent("second.md"),
+            transcriptId: secondId,
+            systemAudioURL: tempDirectory.appendingPathComponent("audio/second.wav"),
+            micAudioURL: nil, onComplete: { _ in completionCount += 1 }
+        )
+        manager.enqueueSpeakerNamingRequest(first)
+        manager.enqueueSpeakerNamingRequest(second)
+
+        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id))
+        XCTAssertEqual(manager.speakerNamingRequest?.id, first.id)
+        try FileManager.default.moveItem(at: firstURL, to: renamedURL)
+        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id),
+                       "a renamed transcript is still present")
+        try FileManager.default.removeItem(at: renamedURL)
+        try transcriptContent(id: secondId, title: "Unrelated replacement path").write(
+            to: firstURL, atomically: true, encoding: .utf8
+        )
+        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: UUID()),
+                       "a stale generation cannot dismiss another review")
+        XCTAssertTrue(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id))
+        XCTAssertEqual(manager.speakerNamingRequest?.id, second.id)
+        XCTAssertFalse(manager.speakerNamingRequestOwnership.isCurrent(requestId: first.id, transcriptId: firstId))
+        XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(requestId: second.id, transcriptId: secondId))
+        XCTAssertEqual(completionCount, 0, "deletion never submits naming answers")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path), "a different recording reusing the path stays untouched")
+        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id))
+    }
+
+    func testDeletedReviewDismissalRefusesActiveReplacement() throws {
+        let manager = makeManager()
+        let transcriptId = UUID()
+        let url = tempDirectory.appendingPathComponent("reserved.md")
+        let request = SpeakerNamingRequest(
+            speakers: [], transcriptURL: url, transcriptId: transcriptId,
+            systemAudioURL: tempDirectory.appendingPathComponent("audio/reserved.wav"),
+            micAudioURL: nil, onComplete: { _ in XCTFail("must not submit naming answers") }
+        )
+        manager.enqueueSpeakerNamingRequest(request)
+        try transcriptContent(id: transcriptId, title: "Synthetic replacement").write(
+            to: url, atomically: true, encoding: .utf8
+        )
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        try FileManager.default.removeItem(at: url)
+        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: transcriptId, requestId: request.id))
+        XCTAssertEqual(manager.speakerNamingRequest?.id, request.id)
+        XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(requestId: request.id, transcriptId: transcriptId))
+    }
+
     func testCancelSpeakerNamingRequestCleansArtifactsAndPromotesNext() throws {
         let manager = makeManager()
         let firstId = UUID()

@@ -63,3 +63,5 @@ Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOv
 - **AppKit renderers, controller-owned state.** Controllers push `update(...)` into views; no SwiftUI hosting in the island.
 - **AirPods.** Nothing here builds an `AVAudioEngine` or touches `inputNode`. The start click waits for recording on a headset (`DictationStartCuePolicy`); read `Sources/Speech/AGENTS.md` before changing start timing.
 - **Source pins.** `DictationSessionController.swift` and `MeetingOverlayController.swift` are heavily pinned; run `python3 scripts/dev/check-source-pins.py --changed-only` before editing.
+
+Speaker review also offers **Delete recording…** below its footer. It pauses completion while confirming, keeps typed answers on Keep recording, and moves only the reviewed recording to Finder Trash via `HomeMeetingDeletion.trashReviewedRecording`. The presenter dismisses the exact review generation after success without submitting naming answers; failures keep the review available. Shared speaker identities remain.

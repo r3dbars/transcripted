@@ -11,6 +11,20 @@ import TranscriptedCore
 import UniformTypeIdentifiers
 
 extension TranscriptedAppDelegate {
+    func configureSpeakerReviewActions(meetingSession: MeetingSessionController) {
+        SpeakerNamingSheet.shared.onOpenTranscript = { [weak self] transcriptURL in
+            self?.settingsWindowController.revealMeeting(
+                transcriptURL: transcriptURL,
+                source: "meeting_overlay"
+            )
+        }
+        SpeakerNamingSheet.shared.onRecordingDeleted = { [weak meetingSession] transcriptID, requestID in
+            meetingSession?.taskManager.dismissDeletedSpeakerNamingRequest(
+                transcriptId: transcriptID, requestId: requestID
+            )
+        }
+    }
+
     func startDictationFromSettings() {
         guard let session = appState.contextCapture.sessionController else { return }
         let sourceApp = resolvedSourceApp()

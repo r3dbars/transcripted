@@ -32,6 +32,7 @@ final class SpeakerNamingSheet {
     weak var island: NotchIslandController?
     /// Open transcript on the island's "Everyone's named".
     var onOpenTranscript: ((URL) -> Void)?
+    var onRecordingDeleted: ((_ transcriptID: UUID, _ requestID: UUID) -> Void)?
     private var islandReviewView: NotchIslandSpeakerReviewView?
     private var islandReviewContent: NotchIslandSpeakerReviewContent?
 
@@ -106,6 +107,33 @@ final class SpeakerNamingSheet {
         let requestID = request.id
         let view = NotchIslandSpeakerReviewView(request: request)
         let content = NotchIslandSpeakerReviewContent(reviewID: requestID, meetingTitle: nil, stage: .naming)
+        view.onDeleteRecording = { [weak self, weak view] in
+            guard let self, let view, self.islandReviewView === view else {
+                return "This review has changed. Open the recording from Meetings to delete it."
+            }
+            let root = FileManager.default.meetingSupportDir
+            do {
+                let payload = try await Task.detached(priority: .userInitiated) {
+                    try HomeMeetingDeletion.trashReviewedRecording(
+                        transcriptURL: request.transcriptURL, transcriptID: request.transcriptId,
+                        meetingsRoot: root
+                    )
+                }.value
+                MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(payload.plan.audioAttachmentIDs))
+                self.onRecordingDeleted?(request.transcriptId, requestID)
+                self.finishIslandReview(requestID: requestID)
+                CaptureLibraryChangeBroadcaster.shared.noteArtifactsChanged(transcriptURLs: payload.plan.transcriptURLs)
+                let urls = payload.plan.transcriptURLs
+                Task.detached(priority: .utility) {
+                    DictionaryPastMeetingBackupStore.default().removeBackups(forMeetingsAt: urls)
+                }
+                return nil
+            } catch let error as HomeMeetingDeletionError {
+                return error.localizedDescription
+            } catch {
+                return "The recording could not be moved to Trash. Keep it and try again from Meetings."
+            }
+        }
         view.onLayoutChange = { [weak island] in island?.speakerReviewLayoutChanged() }
         view.onWantsKeyboard = { [weak island] in island?.makeKeyForTyping() }
         view.onLater = { [weak self] updates in
