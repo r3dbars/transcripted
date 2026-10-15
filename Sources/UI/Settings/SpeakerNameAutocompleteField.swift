@@ -1,10 +1,9 @@
 import SwiftUI
 import AppKit
-import TranscriptedCore
 
 /// SwiftUI wrapper around an `NSComboBox`-based name autocomplete.
 /// It reuses `SpeakerNameSelectionPolicy` for label building, suggestion
-/// ordering, and inline completion so the Speakers screen's "Who is this?"
+/// ordering so the Speakers screen's "Who is this?"
 /// field matches existing voices exactly the way naming does elsewhere.
 struct SpeakerNameAutocompleteField: NSViewRepresentable {
     @Binding var text: String
@@ -26,13 +25,20 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSComboBox {
+        makeComboBox(coordinator: context.coordinator)
+    }
+
+    func makeComboBox(coordinator: Coordinator) -> NSComboBox {
         // The box owns its coordinator as data source, so a SwiftUI teardown
         // mid-keystroke can't leave AppKit pointing at a freed coordinator.
         let combo = RetainedDataSourceComboBox()
         combo.isEditable = true
-        combo.completes = true
-        combo.setRetainedDataSource(context.coordinator)
-        combo.delegate = context.coordinator
+        // Names are free-form input. Native inline completion inserts a saved
+        // name into the field before the user explicitly chooses it; a space
+        // can then commit that replacement. Suggestions belong in the dropdown.
+        combo.completes = false
+        combo.setRetainedDataSource(coordinator)
+        combo.delegate = coordinator
         combo.font = NSFont.systemFont(ofSize: 13)
         combo.placeholderString = placeholder
         combo.stringValue = text
@@ -40,7 +46,7 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
             combo.identifier = NSUserInterfaceItemIdentifier(accessibilityIdentifier)
             combo.setAccessibilityIdentifier(accessibilityIdentifier)
         }
-        context.coordinator.rebuild(options: options)
+        coordinator.rebuild(options: options)
         combo.numberOfVisibleItems = Self.visibleItemCount(for: options)
         if autoFocus {
             DispatchQueue.main.async {
@@ -122,16 +128,6 @@ struct SpeakerNameAutocompleteField: NSViewRepresentable {
             let visible = visibleLabels(for: comboBox.stringValue)
             guard visible.indices.contains(index) else { return nil }
             return visible[index]
-        }
-
-        func comboBox(_ comboBox: NSComboBox, completedString string: String) -> String? {
-            SpeakerNameSelectionPolicy.completedLabel(
-                for: string,
-                labels: labels,
-                optionsByLabel: optionsByLabel,
-                displayName: { $0.displayName },
-                callCount: { $0.callCount }
-            )
         }
 
         func comboBox(_ comboBox: NSComboBox, indexOfItemWithStringValue string: String) -> Int {
