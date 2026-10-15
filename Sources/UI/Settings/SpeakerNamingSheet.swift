@@ -32,7 +32,7 @@ final class SpeakerNamingSheet {
     weak var island: NotchIslandController?
     /// Open transcript on the island's "Everyone's named".
     var onOpenTranscript: ((URL) -> Void)?
-    var onRecordingDeleted: ((_ transcriptID: UUID, _ requestID: UUID) -> Void)?
+    var onRecordingDeleted: ((_ transcriptID: UUID, _ requestID: UUID) async -> Void)?
     private var islandReviewView: NotchIslandSpeakerReviewView?
     private var islandReviewContent: NotchIslandSpeakerReviewContent?
 
@@ -120,7 +120,7 @@ final class SpeakerNamingSheet {
                     )
                 }.value
                 MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(payload.plan.audioAttachmentIDs))
-                self.onRecordingDeleted?(request.transcriptId, requestID)
+                await self.onRecordingDeleted?(request.transcriptId, requestID)
                 self.finishIslandReview(requestID: requestID)
                 CaptureLibraryChangeBroadcaster.shared.noteArtifactsChanged(transcriptURLs: payload.plan.transcriptURLs)
                 let urls = payload.plan.transcriptURLs

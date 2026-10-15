@@ -19,7 +19,7 @@ extension TranscriptedAppDelegate {
             )
         }
         SpeakerNamingSheet.shared.onRecordingDeleted = { [weak meetingSession] transcriptID, requestID in
-            meetingSession?.taskManager.dismissDeletedSpeakerNamingRequest(
+            await meetingSession?.taskManager.dismissDeletedSpeakerNamingRequest(
                 transcriptId: transcriptID, requestId: requestID
             )
         }

@@ -487,7 +487,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         XCTAssertTrue(manager.pendingSpeakerNamingRequests.isEmpty)
     }
 
-    func testDeletedReviewDismissalRequiresAbsentTranscriptAndPreservesOtherReview() throws {
+    func testDeletedReviewDismissalRequiresAbsentTranscriptAndPreservesOtherReview() async throws {
         let manager = makeManager()
         let firstId = UUID()
         let secondId = UUID()
@@ -511,27 +511,30 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         manager.enqueueSpeakerNamingRequest(first)
         manager.enqueueSpeakerNamingRequest(second)
 
-        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id))
+        let refusedPresent = await manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id)
+        XCTAssertFalse(refusedPresent)
         XCTAssertEqual(manager.speakerNamingRequest?.id, first.id)
         try FileManager.default.moveItem(at: firstURL, to: renamedURL)
-        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id),
-                       "a renamed transcript is still present")
+        let refusedRenamed = await manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id)
+        XCTAssertFalse(refusedRenamed, "a renamed transcript is still present")
         try FileManager.default.removeItem(at: renamedURL)
         try transcriptContent(id: secondId, title: "Unrelated replacement path").write(
             to: firstURL, atomically: true, encoding: .utf8
         )
-        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: UUID()),
-                       "a stale generation cannot dismiss another review")
-        XCTAssertTrue(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id))
+        let refusedStale = await manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: UUID())
+        XCTAssertFalse(refusedStale, "a stale generation cannot dismiss another review")
+        let dismissed = await manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id)
+        XCTAssertTrue(dismissed)
         XCTAssertEqual(manager.speakerNamingRequest?.id, second.id)
         XCTAssertFalse(manager.speakerNamingRequestOwnership.isCurrent(requestId: first.id, transcriptId: firstId))
         XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(requestId: second.id, transcriptId: secondId))
         XCTAssertEqual(completionCount, 0, "deletion never submits naming answers")
         XCTAssertTrue(FileManager.default.fileExists(atPath: firstURL.path), "a different recording reusing the path stays untouched")
-        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id))
+        let refusedRepeated = await manager.dismissDeletedSpeakerNamingRequest(transcriptId: firstId, requestId: first.id)
+        XCTAssertFalse(refusedRepeated)
     }
 
-    func testDeletedReviewDismissalRefusesActiveReplacement() throws {
+    func testDeletedReviewDismissalRefusesActiveReplacement() async throws {
         let manager = makeManager()
         let transcriptId = UUID()
         let url = tempDirectory.appendingPathComponent("reserved.md")
@@ -547,9 +550,50 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url))
         defer { TranscriptSaver.finishReplacingTranscript(reservation) }
         try FileManager.default.removeItem(at: url)
-        XCTAssertFalse(manager.dismissDeletedSpeakerNamingRequest(transcriptId: transcriptId, requestId: request.id))
+        let refusedReplacement = await manager.dismissDeletedSpeakerNamingRequest(transcriptId: transcriptId, requestId: request.id)
+        XCTAssertFalse(refusedReplacement)
         XCTAssertEqual(manager.speakerNamingRequest?.id, request.id)
         XCTAssertTrue(manager.speakerNamingRequestOwnership.isCurrent(requestId: request.id, transcriptId: transcriptId))
+    }
+
+    func testDeletedReviewDismissalLeavesMainActorAvailableWhileWriterOwnsSerializer() async {
+        let manager = makeManager()
+        let transcriptId = UUID()
+        let request = SpeakerNamingRequest(
+            speakers: [], transcriptURL: tempDirectory.appendingPathComponent("deleted.md"),
+            transcriptId: transcriptId,
+            systemAudioURL: tempDirectory.appendingPathComponent("audio/deleted.wav"),
+            micAudioURL: nil, onComplete: { _ in XCTFail("must not submit naming answers") }
+        )
+        manager.enqueueSpeakerNamingRequest(request)
+        let writerEntered = DispatchSemaphore(value: 0)
+        let releaseWriter = DispatchSemaphore(value: 0)
+        let writer = Task.detached {
+            TranscriptSaver.serializeTranscriptFileUpdate {
+                writerEntered.signal()
+                // Deadlock escape only: the assertion checks who released the
+                // writer, never how long scanning or scheduling took.
+                return releaseWriter.wait(timeout: .now() + 10) == .success
+            }
+        }
+        await Task.detached { writerEntered.wait() }.value
+        var dismissal: Task<Bool, Never>?
+        await withCheckedContinuation { (started: CheckedContinuation<Void, Never>) in
+            dismissal = Task { @MainActor in
+                started.resume()
+                return await manager.dismissDeletedSpeakerNamingRequest(
+                    transcriptId: transcriptId, requestId: request.id
+                )
+            }
+        }
+        // The dismissal task can only yield this actor after entering the
+        // public method. A synchronous scan would hold it until the escape.
+        releaseWriter.signal()
+        let writerReleasedByMainActor = await writer.value
+        let dismissed = await dismissal!.value
+        XCTAssertTrue(writerReleasedByMainActor, "MainActor must remain available while deletion waits for a writer")
+        XCTAssertTrue(dismissed)
+        XCTAssertNil(manager.speakerNamingRequest)
     }
 
     func testCancelSpeakerNamingRequestCleansArtifactsAndPromotesNext() throws {

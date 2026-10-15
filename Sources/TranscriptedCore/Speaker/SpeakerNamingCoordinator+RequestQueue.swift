@@ -183,7 +183,7 @@ extension TranscriptionTaskManager {
     /// A cancelled confirmation or a busy replacement must leave the review intact.
     /// Unlike completing with no answers, this never persists deferred naming state.
     @discardableResult
-    public func dismissDeletedSpeakerNamingRequest(transcriptId: UUID, requestId: UUID) -> Bool {
+    public func dismissDeletedSpeakerNamingRequest(transcriptId: UUID, requestId: UUID) async -> Bool {
         let requests = [speakerNamingRequest].compactMap { $0 }
             + pendingSpeakerNamingRequests
             + Array(deferredSpeakerNamingRequests.values)
@@ -191,16 +191,28 @@ extension TranscriptionTaskManager {
             $0.transcriptId == transcriptId && $0.id == requestId
         }) else { return false }
 
-        return TranscriptSaver.serializeTranscriptFileUpdate {
-            guard !TranscriptSaver.hasReplacementReservation(at: request.transcriptURL),
-                  !TranscriptSaver.hasReplacementReservation(transcriptId: transcriptId),
-                  TranscriptSaver.existingTranscriptURL(
-                    in: request.transcriptURL.deletingLastPathComponent(), transcriptId: transcriptId
-                  ) == nil
-            else { return false }
-            cancelSpeakerNamingRequest(transcriptId: transcriptId, requestId: requestId)
-            return true
-        }
+        let transcriptURL = request.transcriptURL
+        let ownership = speakerNamingRequestOwnership
+        let didInvalidate = await Task.detached(priority: .userInitiated) {
+            TranscriptSaver.serializeTranscriptFileUpdate {
+                guard !TranscriptSaver.hasReplacementReservation(at: transcriptURL),
+                      !TranscriptSaver.hasReplacementReservation(transcriptId: transcriptId),
+                      TranscriptSaver.existingTranscriptURL(
+                        in: transcriptURL.deletingLastPathComponent(), transcriptId: transcriptId
+                      ) == nil
+                else { return false }
+                // Invalidate before releasing the file serializer so a late
+                // naming completion cannot regain permission during the actor hop.
+                ownership.invalidate(transcriptId: transcriptId, requestId: requestId)
+                return true
+            }
+        }.value
+        guard didInvalidate else { return false }
+        removeSpeakerNamingRequests(
+            transcriptId: transcriptId, requestIds: [requestId],
+            preservingSourceAudio: false, ownershipAlreadyInvalidated: true
+        )
+        return true
     }
 
     func cancelSpeakerNamingRequest(transcriptId: UUID) {
@@ -258,7 +270,8 @@ extension TranscriptionTaskManager {
     private func removeSpeakerNamingRequests(
         transcriptId: UUID,
         requestIds: Set<UUID>?,
-        preservingSourceAudio: Bool
+        preservingSourceAudio: Bool,
+        ownershipAlreadyInvalidated: Bool = false
     ) {
         let matchesTarget: (SpeakerNamingRequest) -> Bool = { request in
             request.transcriptId == transcriptId
@@ -269,16 +282,20 @@ extension TranscriptionTaskManager {
             + pendingSpeakerNamingRequests.filter(matchesTarget)
             + deferredSpeakerNamingRequests.values.filter(matchesTarget)
 
-        TranscriptSaver.serializeTranscriptFileUpdate {
-            if let requestIds {
-                for requestId in requestIds {
-                    speakerNamingRequestOwnership.invalidate(
-                        transcriptId: transcriptId,
-                        requestId: requestId
-                    )
+        // Deleted-review dismissal invalidates off-main. Rejoining the writer
+        // queue here could block UI behind a different long-running rewrite.
+        if !ownershipAlreadyInvalidated {
+            TranscriptSaver.serializeTranscriptFileUpdate {
+                if let requestIds {
+                    for requestId in requestIds {
+                        speakerNamingRequestOwnership.invalidate(
+                            transcriptId: transcriptId,
+                            requestId: requestId
+                        )
+                    }
+                } else {
+                    speakerNamingRequestOwnership.invalidate(transcriptId: transcriptId)
                 }
-            } else {
-                speakerNamingRequestOwnership.invalidate(transcriptId: transcriptId)
             }
         }
         if let requestIds {
