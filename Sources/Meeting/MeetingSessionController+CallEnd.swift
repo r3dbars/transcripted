@@ -15,6 +15,11 @@ extension MeetingSessionController {
     func observeCallActivity(_ snapshot: MeetingCallActivitySnapshot) {
         let now = ProcessInfo.processInfo.systemUptime
         latestCallActivity = snapshot
+        if isRecording, callEndTracking == nil, let pending = pendingCallEndCandidate,
+           pending.identity == activeRecordingIdentity,
+           let families = callEndFamilies(for: pending.candidate) {
+            armCallEndTracking(identity: pending.identity, families: families, late: true)
+        }
         guard isRecording, let tracking = callEndTracking,
               tracking.recordingIdentity == activeRecordingIdentity else { return }
         // The snapshot carries when the audio system was actually read, which can
@@ -119,7 +124,37 @@ extension MeetingSessionController {
         }
     }
 
+    /// Arms call-end detection for a detected-prompt start. When the call app
+    /// is not using audio yet (the prompt was accepted before joining), the
+    /// candidate is remembered and bound by a later activity snapshot for this
+    /// recording. Manual starts never arm.
+    func armCallEndDetection(callFamilies: Set<String>?,
+                             detectedPrompt: Bool,
+                             candidate: MeetingPromptDetector.Candidate?) {
+        guard AutoCallDetectionPreferences.isEnabled(), let identity = activeRecordingIdentity else { return }
+        if let callFamilies {
+            armCallEndTracking(identity: identity, families: callFamilies, late: false)
+        } else if detectedPrompt, let candidate {
+            pendingCallEndCandidate = (identity, candidate)
+        }
+    }
+
+    func armCallEndTracking(identity: UUID, families: Set<String>, late: Bool) {
+        pendingCallEndCandidate = nil
+        callEndTracking = MeetingCallEndTracking(recordingIdentity: identity, families: families)
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_call_end_detection_armed",
+            message: "Call-end detection armed",
+            context: baseDiagnosticsContext(extra: [
+                "late": "\(late)",
+                "families": families.sorted().joined(separator: ",")
+            ])
+        )
+    }
+
     func disableCallEndDetection(restoringSilenceWarning: Bool = true) {
+        pendingCallEndCandidate = nil
         callEndTracking = nil
         latestCallActivity = .unknown
         clearCallEndWarning(restoringSilenceWarning: restoringSilenceWarning)
