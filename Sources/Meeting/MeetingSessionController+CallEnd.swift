@@ -21,6 +21,7 @@ extension MeetingSessionController {
                isArmed: callEndTracking != nil,
                pendingIdentity: pending.identity,
                activeIdentity: activeRecordingIdentity,
+               inputUsers: snapshot.inputUsers,
                families: callEndFamilies(for: pending.candidate)
            ) {
             armCallEndTracking(identity: pending.identity, families: families, late: true)

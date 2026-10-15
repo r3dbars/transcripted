@@ -718,9 +718,10 @@ browser calls bind to the one browser family holding input, regardless of
 whether the tab names Meet, Zoom, or Teams. Safari and WebKit are one family.
 A prompt accepted before the call app is using audio (the usual accept-then-join
 flow) keeps its candidate and binds on the first later poll where the source app
-does have audio, for that recording only; a later recording can never inherit
-it. Because a browser call binds from browser input, a web call joined muted
-binds once its browser takes the microphone, or not at all. Multiple active
+holds the microphone, for that recording only; a later recording can never inherit
+it. Output alone never binds late, so a chat chime from the call app during an
+unrelated recording cannot arm a stop. A call joined muted (native or browser)
+binds once its app takes the microphone, or not at all. Multiple active
 browsers and camera-only prompts cannot establish a safe
 source, so those recordings keep the existing manual/silence behavior. Manual
 menu/hotkey recordings do not arm this detector. Disabling auto call detection
