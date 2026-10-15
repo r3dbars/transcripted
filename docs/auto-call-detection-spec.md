@@ -717,10 +717,16 @@ capture succeeds. Native calls bind to their conferencing bundle family;
 browser calls bind to the one browser family holding input, regardless of
 whether the tab names Meet, Zoom, or Teams. Safari and WebKit are one family.
 A prompt accepted before the call app is using audio (the usual accept-then-join
-flow) keeps its candidate and binds on the first later poll where the source app
-does have audio, for that recording only; a later recording can never inherit
+flow) keeps its candidate and binds after later polls confirm sustained source
+activity, for that recording only; a later recording can never inherit
 it. Because a browser call binds from browser input, a web call joined muted
-binds once its browser takes the microphone, or not at all. Multiple active
+binds once its browser takes the microphone, or not at all. Late binding requires
+ten seconds of fresh, continuous activity from the same source family; a brief
+notification sound cannot arm it. Unknown or absent activity, changed families,
+and sample gaps longer than twelve seconds restart confirmation. Repeated or
+out-of-order samples earn no additional time. This uses process stream activity,
+not waveform levels, so a quiet ongoing call still qualifies. A call shorter
+than the confirmation interval may never arm and keeps the silence fallback. Multiple active
 browsers and camera-only prompts cannot establish a safe
 source, so those recordings keep the existing manual/silence behavior. Manual
 menu/hotkey recordings do not arm this detector. Disabling auto call detection
