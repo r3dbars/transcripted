@@ -85,6 +85,29 @@ struct MeetingCallEndTracking {
     }
 }
 
+/// A detected-prompt recording can be accepted before its call app is using
+/// audio (the usual "accept the prompt, then join" flow), so start may have no
+/// source families to bind. The candidate is remembered instead and bound by the
+/// first later snapshot that resolves it, for that recording only.
+enum MeetingCallEndArming {
+    /// The families a remembered candidate may bind with now, or nil when it
+    /// must keep waiting. Only the recording that remembered the candidate can
+    /// bind it, only while that recording is live and not already armed, and
+    /// only once the snapshot resolves real source families — binding an empty
+    /// set would make every later snapshot look like an ended call.
+    static func lateBindingFamilies(
+        isRecording: Bool,
+        isArmed: Bool,
+        pendingIdentity: UUID?,
+        activeIdentity: UUID?,
+        families: Set<String>?
+    ) -> Set<String>? {
+        guard isRecording, !isArmed, let pendingIdentity,
+              let families, !families.isEmpty else { return nil }
+        return pendingIdentity == activeIdentity ? families : nil
+    }
+}
+
 /// Time is monotonic and supplied by the caller, so sleep, unknown reads and
 /// missed polls cannot count as confirmed call inactivity.
 struct MeetingEndDetectionPolicy {

@@ -15,9 +15,14 @@ extension MeetingSessionController {
     func observeCallActivity(_ snapshot: MeetingCallActivitySnapshot) {
         let now = ProcessInfo.processInfo.systemUptime
         latestCallActivity = snapshot
-        if isRecording, callEndTracking == nil, let pending = pendingCallEndCandidate,
-           pending.identity == activeRecordingIdentity,
-           let families = callEndFamilies(for: pending.candidate) {
+        if let pending = pendingCallEndCandidate,
+           let families = MeetingCallEndArming.lateBindingFamilies(
+               isRecording: isRecording,
+               isArmed: callEndTracking != nil,
+               pendingIdentity: pending.identity,
+               activeIdentity: activeRecordingIdentity,
+               families: callEndFamilies(for: pending.candidate)
+           ) {
             armCallEndTracking(identity: pending.identity, families: families, late: true)
         }
         guard isRecording, let tracking = callEndTracking,
