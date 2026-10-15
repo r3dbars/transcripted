@@ -14,6 +14,10 @@ import TranscriptedCore
 #endif
 
 enum NotchIslandSpeakerReviewPolicy {
+    static let deleteTitle = "Delete recording…"
+    static let deleteConfirmation = "Move this recording to Trash?"
+    static let deleteDetail = "The transcript and saved audio will move to Finder Trash. You can restore them there. Saved people stay in Speakers."
+
     /// The Later button's ring. Touching the review (play, Yes, No, typing)
     /// stops it, so the island never closes on someone mid-answer. It only
     /// runs while the review is on screen (`laterCountdownRuns`).

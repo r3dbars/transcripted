@@ -1,6 +1,60 @@
 import Foundation
 
 func testHomeMeetingDeletion() {
+    runSuite("Review deletion follows identity after rename and keeps other recordings") {
+        withTemporaryHomeMeetingDeletionLibrary { root in
+            let original = root.appendingPathComponent("Original.md")
+            let renamed = root.appendingPathComponent("Renamed.md")
+            let other = root.appendingPathComponent("Other.md")
+            try writeDeletionMeeting(title: "Same title", transcriptURL: original)
+            try writeDeletionMeeting(title: "Same title", transcriptURL: other)
+            let id = UUID(uuidString: try TranscriptFrontmatter.readValues(from: original)!["transcript_id"]!)!
+            try FileManager.default.moveItem(at: original, to: renamed)
+            let audio = try writeDeletionAudio(for: renamed, systemBytes: "same", micBytes: "same")
+            let otherAudio = try writeDeletionAudio(for: other, systemBytes: "same", micBytes: "same")
+            let payload = try HomeMeetingDeletion.trashReviewedRecording(
+                transcriptURL: original, transcriptID: id, meetingsRoot: root)
+            defer { HomeMeetingDeletion.restore(payload) }
+            assertFalse(FileManager.default.fileExists(atPath: renamed.path), "renamed selected transcript moves to Trash")
+            assertFalse(FileManager.default.fileExists(atPath: audio.path), "its audio moves to Trash")
+            assertTrue(FileManager.default.fileExists(atPath: other.path), "matching sibling survives")
+            assertTrue(FileManager.default.fileExists(atPath: otherAudio.path), "sibling audio survives")
+            HomeMeetingDeletion.restore(payload)
+            assertTrue(FileManager.default.fileExists(atPath: renamed.path), "Trash recovery restores transcript")
+            assertTrue(FileManager.default.fileExists(atPath: audio.path), "Trash recovery restores audio")
+        }
+    }
+    runSuite("Review deletion refuses a replaced identity and a path outside its library") {
+        withTemporaryHomeMeetingDeletionLibrary { root in
+            let target = root.appendingPathComponent("Selected.md")
+            try writeDeletionMeeting(title: "Synthetic", transcriptURL: target)
+            let id = UUID(uuidString: try TranscriptFrontmatter.readValues(from: target)!["transcript_id"]!)!
+            for (allowedRoot, expectedID) in [(root, UUID()), (root.appendingPathComponent("different-library"), id)] {
+                do {
+                    let payload = try HomeMeetingDeletion.trashReviewedRecording(
+                        transcriptURL: target, transcriptID: expectedID, meetingsRoot: allowedRoot)
+                    HomeMeetingDeletion.restore(payload)
+                    assertTrue(false, "wrong identity or root must fail closed")
+                } catch HomeMeetingDeletionError.transcriptUnavailable { }
+            }
+            assertTrue(FileManager.default.fileExists(atPath: target.path), "refusal preserves recording")
+        }
+    }
+    runSuite("Review deletion accepts a legacy capture identity") {
+        withTemporaryHomeMeetingDeletionLibrary { root in
+            let target = root.appendingPathComponent("Legacy.md")
+            try writeDeletionMeeting(title: "Synthetic", transcriptURL: target)
+            let id = UUID(uuidString: try TranscriptFrontmatter.readValues(from: target)!["capture_id"]!)!
+            let original = try String(contentsOf: target, encoding: .utf8)
+            let legacy = original.split(separator: "\n", omittingEmptySubsequences: false)
+                .filter { !$0.hasPrefix("transcript_id:") }.joined(separator: "\n")
+            try legacy.write(to: target, atomically: true, encoding: .utf8)
+            let payload = try HomeMeetingDeletion.trashReviewedRecording(
+                transcriptURL: target, transcriptID: id, meetingsRoot: root)
+            defer { HomeMeetingDeletion.restore(payload) }
+            assertFalse(FileManager.default.fileExists(atPath: target.path), "legacy identity still targets the recording")
+        }
+    }
     runSuite("HomeMeetingDeletion waits for an in-flight whole-file update before deleting") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let transcriptURL = meetingsRoot.appendingPathComponent("Quick notes.md")
