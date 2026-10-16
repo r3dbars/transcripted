@@ -81,7 +81,14 @@ class ParakeetEngine: ObservableObject {
     /// guards that must treat a claim from a dead meeting session as absent
     /// go through `resolveSharedMeetingMicClaimStatus()` /
     /// `isSharedMeetingMicClaimCurrent` instead.
-    var sharedMeetingMicClaim: SharedMeetingMicClaim?
+    var sharedMeetingMicClaim: SharedMeetingMicClaim? {
+        // Every assignment reports, so a claim that replaces a stale one
+        // still turns the meeting's gate on.
+        didSet { onSharedMeetingMicBorrowChanged?(sharedMeetingMicClaim != nil) }
+    }
+    /// Told when a borrowed-mic claim starts or ends, so the meeting can keep
+    /// dictated words out of its own mic track while the claim is live.
+    var onSharedMeetingMicBorrowChanged: ((Bool) -> Void)?
     nonisolated let sharedMeetingMicRecorder = SharedMeetingMicRecorder()
     nonisolated let sharedMeetingMicLevelMeter = SharedMeetingMicLevelMeter()
     var sharedMeetingMicTransition = SharedMeetingMicTransitionState()
