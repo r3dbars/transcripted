@@ -409,7 +409,7 @@ extension TranscriptSaver {
     ) -> Bool {
         var lines = content.components(separatedBy: "\n")
         let rows = parseFrontmatterSpeakerRows(in: lines)
-        let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != newName }
+        let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != hedgedName(newName, replacing: $0.name) }
         guard !targetRows.isEmpty else { return false }
 
         var changed = false
@@ -418,7 +418,7 @@ extension TranscriptSaver {
         for row in targetRows {
             guard let index = row.nameLineIndex else { continue }
             let indent = lines[index].prefix(while: { $0 == " " })
-            lines[index] = "\(indent)name: \"\(escapeYAML(newName))\""
+            lines[index] = "\(indent)name: \"\(escapeYAML(hedgedName(newName, replacing: row.name)))\""
             changed = true
         }
         content = lines.joined(separator: "\n")
@@ -432,7 +432,7 @@ extension TranscriptSaver {
             let hasAnyConflict = rows.contains { $0.dbId != dbId && $0.name == oldName }
 
             if !hasAnyConflict {
-                applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
+                applyNameReplacement(in: &content, oldName: oldName, newName: hedgedName(newName, replacing: oldName), updateSpeakerTag: true)
                 changed = true
                 continue
             }
@@ -454,7 +454,7 @@ extension TranscriptSaver {
                     applyScopedNameReplacement(
                         in: &content,
                         oldName: oldName,
-                        newName: newName,
+                        newName: hedgedName(newName, replacing: oldName),
                         channel: channel
                     )
                     renamedChannels.append(channel.rawValue)
