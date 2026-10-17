@@ -305,6 +305,22 @@ struct ScreenSceneTests {
         #expect(scene.conversationTurns.contains { $0.text == "ok" })
     }
 
+    @Test("A short line flush above the field stays when it is only a substring of a field word")
+    func flushShortLineThatIsNotAFieldWordStays() {
+        let blocks = [
+            block("Can you confirm the schedule for Thursday", x: 0.05, y: 0.55, window: slack),
+            block("ok", x: 0.05, y: 0.72, window: slack),
+            block("look at the schedule for", x: 0.30, y: 0.77, window: slack),
+            block("thursday afternoon please", x: 0.30, y: 0.82, window: slack),
+        ]
+        let scene = ScreenScene.classify(
+            blocks: blocks,
+            frontmostBundleID: slack,
+            fieldText: "look at the schedule for thursday afternoon please"
+        )
+        #expect(scene.conversationTurns.last?.text == "ok")
+    }
+
     @Test("With nothing typed there is no floor and the bottom bubbles are used as before")
     func emptyFieldKeepsLegacySelection() {
         let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)

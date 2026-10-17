@@ -488,9 +488,9 @@ public enum ScreenScene {
     private static let dedupeMinimumLength = 6
     /// Top edge of the lowest block in the lower half of the window that
     /// reads back the user's own typed text, or `nil` when none does (empty
-    /// field, or the field is scrolled out of view). Only the lowest match is
-    /// the field: a higher one is a quoted or echoed message. The upper lines
-    /// of a wrapped field sit above the floor, but dedupe drops them.
+    /// field, or the field is scrolled out of view), raised to the first line
+    /// of the field when it wraps. Only the lowest match anchors the field: a
+    /// higher match with real spacing above it is a quoted or echoed message.
     private static func composeFieldTop(in blocks: [OCRBlock], fieldText: String) -> Double? {
         let field = normalizedForDedupe(fieldText)
         guard field.count >= dedupeMinimumLength else { return nil }
@@ -514,6 +514,9 @@ public enum ScreenScene {
         // above the floor would keep it in the thread as an earlier
         // message. A higher match with real spacing between it and the
         // cluster is a quoted echo and stays above the cut.
+        // Fragments must be whole words of the field: OCR wraps at word
+        // boundaries, and a bare substring test would let "ok" match "look".
+        let paddedField = " " + field + " "
         var top = lowest
         var remaining = blocks.filter { $0 != lowest && windowRelativeY(of: $0) >= 0.5 }
         while true {
@@ -522,7 +525,7 @@ public enum ScreenScene {
                     guard block.boundingBox.y < top.boundingBox.y,
                           isFlushAbove(top, block) else { return false }
                     let candidate = normalizedForDedupe(block.text)
-                    return !candidate.isEmpty && field.contains(candidate)
+                    return !candidate.isEmpty && paddedField.contains(" " + candidate + " ")
                 }
                 .max(by: { $0.boundingBox.y < $1.boundingBox.y })
             guard let next else { break }
