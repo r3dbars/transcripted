@@ -374,7 +374,7 @@ class FloatingOverlayController {
         actionTitle: String? = nil,
         action: (() -> Void)? = nil
     ) {
-        showMessage(message, tone: .error, actionTitle: actionTitle, action: action)
+        showMessage(message, tone: .error, kind: .other, actionTitle: actionTitle, action: action)
     }
 
     /// Calm variant of showError for "your text is on the clipboard" fallbacks:
@@ -382,10 +382,10 @@ class FloatingOverlayController {
     /// ⌘V instruction stays readable, and a clean fade instead of the shake.
     /// `kind` is `.landedClipboardNotice` only when the text did land and a
     /// newer take may replace the note; the no-island fallback of a
-    /// not-pasted notice keeps the default, which holds the next take back.
+    /// not-pasted notice passes `.other`, which holds the next take back.
     func showClipboardNotice(
         _ message: String,
-        kind: DictationQueuedStartPolicy.MessageKind = .other
+        kind: DictationQueuedStartPolicy.MessageKind
     ) {
         showMessage(message, tone: .notice, kind: kind)
     }
@@ -404,10 +404,10 @@ class FloatingOverlayController {
         paste: @escaping () -> Void
     ) {
         guard isIslandMode else {
-            showClipboardNotice(fallbackMessage)
+            showClipboardNotice(fallbackMessage, kind: .other)
             return
         }
-        showMessage(unconfirmed ? "Maybe pasted" : "Not pasted", tone: .notice, notPasted: NotPastedNotice(
+        showMessage(unconfirmed ? "Maybe pasted" : "Not pasted", tone: .notice, kind: .other, notPasted: NotPastedNotice(
             text: text,
             actionTitle: "Paste",
             hint: unconfirmed ? "If the words aren\u{2019}t there, paste them again." : nil,
@@ -425,7 +425,7 @@ class FloatingOverlayController {
             showError(fallbackMessage)
             return
         }
-        showMessage("Not pasted", tone: .notice, notPasted: NotPastedNotice(
+        showMessage("Not pasted", tone: .notice, kind: .other, notPasted: NotPastedNotice(
             text: text,
             actionTitle: "Copy",
             hint: "Your clipboard holds something too big to set aside.",
@@ -475,16 +475,16 @@ class FloatingOverlayController {
         actionTitle: String? = nil,
         action: (() -> Void)? = nil
     ) {
-        showMessage(message, tone: .saved, actionTitle: actionTitle, action: action)
+        showMessage(message, tone: .saved, kind: .other, actionTitle: actionTitle, action: action)
     }
 
     private func showMessage(
         _ message: String,
         tone: MessageTone,
+        kind: DictationQueuedStartPolicy.MessageKind,
         actionTitle: String? = nil,
         action: (() -> Void)? = nil,
-        notPasted: NotPastedNotice? = nil,
-        kind: DictationQueuedStartPolicy.MessageKind = .other
+        notPasted: NotPastedNotice? = nil
     ) {
         errorDismissTask?.cancel()
         clearNotPasted()
