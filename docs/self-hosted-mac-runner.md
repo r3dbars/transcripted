@@ -68,10 +68,13 @@ failing or hanging never touches the other.
 - A second VM only starts once the first has booted and the service knows
   which process is its VM (so the mic slowdown hits the right one), and only
   when more jobs wait than slots are already booting for.
-- The service counts its slots, the `ci-job-` VMs on disk, and every VM
-  running on the Mac (any app), and starts nothing once any of them reaches
-  two. On restart it stops slots a previous service left behind and deletes
-  every `ci-job-` VM before starting new ones.
+- The service counts its live slots and every VM running on the Mac (any
+  app), and starts nothing once either reaches two. Each slot records the name
+  of its VM; on every pass the service deletes any `ci-job-` VM no live slot
+  owns (a clone Tart failed to delete, or one left by a killed slot), retrying
+  on the next pass if the delete fails, so a leftover never holds a slot. On
+  restart it stops slots a previous service left behind and deletes every
+  `ci-job-` VM before starting new ones.
 - The heartbeat says "free" while at most one slot is busy, and `busy` when
   both are.
 - **Mic:** while a mic is in use, every running job VM drops to background
