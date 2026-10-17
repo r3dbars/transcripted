@@ -52,7 +52,7 @@ enum AudioSignalRecovery {
     // lower than hasSpeechCandidate so quiet but valid microphone input is kept.
     static let minimumCapturePeak: Float = 0.0008
     static let minimumCaptureActiveDuration: Double = 0.20
-    private static let captureFrameDuration: Double = 0.10
+    private static let captureFrameDuration: Double = 0.01
     private static let minimumCaptureFrameRMS: Float = 0.0001
 
     static func analyze(samples: [Float], sampleRate: Double) -> AudioSignalAnalysis {
@@ -102,7 +102,9 @@ enum AudioSignalRecovery {
 
         // Only frames that are both above the RMS floor and reach the capture
         // peak count, so the signal has to be sustained: one click in a dead
-        // mic's hiss is a single frame, not 0.2 s of capture.
+        // mic's hiss is one short frame, not 0.2 s of capture. Frames are 10 ms
+        // so a click straddling a frame boundary adds at most two of them
+        // (20 ms), however the frames happen to line up.
         let frameSize = max(1, Int(sampleRate * captureFrameDuration))
         var activeDuration = 0.0
         for start in stride(from: 0, to: samples.count, by: frameSize) {

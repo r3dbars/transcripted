@@ -97,6 +97,19 @@ final class AudioSignalRecoveryTests: XCTestCase {
         )
     }
 
+    func testUsableCaptureSignalRejectsAClickThatSpansTwoFrames() {
+        // Two adjacent loud samples straddle a frame boundary at every frame
+        // size we might use (100 ms = 1,600 samples; 10 ms = 160).
+        var hissAndClick = [Float](repeating: 0.0003, count: 32_000)
+        hissAndClick[1_599] = 0.5
+        hissAndClick[1_600] = 0.5
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: hissAndClick, sampleRate: 16_000),
+            "a click on a frame boundary must not count as sustained capture"
+        )
+    }
+
     func testUsableCaptureSignalRejectsBelowFloorNoise() {
         let inaudible = [Float](repeating: 0.0004, count: 32_000)
 
