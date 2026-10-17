@@ -299,6 +299,38 @@ func testTranscriptedConstants() async {
         await releaseWork.open()
     }
 
+    await runSuite("TranscriptedConstants.withTimeout — a cancelled caller gets CancellationError even when work swallows cancellation") {
+        // The work catches its cancelled sleep and returns a fallback value, so
+        // both race participants become ready at once. Caller cancellation must
+        // still win, every time.
+        for _ in 0..<50 {
+            let workStarted = ParakeetAsyncInterleavingGate()
+            let caller = Task { () -> Result<String, Error> in
+                do {
+                    return .success(try await TranscriptedConstants.withTimeout(seconds: 3_600) {
+                        await workStarted.open()
+                        do {
+                            try await Task.sleep(nanoseconds: 30_000_000_000)
+                        } catch {
+                            return "fallback"
+                        }
+                        return "slept"
+                    })
+                } catch {
+                    return .failure(error)
+                }
+            }
+            await workStarted.wait()
+            caller.cancel()
+            switch await caller.value {
+            case .success(let value):
+                assertTrue(false, "a cancelled caller must not get the work's value, got \(value)")
+            case .failure(let error):
+                assertTrue(error is CancellationError, "a cancelled caller should get CancellationError, got \(error)")
+            }
+        }
+    }
+
     await runSuite("TranscriptedConstants.withDetachedTimeout — returns completed work before deadline") {
         let result = try? await TranscriptedConstants.withDetachedTimeout(seconds: 1) {
             "ok"
