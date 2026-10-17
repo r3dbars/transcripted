@@ -43,6 +43,16 @@ func testDictationShortcutUpgrade() {
             "the notice names the new key"
         )
         assertEqual(
+            DictationShortcutUpgrade.movedToRightOptionNoticeIdentifier,
+            "transcripted.settings.general.dictation-key-moved-note",
+            "Settings can find the notice by the same automation id"
+        )
+        assertEqual(
+            DictationShortcutUpgrade.movedToRightOptionNoticeDismissIdentifier,
+            "transcripted.settings.general.dictation-key-moved-note-dismiss",
+            "OK uses a stable dismiss id"
+        )
+        assertEqual(
             HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults),
             .holdOrTap,
             "the one-key default behavior stays Hold or tap"
@@ -241,6 +251,31 @@ func testDictationShortcutUpgrade() {
         assertFalse(
             DictationShortcutUpgrade.showsMovedToRightOptionNotice(userDefaults: defaults),
             "they kept Option+Space, so 'moved to Right Option' would be wrong"
+        )
+    }
+
+    runSuite("A harness launch does not write upgrade flags") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        seedReal1169Identity(in: defaults)
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(
+            userDefaults: defaults,
+            isAutomatedLaunch: true
+        )
+        DictationShortcutUpgrade.apply(userDefaults: defaults, isAutomatedLaunch: true)
+
+        assertFalse(
+            defaults.bool(forKey: "dictationOneKeyMigrated"),
+            "smokes must not mark the one-key migrate as done"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.storedPushToTalkBinding(userDefaults: defaults),
+            "smokes use a throwaway HOME and must not persist Right Option"
+        )
+        assertFalse(
+            DictationShortcutUpgrade.showsMovedToRightOptionNotice(userDefaults: defaults),
+            "smokes must not arm the moved-key notice"
         )
     }
 

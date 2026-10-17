@@ -191,10 +191,19 @@ enum PhysicalDictationTriggerPreferences {
 
     /// Runs once. 1.1.69 upgraders move to one Right Option key, unless they
     /// had a custom Hands-Free shortcut — that becomes the one key.
-    static func migrateToOneDictationKeyIfNeeded(userDefaults: UserDefaults = .standard) {
+    /// Harness launches skip it: they use a throwaway HOME and must not
+    /// write migrate/notice flags.
+    static func migrateToOneDictationKeyIfNeeded(
+        userDefaults: UserDefaults = .standard,
+        isAutomatedLaunch: Bool = AutomatedLaunchEnvironment.isActive()
+    ) {
+        guard !isAutomatedLaunch else { return }
         guard !userDefaults.bool(forKey: oneDictationKeyMigratedKey) else { return }
         userDefaults.set(true, forKey: oneDictationKeyMigratedKey)
-        DictationShortcutUpgrade.apply(userDefaults: userDefaults)
+        DictationShortcutUpgrade.apply(
+            userDefaults: userDefaults,
+            isAutomatedLaunch: isAutomatedLaunch
+        )
     }
 
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {

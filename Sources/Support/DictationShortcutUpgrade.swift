@@ -18,6 +18,10 @@ enum DictationShortcutUpgrade {
     static let oneKeyReleaseVersion = "1.1.70"
     static let movedToRightOptionNoticeKey = "dictation-shortcut-moved-to-right-option-notice"
     static let movedToRightOptionNotice = "Dictation moved to Right Option"
+    static let movedToRightOptionNoticeIdentifier =
+        "transcripted.settings.general.dictation-key-moved-note"
+    static let movedToRightOptionNoticeDismissIdentifier =
+        "transcripted.settings.general.dictation-key-moved-note-dismiss"
     static let legacyHoldDefault = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
 
     static func rememberPreviousLaunchedVersion(
@@ -49,8 +53,13 @@ enum DictationShortcutUpgrade {
 
     /// One dictation key. Custom Hands-Free wins; otherwise 1.1.69 Fn /
     /// unstored defaults become Right Option; Carbon-era Option+Space stays
-    /// when Right Option was off.
-    static func apply(userDefaults: UserDefaults) {
+    /// when Right Option was off. Harness launches skip it: they use a
+    /// throwaway HOME and must not write migrate/notice flags.
+    static func apply(
+        userDefaults: UserDefaults,
+        isAutomatedLaunch: Bool = AutomatedLaunchEnvironment.isActive()
+    ) {
+        guard !isAutomatedLaunch else { return }
         let storedHold = PhysicalDictationTriggerPreferences.storedPushToTalkBinding(
             userDefaults: userDefaults
         )

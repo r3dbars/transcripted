@@ -74,14 +74,14 @@ extension TranscriptedSettingsView {
             Text(DictationShortcutUpgrade.movedToRightOptionNotice)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("transcripted.settings.general.dictation-key-moved-note")
+                .accessibilityIdentifier(DictationShortcutUpgrade.movedToRightOptionNoticeIdentifier)
             Spacer(minLength: 0)
             Button("OK") {
                 DictationShortcutUpgrade.dismissMovedToRightOptionNotice()
                 showsDictationKeyMovedNotice = false
             }
             .buttonStyle(.borderless)
-            .accessibilityIdentifier("transcripted.settings.general.dictation-key-moved-note-dismiss")
+            .accessibilityIdentifier(DictationShortcutUpgrade.movedToRightOptionNoticeDismissIdentifier)
         }
         .font(.caption)
         .padding(.bottom, 6)
