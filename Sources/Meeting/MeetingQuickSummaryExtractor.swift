@@ -438,7 +438,13 @@ enum MeetingQuickSummaryExtractor {
         guard hasSmallTalk || matchesAny(courtesyClosers, in: trimmed) else {
             return trimmed
         }
+        // Spoken commitments often follow a connection check without a
+        // comma ("I can hear you and I'll send the update"). Separate the
+        // joined clauses before removing small talk, or the check would
+        // erase the real work in the same sentence. Classification alone
+        // uses this text; the extracted bullet keeps the original sentence.
         let substantive = trimmed
+            .replacingOccurrences(of: #"\b(?:and|but|so)\b"#, with: ",", options: .regularExpression)
             .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == ":" })
             .map(String.init)
             .filter { !isSmallTalkClause($0) && !isCourtesyCloser($0) }
