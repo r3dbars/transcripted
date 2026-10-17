@@ -117,6 +117,8 @@ case "$tier" in
     full)
         step "Build-source list contracts" "python3 scripts/dev/check-build-source-lists.py"
         step "Test shape guard" "python3 scripts/dev/check-test-shape.py"
+        step "Synced copies (self-test)" "python3 scripts/dev/check-synced-copies.py --self-test"
+        step "Synced copies" "python3 scripts/dev/check-synced-copies.py"
         step "Dependency archive input guards" "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
         step "CLI manifest mode guards" "bash Tests/BuildDependencies/CLIManifestTests.sh"
         step "CLI packaging capability guards" "bash Tests/BuildDependencies/CLIPackagingTests.sh"
