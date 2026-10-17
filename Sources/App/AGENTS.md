@@ -22,7 +22,8 @@
 
 ## Files
 
-- `TranscriptedApp.swift` - app entry and `TranscriptedAppDelegate` core: builds the controllers, overlay setup, detected-meeting prompt wiring.
+- `TranscriptedApp.swift` - app entry and `TranscriptedAppDelegate` core: builds the controllers, overlay setup, detected-meeting prompt callbacks.
+- `DetectedMeetingPromptWiring.swift` - connects `MeetingPromptDetector.onPromptRequest` and the call prompt's Record / Not now / Remind soon / expiry callbacks to the app's closures. Tested by `Tests/DetectedMeetingPromptWiringTests.swift`.
 - `TranscriptedAppDelegate+MenuBar.swift` - status item badge, popover, onboarding and Settings windows, activation-policy switching.
 - `TranscriptedAppDelegate+SettingsActions.swift` - Settings actions, the audio-import queue, the auto call detection preference.
 - `TranscriptedAppDelegate+Lifecycle.swift` - login-item launch detection and the Quit confirmation dialogs.

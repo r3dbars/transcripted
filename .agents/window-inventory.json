@@ -1,0 +1,40 @@
+{
+  "windows": [
+    {
+      "file": "Sources/UI/Overlay/NotchIslandPanel.swift",
+      "surface": "NotchIslandPanel",
+      "policy": "protected",
+      "reason": "Live dictation, call prompt and meeting status; the user can allow capture with Show island in screen sharing."
+    },
+    {
+      "file": "Sources/UI/MenuBar/PasteLastDictationFeedback.swift",
+      "surface": "PasteLastDictationFeedbackPanel",
+      "policy": "protected",
+      "reason": "Shows dictated text."
+    },
+    {
+      "file": "Sources/App/DebugControlChannel.swift",
+      "surface": "NSPanel(",
+      "policy": "protected",
+      "reason": "Debug paste-target window for harness runs; holds pasted dictation text."
+    },
+    {
+      "file": "Sources/UI/MenuBar/MenuBarPopoverPresentation.swift",
+      "surface": "MenuBarPopoverAnchorPanel",
+      "policy": "capturable",
+      "reason": "Empty anchor the menu bar popover hangs from; checked in MenuBarPopoverPresentationTests."
+    },
+    {
+      "file": "Sources/UI/Settings/TranscriptedOnboardingWindow.swift",
+      "surface": "NSWindow(",
+      "policy": "capturable",
+      "reason": "First-run setup; people expect normal screenshots."
+    },
+    {
+      "file": "Sources/UI/Settings/TranscriptedSettingsWindow.swift",
+      "surface": "NSWindow(",
+      "policy": "capturable",
+      "reason": "Settings window; people expect normal screenshots."
+    }
+  ]
+}

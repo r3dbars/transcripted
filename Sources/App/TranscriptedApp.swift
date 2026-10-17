@@ -338,10 +338,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 MeetingPromptTelemetry.emit(.remindLater(candidate, elapsedSeconds: elapsedSeconds), readiness: readiness)
                 _ = self.meetingPromptDetector.remindSoon(candidate: candidate)
             }
-            capturePillController.onRecord = recordPrompt
-            capturePillController.onDismiss = dismissPrompt
-            capturePillController.onExpired = expirePrompt
-            capturePillController.onRemind = remindPrompt
             // One event per suppression (see MeetingPromptTelemetry.PromptAction).
             meetingPromptDetector.onPromptSuppressed = { [weak self] suppression in
                 guard let self else { return }
@@ -350,33 +346,30 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     readiness: self.meetingPromptTelemetryReadiness()
                 )
             }
-            meetingPromptDetector.onPromptRequest = { [weak self] candidate in
-                guard PermissionsOnboardingPreferences.hasCompleted() else { return false }
-                guard let self else { return false }
-                let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
-                    for: candidate.reason,
-                    calendarDefault: 30
-                )
-                // Say it before Record: after a remembered Don't Allow, the
-                // meeting records only this person's mic without asking.
-                let callAudioOff = MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(
-                    status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(),
-                    micOnlyRemembered: MeetingMicOnlyChoicePreference.isRemembered()
-                )
-                let presented = self.capturePillController.present(
-                    candidate: candidate,
-                    timeout: TimeInterval(promptTimeout),
-                    detailOverride: callAudioOff ? MeetingMicOnlyNoticeCopy.detectedCallPromptDetail : nil
-                )
-                if presented {
+            DetectedMeetingPromptWiring(
+                onboardingCompleted: { PermissionsOnboardingPreferences.hasCompleted() },
+                detailOverride: {
+                    // Say it before Record: after a remembered Don't Allow, the
+                    // meeting records only this person's mic without asking.
+                    let callAudioOff = MeetingMicOnlyNoticePolicy.detectedCallPromptSaysMicOnly(
+                        status: TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(),
+                        micOnlyRemembered: MeetingMicOnlyChoicePreference.isRemembered()
+                    )
+                    return callAudioOff ? MeetingMicOnlyNoticeCopy.detectedCallPromptDetail : nil
+                },
+                onShown: { [weak self] candidate in
+                    guard let self else { return }
                     self.meetingPromptShownAtByCandidateID[candidate.id] = Date()
                     MeetingPromptTelemetry.emit(
                         .shown(candidate, signals: self.meetingPromptDetector.currentSignalSnapshot()),
                         readiness: self.meetingPromptTelemetryReadiness()
                     )
-                }
-                return presented
-            }
+                },
+                onRecord: recordPrompt,
+                onDismiss: dismissPrompt,
+                onExpired: expirePrompt,
+                onRemind: remindPrompt
+            ).install(on: meetingPromptDetector, pill: capturePillController)
             // Capture-funnel denominator: one event per detected call at its
             // end, recorded or not, so capture rate is measured against calls
             // that actually happened instead of prompts that fired.

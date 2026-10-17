@@ -328,6 +328,16 @@ rules:
       - "python3 scripts/dev/check-known-traps.py --self-test"
       - "python3 scripts/dev/check-known-traps.py"
 
+  # Every NSWindow/NSPanel surface in Sources/ must be in the window inventory
+  # with its screen-sharing policy.
+  - paths:
+      - "Sources/**/*.swift"
+      - ".agents/window-inventory.json"
+      - "scripts/dev/check-window-inventory.py"
+    checks:
+      - "python3 scripts/dev/check-window-inventory.py --self-test"
+      - "python3 scripts/dev/check-window-inventory.py"
+
   - paths:
       - "scripts/dev/explain-missing-sources.py"
       - "scripts/dev/test-parakeet-lifecycle.sh"
