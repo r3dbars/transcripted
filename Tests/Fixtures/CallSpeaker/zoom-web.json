@@ -1,0 +1,33 @@
+{
+  "role": "AXWindow",
+  "title": "Zoom Meeting - Google Chrome",
+  "children": [
+    {
+      "role": "AXWebArea",
+      "children": [
+        {
+          "role": "AXGroup",
+          "domClassList": ["speaker-view__video-frame", "speaker-view__video-frame--active"],
+          "children": [
+            {
+              "role": "AXGroup",
+              "domClassList": ["video-avatar__avatar-footer"],
+              "children": [{ "role": "AXStaticText", "value": "Lena Ortiz" }]
+            }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": ["gallery__video-frame"],
+          "children": [
+            {
+              "role": "AXGroup",
+              "domClassList": ["video-avatar__avatar-footer"],
+              "children": [{ "role": "AXStaticText", "value": "Max Ueda (Guest)" }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

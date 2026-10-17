@@ -38,12 +38,13 @@ extension NotchIslandVoiceRowView {
         )
     }
 
-    /// Fills the open, empty name field with the calendar 1:1 name, as the
-    /// review window did: under a saved person's label when exactly one saved
-    /// person has that name, else as typed. Still editable; it saves on Done
-    /// like a typed name. Returns whether the field was filled.
+    /// Fills the open, empty name field with the call app's name or the
+    /// calendar 1:1 name, as the review window did: under a saved person's
+    /// label when exactly one saved person has that name, else as typed.
+    /// Still editable; it saves on Done like a typed name. Returns whether
+    /// the field was filled.
     @discardableResult
-    func prefill(_ name: String) -> Bool {
+    func prefill(_ name: String, source: Policy.PrefillSource = .calendar) -> Bool {
         guard !isRecognized, isEditing, answer == .none, lock == nil,
               nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         let label = MeetingInviteeSuggestionPolicy.suggestionLabels(
@@ -55,6 +56,7 @@ extension NotchIslandVoiceRowView {
         nameField.stringValue = label
         highlightedRow = nil
         prefilledUntouched = true
+        prefillSource = source
         rebuild(animated: false)
         return true
     }

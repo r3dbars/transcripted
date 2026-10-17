@@ -15,6 +15,8 @@ struct PeopleSettingsPage: View {
                 model: speakerPeopleModel,
                 onStartMeeting: onStartMeeting
             )
+
+            CallSpeakerNamesToggleRow()
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.people")
