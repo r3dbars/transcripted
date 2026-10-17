@@ -400,15 +400,18 @@ func testMeetingSessionUIPolicy() async {
 
     runSuite("The strip menu offers Discard only when the overlay and the session both say recording") {
         assertTrue(MeetingSessionStateMachine.stripMenuOffersDiscard(overlayIsRecording: true, sessionState: .recording))
-        assertFalse(
-            MeetingSessionStateMachine.stripMenuOffersDiscard(overlayIsRecording: false, sessionState: .recording),
-            "no menu while the overlay isn't in its recording state"
-        )
-        let hidden: [MeetingSessionState?] = [nil, .idle, .startingRecording, .stoppingRecording, .transcribing, .error("synthetic")]
+        let hidden: [MeetingSessionState?] = [nil, .idle, .loadingModels, .ready, .startingRecording,
+                                             .stoppingRecording, .transcribing, .error("synthetic")]
         for session in hidden {
             assertFalse(
                 MeetingSessionStateMachine.stripMenuOffersDiscard(overlayIsRecording: true, sessionState: session),
                 "\(String(describing: session)) must not offer Discard even while the overlay still reads recording"
+            )
+        }
+        for session in hidden + [.recording] {
+            assertFalse(
+                MeetingSessionStateMachine.stripMenuOffersDiscard(overlayIsRecording: false, sessionState: session),
+                "no menu while the overlay isn't in its recording state (session \(String(describing: session)))"
             )
         }
     }
