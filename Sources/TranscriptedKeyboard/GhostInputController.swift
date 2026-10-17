@@ -255,7 +255,10 @@ final class GhostInputController: IMKInputController {
                 dismiss(client)
                 return false
             }
-            let outcome = Self.routePlainTab(awaitingChainedGhost: awaitingChainedGhost) {
+            let outcome = Self.routePlainTab(
+                awaitingChainedGhost: awaitingChainedGhost,
+                caretAtGrowingEdge: { canAcceptSuggestion(in: client) }
+            ) {
                 acceptSuggestion(client, observation: insertionObservation)
             }
             if outcome == .passedToHost { breakHistorySegment() }

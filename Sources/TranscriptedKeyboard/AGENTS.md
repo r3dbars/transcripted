@@ -10,7 +10,7 @@ Writing's IMKit input method, ported from Tilde's InlineGhostIME. It shows autoc
 
 - **The keyboard never writes user text to disk.** The app owns every disk write. Accepted text lives in memory only for the kept-or-edited checks; the ledger records reason codes and counts.
 - **Ghosts are IMKit marked text only.** No Accessibility inserts, overlays, or fake paste. Suggestions stop under Secure Event Input.
-- **Keys behave like Tilde.** The table is "Keyboard behavior" in `docs/writing-plan.md`. In Electron hosts a stray Tab moves focus out of the field, so a Tab that lands mid-chain is held.
+- **Keys behave like Tilde.** The table is "Keyboard behavior" in `docs/writing-plan.md`. In Electron hosts a stray Tab moves focus out of the field, so a Tab that lands mid-chain is held, but only while the caret is still at the growing edge; if the user clicked back into earlier text, the stale chain is cancelled and the host gets the Tab.
 - **Key callbacks stay cheap.** Sampling and capture run after the callback returns; `PersonalHistoryCapture` only snapshots consent and enqueues.
 - **Core imports stay behind `#if canImport(TranscriptedWritingCore)`**, because the bundle script compiles Core into the same module as these files.
 - Interaction behavior comes from the app's served configuration, not from this bundle.
