@@ -152,22 +152,26 @@ struct SystemAudioSilenceWatch: Equatable {
 
 /// Notices a tap that heard signal and then delivers only digital zeros, after
 /// its silence watch already ended on that signal. The capture re-arms the
-/// watch from it. Bounded, so a call whose far end keeps going quiet cannot
+/// watch from it. Only the rebuilds those watches ask for spend the budget:
+/// a lapse with nothing else playing (a notification sound in an in-person
+/// meeting) costs nothing, and a call whose far end keeps going quiet cannot
 /// cause repeated rebuilds. Pure value type, owned by the capture's queue.
 struct SystemAudioSignalTracker: Equatable {
-    static let maxRearms = 3
+    static let maxRebuilds = 3
     private(set) var lastSignalAt: TimeInterval?
-    private(set) var rearms = 0
+    private(set) var rebuilds = 0
 
     mutating func noteSignal(at now: TimeInterval) { lastSignalAt = now }
 
-    /// True once per lapse: signal was heard, then at least
-    /// `SystemAudioSilenceWatch.silenceSeconds` passed without any.
-    mutating func shouldRearm(at now: TimeInterval) -> Bool {
-        guard let lastSignalAt, rearms < Self.maxRearms,
-              now - lastSignalAt >= SystemAudioSilenceWatch.silenceSeconds else { return false }
-        rearms += 1
-        return true
+    /// A re-armed watch asked for a rebuild.
+    mutating func noteRebuild() { rebuilds += 1 }
+
+    /// True when signal was heard, then at least
+    /// `SystemAudioSilenceWatch.silenceSeconds` passed without any, and
+    /// rebuilds are left. The caller arms only when no watch is running.
+    func shouldRearm(at now: TimeInterval) -> Bool {
+        guard let lastSignalAt, rebuilds < Self.maxRebuilds else { return false }
+        return now - lastSignalAt >= SystemAudioSilenceWatch.silenceSeconds
     }
 }
 

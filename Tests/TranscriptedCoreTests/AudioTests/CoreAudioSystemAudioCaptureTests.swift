@@ -947,14 +947,14 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         XCTAssertFalse(capture.isNotHearingPlayback)
     }
 
-    func testMidRecordingRearmsAreBounded() throws {
+    func testMidRecordingRebuildsAreBounded() throws {
         let hal = HAL(), capture = hal.makeCapture()
         defer { capture.stopSync() }
         try capture.start { _ in }
         hal.otherAudioPlaying = true
         let speech = hal.buffer()
         speech.floatChannelData![0][0] = 0.25
-        for _ in 0..<(SystemAudioSignalTracker.maxRearms + 3) {
+        for _ in 0..<(SystemAudioSignalTracker.maxRebuilds + 3) {
             hal.now += 0.1
             capture.receiveForTesting(speech)
             capture.drainForTesting()
@@ -964,19 +964,47 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
                 capture.drainForTesting()
             }
         }
-        XCTAssertEqual(hal.starts, 1 + SystemAudioSignalTracker.maxRearms, "A call that keeps going quiet cannot rebuild forever")
+        XCTAssertEqual(hal.starts, 1 + SystemAudioSignalTracker.maxRebuilds, "A call that keeps going quiet cannot rebuild forever")
     }
 
-    func testSignalTrackerRearmsOncePerLapseUpToItsBudget() {
+    // Short sounds with nothing else playing (a notification during an
+    // in-person meeting) must not use up the rebuilds a later call needs.
+    func testLapsesWithNothingPlayingKeepTheRebuildBudget() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        for _ in 0..<(SystemAudioSignalTracker.maxRebuilds + 2) {
+            hal.now += 0.1
+            capture.receiveForTesting(speech)
+            capture.drainForTesting()
+            for _ in 0..<20 {
+                hal.now += 1
+                capture.receiveForTesting(hal.buffer())
+                capture.drainForTesting()
+            }
+        }
+        XCTAssertEqual(hal.starts, 1, "Zeros on a quiet Mac never rebuild")
+        hal.otherAudioPlaying = true
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        for _ in 0..<20 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "The call that later goes to zeros still gets its rebuild")
+    }
+
+    func testSignalTrackerRearmsAfterSilenceUntilItsRebuildsAreSpent() {
         var tracker = SystemAudioSignalTracker()
         XCTAssertFalse(tracker.shouldRearm(at: 100), "No signal heard yet")
         tracker.noteSignal(at: 100)
         XCTAssertFalse(tracker.shouldRearm(at: 100 + SystemAudioSilenceWatch.silenceSeconds - 0.5))
         XCTAssertTrue(tracker.shouldRearm(at: 100 + SystemAudioSilenceWatch.silenceSeconds))
-        for round in 1..<SystemAudioSignalTracker.maxRearms {
-            tracker.noteSignal(at: 200 + Double(round) * 100)
-            XCTAssertTrue(tracker.shouldRearm(at: 200 + Double(round) * 100 + 10))
-        }
+        for _ in 0..<SystemAudioSignalTracker.maxRebuilds { tracker.noteRebuild() }
         tracker.noteSignal(at: 1000)
         XCTAssertFalse(tracker.shouldRearm(at: 1100), "Budget spent")
     }

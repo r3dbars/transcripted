@@ -480,8 +480,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             lastBuffer = now
             rebuildRetries = 0
             awaitingFirstBuffer = nil
-            if Self.containsSignal(buffer) { signalTracker.noteSignal(at: now) }
-            if silenceWatch != nil { noteSilenceWatchBuffer(buffer, at: now) }
+            let hasSignal = Self.containsSignal(buffer)
+            if hasSignal { signalTracker.noteSignal(at: now) }
+            if silenceWatch != nil { noteSilenceWatchBuffer(hasSignal: hasSignal, at: now) }
             if let started = recoveryStarted {
                 recoveryStarted = nil
                 recovery.send(.gap(duration: Self.interruptionGap(
@@ -534,9 +535,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     static var maxWakeSilenceReconnects: Int { SystemAudioSilenceWatch.maxWakeReconnects }
 
-    private func noteSilenceWatchBuffer(_ buffer: AVAudioPCMBuffer, at now: TimeInterval) {
+    private func noteSilenceWatchBuffer(hasSignal: Bool, at now: TimeInterval) {
         guard var watch = silenceWatch else { return }
-        guard watch.noteBuffer(hasSignal: Self.containsSignal(buffer), at: now) else {
+        guard watch.noteBuffer(hasSignal: hasSignal, at: now) else {
             silenceWatch = nil
             // Signal is back, so the tap isn't stuck silent after the wake.
             tapDiagnostics.silentAfterWakeUnresolved = false
@@ -586,6 +587,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         case .none:
             return
         case .reconnect:
+            if watch.reason == .lostMidRecording { signalTracker.noteRebuild() }
             recover(watch.reason == .wake ? .silentAfterWake : .silentWhilePlaying)
         case .reportUnheard:
             tapDiagnostics.unheardPlayback = true
