@@ -10,6 +10,7 @@ func testMeetingCallEndArming() {
         MeetingCallEndArming.lateBindingFamilies(
             isRecording: true, isArmed: false,
             pendingIdentity: detectedPrompt ? identity : nil, activeIdentity: identity,
+            inputUsers: snapshot.inputUsers,
             families: snapshot.sourceFamilies(detectedPrompt: detectedPrompt, provider: .zoom,
                 isBrowserCall: false, cameraOnly: cameraOnly, sampledAt: time, now: time))
     }
@@ -51,11 +52,51 @@ func testMeetingCallEndArming() {
         assertEqual(arming.confirm(families: zoom, sampledAt: 25, now: 25), zoom)
     }
 
-    runSuite("Call-end arming — sustained output can confirm a muted native call") {
+    runSuite("Call-end arming — sustained output alone never confirms a call") {
         var arming = MeetingCallEndArming()
-        assertNil(arming.confirm(families: families(notification, at: 0), sampledAt: 0, now: 0))
-        assertNil(arming.confirm(families: families(notification, at: 5), sampledAt: 5, now: 5))
-        assertEqual(arming.confirm(families: families(notification, at: 10), sampledAt: 10, now: 10), zoom)
+        for time in [0.0, 5, 10, 15, 20, 25, 30] {
+            assertNil(arming.confirm(families: families(notification, at: time), sampledAt: time, now: time),
+                      "playback alone is not evidence that a call joined")
+        }
+    }
+
+    runSuite("Call-end arming — brief microphone ownership and output interrupt confirmation") {
+        var arming = MeetingCallEndArming()
+        for time in [0.0, 5] {
+            assertNil(arming.confirm(families: families(joined, at: time), sampledAt: time, now: time))
+        }
+        assertNil(arming.confirm(families: families(notification, at: 10), sampledAt: 10, now: 10))
+        for time in [15.0, 20] {
+            assertNil(arming.confirm(families: families(joined, at: time), sampledAt: time, now: time),
+                      "input must earn a fresh interval after output-only activity")
+        }
+        assertEqual(arming.confirm(families: families(joined, at: 25), sampledAt: 25, now: 25), zoom)
+    }
+
+    runSuite("Call-end arming — quiet microphone ownership qualifies and output preserves an armed call") {
+        var arming = MeetingCallEndArming()
+        // Ownership, not audio amplitude: a muted app retaining its input stream qualifies.
+        for time in [0.0, 5] {
+            assertNil(arming.confirm(families: families(joined, at: time), sampledAt: time, now: time))
+        }
+        let bound = arming.confirm(families: families(joined, at: 10), sampledAt: 10, now: 10)
+        assertEqual(bound, zoom)
+        guard let bound else { return }
+        var tracking = MeetingCallEndTracking(recordingIdentity: identity, families: bound)
+        for time in [15.0, 20, 25, 30] {
+            assertEqual(tracking.policy.observe(notification.activity(in: bound, cameraInUse: false),
+                                               sampledAt: time, at: time), .none,
+                        "losing the mic while retaining output must not warn after arming")
+        }
+    }
+
+    runSuite("Call-end arming — microphone ownership must belong to the selected source family") {
+        let otherMic = MeetingCallActivitySnapshot(inputUsers: chrome, outputUsers: zoom, isReliable: true)
+        assertNil(families(otherMic, at: 0), "another app's microphone cannot qualify call-app playback")
+        let helperMic = MeetingCallActivitySnapshot(inputUsers: ["us.zoom.xos.helper"], outputUsers: [], isReliable: true)
+        assertEqual(families(helperMic, at: 0), zoom, "dotted helpers belong to the source family")
+        let lookalike = MeetingCallActivitySnapshot(inputUsers: ["us.zoom.xosOther"], outputUsers: zoom, isReliable: true)
+        assertNil(families(lookalike, at: 0), "a shared string prefix is not a bundle-family match")
     }
 
     runSuite("Call-end arming — manual recordings and camera-only prompts remain unarmed") {

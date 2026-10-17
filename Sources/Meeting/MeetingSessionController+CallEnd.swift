@@ -21,6 +21,7 @@ extension MeetingSessionController {
                 isArmed: callEndTracking != nil,
                 pendingIdentity: pending.identity,
                 activeIdentity: activeRecordingIdentity,
+                inputUsers: snapshot.inputUsers,
                 families: callEndFamilies(for: pending.candidate)
             )
             if let families = callEndArming.confirm(families: eligibleFamilies,

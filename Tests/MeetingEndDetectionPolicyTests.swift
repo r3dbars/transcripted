@@ -523,7 +523,7 @@ func testMeetingEndDetectionPolicy() {
         assertEqual(
             MeetingCallEndArming.lateBindingFamilies(
                 isRecording: true, isArmed: false,
-                pendingIdentity: identity, activeIdentity: identity, families: zoom
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: zoom
             ),
             zoom,
             "the recording that remembered the candidate binds it once its families resolve"
@@ -532,7 +532,7 @@ func testMeetingEndDetectionPolicy() {
             assertNil(
                 MeetingCallEndArming.lateBindingFamilies(
                     isRecording: true, isArmed: false,
-                    pendingIdentity: identity, activeIdentity: identity, families: families
+                    pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: families
                 ),
                 "an unresolved or empty candidate keeps waiting instead of binding"
             )
@@ -540,14 +540,14 @@ func testMeetingEndDetectionPolicy() {
         assertNil(
             MeetingCallEndArming.lateBindingFamilies(
                 isRecording: false, isArmed: false,
-                pendingIdentity: identity, activeIdentity: identity, families: zoom
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: zoom
             ),
             "a recording that is no longer live never binds a remembered candidate"
         )
         assertNil(
             MeetingCallEndArming.lateBindingFamilies(
                 isRecording: true, isArmed: true,
-                pendingIdentity: identity, activeIdentity: identity, families: zoom
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: zoom
             ),
             "an armed recording never rebinds from a remembered candidate"
         )
@@ -555,7 +555,7 @@ func testMeetingEndDetectionPolicy() {
             assertNil(
                 MeetingCallEndArming.lateBindingFamilies(
                     isRecording: true, isArmed: false,
-                    pendingIdentity: identity, activeIdentity: active, families: zoom
+                    pendingIdentity: identity, activeIdentity: active, inputUsers: zoom, families: zoom
                 ),
                 "only the recording that remembered the candidate can bind it"
             )
@@ -563,9 +563,16 @@ func testMeetingEndDetectionPolicy() {
         assertNil(
             MeetingCallEndArming.lateBindingFamilies(
                 isRecording: true, isArmed: false,
-                pendingIdentity: nil, activeIdentity: identity, families: zoom
+                pendingIdentity: nil, activeIdentity: identity, inputUsers: zoom, families: zoom
             ),
             "with nothing remembered there is nothing to bind"
+        )
+        assertNil(
+            MeetingCallEndArming.lateBindingFamilies(
+                isRecording: true, isArmed: false,
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: [], families: zoom
+            ),
+            "output alone, such as a chat chime, never binds late: the call app must hold the microphone"
         )
     }
 }

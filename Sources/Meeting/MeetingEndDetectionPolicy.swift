@@ -95,7 +95,7 @@ struct MeetingCallEndArming {
     private var lastSampleAt: TimeInterval?
 
     /// A single notification sound is not proof that the call was joined.
-    /// Require ten seconds of fresh, continuous activity from the same source.
+    /// Require ten seconds of fresh, continuous eligible microphone ownership.
     /// This measures process stream ownership, never waveform loudness.
     mutating func confirm(families: Set<String>?, sampledAt: TimeInterval?,
                           now: TimeInterval) -> Set<String>? {
@@ -119,16 +119,21 @@ struct MeetingCallEndArming {
     /// must keep waiting. Only the recording that remembered the candidate can
     /// bind it, only while that recording is live and not already armed, and
     /// only once the snapshot resolves real source families — binding an empty
-    /// set would make every later snapshot look like an ended call.
+    /// set would make every later snapshot look like an ended call. A late bind
+    /// also needs the call app on the microphone: output alone can be a chat
+    /// chime during an unrelated recording.
     static func lateBindingFamilies(
         isRecording: Bool,
         isArmed: Bool,
         pendingIdentity: UUID?,
         activeIdentity: UUID?,
+        inputUsers: Set<String>,
         families: Set<String>?
     ) -> Set<String>? {
         guard isRecording, !isArmed, let pendingIdentity,
-              let families, !families.isEmpty else { return nil }
+              let families, !families.isEmpty,
+              inputUsers.contains(where: { id in families.contains { id.matchesBundleFamily($0) } })
+        else { return nil }
         return pendingIdentity == activeIdentity ? families : nil
     }
 }
