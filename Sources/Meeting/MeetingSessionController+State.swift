@@ -242,6 +242,7 @@ final class MeetingSessionController: ObservableObject {
     var shouldSurfaceMeetingWarmupFailure = false
     var audioInactivityDetector = MeetingAudioInactivityDetector()
     var callEndTracking: MeetingCallEndTracking?
+    var pendingCallEndCandidate: (identity: UUID, candidate: MeetingPromptDetector.Candidate)?
     var latestCallActivity = MeetingCallActivitySnapshot.unknown
     /// Takes a fresh call-activity reading off main (the app wires it to the mic monitor's queue).
     var callActivitySampler: (@MainActor (@escaping @MainActor @Sendable (MeetingCallActivitySnapshot) -> Void) -> Void)?
