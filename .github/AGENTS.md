@@ -7,7 +7,7 @@ Workflows, templates, and the CI contracts that gate merges. Repo-wide rules liv
 | File | Runs | Notes |
 |------|------|-------|
 | `workflows/swift-ci.yml` | PRs, pushes to main, manual | Jobs `checks`, `spm-tests`, `app-build` run in parallel; `build-and-test` aggregates them. Also `hardware-smokes`, `full-qa-bench`, `staged-update-proof` (manual inputs). |
-| `workflows/repo-hygiene.yml` | PRs | Ubuntu; runs `scripts/dev/linux-checks.sh --strict-tools`. |
+| `workflows/repo-hygiene.yml` | PRs, merge queue, pushes to main, manual | Ubuntu; runs `scripts/dev/linux-checks.sh --strict-tools`. |
 | `workflows/concurrency-census.yml` | PRs and pushes touching `Sources/` | Fails only if a folder is above `.agents/concurrency-baseline.json` and above the PR base (`--allow-up-to`), so toolchain drift alone passes. |
 | `workflows/transcripted-lab.yml` | `Tools/TranscriptedLab/**` changes | Builds and tests that package on `macos-15`. |
 | `workflows/release-candidate.yml` | Manual only | Builds, signs, notarizes, and builds Sparkle metadata. Uses the signing secrets. |
