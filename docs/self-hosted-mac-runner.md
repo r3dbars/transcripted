@@ -121,12 +121,16 @@ hosted right away:
 | Word      | Meaning                                                    |
 |-----------|------------------------------------------------------------|
 | `paused`  | the owner ran `pause`                                      |
+| `parked`  | `install` or `rebuild` stopped the service between jobs    |
 | `battery` | the Mac is not plugged in                                  |
 | `disk`    | less than 40 GB free per job VM (80 GB for a second one)   |
 | `vms`     | two VMs are already running on the Mac (other apps' too)   |
 | `mic`     | a microphone is in use (a meeting, dictation, or a call)   |
 | `busy`    | both job slots are in use                                  |
 | `offline` | no CI image yet, a GitHub API error, or backing off        |
+
+With `MAC_RUNNER_MODE=always`, only `paused` sends new runs hosted; every other
+word just means they wait (see "Day to day").
 
 The timestamp in both forms lets `pick-runner` tell a live Mac from one that
 went quiet. While a VM runs, the service keeps the Mac from idle-sleeping
@@ -260,6 +264,13 @@ same-repo run waits for this Mac, however long the line is, and nothing is
 re-run on GitHub (neither the sweep nor this service reroutes). Fork PRs still
 run hosted. This is the owner's default, because hosted macOS minutes run out
 fast on a private repo.
+
+The one exception is `pause`: while the heartbeat says `paused`, new runs go to
+hosted `macos-26`, so nothing new lands on a Mac you asked to leave alone. Jobs
+sent here before the pause still run and finish, as in the default mode. After
+`resume`, new runs wait for the Mac again. An `install` or `rebuild` is not a
+pause: it parks the service with `parked`, and in `always` mode new runs keep
+waiting for the Mac until the service is back.
 
 Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
 
