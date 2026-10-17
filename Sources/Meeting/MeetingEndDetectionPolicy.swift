@@ -88,8 +88,33 @@ struct MeetingCallEndTracking {
 /// A detected-prompt recording can be accepted before its call app is using
 /// audio (the usual "accept the prompt, then join" flow), so start may have no
 /// source families to bind. The candidate is remembered instead and bound by the
-/// first later snapshot that resolves it, for that recording only.
-enum MeetingCallEndArming {
+/// sustained later activity that resolves it, for that recording only.
+struct MeetingCallEndArming {
+    private var observedFamilies: Set<String>?
+    private var activeSince: TimeInterval?
+    private var lastSampleAt: TimeInterval?
+
+    /// A single notification sound is not proof that the call was joined.
+    /// Require ten seconds of fresh, continuous eligible microphone ownership.
+    /// This measures process stream ownership, never waveform loudness.
+    mutating func confirm(families: Set<String>?, sampledAt: TimeInterval?,
+                          now: TimeInterval) -> Set<String>? {
+        guard let families, !families.isEmpty, let sampledAt,
+              sampledAt <= now, now - sampledAt <= MeetingEndDetectionPolicy.sampleFreshness else {
+            self = Self()
+            return nil
+        }
+        if let lastSampleAt, sampledAt <= lastSampleAt { return nil }
+        let continuous = lastSampleAt.map { sampledAt - $0 <= MeetingEndDetectionPolicy.sampleFreshness } ?? false
+        if observedFamilies != families || !continuous {
+            activeSince = sampledAt
+            observedFamilies = families
+        }
+        lastSampleAt = sampledAt
+        guard let activeSince, sampledAt - activeSince >= 10 else { return nil }
+        return families
+    }
+
     /// The families a remembered candidate may bind with now, or nil when it
     /// must keep waiting. Only the recording that remembered the candidate can
     /// bind it, only while that recording is live and not already armed, and
