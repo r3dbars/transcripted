@@ -111,11 +111,7 @@ public enum SecretRules {
             if candidate.range.lowerBound >= cursor {
                 accepted.append((candidate.range, candidate.type))
                 cursor = candidate.range.upperBound
-            } else if candidate.range.upperBound > cursor,
-                      !(candidate.type == .creditCard
-                        && accepted.last?.type == .creditCard
-                        && endsBeforeExpirySlash(text, candidate.range.upperBound)),
-                      let last = accepted.popLast() {
+            } else if candidate.range.upperBound > cursor, let last = accepted.popLast() {
                 // A partial overlap runs past the accepted match: extend it
                 // instead of dropping the rest, or the tail of a secret
                 // (a card's last digits after a number in front of it)
@@ -137,18 +133,6 @@ public enum SecretRules {
         }
         clean += text[walker...]
         return (clean, findings)
-    }
-
-    /// True when the rest of the digit run at `index` is followed by `/` and
-    /// a digit, i.e. the card window stops inside an expiry month ("02/26").
-    /// Such a window is a shifted copy of a card already accepted, not a
-    /// number in front of it, so it must not extend the card's span.
-    private static func endsBeforeExpirySlash(_ text: String, _ index: String.Index) -> Bool {
-        var i = index
-        while i < text.endIndex, text[i].isNumber { i = text.index(after: i) }
-        guard i < text.endIndex, text[i] == "/" else { return false }
-        let next = text.index(after: i)
-        return next < text.endIndex && text[next].isNumber
     }
 
     // MARK: - Rule table
@@ -272,8 +256,15 @@ public enum SecretRules {
     /// plausible card length (13–19, longest first) against Luhn, accepting
     /// the first that validates — so a valid card prefix wins even when
     /// trailing unrelated digits made the maximal span invalid.
+    ///
+    /// A window also stops before an expiry month ("02" in
+    /// `"4111 1111 1111 1111 02/26"`). Without that, a window starting at
+    /// the card's start or at one of its later groups can be Luhn-valid only
+    /// by reaching into the month, which then gets redacted with the card
+    /// and leaves a stray "/26" behind.
     private static func creditCardMatches(_ text: String) -> [Range<String.Index>] {
         let starts = regexMatches(text, regex: cardStartRegex)
+        let expiryMonthStarts = Set(regexMatches(text, regex: cardExpiryMonthRegex).map(\.lowerBound))
         var results: [Range<String.Index>] = []
         for start in starts {
             var digits: [(character: Character, index: String.Index)] = []
@@ -282,6 +273,7 @@ public enum SecretRules {
             while index < text.endIndex, digits.count < 19 {
                 let char = text[index]
                 if char.isNumber {
+                    if expiryMonthStarts.contains(index) { break }
                     digits.append((char, index))
                     sawSeparator = false
                 } else if (char == " " || char == "-"), !sawSeparator, !digits.isEmpty {
@@ -466,6 +458,10 @@ public enum SecretRules {
     private static let jwtRegex = try? NSRegularExpression(pattern: #"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#)
     private static let ibanHeaderRegex = try? NSRegularExpression(pattern: #"\b[A-Za-z]{2}\d{2}"#)
     private static let cardStartRegex = try? NSRegularExpression(pattern: #"(?<!\d)\d"#)
+    /// A one- or two-digit group right after a digit run and a separator,
+    /// directly followed by "/" and a digit: the month of an expiry date
+    /// written after a card number.
+    private static let cardExpiryMonthRegex = try? NSRegularExpression(pattern: #"(?<=\d[ -])\d{1,2}(?=/\d)"#)
     private static let ssnRegex = try? NSRegularExpression(pattern: #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"#)
     private static let awsAccessKeyRegex = try? NSRegularExpression(pattern: #"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#)
     private static let openAIKeyRegex = try? NSRegularExpression(pattern: #"\bsk-[A-Za-z0-9_-]{20,}\b"#)
