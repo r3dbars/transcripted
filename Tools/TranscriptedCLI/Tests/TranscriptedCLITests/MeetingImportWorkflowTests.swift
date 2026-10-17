@@ -43,6 +43,36 @@ final class MeetingImportWorkflowTests: XCTestCase {
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: root.path).isEmpty)
     }
 
+    func testNemotronOnlyDiarizationDirFallsBackToInstalledPyannote() throws {
+        let root = try temporaryRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home = root.appendingPathComponent("home")
+        let cached = home.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
+        try writeDiarizationFixture(at: cached)
+        let nemotronDir = root.appendingPathComponent("nemotron-only", isDirectory: true)
+        try FileManager.default.createDirectory(at: nemotronDir, withIntermediateDirectories: true)
+        for name in MeetingImportModels.nemotronRequiredPaths() {
+            let url = nemotronDir.appendingPathComponent(name)
+            if name.hasSuffix(".mlmodelc") {
+                try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+            } else {
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try Data().write(to: url)
+            }
+        }
+        let paths = try MeetingImportModels.resolve(
+            modelsDir: nil,
+            diarizationModelsDir: nemotronDir.path,
+            noDownload: false,
+            engineChoice: "nemotron",
+            environment: [:],
+            storedPreference: nil,
+            bundledResourceDirectories: [],
+            homeDirectory: home
+        )
+        XCTAssertEqual(paths.diarization?.path, cached.deletingLastPathComponent().path)
+    }
+
     func testBundledDiarizerFindsActualNestedReleaseLayoutWithoutCache() throws {
         let root = try temporaryRoot()
         defer { try? FileManager.default.removeItem(at: root) }

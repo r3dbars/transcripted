@@ -400,6 +400,16 @@ extension TranscriptSaver {
     /// Internal (not `private`) so `SpeakerIdentityMutationService` — the canonical
     /// entry point for rename/merge/discard — can reuse this as the one shared
     /// library-scan rename engine instead of reimplementing it.
+    /// A row written by `--name-likely-speakers` carries `Name (likely)` and was
+    /// never confirmed by the user. A profile rename or merge must keep that
+    /// hedge rather than make the guess look confirmed.
+    private static func hedgedName(_ newName: String, replacing oldName: String?) -> String {
+        guard let oldName,
+              oldName.hasSuffix(SpeakerMapping.likelyNameSuffix),
+              !newName.hasSuffix(SpeakerMapping.likelyNameSuffix) else { return newName }
+        return newName + SpeakerMapping.likelyNameSuffix
+    }
+
     @discardableResult
     static func applyRetroactiveRename(
         in content: inout String,
@@ -418,7 +428,7 @@ extension TranscriptSaver {
         for row in targetRows {
             guard let index = row.nameLineIndex else { continue }
             let indent = lines[index].prefix(while: { $0 == " " })
-            lines[index] = "\(indent)name: \"\(escapeYAML(newName))\""
+            lines[index] = "\(indent)name: \"\(escapeYAML(hedgedName(newName, replacing: row.name)))\""
             changed = true
         }
         content = lines.joined(separator: "\n")
@@ -432,7 +442,7 @@ extension TranscriptSaver {
             let hasAnyConflict = rows.contains { $0.dbId != dbId && $0.name == oldName }
 
             if !hasAnyConflict {
-                applyNameReplacement(in: &content, oldName: oldName, newName: newName, updateSpeakerTag: true)
+                applyNameReplacement(in: &content, oldName: oldName, newName: hedgedName(newName, replacing: oldName), updateSpeakerTag: true)
                 changed = true
                 continue
             }
@@ -454,7 +464,7 @@ extension TranscriptSaver {
                     applyScopedNameReplacement(
                         in: &content,
                         oldName: oldName,
-                        newName: newName,
+                        newName: hedgedName(newName, replacing: oldName),
                         channel: channel
                     )
                     renamedChannels.append(channel.rawValue)

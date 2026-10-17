@@ -94,6 +94,41 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertFalse(updated.contains(#"[System/C:\Users\Dana]"#))
     }
 
+    func testRetroactivelyUpdateSpeakerKeepsLikelyHedgeOnPendingRows() throws {
+        let speakerId = UUID()
+        let transcriptURL = temporaryDirectory.appendingPathComponent("likely.md")
+        try """
+        ---
+        speakers:
+          - id: "0"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Alice (likely)"
+            confidence: low
+            source: db_pending
+        ---
+
+        #### Remote Speaker Breakdown
+
+        - **Alice (likely):** 1 utterances, ~2 words, 00:01
+
+        ---
+
+        [00:00] [System/Alice (likely)] hello there
+        """.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        TranscriptSaver.retroactivelyUpdateSpeaker(
+            dbId: speakerId,
+            newName: "Alicia",
+            in: temporaryDirectory
+        )
+
+        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Alicia (likely)""#))
+        XCTAssertTrue(updated.contains("[System/Alicia (likely)]"))
+        XCTAssertFalse(updated.contains("[System/Alicia]"))
+    }
+
     func testRetroactivelyUpdateSpeakerRenamesMicLabels() throws {
         let speakerId = UUID()
         let transcriptURL = temporaryDirectory.appendingPathComponent("mic.md")
