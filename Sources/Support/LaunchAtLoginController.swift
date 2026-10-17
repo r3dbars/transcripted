@@ -156,24 +156,35 @@ enum LaunchAtLoginController {
         }
     }
 
-    /// Runs on `statusQueue`, behind any register already queued by onboarding
-    /// or launch, and saves the choice inside the same block so nothing can
-    /// interleave between the service change and the saved preference.
-    /// `apply` is a test seam; production registers or unregisters the main app.
+    /// The Settings toggle. Runs on `statusQueue`, so it waits behind any
+    /// register already queued by onboarding or launch instead of racing it,
+    /// and the main thread never makes the blocking XPC calls. The choice is
+    /// saved inside the same block, so nothing interleaves between the service
+    /// change and the saved preference. `apply` is a test seam; production
+    /// registers or unregisters the main app.
     nonisolated static func setEnabled(
         _ enabled: Bool,
         userDefaults: UserDefaults = .standard,
         apply: (@Sendable (Bool) throws -> Void)? = nil
-    ) throws {
-        try statusQueue.sync {
-            if let apply {
-                try apply(enabled)
-            } else if enabled {
-                try registerIfNeeded()
-            } else {
-                try unregisterIfNeeded()
+    ) async throws {
+        // UserDefaults is thread-safe; it just isn't annotated Sendable.
+        nonisolated(unsafe) let defaults = userDefaults
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            statusQueue.async {
+                do {
+                    if let apply {
+                        try apply(enabled)
+                    } else if enabled {
+                        try registerIfNeeded()
+                    } else {
+                        try unregisterIfNeeded()
+                    }
+                    LaunchAtLoginPreferences.setEnabled(enabled, userDefaults: defaults)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
+                }
             }
-            LaunchAtLoginPreferences.setEnabled(enabled, userDefaults: userDefaults)
         }
     }
 

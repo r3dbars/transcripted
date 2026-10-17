@@ -49,12 +49,14 @@ func testLaunchAtLoginDefaultEnable() async {
         assertEqual(probe.calls, 0, "an explicit Settings choice always wins over the default")
     }
 
-    await runSuite("A Settings change made while the default register is queued runs after it and wins") {
+    await runSuite("A Settings opt-out made while the default register is pending runs after it and wins") {
         let (defaults, suiteName) = makeLaunchAtLoginDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let order = LaunchAtLoginOrderProbe()
+        let toggleProbe = LaunchAtLoginRegisterProbe()
         let registerStarted = DispatchSemaphore(value: 0)
         let releaseRegister = DispatchSemaphore(value: 0)
+        let toggleApplied = DispatchSemaphore(value: 0)
 
         let registerTask = Task.detached {
             await LaunchAtLoginController.applyDefaultEnableIfNeeded(
@@ -67,32 +69,85 @@ func testLaunchAtLoginDefaultEnable() async {
                 }
             )
         }
-        await launchAtLoginWait(registerStarted)
+        _ = await launchAtLoginWait(registerStarted)
 
-        let toggleDone = DispatchSemaphore(value: 0)
-        DispatchQueue(label: "launch-at-login-test-toggle").async {
-            try? LaunchAtLoginController.setEnabled(false, userDefaults: defaults, apply: { enabled in
+        let toggleTask = Task.detached {
+            try await LaunchAtLoginController.setEnabled(false, userDefaults: defaults, apply: { enabled in
+                toggleProbe.record(onMainThread: Thread.isMainThread)
                 order.append(enabled ? "enable" : "disable")
+                toggleApplied.signal()
             })
-            toggleDone.signal()
         }
-        releaseRegister.signal()
-        await launchAtLoginWait(toggleDone)
-        _ = await registerTask.value
+        // The window only gives an unserialized toggle the chance to jump the
+        // queue; a serialized one can't finish before the register is released.
+        let toggleRanEarly = await launchAtLoginWait(toggleApplied, timeout: 0.2)
+        assertFalse(toggleRanEarly, "the toggle must wait behind the pending register")
 
-        assertEqual(order.events, ["register", "disable"], "turning the setting off must run after the queued register, not before it")
+        releaseRegister.signal()
+        _ = await registerTask.value
+        let toggleError: Error? = await {
+            do { try await toggleTask.value; return nil } catch { return error }
+        }()
+
+        assertNil(toggleError, "the opt-out should succeed")
+        assertEqual(order.events, ["register", "disable"], "turning the setting off must run after the pending register, not before it")
+        assertFalse(toggleProbe.ranOnMainThread, "the Settings toggle's login-item call must not run on the main thread")
         assertTrue(LaunchAtLoginPreferences.hasExplicitChoice(userDefaults: defaults), "the opt-out should be saved")
+        assertFalse(LaunchAtLoginPreferences.isEnabled(userDefaults: defaults), "the saved choice should stay off")
+    }
+
+    await runSuite("A default register that queues behind an in-flight opt-out never registers") {
+        let (defaults, suiteName) = makeLaunchAtLoginDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let registerProbe = LaunchAtLoginRegisterProbe()
+        let toggleStarted = DispatchSemaphore(value: 0)
+        let releaseToggle = DispatchSemaphore(value: 0)
+        let registerDone = DispatchSemaphore(value: 0)
+
+        let toggleTask = Task.detached {
+            try await LaunchAtLoginController.setEnabled(false, userDefaults: defaults, apply: { _ in
+                toggleStarted.signal()
+                releaseToggle.wait()
+            })
+        }
+        _ = await launchAtLoginWait(toggleStarted)
+
+        // Onboarding finishes while the opt-out is still in flight, so no
+        // explicit choice is saved yet and the default register gets queued.
+        let registerTask = Task.detached {
+            let failure = await LaunchAtLoginController.applyDefaultEnableIfNeeded(
+                onboardingCompleted: true,
+                userDefaults: defaults,
+                register: { registerProbe.record(onMainThread: Thread.isMainThread) }
+            )
+            registerDone.signal()
+            return failure
+        }
+        let registerFinishedEarly = await launchAtLoginWait(registerDone, timeout: 0.2)
+        assertFalse(registerFinishedEarly, "the default register must wait behind the in-flight opt-out")
+
+        releaseToggle.signal()
+        let failure = await registerTask.value
+        try? await toggleTask.value
+
+        assertNil(failure, "a skipped register has nothing to report")
+        assertEqual(registerProbe.calls, 0, "the opt-out saved first must stop the queued default register")
         assertFalse(LaunchAtLoginPreferences.isEnabled(userDefaults: defaults), "the saved choice should stay off")
     }
 }
 
 /// Waits for a semaphore without blocking the main actor, which the
-/// controller's own async calls need to hop back onto.
-private func launchAtLoginWait(_ semaphore: DispatchSemaphore) async {
+/// controller's own async calls need to hop back onto. Returns whether it was
+/// signaled; with a timeout, `false` means the window passed first.
+private func launchAtLoginWait(_ semaphore: DispatchSemaphore, timeout: TimeInterval? = nil) async -> Bool {
     await withCheckedContinuation { continuation in
         DispatchQueue.global().async {
-            semaphore.wait()
-            continuation.resume()
+            if let timeout {
+                continuation.resume(returning: semaphore.wait(timeout: .now() + timeout) == .success)
+            } else {
+                semaphore.wait()
+                continuation.resume(returning: true)
+            }
         }
     }
 }
