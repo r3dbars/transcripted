@@ -188,15 +188,18 @@ enum MeetingQuickSummaryExtractor {
             let owner = displayOwner(turn.speaker)
             for sentence in sentences(in: turn.text) {
                 let normalized = sentence.lowercased()
-                guard !isSmallTalk(normalized) else { continue }
+                // Classify on the substantive clauses only, so a discarded
+                // courtesy clause ("let me know once we've decided") cannot
+                // steer the sentence into the wrong bucket.
+                guard let substantive = substantiveText(normalized) else { continue }
 
                 // One sentence lands in at most one structured bucket, in
                 // priority order, so a "we'll decide X" line does not show up
                 // as both a decision and an action item.
-                if matchesAny(decisionCues, in: normalized) {
+                if matchesAny(decisionCues, in: substantive) {
                     append(sentence, to: &decisions)
-                } else if matchesAny(actionCues, in: normalized) {
-                    append(actionBullet(sentence, owner: owner, normalized: normalized), to: &actionItems)
+                } else if matchesAny(actionCues, in: substantive) {
+                    append(actionBullet(sentence, owner: owner, normalized: substantive), to: &actionItems)
                 } else if isOpenQuestion(sentence, normalized: normalized) {
                     append(sentence, to: &openQuestions)
                 }
@@ -349,6 +352,11 @@ enum MeetingQuickSummaryExtractor {
         "good morning", "good afternoon", "good evening", "how are you", "how's it going",
         "nice to meet", "thanks everyone", "thank you all", "see you", "talk soon",
         "have a good", "sounds good", "no worries", "you're welcome",
+        // Audio confirmations carry the weak "i can " action cue but never a
+        // commitment ("I can hear you now").
+        "i can hear", "i can't hear", "i can barely hear", "i can see you",
+        "i can see your screen", "i can't see", "hear you", "you're muted",
+        "you are muted", "you're breaking up",
     ]
 
     /// Sign-off phrases that contain a weak action cue ("let me ", "have to ")
@@ -395,20 +403,28 @@ enum MeetingQuickSummaryExtractor {
         return wordCount >= 6
     }
 
-    private static func isSmallTalk(_ normalized: String) -> Bool {
+    /// The text to classify for decision and action cues, or nil when the
+    /// sentence is small talk. A sentence with no small-talk marker is
+    /// returned whole. Otherwise courtesy clauses ("Sounds good", "let me
+    /// know", "I can hear you") are dropped so they can neither hide a
+    /// decision or action in another clause nor supply the cue themselves.
+    private static func substantiveText(_ normalized: String) -> String? {
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count < 3 { return true }
-        guard matchesAny(smallTalkMarkers, in: trimmed) else { return false }
-        // A courtesy clause ("Sounds good, we'll go with X.") must not hide a
-        // decision or action in another clause of the same sentence. Drop
-        // the courtesy clauses and closers ("let me know", "see you"), then
-        // look for a cue in what's left.
+        if trimmed.count < 3 { return nil }
+        guard matchesAny(smallTalkMarkers, in: trimmed) || matchesAny(courtesyClosers, in: trimmed) else {
+            return trimmed
+        }
         let substantive = trimmed
             .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == ":" })
             .map(String.init)
             .filter { !matchesAny(smallTalkMarkers, in: $0) && !isCourtesyCloser($0) }
             .joined(separator: ",")
-        return !matchesAny(decisionCues, in: substantive) && !matchesAny(actionCues, in: substantive)
+        guard matchesAny(decisionCues, in: substantive) || matchesAny(actionCues, in: substantive) else {
+            // Nothing substantive left. Only a sentence that matched a
+            // small-talk marker is dropped; a bare closer keeps its old path.
+            return matchesAny(smallTalkMarkers, in: trimmed) ? nil : trimmed
+        }
+        return substantive
     }
 
     // MARK: - Summary assembly
