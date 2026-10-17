@@ -118,8 +118,9 @@ func testMenuBarPopoverPresentation() async {
         let fixture = MenuBarPopoverPresentationFixture()
         fixture.windowVisibility = { _ in .otherSpace }
         fixture.popover.showResults = [true, true]
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertTrue(presented, "a menu reopened on the full-screen anchor is counted as an open")
         assertEqual(fixture.popover.presentations.count, 2, "a shown window on another Space gets one anchor retry")
         assertTrue(fixture.popover.isShown, "the retried menu is open")
         guard let panel = fixture.fallbackPanels.first, let retry = fixture.popover.presentations.last else { return }
@@ -157,8 +158,9 @@ func testMenuBarPopoverPresentation() async {
         fixture.onShow = { [weak fixture] count in
             if count == 1 { fixture?.anchor.removeFromSuperview() }
         }
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertTrue(presented, "a menu opened by the fallback retry is counted as an open")
         assertEqual(fixture.events, ["show", "create anchor", "order anchor", "show", "focus popover"], "the anchor is ordered before the retry and focus follows successful presentation")
         assertEqual(fixture.popover.presentations.count, 2, "a refused show gets one retry")
         assertEqual(fixture.fallbackPanels.count, 1, "the retry uses one temporary anchor window")
@@ -287,8 +289,9 @@ func testMenuBarPopoverPresentation() async {
         fixture.popover.showResults = [false, true]
         fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
         let originalEvents = fixture.events
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let repeated = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertFalse(repeated, "a repeated show of a visible menu is not a second open")
         assertEqual(fixture.events, originalEvents, "a repeated show is a no-op while this popover is visible")
         assertEqual(fixture.fallbackPanels.count, 1, "a repeated show does not replace the retained anchor")
         assertEqual(fixture.fallbackPanels.first?.orderOutCount, 0, "a repeated show does not remove the retained anchor")
@@ -303,14 +306,16 @@ func testMenuBarPopoverPresentation() async {
             fixture.popover.close()
             let upType: NSEvent.EventType = buttonType == .leftMouseDown ? .leftMouseUp : .rightMouseUp
             fixture.currentEvent = menuBarMouseEvent(upType, number: 71, at: fixture.anchorScreenPoint)
-            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            let dismissalPresented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+            assertFalse(dismissalPresented, "the click that dismisses a fallback menu is not counted as a menu open")
             assertEqual(fixture.popover.presentations.count, 2, "matching mouse up consumes the dismissal without reopening")
             assertEqual(fixture.fallbackPanels.count, 1, "the dismissing click creates no replacement panel")
             assertTrue(!fixture.popover.isShown, "clicking the original status button leaves the menu closed")
 
             fixture.currentEvent = menuBarMouseEvent(upType, number: 72, at: fixture.anchorScreenPoint)
-            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            let reopened = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            assertTrue(reopened, "the next independent click that reopens the menu is counted")
             assertEqual(fixture.popover.presentations.count, 4, "the next independent click can reopen normally")
             assertTrue(fixture.popover.isShown, "suppression is limited to the closing click")
         }
