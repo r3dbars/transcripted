@@ -36,15 +36,15 @@ name: Swift CI
 # arm64-apple-macos26.0, so the runner must carry a toolchain/SDK that can
 # target macOS 26.
 #
-# `checks` and `spm-tests` prefer the owner's Mac (a self-hosted runner labelled
-# transcripted-mac, in a fresh throwaway macOS VM per job) whenever it
-# reported free in the last 60s and has at most one job queued or running, and
-# use hosted macos-26 otherwise. GitHub gives this account only 5 concurrent
-# hosted macOS jobs, so moving two of each PR's three jobs off hosted lets more
-# PRs run at once. `pick-runner` makes the choice (scripts/ci/pick-ci-runner.py);
+# `checks`, `spm-tests` and `app-build` prefer the owner's Mac (a self-hosted
+# runner labelled transcripted-mac, in a fresh throwaway macOS VM per job)
+# whenever it reported free in the last 60s and has at most one job queued or
+# running, and use hosted macos-26 otherwise. GitHub gives this account only 5
+# concurrent hosted macOS jobs, so moving a PR's jobs off hosted lets more PRs
+# run at once. `pick-runner` makes the choice (scripts/ci/pick-ci-runner.py);
 # fork PRs always stay hosted, and the Mac's job-started hook refuses them too.
-# `app-build` always stays hosted: its launch smoke is kept to hosted runners
-# (scripts/ops/native-smoke-isolation.py). Setup, pause, and removal:
+# The launch smoke inside `app-build` runs inside the throwaway job VM on the
+# Mac (scripts/ops/native-smoke-isolation.py). Setup, pause, and removal:
 # docs/self-hosted-mac-runner.md.
 #
 # None of these jobs use continue-on-error, so a failure blocks merge instead of
@@ -201,8 +201,8 @@ jobs:
   # but NOT the built app bundle. Restores the shared deps cache and, on a miss,
   # self-heals by building deps here — so it never has to wait behind the app
   # build. On hosted runners app-build is the canonical cache saver and this job
-  # restores only. The owner's Mac (a fresh VM per job) never runs app-build,
-  # so it may restore hosted entries but only ever saves its own `deps-mac-`
+  # restores only. The owner's Mac (a fresh VM per job) is never the canonical
+  # cache saver, so it may restore hosted entries but only ever saves its own `deps-mac-`
   # entries, and only from main so PR runs don't crowd the repo's cache.
   # ---------------------------------------------------------------------------
   spm-tests:

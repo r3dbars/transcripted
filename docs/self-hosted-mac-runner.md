@@ -258,8 +258,16 @@ without touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
 Set `MAC_RUNNER_MODE` to `always` to never use GitHub's hosted Macs: every
 same-repo run waits for this Mac, however long the line is, and nothing is
 re-run on GitHub (neither the sweep nor this service reroutes). Fork PRs still
-run hosted. This is the owner's default, because hosted macOS minutes run out
+run hosted. The one exception is `pause` (and the short park during `install` or
+`rebuild`): while the heartbeat says `paused`, new runs go to hosted `macos-26`
+so nothing new starts on a Mac you asked to leave alone. Runs already queued
+for the Mac stay queued. After `resume`, new runs wait for the Mac again. This is the owner's default, because hosted macOS minutes run out
 fast on a private repo.
+
+The first `install` or `rebuild` after this change lands is parked by the daemon
+that is still running, which is the old code, so in that one pass it may send
+queued runs back to GitHub once even in `always` mode. A copied script can't
+change a running process, so this is accepted as a one-time re-run.
 
 Logs live in `~/.transcripted-ci/serve.log` and `~/.transcripted-ci/logs/`.
 
