@@ -66,6 +66,11 @@ func testCIWorkflowContract() {
             assertTrue(sourceLists < fastTests, "source-list validation should run before the fast tests")
         }
         assertTrue(checks.contains("bash run-e2e-smoke.sh"), "swift-ci should run the E2E smoke")
+        assertTrue(
+            checks.contains("python3 scripts/dev/check-synced-copies.py --self-test")
+                && checks.contains("python3 scripts/dev/check-synced-copies.py"),
+            "swift-ci should run the synced-copies check so merged main keeps the CaptureLibraryPathSafety copies identical"
+        )
         assertTrue(spm.contains("bash run-integration-smoke.sh"), "swift-ci should run the integration smoke")
         assertTrue(
             spm.contains { $0 == "swift test" || $0.hasSuffix(" swift test") },
