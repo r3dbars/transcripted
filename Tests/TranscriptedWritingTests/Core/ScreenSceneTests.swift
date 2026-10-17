@@ -234,6 +234,24 @@ struct ScreenSceneTests {
         #expect(!scene.conversationTurns.contains { $0.text.contains("I can make it") })
     }
 
+    @Test("A misread line inside a wrapped compose field stays out of the reply context")
+    func noisyWrappedFieldLineStaysBelowTheFloor() {
+        let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)
+        let blocks = [
+            block("Hey, are you free Thursday afternoon?", x: 0.41, y: 0.45, width: 0.15, window: slack, windowFrame: frame),
+            block("Should be, what time were you thinking?", x: 0.48, y: 0.50, width: 0.12, window: slack, windowFrame: frame),
+            block("No rush, just let me know today if you can.", x: 0.41, y: 0.58, width: 0.13, window: slack, windowFrame: frame),
+            // Three wrapped field lines; the middle one has an OCR error.
+            block("I can make it", x: 0.48, y: 0.66, width: 0.05, window: slack, windowFrame: frame),
+            block("on Thursclay", x: 0.48, y: 0.69, width: 0.05, window: slack, windowFrame: frame),
+            block("afternoon if that works", x: 0.48, y: 0.72, width: 0.05, window: slack, windowFrame: frame),
+        ]
+        let scene = ScreenScene.classify(blocks: blocks, frontmostBundleID: slack, fieldText: "I can make it on Thursday afternoon if that works")
+        #expect(scene.mode == .replying)
+        #expect(scene.conversationTurns.last?.text == "No rush, just let me know today if you can.")
+        #expect(!scene.conversationTurns.contains { $0.text.contains("Thursclay") })
+    }
+
     @Test("An echo of the typed text high in the window does not cut off the thread beneath it")
     func echoAboveThreadDoesNotMoveTheFloor() {
         let blocks = [
