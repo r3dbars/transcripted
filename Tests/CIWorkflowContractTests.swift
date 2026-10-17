@@ -33,6 +33,38 @@ func testCIWorkflowContract() {
         assertEqual(fixture.descendants(named: "env").flatMap { $0.children.map(\.key) }, ["FOO"], "env names are found at any depth")
     }
 
+    runSuite("CI workflow contract - parser tolerates comments, quoted lists and flow env") {
+        let fixture = WorkflowNode.parse("""
+        on:
+          push:
+            branches: ["main", 'dev'] # quoted inline list
+        jobs:
+          a:
+            runs-on: macos-26 # hosted isolation
+            needs: ["x", y]
+            steps:
+              - run: bash run-tests.sh # fast suite
+              - run: echo "keep # this"
+              - run: | # block with comment
+                  echo block
+              - env: { SKIP: "1", BAZ: 'a, b' } # flow mapping
+        """)
+        let job = fixture.child("jobs")?.child("a")
+        assertEqual(fixture.child("on")?.child("push")?.child("branches")?.list ?? [], ["main", "dev"], "inline list elements are unquoted")
+        assertEqual(job?.child("needs")?.list ?? [], ["x", "y"], "needs elements are unquoted")
+        assertEqual(job?.child("runs-on")?.scalar, "macos-26", "inline comment is stripped from a scalar")
+        let steps = job?.child("steps")?.children ?? []
+        assertEqual(steps.count, 4, "comments do not add or drop steps")
+        assertEqual(steps[0].child("run")?.commandLines ?? [], ["bash run-tests.sh"], "inline comment is stripped from a run command")
+        assertEqual(steps[1].child("run")?.commandLines ?? [], ["echo \"keep # this\""], "a # inside quotes is kept")
+        assertEqual(steps[2].child("run")?.commandLines ?? [], ["echo block"], "block scalar header comment is ignored")
+        assertEqual(steps[3].child("env")?.children.map(\.key) ?? [], ["SKIP", "BAZ"], "flow-style env mappings expose their names")
+        assertEqual(steps[3].child("env")?.child("BAZ")?.scalar, "a, b", "commas inside quoted flow values stay together")
+
+        let unreadable = WorkflowNode.parse("env: { SKIP: \"1\"")
+        assertEqual(unreadable.descendants(named: "!unparsed").count, 1, "an unclosed flow mapping fails closed with a marker")
+    }
+
     runSuite("CI workflow contract - swift-ci stays a blocking gate") {
         let jobs = workflow.child("jobs")?.children ?? []
         assertTrue(jobs.count >= 4, "swift-ci should parse into its jobs")
@@ -123,6 +155,10 @@ func testCIWorkflowContract() {
         // The launch smoke runs on hosted runners now, so the skip env must be
         // gone. The only allowed skip env is the wall-clock timing one. Collect
         // every env var name and every command token so a skip set in either place counts.
+        assertTrue(
+            workflow.descendants(named: "!unparsed").isEmpty,
+            "every env mapping in swift-ci must be readable so a skip variable cannot hide in one"
+        )
         let envNames = workflow.descendants(named: "env").flatMap { $0.children.map(\.key) }
         let commandTokens = workflow.descendants(named: "run").flatMap { run in
             run.commandLines.flatMap { $0.split(whereSeparator: { " \t=\"'".contains($0) }).map(String.init) }
@@ -182,7 +218,9 @@ private struct WorkflowNode {
     /// and come back empty here, so an assert on them fails closed.
     var list: [String] {
         guard let scalar, scalar.hasPrefix("["), scalar.hasSuffix("]") else { return children.compactMap(\.scalar) }
-        return scalar.dropFirst().dropLast().split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        return WorkflowNode.splitTopLevel(String(scalar.dropFirst().dropLast())).map {
+            WorkflowNode.unquote($0.trimmingCharacters(in: .whitespaces))
+        }.filter { !$0.isEmpty }
     }
 
     /// Non-empty command lines of a `run:` value (block or inline).
@@ -215,7 +253,7 @@ private struct WorkflowNode {
                 content = String(content.dropFirst(2)).trimmingCharacters(in: .whitespaces)
             }
             guard let node = keyValue(content) else {
-                flat.append((indent, WorkflowNode(key: "-", scalar: unquote(content))))
+                flat.append((indent, WorkflowNode(key: "-", scalar: unquote(stripComment(content)))))
                 continue
             }
             var parsed = node
@@ -255,11 +293,81 @@ private struct WorkflowNode {
         guard !key.isEmpty, key.allSatisfy({ $0.isLetter || $0.isNumber || "_-.".contains($0) }) else { return nil }
         let rest = content[content.index(after: colon)...]
         guard rest.isEmpty || rest.first == " " else { return nil }
-        let value = rest.trimmingCharacters(in: .whitespaces)
+        let value = stripComment(rest.trimmingCharacters(in: .whitespaces))
+        if value.hasPrefix("{") {
+            return flowMapping(key: key, value: value)
+        }
         return WorkflowNode(key: key, scalar: value.isEmpty ? nil : unquote(value))
     }
 
-    private static func unquote(_ value: String) -> String {
+    /// `key: { A: "1", B: 2 }` becomes a node with children A and B. Anything
+    /// that is not a closed, parseable mapping gets an "!unparsed" child so
+    /// checks over `env:` blocks can fail closed instead of missing a variable.
+    private static func flowMapping(key: String, value: String) -> WorkflowNode {
+        var node = WorkflowNode(key: key)
+        guard value.hasSuffix("}") else {
+            node.children.append(WorkflowNode(key: "!unparsed", scalar: value))
+            return node
+        }
+        for pair in splitTopLevel(String(value.dropFirst().dropLast())) {
+            let trimmed = pair.trimmingCharacters(in: .whitespaces)
+            if trimmed.isEmpty { continue }
+            if let entry = keyValue(trimmed) {
+                node.children.append(entry)
+            } else {
+                node.children.append(WorkflowNode(key: "!unparsed", scalar: trimmed))
+            }
+        }
+        return node
+    }
+
+    /// Splits on commas outside quotes and nested `[]` / `{}`.
+    fileprivate static func splitTopLevel(_ text: String) -> [String] {
+        var parts: [String] = []
+        var current = ""
+        var quote: Character?
+        var depth = 0
+        for character in text {
+            if let open = quote {
+                if character == open { quote = nil }
+            } else if character == "\"" || character == "'" {
+                quote = character
+            } else if "[{".contains(character) {
+                depth += 1
+            } else if "]}".contains(character) {
+                depth -= 1
+            } else if character == ",", depth == 0 {
+                parts.append(current)
+                current = ""
+                continue
+            }
+            current.append(character)
+        }
+        parts.append(current)
+        return parts
+    }
+
+    /// Drops a trailing YAML comment (`#` after whitespace, outside quotes).
+    fileprivate static func stripComment(_ value: String) -> String {
+        var quote: Character?
+        var previous: Character = " "
+        var end = value.endIndex
+        for index in value.indices {
+            let character = value[index]
+            if let open = quote {
+                if character == open { quote = nil }
+            } else if (character == "\"" || character == "'") && (index == value.startIndex || previous == " " || "[{,:".contains(previous)) {
+                quote = character
+            } else if character == "#", index == value.startIndex || previous == " " || previous == "\t" {
+                end = index
+                break
+            }
+            previous = character
+        }
+        return String(value[..<end]).trimmingCharacters(in: .whitespaces)
+    }
+
+    fileprivate static func unquote(_ value: String) -> String {
         guard value.count >= 2, let first = value.first, first == "\"" || first == "'", value.last == first else { return value }
         return String(value.dropFirst().dropLast())
     }
