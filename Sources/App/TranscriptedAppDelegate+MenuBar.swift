@@ -154,10 +154,11 @@ extension TranscriptedAppDelegate {
     ) {
         _ = resolvedSourceApp()
         menuPanelController.refresh()
-        trackMenuBarOpened(entrypoint: entrypoint)
         popover.contentViewController = menuPanelController
         popover.contentSize = menuPanelController.preferredContentSize
-        menuPopoverPresentation.show(popover, relativeTo: button)
+        if menuPopoverPresentation.show(popover, relativeTo: button) {
+            trackMenuBarOpened(entrypoint: entrypoint)
+        }
     }
 
     func closePopover() {

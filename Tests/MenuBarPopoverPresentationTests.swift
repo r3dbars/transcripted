@@ -66,8 +66,9 @@ func testMenuBarPopoverPresentation() async {
 
     runSuite("Opening the menu focuses only its popover window after showing it") {
         let fixture = MenuBarPopoverPresentationFixture()
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertTrue(presented, "a menu that opened reports it so analytics can count it")
         assertEqual(fixture.events, ["show", "focus popover"], "show must create the window before keyboard focus is requested")
         assertTrue(fixture.popover.shownRelativeTo === fixture.anchor, "keep the clicked status button as the anchor")
         assertEqual(fixture.popover.shownRect, fixture.anchor.bounds, "anchor to the button's bounds")
@@ -81,8 +82,9 @@ func testMenuBarPopoverPresentation() async {
         // window. AppKit may refuse the next show if the anchor is hidden.
         fixture.window.contentView = fixture.content.view
         fixture.popover.showResults = [false, false]
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertFalse(presented, "a refused presentation is not counted as an open")
         assertEqual(fixture.events, ["show", "create anchor", "order anchor", "show", "order out anchor"], "a hidden menu cleans up its single retry without stealing keyboard focus")
         assertEqual(fixture.popover.presentations.count, 2, "failure does not start an unbounded presentation loop")
         assertEqual(fixture.fallbackPanels.first?.orderOutCount, 1, "a refused retry removes its temporary anchor")
@@ -94,8 +96,9 @@ func testMenuBarPopoverPresentation() async {
         fixture.onShow = { [weak fixture] count in
             if count == 1 { fixture?.popover.close() }
         }
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertFalse(presented, "a menu dismissed while presenting is not counted as an open")
         assertEqual(fixture.popover.presentations.count, 1, "a close notification distinguishes dismissal from a refused show")
         assertTrue(fixture.fallbackPanels.isEmpty, "dismissal does not allocate a recovery anchor")
         assertFalse(fixture.popover.isShown, "a closed menu must not immediately reopen")
@@ -115,8 +118,9 @@ func testMenuBarPopoverPresentation() async {
         let fixture = MenuBarPopoverPresentationFixture()
         fixture.windowVisibility = { _ in .otherSpace }
         fixture.popover.showResults = [true, true]
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertTrue(presented, "a menu reopened on the full-screen anchor is counted as an open")
         assertEqual(fixture.popover.presentations.count, 2, "a shown window on another Space gets one anchor retry")
         assertTrue(fixture.popover.isShown, "the retried menu is open")
         guard let panel = fixture.fallbackPanels.first, let retry = fixture.popover.presentations.last else { return }
@@ -136,7 +140,8 @@ func testMenuBarPopoverPresentation() async {
             fixture.popover.close()
             let upType: NSEvent.EventType = downType == .leftMouseDown ? .leftMouseUp : .rightMouseUp
             fixture.currentEvent = menuBarMouseEvent(upType, number: 173, at: fixture.anchorScreenPoint)
-            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            let dismissalPresented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            assertFalse(dismissalPresented, "the dismissing click is not counted as a menu open")
             assertEqual(fixture.popover.presentations.count, 2, "the dismissal's mouse up cannot reopen the retried menu")
             assertFalse(fixture.popover.isShown, "the retried menu stays dismissed")
             assertEqual(fixture.fallbackPanels.count, 1, "the dismissing click creates no replacement fallback")
@@ -153,8 +158,9 @@ func testMenuBarPopoverPresentation() async {
         fixture.onShow = { [weak fixture] count in
             if count == 1 { fixture?.anchor.removeFromSuperview() }
         }
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertTrue(presented, "a menu opened by the fallback retry is counted as an open")
         assertEqual(fixture.events, ["show", "create anchor", "order anchor", "show", "focus popover"], "the anchor is ordered before the retry and focus follows successful presentation")
         assertEqual(fixture.popover.presentations.count, 2, "a refused show gets one retry")
         assertEqual(fixture.fallbackPanels.count, 1, "the retry uses one temporary anchor window")
@@ -283,8 +289,9 @@ func testMenuBarPopoverPresentation() async {
         fixture.popover.showResults = [false, true]
         fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
         let originalEvents = fixture.events
-        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        let repeated = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+        assertFalse(repeated, "a repeated show of a visible menu is not a second open")
         assertEqual(fixture.events, originalEvents, "a repeated show is a no-op while this popover is visible")
         assertEqual(fixture.fallbackPanels.count, 1, "a repeated show does not replace the retained anchor")
         assertEqual(fixture.fallbackPanels.first?.orderOutCount, 0, "a repeated show does not remove the retained anchor")
@@ -299,14 +306,16 @@ func testMenuBarPopoverPresentation() async {
             fixture.popover.close()
             let upType: NSEvent.EventType = buttonType == .leftMouseDown ? .leftMouseUp : .rightMouseUp
             fixture.currentEvent = menuBarMouseEvent(upType, number: 71, at: fixture.anchorScreenPoint)
-            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            let dismissalPresented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
 
+            assertFalse(dismissalPresented, "the click that dismisses a fallback menu is not counted as a menu open")
             assertEqual(fixture.popover.presentations.count, 2, "matching mouse up consumes the dismissal without reopening")
             assertEqual(fixture.fallbackPanels.count, 1, "the dismissing click creates no replacement panel")
             assertTrue(!fixture.popover.isShown, "clicking the original status button leaves the menu closed")
 
             fixture.currentEvent = menuBarMouseEvent(upType, number: 72, at: fixture.anchorScreenPoint)
-            fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            let reopened = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+            assertTrue(reopened, "the next independent click that reopens the menu is counted")
             assertEqual(fixture.popover.presentations.count, 4, "the next independent click can reopen normally")
             assertTrue(fixture.popover.isShown, "suppression is limited to the closing click")
         }
