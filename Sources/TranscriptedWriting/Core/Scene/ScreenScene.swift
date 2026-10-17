@@ -486,11 +486,11 @@ public enum ScreenScene {
     /// is doing the containing (e.g. "ok", "yes") since they'd trivially
     /// "match" almost any text without actually being the same message.
     private static let dedupeMinimumLength = 6
-    /// Top edge of the lowest block in the lower half of the window that
-    /// reads back the user's own typed text, or `nil` when none does (empty
-    /// field, or the field is scrolled out of view). Only the lowest match is
-    /// the field: a higher one is a quoted or echoed message. The upper lines
-    /// of a wrapped field sit above the floor, but dedupe drops them.
+    /// Top edge of the bottom compose cluster: the lowest block in the lower
+    /// half of the window that reads back the user's own typed text, plus the
+    /// matching lines stacked directly above it. `nil` when none matches
+    /// (empty field, or the field is scrolled out of view). A match that is
+    /// far above the cluster is a quoted or echoed message, not the field.
     private static func composeFieldTop(in blocks: [OCRBlock], fieldText: String) -> Double? {
         let field = normalizedForDedupe(fieldText)
         guard field.count >= dedupeMinimumLength else { return nil }
@@ -504,8 +504,27 @@ public enum ScreenScene {
                   windowRelativeY(of: block) >= 0.5 else { return false }
             return field.contains(candidate) || candidate.contains(field)
         }
-        return matches.map(\.boundingBox.y).max()
+        // Start from the lowest match (the field) and walk upward through
+        // matches that stack close enough to be lines of the same wrapped
+        // field. The top of that cluster is the floor, so a line in the
+        // middle of the field that OCR misread (and so fails to match) still
+        // sits below it. A quoted copy further up is too far away to join.
+        let ordered = matches.sorted { $0.boundingBox.y > $1.boundingBox.y }
+        guard var current = ordered.first else { return nil }
+        var top = current.boundingBox.y
+        for next in ordered.dropFirst() {
+            let lineHeight = max(current.boundingBox.height, next.boundingBox.height)
+            guard current.boundingBox.y - next.boundingBox.y <= lineHeight * composeClusterMaxGapInLines else { break }
+            top = min(top, next.boundingBox.y)
+            current = next
+        }
+        return top
     }
+
+    /// Largest top-to-top distance, in line heights, between two matching
+    /// lines that still count as one wrapped compose field. Three leaves room
+    /// for a misread line between two matching ones.
+    private static let composeClusterMaxGapInLines = 3.0
 
     private static func windowRelativeY(of block: OCRBlock) -> Double {
         guard let frame = block.windowFrame, frame.height > 0 else { return block.boundingBox.y }
