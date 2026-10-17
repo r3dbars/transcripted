@@ -1,8 +1,9 @@
 // Most of this suite calls AnalyticsEventPolicy, AnalyticsPayloadSanitizer, ActivationTelemetry,
 // and FeatureDiscoveryTelemetry directly, plus Core's SpeakerFinalizationFailureReason (its
 // database-free file is in the fast runner). AgentCaptureQueryTelemetryPolicy lives in the
-// separate MCP package, so this suite asserts a literal copy of its allowedProperties and
-// AgentCaptureQueryTelemetryTests in that package asserts the same list against the real set.
+// separate MCP package, so this suite checks the app policy against the shared taxonomy row in
+// Resources/analytics-events.psv, and AgentCaptureQueryTelemetryTests in that package checks the
+// real MCP set against the same row.
 // Docs and Resources/*.psv are read as data files (repo files that must agree with the allowlist).
 
 import Foundation
@@ -173,8 +174,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(returnProxy?.allowedProperties ?? Set<String>(), ["prior_artifact_kind", "proxy_kind", "return_window_bucket", "surface"], "return proxy should not include paths or titles")
         assertEqual(
             agentQuery?.allowedProperties ?? Set<String>(),
-            ["app_version", "build_channel", "build_revision", "client_family", "capture_kind", "latency_bucket", "result", "result_count_bucket", "source_count_bucket", "tool_kind"],
-            "agent query observation should stay build-scoped, enum, and bucket only"
+            taxonomyFileProperties(forEvent: "agent_capture_query_observed"),
+            "agent query allowlist should match the shared row in Resources/analytics-events.psv that the MCP package test also checks"
+        )
+        assertFalse(
+            taxonomyFileProperties(forEvent: "agent_capture_query_observed").isEmpty,
+            "the shared taxonomy row for agent_capture_query_observed should list properties"
         )
 
         let activationAllowedProperties = (prompt?.allowedProperties ?? Set<String>())
@@ -1937,6 +1942,16 @@ private func taxonomyFileEventNames() -> [String] {
         }
         return String(first)
     }
+}
+
+private func taxonomyFileProperties(forEvent event: String) -> Set<String> {
+    for line in taxonomyDataLines(relativePath: "Resources/analytics-events.psv") {
+        let pieces = line.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+        if pieces.count == 2, pieces[0] == event {
+            return Set(pieces[1].split(separator: ",").map { String($0) })
+        }
+    }
+    return []
 }
 
 private func reviewedNonBucketAnalyticsProperties() -> Set<String> {
