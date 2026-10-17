@@ -377,6 +377,16 @@ extension TranscriptSaver {
         }
     }
 
+    /// A row written by `--name-likely-speakers` carries `Name (likely)` and was
+    /// never confirmed by the user. A profile rename or merge must keep that
+    /// hedge rather than make the guess look confirmed.
+    private static func hedgedName(_ newName: String, replacing oldName: String?) -> String {
+        guard let oldName,
+              oldName.hasSuffix(SpeakerMapping.likelyNameSuffix),
+              !newName.hasSuffix(SpeakerMapping.likelyNameSuffix) else { return newName }
+        return newName + SpeakerMapping.likelyNameSuffix
+    }
+
     // MARK: - Settings Rename/Merge Helpers
     //
     // File scanning (transcriptMarkdownFiles, scanFrontmatter), frontmatter row
@@ -400,16 +410,6 @@ extension TranscriptSaver {
     /// Internal (not `private`) so `SpeakerIdentityMutationService` — the canonical
     /// entry point for rename/merge/discard — can reuse this as the one shared
     /// library-scan rename engine instead of reimplementing it.
-    /// A row written by `--name-likely-speakers` carries `Name (likely)` and was
-    /// never confirmed by the user. A profile rename or merge must keep that
-    /// hedge rather than make the guess look confirmed.
-    private static func hedgedName(_ newName: String, replacing oldName: String?) -> String {
-        guard let oldName,
-              oldName.hasSuffix(SpeakerMapping.likelyNameSuffix),
-              !newName.hasSuffix(SpeakerMapping.likelyNameSuffix) else { return newName }
-        return newName + SpeakerMapping.likelyNameSuffix
-    }
-
     @discardableResult
     static func applyRetroactiveRename(
         in content: inout String,
@@ -419,7 +419,7 @@ extension TranscriptSaver {
     ) -> Bool {
         var lines = content.components(separatedBy: "\n")
         let rows = parseFrontmatterSpeakerRows(in: lines)
-        let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != newName }
+        let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != hedgedName(newName, replacing: $0.name) }
         guard !targetRows.isEmpty else { return false }
 
         var changed = false

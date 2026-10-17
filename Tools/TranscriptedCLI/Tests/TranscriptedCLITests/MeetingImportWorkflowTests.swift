@@ -71,6 +71,14 @@ final class MeetingImportWorkflowTests: XCTestCase {
             homeDirectory: home
         )
         XCTAssertEqual(paths.diarization?.path, cached.deletingLastPathComponent().path)
+        XCTAssertEqual(paths.nemotron?.standardizedFileURL.path, nemotronDir.standardizedFileURL.path)
+        XCTAssertNil(MeetingImportModels.noDownloadWeSpeakerError(
+            engine: "nemotron",
+            hasInjectedEmbedder: false,
+            hasOfflineWeSpeaker: paths.diarization != nil,
+            usesOnlineWeSpeaker: false,
+            hasOnlineWeSpeaker: false
+        ))
     }
 
     func testBundledDiarizerFindsActualNestedReleaseLayoutWithoutCache() throws {

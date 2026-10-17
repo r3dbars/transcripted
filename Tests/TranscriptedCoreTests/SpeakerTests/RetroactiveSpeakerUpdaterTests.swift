@@ -123,10 +123,32 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             in: temporaryDirectory
         )
 
-        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        var updated = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(updated.contains(#"name: "Alicia (likely)""#))
         XCTAssertTrue(updated.contains("[System/Alicia (likely)]"))
+        XCTAssertTrue(updated.contains("**Alicia (likely):**"))
         XCTAssertFalse(updated.contains("[System/Alicia]"))
+        XCTAssertFalse(updated.contains(#"name: "Alicia""#))
+
+        let confirmedURL = temporaryDirectory.appendingPathComponent("confirmed.md")
+        try markdown(speakerId: speakerId, speakerName: "Alicia")
+            .write(to: confirmedURL, atomically: true, encoding: .utf8)
+        let mergedId = UUID()
+        TranscriptSaver.retroactivelyMergeSpeaker(
+            sourceDbId: speakerId,
+            targetDbId: mergedId,
+            targetName: "Alex",
+            in: temporaryDirectory
+        )
+
+        updated = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Alex (likely)""#))
+        XCTAssertTrue(updated.contains("[System/Alex (likely)]"))
+        XCTAssertFalse(updated.contains("[System/Alex]"))
+        let confirmed = try String(contentsOf: confirmedURL, encoding: .utf8)
+        XCTAssertTrue(confirmed.contains(#"name: "Alex""#))
+        XCTAssertTrue(confirmed.contains("[System/Alex]"))
+        XCTAssertFalse(confirmed.contains("(likely)"))
     }
 
     func testRetroactivelyUpdateSpeakerRenamesMicLabels() throws {
