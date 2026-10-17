@@ -878,11 +878,8 @@ final class MeetingOverlayController: NSObject {
     // MARK: - Island right-click menu
 
     private func makeStripMenu() -> NSMenu? {
-        guard state == .recording else { return nil }
-        // Overlay `.recording` also covers `.stoppingRecording` (keep the
-        // meeting up through teardown). Discard must require the session
-        // itself to still be `.recording`, or the item no-ops after a stop starts.
-        if MeetingSessionStateMachine.mayDiscardRecording(sessionState: meetingSession?.state) {
+        // Overlay `.recording` also covers `.stoppingRecording`; the session state decides.
+        if MeetingSessionStateMachine.stripMenuOffersDiscard(overlayIsRecording: state == .recording, sessionState: meetingSession?.state) {
             let menu = NSMenu()
             let discardItem = NSMenuItem(
                 title: "Discard Recording…",
