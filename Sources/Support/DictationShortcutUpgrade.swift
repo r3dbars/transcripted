@@ -1,13 +1,14 @@
 import Carbon
 import Foundation
 
-/// Restores the 1.1.69 two-key dictation layout for people upgrading through
-/// 1.1.70's one-key default, and names the chosen keys for analytics.
+/// 1.1.70 made Right Option the one dictation key. This upgrade leaves
+/// people on that one key: unstored 1.1.69 defaults and reset-to-defaults
+/// (stored Fn) become Right Option; a custom Hands-Free key becomes the
+/// one key. Dual Fn + Right Option is not restored.
 ///
-/// 1.1.70 made Right Option the one dictation key. Unstored 1.1.69 defaults
-/// were Fn hold-to-talk plus Right Option hands-free, so a naive read of the
-/// new default dropped Fn. A stored hold key made migrate return early and
-/// drop Hands-Free. Both keys are valid together.
+/// A one-time Settings note ("Dictation moved to Right Option") is armed
+/// only for installs whose previous launched version is before 1.1.70.
+/// Fresh installs and anyone already on 1.1.70+ never see it.
 enum DictationShortcutUpgrade {
     static let lastLaunchedAppVersionKey = "Transcripted.LastLaunchedAppVersion"
     /// Written before Sparkle overwrites `lastLaunchedAppVersionKey` on launch,
@@ -15,8 +16,9 @@ enum DictationShortcutUpgrade {
     /// the updater (that happens before `registerHotkey`).
     static let previousLaunchedAppVersionKey = "Transcripted.PreviousLaunchedAppVersion"
     static let oneKeyReleaseVersion = "1.1.70"
+    static let movedToRightOptionNoticeKey = "dictation-shortcut-moved-to-right-option-notice"
+    static let movedToRightOptionNotice = "Dictation moved to Right Option"
     static let legacyHoldDefault = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function))
-    static let legacyToggleDefault = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
 
     static func rememberPreviousLaunchedVersion(
         _ previous: String?,
@@ -32,11 +34,22 @@ enum DictationShortcutUpgrade {
             ?? meaningfulVersion(userDefaults.string(forKey: lastLaunchedAppVersionKey))
     }
 
-    /// Persist every 1.1.69 dictation key that still worked. Carbon-era
-    /// Right-Option-disabled installs keep Option+Space (or whatever Carbon
-    /// shortcut they saved) as the one dictation key — the lazy read path
-    /// cannot, because a missing mode is Hands-Free and that returns today's
-    /// Right Option default.
+    static func isVersionBeforeOneKeyRelease(_ version: String?) -> Bool {
+        guard let version = meaningfulVersion(version) else { return false }
+        return version.compare(oneKeyReleaseVersion, options: .numeric) == .orderedAscending
+    }
+
+    static func showsMovedToRightOptionNotice(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: movedToRightOptionNoticeKey)
+    }
+
+    static func dismissMovedToRightOptionNotice(userDefaults: UserDefaults = .standard) {
+        userDefaults.removeObject(forKey: movedToRightOptionNoticeKey)
+    }
+
+    /// One dictation key. Custom Hands-Free wins; otherwise 1.1.69 Fn /
+    /// unstored defaults become Right Option; Carbon-era Option+Space stays
+    /// when Right Option was off.
     static func apply(userDefaults: UserDefaults) {
         let storedHold = PhysicalDictationTriggerPreferences.storedPushToTalkBinding(
             userDefaults: userDefaults
@@ -44,44 +57,50 @@ enum DictationShortcutUpgrade {
         let storedToggle = PhysicalDictationTriggerPreferences.storedHandsFreeBinding(
             userDefaults: userDefaults
         )
-        let carbonRightOptionDisabled = !HotkeyPreferences.rightOptionDictationEnabled(
-            userDefaults: userDefaults
+        let rightOption = PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
+        let fromBeforeOneKey = isVersionBeforeOneKeyRelease(
+            launchedVersionBeforeThisBuild(userDefaults: userDefaults)
         )
 
-        if shouldKeepEveryLegacyKey(
-            storedHold: storedHold,
-            storedToggle: storedToggle,
-            carbonRightOptionDisabled: carbonRightOptionDisabled,
-            launchedVersionBeforeThisBuild: launchedVersionBeforeThisBuild(userDefaults: userDefaults),
-            onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(userDefaults: userDefaults)
-        ) {
-            let hold = storedHold ?? legacyHoldDefault
-            PhysicalDictationTriggerPreferences.savePushToTalk(hold, userDefaults: userDefaults)
-            let toggle = storedToggle ?? legacyToggleDefault
-            if toggle != hold {
-                PhysicalDictationTriggerPreferences.saveHandsFree(toggle, userDefaults: userDefaults)
-            }
+        if let custom = storedToggle, custom != rightOption {
+            PhysicalDictationTriggerPreferences.savePushToTalk(custom, userDefaults: userDefaults)
+            PhysicalDictationTriggerPreferences.clearHandsFree(userDefaults: userDefaults)
+            HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: userDefaults)
             return
         }
 
-        persistCarbonEraShortcutIfNeeded(
+        let carbonRightOptionDisabled = !HotkeyPreferences.rightOptionDictationEnabled(
+            userDefaults: userDefaults
+        )
+        if persistCarbonEraShortcutIfNeeded(
             storedHold: storedHold,
             storedToggle: storedToggle,
             carbonRightOptionDisabled: carbonRightOptionDisabled,
             userDefaults: userDefaults
-        )
+        ) {
+            return
+        }
+
+        guard fromBeforeOneKey, storedHold == nil || storedHold == legacyHoldDefault else {
+            return
+        }
+
+        PhysicalDictationTriggerPreferences.savePushToTalk(rightOption, userDefaults: userDefaults)
+        PhysicalDictationTriggerPreferences.clearHandsFree(userDefaults: userDefaults)
+        userDefaults.set(true, forKey: movedToRightOptionNoticeKey)
     }
 
     /// Pre-physical-trigger installs that turned Right Option off used the
     /// Carbon RegisterEventHotKey chord (default Option+Space). Persist it as
-    /// the one dictation key, matching the 1.1.70 migrate for this cohort.
+    /// the one dictation key — that chord is their custom shortcut.
+    @discardableResult
     private static func persistCarbonEraShortcutIfNeeded(
         storedHold: PhysicalDictationTriggerBinding?,
         storedToggle: PhysicalDictationTriggerBinding?,
         carbonRightOptionDisabled: Bool,
         userDefaults: UserDefaults
-    ) {
-        guard carbonRightOptionDisabled, storedHold == nil, storedToggle == nil else { return }
+    ) -> Bool {
+        guard carbonRightOptionDisabled, storedHold == nil, storedToggle == nil else { return false }
         let old = HotkeyPreferences.dictationBinding(userDefaults: userDefaults)
         let carbon = PhysicalDictationTriggerBinding(
             keyCode: old.keyCode,
@@ -89,34 +108,11 @@ enum DictationShortcutUpgrade {
         )
         guard PhysicalDictationTriggerPreferences.rejectionReason(for: carbon) == nil,
               carbon != PhysicalDictationTriggerPreferences.defaultPushToTalkBinding else {
-            return
+            return false
         }
         PhysicalDictationTriggerPreferences.savePushToTalk(carbon, userDefaults: userDefaults)
         HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: userDefaults)
-    }
-
-    static func shouldKeepEveryLegacyKey(
-        storedHold: PhysicalDictationTriggerBinding?,
-        storedToggle: PhysicalDictationTriggerBinding?,
-        carbonRightOptionDisabled: Bool,
-        launchedVersionBeforeThisBuild: String?,
-        onboardingCompleted: Bool
-    ) -> Bool {
-        if carbonRightOptionDisabled, storedHold == nil, storedToggle == nil {
-            return false
-        }
-        if storedHold != nil || storedToggle != nil {
-            return true
-        }
-        if let version = launchedVersionBeforeThisBuild,
-           version.compare(oneKeyReleaseVersion, options: .numeric) == .orderedAscending {
-            return true
-        }
-        // Sparkle writes last-launched to the current version before
-        // registerHotkey. Onboarding is still completed for a 1.1.69
-        // upgrader, and still incomplete on a fresh 1.1.70 first launch
-        // (`registerHotkey` runs before the onboarding window).
-        return onboardingCompleted
+        return true
     }
 
     static func analyticsProperties(userDefaults: UserDefaults = .standard) -> [String: String] {

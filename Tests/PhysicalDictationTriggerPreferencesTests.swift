@@ -169,7 +169,7 @@ func testPhysicalDictationTriggerPreferences() {
         assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "and the behavior stays Hold or tap")
     }
 
-    runSuite("A stored Hands-Free key without a stored hold key keeps Fn hold") {
+    runSuite("A stored Hands-Free key without a stored hold key becomes the one dictation key") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let f5 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))
@@ -178,15 +178,14 @@ func testPhysicalDictationTriggerPreferences() {
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
-            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_Function)),
-            "the unstored 1.1.69 hold key was Fn"
+            f5,
+            "a custom Hands-Free key is kept as the one dictation key"
         )
-        assertEqual(
+        assertNil(
             PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: defaults),
-            Optional(f5),
-            "the custom Hands-Free key stays stored"
+            "Hands-Free is folded in, not left as a second binding"
         )
-        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "it must not fold into Tap to toggle")
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .tapToToggle, "press-to-fire Hands-Free maps to Tap to toggle")
 
         PhysicalDictationTriggerPreferences.savePushToTalk(PhysicalDictationTriggerPreferences.defaultPushToTalkBinding, userDefaults: defaults)
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
@@ -197,7 +196,7 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
-    runSuite("A fresh install keeps Right Option; a chosen hold key keeps a stored Hands-Free key") {
+    runSuite("A fresh install keeps Right Option; a custom Hands-Free key becomes the one key") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
@@ -215,11 +214,10 @@ func testPhysicalDictationTriggerPreferences() {
         PhysicalDictationTriggerPreferences.savePushToTalk(capsLock, userDefaults: custom)
         seedLegacyHandsFree(f5, in: custom)
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: custom)
-        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), capsLock, "a chosen hold key stays")
-        assertEqual(
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), f5, "the custom Hands-Free key becomes the one dictation key")
+        assertNil(
             PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: custom),
-            Optional(f5),
-            "and the stored Hands-Free key is not dropped"
+            "a second key is not left stored"
         )
     }
 

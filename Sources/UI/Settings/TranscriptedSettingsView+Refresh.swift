@@ -179,6 +179,7 @@ extension TranscriptedSettingsView {
         uiSoundsEnabled = UISoundPreferences.isEnabled()
         meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
         showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+        showsDictationKeyMovedNotice = DictationShortcutUpgrade.showsMovedToRightOptionNotice()
         micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
         useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
         pinnedMicrophoneRecorderOn = PinnedMicrophoneCapturePreferences.isEnabled()
@@ -439,6 +440,7 @@ extension TranscriptedSettingsView {
         dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
             for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
         )
+        showsDictationKeyMovedNotice = DictationShortcutUpgrade.showsMovedToRightOptionNotice()
     }
 
     func refreshDockVisibility() {

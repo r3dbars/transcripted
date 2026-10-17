@@ -62,11 +62,13 @@ enum FunctionKeySystemAction: Equatable {
 }
 
 enum PhysicalDictationTriggerPreferences {
-    /// The one dictation key on a fresh install. Right Option, not Fn: Fn
-    /// also opens emoji or switches input unless macOS is set to Do Nothing.
-    /// 1.1.69 upgraders keep Fn through `DictationShortcutUpgrade`.
+    /// The one dictation key. Right Option, not Fn: Fn also opens emoji or
+    /// switches input unless macOS is set to Do Nothing. 1.1.69 upgraders
+    /// land here through `DictationShortcutUpgrade` (custom Hands-Free
+    /// becomes this one key instead).
     static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
-    /// 1.1.69 Hands-Free default. Still stored as a second key when distinct.
+    /// 1.1.69 Hands-Free default. Upgrade copies a distinct stored value
+    /// onto the one dictation key, then clears this slot.
     static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),
@@ -115,11 +117,6 @@ enum PhysicalDictationTriggerPreferences {
             modifiersKey: handsFreeModifiersKey,
             userDefaults: userDefaults
         )
-    }
-
-    static func hasDistinctHandsFreeBinding(userDefaults: UserDefaults = .standard) -> Bool {
-        guard let stored = storedHandsFreeBinding(userDefaults: userDefaults) else { return false }
-        return stored != pushToTalkBinding(userDefaults: userDefaults)
     }
 
     static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
@@ -192,22 +189,12 @@ enum PhysicalDictationTriggerPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
-    /// Runs once. 1.1.69 upgraders keep every key that still worked, including
-    /// Fn hold-to-talk next to Right Option hands-free.
+    /// Runs once. 1.1.69 upgraders move to one Right Option key, unless they
+    /// had a custom Hands-Free shortcut — that becomes the one key.
     static func migrateToOneDictationKeyIfNeeded(userDefaults: UserDefaults = .standard) {
         guard !userDefaults.bool(forKey: oneDictationKeyMigratedKey) else { return }
         userDefaults.set(true, forKey: oneDictationKeyMigratedKey)
         DictationShortcutUpgrade.apply(userDefaults: userDefaults)
-    }
-
-    /// Menu bar and Settings: "Fn / Right ⌥" when a second key is bound.
-    static func dictationShortcutDisplayString(userDefaults: UserDefaults = .standard) -> String {
-        let hold = pushToTalkBinding(userDefaults: userDefaults)
-        let holdText = displayString(for: hold)
-        guard let toggle = storedHandsFreeBinding(userDefaults: userDefaults), toggle != hold else {
-            return holdText
-        }
-        return "\(holdText) / \(displayString(for: toggle))"
     }
 
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {

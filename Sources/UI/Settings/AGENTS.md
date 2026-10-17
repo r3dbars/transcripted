@@ -35,7 +35,7 @@
 - `+HomeMeetingActions.swift` - `RootAlert`, rename, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts.
 - `+HomeSpeakerVoiceprints.swift` - Home "Name speakers" persistence, including re-embed from retained audio for unlinked voices.
 - `+GeneralEditors.swift` - the combined page and its injected `general*Editor` properties (model, speaker matching, shortcuts, Bluetooth mic, microphone, auto-send, permissions, mic processing, reporting).
-- `+ShortcutEditor.swift` - shortcut recorder editor (dictation key, its behavior, meetings).
+- `+ShortcutEditor.swift` - shortcut recorder editor (dictation key, its behavior, meetings). The one-time "Dictation moved to Right Option" note lives under the dictation key row.
 - `+DictationMuffle.swift` - the "Muffle other audio" toggle; turning it on asks for System Audio Recording here, so dictation never prompts.
 - `+Refresh.swift` - state refresh, analytics, model cache, launch at login.
 - `+Preferences.swift` - corrections, capture library, Auto Enter, update actions.
@@ -52,7 +52,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `TranscriptedSettingsGeneralControls.swift` - `SettingsCard`, label/control/toggle/action rows, the dictation overlay mode picker, `GeneralInfo` popovers.
 - `TranscriptedSettingsComponents.swift` - `persistedSettingsBinding`, `SettingsPageIntro`, button styles, `SettingsStatusCard`, permission rows, hotkey recorder container.
 - `TranscriptedSettingsRows.swift` - rows for model choices, custom corrections, Auto Enter apps.
-- `ShortcutSettingsRows.swift` - key rows for the dictation key, an extra Hands-Free row when a distinct 1.1.69 second key is still bound, and meetings, plus `ShortcutRecorderModel`. Paste-last stays gone.
+- `ShortcutSettingsRows.swift` - key rows for the dictation key and meetings, and `ShortcutRecorderModel`, which records a shortcut in place (the dictation key is one key with hold/tap behavior; no Hands-Free or paste-last rows).
 - `MeetingLanguageSettingRow.swift` / `MeetingMicrophoneSettingRow.swift` / `MicrophoneSettingsPolicy.swift` - meeting language picker, Mac-selected-mic toggle, and which mic rows General shows (Foundation-pure).
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the shell (start dictation/meeting, import audio, feedback, diagnostics).
 - `TranscriptedSettingsWindowController.swift` / `TranscriptedOnboardingWindowController.swift` - AppKit windows. The settings controller owns `TodayViewModel`.

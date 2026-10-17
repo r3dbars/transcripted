@@ -1,6 +1,6 @@
 // TranscriptedSettingsView+ShortcutEditor.swift
 // General page: the keyboard shortcuts switch and the shortcut recorder
-// (dictation key, optional Hands-Free, its behavior, meetings).
+// (dictation key, its behavior, meetings).
 
 import SwiftUI
 
@@ -27,26 +27,17 @@ extension TranscriptedSettingsView {
                     target: .dictation,
                     info: GeneralInfo(
                         title: "Dictation key",
-                        message: "Hold this key to talk, or tap it to keep listening, depending on Behavior. Click it, then press the key you want. Modifier keys like Fn or Right Option work on their own."
+                        message: "The one key for dictation. Click it, then press the key you want. Modifier keys like Fn or Right Option work on their own."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-key",
                     recorder: shortcutRecorder
                 ) {
+                    if showsDictationKeyMovedNotice {
+                        dictationKeyMovedNotice
+                    }
                     if let dictationTriggerSystemWarning {
                         dictationKeyWarning(dictationTriggerSystemWarning)
                     }
-                }
-
-                if PhysicalDictationTriggerPreferences.hasDistinctHandsFreeBinding() {
-                    ShortcutKeyRow(
-                        target: .dictationHandsFree,
-                        info: GeneralInfo(
-                            title: "Hands-Free",
-                            message: "A second key that starts or stops dictation without holding. 1.1.69 bound this separately; it still works next to the hold key."
-                        ),
-                        automationIdentifier: "transcripted.settings.general.hands-free-key",
-                        recorder: shortcutRecorder
-                    )
                 }
 
                 DictationKeyBehaviorRow(behavior: persistedSettingsBinding(
@@ -70,12 +61,30 @@ extension TranscriptedSettingsView {
         .onDisappear { shortcutRecorder.stopRecording() }
         .onChange(of: dictationShortcutsEnabled) { _, enabled in
             // The dictation row just hid; don't keep listening for its key.
-            if !enabled,
-               shortcutRecorder.recordingTarget == .dictation
-                || shortcutRecorder.recordingTarget == .dictationHandsFree {
+            if !enabled, shortcutRecorder.recordingTarget == .dictation {
                 shortcutRecorder.stopRecording()
             }
         }
+    }
+
+    /// One-time after upgrading from before 1.1.70, when the one dictation
+    /// key became Right Option. OK persists the dismissal.
+    private var dictationKeyMovedNotice: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(DictationShortcutUpgrade.movedToRightOptionNotice)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier("transcripted.settings.general.dictation-key-moved-note")
+            Spacer(minLength: 0)
+            Button("OK") {
+                DictationShortcutUpgrade.dismissMovedToRightOptionNotice()
+                showsDictationKeyMovedNotice = false
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier("transcripted.settings.general.dictation-key-moved-note-dismiss")
+        }
+        .font(.caption)
+        .padding(.bottom, 6)
     }
 
     /// Fn's macOS action fires along with dictation until it's set to Do
