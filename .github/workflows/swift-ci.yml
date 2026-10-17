@@ -166,6 +166,12 @@ jobs:
         shell: bash
         run: python3 scripts/dev/check-build-source-lists.py
 
+      - name: Synced copies
+        shell: bash
+        run: |
+          python3 scripts/dev/check-synced-copies.py --self-test
+          python3 scripts/dev/check-synced-copies.py
+
       - name: Dependency archive input guards
         shell: bash
         run: bash Tests/BuildDependencies/ArchiveInputsTests.sh
