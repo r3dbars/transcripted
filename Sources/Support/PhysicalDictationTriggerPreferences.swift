@@ -63,10 +63,13 @@ enum FunctionKeySystemAction: Equatable {
 
 enum PhysicalDictationTriggerPreferences {
     /// The one dictation key. Right Option, not Fn: Fn also opens emoji or
-    /// switches input unless macOS is set to Do Nothing.
+    /// switches input unless macOS is set to Do Nothing. 1.1.69 upgraders
+    /// land here through `DictationShortcutUpgrade` (custom Hands-Free
+    /// becomes this one key instead).
     static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
-    /// Migration only: the old separate Hands-Free key.
-    private static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
+    /// 1.1.69 Hands-Free default. Upgrade copies a distinct stored value
+    /// onto the one dictation key, then clears this slot.
+    static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),
         modifiers: PhysicalDictationTriggerModifiers.option
@@ -100,7 +103,23 @@ enum PhysicalDictationTriggerPreferences {
         )
     }
 
-    private static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
+    static func storedPushToTalkBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding? {
+        storedBinding(
+            keyCodeKey: pushToTalkKeyCodeKey,
+            modifiersKey: pushToTalkModifiersKey,
+            userDefaults: userDefaults
+        )
+    }
+
+    static func storedHandsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding? {
+        storedBinding(
+            keyCodeKey: handsFreeKeyCodeKey,
+            modifiersKey: handsFreeModifiersKey,
+            userDefaults: userDefaults
+        )
+    }
+
+    static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
         safeBinding(
             storedBinding(
                 keyCodeKey: handsFreeKeyCodeKey,
@@ -135,6 +154,21 @@ enum PhysicalDictationTriggerPreferences {
         )
     }
 
+    static func saveHandsFree(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
+        saveBinding(
+            binding,
+            keyCodeKey: handsFreeKeyCodeKey,
+            modifiersKey: handsFreeModifiersKey,
+            userDefaults: userDefaults
+        )
+    }
+
+    static func clearHandsFree(userDefaults: UserDefaults = .standard) {
+        userDefaults.removeObject(forKey: handsFreeKeyCodeKey)
+        userDefaults.removeObject(forKey: handsFreeModifiersKey)
+        NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
+    }
+
     static func saveMeeting(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
         saveBinding(
             binding,
@@ -155,27 +189,26 @@ enum PhysicalDictationTriggerPreferences {
         NotificationCenter.default.post(name: .hotkeysDidChange, object: nil)
     }
 
-    /// Dictation used to have a hold key and a separate hands-free key; now
-    /// it has one key with a behavior. Someone who set a custom hands-free
-    /// key and never touched the hold key keeps their key, as Tap to toggle,
-    /// instead of silently getting Fn. Runs once.
-    static func migrateToOneDictationKeyIfNeeded(userDefaults: UserDefaults = .standard) {
+    /// Runs once. 1.1.69 upgraders move to one Right Option key, unless they
+    /// had a custom Hands-Free shortcut — that becomes the one key.
+    /// Harness launches skip it: they use a throwaway HOME and must not
+    /// write migrate/notice flags.
+    static func migrateToOneDictationKeyIfNeeded(
+        userDefaults: UserDefaults = .standard,
+        isAutomatedLaunch: Bool = AutomatedLaunchEnvironment.isActive()
+    ) {
+        guard !isAutomatedLaunch else { return }
         guard !userDefaults.bool(forKey: oneDictationKeyMigratedKey) else { return }
         userDefaults.set(true, forKey: oneDictationKeyMigratedKey)
-        guard storedBinding(
-            keyCodeKey: pushToTalkKeyCodeKey,
-            modifiersKey: pushToTalkModifiersKey,
-            userDefaults: userDefaults
-        ) == nil else { return }
-        let handsFree = handsFreeBinding(userDefaults: userDefaults)
-        guard handsFree != defaultHandsFreeBinding,
-              pushToTalkBinding(userDefaults: userDefaults) == defaultPushToTalkBinding else { return }
-        savePushToTalk(handsFree, userDefaults: userDefaults)
-        HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: userDefaults)
+        DictationShortcutUpgrade.apply(
+            userDefaults: userDefaults,
+            isAutomatedLaunch: isAutomatedLaunch
+        )
     }
 
     static func resetToDefaults(userDefaults: UserDefaults = .standard) {
         savePushToTalk(defaultPushToTalkBinding, userDefaults: userDefaults)
+        clearHandsFree(userDefaults: userDefaults)
         saveMeeting(defaultMeetingBinding, userDefaults: userDefaults)
     }
 

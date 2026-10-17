@@ -35,7 +35,7 @@
 - `+HomeMeetingActions.swift` - `RootAlert`, rename, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts.
 - `+HomeSpeakerVoiceprints.swift` - Home "Name speakers" persistence, including re-embed from retained audio for unlinked voices.
 - `+GeneralEditors.swift` - the combined page and its injected `general*Editor` properties (model, speaker matching, shortcuts, Bluetooth mic, microphone, auto-send, permissions, mic processing, reporting).
-- `+ShortcutEditor.swift` - shortcut recorder editor (dictation key, its behavior, meetings).
+- `+ShortcutEditor.swift` - shortcut recorder editor (dictation key, its behavior, meetings). The one-time "Dictation moved to Right Option" note lives under the dictation key row.
 - `+DictationMuffle.swift` - the "Muffle other audio" toggle; turning it on asks for System Audio Recording here, so dictation never prompts.
 - `+Refresh.swift` - state refresh, analytics, model cache, launch at login.
 - `+Preferences.swift` - corrections, capture library, Auto Enter, update actions.

@@ -40,12 +40,14 @@ extension DictationSessionController {
         )
         // Closes the attempt `dictation_start_requested` opened, so the start
         // funnel doesn't read a dropped combo as a lost start.
+        var droppedProperties = DictationShortcutUpgrade.analyticsProperties()
+        droppedProperties["duration_bucket"] = AnalyticsReporter.durationBucket(
+            seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime
+        )
+        droppedProperties["trigger"] = currentDictationTrigger.rawValue
         AnalyticsReporter.track(
             "dictation_start_dropped_for_modifier_combo",
-            properties: [
-                "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
-                "trigger": currentDictationTrigger.rawValue,
-            ]
+            properties: droppedProperties
         )
     }
 

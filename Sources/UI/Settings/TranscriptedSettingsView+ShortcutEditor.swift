@@ -32,6 +32,9 @@ extension TranscriptedSettingsView {
                     automationIdentifier: "transcripted.settings.general.dictation-key",
                     recorder: shortcutRecorder
                 ) {
+                    if showsDictationKeyMovedNotice {
+                        dictationKeyMovedNotice
+                    }
                     if let dictationTriggerSystemWarning {
                         dictationKeyWarning(dictationTriggerSystemWarning)
                     }
@@ -62,6 +65,26 @@ extension TranscriptedSettingsView {
                 shortcutRecorder.stopRecording()
             }
         }
+    }
+
+    /// One-time after upgrading from before 1.1.70, when the one dictation
+    /// key became Right Option. OK persists the dismissal.
+    private var dictationKeyMovedNotice: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(DictationShortcutUpgrade.movedToRightOptionNotice)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityIdentifier(DictationShortcutUpgrade.movedToRightOptionNoticeIdentifier)
+            Spacer(minLength: 0)
+            Button("OK") {
+                DictationShortcutUpgrade.dismissMovedToRightOptionNotice()
+                showsDictationKeyMovedNotice = false
+            }
+            .buttonStyle(.borderless)
+            .accessibilityIdentifier(DictationShortcutUpgrade.movedToRightOptionNoticeDismissIdentifier)
+        }
+        .font(.caption)
+        .padding(.bottom, 6)
     }
 
     /// Fn's macOS action fires along with dictation until it's set to Do

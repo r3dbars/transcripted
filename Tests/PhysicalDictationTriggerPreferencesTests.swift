@@ -169,15 +169,23 @@ func testPhysicalDictationTriggerPreferences() {
         assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "and the behavior stays Hold or tap")
     }
 
-    runSuite("One dictation key: a custom hands-free key carries over as Tap to toggle") {
+    runSuite("A stored Hands-Free key without a stored hold key becomes the one dictation key") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         let f5 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))
         seedLegacyHandsFree(f5, in: defaults)
 
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
-        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults), f5, "their key becomes the dictation key")
-        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .tapToToggle, "and it still toggles")
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            f5,
+            "a custom Hands-Free key is kept as the one dictation key"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: defaults),
+            "Hands-Free is folded in, not left as a second binding"
+        )
+        assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .tapToToggle, "press-to-fire Hands-Free maps to Tap to toggle")
 
         PhysicalDictationTriggerPreferences.savePushToTalk(PhysicalDictationTriggerPreferences.defaultPushToTalkBinding, userDefaults: defaults)
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
@@ -188,24 +196,29 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
-    runSuite("One dictation key: defaults and a set hold key are left alone") {
+    runSuite("A fresh install keeps Right Option; a custom Hands-Free key becomes the one key") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
-            "a fresh install keeps Fn"
+            "a fresh install keeps Right Option"
         )
         assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOrTap, "with Hold or tap")
 
         let (custom, customSuite) = makePhysicalTriggerDefaults()
         defer { custom.removePersistentDomain(forName: customSuite) }
         let capsLock = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock))
+        let f5 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5))
         PhysicalDictationTriggerPreferences.savePushToTalk(capsLock, userDefaults: custom)
-        seedLegacyHandsFree(PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5)), in: custom)
+        seedLegacyHandsFree(f5, in: custom)
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: custom)
-        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), capsLock, "a chosen hold key wins")
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), f5, "the custom Hands-Free key becomes the one dictation key")
+        assertNil(
+            PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: custom),
+            "a second key is not left stored"
+        )
     }
 
     runSuite("PhysicalDictationTriggerPreferences records modifier-only keys from flagsChanged") {
@@ -357,12 +370,17 @@ func testPhysicalDictationTriggerPreferences() {
             userDefaults: defaults
         )
 
+        seedLegacyHandsFree(PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F5)), in: defaults)
         PhysicalDictationTriggerPreferences.resetToDefaults(userDefaults: defaults)
 
         assertEqual(
             PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
             PhysicalDictationTriggerPreferences.defaultPushToTalkBinding,
             "reset should restore push-to-talk"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: defaults),
+            "reset should drop a leftover Hands-Free key so a fresh install stays one key"
         )
         assertEqual(
             PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: defaults),

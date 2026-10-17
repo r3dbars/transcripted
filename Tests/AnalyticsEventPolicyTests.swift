@@ -951,7 +951,7 @@ func testAnalyticsEventPolicy() {
         let dropped = AnalyticsEventPolicy.policy(forEvent: "dictation_start_dropped_for_modifier_combo")
         assertEqual(
             (dropped?.allowedProperties ?? Set<String>()).sorted(),
-            ["duration_bucket", "trigger"],
+            ["duration_bucket", "hold_key", "key_behavior", "toggle_key", "trigger"],
             "a start dropped because right Option became a combo needs its own terminal event, with only coarse fields"
         )
     }
