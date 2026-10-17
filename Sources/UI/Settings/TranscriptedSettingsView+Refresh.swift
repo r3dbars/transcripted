@@ -460,29 +460,38 @@ extension TranscriptedSettingsView {
         }
     }
 
+    /// The login-item change runs off main, queued behind any pending
+    /// onboarding register. The switch moves now; a failure puts it back
+    /// unless a newer toggle has already replaced this one.
     func updateLaunchAtLogin(_ enabled: Bool) {
         launchAtLoginReadGeneration += 1
+        let generation = launchAtLoginReadGeneration
         let previousValue = launchAtLogin.isEnabled
         launchAtLogin.isEnabled = enabled
         trackSettingsToggle("launch_at_login", enabled: enabled, page: .general)
 
-        do {
-            try LaunchAtLoginController.setEnabled(enabled)
-            refreshLaunchAtLoginState()
-        } catch {
-            launchAtLogin.isEnabled = previousValue
-            // Shown inline under the switch (it used to live only in the
-            // tooltip); the raw error is captured to telemetry below.
-            launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin
-            launchAtLoginFailureMessage = LaunchAtLoginController.isUnavailable
-                ? SettingsActionFailureCopy.launchAtLoginUnavailable
-                : SettingsActionFailureCopy.launchAtLogin
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "app",
-                event: "launch_at_login_update_failed",
-                message: error.localizedDescription
-            )
+        Task { @MainActor in
+            do {
+                try await LaunchAtLoginController.setEnabled(enabled)
+                guard generation == launchAtLoginReadGeneration else { return }
+                refreshLaunchAtLoginState()
+            } catch {
+                // The raw error is captured to telemetry; the inline copy
+                // under the switch stays generic.
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: "app",
+                    event: "launch_at_login_update_failed",
+                    message: error.localizedDescription
+                )
+                let state = await LaunchAtLoginController.readState()
+                guard generation == launchAtLoginReadGeneration else { return }
+                launchAtLogin.isEnabled = previousValue
+                launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin
+                launchAtLoginFailureMessage = state.isUnavailable
+                    ? SettingsActionFailureCopy.launchAtLoginUnavailable
+                    : SettingsActionFailureCopy.launchAtLogin
+            }
         }
     }
 }
