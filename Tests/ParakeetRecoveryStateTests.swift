@@ -254,6 +254,22 @@ func testParakeetRecoveryState() async {
                             token: callbackToken, engine: NSObject()), "retired graph cannot mask replacement")
     }
 
+    // Virtual uptime for the binding token: each injected sleep advances the
+    // clock by exactly the requested amount and returns at once.
+    final class VirtualUptime: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value: TimeInterval = 0
+        private var longest: UInt64 = 0
+        func now() -> TimeInterval { lock.withLock { value } }
+        func advance(nanoseconds: UInt64) {
+            lock.withLock {
+                value += Double(nanoseconds) / 1_000_000_000
+                longest = max(longest, nanoseconds)
+            }
+        }
+        var longestSleepNanoseconds: UInt64 { lock.withLock { longest } }
+    }
+
     // True if the task completes before a generous give-up margin. The margin
     // only keeps a broken wake-up from hanging the suite; it is not a speed limit.
     func finishes(_ task: Task<Void, Never>) async -> Bool {
@@ -290,10 +306,18 @@ func testParakeetRecoveryState() async {
         assertFalse(ignored(.audioEngine, at: 101.1, observed: selected,
                             token: failed, engine: engine), "failed setter must recover")
 
-        let hung = ParakeetAUHALBindingIntent().begin(engine: engine, route: selected, at: 102)
-        let hungHandler = Task { await hung.waitForResolution(nativeTimeoutNanoseconds: 50_000_000) }
-        let releasedByTimeout = await finishes(hungHandler)
-        assertTrue(releasedByTimeout, "wedged setter must release notification handler once the native timeout fires")
+        // Virtual clock: sleep advances time instead of waiting, so the 50 ms
+        // native budget is checked exactly, with no wall-clock race.
+        let clock = VirtualUptime()
+        let hung = ParakeetAUHALBindingIntent().begin(
+            engine: engine, route: selected, at: 102,
+            uptime: { clock.now() }, sleep: { clock.advance(nanoseconds: $0) })
+        await hung.waitForResolution(nativeTimeoutNanoseconds: 50_000_000)
+        let virtualNow = clock.now()
+        assertTrue(virtualNow >= 0.0499 && virtualNow <= 0.0601,
+                   "wedged setter releases the handler at the 50 ms native budget (virtual clock \(virtualNow))")
+        assertTrue(clock.longestSleepNanoseconds <= 10_000_000,
+                   "polling wakes at least every 10 ms so a late finish is noticed promptly")
         assertFalse(ignored(.audioEngine, at: 102.1, observed: selected,
                             token: hung, engine: engine), "timed-out setter remains unproven")
         hung.finish(succeeded: true)
