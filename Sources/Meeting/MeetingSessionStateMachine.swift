@@ -138,6 +138,13 @@ enum MeetingSessionStateMachine {
         return isSteadyStateRecording(sessionState)
     }
 
+    /// Does the island's right-click menu carry "Discard Recording…" right now?
+    /// The overlay reads `.recording` through `.stoppingRecording`, so it
+    /// is necessary but not sufficient; the session state decides.
+    static func stripMenuOffersDiscard(overlayIsRecording: Bool, sessionState: MeetingSessionState?) -> Bool {
+        overlayIsRecording && mayDiscardRecording(sessionState: sessionState)
+    }
+
     /// Runs the same discard flow that the overlay menu invokes. The modal
     /// confirmation may run an event loop, so read the session again afterward.
     @MainActor
