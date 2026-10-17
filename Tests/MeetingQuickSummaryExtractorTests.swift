@@ -148,6 +148,26 @@ func testMeetingQuickSummaryExtractor() {
         assertEqual(sections.decisions, "None found.", "audio checks are not decisions, got: \(sections.decisions)")
     }
 
+    runSuite("work that mentions hearing or seeing someone's input stays an action item") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        We need to hear your feedback on the contract by Friday.
+
+        **00:02**  [System/Maya]
+        I can see your concern so I'll rewrite the onboarding draft.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("feedback on the contract"),
+            "asking for someone's feedback is real work, got: \(sections.actionItems)"
+        )
+        assertTrue(
+            sections.actionItems.contains("rewrite the onboarding draft"),
+            "seeing someone's concern is not an audio check, got: \(sections.actionItems)"
+        )
+    }
+
     runSuite("a discarded closer's decision cue does not steal a real action") {
         let transcript = """
         **00:01**  [Mic/Justin]

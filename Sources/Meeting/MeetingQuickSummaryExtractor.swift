@@ -350,19 +350,42 @@ enum MeetingQuickSummaryExtractor {
     private static let smallTalkMarkers: [String] = [
         "can you hear me", "are you there", "you there", "test test", "testing testing",
         "good morning", "good afternoon", "good evening", "how are you", "how's it going",
-        "nice to meet", "thanks everyone", "thank you all", "see you", "talk soon",
+        "nice to meet", "thanks everyone", "thank you all", "talk soon",
         "have a good", "sounds good", "no worries", "you're welcome",
-        // Audio confirmations carry the weak "i can " action cue but never a
-        // commitment ("I can hear you now").
-        "i can hear", "i can't hear", "i can barely hear", "i can see you",
-        "i can see your screen", "i can't see", "hear you", "you're muted",
-        "you are muted", "you're breaking up",
     ]
+
+    /// Audio and screen-share checks ("I can hear you now", "I can see your
+    /// screen", "you're muted"). They carry the weak "i can " action cue but
+    /// never a commitment. Word-bounded so "hear your feedback" or "see your
+    /// concern" still count as work.
+    private static let audioCheckPatterns: [String] = [
+        #"\b(can|could|can't|couldn't|cannot|can not|could not) (barely |still |now )?hear (you|me|us|everyone|everybody)\b(?!')"#,
+        #"\bhear (you|me) (now|fine|ok|okay|well|clearly|loud)\b"#,
+        #"\b(can|could|can't|couldn't|cannot|can not|could not) (barely |still |now )?see (your|my|the) screen\b"#,
+        #"\b(you're|you are|i'm|i am) (on )?mute(d)?\b"#,
+        #"\b(you're|you are|i'm|i am) breaking up\b"#,
+        #"\byou (cut|dropped) out\b"#,
+    ]
+
+    private static func isAudioCheck(_ normalized: String) -> Bool {
+        audioCheckPatterns.contains { normalized.range(of: $0, options: .regularExpression) != nil }
+    }
+
+    /// "See you" as a sign-off, word-bounded so "let's see your draft" is
+    /// still work.
+    private static let seeYouPattern = #"\bsee (you|ya)\b(?!')"#
+
+    /// A clause that is pure pleasantry or connection talk.
+    private static func isSmallTalkClause(_ normalized: String) -> Bool {
+        matchesAny(smallTalkMarkers, in: normalized)
+            || normalized.range(of: seeYouPattern, options: .regularExpression) != nil
+            || isAudioCheck(normalized)
+    }
 
     /// Sign-off phrases that contain a weak action cue ("let me ", "have to ")
     /// but never carry a real commitment.
     private static let courtesyClosers: [String] = [
-        "let me know", "catch up", "see you", "talk soon", "talk later",
+        "let me know", "catch up", "talk soon", "talk later",
         "let you go", "talk to you", "catch you", "get back to your",
     ]
 
@@ -411,18 +434,19 @@ enum MeetingQuickSummaryExtractor {
     private static func substantiveText(_ normalized: String) -> String? {
         let trimmed = normalized.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.count < 3 { return nil }
-        guard matchesAny(smallTalkMarkers, in: trimmed) || matchesAny(courtesyClosers, in: trimmed) else {
+        let hasSmallTalk = isSmallTalkClause(trimmed)
+        guard hasSmallTalk || matchesAny(courtesyClosers, in: trimmed) else {
             return trimmed
         }
         let substantive = trimmed
             .split(whereSeparator: { $0 == "," || $0 == ";" || $0 == ":" })
             .map(String.init)
-            .filter { !matchesAny(smallTalkMarkers, in: $0) && !isCourtesyCloser($0) }
+            .filter { !isSmallTalkClause($0) && !isCourtesyCloser($0) }
             .joined(separator: ",")
         guard matchesAny(decisionCues, in: substantive) || matchesAny(actionCues, in: substantive) else {
             // Nothing substantive left. Only a sentence that matched a
             // small-talk marker is dropped; a bare closer keeps its old path.
-            return matchesAny(smallTalkMarkers, in: trimmed) ? nil : trimmed
+            return hasSmallTalk ? nil : trimmed
         }
         return substantive
     }
