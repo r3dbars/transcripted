@@ -359,6 +359,16 @@ class AppVerdictTests(unittest.TestCase):
         self.assertIsNone(v)
         self.assertIn("not configured", why)
 
+    def test_closed_pr_verdict_is_not_inherited_by_new_pr_on_same_sha(self):
+        """Close PR A at SHA X, open PR B at SHA X: B gets no inherited pass."""
+        base = "b" * 40
+        a_run = dict(gate_run(pr=11, base_sha=base), external_id=rt.external_id(11, base, HEAD))
+        self.assertIsNotNone(rt.app_verdict([a_run], HEAD, APP, 11, base)[0])
+        self.assertIsNone(rt.app_verdict([a_run], HEAD, APP, 12, base)[0])
+        # Even a run whose external_id was rewritten to B's but whose verdict names A.
+        forged = dict(a_run, external_id=rt.external_id(12, base, HEAD))
+        self.assertIsNone(rt.app_verdict([forged], HEAD, APP, 12, base)[0])
+
     def test_newest_app_run_wins(self):
         runs = [gate_run(p1=0, t="2026-10-10T05:00:00Z", rid=1), gate_run(p1=2, t="2026-10-10T06:00:00Z", rid=2),
                 gate_run(app="15368", p1=0, t="2026-10-10T07:00:00Z", rid=3)]
