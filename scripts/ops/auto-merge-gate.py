@@ -188,6 +188,9 @@ def lowers_something(base, head, top: bool = True) -> bool:
     if isinstance(head, dict) and isinstance(base, dict):
         for k, v in base.items():
             if k not in head:
+                # Dropping an entry is a reduction; dropping an empty section isn't.
+                if isinstance(v, (dict, list)) and not v:
+                    continue
                 if not (top and not isinstance(v, (dict, list))):
                     return True
             elif top and not isinstance(v, (dict, list)):
@@ -384,8 +387,8 @@ def file_json(owner: str, name: str, path: str, ref: str):
 
 
 def lowered_baselines(owner: str, name: str, pr: dict, changed: list[str]) -> tuple[list[str], list[str]]:
-    """(lowered, unknown): changed baselines whose head only lowers what the
-    merge base had, and ones GitHub couldn't serve this run. `changed` is the
+    """(lowered, unknown): changed baselines whose head lowers at least one
+    count or drops an entry versus the merge base and adds nothing, and ones GitHub couldn't serve this run. `changed` is the
     rename-aware REST path list from changed_paths(), not the capped GraphQL one."""
     paths = [p for p in changed if matches(p, [BASELINE_GLOB]) and p not in BASELINE_NEEDS_CENSUS]
     if not paths:
@@ -521,7 +524,8 @@ def run(apply: bool, only: int | None) -> int:
                     except RuntimeError:
                         current = ""
                     if current != pr["headRefOid"]:
-                        print(f"#{number} [{label}] head moved since the snapshot, not holding; next run re-evaluates")
+                        why = "head moved since the snapshot" if current else "couldn't re-read the head"
+                        print(f"#{number} [{label}] {why}, not holding; next run re-evaluates")
                         continue
                     # Comment first, then label: if the label fails, the next run
                     # sees the note and only retries the label, so nothing is lost
@@ -787,6 +791,8 @@ def self_test() -> int:
         ({"edges": ["x", "y"]}, {"edges": ["x"]}, True),
         ({"limit": 800, "files": {"a": 900}}, {"limit": 800, "files": {"a": 900}}, False),
         ({"edges": {"f": {"M": ["T", "T"]}}}, {"edges": {"f": {"M": ["T"]}}}, True),
+        ({"files": {}, "edges": {"f": 1}}, {"edges": {"f": 1}}, False),
+        ({"files": {"a": 0}}, {"files": {}}, True),
     ]
     for base_v, head_v, want in reductions:
         ok = lowers_something(base_v, head_v) == want
