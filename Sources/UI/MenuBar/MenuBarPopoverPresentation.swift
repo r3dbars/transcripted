@@ -48,9 +48,12 @@ final class MenuBarPopoverPresentation: NSObject {
         super.init()
     }
 
-    func show(_ popover: NSPopover, relativeTo button: NSView) {
-        if consumeDismissalClick(for: button) { return }
-        guard !popover.isShown else { return }
+    /// Returns true only when this call left the popover presented. A click that
+    /// dismisses a fallback-anchored popover, or a refused presentation, is false.
+    @discardableResult
+    func show(_ popover: NSPopover, relativeTo button: NSView) -> Bool {
+        if consumeDismissalClick(for: button) { return false }
+        guard !popover.isShown else { return false }
         releaseAnchor()
 
         // Snapshot before show: a revealed menu bar may retract during the
@@ -108,8 +111,9 @@ final class MenuBarPopoverPresentation: NSObject {
             releaseAnchor()
         }
 
-        guard popover.isShown else { return }
+        guard popover.isShown else { return false }
         popover.contentViewController?.view.window?.makeKey()
+        return true
     }
 
     private func closeShownOnAnotherSpace(_ popover: NSPopover) {
