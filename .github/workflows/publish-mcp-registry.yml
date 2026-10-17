@@ -48,9 +48,6 @@ jobs:
         run: |
           set -euo pipefail
           tag="$INPUT_TAG"
-          if [ -z "$tag" ]; then
-            tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
-          fi
           if ! [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "::error::Expected a release tag like v1.2.3, got '$tag'."
             exit 1
