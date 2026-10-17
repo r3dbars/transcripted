@@ -124,16 +124,28 @@ enum LaunchAtLoginController {
         }
 
         LaunchAtLoginPreferences.markDefaultEnableApplied(userDefaults: userDefaults)
-        return await registerOnStatusQueue(register ?? { try registerIfNeeded() })
+        return await registerOnStatusQueue(userDefaults: userDefaults, register ?? { try registerIfNeeded() })
     }
 
-    /// Same queue as the launch-time sync: `status` and `register()` are
-    /// blocking XPC calls that must stay off the main thread.
+    /// Same queue as the launch-time sync and `setEnabled`: `status` and
+    /// `register()` are blocking XPC calls that must stay off the main thread,
+    /// and every login-item mutation runs on this one serial queue so a slow
+    /// register can't land after a later Settings change. The saved choice is
+    /// read again when the block runs, so an opt-out made while this was
+    /// queued wins.
     private nonisolated static func registerOnStatusQueue(
+        userDefaults: UserDefaults,
         _ register: @escaping @Sendable () throws -> Void
     ) async -> String? {
-        await withCheckedContinuation { continuation in
+        // UserDefaults is thread-safe; it just isn't annotated Sendable.
+        nonisolated(unsafe) let defaults = userDefaults
+        return await withCheckedContinuation { continuation in
             statusQueue.async {
+                if LaunchAtLoginPreferences.hasExplicitChoice(userDefaults: defaults),
+                   !LaunchAtLoginPreferences.isEnabled(userDefaults: defaults) {
+                    continuation.resume(returning: nil)
+                    return
+                }
                 do {
                     try register()
                     continuation.resume(returning: nil)
@@ -144,14 +156,25 @@ enum LaunchAtLoginController {
         }
     }
 
-    static func setEnabled(_ enabled: Bool) throws {
-        if enabled {
-            try registerIfNeeded()
-        } else {
-            try unregisterIfNeeded()
+    /// Runs on `statusQueue`, behind any register already queued by onboarding
+    /// or launch, and saves the choice inside the same block so nothing can
+    /// interleave between the service change and the saved preference.
+    /// `apply` is a test seam; production registers or unregisters the main app.
+    nonisolated static func setEnabled(
+        _ enabled: Bool,
+        userDefaults: UserDefaults = .standard,
+        apply: (@Sendable (Bool) throws -> Void)? = nil
+    ) throws {
+        try statusQueue.sync {
+            if let apply {
+                try apply(enabled)
+            } else if enabled {
+                try registerIfNeeded()
+            } else {
+                try unregisterIfNeeded()
+            }
+            LaunchAtLoginPreferences.setEnabled(enabled, userDefaults: userDefaults)
         }
-
-        LaunchAtLoginPreferences.setEnabled(enabled)
     }
 
     nonisolated private static func registerIfNeeded() throws {

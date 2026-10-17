@@ -48,6 +48,60 @@ func testLaunchAtLoginDefaultEnable() async {
         assertNil(failure, "no register means no failure")
         assertEqual(probe.calls, 0, "an explicit Settings choice always wins over the default")
     }
+
+    await runSuite("A Settings change made while the default register is queued runs after it and wins") {
+        let (defaults, suiteName) = makeLaunchAtLoginDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let order = LaunchAtLoginOrderProbe()
+        let registerStarted = DispatchSemaphore(value: 0)
+        let releaseRegister = DispatchSemaphore(value: 0)
+
+        let registerTask = Task.detached {
+            await LaunchAtLoginController.applyDefaultEnableIfNeeded(
+                onboardingCompleted: true,
+                userDefaults: defaults,
+                register: {
+                    registerStarted.signal()
+                    releaseRegister.wait()
+                    order.append("register")
+                }
+            )
+        }
+        await launchAtLoginWait(registerStarted)
+
+        let toggleDone = DispatchSemaphore(value: 0)
+        DispatchQueue(label: "launch-at-login-test-toggle").async {
+            try? LaunchAtLoginController.setEnabled(false, userDefaults: defaults, apply: { enabled in
+                order.append(enabled ? "enable" : "disable")
+            })
+            toggleDone.signal()
+        }
+        releaseRegister.signal()
+        await launchAtLoginWait(toggleDone)
+        _ = await registerTask.value
+
+        assertEqual(order.events, ["register", "disable"], "turning the setting off must run after the queued register, not before it")
+        assertTrue(LaunchAtLoginPreferences.hasExplicitChoice(userDefaults: defaults), "the opt-out should be saved")
+        assertFalse(LaunchAtLoginPreferences.isEnabled(userDefaults: defaults), "the saved choice should stay off")
+    }
+}
+
+/// Waits for a semaphore without blocking the main actor, which the
+/// controller's own async calls need to hop back onto.
+private func launchAtLoginWait(_ semaphore: DispatchSemaphore) async {
+    await withCheckedContinuation { continuation in
+        DispatchQueue.global().async {
+            semaphore.wait()
+            continuation.resume()
+        }
+    }
+}
+
+private final class LaunchAtLoginOrderProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    var events: [String] { lock.withLock { recorded } }
+    func append(_ event: String) { lock.withLock { recorded.append(event) } }
 }
 
 private struct LaunchAtLoginRegisterFailure: LocalizedError {
