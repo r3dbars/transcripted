@@ -211,6 +211,8 @@ rules:
       - "scripts/ops/daily-audio-reliability-check.sh"
       - "docs/qa-issue-500-meeting-audio.md"
       - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/entrypoints/run-e2e-smoke.sh"
+      - "scripts/entrypoints/lib/shared-smoke-sources.sh"
       - "scripts/dev/check-audio-automation-contract.py"
     checks:
       - "python3 scripts/dev/check-audio-automation-contract.py --self-test"
