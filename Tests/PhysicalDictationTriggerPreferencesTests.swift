@@ -196,7 +196,7 @@ func testPhysicalDictationTriggerPreferences() {
         )
     }
 
-    runSuite("A fresh install keeps Right Option; a custom Hands-Free key becomes the one key") {
+    runSuite("A fresh install keeps Right Option; an explicitly chosen primary key stays chosen") {
         let (defaults, suiteName) = makePhysicalTriggerDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
@@ -214,7 +214,7 @@ func testPhysicalDictationTriggerPreferences() {
         PhysicalDictationTriggerPreferences.savePushToTalk(capsLock, userDefaults: custom)
         seedLegacyHandsFree(f5, in: custom)
         PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: custom)
-        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), f5, "the custom Hands-Free key becomes the one dictation key")
+        assertEqual(PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: custom), capsLock, "an explicitly chosen primary key wins over a leftover Hands-Free key")
         assertNil(
             PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: custom),
             "a second key is not left stored"

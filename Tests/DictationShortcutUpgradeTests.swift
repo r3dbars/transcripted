@@ -165,6 +165,43 @@ func testDictationShortcutUpgrade() {
         )
     }
 
+    runSuite("An explicit non-Fn primary key and its behavior survive a leftover custom Hands-Free key") {
+        let chosenKeys = [
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_CapsLock)),
+            PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F4)),
+            rightOption,
+        ]
+        for version in ["1.1.69", "1.1.70"] {
+            for chosen in chosenKeys {
+                let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+                defer { defaults.removePersistentDomain(forName: suiteName) }
+                defaults.set(version, forKey: DictationShortcutUpgrade.lastLaunchedAppVersionKey)
+                PhysicalDictationTriggerPreferences.savePushToTalk(chosen, userDefaults: defaults)
+                seedStoredPhysicalKey(
+                    keyCodeKey: "dictationHandsFreeTrigger-keyCode",
+                    modifiersKey: "dictationHandsFreeTrigger-modifiers",
+                    binding: f5,
+                    in: defaults
+                )
+                HotkeyPreferences.setDictationKeyBehavior(.holdOnly, userDefaults: defaults)
+
+                PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(
+                    userDefaults: defaults,
+                    isAutomatedLaunch: false
+                )
+
+                assertOneDictationKey(
+                    PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults),
+                    binding: chosen,
+                    "the explicitly configured primary key must survive the upgrade from \(version)"
+                )
+                assertEqual(HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults), .holdOnly, "preserve the chosen behavior too")
+                assertNil(PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: defaults), "retire only the unused legacy slot")
+                assertFalse(DictationShortcutUpgrade.showsMovedToRightOptionNotice(userDefaults: defaults), "a preserved key did not move")
+            }
+        }
+    }
+
     runSuite("The moved-key notice is one-time, dismissed, and skipped for fresh and 1.1.70+ installs") {
         let (upgrader, upgraderSuite) = makeDictationShortcutUpgradeDefaults()
         defer { upgrader.removePersistentDomain(forName: upgraderSuite) }

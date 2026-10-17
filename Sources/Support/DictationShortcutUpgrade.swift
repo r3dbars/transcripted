@@ -3,8 +3,9 @@ import Foundation
 
 /// 1.1.70 made Right Option the one dictation key. This upgrade leaves
 /// people on that one key: unstored 1.1.69 defaults and reset-to-defaults
-/// (stored Fn) become Right Option; a custom Hands-Free key becomes the
-/// one key. Dual Fn + Right Option is not restored.
+/// (stored Fn) become Right Option; an explicit non-Fn primary key stays
+/// chosen, otherwise a custom Hands-Free key becomes the one key.
+/// Dual Fn + Right Option is not restored.
 ///
 /// A one-time Settings note ("Dictation moved to Right Option") is armed
 /// only for installs whose previous launched version is before 1.1.70.
@@ -51,7 +52,8 @@ enum DictationShortcutUpgrade {
         userDefaults.removeObject(forKey: movedToRightOptionNoticeKey)
     }
 
-    /// One dictation key. Custom Hands-Free wins; otherwise 1.1.69 Fn /
+    /// One dictation key. An explicit non-Fn primary key wins, then custom
+    /// Hands-Free; otherwise 1.1.69 Fn /
     /// unstored defaults become Right Option; Carbon-era Option+Space stays
     /// when Right Option was off. Harness launches skip it: they use a
     /// throwaway HOME and must not write migrate/notice flags.
@@ -70,6 +72,13 @@ enum DictationShortcutUpgrade {
         let fromBeforeOneKey = isVersionBeforeOneKeyRelease(
             launchedVersionBeforeThisBuild(userDefaults: userDefaults)
         )
+
+        // An old, unused Hands-Free slot must not replace the primary key
+        // the user explicitly chose, or change its hold/toggle behavior.
+        if let storedHold, storedHold != legacyHoldDefault {
+            PhysicalDictationTriggerPreferences.clearHandsFree(userDefaults: userDefaults)
+            return
+        }
 
         if let custom = storedToggle, custom != rightOption {
             PhysicalDictationTriggerPreferences.savePushToTalk(custom, userDefaults: userDefaults)
