@@ -111,7 +111,11 @@ public enum SecretRules {
             if candidate.range.lowerBound >= cursor {
                 accepted.append((candidate.range, candidate.type))
                 cursor = candidate.range.upperBound
-            } else if candidate.range.upperBound > cursor, let last = accepted.popLast() {
+            } else if candidate.range.upperBound > cursor,
+                      !(candidate.type == .creditCard
+                        && accepted.last?.type == .creditCard
+                        && endsBeforeExpirySlash(text, candidate.range.upperBound)),
+                      let last = accepted.popLast() {
                 // A partial overlap runs past the accepted match: extend it
                 // instead of dropping the rest, or the tail of a secret
                 // (a card's last digits after a number in front of it)
@@ -133,6 +137,18 @@ public enum SecretRules {
         }
         clean += text[walker...]
         return (clean, findings)
+    }
+
+    /// True when the rest of the digit run at `index` is followed by `/` and
+    /// a digit, i.e. the card window stops inside an expiry month ("02/26").
+    /// Such a window is a shifted copy of a card already accepted, not a
+    /// number in front of it, so it must not extend the card's span.
+    private static func endsBeforeExpirySlash(_ text: String, _ index: String.Index) -> Bool {
+        var i = index
+        while i < text.endIndex, text[i].isNumber { i = text.index(after: i) }
+        guard i < text.endIndex, text[i] == "/" else { return false }
+        let next = text.index(after: i)
+        return next < text.endIndex && text[next].isNumber
     }
 
     // MARK: - Rule table

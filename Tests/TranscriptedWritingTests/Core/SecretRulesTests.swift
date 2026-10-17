@@ -200,6 +200,16 @@ struct SecretRulesTests {
         #expect(result.clean.contains("12/26"), "expiry date should be left alone, only the card redacted")
     }
 
+    @Test(
+        "An expiry month next to a card stays out of the redacted span",
+        arguments: ["02", "12", "07", "11"]
+    )
+    func expiryMonthAfterCardStaysVisible(month: String) {
+        let text = "Card 4111 1111 1111 1111 \(month)/26 on file."
+        let result = SecretRules.scrub(text, config: .forPersistence)
+        #expect(result.clean == "Card \u{27E8}redacted:card\u{27E9} \(month)/26 on file.", "got: \(result.clean)")
+    }
+
     /// A short number right before a card can start its own Luhn-valid
     /// window that covers only the front of the card. No digit of the card
     /// may survive, whatever number sits in front of it.
