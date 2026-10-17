@@ -214,8 +214,8 @@ struct AgentCaptureQueryObservation: Equatable {
 enum AgentCaptureQueryTelemetryPolicy {
     static let eventName = "agent_capture_query_observed"
     // This standalone MCP package cannot import the app target, so this
-    // mirrors AnalyticsEventPolicy.agentCaptureQueryProperties. Keep the root
-    // AnalyticsEventPolicy parity test green when changing either side.
+    // mirrors AnalyticsEventPolicy.agentCaptureQueryProperties. Both are checked
+    // against the agent_capture_query_observed row of Resources/analytics-events.psv.
     static let allowedProperties: Set<String> = [
         "app_version",
         "build_channel",

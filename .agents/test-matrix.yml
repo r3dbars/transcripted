@@ -611,6 +611,13 @@ rules:
       - "python3 scripts/dev/check-analytics-emitters.py"
       - "bash run-tests.sh"
 
+  # The MCP package can't import the app, so AgentCaptureQueryTelemetryTests checks
+  # its agent_capture_query_observed allowlist against this file's row.
+  - paths:
+      - "Resources/analytics-events.psv"
+    checks:
+      - "swift test --package-path Tools/TranscriptedMCP"
+
   # The analytics taxonomy files are union-merged and must stay normalized, and
   # every allowlisted property must survive the sanitizers' sensitive-fragment
   # drop (an allowlisted key containing e.g. "file" or "name" never arrives).
