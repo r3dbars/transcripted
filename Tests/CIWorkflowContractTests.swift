@@ -44,7 +44,8 @@ func testCIWorkflowContract() {
             needs: ["x", y]
             steps:
               - run: bash run-tests.sh # fast suite
-              - run: echo "keep # this"
+              - run: "echo keep # this"
+              - run: echo "cut # here"
               - run: | # block with comment
                   echo block
               - env: { SKIP: "1", BAZ: 'a, b' } # flow mapping
@@ -54,12 +55,19 @@ func testCIWorkflowContract() {
         assertEqual(job?.child("needs")?.list ?? [], ["x", "y"], "needs elements are unquoted")
         assertEqual(job?.child("runs-on")?.scalar, "macos-26", "inline comment is stripped from a scalar")
         let steps = job?.child("steps")?.children ?? []
-        assertEqual(steps.count, 4, "comments do not add or drop steps")
+        assertEqual(steps.count, 5, "comments do not add or drop steps")
         assertEqual(steps[0].child("run")?.commandLines ?? [], ["bash run-tests.sh"], "inline comment is stripped from a run command")
-        assertEqual(steps[1].child("run")?.commandLines ?? [], ["echo \"keep # this\""], "a # inside quotes is kept")
-        assertEqual(steps[2].child("run")?.commandLines ?? [], ["echo block"], "block scalar header comment is ignored")
-        assertEqual(steps[3].child("env")?.children.map(\.key) ?? [], ["SKIP", "BAZ"], "flow-style env mappings expose their names")
-        assertEqual(steps[3].child("env")?.child("BAZ")?.scalar, "a, b", "commas inside quoted flow values stay together")
+        assertEqual(steps[1].child("run")?.commandLines ?? [], ["echo keep # this"], "a # inside a quoted scalar is kept")
+        assertEqual(steps[2].child("run")?.commandLines ?? [], ["echo \"cut"], "a plain scalar ends at ' #' even between inner quotes, as YAML reads it")
+        assertEqual(steps[3].child("run")?.commandLines ?? [], ["echo block"], "block scalar header comment is ignored")
+        assertEqual(steps[4].child("env")?.children.map(\.key) ?? [], ["SKIP", "BAZ"], "flow-style env mappings expose their names")
+        assertEqual(steps[4].child("env")?.child("BAZ")?.scalar, "a, b", "commas inside quoted flow values stay together")
+        assertEqual(WorkflowNode.stripComment("'it''s # kept' # note"), "'it''s # kept'", "an escaped single quote does not close the scalar")
+        assertEqual(WorkflowNode.stripComment("\"a \\\" # kept\" # note"), "\"a \\\" # kept\"", "an escaped double quote does not close the scalar")
+        assertEqual(WorkflowNode.stripComment("a#b # note"), "a#b", "a # with no space before it is part of the value")
+
+        let apostrophe = WorkflowNode.parse("env: { A: it's, SKIP: \"1\" }")
+        assertEqual(apostrophe.child("env")?.children.map(\.key) ?? [], ["A", "SKIP"], "an apostrophe in a plain flow value does not hide the next key")
 
         let unreadable = WorkflowNode.parse("env: { SKIP: \"1\"")
         assertEqual(unreadable.descendants(named: "!unparsed").count, 1, "an unclosed flow mapping fails closed with a marker")
@@ -321,16 +329,19 @@ private struct WorkflowNode {
         return node
     }
 
-    /// Splits on commas outside quotes and nested `[]` / `{}`.
+    /// Splits on commas outside quotes and nested `[]` / `{}`. A quote only
+    /// counts when it opens an element (after `[`, `{`, `,` or `:`), so an
+    /// apostrophe inside a plain value like `it's` cannot swallow the next pair.
     fileprivate static func splitTopLevel(_ text: String) -> [String] {
         var parts: [String] = []
         var current = ""
         var quote: Character?
         var depth = 0
+        var atStart = true
         for character in text {
             if let open = quote {
                 if character == open { quote = nil }
-            } else if character == "\"" || character == "'" {
+            } else if (character == "\"" || character == "'") && atStart {
                 quote = character
             } else if "[{".contains(character) {
                 depth += 1
@@ -339,7 +350,11 @@ private struct WorkflowNode {
             } else if character == ",", depth == 0 {
                 parts.append(current)
                 current = ""
+                atStart = true
                 continue
+            }
+            if character != " " && character != "\t" {
+                atStart = quote == nil && "[{,:".contains(character)
             }
             current.append(character)
         }
@@ -347,22 +362,45 @@ private struct WorkflowNode {
         return parts
     }
 
-    /// Drops a trailing YAML comment (`#` after whitespace, outside quotes).
+    /// Drops a trailing YAML comment: a `#` after whitespace that is not inside
+    /// a quoted scalar. As in YAML, a quote only counts when it opens the value
+    /// or a flow element (after `[`, `{`, `,` or `:`), so in a plain scalar such as
+    /// `echo "a # b"` the ` #` still starts a comment, the same as Actions reads it.
     fileprivate static func stripComment(_ value: String) -> String {
+        let flow = value.first == "[" || value.first == "{"
         var quote: Character?
         var previous: Character = " "
+        var atStart = true
         var end = value.endIndex
-        for index in value.indices {
+        var index = value.startIndex
+        while index < value.endIndex {
             let character = value[index]
+            let next = value.index(after: index)
             if let open = quote {
-                if character == open { quote = nil }
-            } else if (character == "\"" || character == "'") && (index == value.startIndex || previous == " " || "[{,:".contains(previous)) {
+                if open == "\"", character == "\\", next < value.endIndex {
+                    index = value.index(after: next)
+                    previous = "x"
+                    continue
+                }
+                if character == open {
+                    if open == "'", next < value.endIndex, value[next] == "'" {
+                        index = value.index(after: next)
+                        previous = "x"
+                        continue
+                    }
+                    quote = nil
+                }
+            } else if (character == "\"" || character == "'") && atStart {
                 quote = character
-            } else if character == "#", index == value.startIndex || previous == " " || previous == "\t" {
+            } else if character == "#", previous == " " || previous == "\t" {
                 end = index
                 break
             }
+            if character != " " && character != "\t" {
+                atStart = quote == nil && flow && "[{,:".contains(character)
+            }
             previous = character
+            index = next
         }
         return String(value[..<end]).trimmingCharacters(in: .whitespaces)
     }
