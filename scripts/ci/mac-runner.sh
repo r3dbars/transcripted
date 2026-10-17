@@ -109,6 +109,20 @@ vms_in_use() {
   if [ "$1" -ge "$2" ]; then echo "$1"; else echo "$2"; fi
 }
 
+# stale_job_vms <live slot numbers, space separated> <vm names, one per line>:
+# the job VMs no live slot owns (a name is ci-job-<stamp>-<slot>), so a clone
+# whose delete failed, or whose slot was killed before cleanup, gets removed
+# instead of counting as a busy slot.
+stale_job_vms() {
+  local live=" $1 " vm slot
+  while IFS= read -r vm; do
+    case "$vm" in "$JOB_PREFIX"*) ;; *) continue ;; esac
+    slot="${vm##*-}"
+    case "$live" in *" $slot "*) continue ;; esac
+    echo "$vm"
+  done <<< "$2"
+}
+
 # offer_block <paused> <on_ac> <disk_ok> <vms_running> <mic> <backing_off> [slots_busy]
 # Why this Mac should not be offered to new runs, or "" when it can be.
 offer_block() {
@@ -256,6 +270,8 @@ self_test() {
     else
         got="$(start_block 1 1 0 1 0 1 0)"; expect "$got" "vms" "serial mode refuses a second slot"
     fi
+    got="$(stale_job_vms " 0" "$(printf 'ci-base\nci-job-100-0\nci-job-90-1\nci-job-80-1\n')" | tr '\n' ' ')"; expect "$got" "ci-job-90-1 ci-job-80-1 " "job VMs of free slots are stale"
+    got="$(stale_job_vms "" "ci-golden")"; expect "$got" "" "non-job VMs are never stale"
     got="$(vms_in_use 0 1)";            expect "$got" "1" "a booting slot counts as a VM"
     got="$(vms_in_use 2 1)";            expect "$got" "2" "other apps' VMs count"
     got="$(offer_block 0 1 1 "$((MAX_VMS - 1))" 0 0 "$((MAX_VMS - 1))")"; expect "$got" "" "below slot cap: still free"
@@ -1115,9 +1131,6 @@ golden_is_stale() {
 
 SLOTS="$STATE/slots"
 
-# Job VMs this service owns right now (a slot can outlive a crashed serve).
-job_vms() { vm_names | grep -c "^$JOB_PREFIX" || true; }
-
 # Only at startup, before any slot exists: stops slots a previous serve left
 # behind (launchd's AbandonProcessGroup keeps them alive), then deletes every
 # job VM, so a restart never ends up with more than MAX_VMS.
@@ -1343,11 +1356,30 @@ reap_slots() {
   done
 }
 
-# slots_busy: live slots, or the job VMs on disk if that's more.
+# live_slots: the numbers of slots with a running run_one_job, space separated.
+live_slots() {
+  local i out=""
+  for ((i = 0; i < MAX_VMS; i++)); do [ -z "${SLOT_PIDS[$i]:-}" ] || out="$out $i"; done
+  echo "$out"
+}
+
+# reconcile_job_vms: deletes job VMs (and their share folders) that no live
+# slot owns. A failed delete is retried on the next pass, and never counts as
+# a busy slot meanwhile.
+reconcile_job_vms() {
+  local vm
+  for vm in $(stale_job_vms "$(live_slots)" "$(vm_names)"); do
+    log "removing stale $vm"
+    delete_vm "$vm"
+    rm -rf "$STATE/share/$vm"
+  done
+}
+
+# slots_busy: live slots only. Leftover job VMs are removed, not counted.
 slots_busy() {
   local i n=0
   for ((i = 0; i < MAX_VMS; i++)); do [ -z "${SLOT_PIDS[$i]:-}" ] || n=$((n + 1)); done
-  vms_in_use "$n" "$(job_vms)"
+  echo "$n"
 }
 
 # free_slot: the first unused slot number, or nothing.
@@ -1388,6 +1420,7 @@ serve() {
   while true; do
     rotate_log
     reap_slots
+    reconcile_job_vms
     if [ "$REAPED" = fail ]; then
       backoff="$(next_backoff "$backoff")"
       retry_at=$(( $(date +%s) + backoff ))
