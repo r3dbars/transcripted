@@ -359,6 +359,41 @@ class AppVerdictTests(unittest.TestCase):
         self.assertIsNone(v)
         self.assertIn("not configured", why)
 
+    def test_closed_pr_verdict_is_not_inherited_by_new_pr_on_same_sha(self):
+        """Close PR A at SHA X, open PR B at SHA X: B gets no inherited pass."""
+        base = "b" * 40
+        a_run = dict(gate_run(pr=11, base_sha=base), external_id=rt.external_id(11, base, HEAD))
+        self.assertIsNotNone(rt.app_verdict([a_run], HEAD, APP, 11, base)[0])
+        self.assertIsNone(rt.app_verdict([a_run], HEAD, APP, 12, base)[0])
+        # Even a run whose external_id was rewritten to B's but whose verdict names A.
+        forged = dict(a_run, external_id=rt.external_id(12, base, HEAD))
+        self.assertIsNone(rt.app_verdict([forged], HEAD, APP, 12, base)[0])
+
+    def test_closed_pr_pass_on_shared_sha_is_revoked(self):
+        """GitHub's required check is per commit, so A's pass must not stay the newest run for B."""
+        base = "b" * 40
+
+        def passed(pr, rid, t, app=APP):
+            return dict(gate_run(app=app, pr=pr, base_sha=base, rid=rid, t=t), status="completed",
+                        conclusion="success", external_id=rt.external_id(pr, base, HEAD))
+
+        a_pass = passed(11, 1, "2026-10-10T05:00:00Z")
+        # A closed, B (12) open on the same SHA, A's pass is still newest: revoke it.
+        self.assertEqual(rt.stale_gate_pass([a_pass], HEAD, APP, [12]), a_pass["external_id"])
+        self.assertIsNotNone(rt.stale_gate_pass([a_pass], HEAD, APP, []))
+        # A is still (or again) open: its own pass stands.
+        self.assertIsNone(rt.stale_gate_pass([a_pass], HEAD, APP, [11, 12]))
+        # B earned its own newer pass: nothing to revoke.
+        self.assertIsNone(rt.stale_gate_pass([a_pass, passed(12, 2, "2026-10-10T06:00:00Z")], HEAD, APP, [12]))
+        # Already revoked or held (newest run not a pass): nothing to do.
+        held = dict(gate_run(rid=3, t="2026-10-10T07:00:00Z"), status="in_progress", conclusion=None,
+                    external_id="revoked;" + a_pass["external_id"])
+        self.assertIsNone(rt.stale_gate_pass([a_pass, held], HEAD, APP, [12]))
+        # Runs from another app or commit are not the gate's, and no App means no trusted pass.
+        self.assertIsNone(rt.stale_gate_pass([passed(11, 4, "2026-10-10T05:00:00Z", app="15368")], HEAD, APP, [12]))
+        self.assertIsNone(rt.stale_gate_pass([a_pass], "e" * 40, APP, [12]))
+        self.assertIsNone(rt.stale_gate_pass([a_pass], HEAD, "", [12]))
+
     def test_newest_app_run_wins(self):
         runs = [gate_run(p1=0, t="2026-10-10T05:00:00Z", rid=1), gate_run(p1=2, t="2026-10-10T06:00:00Z", rid=2),
                 gate_run(app="15368", p1=0, t="2026-10-10T07:00:00Z", rid=3)]

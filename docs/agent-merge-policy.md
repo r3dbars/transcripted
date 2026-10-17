@@ -47,7 +47,7 @@ There is **no waiver label** any more. A label or comment from @r3dbars proves n
 6. The branch isn't behind its base.
 7. Kill switch: repo or environment variable `AUTOMERGE_ENABLED`. `true` posts success and arms squash auto-merge (`--match-head-commit`); `signal-only` posts success but never arms; anything else, or unset, holds everything.
 
-Only the App token arms auto-merge; disabling it is done with any token, and happens before a new result is posted. An error on one PR fails that PR closed (auto-merge off, `risk-gate` in progress) and the sweep moves on.
+Only the App token arms auto-merge; disabling it is done with any token, and happens before a new result is posted. An error on one PR fails that PR closed (auto-merge off, `risk-gate` in progress) and the sweep moves on. A `risk-gate` pass counts for the commit, not the PR, so the gate revokes a pass left by a PR that's no longer open on that commit (closed PR A, new PR B on the same SHA): it posts an in-progress `risk-gate` over it before evaluating B, on B's CI events and on the 20-minute sweep of recently closed PRs. B never inherits A's verdict either; stored verdicts are bound to PR, base and head.
 
 ```bash
 python3 scripts/ops/risk-triage.py classify Sources/UI/Foo.swift Tests/FooTests.swift  # offline tier

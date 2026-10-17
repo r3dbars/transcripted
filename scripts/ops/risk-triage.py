@@ -805,6 +805,58 @@ def fail_closed(num: int, why: str) -> None:
                 "output": {"title": f"failed closed: {why}"[:120], "summary": why}})
 
 
+def stale_gate_pass(check_runs: list[dict], head_sha: str, gate_app_id: str,
+                    open_prs: list[int] | set[int]) -> str | None:
+    """A passing risk-gate this commit must not keep for a PR that's gone.
+
+    GitHub's required-check status belongs to the commit, not the PR: the
+    newest risk-gate run on a SHA counts for every PR on that SHA. So if PR A
+    passed at SHA X and was closed, a new PR B at X looks green until the gate
+    evaluates B. Returns the external_id of that newest App run when it passed
+    and names no PR that is still open on this commit (it gets revoked);
+    None otherwise.
+    """
+    if not gate_app_id:
+        return None
+    mine = [r for r in check_runs if r.get("name") == GATE_CONTEXT
+            and str((r.get("app") or {}).get("id")) == str(gate_app_id) and r.get("head_sha") == head_sha]
+    if not mine:
+        return None
+    newest = max(mine, key=lambda r: (r.get("started_at") or "", r.get("id") or 0))
+    if newest.get("status") != "completed" or newest.get("conclusion") != "success":
+        return None
+    m = re.match(r"pr=(\d+);", newest.get("external_id") or "")
+    if m and int(m.group(1)) in set(open_prs):
+        return None
+    return newest.get("external_id") or "(no external_id)"
+
+
+def closed_unmerged_heads() -> set[str]:
+    """Head SHAs of the most recently updated closed, unmerged PRs (sweep only)."""
+    pulls = gh_json(f"repos/{REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=30")
+    return {p["head"]["sha"] for p in pulls if isinstance(p, dict) and not p.get("merged_at")}
+
+
+def revoke_stale_passes(shas: set[str]) -> None:
+    """Post an in-progress risk-gate over any pass left by a PR that isn't open
+    on that commit any more, so a new PR on the same SHA starts pending."""
+    if not shas or _app_env() is None:
+        return
+    open_by_sha: dict[str, list[int]] = {}
+    for p in gh_json(f"repos/{REPO}/pulls?state=open&per_page=100", paginate=True):
+        open_by_sha.setdefault(p["head"]["sha"], []).append(p["number"])
+    for sha in sorted(shas):
+        runs = gh_json(f"repos/{REPO}/commits/{sha}/check-runs?check_name={GATE_CONTEXT}&per_page=100", paginate=True)
+        stale = stale_gate_pass(runs, sha, GATE_APP_ID, open_by_sha.get(sha, []))
+        if stale is None:
+            continue
+        why = "the last pass on this commit was for a PR that is no longer open; waiting for a fresh evaluation"
+        post_check({"name": GATE_CONTEXT, "head_sha": sha, "status": "in_progress",
+                    "external_id": f"revoked;{stale}",
+                    "output": {"title": why[:120], "summary": why}})
+        print(json.dumps({"sha": sha, "revoked": stale}))
+
+
 def _gate_one(num: int, apply: bool, entries: list) -> int:
     pr, res, risk, verdict, review = evaluate(num, entries)
     print(json.dumps({"pr": num, **res}))
@@ -847,6 +899,12 @@ def cmd_gate(n: int | None, apply: bool, sha: str | None = None, reviews_path: s
         except (OSError, json.JSONDecodeError):
             entries = []
     failed = 0
+    if apply:
+        # Before gating, so an open PR's own result is the newest run.
+        try:
+            revoke_stale_passes({sha} if sha else (set() if n else closed_unmerged_heads()))
+        except Exception as e:  # noqa: BLE001 - never stops the gate itself
+            print(json.dumps({"revoke_error": str(e)[:300]}), file=sys.stderr)
     for num in target_prs(n, sha):
         try:
             failed += _gate_one(num, apply, entries)
