@@ -1,6 +1,8 @@
 name: Repo Hygiene
 
 on:
+  push:
+    branches: [main]
   pull_request:
   merge_group:
   workflow_dispatch:
