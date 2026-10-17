@@ -12,7 +12,8 @@ permissions:
 
 concurrency:
   group: repo-hygiene-${{ github.ref }}
-  cancel-in-progress: true
+  # Every push to main gets its own full run; only superseded PR runs cancel.
+  cancel-in-progress: ${{ github.event_name != 'push' }}
 
 jobs:
   repo-hygiene:
