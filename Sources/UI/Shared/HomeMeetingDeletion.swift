@@ -52,6 +52,49 @@ enum HomeMeetingDeletion {
         }
     }
 
+    /// Review actions bind to a saved recording identity, never a stale row or
+    /// an arbitrary path. Resolve restyle renames while holding the writer lock.
+    /// Unlike library duplicate cleanup, this action targets one recording only.
+    static func trashReviewedRecording(
+        transcriptURL: URL,
+        transcriptID: UUID,
+        meetingsRoot: URL,
+        fileManager: FileManager = .default
+    ) throws -> UndoPayload {
+        do {
+            return try MeetingTranscriptFileUpdateSerializer.sync {
+                let root = canonicalPath(meetingsRoot)
+                guard canonicalPath(transcriptURL.deletingLastPathComponent()) == root else {
+                    throw HomeMeetingDeletionError.transcriptUnavailable
+                }
+                let candidates = [transcriptURL] + ((try? fileManager.contentsOfDirectory(
+                    at: meetingsRoot, includingPropertiesForKeys: nil
+                )) ?? [])
+                guard let current = candidates.first(where: { url in
+                    url.pathExtension == "md"
+                        && canonicalPath(url.deletingLastPathComponent()) == root
+                        && canonicalPath(url).hasPrefix(root + "/")
+                        && isRegularFile(url, fileManager: fileManager)
+                        && appOwnedMeetingTranscriptValues(url).flatMap(TranscriptFrontmatter.captureID(in:)) == transcriptID
+                }) else { throw HomeMeetingDeletionError.transcriptUnavailable }
+                let item = RecentMeetingItem(
+                    title: "", date: Date(), startDate: nil, endDate: nil,
+                    transcriptURL: current, audio: nil, speakerStatus: .ready
+                )
+                let plan = plan(for: item, fileManager: fileManager, includeDuplicates: false)
+                let urls = plan.transcriptURLs + plan.summaryURLs + plan.audioDirectoryURLs
+                guard urls.allSatisfy({ canonicalPath($0).hasPrefix(root + "/") }) else {
+                    throw HomeMeetingDeletionError.transcriptUnavailable
+                }
+                return try MeetingTranscriptFileUpdateSerializer.sync(protecting: plan.transcriptURLs) {
+                    UndoPayload(plan: plan, trashedFiles: try CaptureTrashOperation.trash(urls, fileManager: fileManager))
+                }
+            }
+        } catch MeetingTranscriptFileUpdateError.replacementInProgress {
+            throw HomeMeetingDeletionError.retranscriptionInProgress
+        }
+    }
+
     static func restore(_ payload: UndoPayload, fileManager: FileManager = .default) {
         MeetingTranscriptFileUpdateSerializer.sync {
             // Preserve the existing non-overwriting Trash restore behavior.
@@ -112,7 +155,8 @@ enum HomeMeetingDeletion {
 
     static func plan(
         for item: RecentMeetingItem,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        includeDuplicates: Bool = true
     ) -> Plan {
         var transcriptURLs = OrderedURLSet()
         var summaryURLs = OrderedURLSet()
@@ -126,7 +170,7 @@ enum HomeMeetingDeletion {
         if let audio = MeetingAudioArchiveResolver.attachment(forTranscript: item.transcriptURL, fileManager: fileManager) {
             audioDirectoryURLs.insert(audio.directoryURL)
             audioAttachmentIDs.append(audio.id)
-            if isAppOwnedMeetingTranscript(item.transcriptURL) {
+            if includeDuplicates && isAppOwnedMeetingTranscript(item.transcriptURL) {
                 for duplicate in duplicateRetainedAudioMeetings(
                     matching: audio,
                     selectedTranscriptURL: item.transcriptURL,

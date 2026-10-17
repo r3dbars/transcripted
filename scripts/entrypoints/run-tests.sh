@@ -663,6 +663,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/AgentSetupFailureCopy.swift"
     "Sources/Writing/WritingSidebarNewBadge.swift"
     "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
+    "Sources/UI/Settings/SpeakerNameAutocompleteField.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/SettingsActionFailureCopy.swift"

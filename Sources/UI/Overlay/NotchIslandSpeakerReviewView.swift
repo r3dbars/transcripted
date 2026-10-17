@@ -45,6 +45,12 @@ final class NotchIslandSpeakerReviewView: NSView {
     /// Later, or the ring ran out: save what was answered, leave the rest.
     var onLater: ((_ updates: [SpeakerReviewUpdate]) -> Void)?
     var onOpenTranscript: (() -> Void)?
+    /// Nil means success; an error keeps the review available for retry.
+    var onDeleteRecording: (() async -> String?)?
+    private var confirmingDeletion = false
+    private var deletingRecording = false
+    private var deletionError: String?
+
     /// "Everyone's named" has been up long enough.
     var onDoneLingerEnded: (() -> Void)?
 
@@ -240,6 +246,10 @@ final class NotchIslandSpeakerReviewView: NSView {
         hidePrintTip()
         stack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         if isFinished { return }
+        if confirmingDeletion {
+            buildDeleteConfirmation()
+            return
+        }
 
         let header = headerLine()
         stack.addArrangedSubview(header)
@@ -303,6 +313,71 @@ final class NotchIslandSpeakerReviewView: NSView {
         stack.setCustomSpacing(18, after: lastRow)
         stack.addArrangedSubview(footer)
         refreshFooterSummary(animated: false)
+        let delete = NotchIslandTextButton(title: NotchIslandSpeakerReviewPolicy.deleteTitle, restAlpha: 0.65)
+        delete.setAccessibilityIdentifier("speaker-review-delete-recording")
+        delete.setAccessibilityHelp("Delete this recording and its saved audio, with confirmation. Saved people are kept.")
+        delete.onPress = { [weak self] in
+            guard let self, !self.isFinished else { return }
+            self.stopLaterCountdown()
+            self.confirmingDeletion = true
+            self.deletionError = nil
+            SpeakerClipPlayback.stop()
+            self.rebuild()
+            self.onLayoutChange?()
+        }
+        stack.setCustomSpacing(10, after: footer)
+        stack.addArrangedSubview(delete)
+    }
+
+    private func buildDeleteConfirmation() {
+        if let meetingTitle {
+            let meeting = NotchIslandPalette.label(meetingTitle, font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText)
+            meeting.lineBreakMode = .byTruncatingTail
+            stack.addArrangedSubview(meeting)
+        }
+        let title = NotchIslandPalette.label(NotchIslandSpeakerReviewPolicy.deleteConfirmation,
+            font: .systemFont(ofSize: 16, weight: .semibold), color: NotchIslandPalette.primaryText)
+        let detail = NSTextField(wrappingLabelWithString: deletionError ?? NotchIslandSpeakerReviewPolicy.deleteDetail)
+        detail.font = .systemFont(ofSize: 13)
+        detail.textColor = NotchIslandPalette.secondaryText
+        detail.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        stack.addArrangedSubview(title)
+        stack.addArrangedSubview(detail)
+        if deletingRecording {
+            stack.addArrangedSubview(NotchIslandPalette.label("Moving to Trash…", font: .systemFont(ofSize: 13), color: NotchIslandPalette.secondaryText))
+            return
+        }
+        let keep = NotchIslandButton(title: "Keep recording", style: .white, height: 34)
+        keep.onPress = { [weak self] in
+            guard let self else { return }
+            self.confirmingDeletion = false
+            self.rebuild()
+            self.onLayoutChange?()
+        }
+        let delete = NotchIslandButton(title: "Move to Trash", style: .destructive, height: 34)
+        delete.setAccessibilityIdentifier("speaker-review-confirm-delete")
+        delete.onPress = { [weak self] in self?.deleteConfirmed() }
+        let buttons = NSStackView(views: [keep, delete])
+        buttons.orientation = .horizontal
+        buttons.spacing = 16
+        stack.addArrangedSubview(buttons)
+    }
+
+    private func deleteConfirmed() {
+        guard confirmingDeletion, !deletingRecording, !isFinished, let onDeleteRecording else { return }
+        deletingRecording = true
+        rebuild()
+        onLayoutChange?()
+        Task { @MainActor [weak self] in
+            let error = await onDeleteRecording()
+            guard let self else { return }
+            self.deletingRecording = false
+            if let error {
+                self.deletionError = error
+                self.rebuild()
+                self.onLayoutChange?()
+            }
+        }
     }
 
     /// "Who spoke?" with the meeting's name small and grey on the right.
@@ -446,7 +521,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func closeAtHardCapIfDue() { // also re-checked when an answer finishes (rowChanged)
-        guard hardCapReached, !isFinished, NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: isHovered, answering: recognizedRows.contains { !$0.isAnswered }) else { return }
+        guard hardCapReached, !isFinished, !confirmingDeletion, NotchIslandSpeakerReviewPolicy.hardCapClosesNow(hovered: isHovered, answering: recognizedRows.contains { !$0.isAnswered }) else { return }
         finishLater()
     }
 
@@ -481,7 +556,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func finishLater() {
-        guard !isFinished else { return }
+        guard !isFinished, !confirmingDeletion else { return }
         isFinished = true
         laterTask?.cancel()
         SpeakerClipPlayback.stop()
@@ -495,7 +570,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func finishDone() {
-        guard !isFinished else { return }
+        guard !isFinished, !confirmingDeletion else { return }
         let result = collectUpdates(finish: .done)
         guard NotchIslandSpeakerReviewPolicy.doneShowsSummary(
             recognizedOnly: isRecognizedOnly,

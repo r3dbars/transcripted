@@ -466,12 +466,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             // the call"), so only then does a meeting with nobody to ask get
             // a review; the window has nothing to show for it.
             meetingSession.taskManager.reviewListsRecognizedVoicesProvider = { true }
-            SpeakerNamingSheet.shared.onOpenTranscript = { [weak self] transcriptURL in
-                self?.settingsWindowController.revealMeeting(
-                    transcriptURL: transcriptURL,
-                    source: "meeting_overlay"
-                )
-            }
+            configureSpeakerReviewActions(meetingSession: meetingSession)
             SpeakerNamingSheet.shared.observe(
                 requests: meetingSession.speakerNamingRequests,
                 meetingCaptureActive: meetingSession.$state
