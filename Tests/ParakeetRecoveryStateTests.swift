@@ -254,16 +254,20 @@ func testParakeetRecoveryState() async {
                             token: callbackToken, engine: NSObject()), "retired graph cannot mask replacement")
     }
 
+    // Virtual uptime for the binding token: each injected sleep advances the
+    // clock by exactly the requested amount and returns at once.
     final class VirtualUptime: @unchecked Sendable {
         private let lock = NSLock()
-        private var value: TimeInterval = 1_000
-        private let start: TimeInterval = 1_000
-        private var sleeps = 0
-        func now() -> TimeInterval { lock.withLock { value - start } }
+        private var value: TimeInterval = 0
+        private var longest: UInt64 = 0
+        func now() -> TimeInterval { lock.withLock { value } }
         func advance(nanoseconds: UInt64) {
-            lock.withLock { value += Double(nanoseconds) / 1_000_000_000; sleeps += 1 }
+            lock.withLock {
+                value += Double(nanoseconds) / 1_000_000_000
+                longest = max(longest, nanoseconds)
+            }
         }
-        var sleepCount: Int { lock.withLock { sleeps } }
+        var longestSleepNanoseconds: UInt64 { lock.withLock { longest } }
     }
 
     // True if the task completes before a generous give-up margin. The margin
@@ -312,7 +316,8 @@ func testParakeetRecoveryState() async {
         let virtualNow = clock.now()
         assertTrue(virtualNow >= 0.0499 && virtualNow <= 0.0601,
                    "wedged setter releases the handler at the 50 ms native budget (virtual clock \(virtualNow))")
-        assertTrue(clock.sleepCount <= 6, "polling wakes in short steps, not one long sleep")
+        assertTrue(clock.longestSleepNanoseconds <= 10_000_000,
+                   "polling wakes at least every 10 ms so a late finish is noticed promptly")
         assertFalse(ignored(.audioEngine, at: 102.1, observed: selected,
                             token: hung, engine: engine), "timed-out setter remains unproven")
         hung.finish(succeeded: true)
