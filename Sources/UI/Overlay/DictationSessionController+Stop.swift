@@ -514,27 +514,26 @@ extension DictationSessionController {
                 autoSend: autoSendOutcome,
                 autoSendExpected: self.autoSendRequestDecision.expected
             ).addingPendingAudioNotice(saveResult.pendingAudioRetention != nil)
-            switch deliveryPresentation {
-            case .success(let title):
-                overlayController.showSuccessAndDismiss(title: title)
-            case .clipboardNotice(let message):
-                overlayController.showClipboardNotice(message)
-                // The text landed; a press for the next take can replace this.
-                overlayController.messageCanGiveWayToNextStart = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.landedClipboardNotice)
-            case .notPasted(let message, let unconfirmed):
-                // The island also shows the words and a Paste button.
-                self.showNotPasted(
-                    text,
-                    message: message,
-                    unconfirmed: unconfirmed,
-                    overlayController: overlayController
+            DictationQueuedStartPolicy.presentDelivery(
+                deliveryPresentation,
+                DictationQueuedStartPolicy.DeliveryOverlaySteps(
+                    showSuccess: { overlayController.showSuccessAndDismiss(title: $0) },
+                    // The kind says whether a press for the next take can replace it.
+                    showClipboardNotice: { overlayController.showClipboardNotice($0, kind: $1) },
+                    // The island also shows the words and a Paste button.
+                    showNotPasted: { message, unconfirmed in
+                        self.showNotPasted(
+                            text,
+                            message: message,
+                            unconfirmed: unconfirmed,
+                            overlayController: overlayController
+                        )
+                    },
+                    // The words never went on the clipboard; offer them back.
+                    showClipboardBusy: { self.showClipboardBusy(text, message: $0, overlayController: overlayController) },
+                    showError: { overlayController.showError($0) }
                 )
-            case .clipboardBusy(let message):
-                // The words never went on the clipboard; offer them back.
-                self.showClipboardBusy(text, message: message, overlayController: overlayController)
-            case .error(let message):
-                overlayController.showError(message)
-            }
+            )
             if deliveryPresentation.canOfferAudioRetentionRetry { self.showPendingAudioRetention(saveResult) }
             isDictating = false
             appState.logger.log("DICTATION | completed with outcome \(pasteOutcome)")
