@@ -83,6 +83,35 @@ def registered_permission_state(entrypoint: str) -> bool:
                for item in configuration.group(1).split(","))
 
 
+LIVE_TAIL_CALL = "run_live_tail"
+
+
+def live_smoke_gated(bench: str) -> bool:
+    """True when the live smoke can only run from the `then` branch of
+    `if run_permission_state; then`.
+
+    The smoke command must live only inside the run_live_tail function, and the
+    one reference to run_live_tail (besides its definition) must be a bare call
+    in that `then` branch: not after the `fi`, not in the `else`, not chained
+    elsewhere, and not inlined outside the function.
+    """
+    code = "\n".join(line for line in bench.splitlines() if not line.lstrip().startswith("#"))
+    gate = re.search(r"\bif run_permission_state; then\n(.*?)\n\s*else\b(.*?)\n\s*fi\b", code, re.S)
+    tail = re.search(rf"^[ \t]*{LIVE_TAIL_CALL}\(\)[ \t]*\{{\n(.*?)\n\}}", code, re.S | re.M)
+    if gate is None or tail is None:
+        return False
+    then_body, else_body = gate.group(1), gate.group(2)
+    outside_tail = code[: tail.start()] + code[tail.end():]
+    references = re.findall(rf"\b{LIVE_TAIL_CALL}\b(?!\(\))", code)
+    return (
+        LIVE_SMOKE_STEP in tail.group(1)
+        and LIVE_SMOKE_STEP not in outside_tail
+        and len(references) == 1
+        and re.search(rf"^[ \t]*{LIVE_TAIL_CALL}[ \t]*$", then_body, re.M) is not None
+        and LIVE_TAIL_CALL not in else_body
+    )
+
+
 def check(root: Path) -> list[str]:
     problems: list[str] = []
     entrypoint = read(root, ENTRYPOINT, problems)
@@ -101,6 +130,11 @@ def check(root: Path) -> list[str]:
     live_at = bench.find(LIVE_SMOKE_STEP)
     if permission_at == -1 or live_at == -1 or permission_at > live_at:
         problems.append(f"{BENCH}: should run `{PERMISSION_STEP}` before `{LIVE_SMOKE_STEP}`")
+    if not live_smoke_gated(bench):
+        problems.append(
+            f"{BENCH}: `{LIVE_SMOKE_STEP}` should run only from `{LIVE_TAIL_CALL}`, called once, inside the "
+            "`then` branch of `if run_permission_state; then`, so a blocked preflight cannot reach the live smoke"
+        )
     for needle, why in BENCH_PHRASES:
         if needle not in bench:
             problems.append(f"{BENCH}: should {why} (missing `{needle}`)")
@@ -125,16 +159,36 @@ def run(root: Path) -> int:
     return 0
 
 
+# Written out on purpose, not derived from PROBE_MATRIX: if a probe is dropped from
+# the checker, the invariant below fails instead of the fixture shrinking with it.
+EXPECTED_PROBES = [
+    'commandName: "permission-state"',
+    "PermissionStateMode",
+    "CGPreflightScreenCaptureAccess",
+    "CGPreflightPostEventAccess",
+    "CGPreflightListenEventAccess",
+    "AXIsProcessTrusted",
+    "AVCaptureDevice.authorizationStatus",
+    "AEDeterminePermissionToAutomateTarget",
+    "PermissionRunningApplication",
+]
+GOOD_BENCH = (
+    f"run_permission_state() {{\n  {PERMISSION_STEP}\n}}\n"
+    f"run_live_tail() {{\n  {LIVE_SMOKE_STEP}\n}}\n"
+    "if run_permission_state; then\n  run_live_tail\nelse\n"
+    "  skip_step 40 skipped after permission-state preflight\nfi\n"
+    "INCOMPLETE: harness permission blocked\n"
+    "prove a visible state change after each click\n"
+    "No duplicate or wrong running Transcripted app instance\n"
+)
+
+
 def self_test() -> None:
+    assert sorted(PROBE_MATRIX) == sorted(EXPECTED_PROBES), "PROBE_MATRIX drifted from the expected probes"
     good = {
         ENTRYPOINT: "subcommands: [PermissionState.self]",
-        COMMAND: "\n".join(PROBE_MATRIX),
-        BENCH: (
-            f"{PERMISSION_STEP}\n{LIVE_SMOKE_STEP}\nif run_permission_state; then\n"
-            "skipped after permission-state preflight\nINCOMPLETE: harness permission blocked\n"
-            "prove a visible state change after each click\n"
-            "No duplicate or wrong running Transcripted app instance\n"
-        ),
+        COMMAND: "\n".join(EXPECTED_PROBES),
+        BENCH: GOOD_BENCH,
         QA_DOCS: "permission-state INCOMPLETE harness permission blocked",
         QA_GATES: "permission_state Permission blockers are INCOMPLETE, not green",
     }
@@ -152,13 +206,21 @@ def self_test() -> None:
         (ENTRYPOINT, "PermissionState.self", "// PermissionState.self\n"),
         (ENTRYPOINT, "PermissionState.self", "/* PermissionState.self */ Other.self"),
         (ENTRYPOINT, "subcommands: [PermissionState.self]", 'let example = "PermissionState.self"; subcommands: [Other.self]'),
-        (COMMAND, "AXIsProcessTrusted", "x"),
-        (BENCH, f"{PERMISSION_STEP}\n{LIVE_SMOKE_STEP}", f"{LIVE_SMOKE_STEP}\n{PERMISSION_STEP}"),
+        (BENCH, f"  {PERMISSION_STEP}\n}}\nrun_live_tail() {{\n  {LIVE_SMOKE_STEP}",
+               f"  {LIVE_SMOKE_STEP}\n}}\nrun_live_tail() {{\n  {PERMISSION_STEP}"),
         (BENCH, "if run_permission_state; then", "run_permission_state"),
+        # bypass: live smoke called after the gate, or in the else branch, instead of inside the then branch
+        (BENCH, "then\n  run_live_tail\nelse", "then\n  :\nelse"),
+        (BENCH, "fi\nINCOMPLETE", "fi\nrun_live_tail\nINCOMPLETE"),
+        (BENCH, "  skip_step 40", "  run_live_tail\n  skip_step 40"),
+        (BENCH, "fi\nINCOMPLETE", "fi\nrun_live_tail || true\nINCOMPLETE"),
+        # bypass: smoke command inlined outside run_live_tail, ungated
+        (BENCH, "fi\nINCOMPLETE", f"fi\n{LIVE_SMOKE_STEP}\nINCOMPLETE"),
+        (BENCH, f"run_live_tail() {{\n  {LIVE_SMOKE_STEP}", "run_live_tail() {\n  :"),
         (BENCH, "INCOMPLETE: harness permission blocked", ""),
         (QA_DOCS, "harness permission blocked", ""),
         (QA_GATES, "Permission blockers are INCOMPLETE, not green", ""),
-    ]:
+    ] + [(COMMAND, probe, "x") for probe in EXPECTED_PROBES]:
         broken = dict(good)
         broken[rel] = broken[rel].replace(old, new)
         assert check(build(broken)), (rel, old)
