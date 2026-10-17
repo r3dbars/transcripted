@@ -488,9 +488,9 @@ public enum ScreenScene {
     private static let dedupeMinimumLength = 6
     /// Top edge of the lowest block in the lower half of the window that
     /// reads back the user's own typed text, or `nil` when none does (empty
-    /// field, or the field is scrolled out of view). Only the lowest match is
-    /// the field: a higher one is a quoted or echoed message. The upper lines
-    /// of a wrapped field sit above the floor, but dedupe drops them.
+    /// field, or the field is scrolled out of view), raised to the first line
+    /// of the field when it wraps. Only the lowest match anchors the field: a
+    /// higher match with real spacing above it is a quoted or echoed message.
     private static func composeFieldTop(in blocks: [OCRBlock], fieldText: String) -> Double? {
         let field = normalizedForDedupe(fieldText)
         guard field.count >= dedupeMinimumLength else { return nil }
@@ -504,7 +504,43 @@ public enum ScreenScene {
                   windowRelativeY(of: block) >= 0.5 else { return false }
             return field.contains(candidate) || candidate.contains(field)
         }
-        return matches.map(\.boundingBox.y).max()
+        guard let lowest = matches.max(by: { $0.boundingBox.y < $1.boundingBox.y }) else { return nil }
+
+        // Walk upward from the lowest match through lines that sit flush
+        // against the cluster (ordinary line spacing, same as wrapped
+        // bubble lines): matching lines, and short fragments like "ok"
+        // that the field contains but that are too short to match on their
+        // own. A wrapped field's first line is one of these; leaving it
+        // above the floor would keep it in the thread as an earlier
+        // message. A higher match with real spacing between it and the
+        // cluster is a quoted echo and stays above the cut.
+        // Fragments must be whole words of the field: OCR wraps at word
+        // boundaries, and a bare substring test would let "ok" match "look".
+        let paddedField = " " + field + " "
+        var top = lowest
+        var remaining = blocks.filter { $0 != lowest && windowRelativeY(of: $0) >= 0.5 }
+        while true {
+            let next = remaining
+                .filter { block in
+                    guard block.boundingBox.y < top.boundingBox.y,
+                          isFlushAbove(top, block) else { return false }
+                    let candidate = normalizedForDedupe(block.text)
+                    return !candidate.isEmpty && paddedField.contains(" " + candidate + " ")
+                }
+                .max(by: { $0.boundingBox.y < $1.boundingBox.y })
+            guard let next else { break }
+            top = next
+            remaining.removeAll { $0 == next }
+        }
+        return top.boundingBox.y
+    }
+
+    /// True when `upper` sits directly above `lower` with no more than
+    /// wrapped-line spacing between them.
+    private static func isFlushAbove(_ lower: OCRBlock, _ upper: OCRBlock) -> Bool {
+        let gap = lower.boundingBox.y - (upper.boundingBox.y + upper.boundingBox.height)
+        let reference = max(lower.boundingBox.height, upper.boundingBox.height)
+        return reference > 0 && gap <= reference * wrappedLineMaxGapRatio
     }
 
     private static func windowRelativeY(of block: OCRBlock) -> Double {
