@@ -107,6 +107,53 @@ final class SparkleUpdateSmokeTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: first.reportPath ?? ""), "run-b must not delete run-a's report")
     }
 
+    func testScenarioRejectsSymlinkAtEveryOwnedDirectoryLevel() throws {
+        for relativePath in ["runs", "runs/run-a", "runs/run-a/available"] {
+            let output = try temporaryDirectory()
+            let outside = try temporaryDirectory()
+            let link = output.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+            let app = try fakeApp(in: output, body: "exit 1")
+
+            let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
+
+            XCTAssertEqual(report.status, .fail)
+            XCTAssertTrue(report.checks.contains { $0.id == "scenario-directory" && $0.status == .fail }, "\(relativePath): \(report.checks)")
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: outside.path), [], "\(relativePath) must not create a home, log, or report outside the owned output")
+        }
+    }
+
+    func testScenarioRejectsSymlinkedLaunchArtifactsWithoutChangingTargets() throws {
+        for artifact in ["launch-ui-smoke.json", "app.log"] {
+            let output = try temporaryDirectory()
+            let outside = try temporaryDirectory()
+            let protected = outside.appendingPathComponent("protected.txt")
+            try "keep me".write(to: protected, atomically: true, encoding: .utf8)
+            let scenario = output.appendingPathComponent("runs/run-a/available")
+            try FileManager.default.createDirectory(at: scenario, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: scenario.appendingPathComponent(artifact), withDestinationURL: protected)
+            let app = try fakeApp(in: output, body: "exit 1")
+
+            let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
+
+            XCTAssertEqual(report.status, .fail)
+            XCTAssertTrue(report.checks.contains { $0.id == "scenario-directory" && $0.status == .fail })
+            XCTAssertEqual(try String(contentsOf: protected, encoding: .utf8), "keep me")
+        }
+    }
+
+    func testScenarioRejectsPathComponentsThatEscapeRunOwnership() throws {
+        let output = try temporaryDirectory()
+        let app = try fakeApp(in: output, body: "exit 1")
+        for (runID, state) in [("../escape", "available"), ("run-a", "../escape"), ("..", "available"), ("", "available")] {
+            let report = runner(output: output).runScenario(state: state, runID: runID, appExecutableURL: app, outputURL: output)
+            XCTAssertEqual(report.status, .fail)
+            XCTAssertTrue(report.checks.contains { $0.id == "scenario-directory" && $0.status == .fail })
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.appendingPathComponent("runs").path))
+    }
+
     private func runner(output: URL) -> SparkleUpdateSmokeRunner {
         SparkleUpdateSmokeRunner(appBundlePath: "", outputDirectory: output.path, version: "9.9.9", timeout: 2)
     }
