@@ -51,7 +51,7 @@ final class AudioSignalRecoveryTests: XCTestCase {
 
         XCTAssertFalse(
             AudioSignalRecovery.hasUsableCaptureSignal(samples: firstFrameOnly, sampleRate: 16_000),
-            "one 100ms frame must not count as sustained microphone capture"
+            "100 ms of signal then a stall must not count as sustained microphone capture"
         )
     }
 
@@ -94,6 +94,35 @@ final class AudioSignalRecoveryTests: XCTestCase {
         XCTAssertFalse(
             AudioSignalRecovery.hasUsableCaptureSignal(samples: hissAndClick, sampleRate: 16_000),
             "one click in a dead mic's hiss must not make the track look usable"
+        )
+    }
+
+    func testUsableCaptureSignalRejectsAClickThatSpansTwoFrames() {
+        // Two adjacent loud samples straddle a frame boundary at every frame
+        // size we might use (100 ms = 1,600 samples; 10 ms = 160).
+        var hissAndClick = [Float](repeating: 0.0003, count: 32_000)
+        hissAndClick[1_599] = 0.5
+        hissAndClick[1_600] = 0.5
+
+        XCTAssertFalse(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: hissAndClick, sampleRate: 16_000),
+            "a click on a frame boundary must not count as sustained capture"
+        )
+    }
+
+    func testUsableCaptureSignalKeepsSpeechBrokenIntoShortBursts() {
+        // Syllable-like bursts: 50 ms of signal every 250 ms over 2 s of hiss,
+        // 400 ms of real signal in total, none of it frame-aligned.
+        var hissAndBursts = [Float](repeating: 0.0003, count: 32_000)
+        for burstStart in stride(from: 1_234, to: 32_000 - 800, by: 4_000) {
+            for index in burstStart..<(burstStart + 800) {
+                hissAndBursts[index] = index.isMultiple(of: 2) ? 0.05 : -0.05
+            }
+        }
+
+        XCTAssertTrue(
+            AudioSignalRecovery.hasUsableCaptureSignal(samples: hissAndBursts, sampleRate: 16_000),
+            "speech that arrives in short bursts must still count as usable capture"
         )
     }
 
