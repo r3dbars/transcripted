@@ -68,13 +68,13 @@ final class SparkleUpdateSmokeTests: XCTestCase {
 
     func testScenarioDoesNotPassOnLaunchReportLeftByEarlierRun() throws {
         let output = try temporaryDirectory()
-        let scenario = output.appendingPathComponent("available", isDirectory: true)
+        let scenario = output.appendingPathComponent("runs/run-a/available", isDirectory: true)
         try FileManager.default.createDirectory(at: scenario, withIntermediateDirectories: true)
         try JSONEncoder().encode(passingAvailableReport())
             .write(to: scenario.appendingPathComponent("launch-ui-smoke.json"))
         let app = try fakeApp(in: output, body: "exit 1")
 
-        let report = runner(output: output).runScenario(state: "available", appExecutableURL: app, outputURL: output)
+        let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
 
         XCTAssertEqual(report.status, .fail)
         XCTAssertTrue(report.checks.contains { $0.id == "launch-report" && $0.status == .fail }, "\(report.checks)")
@@ -86,9 +86,25 @@ final class SparkleUpdateSmokeTests: XCTestCase {
         try JSONEncoder().encode(passingAvailableReport()).write(to: fixture)
         let app = try fakeApp(in: output, body: "cp '\(fixture.path)' \"$TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT\"")
 
-        let report = runner(output: output).runScenario(state: "available", appExecutableURL: app, outputURL: output)
+        let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
 
         XCTAssertEqual(report.status, .pass, "\(report.checks)")
+    }
+
+    func testConcurrentRunsKeepSeparateLaunchReports() throws {
+        let output = try temporaryDirectory()
+        let fixture = output.appendingPathComponent("fresh-report.json")
+        try JSONEncoder().encode(passingAvailableReport()).write(to: fixture)
+        let app = try fakeApp(in: output, body: "cp '\(fixture.path)' \"$TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT\"")
+        let failingApp = try fakeApp(in: output, body: "exit 1", name: "failing-app.sh")
+
+        let first = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
+        let second = runner(output: output).runScenario(state: "available", runID: "run-b", appExecutableURL: failingApp, outputURL: output)
+
+        XCTAssertEqual(first.status, .pass, "\(first.checks)")
+        XCTAssertEqual(second.status, .fail, "run-b must not consume run-a's report")
+        XCTAssertNotEqual(first.reportPath, second.reportPath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.reportPath ?? ""), "run-b must not delete run-a's report")
     }
 
     private func runner(output: URL) -> SparkleUpdateSmokeRunner {
@@ -109,8 +125,8 @@ final class SparkleUpdateSmokeTests: XCTestCase {
     }
 
     /// A stand-in app executable: a shell script, never the real app.
-    private func fakeApp(in directory: URL, body: String) throws -> URL {
-        let url = directory.appendingPathComponent("fake-app.sh")
+    private func fakeApp(in directory: URL, body: String, name: String = "fake-app.sh") throws -> URL {
+        let url = directory.appendingPathComponent(name)
         try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url

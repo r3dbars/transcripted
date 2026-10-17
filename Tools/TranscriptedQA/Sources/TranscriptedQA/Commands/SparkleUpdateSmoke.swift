@@ -109,11 +109,13 @@ struct SparkleUpdateSmokeRunner {
 
         scenarios.append(runScenario(
             state: "available",
+            runID: runID,
             appExecutableURL: executableURL,
             outputURL: outputURL
         ))
         scenarios.append(runScenario(
             state: "downloading",
+            runID: runID,
             appExecutableURL: executableURL,
             outputURL: outputURL
         ))
@@ -123,10 +125,16 @@ struct SparkleUpdateSmokeRunner {
 
     func runScenario(
         state: String,
+        runID: String,
         appExecutableURL: URL,
         outputURL: URL
     ) -> SparkleUpdateSmokeScenarioReport {
-        let scenarioDirectory = outputURL.appendingPathComponent(state, isDirectory: true)
+        // Per-run folder, so two overlapping runs on the same output never
+        // share (or delete) each other's launch report, log or isolated home.
+        let scenarioDirectory = outputURL
+            .appendingPathComponent("runs", isDirectory: true)
+            .appendingPathComponent(runID, isDirectory: true)
+            .appendingPathComponent(state, isDirectory: true)
         let reportURL = scenarioDirectory.appendingPathComponent("launch-ui-smoke.json", isDirectory: false)
         let logURL = scenarioDirectory.appendingPathComponent("app.log", isDirectory: false)
         do {
