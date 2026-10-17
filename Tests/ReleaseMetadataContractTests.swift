@@ -113,6 +113,15 @@ func testReleaseMetadataContract() {
         assertEqual(caskDependsOn["macos"], ":tahoe", "Homebrew cask should use the supported symbol syntax for the macOS 26+ release floor")
     }
 
+    runSuite("Release metadata - cask dependency parser rejects malformed Ruby separators") {
+        let valid = releaseRubyDependsOn(in: "  depends_on arch: :arm64\n  depends_on macos: :tahoe\n")
+        assertEqual(valid["arch"], ":arm64", "well-formed arch dependency should parse")
+        assertEqual(valid["macos"], ":tahoe", "well-formed macos dependency should parse")
+
+        let malformed = releaseRubyDependsOn(in: "  depends_on arch::arm64\n  depends_on macos::tahoe\n  depends_on arch :arm64\n")
+        assertTrue(malformed.isEmpty, "missing-space or missing-colon separators must not parse as dependencies")
+    }
+
     runSuite("Release metadata - Sparkle app settings point at the committed appcast") {
         let infoPlist = releaseContractFile("Info.plist")
         let appcast = releaseContractFile("docs/appcast.xml")
@@ -178,14 +187,22 @@ private func releaseJSONValues(forKey key: String, in node: Any) -> [String] {
 }
 
 /// `depends_on arch: :arm64` lines parsed into ["arch": ":arm64"].
+/// Only valid Ruby hash-label syntax counts: `label: :symbol`, with the colon
+/// directly after the label and whitespace before the symbol. Malformed lines
+/// like `depends_on arch::arm64` (a NameError in Ruby) are skipped, so the
+/// contract fails instead of passing on a broken cask.
 private func releaseRubyDependsOn(in contents: String) -> [String: String] {
     var result: [String: String] = [:]
+    let pattern = #"^depends_on\s+([A-Za-z_][A-Za-z0-9_]*):\s+(:[A-Za-z_][A-Za-z0-9_]*)\s*$"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return result }
     for line in contents.split(separator: "\n") {
         let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard trimmed.hasPrefix("depends_on ") else { continue }
-        let parts = trimmed.dropFirst("depends_on ".count).split(separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
-        guard parts.count == 2 else { continue }
-        result[String(parts[0]).trimmingCharacters(in: .whitespaces)] = String(parts[1]).trimmingCharacters(in: .whitespaces)
+        let range = NSRange(trimmed.startIndex..., in: trimmed)
+        guard let match = regex.firstMatch(in: trimmed, range: range),
+              let labelRange = Range(match.range(at: 1), in: trimmed),
+              let valueRange = Range(match.range(at: 2), in: trimmed)
+        else { continue }
+        result[String(trimmed[labelRange])] = String(trimmed[valueRange])
     }
     return result
 }
