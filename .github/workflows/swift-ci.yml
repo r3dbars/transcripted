@@ -43,8 +43,8 @@ name: Swift CI
 # concurrent hosted macOS jobs, so moving a PR's jobs off hosted lets more PRs
 # run at once. `pick-runner` makes the choice (scripts/ci/pick-ci-runner.py);
 # fork PRs always stay hosted, and the Mac's job-started hook refuses them too.
-# The launch smoke inside `app-build` runs inside the throwaway job VM on the
-# Mac (scripts/ops/native-smoke-isolation.py). Setup, pause, and removal:
+# On the Mac, `app-build`'s launch smoke runs inside that throwaway job VM
+# (scripts/ops/native-smoke-isolation.py). Setup, pause, and removal:
 # docs/self-hosted-mac-runner.md.
 #
 # None of these jobs use continue-on-error, so a failure blocks merge instead of
@@ -202,8 +202,8 @@ jobs:
   # self-heals by building deps here — so it never has to wait behind the app
   # build. On hosted runners app-build is the canonical cache saver and this job
   # restores only. The owner's Mac (a fresh VM per job) is never the canonical
-  # cache saver, so it may restore hosted entries but only ever saves its own `deps-mac-`
-  # entries, and only from main so PR runs don't crowd the repo's cache.
+  # cache saver: it may restore hosted entries but only ever saves its own
+  # `deps-mac-` entries, and only from main so PR runs don't crowd the cache.
   # ---------------------------------------------------------------------------
   spm-tests:
     needs: pick-runner

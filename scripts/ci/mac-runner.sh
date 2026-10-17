@@ -123,6 +123,14 @@ offer_block() {
   echo ""
 }
 
+# park_word <paused>: the heartbeat word while install/rebuild park the service.
+# "parked" rather than "paused", so MAC_RUNNER_MODE=always keeps sending new
+# runs here to wait for the service to come back (pick-ci-runner.py sends
+# them hosted only on a real pause). An owner's pause stays "paused".
+park_word() {
+  if [ "$1" = "1" ]; then echo "paused"; else echo "parked"; fi
+}
+
 # start_block <disk_ok> <vms_running> <backing_off> [slots_busy paused on_ac mic]
 # Why a job that is already waiting for this Mac can't start now, or "".
 # Pause, battery and the mic don't stop the first slot: the job was sent here
@@ -263,6 +271,8 @@ self_test() {
     got="$(heartbeat_value "$(offer_block 0 1 1 "$MAX_VMS" 0 0 "$MAX_VMS")" 9)"; expect "$got" "busy:9" "busy heartbeat at slot cap"
   done
   MAX_VMS="$configured_max"
+  got="$(park_word 0)"; expect "$got" "parked" "install/rebuild park is not a pause"
+  got="$(park_word 1)"; expect "$got" "paused" "a pause stays a pause while parked"
 
   # Zero or ambiguous PID discoveries must keep the next slot waiting; a
   # uniquely identified VM publishes its PID and lets admission continue.
@@ -1402,7 +1412,7 @@ serve() {
     # stop it. A job that shows up meanwhile goes back to GitHub, once no
     # slot is still running one (a cancel would end that job too).
     if [ -f "$STATE/STOP" ]; then
-      set_heartbeat paused
+      set_heartbeat "$(park_word "$(is_paused)")"
       if [ "$busy" -gt 0 ]; then
         rm -f "$STATE/STOPPED"
         sleep "$INTERVAL"
@@ -1421,7 +1431,7 @@ serve() {
         rm -f "$STATE/STOPPED"
         for run in $(printf '%s\n' "$waiting" | awk '{print $1}' | sort -u); do
           reroute_run "$run"
-          set_heartbeat paused
+          set_heartbeat "$(park_word "$(is_paused)")"
         done
         continue
       fi
