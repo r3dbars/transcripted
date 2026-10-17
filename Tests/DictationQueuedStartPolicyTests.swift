@@ -248,6 +248,34 @@ func testDictationQueuedStartPolicy() async {
         )
     }
 
+    runSuite("Only the landed-clipboard delivery notice gives way; every other delivery message holds the next take back") {
+        let cases: [(DictationDeliveryPresentation, DictationQueuedStartPolicy.MessageKind)] = [
+            (.clipboardNotice("Copied. Press ⌘V"), .landedClipboardNotice),
+            (.success(title: "Pasted"), .other),
+            (.notPasted(message: "Not pasted", unconfirmed: false), .other),
+            (.notPasted(message: "Maybe pasted", unconfirmed: true), .other),
+            (.clipboardBusy(message: "Clipboard busy"), .other),
+            (.error("Couldn't save"), .other),
+        ]
+        for (presentation, expected) in cases {
+            assertEqual(
+                DictationQueuedStartPolicy.messageKind(for: presentation),
+                expected,
+                "\(presentation) maps to its message kind"
+            )
+        }
+        assertEqual(
+            DictationQueuedStartPolicy.messageKind(for: DictationDeliveryPresentation.clipboardNotice("Copied.").addingPendingAudioNotice(true)),
+            .landedClipboardNotice,
+            "the audio-repair suffix keeps a landed notice a passing note"
+        )
+        assertEqual(
+            DictationQueuedStartPolicy.messageKind(for: DictationDeliveryPresentation.error("Failed").addingPendingAudioNotice(true)),
+            .other,
+            "the audio-repair suffix never lets a failure give way"
+        )
+    }
+
     // Still source-text, deliberately: the Esc callback wiring lives in
     // DictationSessionController, which a fast test can't build. The overlay
     // half (which messages give way) is a behavioral suite above now.

@@ -76,6 +76,17 @@ extension DictationQueuedStartPolicy {
         }
     }
 
+    /// The kind of message the pill shows for a finished take's delivery.
+    /// Only the calm "it landed, press ⌘V" notice is a passing note; a
+    /// success never leaves a message, and everything else (not pasted,
+    /// clipboard busy, failures) must hold the next take back.
+    static func messageKind(for presentation: DictationDeliveryPresentation) -> MessageKind {
+        switch presentation {
+        case .clipboardNotice: return .landedClipboardNotice
+        case .success, .notPasted, .clipboardBusy, .error: return .other
+        }
+    }
+
     /// While the last take is still on screen transcribing, an error would
     /// cover its pill (and can hide it and turn off Esc), so a dropped press
     /// only says "still finishing" once nothing is dictating.

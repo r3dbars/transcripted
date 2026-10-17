@@ -518,9 +518,11 @@ extension DictationSessionController {
             case .success(let title):
                 overlayController.showSuccessAndDismiss(title: title)
             case .clipboardNotice(let message):
-                overlayController.showClipboardNotice(message)
                 // The text landed; a press for the next take can replace this.
-                overlayController.messageCanGiveWayToNextStart = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.landedClipboardNotice)
+                overlayController.showClipboardNotice(
+                    message,
+                    kind: DictationQueuedStartPolicy.messageKind(for: deliveryPresentation)
+                )
             case .notPasted(let message, let unconfirmed):
                 // The island also shows the words and a Paste button.
                 self.showNotPasted(

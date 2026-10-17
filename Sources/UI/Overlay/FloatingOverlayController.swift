@@ -380,8 +380,14 @@ class FloatingOverlayController {
     /// Calm variant of showError for "your text is on the clipboard" fallbacks:
     /// clipboard icon instead of a warning triangle, a longer dwell so the
     /// ⌘V instruction stays readable, and a clean fade instead of the shake.
-    func showClipboardNotice(_ message: String) {
-        showMessage(message, tone: .notice)
+    /// `kind` is `.landedClipboardNotice` only when the text did land and a
+    /// newer take may replace the note; the no-island fallback of a
+    /// not-pasted notice keeps the default, which holds the next take back.
+    func showClipboardNotice(
+        _ message: String,
+        kind: DictationQueuedStartPolicy.MessageKind = .other
+    ) {
+        showMessage(message, tone: .notice, kind: kind)
     }
 
     /// A dictation that didn't paste (no text box, or focus moved). The
@@ -477,7 +483,8 @@ class FloatingOverlayController {
         tone: MessageTone,
         actionTitle: String? = nil,
         action: (() -> Void)? = nil,
-        notPasted: NotPastedNotice? = nil
+        notPasted: NotPastedNotice? = nil,
+        kind: DictationQueuedStartPolicy.MessageKind = .other
     ) {
         errorDismissTask?.cancel()
         clearNotPasted()
@@ -495,7 +502,7 @@ class FloatingOverlayController {
         discardActionableMessageIfNeeded()
         errorMessage = message
         messageTone = tone
-        messageCanGiveWayToNextStart = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(.other)
+        messageCanGiveWayToNextStart = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(kind)
         errorActionTitle = actionTitle
         errorActionHandler = action
         state = .drafting
