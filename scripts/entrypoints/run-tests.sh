@@ -504,6 +504,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingSessionState.swift"
     "Sources/App/LabControlCommand.swift"
     "Sources/App/DebugControlCommand.swift"
+    "Sources/App/DetectedMeetingPromptWiring.swift"
     "Sources/Meeting/MeetingSessionStateMachine.swift"
     "Sources/Meeting/MeetingPipelinePhaseCadence.swift"
     "Sources/Meeting/LiveTranscriptPrewarmPolicy.swift"
