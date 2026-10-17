@@ -252,6 +252,31 @@ struct ScreenSceneTests {
         #expect(!scene.conversationTurns.contains { $0.text.contains("Thursclay") })
     }
 
+    @Test("A wrapped field with both a short first line and a misread middle line stays out of the conversation")
+    func shortFirstLineAndNoisyMiddleShareOneComposeFloor() {
+        let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)
+        let blocks = [
+            block("Hey, are you free Thursday afternoon?", x: 0.41, y: 0.35, width: 0.15, window: slack, windowFrame: frame),
+            block("No rush, just let me know today if you can.", x: 0.41, y: 0.55, width: 0.13, window: slack, windowFrame: frame),
+            // Both fixes are needed: bridge the noisy line between the long
+            // matches, then extend above that cluster through the short line.
+            block("ok", x: 0.48, y: 0.65, width: 0.05, window: slack, windowFrame: frame),
+            block("I can make it", x: 0.48, y: 0.70, width: 0.05, window: slack, windowFrame: frame),
+            block("on Thursclay", x: 0.48, y: 0.75, width: 0.05, window: slack, windowFrame: frame),
+            block("afternoon if that works", x: 0.48, y: 0.80, width: 0.05, window: slack, windowFrame: frame),
+        ]
+        let scene = ScreenScene.classify(
+            blocks: blocks,
+            frontmostBundleID: slack,
+            fieldText: "ok I can make it on Thursday afternoon if that works"
+        )
+        #expect(scene.mode == .replying)
+        #expect(scene.conversationTurns.last?.text == "No rush, just let me know today if you can.")
+        #expect(scene.conversationTurns.last?.speaker == .other)
+        #expect(!scene.conversationTurns.contains { $0.text == "ok" })
+        #expect(!scene.conversationTurns.contains { $0.text.contains("Thursclay") })
+    }
+
     @Test("An echo of the typed text high in the window does not cut off the thread beneath it")
     func echoAboveThreadDoesNotMoveTheFloor() {
         let blocks = [
