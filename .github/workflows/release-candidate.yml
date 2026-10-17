@@ -21,7 +21,7 @@ jobs:
     # Signing/notarization/Sparkle secrets live in the main-only `release`
     # environment with Justin as required reviewer. Justin must create that
     # environment (and move the 6 secrets) BEFORE this merges, or RCs fail.
-    # Dispatch from main: gh workflow run release-candidate.yml --ref main -f source_ref=<prep branch>
+    # Dispatch from main: gh workflow run release-candidate.yml --ref main -f source_ref=<prep branch> -f version=<x.y.z>
     environment: release
     timeout-minutes: 180
     env:
@@ -102,13 +102,17 @@ jobs:
           KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          # Only /usr/bin/codesign may use the key (no `import -A`). Nothing
+          # here uses productsign, and trusting /usr/bin/security would let it
+          # export the private key without a prompt. The keychain relocks after
+          # 3 h (the job timeout) and the always() step at the end deletes it.
           keychain_path="$RUNNER_TEMP/transcripted-signing.keychain-db"
           certificate_path="$RUNNER_TEMP/developer-id.p12"
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security set-keychain-settings -lut 21600 "$keychain_path"
+          security set-keychain-settings -lut 10800 "$keychain_path"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
           printf '%s' "$DEVELOPER_ID_CERT" | base64 --decode -o "$certificate_path"
-          security import "$certificate_path" -P "$DEVELOPER_ID_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security import "$certificate_path" -P "$DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12 -k "$keychain_path"
           security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
           security list-keychain -d user -s "$keychain_path"
           security find-identity -v -p codesigning "$keychain_path"

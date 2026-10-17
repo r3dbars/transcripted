@@ -11,7 +11,7 @@ Workflows, templates, and the CI contracts that gate merges. Repo-wide rules liv
 | `workflows/concurrency-census.yml` | PRs and pushes touching `Sources/` | Fails only if a folder is above `.agents/concurrency-baseline.json` and above the PR base (`--allow-up-to`), so toolchain drift alone passes. |
 | `workflows/transcripted-lab.yml` | `Tools/TranscriptedLab/**` changes | Builds and tests that package on `macos-15`. |
 | `workflows/release-candidate.yml` | Manual only | Builds, signs, notarizes, and builds Sparkle metadata. Uses the signing secrets. |
-| `workflows/publish-mcp-registry.yml` | Release published, manual | Repackages the already-signed `transcripted-mcp` into a `.mcpb`; builds and signs nothing. OIDC login, no secret. |
+| `workflows/publish-mcp-registry.yml` | Release published only (no manual dispatch; re-run the job to retry) | Repackages the already-signed `transcripted-mcp` into a `.mcpb`; builds and signs nothing. OIDC login, no secret. |
 | `workflows/mac-runner-sweep.yml` | Every 30 min | Re-runs Swift CI on hosted runners if the owner's Mac went quiet, except in `MAC_RUNNER_MODE=always`. |
 | `workflows/mutation-monthly.yml` | 1st of the month | Report-only mutation probe on the `transcripted-mac` runner. |
 
