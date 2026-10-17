@@ -12,12 +12,16 @@ extension GhostInputController {
 
     /// What a plain Tab does. The hold is decided before the accept attempt,
     /// because that attempt cancels pending work and moves the schedule
-    /// revision on, which would make a chained request look stale.
+    /// revision on, which would make a chained request look stale. The hold
+    /// also needs the live caret to still be at the growing edge: if the user
+    /// clicked back into earlier text, the chained request is stale, so the
+    /// accept attempt runs, cancels it, and the host gets the Tab.
     static func routePlainTab(
         awaitingChainedGhost: () -> Bool,
+        caretAtGrowingEdge: () -> Bool,
         acceptWord: () -> Bool
     ) -> PlainTabOutcome {
-        if awaitingChainedGhost() { return .held }
+        if awaitingChainedGhost(), caretAtGrowingEdge() { return .held }
         return acceptWord() ? .accepted : .passedToHost
     }
 }

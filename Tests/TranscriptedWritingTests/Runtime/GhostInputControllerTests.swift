@@ -38,6 +38,7 @@ struct GhostInputControllerTests {
         var requestPending = false
         var ghostVisible = false
         var acceptAttempts = 0
+        var caretAtGrowingEdge = true
 
         mutating func chainAfterAccept() {
             scheduleRevision += 1
@@ -49,8 +50,14 @@ struct GhostInputControllerTests {
                 awaitingChainedGhost: {
                     hold.isAwaitingGhost(scheduleRevision: scheduleRevision, requestPending: requestPending, ghostVisible: ghostVisible)
                 },
+                caretAtGrowingEdge: { caretAtGrowingEdge },
                 acceptWord: {
                     acceptAttempts += 1
+                    if !caretAtGrowingEdge {
+                        scheduleRevision += 1
+                        requestPending = false
+                        return false
+                    }
                     if ghostVisible { return true }
                     scheduleRevision += 1
                     requestPending = false
@@ -69,6 +76,18 @@ struct GhostInputControllerTests {
         #expect(model.tab() == .held)
         #expect(model.acceptAttempts == 0)
         #expect(model.requestPending, "the chained request must keep running")
+    }
+
+    @Test("A Tab after the caret moved into earlier text is not held; the stale chain is cancelled and the host gets the Tab")
+    func tabWithStaleCaretGoesToHost() {
+        var model = ChainedTabModel()
+        model.chainAfterAccept()
+        model.hold.taskStarted(revision: model.scheduleRevision)
+        model.requestPending = true
+        model.caretAtGrowingEdge = false
+        #expect(model.tab() == .passedToHost)
+        #expect(model.acceptAttempts == 1)
+        #expect(!model.requestPending, "the stale chained request must be cancelled")
     }
 
     @Test("A Tab in a calm host's settle window, before the chained request is pending, is held")
