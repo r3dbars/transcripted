@@ -33,7 +33,10 @@ enum DictationShortcutUpgrade {
     }
 
     /// Persist every 1.1.69 dictation key that still worked. Carbon-era
-    /// Right-Option-disabled shortcuts keep the old read path instead.
+    /// Right-Option-disabled installs keep Option+Space (or whatever Carbon
+    /// shortcut they saved) as the one dictation key — the lazy read path
+    /// cannot, because a missing mode is Hands-Free and that returns today's
+    /// Right Option default.
     static func apply(userDefaults: UserDefaults) {
         let storedHold = PhysicalDictationTriggerPreferences.storedPushToTalkBinding(
             userDefaults: userDefaults
@@ -45,20 +48,51 @@ enum DictationShortcutUpgrade {
             userDefaults: userDefaults
         )
 
-        guard shouldKeepEveryLegacyKey(
+        if shouldKeepEveryLegacyKey(
             storedHold: storedHold,
             storedToggle: storedToggle,
             carbonRightOptionDisabled: carbonRightOptionDisabled,
             launchedVersionBeforeThisBuild: launchedVersionBeforeThisBuild(userDefaults: userDefaults),
             onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(userDefaults: userDefaults)
-        ) else { return }
-
-        let hold = storedHold ?? legacyHoldDefault
-        PhysicalDictationTriggerPreferences.savePushToTalk(hold, userDefaults: userDefaults)
-        let toggle = storedToggle ?? legacyToggleDefault
-        if toggle != hold {
-            PhysicalDictationTriggerPreferences.saveHandsFree(toggle, userDefaults: userDefaults)
+        ) {
+            let hold = storedHold ?? legacyHoldDefault
+            PhysicalDictationTriggerPreferences.savePushToTalk(hold, userDefaults: userDefaults)
+            let toggle = storedToggle ?? legacyToggleDefault
+            if toggle != hold {
+                PhysicalDictationTriggerPreferences.saveHandsFree(toggle, userDefaults: userDefaults)
+            }
+            return
         }
+
+        persistCarbonEraShortcutIfNeeded(
+            storedHold: storedHold,
+            storedToggle: storedToggle,
+            carbonRightOptionDisabled: carbonRightOptionDisabled,
+            userDefaults: userDefaults
+        )
+    }
+
+    /// Pre-physical-trigger installs that turned Right Option off used the
+    /// Carbon RegisterEventHotKey chord (default Option+Space). Persist it as
+    /// the one dictation key, matching the 1.1.70 migrate for this cohort.
+    private static func persistCarbonEraShortcutIfNeeded(
+        storedHold: PhysicalDictationTriggerBinding?,
+        storedToggle: PhysicalDictationTriggerBinding?,
+        carbonRightOptionDisabled: Bool,
+        userDefaults: UserDefaults
+    ) {
+        guard carbonRightOptionDisabled, storedHold == nil, storedToggle == nil else { return }
+        let old = HotkeyPreferences.dictationBinding(userDefaults: userDefaults)
+        let carbon = PhysicalDictationTriggerBinding(
+            keyCode: old.keyCode,
+            modifiers: PhysicalDictationTriggerPreferences.modifiers(fromCarbon: old.modifiers)
+        )
+        guard PhysicalDictationTriggerPreferences.rejectionReason(for: carbon) == nil,
+              carbon != PhysicalDictationTriggerPreferences.defaultPushToTalkBinding else {
+            return
+        }
+        PhysicalDictationTriggerPreferences.savePushToTalk(carbon, userDefaults: userDefaults)
+        HotkeyPreferences.setDictationKeyBehavior(.tapToToggle, userDefaults: userDefaults)
     }
 
     static func shouldKeepEveryLegacyKey(

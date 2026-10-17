@@ -190,6 +190,43 @@ func testDictationShortcutUpgrade() {
         )
     }
 
+    runSuite("Carbon-era Option+Space with Right Option off stays the one dictation key") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        HotkeyPreferences.setRightOptionDictation(enabled: false, userDefaults: defaults)
+        HotkeyPreferences.save(
+            dictation: HotkeyBinding(keyCode: UInt32(kVK_Space), modifiers: UInt32(optionKey)),
+            userDefaults: defaults
+        )
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+        let optionSpace = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_Space),
+            modifiers: PhysicalDictationTriggerModifiers.option
+        )
+
+        assertEqual(
+            PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: defaults),
+            optionSpace,
+            "disabled Right Option must keep the Carbon Option+Space shortcut"
+        )
+        assertEqual(
+            bindings.first { $0.action == .dictationPushToTalk }?.binding,
+            Optional(optionSpace),
+            "the event tap must register Option+Space, not Right Option"
+        )
+        assertNil(
+            bindings.first { $0.action == .dictationHandsFree },
+            "this cohort had one Carbon key, not the 1.1.69 two-key layout"
+        )
+        assertEqual(
+            HotkeyPreferences.dictationKeyBehavior(userDefaults: defaults),
+            .tapToToggle,
+            "Carbon RegisterEventHotKey was press-to-fire, which maps to Tap to toggle"
+        )
+    }
+
     runSuite("A fresh install still has one dictation key, Right Option") {
         let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
