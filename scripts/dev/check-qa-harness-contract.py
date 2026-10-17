@@ -87,17 +87,28 @@ LIVE_TAIL_CALL = "run_live_tail"
 
 
 def live_smoke_gated(bench: str) -> bool:
-    """True when the only call to run_live_tail sits in the `then` branch of
-    `if run_permission_state; then`, not after it, in the else, or elsewhere."""
-    gate = re.search(r"if run_permission_state; then\n(.*?)\n\s*else\b(.*?)\n\s*fi\b", bench, re.S)
-    if gate is None:
+    """True when the live smoke can only run from the `then` branch of
+    `if run_permission_state; then`.
+
+    The smoke command must live only inside the run_live_tail function, and the
+    one reference to run_live_tail (besides its definition) must be a bare call
+    in that `then` branch: not after the `fi`, not in the `else`, not chained
+    elsewhere, and not inlined outside the function.
+    """
+    code = "\n".join(line for line in bench.splitlines() if not line.lstrip().startswith("#"))
+    gate = re.search(r"\bif run_permission_state; then\n(.*?)\n\s*else\b(.*?)\n\s*fi\b", code, re.S)
+    tail = re.search(rf"^[ \t]*{LIVE_TAIL_CALL}\(\)[ \t]*\{{\n(.*?)\n\}}", code, re.S | re.M)
+    if gate is None or tail is None:
         return False
     then_body, else_body = gate.group(1), gate.group(2)
-    call = rf"^[ \t]*{LIVE_TAIL_CALL}[ \t]*$"
+    outside_tail = code[: tail.start()] + code[tail.end():]
+    references = re.findall(rf"\b{LIVE_TAIL_CALL}\b(?!\(\))", code)
     return (
-        re.search(call, then_body, re.M) is not None
+        LIVE_SMOKE_STEP in tail.group(1)
+        and LIVE_SMOKE_STEP not in outside_tail
+        and len(references) == 1
+        and re.search(rf"^[ \t]*{LIVE_TAIL_CALL}[ \t]*$", then_body, re.M) is not None
         and LIVE_TAIL_CALL not in else_body
-        and len(re.findall(call, bench, re.M)) == 1
     )
 
 
@@ -121,8 +132,8 @@ def check(root: Path) -> list[str]:
         problems.append(f"{BENCH}: should run `{PERMISSION_STEP}` before `{LIVE_SMOKE_STEP}`")
     if not live_smoke_gated(bench):
         problems.append(
-            f"{BENCH}: `{LIVE_TAIL_CALL}` should be called once, inside the `then` branch of "
-            "`if run_permission_state; then`, so a blocked preflight cannot reach the live smoke"
+            f"{BENCH}: `{LIVE_SMOKE_STEP}` should run only from `{LIVE_TAIL_CALL}`, called once, inside the "
+            "`then` branch of `if run_permission_state; then`, so a blocked preflight cannot reach the live smoke"
         )
     for needle, why in BENCH_PHRASES:
         if needle not in bench:
@@ -202,6 +213,10 @@ def self_test() -> None:
         (BENCH, "then\n  run_live_tail\nelse", "then\n  :\nelse"),
         (BENCH, "fi\nINCOMPLETE", "fi\nrun_live_tail\nINCOMPLETE"),
         (BENCH, "  skip_step 40", "  run_live_tail\n  skip_step 40"),
+        (BENCH, "fi\nINCOMPLETE", "fi\nrun_live_tail || true\nINCOMPLETE"),
+        # bypass: smoke command inlined outside run_live_tail, ungated
+        (BENCH, "fi\nINCOMPLETE", f"fi\n{LIVE_SMOKE_STEP}\nINCOMPLETE"),
+        (BENCH, f"run_live_tail() {{\n  {LIVE_SMOKE_STEP}", "run_live_tail() {\n  :"),
         (BENCH, "INCOMPLETE: harness permission blocked", ""),
         (QA_DOCS, "harness permission blocked", ""),
         (QA_GATES, "Permission blockers are INCOMPLETE, not green", ""),
