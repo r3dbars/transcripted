@@ -200,6 +200,34 @@ struct SecretRulesTests {
         #expect(result.clean.contains("12/26"), "expiry date should be left alone, only the card redacted")
     }
 
+    @Test(
+        "An expiry month next to a card stays out of the redacted span",
+        arguments: ["02", "12", "07", "11"]
+    )
+    func expiryMonthAfterCardStaysVisible(month: String) {
+        let text = "Card 4111 1111 1111 1111 \(month)/26 on file."
+        let result = SecretRules.scrub(text, config: .forPersistence)
+        #expect(result.clean == "Card \u{27E8}redacted:card\u{27E9} \(month)/26 on file.", "got: \(result.clean)")
+    }
+
+    /// A number in front of the card and an expiry after it at the same
+    /// time: the card is still fully redacted and the expiry stays intact.
+    @Test(
+        "A number before a card and an expiry after it: no card digit leaks, expiry stays",
+        arguments: [("12", "09"), ("45", "03"), ("3", "07"), ("8", "2")]
+    )
+    func numberBeforeCardWithExpiryAfter(lead: String, month: String) {
+        let text = "Ref \(lead) 5555 5555 5555 4444 \(month)/26 on file."
+        for config in [SecretRules.ScrubConfig.forPromptContext, .forPersistence] {
+            let result = SecretRules.scrub(text, config: config)
+            for group in ["5555", "4444"] {
+                #expect(!result.clean.contains(group), "card digits leaked: \(result.clean)")
+            }
+            #expect(result.clean.hasSuffix("\u{27E9} \(month)/26 on file."), "expiry not intact: \(result.clean)")
+            #expect(result.findings.map(\.type) == [.creditCard])
+        }
+    }
+
     /// A short number right before a card can start its own Luhn-valid
     /// window that covers only the front of the card. No digit of the card
     /// may survive, whatever number sits in front of it.
