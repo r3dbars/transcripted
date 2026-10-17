@@ -226,6 +226,7 @@ final class MeetingSessionController: ObservableObject {
     /// remembered, so every meeting asks again about call audio.
     var systemAudioAccessAsksWhileRecording: @MainActor () -> Bool = { false }
     var activeRecordingStartedAt: Date?
+    let callSpeakerNames = MeetingCallSpeakerNames()  // +CallSpeakerNames
     /// What the controller saw the moment capture stopped underneath it
     /// (state still `.recording`); see `MeetingCaptureStopEvidence`. A later
     /// warning refresh can also clear the live unheard timer before the
@@ -378,7 +379,7 @@ final class MeetingSessionController: ObservableObject {
             meetingActionIdentity = UUID()
         }
         self.systemAudioPermissionRecoveryNeeded = systemAudioPermissionRecoveryNeeded
-        if case .recording = newState { beginLiveTranscriptCaptureIfNeeded() }
+        recordingStateHooks(from: state, to: newState)
         state = newState
         switch newState {
         case .startingRecording, .recording:
@@ -607,6 +608,7 @@ final class MeetingSessionController: ObservableObject {
         taskManager.lineupNamingProvider = { recordingDate in
             await MeetingCalendarNaming.lineupRequest(recordingStart: recordingDate)
         }
+        wireCallSpeakerNames()
 
         capture.onUnexpectedRecordingComplete = { [weak self] result in
             Task { @MainActor [weak self] in
@@ -756,10 +758,6 @@ final class MeetingSessionController: ObservableObject {
         }
 
         return context
-    }
-
-    func boolString(_ value: Bool) -> String {
-        value ? "true" : "false"
     }
 
     /// Recomputes and assigns the published failed-meeting list. Kept on the

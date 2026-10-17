@@ -15,6 +15,10 @@ public struct ParsedMeetingCapture {
         public let name: String
         public let persistentSpeakerId: String?
         public let confidence: String?
+        /// `name_source` frontmatter when present: where a shown but still
+        /// unconfirmed name came from (`call_app`: the call app showed this
+        /// person talking). Nil for voiceprint, user-given and placeholder names.
+        public let nameSource: String?
         public let wordCount: Int
         public let speakingSeconds: Double
     }
@@ -65,6 +69,7 @@ public enum CaptureMarkdownParser {
         let name: String
         let persistentSpeakerId: String?
         let confidence: String?
+        let nameSource: String?
     }
 
     // MARK: - Frontmatter
@@ -241,6 +246,7 @@ public enum CaptureMarkdownParser {
                 name: displayName,
                 persistentSpeakerId: metadata?.persistentSpeakerId,
                 confidence: metadata?.confidence,
+                nameSource: metadata?.nameSource,
                 wordCount: wordCount,
                 speakingSeconds: (speakingSeconds * 10).rounded() / 10
             )
@@ -333,6 +339,7 @@ public enum CaptureMarkdownParser {
         var currentName: String?
         var currentPersistentSpeakerId: String?
         var currentConfidence: String?
+        var currentNameSource: String?
 
         func flush() {
             if let currentId, let currentName {
@@ -341,7 +348,8 @@ public enum CaptureMarkdownParser {
                     channel: currentChannel,
                     name: currentName,
                     persistentSpeakerId: currentPersistentSpeakerId,
-                    confidence: currentConfidence
+                    confidence: currentConfidence,
+                    nameSource: currentNameSource
                 ))
             }
             currentId = nil
@@ -349,6 +357,7 @@ public enum CaptureMarkdownParser {
             currentName = nil
             currentPersistentSpeakerId = nil
             currentConfidence = nil
+            currentNameSource = nil
         }
 
         for rawLine in speakerLines {
@@ -373,6 +382,11 @@ public enum CaptureMarkdownParser {
             } else if trimmed.hasPrefix("db_id:") {
                 currentPersistentSpeakerId = trimmed
                     .replacingOccurrences(of: "db_id:", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            } else if trimmed.hasPrefix("name_source:") {
+                currentNameSource = trimmed
+                    .replacingOccurrences(of: "name_source:", with: "")
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                     .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             } else if trimmed.hasPrefix("confidence:") {

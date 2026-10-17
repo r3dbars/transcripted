@@ -90,7 +90,7 @@ extension NotchIslandVoiceRowView {
     }
 
     func refreshAccessibility() {
-        let hint = Policy.rowHint(rowState, progress: progress, prefilledUntouched: prefilledUntouched)
+        let hint = Policy.rowHint(rowState, progress: progress, prefilledUntouched: prefilledUntouched, prefillSource: prefillSource)
         setAccessibilityLabel(Policy.rowAccessibilityLabel(rowState, name: shownName, hint: hint?.text, corrected: isRecognized))
         setAccessibilityHelp(printExplanation)
     }
@@ -115,7 +115,7 @@ extension NotchIslandVoiceRowView {
             titleFieldHolder.widthAnchor.constraint(equalTo: textColumn.widthAnchor).isActive = true
         }
         hintLabel = nil
-        let hint = Policy.rowHint(state, progress: progress, prefilledUntouched: prefilledUntouched)
+        let hint = Policy.rowHint(state, progress: progress, prefilledUntouched: prefilledUntouched, prefillSource: prefillSource)
         if let hint {
             let label = NotchIslandPalette.label(hint.text, font: .systemFont(ofSize: 12, weight: .medium), color: NSColor(white: 1, alpha: 0.45))
             label.lineBreakMode = .byTruncatingTail
