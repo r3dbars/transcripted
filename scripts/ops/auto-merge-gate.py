@@ -179,6 +179,30 @@ def only_lowers(base, head, top: bool = True) -> bool:
     return head == base
 
 
+def lowers_something(base, head, top: bool = True) -> bool:
+    """True when head is a real reduction of base: some count is lower or some
+    entry is gone. A reformatted or reordered copy of the same values is not.
+
+    Call only after only_lowers(base, head) is true; it assumes head adds nothing.
+    """
+    if isinstance(head, dict) and isinstance(base, dict):
+        for k, v in base.items():
+            if k not in head:
+                if not (top and not isinstance(v, (dict, list))):
+                    return True
+            elif top and not isinstance(v, (dict, list)):
+                continue
+            elif lowers_something(v, head[k], top=False):
+                return True
+        return False
+    if isinstance(head, list) and isinstance(base, list):
+        return len(head) < len(base)
+    if (isinstance(head, (int, float)) and isinstance(base, (int, float))
+            and not isinstance(head, bool) and not isinstance(base, bool)):
+        return head < base
+    return False
+
+
 def held_for_human(reasons: list[str]) -> list[str]:
     """Reasons this PR can never pass in its lane, so a human has to look.
 
@@ -380,7 +404,8 @@ def lowered_baselines(owner: str, name: str, pr: dict, changed: list[str]) -> tu
         except BaselineUnreadable:
             unknown.append(path)
             continue
-        if base is not None and head is not None and only_lowers(base, head):
+        if (base is not None and head is not None and only_lowers(base, head)
+                and lowers_something(base, head)):
             lowered.append(path)
     return lowered, unknown
 
@@ -488,6 +513,16 @@ def run(apply: bool, only: int | None) -> int:
             labels = {item["name"] for item in pr.get("labels", [])}
             if held and not (labels & HUMAN_LABELS):
                 if apply:
+                    # A push since the snapshot makes these reasons stale. Hold
+                    # only the head we evaluated; the next run judges the new one.
+                    try:
+                        current = gh("pr", "view", str(number), "--json", "headRefOid",
+                                     "--jq", ".headRefOid").strip()
+                    except RuntimeError:
+                        current = ""
+                    if current != pr["headRefOid"]:
+                        print(f"#{number} [{label}] head moved since the snapshot, not holding; next run re-evaluates")
+                        continue
                     # Comment first, then label: if the label fails, the next run
                     # sees the note and only retries the label, so nothing is lost
                     # and nothing is posted twice.
@@ -743,6 +778,20 @@ def self_test() -> int:
         ok = only_lowers(base_v, head_v) == want
         results.append(ok)
         print(f"{'PASS' if ok else 'FAIL'} only_lowers {base_v} -> {head_v} = {want}")
+    reductions = [
+        ({"files": {"a": 900, "b": 850}}, {"files": {"b": 850, "a": 900}}, False),
+        ({"files": {"a": 900}}, {"files": {"a": 900}}, False),
+        ({"files": {"a": 900}}, {"files": {"a": 899}}, True),
+        ({"files": {"a": 900, "b": 850}}, {"files": {"a": 900}}, True),
+        ({"edges": ["x", "y"]}, {"edges": ["y", "x"]}, False),
+        ({"edges": ["x", "y"]}, {"edges": ["x"]}, True),
+        ({"limit": 800, "files": {"a": 900}}, {"limit": 800, "files": {"a": 900}}, False),
+        ({"edges": {"f": {"M": ["T", "T"]}}}, {"edges": {"f": {"M": ["T"]}}}, True),
+    ]
+    for base_v, head_v, want in reductions:
+        ok = lowers_something(base_v, head_v) == want
+        results.append(ok)
+        print(f"{'PASS' if ok else 'FAIL'} lowers_something {base_v} -> {head_v} = {want}")
     pin_pr = {"files": [{"path": "Tests/FooTests.swift"}, {"path": ".agents/source-pin-baseline.json"}]}
     results.append(case("lowered extra baseline is allowed", True, pin_pr,
                         {"lowered_baselines": [".agents/source-pin-baseline.json"]}))
