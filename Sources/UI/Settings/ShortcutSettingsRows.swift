@@ -1,7 +1,7 @@
 // ShortcutSettingsRows.swift
-// General page shortcut rows: the one dictation key, its behavior, and the
-// meeting shortcut. Each key row records a new
-// shortcut in place (press the key you want) and has its own reset.
+// General page shortcut rows: the dictation key, optional Hands-Free when a
+// second key is still bound, its behavior, and the meeting shortcut. Each
+// key row records a new shortcut in place and has its own reset.
 
 import AppKit
 import Carbon
@@ -10,11 +10,13 @@ import SwiftUI
 /// Which shortcut a key row records.
 enum ShortcutRecordingTarget: CaseIterable {
     case dictation
+    case dictationHandsFree
     case meeting
 
     var name: String {
         switch self {
         case .dictation: return "Dictation key"
+        case .dictationHandsFree: return "Hands-Free"
         case .meeting: return "Meetings"
         }
     }
@@ -22,6 +24,9 @@ enum ShortcutRecordingTarget: CaseIterable {
     var binding: PhysicalDictationTriggerBinding {
         switch self {
         case .dictation: return PhysicalDictationTriggerPreferences.pushToTalkBinding()
+        case .dictationHandsFree:
+            return PhysicalDictationTriggerPreferences.storedHandsFreeBinding()
+                ?? PhysicalDictationTriggerPreferences.defaultHandsFreeBinding
         case .meeting: return PhysicalDictationTriggerPreferences.meetingBinding()
         }
     }
@@ -29,14 +34,22 @@ enum ShortcutRecordingTarget: CaseIterable {
     var defaultBinding: PhysicalDictationTriggerBinding {
         switch self {
         case .dictation: return PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
+        case .dictationHandsFree: return PhysicalDictationTriggerPreferences.defaultHandsFreeBinding
         case .meeting: return PhysicalDictationTriggerPreferences.defaultMeetingBinding
         }
     }
 
     func save(_ binding: PhysicalDictationTriggerBinding) {
         switch self {
-        case .dictation: PhysicalDictationTriggerPreferences.savePushToTalk(binding)
-        case .meeting: PhysicalDictationTriggerPreferences.saveMeeting(binding)
+        case .dictation:
+            PhysicalDictationTriggerPreferences.savePushToTalk(binding)
+            if PhysicalDictationTriggerPreferences.storedHandsFreeBinding() == binding {
+                PhysicalDictationTriggerPreferences.clearHandsFree()
+            }
+        case .dictationHandsFree:
+            PhysicalDictationTriggerPreferences.saveHandsFree(binding)
+        case .meeting:
+            PhysicalDictationTriggerPreferences.saveMeeting(binding)
         }
     }
 }
@@ -84,6 +97,12 @@ final class ShortcutRecorderModel: ObservableObject {
     /// row opens for recording with the reason instead of saving a duplicate.
     func reset(_ target: ShortcutRecordingTarget) {
         stopRecording()
+        if target == .dictationHandsFree,
+           target.defaultBinding == ShortcutRecordingTarget.dictation.binding {
+            PhysicalDictationTriggerPreferences.clearHandsFree()
+            revision &+= 1
+            return
+        }
         if let reason = duplicateReason(for: target.defaultBinding, target: target) {
             NSSound.beep()
             startRecording(target)
@@ -167,6 +186,13 @@ final class ShortcutRecorderModel: ObservableObject {
     /// Saves unless another shortcut already uses it. Then it beeps, says
     /// which one, and keeps listening for a different key.
     private func saveIfFree(_ binding: PhysicalDictationTriggerBinding, for target: ShortcutRecordingTarget) {
+        if target == .dictation,
+           PhysicalDictationTriggerPreferences.storedHandsFreeBinding() == binding {
+            target.save(binding)
+            stopRecording()
+            revision &+= 1
+            return
+        }
         if let reason = duplicateReason(for: binding, target: target) {
             NSSound.beep()
             pendingModifier = nil
@@ -184,6 +210,9 @@ final class ShortcutRecorderModel: ObservableObject {
     private func duplicateReason(for binding: PhysicalDictationTriggerBinding, target: ShortcutRecordingTarget) -> String? {
         let others = ShortcutRecordingTarget.allCases
             .filter { $0 != target }
+            .filter {
+                $0 != .dictationHandsFree || PhysicalDictationTriggerPreferences.hasDistinctHandsFreeBinding()
+            }
             .map { (name: $0.name, binding: $0.binding) }
         return PhysicalDictationTriggerPreferences.duplicateReason(for: binding, otherShortcuts: others)
     }

@@ -285,17 +285,27 @@ extension PhysicalShortcutMatcher {
             return bindings
         }
 
-        // One dictation key. Tap to toggle runs it through the hands-free
-        // path; the other behaviors are Push to Talk, where Hold or tap
-        // keeps listening after a quick tap (DictationHotkeyRouter).
+        // Hold key first. A distinct stored Hands-Free key from 1.1.69 still
+        // registers as a second dictation shortcut; binding both Fn and Right
+        // Option is fine. Tap to toggle runs the hold key through the
+        // hands-free path; Hold or tap keeps listening after a quick tap
+        // (DictationHotkeyRouter).
         let behavior = HotkeyPreferences.dictationKeyBehavior(userDefaults: userDefaults)
+        let hold = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
         bindings.insert(
             PhysicalShortcutBinding(
                 action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
-                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
+                binding: hold
             ),
             at: 0
         )
+        if let toggle = PhysicalDictationTriggerPreferences.storedHandsFreeBinding(userDefaults: userDefaults),
+           toggle != hold {
+            bindings.insert(
+                PhysicalShortcutBinding(action: .dictationHandsFree, binding: toggle),
+                at: 1
+            )
+        }
         return bindings
     }
 

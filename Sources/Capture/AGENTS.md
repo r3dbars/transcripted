@@ -19,13 +19,13 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 
 ## Dictation key behavior
 
-Defaults (`Sources/Support/PhysicalDictationTriggerPreferences.swift`): Right Option for dictation (not Fn, which also opens emoji), Option-M for meetings. There is one dictation key, the stored Push to Talk binding. `HotkeyPreferences.dictationKeyBehavior` picks what it does, in `PhysicalShortcutMatcher.configuredBindings`:
+Defaults (`Sources/Support/PhysicalDictationTriggerPreferences.swift`): Right Option for dictation on a fresh install (not Fn, which also opens emoji), Option-M for meetings. The stored Push to Talk binding is the hold key. A distinct stored Hands-Free binding from 1.1.69 is a second dictation shortcut. `HotkeyPreferences.dictationKeyBehavior` picks what the hold key does, in `PhysicalShortcutMatcher.configuredBindings`:
 
 - **Hold or tap** (default): registers as `.dictationPushToTalk`. Hold, and the release stops and pastes. Tap it (held under `DictationHoldKeyTapPolicy.tapThresholdSeconds`, no other key or modifier meanwhile) and the take flips to hands-free: the next press stops it and that press's release is swallowed.
 - **Hold only**: the same `.dictationPushToTalk` registration, plain Push to Talk with no tap flip.
 - **Tap to toggle**: registers as `.dictationHandsFree`.
 
-The paste-last-dictation shortcut is no longer registered. The unused paste-last action, detector routing, callback and binding helpers have been removed; the island's Paste again action and feedback remain. The old hands-free binding is retained only for the one-key migration and reset, not registered as a separate shortcut.
+The paste-last-dictation shortcut is no longer registered. The unused paste-last action, detector routing, callback and binding helpers have been removed; the island's Paste again action and feedback remain. 1.1.69 Hands-Free keys stay registered when they are still stored and distinct from the hold key.
 
 ## Invariants
 

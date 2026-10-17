@@ -165,7 +165,6 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
     private static let pendingInstalledUpdateVersionKey = "Transcripted.PendingInstalledUpdateVersion"
     private static let pendingInstalledUpdatePreviousVersionKey = "Transcripted.PendingInstalledUpdatePreviousVersion"
     private static let pendingInstalledUpdateKindKey = "Transcripted.PendingInstalledUpdateKind"
-    private static let lastLaunchedAppVersionKey = "Transcripted.LastLaunchedAppVersion"
     private static let deferredBackgroundCheckErrorDomain = "Transcripted.UpdateCheckDeferred"
     private static var isLaunchUISmoke: Bool {
         AutomatedLaunchEnvironment.isActive()
@@ -780,16 +779,15 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         defaults.set(kind.rawValue, forKey: Self.pendingInstalledUpdateKindKey)
     }
 
-    /// Counts every install path once, on the first launch of a newer version:
-    /// the in-app restart, Sparkle's silent install on quit, and installs from
-    /// a DMG or Homebrew (`unattributed`). Before this, only the in-app
-    /// restart was counted, so `update_installed` undercounted real installs.
+    /// Counts every install path once on the first launch of a newer version
+    /// (`update_installed.install_kind`: restart, quit, unattributed).
     private func trackInstalledUpdateIfNeeded() {
         let defaults = UserDefaults.standard
         let currentVersion = currentAppVersion()
+        let lastLaunchedVersion = defaults.string(forKey: DictationShortcutUpgrade.lastLaunchedAppVersionKey)
         let outcome = UpdateInstallDetection.detect(
             currentVersion: currentVersion,
-            lastLaunchedVersion: defaults.string(forKey: Self.lastLaunchedAppVersionKey),
+            lastLaunchedVersion: lastLaunchedVersion,
             pendingVersion: defaults.string(forKey: Self.pendingInstalledUpdateVersionKey),
             pendingPreviousVersion: defaults.string(forKey: Self.pendingInstalledUpdatePreviousVersionKey),
             pendingKind: defaults.string(forKey: Self.pendingInstalledUpdateKindKey)
@@ -813,7 +811,8 @@ final class SparkleUpdaterController: NSObject, ObservableObject {
         }
 
         if let versionToRemember = outcome.versionToRemember {
-            defaults.set(versionToRemember, forKey: Self.lastLaunchedAppVersionKey)
+            DictationShortcutUpgrade.rememberPreviousLaunchedVersion(lastLaunchedVersion, userDefaults: defaults)
+            defaults.set(versionToRemember, forKey: DictationShortcutUpgrade.lastLaunchedAppVersionKey)
         }
     }
 

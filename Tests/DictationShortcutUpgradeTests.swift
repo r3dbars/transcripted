@@ -125,6 +125,124 @@ func testDictationShortcutUpgrade() {
             "keeping the custom key must not fold it into Tap to toggle"
         )
     }
+
+    runSuite("Onboarding-completed 1.1.69 defaults keep Fn after last-launched is already 1.1.70") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("1.1.70", forKey: "Transcripted.LastLaunchedAppVersion")
+        defaults.set(true, forKey: "permissionsOnboardingCompleted")
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+
+        assertUpgradedTwoKeyLayout(
+            bindings,
+            hold: fn,
+            toggle: rightOption,
+            "registerHotkey runs after Sparkle writes 1.1.70, so onboarding is the remaining 1.1.69 signal"
+        )
+    }
+
+    runSuite("Sparkle overwriting last-launched to 1.1.70 still keeps 1.1.69 default keys") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        seedReal1169Identity(in: defaults)
+        DictationShortcutUpgrade.rememberPreviousLaunchedVersion("1.1.69", userDefaults: defaults)
+        defaults.set("1.1.70", forKey: "Transcripted.LastLaunchedAppVersion")
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+
+        assertUpgradedTwoKeyLayout(
+            bindings,
+            hold: fn,
+            toggle: rightOption,
+            "the previous-version snapshot is what migrate sees after Sparkle writes 1.1.70"
+        )
+    }
+
+    runSuite("A leftover 1.1.69 Hands-Free key still fires after the one-key flag is set") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set("1.1.70", forKey: "Transcripted.LastLaunchedAppVersion")
+        defaults.set(true, forKey: "dictationOneKeyMigrated")
+        seedStoredPhysicalKey(
+            keyCodeKey: "dictationPushToTalkTrigger-keyCode",
+            modifiersKey: "dictationPushToTalkTrigger-modifiers",
+            binding: fn,
+            in: defaults
+        )
+        seedStoredPhysicalKey(
+            keyCodeKey: "dictationHandsFreeTrigger-keyCode",
+            modifiersKey: "dictationHandsFreeTrigger-modifiers",
+            binding: rightOption,
+            in: defaults
+        )
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+
+        assertUpgradedTwoKeyLayout(
+            bindings,
+            hold: fn,
+            toggle: rightOption,
+            "already-upgraded reset-to-defaults users still have the Hands-Free keys on disk"
+        )
+    }
+
+    runSuite("A fresh install still has one dictation key, Right Option") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+        let bindings = PhysicalShortcutMatcher.configuredBindings(userDefaults: defaults)
+
+        assertEqual(
+            bindings.map(\.action),
+            [.dictationPushToTalk, .meeting],
+            "new installs must not gain a second 1.1.69 Hands-Free key"
+        )
+        assertEqual(
+            bindings.first?.binding,
+            rightOption,
+            "the product default stays Right Option"
+        )
+        assertEqual(
+            PhysicalDictationTriggerPreferences.dictationShortcutDisplayString(userDefaults: defaults),
+            "Right ⌥",
+            "the menu bar shows one key"
+        )
+    }
+
+    runSuite("Chosen-shortcut analytics names are categorical and survive sanitizing") {
+        let (defaults, suiteName) = makeDictationShortcutUpgradeDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        seedReal1169Identity(in: defaults)
+        PhysicalDictationTriggerPreferences.migrateToOneDictationKeyIfNeeded(userDefaults: defaults)
+
+        let properties = DictationShortcutUpgrade.analyticsProperties(userDefaults: defaults)
+        assertEqual(properties["hold_key"], "fn", "the hold key is Fn")
+        assertEqual(properties["toggle_key"], "right_option", "the toggle key is Right Option")
+        assertEqual(properties["key_behavior"], "hold_or_tap", "behavior stays Hold or tap")
+        assertEqual(
+            PhysicalDictationTriggerPreferences.dictationShortcutDisplayString(userDefaults: defaults),
+            "Fn / Right ⌥",
+            "the menu bar shows both keys"
+        )
+
+        let allowed = Set(properties.keys)
+        let walked = AnalyticsPayloadSanitizer.sanitizeProperties(properties, allowedKeys: allowed)
+        assertEqual(walked, properties, "hold_key, toggle_key, and key_behavior must not be dropped by substring sanitizing")
+        assertEqual(
+            AnalyticsReporter.defaultProperties(
+                distinctID: "anonymous-device",
+                sessionID: "session-1",
+                infoDictionary: [AnalyticsInfoPlistKeys.buildChannelInfoKey: "local"]
+            )["build_channel"],
+            "local",
+            "dictation events already carry local vs release on every capture"
+        )
+    }
 }
 
 private func makeDictationShortcutUpgradeDefaults() -> (UserDefaults, String) {
