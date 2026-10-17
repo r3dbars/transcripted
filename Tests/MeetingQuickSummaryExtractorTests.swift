@@ -134,6 +134,54 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("audio confirmations are not promoted to action items") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        Sounds good, I can hear you now.
+
+        **00:02**  [System/Maya]
+        I can see your screen and I can hear you fine.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertEqual(sections.actionItems, "None found.", "audio checks are not tasks, got: \(sections.actionItems)")
+        assertEqual(sections.decisions, "None found.", "audio checks are not decisions, got: \(sections.decisions)")
+    }
+
+    runSuite("work that mentions hearing or seeing someone's input stays an action item") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        We need to hear your feedback on the contract by Friday.
+
+        **00:02**  [System/Maya]
+        I can see your concern so I'll rewrite the onboarding draft.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("feedback on the contract"),
+            "asking for someone's feedback is real work, got: \(sections.actionItems)"
+        )
+        assertTrue(
+            sections.actionItems.contains("rewrite the onboarding draft"),
+            "seeing someone's concern is not an audio check, got: \(sections.actionItems)"
+        )
+    }
+
+    runSuite("a discarded closer's decision cue does not steal a real action") {
+        let transcript = """
+        **00:01**  [Mic/Justin]
+        Thanks everyone, let me know once we've decided; I'll send the update tomorrow.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("send the update tomorrow"),
+            "the real action should be kept, got: \(sections.actionItems)"
+        )
+        assertEqual(sections.decisions, "None found.", "the closer's cue is not a decision, got: \(sections.decisions)")
+    }
+
     runSuite("extracts decisions and keeps them out of action items") {
         let transcript = """
         **00:01**  [System/Maya]
