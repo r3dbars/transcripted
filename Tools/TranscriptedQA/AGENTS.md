@@ -26,7 +26,7 @@ What each smoke does and does not prove:
 - `imported-audio-smoke`: deterministic synthetic WAV through the imported-meeting artifact shape (`system_audio` metadata, retained single-file audio, parser discovery, transcript validation). Not file-picker or real ML transcription proof.
 - `imported-audio-native-smoke`: drives the native import picker; needs Accessibility and local models.
 - `ui-smoke`: stable AX identifiers across onboarding, menu bar, Home, Settings. Exits `3` for Accessibility/TCC blockers.
-- `sparkle-update-smoke`: fake update-available and downloading states, real menu snapshot. Local UI proof only, not live appcast/download/install.
+- `sparkle-update-smoke`: fake update-available and downloading states, real menu snapshot. Each run writes its launch reports and logs under `<output>/runs/<runID>/<state>/`, so overlapping runs on one output don't touch each other. Local UI proof only, not live appcast/download/install.
 - `packaged-app-smoke`: validates a no-publish `build-beta.sh` artifact (version/config parity, Sparkle keys, signing, dSYM UUIDs, DMG, appcast, log privacy, optional `--run-ui-smoke`).
 - `permission-state`: no-prompt probe (`--mode computer-use|live-capture`) of host grants and the Transcripted bundle id; warns on duplicate or wrong running app instances.
 
