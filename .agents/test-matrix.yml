@@ -6,6 +6,18 @@
 
 rules:
   - paths:
+      - "scripts/dev/bench-launch-latency.sh"
+      - "scripts/dev/verify-change.sh"
+      - "scripts/ops/native-smoke-isolation.py"
+      - "scripts/ops/test-launch-benchmark-isolation.py"
+      - ".claude/skills/verify/SKILL.md"
+    checks:
+      - "bash -n scripts/dev/bench-launch-latency.sh"
+      - "bash -n scripts/dev/verify-change.sh"
+      - "python3 scripts/ops/test-native-smoke-isolation.py"
+      - "python3 scripts/ops/test-launch-benchmark-isolation.py"
+
+  - paths:
       - "Sources/**/*.swift"
       - "Tests/**/*.swift"
     checks:

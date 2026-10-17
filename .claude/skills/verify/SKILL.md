@@ -28,7 +28,11 @@ After you finish a code change and `bash check.sh` passes, and before you say it
 | ui | `Sources/UI`, `App`, `Accessibility`, Writing and the keyboard | the built app opens onboarding, the menu bar, Home and Settings |
 | speed | launch-path code | all 20 cold launches report, and p95 stays under 400 ms |
 
-Everything runs in a throwaway home folder. None of it touches Justin's real recordings or settings.
+Native checks require a separate OS account or verified CI isolation before
+launching. A throwaway HOME alone does not isolate CFPreferences or TCC. The
+speed lane skips before building when isolation is unavailable or Transcripted
+is running, and the benchmark rechecks before every launch. SKIP is incomplete,
+not performance proof. The paste check uses its own synthetic target.
 
 No script can prove dictation itself (mic to text); that's the live check below. Any changed source file no check covers shows up under "Not covered by any check" in the summary. Check those by hand and say what you did.
 
@@ -36,7 +40,7 @@ Force a check with `--only ui,speed`, or run all of them with `--all`.
 
 ## Extra steps the script can't do
 
-- **UI changes: look at it.** After the ui check passes, open the screen you changed in the built app (`build/Transcripted.app`) and take a screenshot with computer use. Check it against what was asked: layout, wording, light and dark mode. Attach the screenshot. If any Transcripted is running, the ui and meetings checks skip. Don't quit it; tell Justin those two need it closed.
+- **UI changes: look at it.** After the ui check passes, open the screen you changed in the built app (`build/Transcripted.app`) and take a screenshot with computer use. Check it against what was asked: layout, wording, light and dark mode. Attach the screenshot. If any Transcripted is running, native checks skip. Don't quit it; tell Justin the checks need an idle, isolated account.
 - **Audio and dictation changes: hand off to Justin.** If the summary says "Needs a live check by Justin", say so plainly in your reply. Real mics and AirPods can't be faked. He runs `bash check.sh hardware` and dictates once with the built-in mic and once with AirPods.
 - **Speed failures: rerun once.** One slow run can be a busy machine (other sessions benchmarking, a build running). If it fails twice, it's real.
 

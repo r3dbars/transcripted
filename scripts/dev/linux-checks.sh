@@ -322,6 +322,7 @@ SELF_TEST_SCRIPTS=(
 )
 PY_TEST_SUITES=(
     scripts/ops/test-native-smoke-isolation.py
+    scripts/ops/test-launch-benchmark-isolation.py
     scripts/ops/test-nightly-security-check.py
     scripts/ops/test-score-boards.py
     scripts/ops/test-risk-triage.py

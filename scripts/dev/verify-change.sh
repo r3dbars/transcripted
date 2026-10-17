@@ -44,7 +44,8 @@ Checks:
              menu bar, Home and Settings through Accessibility
   speed      cold-launch N times; every launch must report and p95 must stay under 400 ms
 
-ui and meetings skip (never quit anything) when a Transcripted copy is already running.
+ui, meetings and speed skip (never quit anything) when a Transcripted copy is already running.
+Native checks require separate-account or verified CI isolation; a temporary HOME is not enough.
 
 Exit: 0 when nothing failed (skips are listed), 1 when a check failed, 2 on bad usage.
 EOF
@@ -171,6 +172,22 @@ run_logged() {
 # launched instance ambiguous for AX automation. We never quit it.
 app_running() { pgrep -f "Transcripted.app/Contents/MacOS/Transcripted" >/dev/null 2>&1; }
 
+# Speed must fail closed before even building: build.sh may skip its own launch
+# smoke on this account, which does not make a later benchmark safe.
+speed_ready() {
+    if app_running; then
+        record speed SKIP "Transcripted is already running; nothing was quit"
+        return 1
+    fi
+    run_logged speed-preflight /usr/bin/python3 "$REPO_ROOT/scripts/ops/native-smoke-isolation.py"
+    case $? in
+        0) return 0 ;;
+        3) record speed SKIP "native account isolation unavailable; HOME does not isolate preferences; see .build/verify/speed-preflight.log" ;;
+        *) record speed FAIL "native isolation preflight failed; see .build/verify/speed-preflight.log" ;;
+    esac
+    return 1
+}
+
 # 0 built, 1 build failed, 2 build refused because this worktree's app is running.
 BUILD_STATE=""
 ensure_app_built() {
@@ -238,7 +255,7 @@ if [ "$want_ui" = 1 ]; then
         ui-smoke --app "$APP" --report "$OUT_DIR/ui.json"
 fi
 
-if [ "$want_speed" = 1 ] && ! record_build_problem speed; then
+if [ "$want_speed" = 1 ] && speed_ready && ! record_build_problem speed; then
     echo "Running speed check ($why_speed, $LAUNCH_SAMPLES launches)..."
     speed_json="$OUT_DIR/launch-latency.json"
     if run_logged speed bash scripts/dev/bench-launch-latency.sh \
@@ -256,7 +273,10 @@ print(r["collectedSamples"], s["p50"], s["p95"])' "$speed_json")
             record speed FAIL "launch p95 ${p95} ms is over the ${LAUNCH_P95_BUDGET_MS} ms budget (p50 ${p50}); rerun once to rule out a busy machine"
         fi
     else
-        record speed FAIL "launch benchmark failed; see .build/verify/speed.log"
+        case $? in
+            3) record speed SKIP "launch benchmark incomplete (isolation unavailable or Transcripted started); see .build/verify/speed.log" ;;
+            *) record speed FAIL "launch benchmark failed; see .build/verify/speed.log" ;;
+        esac
     fi
 fi
 
