@@ -880,6 +880,7 @@ rules:
       - "scripts/ops/nightly-security-check.py"
       - "scripts/ops/transcripted-qa-bench.sh"
     checks:
+      - "python3 docs/assets/menu-bar-icon/make_menu_bar_icons.py --check"
       - "scripts/dev/agent-preflight.sh"
       - "bash run-tests.sh"
 

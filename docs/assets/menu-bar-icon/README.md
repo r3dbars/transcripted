@@ -14,7 +14,8 @@ menu bar SF Symbol.
 
 `Sources/UI/MenuBar/MenuBarGlyph.swift` draws the same shapes in code. Keep the numbers in
 `make_menu_bar_icons.py` and that file in sync; `Tests/StatusItemPresentationTests.swift` fails
-when they drift.
+when they drift. `python3 make_menu_bar_icons.py --check` fails when the committed SVGs no longer
+match what the generator writes.
 
 Regenerate: `python3 make_menu_bar_icons.py` (from anywhere), then, from this directory,
 `NODE_PATH=$(npm root -g) node render_preview.js` for `preview@2x.png` / `preview@1x.png`.
