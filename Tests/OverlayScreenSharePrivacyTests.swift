@@ -11,9 +11,10 @@
 // prompt, meeting pill, dictation overlay and speaker review all draw inside
 // the one NotchIslandPanel, so protecting that panel protects them.
 //
-// Window inventory. This is the list of AppKit windows the app makes, and each
-// is built below. Nothing at runtime can say "someone added a window", so a NEW
-// NSWindow/NSPanel must be added here by hand with the right policy.
+// Window inventory. The list of AppKit windows lives in
+// `.agents/window-inventory.json`, and `scripts/dev/check-window-inventory.py`
+// fails when a NEW NSWindow/NSPanel shows up in Sources/ without an entry (or
+// without setting `sharingType`). Each window is built below. Summary:
 //   protected (.none):      NotchIslandPanel, PasteLastDictationFeedbackPanel
 //   capturable (.readOnly): Onboarding window, Settings window,
 //                           MenuBarPopoverAnchorPanel (checked in MenuBarPopoverPresentationTests)

@@ -214,6 +214,8 @@ check "doc paths self-test" "python3 scripts/dev/check-doc-paths.py --self-test"
 check "doc paths (every path a doc names exists; entry files in budget)" "python3 scripts/dev/check-doc-paths.py"
 check "known traps self-test" "python3 scripts/dev/check-known-traps.py --self-test"
 check "known traps (Tools CI wiring, root commands documented, AGENTS.md-only agent docs)" "python3 scripts/dev/check-known-traps.py"
+check "window inventory self-test" "python3 scripts/dev/check-window-inventory.py --self-test"
+check "window inventory (every NSWindow/NSPanel has a screen-sharing policy)" "python3 scripts/dev/check-window-inventory.py"
 
 # ---------------------------------------------------------------- telemetry/privacy
 check "analytics emitters" "python3 scripts/dev/check-analytics-emitters.py"
