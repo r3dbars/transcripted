@@ -95,14 +95,24 @@ final class ParakeetAUHALBindingToken: @unchecked Sendable {
     let engineID: ObjectIdentifier
     let route: ParakeetAudioRouteIdentity
     let issuedAt: CFAbsoluteTime
-    private let issuedUptime = ProcessInfo.processInfo.systemUptime
+    private let uptime: @Sendable () -> TimeInterval
+    private let sleep: @Sendable (UInt64) async -> Void
+    private let issuedUptime: TimeInterval
     private let lock = NSLock()
     private var result: Bool?
 
-    init(engine: AnyObject, route: ParakeetAudioRouteIdentity, issuedAt: CFAbsoluteTime) {
+    /// `uptime` and `sleep` are a test seam: production reads the system
+    /// uptime and sleeps for real; tests inject a virtual clock so the native
+    /// budget is checked without any wall-clock race.
+    init(engine: AnyObject, route: ParakeetAudioRouteIdentity, issuedAt: CFAbsoluteTime,
+         uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+         sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }) {
         engineID = ObjectIdentifier(engine)
         self.route = route
         self.issuedAt = issuedAt
+        self.uptime = uptime
+        self.sleep = sleep
+        issuedUptime = uptime()
     }
 
     func finish(succeeded: Bool) {
@@ -121,7 +131,7 @@ final class ParakeetAUHALBindingToken: @unchecked Sendable {
         let deadline = issuedUptime + Double(nativeTimeoutNanoseconds) / 1_000_000_000
         while !Task.isCancelled {
             if lock.withLock({ result != nil }) { return }
-            let remaining = deadline - ProcessInfo.processInfo.systemUptime
+            let remaining = deadline - uptime()
             guard remaining > 0 else {
                 lock.withLock {
                     if result == nil { result = false }
@@ -129,7 +139,7 @@ final class ParakeetAUHALBindingToken: @unchecked Sendable {
                 return
             }
             let sleepNanoseconds = UInt64(min(remaining, 0.01) * 1_000_000_000)
-            try? await Task.sleep(nanoseconds: max(1, sleepNanoseconds))
+            await sleep(max(1, sleepNanoseconds))
         }
     }
 }
@@ -141,9 +151,13 @@ final class ParakeetAUHALBindingIntent: @unchecked Sendable {
     private var currentToken: ParakeetAUHALBindingToken?
 
     func begin(engine: AnyObject, route: ParakeetAudioRouteIdentity,
-               at issuedAt: CFAbsoluteTime) -> ParakeetAUHALBindingToken {
+               at issuedAt: CFAbsoluteTime,
+               uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+               sleep: @escaping @Sendable (UInt64) async -> Void = { try? await Task.sleep(nanoseconds: $0) }
+    ) -> ParakeetAUHALBindingToken {
         lock.withLock {
-            let token = ParakeetAUHALBindingToken(engine: engine, route: route, issuedAt: issuedAt)
+            let token = ParakeetAUHALBindingToken(engine: engine, route: route, issuedAt: issuedAt,
+                                                  uptime: uptime, sleep: sleep)
             currentToken = token
             return token
         }
