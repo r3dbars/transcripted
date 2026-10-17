@@ -647,9 +647,7 @@ class ContextCaptureEngine: ObservableObject {
             return ""
         }
 
-        return PhysicalDictationTriggerPreferences.displayString(
-            for: PhysicalDictationTriggerPreferences.pushToTalkBinding()
-        )
+        return PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pushToTalkBinding())
     }
 
     func refreshShortcutStatus() {
