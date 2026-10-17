@@ -732,12 +732,12 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.receiveForTesting(speech)
         capture.drainForTesting()
         hal.otherAudioPlaying = true
-        for _ in 0..<10 {
+        for _ in 0..<4 {
             hal.now += 1
             capture.receiveForTesting(hal.buffer())
             capture.drainForTesting()
         }
-        XCTAssertEqual(hal.starts, 2, "Once the tap has heard real audio, later silence is just silence")
+        XCTAssertEqual(hal.starts, 2, "A short pause after real audio is just silence")
     }
 
     // Pain point #8: the tap can hear nothing while a call plays (a broken
@@ -885,13 +885,100 @@ final class CoreAudioSystemAudioCaptureTests: XCTestCase {
         capture.receiveForTesting(speech)
         capture.drainForTesting()
         hal.otherAudioPlaying = true
-        for _ in 0..<60 {
+        for _ in 0..<4 {
             hal.now += 1
             capture.receiveForTesting(hal.buffer())
             capture.drainForTesting()
         }
-        XCTAssertEqual(hal.starts, 1, "After real audio, silence is the call going quiet")
+        XCTAssertEqual(hal.starts, 1, "A short pause after real audio is the call going quiet")
         XCTAssertFalse(capture.isNotHearingPlayback)
+    }
+
+    // The tap heard the call, then switched to exact digital zeros for good
+    // (seen when another app's screen share stopped). The start watch was
+    // already over, so nothing noticed.
+    func testZerosAfterSignalWhileOtherAudioPlaysRebuildOnceThenConfirmLossOnNewSignal() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        for _ in 0..<30 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "Zeros after signal while another app plays get one fresh tap")
+        XCTAssertFalse(capture.isNotHearingPlayback, "Not reported before the unheard window")
+        for _ in 0..<(Int(SystemAudioSilenceWatch.unheardReportSeconds) + 5) {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 2, "One rebuild per lapse")
+        XCTAssertTrue(capture.isNotHearingPlayback, "Still silent while the call plays: the host warns")
+        capture.defaultOutputChangedForTesting()
+        hal.now += 1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        XCTAssertFalse(capture.isNotHearingPlayback)
+        XCTAssertTrue(capture.didLosePlayback, "Signal that needed a new output proves the call was lost")
+    }
+
+    func testZerosAfterSignalWithNothingPlayingNeverRebuild() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        hal.now += 0.1
+        capture.receiveForTesting(speech)
+        capture.drainForTesting()
+        for _ in 0..<120 {
+            hal.now += 1
+            capture.receiveForTesting(hal.buffer())
+            capture.drainForTesting()
+        }
+        XCTAssertEqual(hal.starts, 1)
+        XCTAssertFalse(capture.isNotHearingPlayback)
+    }
+
+    func testMidRecordingRearmsAreBounded() throws {
+        let hal = HAL(), capture = hal.makeCapture()
+        defer { capture.stopSync() }
+        try capture.start { _ in }
+        hal.otherAudioPlaying = true
+        let speech = hal.buffer()
+        speech.floatChannelData![0][0] = 0.25
+        for _ in 0..<(SystemAudioSignalTracker.maxRearms + 3) {
+            hal.now += 0.1
+            capture.receiveForTesting(speech)
+            capture.drainForTesting()
+            for _ in 0..<20 {
+                hal.now += 1
+                capture.receiveForTesting(hal.buffer())
+                capture.drainForTesting()
+            }
+        }
+        XCTAssertEqual(hal.starts, 1 + SystemAudioSignalTracker.maxRearms, "A call that keeps going quiet cannot rebuild forever")
+    }
+
+    func testSignalTrackerRearmsOncePerLapseUpToItsBudget() {
+        var tracker = SystemAudioSignalTracker()
+        XCTAssertFalse(tracker.shouldRearm(at: 100), "No signal heard yet")
+        tracker.noteSignal(at: 100)
+        XCTAssertFalse(tracker.shouldRearm(at: 100 + SystemAudioSilenceWatch.silenceSeconds - 0.5))
+        XCTAssertTrue(tracker.shouldRearm(at: 100 + SystemAudioSilenceWatch.silenceSeconds))
+        for round in 1..<SystemAudioSignalTracker.maxRearms {
+            tracker.noteSignal(at: 200 + Double(round) * 100)
+            XCTAssertTrue(tracker.shouldRearm(at: 200 + Double(round) * 100 + 10))
+        }
+        tracker.noteSignal(at: 1000)
+        XCTAssertFalse(tracker.shouldRearm(at: 1100), "Budget spent")
     }
 
     func testDefaultOutputChangeWatchesTheTapAgain() throws {
