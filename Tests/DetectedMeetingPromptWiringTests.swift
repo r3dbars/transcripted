@@ -108,13 +108,13 @@ private final class WiringRig {
     func install() {
         pill.island = island
         DetectedMeetingPromptWiring(
-            onboardingCompleted: { [unowned self] in self.onboardingCompleted },
-            detailOverride: { [unowned self] in self.detailOverride },
-            onShown: { [unowned self] in self.shown.append($0.id) },
-            onRecord: { [unowned self] in self.answers.append("record:\($0.id)") },
-            onDismiss: { [unowned self] in self.answers.append("dismiss:\($0.id)") },
-            onExpired: { [unowned self] in self.answers.append("expire:\($0.id)") },
-            onRemind: { [unowned self] in self.answers.append("remind:\($0.id)") }
+            onboardingCompleted: { [weak self] in self?.onboardingCompleted ?? false },
+            detailOverride: { [weak self] in self?.detailOverride },
+            onShown: { [weak self] in self?.shown.append($0.id) },
+            onRecord: { [weak self] in self?.answers.append("record:\($0.id)") },
+            onDismiss: { [weak self] in self?.answers.append("dismiss:\($0.id)") },
+            onExpired: { [weak self] in self?.answers.append("expire:\($0.id)") },
+            onRemind: { [weak self] in self?.answers.append("remind:\($0.id)") }
         ).install(on: detector, pill: pill)
     }
 }

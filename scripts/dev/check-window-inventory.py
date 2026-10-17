@@ -7,8 +7,9 @@ out with `sharingType = .none`. Nothing at runtime says "someone added a window"
 so this check scans `Sources/` for window surfaces and compares them to
 `.agents/window-inventory.json`:
 
-* A surface is `NSWindow(` / `NSPanel(` constructed directly, or a class that
-  subclasses `NSWindow` / `NSPanel`.
+* A surface is `NSWindow(` / `NSPanel(` constructed directly (`.init(` too), or
+  a class that subclasses `NSWindow` / `NSPanel` or another window class found
+  in `Sources/`.
 * Every surface found must be listed in the inventory (file + token), with a
   policy: `protected` (excluded from capture) or `capturable`, and a reason.
 * The file must set `sharingType` explicitly, to the value the policy says
@@ -22,7 +23,7 @@ so this check scans `Sources/` for window surfaces and compares them to
     python3 scripts/dev/check-window-inventory.py
     python3 scripts/dev/check-window-inventory.py --self-test
 
-Offline, python3 stdlib only, writes nothing.
+Offline, python3 stdlib only. Writes nothing outside a temp dir (self-test).
 """
 
 from __future__ import annotations
@@ -38,34 +39,51 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 INVENTORY = ".agents/window-inventory.json"
 POLICIES = {"protected": ".none", "capturable": ".readOnly"}
 
-CONSTRUCTOR = re.compile(r"\b(NSWindow|NSPanel)\(")
-SUBCLASS = re.compile(r"\bclass\s+(\w+)\s*:\s*(?:NSWindow|NSPanel)\b")
+BASE_WINDOW_CLASSES = frozenset({"NSWindow", "NSPanel"})
+CONSTRUCTOR = re.compile(r"\b(NSWindow|NSPanel)(?:\.init)?\(")
+CLASS_DECL = re.compile(r"\bclass\s+(\w+)\s*:\s*(\w+)")
 
 
 def strip_comment(line: str) -> str:
     return line.split("//", 1)[0]
 
 
-def scan_source(text: str) -> set[str]:
-    """Surface tokens in one Swift file: `NSWindow(`, `NSPanel(`, or a class name."""
+def scan_source(text: str, window_classes: frozenset[str] = BASE_WINDOW_CLASSES) -> set[str]:
+    """Surface tokens in one Swift file: `NSWindow(`, `NSPanel(`, or a class name
+    whose superclass is in `window_classes`."""
     found: set[str] = set()
     for raw in text.splitlines():
         line = strip_comment(raw)
         for match in CONSTRUCTOR.finditer(line):
             found.add(f"{match.group(1)}(")
-        for match in SUBCLASS.finditer(line):
-            found.add(match.group(1))
+        for match in CLASS_DECL.finditer(line):
+            if match.group(2) in window_classes:
+                found.add(match.group(1))
     return found
 
 
+def scan_texts(texts: dict[str, str]) -> dict[str, set[str]]:
+    """Scan every file, widening the set of window classes until it stops
+    growing, so `class B: A` counts when `class A: NSPanel` lives elsewhere."""
+    window_classes = set(BASE_WINDOW_CLASSES)
+    while True:
+        surfaces: dict[str, set[str]] = {}
+        for name, text in texts.items():
+            tokens = scan_source(text, frozenset(window_classes))
+            if tokens:
+                surfaces[name] = tokens
+        found_classes = {t for tokens in surfaces.values() for t in tokens if not t.endswith("(")}
+        if found_classes <= window_classes:
+            return surfaces
+        window_classes |= found_classes
+
+
 def scan_tree(root: Path) -> dict[str, set[str]]:
-    surfaces: dict[str, set[str]] = {}
-    sources = root / "Sources"
-    for path in sorted(sources.rglob("*.swift")):
-        tokens = scan_source(path.read_text(encoding="utf-8", errors="replace"))
-        if tokens:
-            surfaces[path.relative_to(root).as_posix()] = tokens
-    return surfaces
+    texts = {
+        path.relative_to(root).as_posix(): path.read_text(encoding="utf-8", errors="replace")
+        for path in sorted((root / "Sources").rglob("*.swift"))
+    }
+    return scan_texts(texts)
 
 
 def check(root: Path) -> list[str]:
@@ -124,9 +142,19 @@ def self_test() -> int:
     expect("comment ignored", scan_source("// NSWindow(contentRect:)") == set())
     expect("type annotation ignored", scan_source("private var p: NSPanel?") == set())
     expect("NSWindowController ignored", scan_source("final class C: NSWindowController {") == set())
+    expect("init constructor found", scan_source("let w = NSPanel.init(contentRect: r)") == {"NSPanel("})
+    expect(
+        "subclass of a subclass found",
+        scan_texts({"A.swift": "class A: NSPanel {}", "B.swift": "final class B: A {}"})
+        == {"A.swift": {"A"}, "B.swift": {"B"}},
+    )
+
+    scratch = tempfile.TemporaryDirectory()
+    counter = iter(range(1_000_000))
 
     def build(entries: list[dict], files: dict[str, str]) -> Path:
-        root = Path(tempfile.mkdtemp())
+        root = Path(scratch.name) / str(next(counter))
+        root.mkdir()
         (root / ".agents").mkdir()
         (root / INVENTORY).write_text(json.dumps({"windows": entries}))
         for name, body in files.items():
@@ -152,6 +180,7 @@ def self_test() -> int:
         "missing reason fails",
         len(check(build([{**good, "reason": ""}], {"Sources/A.swift": src}))) == 1,
     )
+    scratch.cleanup()
 
     if failures:
         print("check-window-inventory self-test FAILED:")
