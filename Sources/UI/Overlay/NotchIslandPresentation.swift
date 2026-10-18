@@ -122,6 +122,8 @@ struct NotchIslandMeetingContent: Equatable {
     /// "Live transcript" is on: the recording drop-down shows the
     /// conversation so far instead of the level lanes.
     var showsLiveTranscript = false
+    /// Opt-in auto-start from a proven detected call. Yields to `prompt`.
+    var autoRecordNote = false
 
     var isRecording: Bool { phase == .recording }
 
@@ -511,6 +513,9 @@ enum NotchIslandPresentation {
         }
         if case .error(let title, let message, let canOpen, let grantsSystemAudio)? = meeting?.phase {
             return .meetingError(title: title, message: message, canOpen: canOpen, grantsSystemAudio: grantsSystemAudio)
+        }
+        if let meeting, meeting.isRecording, meeting.autoRecordNote {
+            return .meetingPrompt(MeetingAutoRecordNoteCopy.prompt)
         }
         if let meeting, meeting.isRecording, meeting.asksAboutCallAudio, meeting.callAudioNote == .off {
             return .meetingCallAudioAsk

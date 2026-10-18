@@ -18,6 +18,10 @@ struct DetectedMeetingPromptWiring {
     var onDismiss: (MeetingPromptDetector.Candidate) -> Void
     var onExpired: (MeetingPromptDetector.Candidate) -> Void
     var onRemind: (MeetingPromptDetector.Candidate) -> Void
+    /// Defaults to prompt so existing installs and tests keep today's island.
+    var decisionForCandidate: (MeetingPromptDetector.Candidate) -> MeetingAutoRecordPolicy.Decision = { _ in .prompt }
+    /// Starts capture through the Record path without showing the prompt.
+    var onAutoStart: ((MeetingPromptDetector.Candidate) -> Void)? = nil
 
     func install(on detector: MeetingPromptDetector, pill: CapturePillController) {
         pill.onRecord = onRecord
@@ -28,8 +32,20 @@ struct DetectedMeetingPromptWiring {
         let onboardingCompleted = onboardingCompleted
         let detailOverride = detailOverride
         let onShown = onShown
+        let decisionForCandidate = decisionForCandidate
+        let onAutoStart = onAutoStart
         detector.onPromptRequest = { [weak pill] candidate in
             guard onboardingCompleted() else { return false }
+            switch decisionForCandidate(candidate) {
+            case .none:
+                return false
+            case .autoStart:
+                guard let onAutoStart else { break }
+                onAutoStart(candidate)
+                return true
+            case .prompt:
+                break
+            }
             guard let pill else { return false }
             let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
                 for: candidate.reason,
@@ -43,5 +59,22 @@ struct DetectedMeetingPromptWiring {
             if presented { onShown(candidate) }
             return presented
         }
+    }
+
+    static func autoRecordDecision(
+        for candidate: MeetingPromptDetector.Candidate,
+        otherCaptureActive: Bool
+    ) -> MeetingAutoRecordPolicy.Decision {
+        MeetingAutoRecordPolicy.decision(
+            for: MeetingAutoRecordPolicy.Request(
+                autoRecordEnabled: AutoRecordDetectedCallsPreferences.isEnabled(),
+                evidence: candidate.callEvidence,
+                provider: candidate.provider,
+                reason: candidate.reason,
+                microphoneGranted: TranscriptedPermissionAccess.isGranted(.microphone),
+                systemAudioGranted: TranscriptedPermissionAccess.isGranted(.systemAudioRecording),
+                otherCaptureActive: otherCaptureActive
+            )
+        )
     }
 }

@@ -1065,7 +1065,8 @@ final class MeetingOverlayController: NSObject {
             duration: currentDuration,
             callAudioNote: callAudioNote,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
-            asksAboutCallAudio: islandCallAudioAskPending
+            asksAboutCallAudio: islandCallAudioAskPending,
+            autoRecordNote: state == .recording && meetingSession?.activeRecordingWasAutoStarted == true
         )
     }
 
@@ -1079,6 +1080,22 @@ final class MeetingOverlayController: NSObject {
     }
 
     private func handleIslandAction(_ action: NotchIslandAction) {
+        switch MeetingAutoRecordIslandActionPolicy.route(
+            action: action,
+            noteVisible: state == .recording
+                && promptKind == nil
+                && meetingSession?.activeRecordingWasAutoStarted == true,
+            overlayPromptActive: state == .prompt
+        ) {
+        case .stop:
+            handleCloseTapped()
+            return
+        case .discard:
+            handleDiscardRequested()
+            return
+        case .inherit:
+            break
+        }
         switch action {
         case .meetingCallAudioDismiss:
             islandCallAudioAskPending = false
@@ -1152,27 +1169,5 @@ final class MeetingOverlayController: NSObject {
     private func pushAudioLevelsToView() {
         guard islandShown else { return }
         island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
-    }
-}
-
-@available(macOS 14.0, *)
-private extension MeetingPromptOverlayPromptState {
-    init(_ state: MeetingOverlayController.OverlayState) {
-        switch state {
-        case .idle:
-            self = .idle
-        case .prompt:
-            self = .prompt
-        case .preparing:
-            self = .preparing
-        case .recording:
-            self = .recording
-        case .transcribing:
-            self = .transcribing
-        case .saved:
-            self = .saved
-        case .error:
-            self = .error
-        }
     }
 }

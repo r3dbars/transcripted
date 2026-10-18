@@ -256,13 +256,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     self?.meetingPromptRecordInFlight = true
                     self?.meetingOverlayController.showDetectedMeetingStartInProgress()
                 },
-                startRecording: { [weak self] candidate, promptTelemetryProperties in
+                startRecording: { [weak self] candidate, promptTelemetryProperties, autoStarted in
                     guard let self else { return false }
                     return await self.appState.meetingSession.startRecording(
                         trigger: .detectedPrompt,
                         suggestedTitle: candidate.suggestedTranscriptTitle,
                         promptTelemetryProperties: promptTelemetryProperties,
-                        detectedCallCandidate: candidate
+                        detectedCallCandidate: candidate,
+                        autoStarted: autoStarted
                     )
                 },
                 onCompleted: { [weak self] candidate, started in
@@ -272,7 +273,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
             )
             meetingPromptRecordAction = promptRecordAction
-            let recordPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
+            let recordPrompt: (MeetingPromptDetector.Candidate, Bool) -> Void = { [weak self] candidate, autoStarted in
                 guard let self else { return }
                 // startRecording returns true early, without publishing a state
                 // transition, when a meeting is already recording/starting/stopping.
@@ -292,13 +293,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 )
                 guard promptRecordAction.record(
                     candidate: candidate,
-                    promptTelemetryProperties: promptFunnelProperties
+                    promptTelemetryProperties: promptFunnelProperties,
+                    autoStarted: autoStarted
                 ) else { return }
                 // Mark accepted when start begins, not only after
                 // startRecording returns. evaluate() can run while models
                 // load / .startingRecording, and would otherwise close the
                 // detected-call session as unrecorded.
                 self.meetingPromptDetector.markAccepted(candidate: candidate)
+                if autoStarted { return }
                 MeetingPromptTelemetry.emit(
                     .record(
                         candidate,
@@ -365,10 +368,17 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         readiness: self.meetingPromptTelemetryReadiness()
                     )
                 },
-                onRecord: recordPrompt,
+                onRecord: { recordPrompt($0, false) },
                 onDismiss: dismissPrompt,
                 onExpired: expirePrompt,
-                onRemind: remindPrompt
+                onRemind: remindPrompt,
+                decisionForCandidate: { [weak self] candidate in
+                    DetectedMeetingPromptWiring.autoRecordDecision(
+                        for: candidate,
+                        otherCaptureActive: self?.meetingPromptDetector.isOwnCaptureActive?() ?? false
+                    )
+                },
+                onAutoStart: { recordPrompt($0, true) }
             ).install(on: meetingPromptDetector, pill: capturePillController)
             // Capture-funnel denominator: one event per detected call at its
             // end, recorded or not, so capture rate is measured against calls

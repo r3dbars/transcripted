@@ -182,12 +182,11 @@ final class MeetingSessionController: ObservableObject {
     var activeDetectedPromptTranscriptionTelemetryProperties: [String: String]?
     var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     var activeRecordingTrigger: StartTrigger = .unknown
+    var activeRecordingWasAutoStarted = false
     var activeRecordingIdentity: UUID?
     var micBoostPromptRecordingIdentity: UUID?
     var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
-    /// The recording an accepted Boost is still trying to arm. Stop doesn't
-    /// clear it, so a Boost that never applied before Stop is saved as
-    /// `shown`, not `accepted`.
+    /// Boost still arming; Stop keeps it so an unapplied Boost is `shown`, not `accepted`.
     var micBoostArmPendingIdentity: UUID?
     /// When the current "can't hear the call" stretch began. Wall clock, not
     /// `recordingDuration`, which reads 0 once an unexpected stop reset it.
@@ -664,6 +663,7 @@ final class MeetingSessionController: ObservableObject {
             LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
         }
         activeRecordingIdentity = nil
+        activeRecordingWasAutoStarted = false
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil

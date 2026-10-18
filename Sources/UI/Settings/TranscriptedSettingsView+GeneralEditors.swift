@@ -46,6 +46,15 @@ extension TranscriptedSettingsView {
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
             ),
+            autoRecordDetectedCallsEnabled: Binding(
+                get: { autoDetectCallsEnabled && autoRecordDetectedCallsEnabled },
+                set: { newValue in
+                    guard autoDetectCallsEnabled else { return }
+                    autoRecordDetectedCallsEnabled = newValue
+                    trackSettingsToggle("auto_record_detected_calls", enabled: newValue, page: .general)
+                    AutoRecordDetectedCallsPreferences.setEnabled(newValue)
+                }
+            ),
             correctionsStatusLine: customDictionaryStatusLine,
             onTrackAction: { actionID in
                 trackSettingsAction(actionID, page: .general)

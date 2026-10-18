@@ -85,6 +85,33 @@ func testDetectedMeetingPromptWiring() async {
 
         assertEqual(rig.answers, ["expire:wiring-f"], "an unanswered prompt reports expiry to the app")
     }
+
+    runSuite("an auto-start decision uses the Record path and skips the island prompt") {
+        let rig = WiringRig()
+        rig.decision = { _ in .autoStart }
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-g", reason: .micInput))
+
+        assertEqual(presented, true, "the detector still treats the call as handled")
+        assertTrue(rig.island.prompt == nil, "auto-start must not show Record / Not now")
+        assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
+        assertEqual(rig.autoStarts, ["wiring-g"], "auto-start reaches the existing Record start path")
+        assertEqual(rig.answers, [], "Record is not a user tap when auto-start fires")
+    }
+
+    runSuite("a none decision leaves the island empty") {
+        let rig = WiringRig()
+        rig.decision = { _ in .none }
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-h", reason: .micInput))
+
+        assertEqual(presented, false, "the detector is told nothing was shown")
+        assertTrue(rig.island.prompt == nil, "nothing stacks on an already-running capture")
+        assertEqual(rig.autoStarts, [], "auto-start does not fire")
+        assertEqual(rig.shown, [], "no shown event")
+    }
 }
 
 @available(macOS 14.0, *)
@@ -104,6 +131,8 @@ private final class WiringRig {
     var detailOverride: String?
     var shown: [String] = []
     var answers: [String] = []
+    var autoStarts: [String] = []
+    var decision: (MeetingPromptDetector.Candidate) -> MeetingAutoRecordPolicy.Decision = { _ in .prompt }
 
     func install() {
         pill.island = island
@@ -114,7 +143,11 @@ private final class WiringRig {
             onRecord: { [weak self] in self?.answers.append("record:\($0.id)") },
             onDismiss: { [weak self] in self?.answers.append("dismiss:\($0.id)") },
             onExpired: { [weak self] in self?.answers.append("expire:\($0.id)") },
-            onRemind: { [weak self] in self?.answers.append("remind:\($0.id)") }
+            onRemind: { [weak self] in self?.answers.append("remind:\($0.id)") },
+            decisionForCandidate: { [weak self] candidate in
+                self?.decision(candidate) ?? .prompt
+            },
+            onAutoStart: { [weak self] in self?.autoStarts.append($0.id) }
         ).install(on: detector, pill: pill)
     }
 }

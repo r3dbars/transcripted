@@ -279,6 +279,28 @@ func testNotchIslandPresentation() {
         assertEqual(notchLayout(meeting: unverified).right, [.text("Can't confirm call", .warning)])
     }
 
+    runSuite("NotchIslandPresentation shows the auto-record consent note until a warning wins") {
+        var meeting = recording()
+        meeting.autoRecordNote = true
+        let open = notchLayout(meeting: meeting)
+        assertEqual(open.drop, .meetingPrompt(MeetingAutoRecordNoteCopy.prompt))
+        assertTrue(open.dropIsSticky, "the consent note opens by itself")
+
+        meeting.prompt = NotchIslandMeetingContent.Prompt(
+            title: "Call ended",
+            detail: "Call audio stopped.",
+            countdown: "Stops in 30s",
+            primaryTitle: "Stop",
+            secondaryTitle: "Continue",
+            tertiaryTitle: nil
+        )
+        assertEqual(
+            notchLayout(meeting: meeting).drop,
+            .meetingPrompt(meeting.prompt!),
+            "Call ended keeps the existing countdown over the auto-record note"
+        )
+    }
+
     runSuite("NotchIslandPresentation opens meeting warnings by itself") {
         var meeting = recording()
         meeting.prompt = NotchIslandMeetingContent.Prompt(

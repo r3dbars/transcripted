@@ -30,6 +30,7 @@ struct GeneralSettingsPage<
     @Binding var dictationCleanupEnabled: Bool
     @Binding var dictationMuffleEnabled: Bool
     @Binding var autoDetectCallsEnabled: Bool
+    @Binding var autoRecordDetectedCallsEnabled: Bool
 
     let correctionsStatusLine: String
 
@@ -126,6 +127,20 @@ struct GeneralSettingsPage<
                         message: "Notices when a call starts — an app using your mic, call audio playing, or your camera turning on — and offers to record it. Detection is entirely local; nothing about the audio or video leaves this Mac."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
+                )
+
+                GeneralToggleRow(
+                    title: "Record detected calls automatically",
+                    isOn: $autoRecordDetectedCallsEnabled,
+                    help: autoRecordDetectedCallsEnabled
+                        ? "Starts recording proven Zoom, Teams, and Meet calls."
+                        : "Ask before recording a detected call.",
+                    info: GeneralInfo(
+                        title: "Record detected calls automatically",
+                        message: "When Zoom or Teams is using the mic, or a browser tab names a Meet, Zoom, or Teams call, start recording without asking. Needs Auto-detect calls, plus microphone and System Audio Recording already allowed. Off by default: the other people on the call are not asked."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.auto-record-detected-calls",
+                    isEnabled: autoDetectCallsEnabled
                 )
 
                 NotchIslandLiveTranscriptRow()
