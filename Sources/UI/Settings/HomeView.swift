@@ -409,6 +409,7 @@ struct HomeFailedMeetingInlineRow: View {
                 HomeRowMenuItem(
                     title: rowActions.deleteTitle,
                     symbolName: "trash",
+                    isEnabled: !rowActions.deleteDisabled,
                     isDestructive: rowActions.deleteIsDestructive,
                     action: onClear
                 )
