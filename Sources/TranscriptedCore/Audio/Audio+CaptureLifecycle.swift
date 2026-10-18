@@ -113,16 +113,27 @@ extension Audio {
         // typed stage before any validation can return.
         startFailureStage = .unknown
 
-        // Pre-flight validation checks
-        let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
-        guard validationResult.isValid else {
-            AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
-            error = validationResult.errorMessage
-            return
-        }
-
         let startIntentId = beginStartIntent()
+        let paths = paths
+        // Preflight writes a probe file and queries the volume; a sleeping
+        // external or network library would freeze the UI if this ran on main.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
+            DispatchQueue.main.async {
+                guard self.isCurrentStartIntent(startIntentId) else { return }
+                guard validationResult.isValid else {
+                    AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
+                    self.clearStartIntent(startIntentId)
+                    self.isStarting = false
+                    self.error = validationResult.errorMessage
+                    return
+                }
+                self.startAfterPreflight(startIntentId: startIntentId)
+            }
+        }
+    }
 
+    private func startAfterPreflight(startIntentId: UUID) {
         // Check microphone permission and request if not determined
         // This allows users who skipped permission during onboarding to grant it at record time
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
