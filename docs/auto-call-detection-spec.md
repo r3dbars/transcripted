@@ -558,6 +558,16 @@ incidents. Revisit once `meeting_prompt_dismissed` telemetry separates
 `expired_reoffer` (never saw it) from explicit dismissals (said no): if misses
 dominate, the aggressive tier earns its switch.
 
+**Experiment (opt-in, default OFF):** `MeetingAutoRecordPolicy` can auto-start a
+recording when Zoom or Teams is really on the mic, or the focused front
+Meet/Zoom/Teams tab is, that evidence has lasted a few seconds, "Record
+detected calls automatically" is on, both capture permissions are already
+granted, and nothing else is recording. A tab title, a Meet lobby, a
+background window, or the camera is never enough. It reuses the detected-prompt
+start path so auto-stop is unchanged. Stop or Discard declines the rest of
+that call. This still records other people without asking them; keep it off
+unless that consent cost is accepted.
+
 ## Phase 5 — browser call evidence + learned "Not now" (2026-09-23)
 
 **Problem.** Phase 1's premise that "browsers rarely hold the mic otherwise"

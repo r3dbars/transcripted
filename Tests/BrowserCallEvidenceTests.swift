@@ -376,4 +376,101 @@ func testBrowserCallEvidence() {
             "Chrome's windows are its own"
         )
     }
+
+    runSuite("BrowserCallEvidence.isMeetPreJoinTitle — lobby screens are not in-call") {
+        for title in [
+            "Meet - abc-defg-hij",
+            "abc-defg-hij - Google Chrome",
+            "(2) Meet - abc-defg-hij",
+            "Ready to join - Google Meet",
+            "Ask to join",
+            "Waiting to join",
+            "You'll join in a few seconds",
+        ] {
+            assertTrue(
+                BrowserCallEvidence.isMeetPreJoinTitle(title),
+                "\"\(title)\" is Meet's pre-join screen"
+            )
+        }
+        assertFalse(
+            BrowserCallEvidence.isMeetPreJoinTitle("Meet - Weekly design sync - Google Chrome - Work"),
+            "a named in-call Meet tab is not the lobby"
+        )
+        assertFalse(
+            BrowserCallEvidence.isMeetPreJoinTitle("Zoom Meeting"),
+            "the Zoom web client is not a Meet lobby"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.focusedInCallProof — only the front tab counts") {
+        let backgroundMeet = [
+            BrowserWindowTitle(title: "Meet - Weekly design sync", isFocused: false),
+            BrowserWindowTitle(title: "Hacker News", isFocused: true),
+        ]
+        assertTrue(
+            BrowserCallEvidence.focusedInCallProof(in: backgroundMeet) == nil,
+            "a Meet tab left in the background is not auto-record proof"
+        )
+        let focusedMeet = [
+            BrowserWindowTitle(title: "Meet - Weekly design sync", isFocused: true),
+        ]
+        let focused = BrowserCallEvidence.focusedInCallProof(in: focusedMeet)
+        assertEqual(focused?.provider, .googleMeet, "the focused Meet tab names Meet")
+        assertTrue(focused?.isMeetPreJoin == false, "a named meeting is not the lobby")
+
+        let lobby = [
+            BrowserWindowTitle(title: "Meet - abc-defg-hij", isFocused: true),
+        ]
+        let preJoin = BrowserCallEvidence.focusedInCallProof(in: lobby)
+        assertEqual(preJoin?.provider, .googleMeet, "the lobby still names Meet for prompting")
+        assertTrue(preJoin?.isMeetPreJoin == true, "and auto-record can tell it is pre-join")
+    }
+
+    runSuite("BrowserWindowTitle.isSystemFront — a background browser's focused tab is not the front window") {
+        assertTrue(
+            BrowserWindowTitle.isSystemFront(appPID: 10, frontmostPID: 10, windowIsAppFocused: true),
+            "the focused window of the front app is the front window"
+        )
+        assertFalse(
+            BrowserWindowTitle.isSystemFront(appPID: 10, frontmostPID: 11, windowIsAppFocused: true),
+            "Chrome's internally focused Meet tab must not count while Slack is in front"
+        )
+        assertFalse(
+            BrowserWindowTitle.isSystemFront(appPID: 10, frontmostPID: 10, windowIsAppFocused: false),
+            "an unfocused window of the front browser is not the front window"
+        )
+        assertFalse(
+            BrowserWindowTitle.isSystemFront(appPID: 10, frontmostPID: nil, windowIsAppFocused: true),
+            "without a front app, nothing is the front window"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.focusedInCallProof — AX focus on a background browser is not auto-record proof") {
+        let backgroundChrome = [
+            BrowserWindowTitle(
+                title: "Meet - Weekly design sync",
+                isFocused: true,
+                isSystemFront: false
+            ),
+        ]
+        assertTrue(
+            BrowserCallEvidence.focusedInCallProof(in: backgroundChrome) == nil,
+            "a Meet tab focused inside background Chrome must not auto-record"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify(backgroundChrome),
+            .call(provider: .googleMeet),
+            "prompting still names a Meet tab in a background window"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.classify — a background browser's AX-focused tab still decides not-call") {
+        assertEqual(
+            BrowserCallEvidence.classify([
+                BrowserWindowTitle(title: "ChatGPT", isFocused: true, isSystemFront: false),
+            ]),
+            .notCall,
+            "ChatGPT focused inside background Chrome is still a non-call site"
+        )
+    }
 }

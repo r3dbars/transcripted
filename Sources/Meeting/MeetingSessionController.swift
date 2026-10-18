@@ -44,7 +44,8 @@ extension MeetingSessionController {
         trigger: StartTrigger = .unknown,
         suggestedTitle: String? = nil,
         promptTelemetryProperties: [String: String]? = nil,
-        detectedCallCandidate: MeetingPromptDetector.Candidate? = nil
+        detectedCallCandidate: MeetingPromptDetector.Candidate? = nil,
+        autoStarted: Bool = false
     ) async -> Bool {
         let admission = MeetingSessionStateMachine.startAdmission(
             startCallInFlight: startRecordingCallInFlight,
@@ -263,6 +264,7 @@ extension MeetingSessionController {
         }
 
         activeRecordingStartedAt = Date()
+        activeRecordingWasAutoStarted = autoStarted
         unexpectedCaptureStopEvidence = nil
         if trigger == .detectedPrompt {
             activeDetectedPromptRecordingStartedAt = activeRecordingStartedAt
@@ -285,31 +287,23 @@ extension MeetingSessionController {
         }
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "recording")
         let pipelineSnapshot = capture.pipelineDiagnosticsSnapshot()
+        let startedProperties = meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
+            [
+                "trigger": trigger.rawValue,
+                "mic_only_by_choice": activeRecordingIsMicOnlyByChoice ? "true" : "false",
+                "system_permission_check": lastSystemAudioPermissionCheck,
+                "models_warm": meetingModelsWarmAtStart ? "true" : "false",
+                "auto_started": activeRecordingWasAutoStarted ? "true" : "false",
+            ],
+            uniquingKeysWith: { _, new in new }
+        )
         DiagnosticsTrail.record(
             engine: "meeting",
             event: "meeting_recording_started",
             message: "Meeting recording started",
-            context: baseDiagnosticsContext(
-                extra: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
-                    ["trigger": trigger.rawValue],
-                    uniquingKeysWith: { _, new in new }
-                )
-            )
+            context: baseDiagnosticsContext(extra: startedProperties)
         )
-        AnalyticsReporter.track(
-            "meeting_recording_started",
-            properties: meetingCaptureAnalyticsProperties(snapshot: pipelineSnapshot).merging(
-                [
-                    "trigger": trigger.rawValue,
-                    // #1768: a chosen mic-only meeting is not a call-audio failure.
-                    "mic_only_by_choice": activeRecordingIsMicOnlyByChoice ? "true" : "false",
-                    "system_permission_check": lastSystemAudioPermissionCheck,
-                    // #1773: were the models already loaded when capture began?
-                    "models_warm": meetingModelsWarmAtStart ? "true" : "false",
-                ],
-                uniquingKeysWith: { _, new in new }
-            )
-        )
+        AnalyticsReporter.track("meeting_recording_started", properties: startedProperties)
         return true
     }
 
@@ -326,6 +320,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
+        finishAutoStartedRecording(stopReason: reason)
         clearActiveRecordingIdentity()
 
         DiagnosticsTrail.record(

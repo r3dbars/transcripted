@@ -31,6 +31,8 @@ extension MeetingSessionController {
         case detectedCallEndTimeout = "detected_call_end_timeout"
         case audioRouteWarning = "audio_route_warning"
         case systemAudioWarning = "system_audio_warning"
+        case debugControl = "debug_control"
+        case labControl = "lab_control"
         case unknown = "unknown"
     }
 

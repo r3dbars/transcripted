@@ -290,6 +290,11 @@ func testMeetingPromptTelemetry() async {
                 ["meeting_prompt_choice_made", "meeting_prompt_record_selected"]
             ),
             (
+                "autoStart",
+                .autoStart(candidate, signals: signals),
+                ["meeting_prompt_choice_made", "meeting_prompt_auto_started"]
+            ),
+            (
                 "dismiss",
                 .dismiss(
                     candidate,
@@ -333,6 +338,9 @@ func testMeetingPromptTelemetry() async {
             case "record":
                 assertEqual(choice, "record", "Record is a record choice")
                 assertNil(outcome, "Record's outcome comes later from the meeting session")
+            case "autoStart":
+                assertEqual(choice, "auto_started", "auto-start is counted separately from a Record tap")
+                assertNil(outcome, "auto-start's outcome comes later from the meeting session")
             case "dismiss":
                 assertEqual(choice, "dismiss", "Not now is a dismiss choice")
                 assertEqual(outcome, "dismissed", "Not now ends the prompt as dismissed")
