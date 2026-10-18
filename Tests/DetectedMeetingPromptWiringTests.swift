@@ -114,6 +114,38 @@ func testDetectedMeetingPromptWiring() async {
         assertTrue(rig.island.prompt != nil, "the user can still tap Record")
     }
 
+    runSuite("an auto-start that bails because a recording is already running does not show a prompt") {
+        let rig = WiringRig()
+        rig.decision = { _ in .autoStart }
+        rig.autoStartSucceeds = false
+        rig.detector.shouldSkipPromptEvaluation = { true }
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(
+            wiringCandidate(id: "wiring-busy", reason: .micInput)
+        )
+
+        assertEqual(presented, .skipped, "a live recording must not get a detection prompt stacked on it")
+        assertEqual(rig.autoStarts, ["wiring-busy"], "kickoff was still asked")
+        assertTrue(rig.island.prompt == nil, "the island stays on the recording")
+        assertEqual(rig.shown, [], "no shown event for a prompt nobody should see")
+    }
+
+    runSuite("recovering a failed auto-start while a recording is running does not show a prompt") {
+        let rig = WiringRig()
+        rig.decision = { _ in .autoStart }
+        rig.install()
+        let candidate = wiringCandidate(id: "wiring-busy-recover", reason: .micInput)
+
+        let first = rig.detector.onPromptRequest?(candidate)
+        assertEqual(first, .autoStarted, "precondition: auto-start reported success")
+        rig.detector.shouldSkipPromptEvaluation = { true }
+        rig.detector.recoverFailedAutoStart(candidate: candidate)
+
+        assertTrue(rig.island.prompt == nil, "the island stays on the recording")
+        assertEqual(rig.shown, [], "no shown event while a recording is already running")
+    }
+
     runSuite("a start that bails after autoStarted falls back to the island prompt") {
         let rig = WiringRig()
         rig.decision = { _ in .autoStart }
@@ -242,7 +274,7 @@ func testDetectedMeetingPromptWiring() async {
         assertEqual(rig.shown, ["wiring-cal-zoom-tab"], "the existing Record prompt still appears")
     }
 
-    runSuite("the real auto-record decision keeps a Teams calendar event plus a background Teams web lobby as a prompt") {
+    runSuite("the real auto-record decision keeps a Teams calendar event plus a background Teams tab as a prompt") {
         let rig = WiringRig()
         rig.decision = { candidate in
             DetectedMeetingPromptWiring.autoRecordDecision(
@@ -256,7 +288,7 @@ func testDetectedMeetingPromptWiring() async {
         rig.install()
 
         var candidate = wiringCandidate(
-            id: "wiring-cal-teams-lobby",
+            id: "wiring-cal-teams-tab",
             reason: .calendarNearby,
             source: .calendarEvent,
             provider: .teams
@@ -268,8 +300,8 @@ func testDetectedMeetingPromptWiring() async {
         let presented = rig.detector.onPromptRequest?(candidate)
 
         assertEqual(presented, .presented, "the island prompt is still offered")
-        assertEqual(rig.autoStarts, [], "a Teams web lobby must not auto-start")
-        assertEqual(rig.shown, ["wiring-cal-teams-lobby"], "the existing Record prompt still appears")
+        assertEqual(rig.autoStarts, [], "a background Teams tab must not auto-start")
+        assertEqual(rig.shown, ["wiring-cal-teams-tab"], "the existing Record prompt still appears")
     }
 
     runSuite("the real auto-record decision auto-starts a proven call even when the candidate is a calendar event") {

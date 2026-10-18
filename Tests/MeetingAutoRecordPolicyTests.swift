@@ -227,7 +227,7 @@ func testMeetingAutoRecordPolicy() {
             expected: .prompt
         ),
         Row(
-            name: "a Teams calendar event plus a background Teams web lobby stays a prompt",
+            name: "a Teams calendar event plus a background Teams tab stays a prompt",
             request: autoRecordRequest(
                 evidence: .none, provider: .teams, reason: .calendarNearby,
                 holdsMicrophone: true, isFocusedFrontWindow: false,

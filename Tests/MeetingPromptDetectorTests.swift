@@ -1371,7 +1371,7 @@ func testMeetingPromptDetector() async {
         )
     }
 
-    await runSuite("MeetingPromptDetector — a Teams calendar event plus a background Teams web lobby stays a prompt") {
+    await runSuite("MeetingPromptDetector — a Teams calendar event plus a background Teams tab stays a prompt") {
         await assertCalendarBackgroundTabStaysPrompt(
             provider: .teams,
             tabTitle: "Meeting with Ana | Microsoft Teams",

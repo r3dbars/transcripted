@@ -49,11 +49,16 @@ struct DetectedMeetingPromptWiring {
             if presented { onShown(candidate) }
             return presented ? .presented : .skipped
         }
-        detector.onPromptFallback = { candidate in
+        detector.onPromptFallback = { [weak detector] candidate in
             guard onboardingCompleted() else { return .skipped }
+            // A kickoff that bailed because capture is already running must
+            // not stack Record / Not now on the live recording.
+            if detector?.shouldSkipPromptEvaluation?() == true {
+                return .skipped
+            }
             return presentPrompt(candidate)
         }
-        detector.onPromptRequest = { candidate in
+        detector.onPromptRequest = { [weak detector] candidate in
             guard onboardingCompleted() else { return .skipped }
             switch decisionForCandidate(candidate) {
             case .none:
@@ -64,6 +69,9 @@ struct DetectedMeetingPromptWiring {
                 }
             case .prompt:
                 break
+            }
+            if detector?.shouldSkipPromptEvaluation?() == true {
+                return .skipped
             }
             return presentPrompt(candidate)
         }
