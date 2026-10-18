@@ -125,7 +125,7 @@ enum PhysicalShortcutMediaKeyPolicy {
     ) -> Bool {
         guard let dictationBinding,
               PhysicalDictationTriggerPreferences.isFunctionKey(dictationBinding.keyCode),
-              let expected = nxKeyType(forFunctionKey: dictationBinding.keyCode) else {
+              let expected = Self.nxKeyType(forFunctionKey: dictationBinding.keyCode) else {
             return false
         }
         return canonicalNXKeyType(nxKeyType) == expected
