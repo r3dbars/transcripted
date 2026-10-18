@@ -55,6 +55,7 @@ HERE = Path(__file__).resolve().parent
 CONTROL_ENV = "TRANSCRIPTED_LAB_CONTROL_DIR"
 GUARD_ENV = "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD"
 CONTAINER_ENV = "TRANSCRIPTED_CONTAINER_DIR"
+FILE_LOGGER_OFF_ENV = "TRANSCRIPTED_DISABLE_FILE_LOGGER"
 # The app's UserDefaults domain (Info.plist CFBundleIdentifier) and the keys the
 # launch preflight reads. Sources: TranscriptedStoragePaths.swift
 # (captureLibraryLocationKey), Support/AnalyticsPreferences.swift and
@@ -302,7 +303,9 @@ def launch_plan(
 ) -> dict[str, Any]:
     """The exact argv + extra env `launch` would use. Pure, so it is testable."""
     app_args = [*(TELEMETRY_OFF_ARGS if telemetry_off else ()), *UPDATES_OFF_ARGS]
-    extra_env = {CONTROL_ENV: str(root)}
+    # The harness flag stays off so warmup and captions match a real launch;
+    # only app.jsonl writes are switched off, like other direct launches.
+    extra_env = {CONTROL_ENV: str(root), FILE_LOGGER_OFF_ENV: "1"}
     if allow_second_instance:
         extra_env[GUARD_ENV] = "1"
     if container is not None:

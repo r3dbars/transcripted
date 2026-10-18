@@ -112,6 +112,9 @@ back to `Info.plist`). So `launch` isolates by default and refuses otherwise:
   domain), so a lab build older than the live release isn't swapped out.
   Login-item sync and the companion connection still run against the real
   account.
+- `launch` also sets `TRANSCRIPTED_DISABLE_FILE_LOGGER=1`, so the run doesn't
+  write `app.jsonl`. `events.jsonl`, which the lab reads timings from, still
+  gets written.
 - The client only reads preferences (`defaults read`). It never writes them.
 
 ## Protocol

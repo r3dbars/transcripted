@@ -431,6 +431,7 @@ class LaunchTests(TempDirCase):
         self.assertEqual(plan["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS, *lab_control.UPDATES_OFF_ARGS])
         self.assertEqual(plan["env"], {
             "TRANSCRIPTED_LAB_CONTROL_DIR": "/lab",
+            "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1",
             "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD": "1",
             "TRANSCRIPTED_CONTAINER_DIR": "/c",
         })
