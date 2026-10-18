@@ -645,10 +645,11 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    func finishAutoStartedRecording(recordDecline: Bool = false) {
+    func finishAutoStartedRecording(stopReason: StopReason? = nil, cancelReason: RecordingCancelReason? = nil) {
         if MeetingAutoRecordPolicy.recordsDeclineOnEnd(
             wasAutoStarted: activeRecordingWasAutoStarted,
-            userStoppedOrDiscarded: recordDecline
+            stopReason: stopReason?.rawValue,
+            cancelReason: cancelReason?.rawValue
         ) {
             onAutoStartedRecordingWillEnd?()
         }

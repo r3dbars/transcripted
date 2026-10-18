@@ -27,17 +27,28 @@ final class MeetingPromptDetector {
         var isMeetPreJoin: Bool = false
         /// How long the auto-start evidence has been true.
         var evidenceAge: TimeInterval = 0
+        /// The browser is playing call audio. Tab-title auto-start needs this.
+        var isPlayingCallAudio: Bool = false
 
-        /// Keep a calendar event's title while retaining the live call's proof.
+        /// Keep a calendar event's title and `call_evidence` while copying
+        /// live-call proof that auto-record needs. Telemetry and call-end
+        /// `isBrowserCall` stay calendar-shaped.
         func borrowingCallProof(from live: Candidate) -> Candidate {
             var copy = self
-            copy.callEvidence = live.callEvidence
             copy.holdsMicrophone = live.holdsMicrophone
             copy.isFocusedFrontWindow = live.isFocusedFrontWindow
             copy.isMeetPreJoin = live.isMeetPreJoin
             copy.evidenceAge = live.evidenceAge
+            copy.isPlayingCallAudio = live.isPlayingCallAudio
             return copy
         }
+    }
+
+    /// What the island hook did with a candidate.
+    enum RequestResult: Equatable {
+        case presented
+        case autoStarted
+        case skipped
     }
 
     struct ScoredCandidate {
@@ -45,7 +56,7 @@ final class MeetingPromptDetector {
         let score: Int
     }
 
-    var onPromptRequest: ((Candidate) -> Bool)?
+    var onPromptRequest: ((Candidate) -> RequestResult)?
     var onPromptSuppressed: ((MeetingPromptSuppression) -> Void)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
     /// A detected ad-hoc call ended without a meeting recording and passed the
@@ -91,6 +102,9 @@ final class MeetingPromptDetector {
     var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
     /// How long proven auto-start evidence must last. Tests set this to 0.
     var autoRecordEvidenceHoldDuration: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration
+    /// Tests inject a fixed answer so UserDefaults on the machine running
+    /// the suite cannot turn the 3-second hold on by accident.
+    var isAutoRecordEnabled: () -> Bool = { AutoRecordDetectedCallsPreferences.isEnabled() }
 
     // State below that isn't `private` is only internal because the
     // MeetingPromptDetector+*.swift extensions use it. Treat it as private
@@ -349,19 +363,23 @@ final class MeetingPromptDetector {
         if browserFirstTitleReadPending { return }
 
         let sortedCandidates = candidates.sorted(by: sortCandidates)
-        guard let match = preferredCandidate(from: sortedCandidates) else { return }
-
-        if detectedCallSession?.autoStartDeclined == true {
+        let declinedProviders = detectedCallSession?.autoStartDeclinedProviders ?? []
+        let visibleCandidates = declinedProviders.isEmpty
+            ? sortedCandidates
+            : sortedCandidates.filter { !declinedProviders.contains($0.candidate.provider) }
+        if visibleCandidates.isEmpty, let blocked = sortedCandidates.first,
+           declinedProviders.contains(blocked.candidate.provider) {
             recordSuppression(
-                candidate: match.candidate,
+                candidate: blocked.candidate,
                 reason: .declinedThisCall,
                 now: now,
                 cooldownReason: MeetingPromptSuppressionReason.declinedThisCall.rawValue
             )
             return
         }
+        guard let match = preferredCandidate(from: visibleCandidates) else { return }
 
-        if AutoRecordDetectedCallsPreferences.isEnabled(),
+        if isAutoRecordEnabled(),
            match.candidate.evidenceAge < autoRecordEvidenceHoldDuration {
             let held = MeetingAutoRecordPolicy.Request(
                 autoRecordEnabled: true,
@@ -374,7 +392,8 @@ final class MeetingPromptDetector {
                 holdsMicrophone: match.candidate.holdsMicrophone,
                 isFocusedFrontWindow: match.candidate.isFocusedFrontWindow,
                 isMeetPreJoin: match.candidate.isMeetPreJoin,
-                evidenceAge: MeetingAutoRecordPolicy.evidenceHoldDuration
+                evidenceAge: MeetingAutoRecordPolicy.evidenceHoldDuration,
+                isPlayingCallAudio: match.candidate.isPlayingCallAudio
             )
             if MeetingAutoRecordPolicy.isCallProven(held) {
                 let remaining = max(
@@ -415,13 +434,17 @@ final class MeetingPromptDetector {
             return
         }
 
-        if onPromptRequest?(match.candidate) == true {
+        switch onPromptRequest?(match.candidate) ?? .skipped {
+        case .presented:
             pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
             cooldownReasons[match.candidate.id] = "prompt_pending"
             // Any prompt shown while a call is live feeds the funnel outcome:
             // an unrecorded end now counts as "ignored", not "no_prompt".
             detectedCallSession?.promptShown = true
-        } else {
+        case .autoStarted:
+            pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
+            cooldownReasons[match.candidate.id] = "prompt_pending"
+        case .skipped:
             recordSuppression(
                 candidate: match.candidate,
                 reason: .presentationBlocked,

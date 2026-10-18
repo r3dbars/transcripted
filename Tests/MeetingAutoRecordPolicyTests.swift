@@ -32,25 +32,35 @@ func testMeetingAutoRecordPolicy() {
             expected: .autoStart
         ),
         Row(
-            name: "a focused in-call Meet tab that holds the mic auto-starts",
+            name: "a focused in-call Meet tab that holds the mic and plays audio auto-starts",
+            request: autoRecordRequest(
+                evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
+                isPlayingCallAudio: true
+            ),
+            expected: .autoStart
+        ),
+        Row(
+            name: "a focused in-call Zoom tab that holds the mic and plays audio auto-starts",
+            request: autoRecordRequest(
+                evidence: .tabTitle, provider: .zoom, reason: .micInput,
+                isPlayingCallAudio: true
+            ),
+            expected: .autoStart
+        ),
+        Row(
+            name: "a focused in-call Teams tab that holds the mic and plays audio auto-starts",
+            request: autoRecordRequest(
+                evidence: .tabTitle, provider: .teams, reason: .micInput,
+                isPlayingCallAudio: true
+            ),
+            expected: .autoStart
+        ),
+        Row(
+            name: "a named Meet tab without browser audio output stays a prompt",
             request: autoRecordRequest(
                 evidence: .tabTitle, provider: .googleMeet, reason: .micInput
             ),
-            expected: .autoStart
-        ),
-        Row(
-            name: "a focused in-call Zoom tab that holds the mic auto-starts",
-            request: autoRecordRequest(
-                evidence: .tabTitle, provider: .zoom, reason: .micInput
-            ),
-            expected: .autoStart
-        ),
-        Row(
-            name: "a focused in-call Teams tab that holds the mic auto-starts",
-            request: autoRecordRequest(
-                evidence: .tabTitle, provider: .teams, reason: .micInput
-            ),
-            expected: .autoStart
+            expected: .prompt
         ),
         Row(
             name: "a browser tab title alone never auto-starts",
@@ -72,7 +82,7 @@ func testMeetingAutoRecordPolicy() {
             name: "a Meet pre-join screen never auto-starts",
             request: autoRecordRequest(
                 evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
-                isMeetPreJoin: true
+                isMeetPreJoin: true, isPlayingCallAudio: true
             ),
             expected: .prompt
         ),
@@ -80,7 +90,7 @@ func testMeetingAutoRecordPolicy() {
             name: "a named call in a background tab never auto-starts",
             request: autoRecordRequest(
                 evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
-                isFocusedFrontWindow: false
+                isFocusedFrontWindow: false, isPlayingCallAudio: true
             ),
             expected: .prompt
         ),
@@ -191,6 +201,14 @@ func testMeetingAutoRecordPolicy() {
             expected: .autoStart
         ),
         Row(
+            name: "a calendar candidate with live Zoom proof auto-starts without rewriting evidence",
+            request: autoRecordRequest(
+                evidence: .none, provider: .zoom, reason: .calendarNearby,
+                holdsMicrophone: true
+            ),
+            expected: .autoStart
+        ),
+        Row(
             name: "missing microphone permission stays a prompt",
             request: autoRecordRequest(
                 evidence: .nativeApp, provider: .zoom, reason: .micInput,
@@ -245,14 +263,15 @@ func testMeetingAutoRecordPolicy() {
     runSuite("MeetingAutoRecordPolicy waits a few seconds before auto-start") {
         let waiting = autoRecordRequest(
             evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
-            evidenceAge: 0
+            evidenceAge: 0, isPlayingCallAudio: true
         )
         assertTrue(
             MeetingAutoRecordPolicy.shouldWaitForEvidenceHold(waiting),
             "a brand-new focused Meet tab should wait, not prompt, while the setting is on"
         )
         let ready = autoRecordRequest(
-            evidence: .tabTitle, provider: .googleMeet, reason: .micInput
+            evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
+            isPlayingCallAudio: true
         )
         assertFalse(
             MeetingAutoRecordPolicy.shouldWaitForEvidenceHold(ready),
@@ -269,21 +288,50 @@ func testMeetingAutoRecordPolicy() {
     }
 
     runSuite("MeetingAutoRecordPolicy declines the rest of the call only on Stop or Discard") {
+        for reason in ["hotkey_toggle", "overlay_stop_button", "menu_bar_stop_button"] {
+            assertTrue(
+                MeetingAutoRecordPolicy.recordsDeclineOnEnd(
+                    wasAutoStarted: true, stopReason: reason
+                ),
+                "\(reason) of an auto-started recording must decline the rest of the call"
+            )
+        }
         assertTrue(
             MeetingAutoRecordPolicy.recordsDeclineOnEnd(
-                wasAutoStarted: true, userStoppedOrDiscarded: true
+                wasAutoStarted: true, cancelReason: "discard_button"
             ),
-            "Stop or Discard of an auto-started recording must decline the rest of the call"
+            "Discard of an auto-started recording must decline the rest of the call"
         )
+        for reason in [
+            "quit_confirmation",
+            "audio_inactivity_prompt",
+            "audio_inactivity_timeout",
+            "detected_call_end_prompt",
+            "detected_call_end_timeout",
+            "audio_route_warning",
+            "system_audio_warning",
+            "unknown",
+        ] {
+            assertFalse(
+                MeetingAutoRecordPolicy.recordsDeclineOnEnd(
+                    wasAutoStarted: true, stopReason: reason
+                ),
+                "\(reason) must not decline the rest of the call"
+            )
+        }
         assertFalse(
             MeetingAutoRecordPolicy.recordsDeclineOnEnd(
-                wasAutoStarted: true, userStoppedOrDiscarded: false
+                wasAutoStarted: true, cancelReason: "unknown"
             ),
+            "an unknown cancel must not decline the rest of the call"
+        )
+        assertFalse(
+            MeetingAutoRecordPolicy.recordsDeclineOnEnd(wasAutoStarted: true),
             "a failed start or unexpected stop must not decline the rest of the call"
         )
         assertFalse(
             MeetingAutoRecordPolicy.recordsDeclineOnEnd(
-                wasAutoStarted: false, userStoppedOrDiscarded: true
+                wasAutoStarted: false, stopReason: "hotkey_toggle"
             ),
             "a recording the user started themselves is not an auto-start decline"
         )
@@ -313,7 +361,8 @@ private func autoRecordRequest(
     holdsMicrophone: Bool? = nil,
     isFocusedFrontWindow: Bool = true,
     isMeetPreJoin: Bool = false,
-    evidenceAge: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration
+    evidenceAge: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration,
+    isPlayingCallAudio: Bool = false
 ) -> MeetingAutoRecordPolicy.Request {
     MeetingAutoRecordPolicy.Request(
         autoRecordEnabled: enabled,
@@ -326,6 +375,7 @@ private func autoRecordRequest(
         holdsMicrophone: holdsMicrophone ?? (reason == .micInput),
         isFocusedFrontWindow: isFocusedFrontWindow,
         isMeetPreJoin: isMeetPreJoin,
-        evidenceAge: evidenceAge
+        evidenceAge: evidenceAge,
+        isPlayingCallAudio: isPlayingCallAudio
     )
 }

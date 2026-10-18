@@ -63,4 +63,28 @@ func testSystemAudioPermissionCacheWrites() {
         }
         assertEqual(resetAgain, 0, "clearing an empty cache writes nothing")
     }
+
+    runSuite("System audio peek - a live TCC read does not rewrite the saved grant") {
+        let originals = [knownKey, grantedKey].map { UserDefaults.standard.object(forKey: $0) }
+        defer {
+            for (key, value) in zip([knownKey, grantedKey], originals) {
+                if let value { UserDefaults.standard.set(value, forKey: key) } else { UserDefaults.standard.removeObject(forKey: key) }
+            }
+        }
+        UserDefaults.standard.removeObject(forKey: knownKey)
+        UserDefaults.standard.removeObject(forKey: grantedKey)
+        _ = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem(tcc: tcc(.authorized))
+        assertEqual(TranscriptedPermissionAccess.systemAudioRecordingStatus(), .granted, "precondition: saved grant")
+
+        let peeked = countingDefaultsChanges {
+            let status = TranscriptedPermissionAccess.peekSystemAudioRecordingStatusFromSystem(tcc: tcc(.denied))
+            assertEqual(status, .denied, "the live answer is denied")
+        }
+        assertEqual(peeked, 0, "peeking must not write UserDefaults")
+        assertEqual(
+            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
+            .granted,
+            "the saved grant stays put"
+        )
+    }
 }

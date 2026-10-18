@@ -444,4 +444,33 @@ func testBrowserCallEvidence() {
             "without a front app, nothing is the front window"
         )
     }
+
+    runSuite("BrowserCallEvidence.focusedInCallProof — AX focus on a background browser is not auto-record proof") {
+        let backgroundChrome = [
+            BrowserWindowTitle(
+                title: "Meet - Weekly design sync",
+                isFocused: true,
+                isSystemFront: false
+            ),
+        ]
+        assertTrue(
+            BrowserCallEvidence.focusedInCallProof(in: backgroundChrome) == nil,
+            "a Meet tab focused inside background Chrome must not auto-record"
+        )
+        assertEqual(
+            BrowserCallEvidence.classify(backgroundChrome),
+            .call(provider: .googleMeet),
+            "prompting still names a Meet tab in a background window"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.classify — a background browser's AX-focused tab still decides not-call") {
+        assertEqual(
+            BrowserCallEvidence.classify([
+                BrowserWindowTitle(title: "ChatGPT", isFocused: true, isSystemFront: false),
+            ]),
+            .notCall,
+            "ChatGPT focused inside background Chrome is still a non-call site"
+        )
+    }
 }

@@ -173,7 +173,7 @@ extension MeetingPromptDetector {
         return max(cameraOnSince ?? now, cameraEvidenceSince ?? now)
     }
 
-    private func browserIsPlayingAudio(families: Set<String>) -> Bool {
+    func browserIsPlayingAudio(families: Set<String>) -> Bool {
         !families.isDisjoint(with: Self.browserAppFamilies(for: browserOutputActiveBundleIDs))
     }
 
@@ -195,10 +195,22 @@ extension MeetingPromptDetector {
         }
         guard let session = browserTitles else { return nil }
         let readIsStale = session.readAt.map { now.timeIntervalSince($0) >= browserEvidenceTiming.titleReadSpacing } ?? true
-        if session.namedCall == nil, session.readTask == nil, readIsStale {
-            startBrowserTitleRead(families: families)
+        let justRead = session.readAt.map { now.timeIntervalSince($0) < 0.05 } ?? false
+        if session.readTask == nil {
+            if session.namedCall == nil, readIsStale {
+                startBrowserTitleRead(families: families)
+            } else if isAutoRecordEnabled(), session.namedCall != nil, !justRead {
+                // Auto-record must re-check focus and lobby on every hold
+                // pass instead of aging the first snapshot.
+                startBrowserTitleRead(families: families)
+            }
         }
-        return session.verdict
+        if isAutoRecordEnabled(),
+           browserTitles?.namedCall != nil,
+           browserTitles?.readTask != nil {
+            return nil
+        }
+        return browserTitles?.verdict ?? session.verdict
     }
 
     private func startBrowserTitleRead(families: Set<String>) {

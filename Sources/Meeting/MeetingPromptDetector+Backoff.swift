@@ -64,31 +64,32 @@ extension MeetingPromptDetector {
         learnedBackoff.reset()
     }
 
-    /// Stop or Discard on an auto-started recording: do not auto-start or
-    /// prompt again until this call ends, for every provider.
+    /// Stop or Discard on an auto-started recording: stay quiet for the
+    /// providers in this session until it ends. Does not stamp an 8-hour
+    /// runtime suppress on every provider.
     func declineRestOfDetectedCall(now: Date = Date()) {
         guard var session = detectedCallSession else { return }
         session.userDeclined = true
-        session.autoStartDeclined = true
-        let kinds = MeetingPromptLearnedBackoff.browserKinds.union(
-            Set(MeetingPromptProvider.allCases.map { MeetingPromptLearnedBackoff.nativeKind(for: $0) })
-        )
-        for kind in kinds {
+        session.autoStartDeclinedProviders.formUnion(session.providers)
+        if let named = session.namedBrowserProvider {
+            session.autoStartDeclinedProviders.insert(named)
+        }
+        for kind in session.candidateKinds {
             session.declinedKinds[kind] = now
         }
-        if var titles = browserTitles {
+        let wasBrowser = session.providers.contains(.googleMeet)
+            || session.namedBrowserProvider != nil
+            || session.sawBrowserCallTitle
+        if wasBrowser {
             for kind in MeetingPromptLearnedBackoff.browserKinds {
-                titles.declinedKinds[kind] = now
+                session.declinedKinds[kind] = now
             }
-            browserTitles = titles
-        }
-        let until = now.addingTimeInterval(declinedThisCallLimit)
-        for provider in MeetingPromptProvider.allCases {
-            suppressRuntimePrompts(
-                for: provider,
-                until: until,
-                reason: MeetingPromptSuppressionReason.declinedThisCall.rawValue
-            )
+            if var titles = browserTitles {
+                for kind in MeetingPromptLearnedBackoff.browserKinds {
+                    titles.declinedKinds[kind] = now
+                }
+                browserTitles = titles
+            }
         }
         detectedCallSession = session
     }

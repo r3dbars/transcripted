@@ -35,18 +35,18 @@ struct DetectedMeetingPromptWiring {
         let decisionForCandidate = decisionForCandidate
         let onAutoStart = onAutoStart
         detector.onPromptRequest = { [weak pill] candidate in
-            guard onboardingCompleted() else { return false }
+            guard onboardingCompleted() else { return .skipped }
             switch decisionForCandidate(candidate) {
             case .none:
-                return false
+                return .skipped
             case .autoStart:
                 guard let onAutoStart else { break }
                 onAutoStart(candidate)
-                return true
+                return .autoStarted
             case .prompt:
                 break
             }
-            guard let pill else { return false }
+            guard let pill else { return .skipped }
             let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
                 for: candidate.reason,
                 calendarDefault: 30
@@ -57,7 +57,7 @@ struct DetectedMeetingPromptWiring {
                 detailOverride: detailOverride()
             )
             if presented { onShown(candidate) }
-            return presented
+            return presented ? .presented : .skipped
         }
     }
 
@@ -66,28 +66,35 @@ struct DetectedMeetingPromptWiring {
         otherCaptureActive: Bool,
         autoRecordEnabled: Bool = AutoRecordDetectedCallsPreferences.isEnabled(),
         microphoneGranted: Bool = TranscriptedPermissionAccess.isGranted(.microphone),
-        systemAudioGranted: Bool? = nil
+        systemAudioGranted: Bool? = nil,
+        liveSystemAudio: () -> Bool = { DetectedMeetingPromptWiring.liveSystemAudioGranted() },
+        cachedSystemAudio: () -> Bool = { TranscriptedPermissionAccess.systemAudioRecordingGranted() }
     ) -> MeetingAutoRecordPolicy.Decision {
-        MeetingAutoRecordPolicy.decision(
+        let granted = systemAudioGranted ?? (
+            autoRecordEnabled ? liveSystemAudio() : cachedSystemAudio()
+        )
+        return MeetingAutoRecordPolicy.decision(
             for: MeetingAutoRecordPolicy.Request(
                 autoRecordEnabled: autoRecordEnabled,
                 evidence: candidate.callEvidence,
                 provider: candidate.provider,
                 reason: candidate.reason,
                 microphoneGranted: microphoneGranted,
-                systemAudioGranted: systemAudioGranted ?? liveSystemAudioGranted(),
+                systemAudioGranted: granted,
                 otherCaptureActive: otherCaptureActive,
                 holdsMicrophone: candidate.holdsMicrophone,
                 isFocusedFrontWindow: candidate.isFocusedFrontWindow,
                 isMeetPreJoin: candidate.isMeetPreJoin,
-                evidenceAge: candidate.evidenceAge
+                evidenceAge: candidate.evidenceAge,
+                isPlayingCallAudio: candidate.isPlayingCallAudio
             )
         )
     }
 
-    /// Prompt-free live TCC read. A cached UserDefaults grant is not enough:
-    /// auto-start must not raise the macOS box from the background.
+    /// Prompt-free live TCC peek. A cached UserDefaults grant is not enough:
+    /// auto-start must not raise the macOS box from the background. Does not
+    /// rewrite the saved grant.
     static func liveSystemAudioGranted() -> Bool {
-        TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized
+        TranscriptedPermissionAccess.peekSystemAudioRecordingStatusFromSystem() == .authorized
     }
 }

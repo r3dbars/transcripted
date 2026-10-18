@@ -320,7 +320,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
-        finishAutoStartedRecording(recordDecline: true)
+        finishAutoStartedRecording(stopReason: reason)
         clearActiveRecordingIdentity()
 
         DiagnosticsTrail.record(

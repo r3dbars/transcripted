@@ -45,10 +45,22 @@ import Foundation
 /// One browser window's title as read through Accessibility.
 struct BrowserWindowTitle: Equatable {
     let title: String
-    /// The Mac's front window, not a background browser's internally focused one.
+    /// This browser's AX focused window, even if the browser is in the
+    /// background. Prompting uses this so a background Chrome tab still
+    /// decides call-site vs not-call, matching main.
     let isFocused: Bool
+    /// The Mac's front window: this browser is frontmost and this window is
+    /// AX focused. Auto-record uses this so a background Meet tab cannot
+    /// start capture.
+    let isSystemFront: Bool
 
-    /// AX focused on a background browser is not the front window.
+    init(title: String, isFocused: Bool, isSystemFront: Bool? = nil) {
+        self.title = title
+        self.isFocused = isFocused
+        self.isSystemFront = isSystemFront ?? isFocused
+    }
+
+    /// AX focused on a background browser is not the Mac's front window.
     static func isSystemFront(appPID: Int32, frontmostPID: Int32?, windowIsAppFocused: Bool) -> Bool {
         windowIsAppFocused && frontmostPID == appPID
     }
@@ -267,7 +279,7 @@ enum BrowserCallEvidence {
     static func focusedInCallProof(
         in windows: [BrowserWindowTitle]
     ) -> (provider: MeetingPromptProvider, isMeetPreJoin: Bool)? {
-        guard let focused = windows.first(where: \.isFocused) else { return nil }
+        guard let focused = windows.first(where: \.isSystemFront) else { return nil }
         guard let provider = inCallProvider(forTitle: focused.title) else { return nil }
         return (provider, provider == .googleMeet && isMeetPreJoinTitle(focused.title))
     }

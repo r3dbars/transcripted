@@ -105,9 +105,10 @@ extension MeetingPromptDetector {
         // Whether a meeting recording during this call already counted as a
         // "yes" for the learning.
         var countedRecordingForLearning = false
-        /// Stop or Discard on an auto-started recording: stay quiet until
-        /// this call ends, for every provider.
-        var autoStartDeclined = false
+        /// Providers the user explicitly stopped or discarded after an
+        /// auto-start. Cleared when this session ends; leftover signals must
+        /// not decline an unrelated provider that joins later.
+        var autoStartDeclinedProviders: Set<MeetingPromptProvider> = []
     }
 
     // MARK: - Detected-call session (missed-call nudge)
@@ -142,6 +143,7 @@ extension MeetingPromptDetector {
         }
 
         if providers.isEmpty {
+            clearPromptPendingWindows(for: session)
             detectedCallSession = nil
             finishDetectedCallSession(session, endedAt: now)
         } else {
@@ -163,6 +165,23 @@ extension MeetingPromptDetector {
                 }
             }
             detectedCallSession = session
+        }
+    }
+
+    /// A shown prompt's 90s pending window must not cover the next call
+    /// after this session ends. Dismiss snoozes keep their own backoff.
+    func clearPromptPendingWindows(for session: DetectedCallSession) {
+        var ids = session.providers.map { micCandidateID(for: $0) }
+        if let named = session.namedBrowserProvider {
+            ids.append(micCandidateID(for: named))
+        }
+        ids.append(contentsOf: [
+            Self.unverifiedBrowserCandidateID,
+            Self.browserCallSiteCandidateID,
+        ])
+        for id in ids where cooldownReasons[id] == "prompt_pending" {
+            pendingUntil[id] = nil
+            cooldownReasons[id] = nil
         }
     }
 
@@ -408,7 +427,9 @@ extension MeetingPromptDetector {
                 isMeetPreJoin: titleSession?.namedCallIsPreJoin == true,
                 evidenceAge: autoRecordEvidenceAge(
                     for: provider, evidence: evidence, reason: reason, now: now
-                )
+                ),
+                isPlayingCallAudio: evidence == .tabTitle
+                    && (titleSession.map { browserIsPlayingAudio(families: $0.families) } ?? false)
             ),
             score: presentation.score
         )

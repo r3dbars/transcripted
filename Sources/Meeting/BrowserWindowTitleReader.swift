@@ -90,7 +90,8 @@ enum BrowserWindowTitleReader {
             guard let focusedWindow, let title = title(of: focusedWindow, deadline: deadline) else { return [] }
             return [BrowserWindowTitle(
                 title: title,
-                isFocused: BrowserWindowTitle.isSystemFront(
+                isFocused: true,
+                isSystemFront: BrowserWindowTitle.isSystemFront(
                     appPID: pid, frontmostPID: frontmostPID, windowIsAppFocused: true
                 )
             )]
@@ -100,12 +101,16 @@ enum BrowserWindowTitleReader {
         for window in windows.prefix(maxWindowsPerApp) {
             guard Date() < deadline else { break }
             guard let title = title(of: window, deadline: deadline) else { continue }
-            let isFocused = BrowserWindowTitle.isSystemFront(
-                appPID: pid,
-                frontmostPID: frontmostPID,
-                windowIsAppFocused: focusedWindow.map { CFEqual($0, window) } ?? false
-            )
-            titles.append(BrowserWindowTitle(title: title, isFocused: isFocused))
+            let windowIsAppFocused = focusedWindow.map { CFEqual($0, window) } ?? false
+            titles.append(BrowserWindowTitle(
+                title: title,
+                isFocused: windowIsAppFocused,
+                isSystemFront: BrowserWindowTitle.isSystemFront(
+                    appPID: pid,
+                    frontmostPID: frontmostPID,
+                    windowIsAppFocused: windowIsAppFocused
+                )
+            ))
         }
         return titles
     }

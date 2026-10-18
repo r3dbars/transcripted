@@ -4,16 +4,29 @@ import Foundation
 /// existing island prompt, or stay quiet.
 ///
 /// Auto-start is opt-in and narrow: Zoom or Teams must really hold the mic,
-/// or a focused Meet/Zoom/Teams tab must hold the mic (never a background
-/// tab, a Meet lobby, or the camera). That evidence has to last a few
-/// seconds, both capture permissions must already be on, and nothing else
-/// may be recording. Every other detected call keeps today's prompt. Off
-/// by default, so Record / Not now / Remind is unchanged until the
-/// setting is on.
+/// or a focused Meet/Zoom/Teams tab must hold the mic and play call audio
+/// (never a background tab, a Meet lobby, or the camera). That evidence has
+/// to last a few seconds, both capture permissions must already be on, and
+/// nothing else may be recording. Every other detected call keeps today's
+/// prompt. Off by default, so Record / Not now / Remind is unchanged until
+/// the setting is on.
 enum MeetingAutoRecordPolicy {
     /// How long proven evidence must last before auto-start. Prompting still
     /// happens at once when the setting is off.
     static let evidenceHoldDuration: TimeInterval = 3
+
+    /// Stop reasons that count as the user explicitly ending an auto-started
+    /// recording. Call-end, inactivity, quit, and warning stops do not.
+    static let explicitStopReasons: Set<String> = [
+        "hotkey_toggle",
+        "overlay_stop_button",
+        "menu_bar_stop_button",
+    ]
+
+    /// Discard is the only cancel that declines the rest of this call.
+    static let explicitCancelReasons: Set<String> = [
+        "discard_button",
+    ]
 
     enum Decision: Equatable {
         /// Detector asked, but this start must stay quiet (reserved for
@@ -41,6 +54,9 @@ enum MeetingAutoRecordPolicy {
         var isMeetPreJoin: Bool
         /// How long the auto-start evidence has been true.
         var evidenceAge: TimeInterval
+        /// The browser (or call app) is playing audio output. Required for
+        /// a tab-title auto-start, not for native Zoom/Teams.
+        var isPlayingCallAudio: Bool
     }
 
     static func decision(for request: Request) -> Decision {
@@ -58,28 +74,41 @@ enum MeetingAutoRecordPolicy {
     }
 
     /// Native Zoom or Teams holding the mic, or a focused in-call Meet /
-    /// Zoom / Teams tab that has also held the mic for a few seconds.
+    /// Zoom / Teams tab that has also held the mic and played call audio
+    /// for a few seconds.
     static func isCallProven(_ request: Request) -> Bool {
         guard request.holdsMicrophone else { return false }
         guard request.evidenceAge >= evidenceHoldDuration else { return false }
         switch request.evidence {
         case .nativeApp:
-            return request.provider == .zoom || request.provider == .teams
+            return isProvenNativeApp(request)
         case .tabTitle:
-            return request.isFocusedFrontWindow
-                && !request.isMeetPreJoin
-                && (request.provider == .zoom
-                    || request.provider == .teams
-                    || request.provider == .googleMeet)
-        case .none, .callSite, .camera, .micAndOutput, .micOnly, .nonCallSite:
+            return isProvenTabTitle(request)
+        case .none:
+            // Calendar/runtime title carrying live proof fields, without
+            // rewriting `call_evidence` telemetry or `isBrowserCall`.
+            return isProvenNativeApp(request) || isProvenTabTitle(request)
+        case .callSite, .camera, .micAndOutput, .micOnly, .nonCallSite:
             return false
         }
     }
 
-    /// Stop or Discard of an auto-started recording declines the rest of
-    /// this call. A failed start or unexpected capture stop does not.
-    static func recordsDeclineOnEnd(wasAutoStarted: Bool, userStoppedOrDiscarded: Bool) -> Bool {
-        wasAutoStarted && userStoppedOrDiscarded
+    /// Explicit menu, hotkey, or Discard of an auto-started recording
+    /// declines the rest of this call. Call-end, inactivity, quit, warning
+    /// stops, and a failed start do not.
+    static func recordsDeclineOnEnd(
+        wasAutoStarted: Bool,
+        stopReason: String? = nil,
+        cancelReason: String? = nil
+    ) -> Bool {
+        guard wasAutoStarted else { return false }
+        if let stopReason {
+            return explicitStopReasons.contains(stopReason)
+        }
+        if let cancelReason {
+            return explicitCancelReasons.contains(cancelReason)
+        }
+        return false
     }
 
     /// Runtime-prompt suppression stamped as a rest-of-call decline still
@@ -101,5 +130,18 @@ enum MeetingAutoRecordPolicy {
         held.microphoneGranted = true
         held.systemAudioGranted = true
         return isCallProven(held)
+    }
+
+    private static func isProvenNativeApp(_ request: Request) -> Bool {
+        request.provider == .zoom || request.provider == .teams
+    }
+
+    private static func isProvenTabTitle(_ request: Request) -> Bool {
+        request.isFocusedFrontWindow
+            && !request.isMeetPreJoin
+            && request.isPlayingCallAudio
+            && (request.provider == .zoom
+                || request.provider == .teams
+                || request.provider == .googleMeet)
     }
 }

@@ -18,7 +18,7 @@ func testDetectedMeetingPromptWiring() async {
         let candidate = wiringCandidate(id: "wiring-a", reason: .micInput)
         let presented = rig.detector.onPromptRequest?(candidate)
 
-        assertEqual(presented, true, "the detector hook reports the prompt as shown")
+        assertEqual(presented, .presented, "the detector hook reports the prompt as shown")
         assertEqual(rig.shown, ["wiring-a"], "the app is told which prompt reached the island")
         assertEqual(
             rig.island.prompt,
@@ -45,7 +45,7 @@ func testDetectedMeetingPromptWiring() async {
 
         let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-c", reason: .micInput))
 
-        assertEqual(presented, false, "the detector is told the prompt was blocked")
+        assertEqual(presented, .skipped, "the detector is told the prompt was blocked")
         assertTrue(rig.island.prompt == nil, "the island stays empty")
         assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
     }
@@ -57,7 +57,7 @@ func testDetectedMeetingPromptWiring() async {
 
         let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-d", reason: .micInput))
 
-        assertEqual(presented, false, "with no island there is nowhere to show it")
+        assertEqual(presented, .skipped, "with no island there is nowhere to show it")
         assertEqual(rig.shown, [], "no shown event")
     }
 
@@ -93,7 +93,7 @@ func testDetectedMeetingPromptWiring() async {
 
         let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-g", reason: .micInput))
 
-        assertEqual(presented, true, "the detector still treats the call as handled")
+        assertEqual(presented, .autoStarted, "the detector still treats the call as handled")
         assertTrue(rig.island.prompt == nil, "auto-start must not show Record / Not now")
         assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
         assertEqual(rig.autoStarts, ["wiring-g"], "auto-start reaches the existing Record start path")
@@ -107,7 +107,7 @@ func testDetectedMeetingPromptWiring() async {
 
         let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-h", reason: .micInput))
 
-        assertEqual(presented, false, "the detector is told nothing was shown")
+        assertEqual(presented, .skipped, "the detector is told nothing was shown")
         assertTrue(rig.island.prompt == nil, "nothing stacks on an already-running capture")
         assertEqual(rig.autoStarts, [], "auto-start does not fire")
         assertEqual(rig.shown, [], "no shown event")
@@ -130,7 +130,7 @@ func testDetectedMeetingPromptWiring() async {
             wiringCandidate(id: "wiring-real-zoom", reason: .micInput, provenNativeZoom: true)
         )
 
-        assertEqual(presented, true, "the detector still treats the call as handled")
+        assertEqual(presented, .autoStarted, "the detector still treats the call as handled")
         assertTrue(rig.island.prompt == nil, "a proven call must not show Record / Not now")
         assertEqual(rig.autoStarts, ["wiring-real-zoom"], "the real policy must reach the Record start path")
         assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
@@ -156,7 +156,7 @@ func testDetectedMeetingPromptWiring() async {
         candidate.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
         let presented = rig.detector.onPromptRequest?(candidate)
 
-        assertEqual(presented, true, "the island prompt is still offered")
+        assertEqual(presented, .presented, "the island prompt is still offered")
         assertEqual(rig.autoStarts, [], "a tab title without the mic must not auto-start")
         assertEqual(rig.shown, ["wiring-tab"], "the existing Record prompt still appears")
     }
@@ -178,7 +178,7 @@ func testDetectedMeetingPromptWiring() async {
             wiringCandidate(id: "wiring-cal", reason: .calendarNearby)
         )
 
-        assertEqual(presented, true, "dictation must not drop calendar prompts when auto-record is off")
+        assertEqual(presented, .presented, "dictation must not drop calendar prompts when auto-record is off")
         assertEqual(rig.autoStarts, [], "auto-start does not fire")
         assertEqual(rig.shown, ["wiring-cal"], "the calendar prompt still reaches the island")
     }
@@ -205,10 +205,86 @@ func testDetectedMeetingPromptWiring() async {
             )
         )
 
-        assertEqual(presented, true, "the detector still treats the call as handled")
+        assertEqual(presented, .autoStarted, "the detector still treats the call as handled")
         assertTrue(rig.island.prompt == nil, "a proven call must not show Record / Not now just because a calendar event also matched")
         assertEqual(rig.autoStarts, ["wiring-cal-proof"], "calendar enrichment must not block auto-start")
         assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
+    }
+
+    runSuite("live system-audio is not read when auto-record is off") {
+        var liveCalls = 0
+        var cachedCalls = 0
+        let decision = DetectedMeetingPromptWiring.autoRecordDecision(
+            for: wiringCandidate(id: "wiring-tcc-off", reason: .calendarNearby),
+            otherCaptureActive: false,
+            autoRecordEnabled: false,
+            microphoneGranted: true,
+            liveSystemAudio: {
+                liveCalls += 1
+                return true
+            },
+            cachedSystemAudio: {
+                cachedCalls += 1
+                return true
+            }
+        )
+        assertEqual(decision, .prompt, "the setting off keeps today's prompt")
+        assertEqual(liveCalls, 0, "auto-record off must not peek live TCC")
+        assertEqual(cachedCalls, 1, "the saved grant is enough when auto-record is off")
+    }
+
+    runSuite("live system-audio is peeked when auto-record is on") {
+        var liveCalls = 0
+        var cachedCalls = 0
+        let decision = DetectedMeetingPromptWiring.autoRecordDecision(
+            for: wiringCandidate(id: "wiring-tcc-on", reason: .micInput, provenNativeZoom: true),
+            otherCaptureActive: false,
+            autoRecordEnabled: true,
+            microphoneGranted: true,
+            liveSystemAudio: {
+                liveCalls += 1
+                return true
+            },
+            cachedSystemAudio: {
+                cachedCalls += 1
+                return false
+            }
+        )
+        assertEqual(decision, .autoStart, "a proven call auto-starts from the live grant")
+        assertEqual(liveCalls, 1, "auto-record on peeks live TCC")
+        assertEqual(cachedCalls, 0, "the saved grant is not rewritten or used as a stand-in")
+    }
+
+    await runSuite("detector to recordPrompt auto-starts a proven Zoom call") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: false,
+                autoRecordEnabled: true,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+        rig.detector.isOwnCaptureActive = { false }
+        rig.detector.isAutoRecordEnabled = { true }
+        rig.detector.autoRecordEvidenceHoldDuration = 0
+        rig.detector.nativeMicSince[.zoom] = Date().addingTimeInterval(
+            -MeetingAutoRecordPolicy.evidenceHoldDuration
+        )
+
+        rig.detector.updateMicInputUsers(["us.zoom.xos"])
+        await rig.detector.waitUntilEvaluationsSettle()
+
+        assertEqual(rig.autoStarts, ["mic:zoom"], "evaluate must reach recordPrompt through auto-start")
+        assertEqual(rig.shown, [], "auto-start must not report a shown prompt")
+        assertTrue(rig.island.prompt == nil, "the island stays empty")
+        assertEqual(
+            rig.detector.detectedCallSession?.promptShown,
+            false,
+            "the funnel must not count auto-start as a shown prompt"
+        )
     }
 }
 
@@ -231,6 +307,13 @@ private final class WiringRig {
     var answers: [String] = []
     var autoStarts: [String] = []
     var decision: (MeetingPromptDetector.Candidate) -> MeetingAutoRecordPolicy.Decision = { _ in .prompt }
+
+    init() {
+        detector.isAutoRecordEnabled = { false }
+        detector.frontmostBundleIDProvider = { nil }
+        detector.runningBundleIDsProvider = { [] }
+        detector.browserWindowTitlesProvider = { _ in [] }
+    }
 
     func install() {
         pill.island = island
