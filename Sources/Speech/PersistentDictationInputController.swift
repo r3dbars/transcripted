@@ -396,7 +396,10 @@ final class PersistentDictationInputController {
                     deviceListChanged: deviceListChanged
                 )
             } catch {
-                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+                // A timed-out write may still land; the kept marker lets the next pass adopt or clear it.
+                if (error as? ParakeetSystemInputWorkError)?.isTimedOut != true {
+                    DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+                }
                 throw error
             }
             activeOverride = ActiveOverride(

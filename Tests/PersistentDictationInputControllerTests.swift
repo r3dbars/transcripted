@@ -188,6 +188,23 @@ private func runPersistentDictationInputControllerSuites() async {
         controller.stopMonitoring()
     }
 
+    await runSuite("Persistent input - a timed-out write keeps the marker so a late landing can be undone") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        hal.writeTimesOutAfterLanding = true
+        let controller = hal.makeController()
+        controller.start()
+        await controller.pendingRefresh?.value
+        assertEqual(hal.writes, [persistentBuiltIn.id], "the write ran past its budget but landed")
+        assertEqual(hal.marker, .init(selectedUID: "builtin", previousUID: "airpods"), "the marker survives the timeout")
+
+        hal.writeTimesOutAfterLanding = false
+        hal.monitor.fire(isSelfWrite: false)
+        await controller.pendingRefresh?.value
+        await controller.stopAndRestore()
+        assertEqual(hal.writes, [persistentBuiltIn.id, persistentAirPods.id], "quitting still puts AirPods back")
+        assertNil(hal.marker, "and the restore clears the marker")
+    }
+
     await runSuite("Persistent input - quitting puts the previous mic back when nothing is capturing") {
         let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
         let controller = hal.makeController()
@@ -345,6 +362,8 @@ private final class FakePersistentInputHAL {
     var selectionLookupTimesOut = false
     /// Runs inside the route read, as if the user acted while it was suspended.
     var onSelectionLookup: (() -> Void)?
+    /// The write lands, then reports a timeout, like a driver call that overran.
+    var writeTimesOutAfterLanding = false
     var deviceListAdds = 0
     var deviceListRemoves = 0
     var refreshDelays = 0
@@ -393,8 +412,12 @@ private final class FakePersistentInputHAL {
             userDefaults: defaults,
             defaultInputMonitor: monitor,
             setDefaultInput: { [weak self] id in
-                self?.writes.append(id)
-                self?.defaultInputID = id
+                guard let self else { return }
+                self.writes.append(id)
+                self.defaultInputID = id
+                if self.writeTimesOutAfterLanding {
+                    throw ParakeetSystemInputWorkError.timedOut(operation: "persistent_input_write", timeoutMs: 1_500)
+                }
             },
             addDeviceListListener: { [weak self] handler in
                 guard let self, !self.deviceListListenerRefused else { return nil }
