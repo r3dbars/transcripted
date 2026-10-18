@@ -587,11 +587,11 @@ private final class TranscriptedE2ESmokeHarness {
         let audioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: fixtures.meetingURL)
         let importedAudioDirectory = MeetingAudioArchiveResolver.archiveDirectory(forTranscript: fixtures.importedMeetingURL)
 
-        let result = try HomeMeetingDeletion.delete(item)
+        let payload = try HomeMeetingDeletion.trash(item, fileManager: SmokeTrashFileManager(library: captureLibrary, runRoot: runRoot))
 
-        try expect(result.removedTranscriptURLs.map(\.lastPathComponent) == ["Customer Launch Sync.md"], "Delete should report the selected canonical transcript")
-        try expect(result.removedSummaryURLs.map(\.lastPathComponent) == ["Customer Launch Sync.summary.md"], "Delete should report the matching generated summary")
-        try expect(result.removedAudioDirectoryURLs.map(\.lastPathComponent) == ["Customer Launch Sync_audio"], "Delete should report the selected retained audio directory")
+        try expect(payload.plan.transcriptURLs.map(\.lastPathComponent) == ["Customer Launch Sync.md"], "Delete should report the selected canonical transcript")
+        try expect(payload.plan.summaryURLs.map(\.lastPathComponent) == ["Customer Launch Sync.summary.md"], "Delete should report the matching generated summary")
+        try expect(payload.plan.audioDirectoryURLs.map(\.lastPathComponent) == ["Customer Launch Sync_audio"], "Delete should report the selected retained audio directory")
         try expect(!fileManager.fileExists(atPath: fixtures.meetingURL.path), "Delete should remove the selected transcript")
         try expect(!fileManager.fileExists(atPath: fixtures.summaryURL.path), "Delete should remove the matching summary artifact")
         try expect(!fileManager.fileExists(atPath: audioDirectory.path), "Delete should remove the selected retained audio directory")
@@ -842,6 +842,31 @@ private func fixedDate(_ value: String) throws -> Date {
         return date
     }
     throw E2ESmokeError.failed("Could not parse fixed date \(value)")
+}
+
+/// Moves "trashed" library items into this run's root instead of the user's Trash.
+private final class SmokeTrashFileManager: FileManager, @unchecked Sendable {
+    private let rootPath: String
+    private let trashDirectory: URL
+
+    init(library: URL, runRoot: URL) throws {
+        rootPath = library.standardizedFileURL.resolvingSymlinksInPath().path
+        trashDirectory = runRoot.appendingPathComponent("fixture-trash", isDirectory: true)
+        super.init()
+        try createDirectory(at: trashDirectory, withIntermediateDirectories: true)
+    }
+
+    override func trashItem(
+        at url: URL,
+        resultingItemURL outResultingURL: AutoreleasingUnsafeMutablePointer<NSURL?>?
+    ) throws {
+        guard url.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(rootPath + "/") else {
+            throw E2ESmokeError.failed("Refusing to trash outside the smoke capture library")
+        }
+        let destination = trashDirectory.appendingPathComponent(UUID().uuidString)
+        try moveItem(at: url, to: destination)
+        outResultingURL?.pointee = destination as NSURL
+    }
 }
 
 private extension JSONDecoder {

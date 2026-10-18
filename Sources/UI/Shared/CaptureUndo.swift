@@ -222,8 +222,7 @@ enum CaptureUndoError: LocalizedError {
 enum CaptureTrashOperation {
     /// Moves every URL that exists on disk to the Trash, recording where
     /// each one landed. URLs that no longer exist are skipped (already gone
-    /// is not a failure — mirrors `HomeMeetingDeletion`'s existing-only
-    /// removal). On any failure partway through, moves everything already
+    /// is not a failure). On any failure partway through, moves everything already
     /// trashed back to its original location before rethrowing, so the
     /// operation is all-or-nothing.
     @discardableResult
