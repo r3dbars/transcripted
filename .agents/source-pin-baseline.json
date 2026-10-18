@@ -4,7 +4,7 @@
     "Tests/DictationQueuedStartPolicyTests.swift": 1,
     "Tests/DictationSoundsTests.swift": 2,
     "Tests/HomeFirstArtifactVisibilityTests.swift": 5,
-    "Tests/NightlySecurityContractTests.swift": 34,
-    "Tests/UIAutomationSurfaceContractTests.swift": 71
+    "Tests/NightlySecurityContractTests.swift": 8,
+    "Tests/UIAutomationSurfaceContractTests.swift": 54
   }
 }
