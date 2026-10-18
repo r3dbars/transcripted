@@ -40,7 +40,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | --- | --- | --- | --- | --- |
 | `Sources/TildeCore/Engine/CompletionOutputCleaner.swift` | `Sources/TranscriptedWriting/Core/Engine/CompletionOutputCleaner.swift` | ported | 1 |  |
 | `Sources/TildeCore/Engine/GhostBrainWire.swift` | `Sources/TranscriptedWriting/Core/Engine/GhostBrainWire.swift` | ported | 1 | Phase 3 deviation: an `unsupported` outcome with `rejectedEventIDs`, and the probe that finds history events of an unknown version (see History retries below). |
-| `Sources/TildeCore/Engine/IntentPromptHint.swift` | `Sources/TranscriptedWriting/Core/Engine/IntentPromptHint.swift` | ported | 1 |  |
+| `Sources/TildeCore/Engine/IntentPromptHint.swift` | `—` | not-ported | 1 | Ported, then removed: no production caller. |
 | `Sources/TildeCore/Engine/PreparedCompletionContext.swift` | `Sources/TranscriptedWriting/Core/Engine/PreparedCompletionContext.swift` | ported | 1 |  |
 | `Sources/TildeCore/Engine/PreviewModelAsset.swift` | `—` | not-ported | 1 | 26B preview only. Strip call sites in ModelManager. |
 | `Sources/TildeCore/Engine/ProductionModelAsset.swift` | `Sources/TranscriptedWriting/Core/Engine/ProductionModelAsset.swift` | ported | 1 |  |
@@ -75,7 +75,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeCore/Scene/ScreenScene.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenScene.swift` | ported | 1 |  |
 | `Sources/TildeCore/Scene/ScreenSceneSnapshotBridge.swift` | `Sources/TranscriptedWriting/Core/Scene/ScreenSceneSnapshotBridge.swift` | ported | 1 |  |
 | `Sources/TildeCore/Scene/SensitiveScenePolicy.swift` | `Sources/TranscriptedWriting/Core/Scene/SensitiveScenePolicy.swift` | ported | 1 |  |
-| `Sources/TildeCore/ScreenMemory/CaptureChangeDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureChangeDetector.swift` | ported | 1 |  |
+| `Sources/TildeCore/ScreenMemory/CaptureChangeDetector.swift` | `—` | not-ported | 1 | Incremental OCR only; removed with that flag. |
 | `Sources/TildeCore/ScreenMemory/CaptureKindPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/FocusedWindowCapturePolicy.swift` | replaced | 1 | Owner decision 2026-09-29: Screen Memory reads only the focused window, so there is no full-display read to choose. `FocusedWindowCapturePolicy` picks that window instead. |
 | `Sources/TildeCore/ScreenMemory/CaptureTriggerPolicy.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/CaptureTriggerPolicy.swift` | ported | 1 | Doc comment only (2026-09-29): the any-visible-window exclusion rule is kept on purpose now that capture reads only the focused window. |
 | `Sources/TildeCore/ScreenMemory/ContextResetDetector.swift` | `Sources/TranscriptedWriting/Core/ScreenMemory/ContextResetDetector.swift` | ported | 1 |  |
@@ -136,7 +136,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/ScreenMemory/AccessibilityPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AccessibilityPermission.swift` | ported | 2 | No launch-time prompt; Transcripted already holds Accessibility. `request()` stays; callers decide. |
 | `Sources/TildeApp/ScreenMemory/GLiNERRedactionHelperHost.swift` | `—` | not-ported | 2 | Dev-only GLiNER. |
 | `Sources/TildeApp/ScreenMemory/LocalOCREvaluationStore.swift` | `—` | not-ported | 2 | Dev-only. Strip call sites. |
-| `Sources/TildeApp/ScreenMemory/LuminanceGridSampler.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/LuminanceGridSampler.swift` | ported | 2 | Unreferenced once the incremental-OCR flag is gone; kept as a ported unit. |
+| `Sources/TildeApp/ScreenMemory/LuminanceGridSampler.swift` | `—` | not-ported | 2 | Incremental OCR only; removed with that flag. |
 | `Sources/TildeApp/ScreenMemory/RedactionEvalCommand.swift` | `—` | not-ported | 2 | Dev-only. |
 | `Sources/TildeApp/ScreenMemory/RedactionService.swift` | `—` | not-ported | 2 | Only used by eval and proof paths. |
 | `Sources/TildeApp/ScreenMemory/ScreenCaptureService.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift` | ported | 2 | Fable porter. OCR evaluation store and incremental-OCR flag stripped, so every Vision pass is a full OCR (the flag's default). Full-display capture removed 2026-09-29 (owner decision): it reads only the focused window `FocusedWindowCapturePolicy` picks, or nothing. |
@@ -196,7 +196,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeCoreTests/InlineSuggestionStateTests.swift` | `Tests/TranscriptedWritingTests/Core/InlineSuggestionStateTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/IntentFutureFusionTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentFutureFusionTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/IntentFuturesTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentFuturesTests.swift` | ported | 1 | |
-| `Tests/TildeCoreTests/IntentPromptHintTests.swift` | `Tests/TranscriptedWritingTests/Core/IntentPromptHintTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/IntentPromptHintTests.swift` | `—` | not-ported | 1 | Removed with IntentPromptHint. |
 | `Tests/TildeCoreTests/OpportunityCharacterMeterTests.swift` | `Tests/TranscriptedWritingTests/Core/OpportunityCharacterMeterTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/PersonalHistoryEventTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalHistoryEventTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/PersonalStreamGatePolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/PersonalStreamGatePolicyTests.swift` | ported | 1 | |
@@ -213,7 +213,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeCoreTests/RetainedSpanWatchTests.swift` | `Tests/TranscriptedWritingTests/Core/RetainedSpanWatchTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/SceneEchoPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneEchoPolicyTests.swift` | ported | 1 | Trimmed `.preview26B`/`.modelPreview` from the shipping-profiles loop (profiles not ported). |
 | `Tests/TildeCoreTests/SceneSuggestionPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/SceneSuggestionPolicyTests.swift` | ported | 1 | |
-| `Tests/TildeCoreTests/ScreenMemory/CaptureChangeDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureChangeDetectorTests.swift` | ported | 1 | |
+| `Tests/TildeCoreTests/ScreenMemory/CaptureChangeDetectorTests.swift` | `—` | not-ported | 1 | Removed with CaptureChangeDetector. |
 | `Tests/TildeCoreTests/ScreenMemory/CaptureKindPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/FocusedWindowCapturePolicyTests.swift` | replaced | 1 | Removed with `CaptureKindPolicy` (focused window only, 2026-09-29). |
 | `Tests/TildeCoreTests/ScreenMemory/CaptureTriggerPolicyTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/CaptureTriggerPolicyTests.swift` | ported | 1 | |
 | `Tests/TildeCoreTests/ScreenMemory/ContextResetDetectorTests.swift` | `Tests/TranscriptedWritingTests/Core/ScreenMemory/ContextResetDetectorTests.swift` | ported | 1 | |
