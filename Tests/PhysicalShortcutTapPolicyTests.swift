@@ -192,25 +192,28 @@ func testPhysicalShortcutTapPolicy() {
         assertDiagnosticKeysSurviveSanitizer(mediaContext, label: "media-key log")
     }
 
-    runSuite("A modifier mismatch logs only for the saved key, never for other typing") {
+    runSuite("A modifier mismatch logs only for the saved dictation key, never for other typing") {
         assertTrue(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationPushToTalk,
                 saved: savedF8,
                 keyCode: f8,
                 modifiers: command
             ),
-            "Cmd+F8 on a saved F8 is a mismatch worth logging"
+            "Cmd+F8 on a saved F8 dictation key is a mismatch worth logging"
         )
         assertTrue(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationHandsFree,
                 saved: savedF8,
                 keyCode: f8,
                 modifiers: option | shift
             ),
-            "Option+Shift+F8 on a saved F8 is a mismatch worth logging"
+            "Option+Shift+F8 on a tap-to-toggle F8 is a mismatch worth logging"
         )
         assertTrue(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationPushToTalk,
                 saved: savedF8,
                 keyCode: f8,
                 modifiers: control
@@ -219,6 +222,7 @@ func testPhysicalShortcutTapPolicy() {
         )
         assertFalse(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationPushToTalk,
                 saved: savedF8,
                 keyCode: f8,
                 modifiers: 0
@@ -227,6 +231,7 @@ func testPhysicalShortcutTapPolicy() {
         )
         assertFalse(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationPushToTalk,
                 saved: savedF8,
                 keyCode: f8,
                 modifiers: function
@@ -235,14 +240,16 @@ func testPhysicalShortcutTapPolicy() {
         )
         assertFalse(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationPushToTalk,
                 saved: savedF8,
                 keyCode: UInt32(kVK_Space),
                 modifiers: command
             ),
-            "Cmd+Space must not log; only the saved key is in scope"
+            "Cmd+Space must not log; only the saved dictation key is in scope"
         )
         assertFalse(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .dictationPushToTalk,
                 saved: savedF8,
                 keyCode: UInt32(kVK_ANSI_A),
                 modifiers: 0
@@ -251,29 +258,51 @@ func testPhysicalShortcutTapPolicy() {
         )
 
         let optionM = PhysicalDictationTriggerPreferences.defaultMeetingBinding
+        let m = UInt32(kVK_ANSI_M)
         assertFalse(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .meeting,
                 saved: optionM,
-                keyCode: UInt32(kVK_ANSI_M),
+                keyCode: m,
                 modifiers: 0
             ),
-            "bare M while Option+M is saved is typing, not a logged mismatch"
-        )
-        assertTrue(
-            PhysicalShortcutModifierMismatchPolicy.shouldLog(
-                saved: optionM,
-                keyCode: UInt32(kVK_ANSI_M),
-                modifiers: command
-            ),
-            "Cmd+M on a saved Option+M is a mismatch on the saved key"
+            "bare M while Option+M is the meeting key is typing, not a logged mismatch"
         )
         assertFalse(
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .meeting,
                 saved: optionM,
-                keyCode: UInt32(kVK_ANSI_M),
+                keyCode: m,
+                modifiers: command
+            ),
+            "Cmd+M must not log a meeting-key mismatch; that leaves a local timing trace while typing"
+        )
+        assertFalse(
+            PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .meeting,
+                saved: optionM,
+                keyCode: m,
+                modifiers: shift
+            ),
+            "a capital M (Shift+M) must not log against the meeting shortcut"
+        )
+        assertFalse(
+            PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .meeting,
+                saved: optionM,
+                keyCode: m,
                 modifiers: option
             ),
             "Option+M matches the meeting shortcut"
+        )
+        assertFalse(
+            PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: .meeting,
+                saved: savedF8,
+                keyCode: f8,
+                modifiers: command
+            ),
+            "even an F8 meeting shortcut must not log modifier mismatches"
         )
     }
 
@@ -362,6 +391,115 @@ func testPhysicalShortcutTapPolicy() {
             PhysicalShortcutTapPolicy.diagnosticLogInterval,
             5,
             "the tap uses a 5s window for media-key and mismatch logs"
+        )
+    }
+
+    runSuite("The tap inspects NSSystemDefined events only when dictation is an F1-F12 key") {
+        assertTrue(
+            PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(dictationBinding: savedF8),
+            "F8 can arrive as play/pause, so the tap may wrap that event"
+        )
+        assertTrue(
+            PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(
+                dictationBinding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F1))
+            ),
+            "F1 is on the hardware media row"
+        )
+        assertTrue(
+            PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(
+                dictationBinding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F12))
+            ),
+            "F12 is on the hardware media row"
+        )
+        assertFalse(
+            PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(
+                dictationBinding: PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F20))
+            ),
+            "F13-F20 have no media-key form, so skip NSEvent wrapping"
+        )
+        assertFalse(
+            PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(dictationBinding: rightOption),
+            "Right Option is not a media key; skip NSEvent wrapping so media keys stay fast"
+        )
+        assertFalse(
+            PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(dictationBinding: nil),
+            "no dictation binding means media keys are none of ours"
+        )
+        assertTrue(
+            PhysicalShortcutTapPolicy.mustPassThrough(
+                eventTypeRawValue: PhysicalShortcutTapPolicy.systemDefinedEventTypeRawValue
+            ),
+            "skipping the wrap still passes play/pause through; the tap never swallows media keys"
+        )
+    }
+
+    runSuite("A full F8 press, auto-repeat and release goes through the matcher and tap policy") {
+        let shortcuts = [
+            PhysicalShortcutBinding(action: .dictationPushToTalk, binding: savedF8),
+            PhysicalShortcutBinding(
+                action: .meeting,
+                binding: PhysicalDictationTriggerPreferences.defaultMeetingBinding
+            ),
+        ]
+        var state = PhysicalShortcutKeySequencePolicy.State()
+
+        let pressMatch = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts, keyCode: f8, modifiers: 0
+        )
+        assertEqual(
+            pressMatch?.action,
+            Optional(.dictationPushToTalk),
+            "the F8 keyDown matches the saved dictation key"
+        )
+        assertEqual(
+            PhysicalShortcutKeySequencePolicy.keyDown(
+                keyCode: f8,
+                isRepeat: false,
+                matched: pressMatch,
+                state: &state
+            ),
+            .firePress(.dictationPushToTalk),
+            "the first F8 down starts dictation"
+        )
+
+        let repeatMatch = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts, keyCode: f8, modifiers: function
+        )
+        assertEqual(
+            repeatMatch?.action,
+            Optional(.dictationPushToTalk),
+            "an auto-repeat F8 with implicit Fn still matches"
+        )
+        assertEqual(
+            PhysicalShortcutKeySequencePolicy.keyDown(
+                keyCode: f8,
+                isRepeat: true,
+                matched: repeatMatch,
+                state: &state
+            ),
+            .swallow,
+            "holding F8 must not fire dictation again on auto-repeat"
+        )
+
+        assertEqual(
+            PhysicalShortcutKeySequencePolicy.keyUp(keyCode: f8, state: &state),
+            .firePushToTalkRelease,
+            "F8 up ends the hold"
+        )
+
+        assertTrue(
+            PhysicalShortcutMatcher.matchingKeyDownShortcut(
+                shortcuts,
+                keyCode: UInt32(PhysicalShortcutMediaKeyPolicy.playPauseNXKeyType),
+                modifiers: 0
+            ) == nil,
+            "NX_KEYTYPE_PLAY is not a keyDown keycode; play/pause must not fire dictation"
+        )
+        assertTrue(
+            PhysicalShortcutTapPolicy.mustPassThrough(
+                eventTypeRawValue: PhysicalShortcutTapPolicy.systemDefinedEventTypeRawValue
+            ),
+            "play/pause stays a pass-through media-key diagnosis, never a shortcut fire"
         )
     }
 }

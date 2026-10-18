@@ -131,6 +131,22 @@ enum PhysicalShortcutMediaKeyPolicy {
         return canonicalNXKeyType(nxKeyType) == expected
     }
 
+    /// Building an `NSEvent` from a CGEvent is not cheap, and this runs on
+    /// the tap thread. Skip wrapping unless the saved dictation key is on
+    /// the F1–F12 hardware row that can arrive as `NSSystemDefined`.
+    static func shouldInspectSystemDefined(
+        dictationBinding: PhysicalDictationTriggerBinding?
+    ) -> Bool {
+        guard let dictationBinding else { return false }
+        switch Int(dictationBinding.keyCode) {
+        case kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6,
+             kVK_F7, kVK_F8, kVK_F9, kVK_F10, kVK_F11, kVK_F12:
+            return true
+        default:
+            return false
+        }
+    }
+
     static func nxKeyKind(_ nxKeyType: Int) -> String {
         switch canonicalNXKeyType(nxKeyType) {
         case 0: return "sound_up"
@@ -162,14 +178,22 @@ enum PhysicalShortcutMediaKeyPolicy {
 }
 
 enum PhysicalShortcutModifierMismatchPolicy {
-    /// True only when this event is the saved binding's keycode with a
+    /// True only when this event is the saved *dictation* key with a
     /// different Cmd/Ctrl/Opt/Shift set. Fn on F-keys is not a mismatch.
-    /// Bare typing of the same letter without extra modifiers is not logged.
+    /// The meeting key is never logged: Cmd+M or a capital M would leave a
+    /// local timing trace for ordinary typing.
     static func shouldLog(
+        action: PhysicalShortcutAction,
         saved: PhysicalDictationTriggerBinding,
         keyCode: UInt32,
         modifiers: UInt32
     ) -> Bool {
+        switch action {
+        case .meeting:
+            return false
+        case .dictationPushToTalk, .dictationHandsFree:
+            break
+        }
         guard saved.keyCode == keyCode else { return false }
         guard !PhysicalDictationTriggerPreferences.isModifierKey(saved.keyCode) else { return false }
         let relevant = PhysicalDictationTriggerPreferences.relevantHeldModifiers(forKeyCode: saved.keyCode)
@@ -187,6 +211,57 @@ enum PhysicalShortcutModifierMismatchPolicy {
         [
             "dictation_is_fkey": PhysicalDictationTriggerPreferences.isFunctionKey(keyCode) ? "true" : "false",
         ]
+    }
+}
+
+/// Press / auto-repeat / release for a matched keyDown shortcut. The
+/// CGEventTap callback is not compiled into fast tests
+/// (`run-tests.sh` APP_SOURCES lists this file and the matcher, not
+/// `PhysicalShortcutDetector`), so this is the seam for an F8 hold.
+enum PhysicalShortcutKeySequencePolicy {
+    struct State: Equatable {
+        var consumedKeyCodes: Set<UInt32> = []
+        var activePushToTalkKeyCode: UInt32? = nil
+    }
+
+    enum Decision: Equatable {
+        case firePress(PhysicalShortcutAction)
+        case firePushToTalkRelease
+        case swallow
+        case passThrough
+        case passThroughAndLogMismatch
+    }
+
+    static func keyDown(
+        keyCode: UInt32,
+        isRepeat: Bool,
+        matched: PhysicalShortcutBinding?,
+        state: inout State
+    ) -> Decision {
+        if isRepeat {
+            return state.consumedKeyCodes.contains(keyCode) ? .swallow : .passThrough
+        }
+        guard let matched else {
+            return .passThroughAndLogMismatch
+        }
+        state.consumedKeyCodes.insert(keyCode)
+        if matched.action == .dictationPushToTalk {
+            guard state.activePushToTalkKeyCode == nil else { return .swallow }
+            state.activePushToTalkKeyCode = keyCode
+        }
+        return .firePress(matched.action)
+    }
+
+    static func keyUp(keyCode: UInt32, state: inout State) -> Decision {
+        if state.activePushToTalkKeyCode == keyCode {
+            state.activePushToTalkKeyCode = nil
+            state.consumedKeyCodes.remove(keyCode)
+            return .firePushToTalkRelease
+        }
+        if state.consumedKeyCodes.remove(keyCode) != nil {
+            return .swallow
+        }
+        return .passThrough
     }
 }
 

@@ -531,6 +531,29 @@ enum PhysicalDictationTriggerPreferences {
         return "\(displayString(for: binding)) is already used for \(clash.name). Choose a different key."
     }
 
+    /// Why the stored dictation and meeting shortcuts now collide, or nil.
+    /// F8 and Fn+F8 used to be distinct; after F-keys ignore Fn they are
+    /// one key, and `.first` matching would leave meetings silently dead.
+    static func storedClashReason(
+        dictation: PhysicalDictationTriggerBinding,
+        meeting: PhysicalDictationTriggerBinding
+    ) -> String? {
+        duplicateReason(
+            for: meeting,
+            otherShortcuts: [(name: "Dictation key", binding: dictation)]
+        )
+    }
+
+    /// Caption under a Settings shortcut row. Recording shows why the last
+    /// press was refused; idle shows a stored dictation/meeting clash.
+    static func shortcutRowHint(
+        isRecording: Bool,
+        rejectionHint: String?,
+        storedClashReason: String?
+    ) -> String? {
+        isRecording ? rejectionHint : storedClashReason
+    }
+
     private static func normalizedForComparison(_ binding: PhysicalDictationTriggerBinding) -> PhysicalDictationTriggerBinding {
         PhysicalDictationTriggerBinding(
             keyCode: binding.keyCode,

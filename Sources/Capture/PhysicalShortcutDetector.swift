@@ -251,48 +251,55 @@ final class PhysicalShortcutDetector {
                 pushToTalkTap.otherKeyWentDown()
             }
             lastTypedKeyDownUptime = ProcessInfo.processInfo.systemUptime
-            if isRepeat, consumedKeyCodes.contains(keyCode) {
+            let matched = isRepeat
+                ? nil
+                : matchingKeyDownShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers)
+            var sequenceState = PhysicalShortcutKeySequencePolicy.State(
+                consumedKeyCodes: consumedKeyCodes,
+                activePushToTalkKeyCode: activePushToTalkKeyCode
+            )
+            let decision = PhysicalShortcutKeySequencePolicy.keyDown(
+                keyCode: keyCode,
+                isRepeat: isRepeat,
+                matched: matched,
+                state: &sequenceState
+            )
+            consumedKeyCodes = sequenceState.consumedKeyCodes
+            activePushToTalkKeyCode = sequenceState.activePushToTalkKeyCode
+            switch decision {
+            case .firePress(let action):
+                cancelPendingModifierShortcut()
+                onShortcut?(action, .press)
                 return nil
-            }
-
-            guard !isRepeat else {
+            case .swallow:
+                return nil
+            case .passThrough:
                 return Unmanaged.passUnretained(event)
-            }
-
-            guard let shortcut = matchingKeyDownShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
+            case .passThroughAndLogMismatch:
                 cancelPendingModifierShortcut()
                 logModifierMismatchIfNeeded(keyCode: keyCode, modifiers: modifiers, bindings: shortcutBindings)
                 return Unmanaged.passUnretained(event)
+            case .firePushToTalkRelease:
+                return Unmanaged.passUnretained(event)
             }
-
-            cancelPendingModifierShortcut()
-            consumedKeyCodes.insert(keyCode)
-
-            switch shortcut.action {
-            case .dictationPushToTalk:
-                guard activePushToTalkKeyCode == nil else { return nil }
-                activePushToTalkKeyCode = keyCode
-                onShortcut?(.dictationPushToTalk, .press)
-            case .dictationHandsFree:
-                onShortcut?(.dictationHandsFree, .press)
-            case .meeting:
-                onShortcut?(.meeting, .press)
-            }
-            return nil
 
         case .keyUp:
-            if activePushToTalkKeyCode == keyCode {
-                activePushToTalkKeyCode = nil
-                consumedKeyCodes.remove(keyCode)
+            var sequenceState = PhysicalShortcutKeySequencePolicy.State(
+                consumedKeyCodes: consumedKeyCodes,
+                activePushToTalkKeyCode: activePushToTalkKeyCode
+            )
+            let decision = PhysicalShortcutKeySequencePolicy.keyUp(keyCode: keyCode, state: &sequenceState)
+            consumedKeyCodes = sequenceState.consumedKeyCodes
+            activePushToTalkKeyCode = sequenceState.activePushToTalkKeyCode
+            switch decision {
+            case .firePushToTalkRelease:
                 onShortcut?(.dictationPushToTalk, pushToTalkReleasePhase())
                 return nil
-            }
-
-            if consumedKeyCodes.remove(keyCode) != nil {
+            case .swallow:
                 return nil
+            case .passThrough, .passThroughAndLogMismatch, .firePress:
+                return Unmanaged.passUnretained(event)
             }
-
-            return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
             if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
@@ -397,6 +404,12 @@ final class PhysicalShortcutDetector {
     }
 
     private func handleSystemDefined(_ event: CGEvent) {
+        let dictation = shortcutBindings.first { $0.action != .meeting }
+        guard PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(
+            dictationBinding: dictation?.binding
+        ) else {
+            return
+        }
         guard let nsEvent = NSEvent(cgEvent: event),
               let parsed = PhysicalShortcutMediaKeyPolicy.parseAuxControl(
                 subtype: Int(nsEvent.subtype.rawValue),
@@ -404,7 +417,6 @@ final class PhysicalShortcutDetector {
               ) else {
             return
         }
-        let dictation = shortcutBindings.first { $0.action != .meeting }
         guard PhysicalShortcutMediaKeyPolicy.dictationFunctionKeyArrivedAsMediaKey(
             nxKeyType: parsed.nxKeyType,
             dictationBinding: dictation?.binding
@@ -426,6 +438,7 @@ final class PhysicalShortcutDetector {
     ) {
         guard let saved = bindings.first(where: {
             PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: $0.action,
                 saved: $0.binding,
                 keyCode: keyCode,
                 modifiers: modifiers

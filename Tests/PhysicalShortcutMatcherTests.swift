@@ -374,4 +374,39 @@ func testPhysicalShortcutMatcher() {
         )
         assertTrue(withCommand == nil, "Cmd+F8 must not fire a bare F8 dictation key")
     }
+
+    runSuite("PhysicalShortcutMatcher — Fn+arrow still needs an exact match") {
+        let control = PhysicalDictationTriggerModifiers.control
+        let shortcuts = [
+            binding(.dictationPushToTalk, keyCode: kVK_LeftArrow, modifiers: control | function),
+        ]
+
+        let withFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_LeftArrow),
+            modifiers: control | function
+        )
+        assertEqual(
+            withFn?.action,
+            .dictationPushToTalk,
+            "Control+Left with the Fn flag macOS sets on arrows must resolve"
+        )
+
+        let withoutFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_LeftArrow),
+            modifiers: control
+        )
+        assertTrue(
+            withoutFn == nil,
+            "Control+Left without Fn must not match a Control+Fn+Left shortcut"
+        )
+
+        let fnOnly = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_LeftArrow),
+            modifiers: function
+        )
+        assertTrue(fnOnly == nil, "bare Fn+Left must not fire Control+Left")
+    }
 }
