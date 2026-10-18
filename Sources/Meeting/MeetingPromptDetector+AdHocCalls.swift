@@ -143,7 +143,9 @@ extension MeetingPromptDetector {
         }
 
         if providers.isEmpty {
-            clearPromptPendingWindows(for: session)
+            if !session.autoStartDeclinedProviders.isEmpty {
+                clearPromptPendingWindows(for: session)
+            }
             detectedCallSession = nil
             finishDetectedCallSession(session, endedAt: now)
         } else {

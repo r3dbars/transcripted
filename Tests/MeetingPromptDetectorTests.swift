@@ -514,7 +514,11 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 1, "one prompt should be presented")
         assertEqual(box.candidate?.source, .calendarEvent, "native mic evidence should keep matching calendar context")
         assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "native calendar-backed mic calls should keep the meeting title hint")
-        assertEqual(box.candidate?.callEvidence, .none, "borrowed proof must not rewrite calendar call_evidence telemetry")
+        assertEqual(
+            box.candidate?.callEvidence,
+            Optional(MeetingPromptCallEvidence.none),
+            "borrowed proof must not rewrite calendar call_evidence telemetry"
+        )
         assertTrue(box.candidate?.holdsMicrophone == true, "and that the native app is on the mic")
         assertFalse(
             box.candidate?.isBrowserCall == true,
