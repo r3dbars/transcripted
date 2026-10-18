@@ -571,7 +571,6 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarHeaderStatusPresentation.swift"
     "Sources/UI/MenuBar/MenuBarShortcutWarningPresentation.swift"
     "Sources/UI/MenuBar/MenuBarPrimaryButtonTitle.swift"
-    "Sources/UI/MenuBar/MenuBarShortcutLabel.swift"
     "Sources/UI/MenuBar/MenuBarGlyph.swift"
     "Sources/UI/Shared/MenuTokens.swift"
     "Sources/UI/MenuBar/StatusItemPresentation.swift"
