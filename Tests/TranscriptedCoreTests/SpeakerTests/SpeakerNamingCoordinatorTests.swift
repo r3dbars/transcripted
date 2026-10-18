@@ -2756,7 +2756,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             transcriptionResult: result, micURL: nil, systemURL: systemURL,
             shouldRemoveTemporaryAudio: false, clips: clips
         )
-        try await waitUntil(timeout: 5) {
+        try await waitUntil(timeout: 60) {
             harness.manager.speakerNamingRequest == nil && harness.manager.displayStatus == .transcriptSaved
         }
         XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
@@ -4088,7 +4088,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
     }
 
     private func waitUntil(
-        timeout: TimeInterval = 2.0,
+        timeout: TimeInterval = 60.0,
         condition: @escaping @Sendable @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)

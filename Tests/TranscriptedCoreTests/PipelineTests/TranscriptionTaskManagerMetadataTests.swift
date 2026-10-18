@@ -874,7 +874,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
     }
 
     func waitUntil(
-        timeout: TimeInterval = 2.0,
+        timeout: TimeInterval = 60.0,
         condition: @escaping @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)

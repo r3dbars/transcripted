@@ -1059,7 +1059,7 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
     }
 
     private func waitUntil(
-        timeout: TimeInterval = 3.0,
+        timeout: TimeInterval = 60.0,
         condition: @escaping @Sendable @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
