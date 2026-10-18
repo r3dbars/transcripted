@@ -67,6 +67,9 @@ CRASH_REPORTING_KEY = "observability-crash-reporting-enabled"
 # `-key value` pairs in the volatile NSArgumentDomain, which UserDefaults reads
 # before the saved preferences and never persists.
 TELEMETRY_OFF_ARGS = ("-" + ANALYTICS_KEY, "NO", "-" + CRASH_REPORTING_KEY, "NO")
+# Same trick for Sparkle, always on: launch leaves the automated-harness flag off,
+# so without this a lab build older than the live appcast gets replaced by the release.
+UPDATES_OFF_ARGS = ("-SUEnableAutomaticChecks", "NO", "-SUAutomaticallyUpdate", "NO")
 PRIVATE_DIR_MODE = 0o700
 COMMANDS = (
     "ping",
@@ -298,7 +301,7 @@ def launch_plan(
     telemetry_off: bool = True,
 ) -> dict[str, Any]:
     """The exact argv + extra env `launch` would use. Pure, so it is testable."""
-    app_args = list(TELEMETRY_OFF_ARGS) if telemetry_off else []
+    app_args = [*(TELEMETRY_OFF_ARGS if telemetry_off else ()), *UPDATES_OFF_ARGS]
     extra_env = {CONTROL_ENV: str(root)}
     if allow_second_instance:
         extra_env[GUARD_ENV] = "1"
@@ -314,8 +317,7 @@ def launch_plan(
         argv = ["open", "-n", "-a", str(app)]
         for key, value in extra_env.items():
             argv += ["--env", f"{key}={value}"]
-        if app_args:
-            argv += ["--args", *app_args]
+        argv += ["--args", *app_args]
     else:
         argv = [str(resolve_executable(app)), *app_args]
     return {"argv": argv, "env": extra_env, "uses_open": use_open, "telemetry_off_for_this_run": telemetry_off}

@@ -105,6 +105,13 @@ back to `Info.plist`). So `launch` isolates by default and refuses otherwise:
   which `UserDefaults` reads before saved preferences and never writes back,
   so your normal app keeps whatever you chose in Settings. Pass
   `--allow-telemetry` to skip this.
+- `launch` leaves the automated-harness flag (`TRANSCRIPTED_AUTOMATED_HARNESS`)
+  off on purpose, so warmup, live captions and permission revalidation match a
+  real launch. It only switches off Sparkle update checks for this one process
+  (`-SUEnableAutomaticChecks NO -SUAutomaticallyUpdate NO`, same argument
+  domain), so a lab build older than the live release isn't swapped out.
+  Login-item sync and the companion connection still run against the real
+  account.
 - The client only reads preferences (`defaults read`). It never writes them.
 
 ## Protocol
