@@ -518,9 +518,4 @@ extension TranscriptIndex {
             representativeQuotes: Array(quotes)
         )
     }
-
-    /// Convenience wrapper — returns the N most recent meetings with no date filter.
-    func listRecentMeetings(count: Int) throws -> [MeetingSummary] {
-        try listMeetings(count: count)
-    }
 }
