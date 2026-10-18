@@ -151,6 +151,24 @@ struct DictationPasteTarget: Equatable {
         )
     }
 
+    /// Return goes to whatever holds key focus, and a launcher panel can take
+    /// key focus without becoming frontmost. Blocks only when both pids are
+    /// known and differ, so apps that expose little to Accessibility keep Auto Enter.
+    func ownsFocusedElement(focusedProcessIdentifier: pid_t?) -> Bool {
+        guard let processIdentifier, let focusedProcessIdentifier else { return true }
+        return processIdentifier == focusedProcessIdentifier
+    }
+
+    func ownsCurrentFocusedElement() -> Bool {
+        let focused = FocusedTextPasteConfirmationPolicy.boundedFocusedElement(
+            systemWide: AXUIElementCreateSystemWide()
+        ).flatMap { element -> pid_t? in
+            var pid: pid_t = 0
+            return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+        }
+        return ownsFocusedElement(focusedProcessIdentifier: focused)
+    }
+
     func matches(processIdentifier currentProcessIdentifier: pid_t?, bundleIdentifier currentBundleIdentifier: String?) -> Bool {
         if let processIdentifier, let currentProcessIdentifier {
             return processIdentifier == currentProcessIdentifier

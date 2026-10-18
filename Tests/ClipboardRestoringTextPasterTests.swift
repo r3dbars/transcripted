@@ -1377,6 +1377,15 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
+        runSuite("DictationPasteTarget — Auto Enter needs the target to own the focused field") {
+            let target = DictationPasteTarget(processIdentifier: 42, bundleIdentifier: "com.example.Target")
+            assertTrue(target.ownsFocusedElement(focusedProcessIdentifier: 42), "focus in the target keeps Auto Enter")
+            assertFalse(target.ownsFocusedElement(focusedProcessIdentifier: 7), "a launcher panel over the target blocks Auto Enter")
+            assertTrue(target.ownsFocusedElement(focusedProcessIdentifier: nil), "unreadable focus keeps today's behavior")
+            let noPid = DictationPasteTarget(processIdentifier: nil, bundleIdentifier: "com.example.Target")
+            assertTrue(noPid.ownsFocusedElement(focusedProcessIdentifier: 7), "a target without a pid can't be compared")
+        }
+
         runSuite("DictationPasteTarget — follows the app focused at paste time") {
             let originalTarget = DictationPasteTarget(
                 processIdentifier: 42,

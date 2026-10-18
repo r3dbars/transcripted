@@ -282,7 +282,8 @@ final class DictationAutoSender {
             return .failed(.accessibilityMissing)
         }
 
-        guard target?.matchesCurrentFrontmostApp() != false else {
+        guard target?.matchesCurrentFrontmostApp() != false,
+              target?.ownsCurrentFocusedElement() != false else {
             return .failed(.targetChanged)
         }
 
