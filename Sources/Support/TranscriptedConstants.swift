@@ -384,26 +384,28 @@ enum TranscriptedConstants {
             throw CancellationError()
         }
 
+        let race = TimeoutRaceState<T>()
         guard forwardsCallerCancellation else {
-            return try await awaitRace(operationTask: operationTask, timeoutTask: timeoutTask)
+            return try await awaitRace(race: race, operationTask: operationTask, timeoutTask: timeoutTask)
         }
-        // Cancelling the timer makes it throw CancellationError at once, which
-        // wins the race even if the operation ignores its own cancellation.
+        // The caller's cancellation is recorded in the race itself, so it wins
+        // even when the operation catches its own cancellation and returns a
+        // value before the cancelled timer gets to report.
         return try await withTaskCancellationHandler {
-            try await awaitRace(operationTask: operationTask, timeoutTask: timeoutTask)
+            try await awaitRace(race: race, operationTask: operationTask, timeoutTask: timeoutTask)
         } onCancel: {
+            race.recordCallerCancellation()
             operationTask.cancel()
             timeoutTask.cancel()
         }
     }
 
     private static func awaitRace<T: Sendable>(
+        race: TimeoutRaceState<T>,
         operationTask: Task<T, Error>,
         timeoutTask: Task<T, Error>
     ) async throws -> T {
         try await withCheckedThrowingContinuation { continuation in
-            let race = TimeoutRaceState<T>()
-
             Task {
                 do {
                     race.resume(
@@ -446,9 +448,18 @@ enum TranscriptedConstants {
 private final class TimeoutRaceState<T: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
     private var didResume = false
+    private var callerCancelled = false
+
+    /// Marks the caller as cancelled. Any result reported after this is
+    /// replaced with CancellationError, whichever watcher reports first.
+    func recordCallerCancellation() {
+        lock.lock()
+        callerCancelled = true
+        lock.unlock()
+    }
 
     func resume(
-        with result: Result<T, Error>,
+        with reported: Result<T, Error>,
         continuation: CheckedContinuation<T, Error>,
         operationTask: Task<T, Error>,
         timeoutTask: Task<T, Error>
@@ -459,6 +470,7 @@ private final class TimeoutRaceState<T: Sendable>: @unchecked Sendable {
             return
         }
         didResume = true
+        let result: Result<T, Error> = callerCancelled ? .failure(CancellationError()) : reported
         lock.unlock()
 
         operationTask.cancel()

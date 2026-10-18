@@ -28,11 +28,12 @@ Read the finding, then read the code it points at on the PR's head commit. The f
 
 **Real: fix it.**
 1. Check out the recorded `headRefOid` (the commit whose files you checked, not the branch name) in its own git worktree, and require `git rev-parse HEAD` to equal it.
-2. Make the smallest fix. Stay inside the PR's lane files (`.agents/auto-merge-lanes.json`); if the fix needs a file outside the lane, treat it as "Unsure" instead.
-3. Run `bash check.sh`.
-4. Commit as `r3dbars <r3dbars@users.noreply.github.com>` with no AI co-author lines. For bug-fix PRs, run `bash scripts/dev/verify-change.sh` after committing, so its summary names the new head, and replace the `## App verification` block in the PR body with it.
-5. Re-read `headRefOid`; if it isn't the commit you checked out, stop and don't push. Otherwise push with `git push origin HEAD:<headRefName>`. Never force-push.
-6. Reply on the thread: what was wrong and the commit that fixes it. Resolve the thread.
+2. Require `git status --porcelain` to print nothing in that worktree before you touch anything; if it isn't empty, stop and treat the finding as "Unsure".
+3. Make the smallest fix. Stay inside the PR's lane files (`.agents/auto-merge-lanes.json`); if the fix needs a file outside the lane, treat it as "Unsure" instead.
+4. Run `bash check.sh`.
+5. Commit as `r3dbars <r3dbars@users.noreply.github.com>` with no AI co-author lines. For bug-fix PRs, run `bash scripts/dev/verify-change.sh` after committing, so its summary names the new head, and replace the `## App verification` block in the PR body with it.
+6. Re-read `headRefOid`; if it isn't the commit you checked out, stop and don't push. Otherwise push with `git push origin HEAD:<headRefName>`. Never force-push.
+7. Reply on the thread: what was wrong and the commit that fixes it. Resolve the thread.
 
 The push starts a new Codex review automatically.
 

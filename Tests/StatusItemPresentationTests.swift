@@ -3,7 +3,9 @@
 // neutral template. The second renders every MenuBarGlyph into a bitmap and checks the silhouettes
 // actually differ where they are meant to. The third builds the real CGPaths MenuBarGlyphGeometry makes
 // (corner arcs and the tail included) and compares every path element with the SVGs the generator in
-// docs/assets/menu-bar-icon/make_menu_bar_icons.py wrote; that generator is the source of truth.
+// docs/assets/menu-bar-icon/make_menu_bar_icons.py wrote, including the dictating/meeting knockouts, the
+// meeting dot and ring circles, and the stroke width, cap and join. That generator is the source of
+// truth, and `make_menu_bar_icons.py --check` fails when the committed SVGs are stale against it.
 
 import AppKit
 import Foundation
@@ -133,20 +135,37 @@ func testStatusItemPresentation() {
     runSuite("menu bar glyph paths match the SVGs the generator draws") {
         let g = MenuBarGlyphGeometry.self
         let idle = svgPathData("docs/assets/menu-bar-icon/idle.svg")
-        // dictating.svg also holds the mask's stem and side-bar paths; the bubble is the closed one.
-        let dictating = svgPathData("docs/assets/menu-bar-icon/dictating.svg").filter { $0.last?.kind == "Z" }
+        // The filled SVGs hold the closed bubble plus the mask's open knockout paths (stem, then the
+        // two side bars), in that order.
+        let dictatingAll = svgPathData("docs/assets/menu-bar-icon/dictating.svg")
+        let meetingAll = svgPathData("docs/assets/menu-bar-icon/meeting.svg")
+        let dictating = dictatingAll.filter { $0.last?.kind == "Z" }
+        let meeting = meetingAll.filter { $0.last?.kind == "Z" }
+        let dictatingCuts = dictatingAll.filter { $0.last?.kind != "Z" }
+        let meetingCuts = meetingAll.filter { $0.last?.kind != "Z" }
         assertEqual(idle.count, 5, "idle.svg should hold the outline, crossbar, stem and two side bars")
         assertEqual(dictating.count, 1, "dictating.svg should hold one closed bubble path")
-        guard idle.count == 5, dictating.count == 1 else { return }
+        assertEqual(meeting.count, 1, "meeting.svg should hold one closed bubble path")
+        assertEqual(dictatingCuts.count, 3, "dictating.svg should knock out the stem and two side bars")
+        assertEqual(meetingCuts.count, 3, "meeting.svg should knock out the stem and two side bars")
+        guard idle.count == 5, dictating.count == 1, meeting.count == 1,
+              dictatingCuts.count == 3, meetingCuts.count == 3 else { return }
 
         // The real CGPaths the app strokes, each against the generator's output. The outline and the
-        // body include the four corner arcs and the tail's two quadratic curves.
+        // body include the four corner arcs and the tail's two quadratic curves. The knockouts start
+        // the stem under the top edge, as MenuBarGlyph.draw does for the filled states.
+        let knockoutStem = g.stemPath(from: g.top + g.strokeWidth)
         let comparisons: [(String, CGPath, [PathElement])] = [
             ("idle outline (corner arcs and tail)", g.outlinePath(), idle[0]),
-            ("filled body (corner arcs and tail)", g.bodyPath(), dictating[0]),
+            ("dictating body (corner arcs and tail)", g.bodyPath(), dictating[0]),
+            ("meeting body (corner arcs and tail)", g.bodyPath(), meeting[0]),
             ("crossbar", g.crossbarPath(), idle[1]),
             ("idle stem", g.stemPath(from: g.top), idle[2]),
-            ("side bars", g.sideBarsPath(), idle[3] + idle[4]),
+            ("idle side bars", g.sideBarsPath(), idle[3] + idle[4]),
+            ("dictating knockout stem", knockoutStem, dictatingCuts[0]),
+            ("dictating knockout side bars", g.sideBarsPath(), dictatingCuts[1] + dictatingCuts[2]),
+            ("meeting knockout stem", knockoutStem, meetingCuts[0]),
+            ("meeting knockout side bars", g.sideBarsPath(), meetingCuts[1] + meetingCuts[2]),
         ]
         for (name, path, expected) in comparisons {
             let actual = pathElements(of: path)
@@ -159,6 +178,38 @@ func testStatusItemPresentation() {
                         },
                     "\(name) segment \(index) is \(pair.0), the generator draws \(pair.1)"
                 )
+            }
+        }
+
+        // meeting.svg's recording dot and the clear ring around it, against the circles the app fills.
+        // The ring is knocked out of the mask first, then the dot is drawn on top of it.
+        let circles = svgCircles("docs/assets/menu-bar-icon/meeting.svg")
+        assertEqual(circles.count, 2, "meeting.svg should hold the dot's ring and the dot")
+        if circles.count == 2 {
+            let ring = g.dotRect(radius: g.dotRadius + g.dotRing)
+            let dot = g.dotRect(radius: g.dotRadius)
+            for (name, drawn, expected) in [("ring", circles[0], ring), ("dot", circles[1], dot)] {
+                assertTrue(
+                    abs(drawn.midX - expected.midX) < 0.01 && abs(drawn.midY - expected.midY) < 0.01
+                        && abs(drawn.width - expected.width) < 0.01,
+                    "meeting.svg's \(name) is \(drawn), the app fills \(expected)"
+                )
+            }
+        }
+        assertEqual(svgCircles("docs/assets/menu-bar-icon/dictating.svg").count, 0, "dictating.svg should have no recording dot")
+        assertEqual(svgCircles("docs/assets/menu-bar-icon/idle.svg").count, 0, "idle.svg should have no recording dot")
+
+        // Every stroke in every SVG is the app's 60-unit round stroke (MenuBarGlyph.draw sets
+        // lineWidth to strokeWidth with round caps and joins).
+        for name in ["idle", "dictating", "meeting"] {
+            let file = "docs/assets/menu-bar-icon/\(name).svg"
+            let widths = svgAttributeValues(file, "stroke-width")
+            assertTrue(!widths.isEmpty, "\(name).svg should declare a stroke width")
+            assertTrue(widths.allSatisfy { Double($0) == Double(g.strokeWidth) }, "\(name).svg stroke widths \(widths) should all be \(g.strokeWidth)")
+            for (attribute, expected) in [("stroke-linecap", "round"), ("stroke-linejoin", "round")] {
+                let values = svgAttributeValues(file, attribute)
+                assertTrue(!values.isEmpty, "\(name).svg should declare \(attribute)")
+                assertTrue(values.allSatisfy { $0 == expected }, "\(name).svg \(attribute) \(values) should all be \(expected)")
             }
         }
 
@@ -242,6 +293,26 @@ private func svgPathData(_ relativePath: String) -> [[PathElement]] {
         results.append(elements)
     }
     return results
+}
+
+/// Every attribute value `name="..."` in an SVG, in document order.
+private func svgAttributeValues(_ relativePath: String, _ name: String) -> [String] {
+    guard let svg = try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8) else { return [] }
+    return svg.components(separatedBy: " \(name)=\"").dropFirst().compactMap { $0.components(separatedBy: "\"").first }
+}
+
+/// Every `<circle>` in an SVG as its bounding square, in document order.
+private func svgCircles(_ relativePath: String) -> [CGRect] {
+    guard let svg = try? String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8) else { return [] }
+    return svg.components(separatedBy: "<circle ").dropFirst().map { chunk in
+        let tag = chunk.components(separatedBy: "/>").first ?? ""
+        func value(_ name: String) -> CGFloat? {
+            tag.components(separatedBy: "\(name)=\"").dropFirst().first?.components(separatedBy: "\"").first
+                .flatMap { Double($0) }.map { CGFloat($0) }
+        }
+        guard let cx = value("cx"), let cy = value("cy"), let r = value("r") else { return CGRect.null }
+        return CGRect(x: cx - r, y: cy - r, width: r * 2, height: r * 2)
+    }
 }
 
 private func svgViewBox(_ relativePath: String) -> CGRect {

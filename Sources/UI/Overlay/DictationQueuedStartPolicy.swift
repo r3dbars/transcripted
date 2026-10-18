@@ -76,6 +76,47 @@ extension DictationQueuedStartPolicy {
         }
     }
 
+    /// The kind of message the pill shows for a finished take's delivery.
+    /// Only the calm "it landed, press ⌘V" notice is a passing note; a
+    /// success never leaves a message, and everything else (not pasted,
+    /// clipboard busy, failures) must hold the next take back.
+    static func messageKind(for presentation: DictationDeliveryPresentation) -> MessageKind {
+        switch presentation {
+        case .clipboardNotice: return .landedClipboardNotice
+        case .success, .notPasted, .clipboardBusy, .error: return .other
+        }
+    }
+
+    /// The overlay calls a finished take's delivery can make. The calm
+    /// clipboard notice carries its kind, so the caller can't drop the
+    /// "a newer take may replace this" decision on the way to the pill.
+    struct DeliveryOverlaySteps {
+        var showSuccess: (_ title: String) -> Void
+        var showClipboardNotice: (_ message: String, _ kind: MessageKind) -> Void
+        var showNotPasted: (_ message: String, _ unconfirmed: Bool) -> Void
+        var showClipboardBusy: (_ message: String) -> Void
+        var showError: (_ message: String) -> Void
+    }
+
+    /// Shows a finished take's delivery on the overlay: one call per take.
+    static func presentDelivery(
+        _ presentation: DictationDeliveryPresentation,
+        _ steps: DeliveryOverlaySteps
+    ) {
+        switch presentation {
+        case .success(let title):
+            steps.showSuccess(title)
+        case .clipboardNotice(let message):
+            steps.showClipboardNotice(message, messageKind(for: presentation))
+        case .notPasted(let message, let unconfirmed):
+            steps.showNotPasted(message, unconfirmed)
+        case .clipboardBusy(let message):
+            steps.showClipboardBusy(message)
+        case .error(let message):
+            steps.showError(message)
+        }
+    }
+
     /// While the last take is still on screen transcribing, an error would
     /// cover its pill (and can hide it and turn off Esc), so a dropped press
     /// only says "still finishing" once nothing is dictating.

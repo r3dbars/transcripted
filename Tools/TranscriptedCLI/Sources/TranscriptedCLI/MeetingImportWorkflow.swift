@@ -352,12 +352,18 @@ enum MeetingImportModels {
             guard fromDir.pyannote != nil || fromDir.nemotron != nil else {
                 throw ValidationError("Incomplete diarization models at --diarization-models-dir: \(diarizationModelsDir)")
             }
-            diarization = fromDir.pyannote
+            // A Nemotron-only directory supplies no pyannote assets, so fall
+            // through to the bundled/cache lookup for those.
+            diarization = fromDir.pyannote ?? bundledOrCachedDiarization(
+                bundledResourceDirectories: bundledResourceDirectories,
+                homeDirectory: homeDirectory
+            )
             diarizationDirNemotron = fromDir.nemotron
         } else {
-            let cache = homeDirectory.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
-            diarization = bundledDiarizationModels(in: bundledResourceDirectories)
-                ?? fluidAudioRoot(for: cache)
+            diarization = bundledOrCachedDiarization(
+                bundledResourceDirectories: bundledResourceDirectories,
+                homeDirectory: homeDirectory
+            )
         }
         let discovered = resolveNemotronPaths(
             bundledResourceDirectories: bundledResourceDirectories,
@@ -382,6 +388,15 @@ enum MeetingImportModels {
             throw error
         }
         return paths
+    }
+
+    static func bundledOrCachedDiarization(
+        bundledResourceDirectories: [URL],
+        homeDirectory: URL
+    ) -> URL? {
+        let cache = homeDirectory.appendingPathComponent("Library/Application Support/FluidAudio/Models/speaker-diarization")
+        return bundledDiarizationModels(in: bundledResourceDirectories)
+            ?? fluidAudioRoot(for: cache)
     }
 
     static func bundledOrCachedParakeet() -> URL? {

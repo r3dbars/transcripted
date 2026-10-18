@@ -15,6 +15,20 @@ extension MeetingSessionController {
     func observeCallActivity(_ snapshot: MeetingCallActivitySnapshot) {
         let now = ProcessInfo.processInfo.systemUptime
         latestCallActivity = snapshot
+        if let pending = pendingCallEndCandidate {
+            let eligibleFamilies = MeetingCallEndArming.lateBindingFamilies(
+                isRecording: isRecording,
+                isArmed: callEndTracking != nil,
+                pendingIdentity: pending.identity,
+                activeIdentity: activeRecordingIdentity,
+                inputUsers: snapshot.inputUsers,
+                families: callEndFamilies(for: pending.candidate)
+            )
+            if let families = callEndArming.confirm(families: eligibleFamilies,
+                                                    sampledAt: snapshot.sampledAt, now: now) {
+                armCallEndTracking(identity: pending.identity, families: families, late: true)
+            }
+        }
         guard isRecording, let tracking = callEndTracking,
               tracking.recordingIdentity == activeRecordingIdentity else { return }
         // The snapshot carries when the audio system was actually read, which can
@@ -119,7 +133,40 @@ extension MeetingSessionController {
         }
     }
 
+    /// Arms call-end detection for a detected-prompt start. When the call app
+    /// is not using audio yet (the prompt was accepted before joining), the
+    /// candidate is remembered and bound after sustained activity for this
+    /// recording. Manual starts never arm.
+    func armCallEndDetection(callFamilies: Set<String>?,
+                             detectedPrompt: Bool,
+                             candidate: MeetingPromptDetector.Candidate?) {
+        guard detectedPrompt, AutoCallDetectionPreferences.isEnabled(),
+              let identity = activeRecordingIdentity else { return }
+        if let callFamilies {
+            armCallEndTracking(identity: identity, families: callFamilies, late: false)
+        } else if detectedPrompt, let candidate {
+            pendingCallEndCandidate = (identity, candidate)
+        }
+    }
+
+    func armCallEndTracking(identity: UUID, families: Set<String>, late: Bool) {
+        pendingCallEndCandidate = nil
+        callEndArming = MeetingCallEndArming()
+        callEndTracking = MeetingCallEndTracking(recordingIdentity: identity, families: families)
+        DiagnosticsTrail.record(
+            engine: "meeting",
+            event: "meeting_call_end_detection_armed",
+            message: "Call-end detection armed",
+            context: baseDiagnosticsContext(extra: [
+                "late": "\(late)",
+                "families": families.sorted().joined(separator: ",")
+            ])
+        )
+    }
+
     func disableCallEndDetection(restoringSilenceWarning: Bool = true) {
+        pendingCallEndCandidate = nil
+        callEndArming = MeetingCallEndArming()
         callEndTracking = nil
         latestCallActivity = .unknown
         clearCallEndWarning(restoringSilenceWarning: restoringSilenceWarning)

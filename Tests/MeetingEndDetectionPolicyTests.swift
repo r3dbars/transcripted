@@ -516,4 +516,63 @@ func testMeetingEndDetectionPolicy() {
         assertFalse(tracking.canStop(currentIdentity: identity, warningIdentity: identity, activity: .inactive, at: 140),
                     "people still talking after the remote side hung up keep the recording going")
     }
+
+    runSuite("Meeting end detection arming — a candidate remembered before the call used audio binds later") {
+        let identity = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
+        let other = UUID(uuidString: "00000000-0000-0000-0000-000000000002")!
+        assertEqual(
+            MeetingCallEndArming.lateBindingFamilies(
+                isRecording: true, isArmed: false,
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: zoom
+            ),
+            zoom,
+            "the recording that remembered the candidate binds it once its families resolve"
+        )
+        for families in [nil, []] as [Set<String>?] {
+            assertNil(
+                MeetingCallEndArming.lateBindingFamilies(
+                    isRecording: true, isArmed: false,
+                    pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: families
+                ),
+                "an unresolved or empty candidate keeps waiting instead of binding"
+            )
+        }
+        assertNil(
+            MeetingCallEndArming.lateBindingFamilies(
+                isRecording: false, isArmed: false,
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: zoom
+            ),
+            "a recording that is no longer live never binds a remembered candidate"
+        )
+        assertNil(
+            MeetingCallEndArming.lateBindingFamilies(
+                isRecording: true, isArmed: true,
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: zoom, families: zoom
+            ),
+            "an armed recording never rebinds from a remembered candidate"
+        )
+        for active in [nil, other] as [UUID?] {
+            assertNil(
+                MeetingCallEndArming.lateBindingFamilies(
+                    isRecording: true, isArmed: false,
+                    pendingIdentity: identity, activeIdentity: active, inputUsers: zoom, families: zoom
+                ),
+                "only the recording that remembered the candidate can bind it"
+            )
+        }
+        assertNil(
+            MeetingCallEndArming.lateBindingFamilies(
+                isRecording: true, isArmed: false,
+                pendingIdentity: nil, activeIdentity: identity, inputUsers: zoom, families: zoom
+            ),
+            "with nothing remembered there is nothing to bind"
+        )
+        assertNil(
+            MeetingCallEndArming.lateBindingFamilies(
+                isRecording: true, isArmed: false,
+                pendingIdentity: identity, activeIdentity: identity, inputUsers: [], families: zoom
+            ),
+            "output alone, such as a chat chime, never binds late: the call app must hold the microphone"
+        )
+    }
 }

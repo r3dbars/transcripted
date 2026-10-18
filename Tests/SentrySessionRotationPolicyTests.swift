@@ -4,7 +4,16 @@ import Foundation
 /// stretch of use, not a multi-day menu bar run.
 func testSentrySessionRotationPolicy() {
     let start = Date(timeIntervalSinceReferenceDate: 1_000_000)
-    let day = SentrySessionRotationPolicy.maxSessionAge
+    // Spelled out here, not read from production, so a wrong constant fails.
+    let day: TimeInterval = 86_400
+
+    runSuite("the rotation threshold is one day") {
+        assertEqual(
+            SentrySessionRotationPolicy.maxSessionAge,
+            86_400,
+            "sessions rotate after exactly 86,400 seconds"
+        )
+    }
 
     runSuite("sleep ends the open session and wake starts a new one") {
         assertEqual(

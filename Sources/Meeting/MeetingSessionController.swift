@@ -273,9 +273,8 @@ extension MeetingSessionController {
             )
         }
         transition(to: .recording, reason: "capture_start_confirmed")
-        if AutoCallDetectionPreferences.isEnabled(), let callFamilies, let identity = activeRecordingIdentity {
-            callEndTracking = MeetingCallEndTracking(recordingIdentity: identity, families: callFamilies)
-        }
+        armCallEndDetection(callFamilies: callFamilies, detectedPrompt: trigger == .detectedPrompt,
+                            candidate: detectedCallCandidate)
         refreshSystemAudioSignalVerification(shouldWarn: startDecision.systemAudioPermissionCheckWasInconclusive)
         if startDecision.mayRaiseSystemAudioPermissionPrompt {
             micOnlyNotice = MeetingMicOnlyNoticePolicy.noticeAfterStart(

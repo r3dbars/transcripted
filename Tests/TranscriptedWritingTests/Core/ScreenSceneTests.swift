@@ -234,6 +234,49 @@ struct ScreenSceneTests {
         #expect(!scene.conversationTurns.contains { $0.text.contains("I can make it") })
     }
 
+    @Test("A misread line inside a wrapped compose field stays out of the reply context")
+    func noisyWrappedFieldLineStaysBelowTheFloor() {
+        let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)
+        let blocks = [
+            block("Hey, are you free Thursday afternoon?", x: 0.41, y: 0.45, width: 0.15, window: slack, windowFrame: frame),
+            block("Should be, what time were you thinking?", x: 0.48, y: 0.50, width: 0.12, window: slack, windowFrame: frame),
+            block("No rush, just let me know today if you can.", x: 0.41, y: 0.58, width: 0.13, window: slack, windowFrame: frame),
+            // Three wrapped field lines; the middle one has an OCR error.
+            block("I can make it", x: 0.48, y: 0.66, width: 0.05, window: slack, windowFrame: frame),
+            block("on Thursclay", x: 0.48, y: 0.69, width: 0.05, window: slack, windowFrame: frame),
+            block("afternoon if that works", x: 0.48, y: 0.72, width: 0.05, window: slack, windowFrame: frame),
+        ]
+        let scene = ScreenScene.classify(blocks: blocks, frontmostBundleID: slack, fieldText: "I can make it on Thursday afternoon if that works")
+        #expect(scene.mode == .replying)
+        #expect(scene.conversationTurns.last?.text == "No rush, just let me know today if you can.")
+        #expect(!scene.conversationTurns.contains { $0.text.contains("Thursclay") })
+    }
+
+    @Test("A wrapped field with both a short first line and a misread middle line stays out of the conversation")
+    func shortFirstLineAndNoisyMiddleShareOneComposeFloor() {
+        let frame = ScreenScene.NormalizedRect(x: 0.4, y: 0.2, width: 0.2, height: 0.6)
+        let blocks = [
+            block("Hey, are you free Thursday afternoon?", x: 0.41, y: 0.35, width: 0.15, window: slack, windowFrame: frame),
+            block("No rush, just let me know today if you can.", x: 0.41, y: 0.55, width: 0.13, window: slack, windowFrame: frame),
+            // Both fixes are needed: bridge the noisy line between the long
+            // matches, then extend above that cluster through the short line.
+            block("ok", x: 0.48, y: 0.65, width: 0.05, window: slack, windowFrame: frame),
+            block("I can make it", x: 0.48, y: 0.70, width: 0.05, window: slack, windowFrame: frame),
+            block("on Thursclay", x: 0.48, y: 0.75, width: 0.05, window: slack, windowFrame: frame),
+            block("afternoon if that works", x: 0.48, y: 0.80, width: 0.05, window: slack, windowFrame: frame),
+        ]
+        let scene = ScreenScene.classify(
+            blocks: blocks,
+            frontmostBundleID: slack,
+            fieldText: "ok I can make it on Thursday afternoon if that works"
+        )
+        #expect(scene.mode == .replying)
+        #expect(scene.conversationTurns.last?.text == "No rush, just let me know today if you can.")
+        #expect(scene.conversationTurns.last?.speaker == .other)
+        #expect(!scene.conversationTurns.contains { $0.text == "ok" })
+        #expect(!scene.conversationTurns.contains { $0.text.contains("Thursclay") })
+    }
+
     @Test("An echo of the typed text high in the window does not cut off the thread beneath it")
     func echoAboveThreadDoesNotMoveTheFloor() {
         let blocks = [
@@ -268,6 +311,57 @@ struct ScreenSceneTests {
         #expect(scene.mode == .replying)
         #expect(scene.conversationTurns.last?.text == "Sounds good, I will drive over")
         #expect(scene.conversationTurns.contains { $0.text == "The venue moved to the north building" })
+    }
+
+    @Test("A short first line of a wrapped compose field is not kept as an earlier message")
+    func shortWrappedFieldLineIsNotAMessage() {
+        let blocks = [
+            block("Quick check about the offsite plans", x: 0.05, y: 0.30, window: slack),
+            block("Can you confirm the schedule for Thursday", x: 0.05, y: 0.60, window: slack),
+            // The compose field wrapped across three lines; the first is too short to dedupe on its own.
+            block("ok", x: 0.30, y: 0.72, window: slack),
+            block("let me check the schedule for", x: 0.30, y: 0.77, window: slack),
+            block("thursday afternoon please", x: 0.30, y: 0.82, window: slack),
+        ]
+        let scene = ScreenScene.classify(
+            blocks: blocks,
+            frontmostBundleID: slack,
+            fieldText: "ok let me check the schedule for thursday afternoon please"
+        )
+        #expect(scene.conversationTurns.last?.text == "Can you confirm the schedule for Thursday")
+        #expect(!scene.conversationTurns.contains { $0.text == "ok" })
+    }
+
+    @Test("A short message well above the field stays even when the field also contains it")
+    func spacedShortMessageAboveFieldStays() {
+        let blocks = [
+            block("ok", x: 0.05, y: 0.55, window: slack),
+            block("Can you confirm the schedule for Thursday", x: 0.05, y: 0.65, window: slack),
+            block("let me check the schedule for", x: 0.30, y: 0.80, window: slack),
+            block("thursday afternoon please ok", x: 0.30, y: 0.85, window: slack),
+        ]
+        let scene = ScreenScene.classify(
+            blocks: blocks,
+            frontmostBundleID: slack,
+            fieldText: "let me check the schedule for thursday afternoon please ok"
+        )
+        #expect(scene.conversationTurns.contains { $0.text == "ok" })
+    }
+
+    @Test("A short line flush above the field stays when it is only a substring of a field word")
+    func flushShortLineThatIsNotAFieldWordStays() {
+        let blocks = [
+            block("Can you confirm the schedule for Thursday", x: 0.05, y: 0.55, window: slack),
+            block("ok", x: 0.05, y: 0.72, window: slack),
+            block("look at the schedule for", x: 0.30, y: 0.77, window: slack),
+            block("thursday afternoon please", x: 0.30, y: 0.82, window: slack),
+        ]
+        let scene = ScreenScene.classify(
+            blocks: blocks,
+            frontmostBundleID: slack,
+            fieldText: "look at the schedule for thursday afternoon please"
+        )
+        #expect(scene.conversationTurns.last?.text == "ok")
     }
 
     @Test("With nothing typed there is no floor and the bottom bubbles are used as before")

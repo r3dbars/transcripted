@@ -9,18 +9,22 @@ fresh throwaway macOS VM) only when all of these hold:
     branch lives in this repo (fork PRs always stay hosted)
   * the MAC_RUNNER_HEARTBEAT repo variable is a bare Unix timestamp at most
     MAX_AGE_SECONDS old. The Mac writes a bare timestamp only while it is
-    free, and "<word>:<timestamp>" (busy, paused, battery, disk, vms, mic,
-    offline) otherwise
+    free, and "<word>:<timestamp>" (busy, paused, parked, battery, disk, vms,
+    mic, offline) otherwise
   * other Swift CI runs have at most MAX_BUSY_MAC_JOBS transcripted-mac
     jobs queued or running (the Mac runs two job VMs at once), so a burst
     of pushes can't pile up behind one Mac
 
 Anything else, including any GitHub API error, picks hosted macos-26.
 
-MAC_RUNNER_MODE=always skips the heartbeat and queue checks: every
-same-repo run waits for the owner's Mac, however long that takes, and
-never spends GitHub-hosted minutes. Fork PRs still stay hosted, and
---reroute does nothing, so nothing is ever sent back to GitHub.
+MAC_RUNNER_MODE=always skips the heartbeat freshness and queue checks:
+every same-repo run waits for the owner's Mac, however long that takes, and
+never spends GitHub-hosted minutes. The one exception is a heartbeat of
+"paused:<timestamp>": the owner ran `pause`, so new runs go hosted until
+`resume`, however old that heartbeat is. An install or rebuild parks the
+service with "parked:<timestamp>" instead, and runs keep waiting for the
+Mac through it. Fork PRs still stay hosted, and --reroute does nothing, so
+nothing already queued is ever sent back to GitHub.
 
 With --reroute (run from main by .github/workflows/mac-runner-sweep.yml,
 with an actions: write token), it instead sends stranded runs back to
@@ -89,6 +93,8 @@ def decide(
         # this workflow.
         return "hosted", "pull request comes from a fork"
     if mode.strip().lower() == "always":
+        if parse_heartbeat(heartbeat)[0] == "paused":
+            return "hosted", "the Mac is paused"
         return "mac", "MAC_RUNNER_MODE is always"
     word, stamp = parse_heartbeat(heartbeat)
     if word or stamp is None:
@@ -238,6 +244,10 @@ def self_test() -> int:
         ("mac", dict(mode="always", heartbeat=f"busy:{now}", busy_mac_jobs=3)),
         ("mac", dict(mode="Always", heartbeat="", busy_mac_jobs=None)),
         ("mac", dict(mode="always", event="push", head_repo="")),
+        ("hosted", dict(mode="always", heartbeat=f"paused:{now}")),
+        ("hosted", dict(mode="always", heartbeat=f"paused:{now - 10_000}")),
+        ("mac", dict(mode="always", heartbeat=f"parked:{now}")),  # install/rebuild
+        ("hosted", dict(heartbeat=f"parked:{now}")),
         ("hosted", dict(mode="always", head_repo="evil/fork")),
         ("hosted", dict(mode="always", event="schedule")),
     ]

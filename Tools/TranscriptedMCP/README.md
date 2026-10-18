@@ -121,7 +121,7 @@ it in the official MCP Registry as `io.github.r3dbars/transcripted`.
 The `Publish MCP Bundle` workflow does both. It copies the signed helper out of
 the release DMG, packs it with [`mcpb/manifest.json`](mcpb/manifest.json),
 attaches the bundle to the release, then fills in and publishes the root
-`server.json`. It runs when a release is published, or by hand with a tag.
+`server.json`. It runs when a release is published. There is no manual dispatch (it could run from any branch); to retry, re-run the job.
 Nothing is rebuilt, so the bundle keeps the notarized app's signature.
 
 `glama.json` at the repo root claims the Glama listing for the maintainer.

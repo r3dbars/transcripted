@@ -1,3 +1,4 @@
+import AVFoundation
 import Foundation
 
 /// Watches a live process tap that delivers only digital zeros while another
@@ -10,8 +11,9 @@ import Foundation
 /// other app keeps playing, the watch reports it once so the host can tell
 /// the user during the meeting.
 ///
-/// Armed at start, after a wake, after any other rebuild, and when the Mac's
-/// default output changes. It ends as soon as the tap hears any real signal.
+/// Armed at start, after a wake, after any other rebuild, when the Mac's
+/// default output changes, and when a tap that already heard signal goes back
+/// to digital zeros. It ends as soon as the tap hears any real signal.
 /// Pure value type; the capture owns it on its serial queue.
 struct SystemAudioSilenceWatch: Equatable {
     enum Reason: String {
@@ -23,6 +25,8 @@ struct SystemAudioSilenceWatch: Equatable {
         case rebuild
         /// The Mac's default output device changed.
         case outputChange
+        /// The tap heard signal, then went back to digital zeros mid-recording.
+        case lostMidRecording
     }
 
     enum Action: Equatable {
@@ -78,7 +82,7 @@ struct SystemAudioSilenceWatch: Equatable {
                 silenceSeconds: wakeSilenceSeconds,
                 reconnectsLeft: maxWakeReconnects
             )
-        case .start, .rebuild, .outputChange:
+        case .start, .rebuild, .outputChange, .lostMidRecording:
             return SystemAudioSilenceWatch(
                 reason: reason,
                 until: nil,
@@ -143,5 +147,44 @@ struct SystemAudioSilenceWatch: Equatable {
         guard !reportedUnheard, now - since >= Self.unheardReportSeconds else { return .none }
         reportedUnheard = true
         return .reportUnheard
+    }
+}
+
+/// Notices a tap that heard signal and then delivers only digital zeros, after
+/// its silence watch already ended on that signal. The capture re-arms the
+/// watch from it. Only the rebuilds those watches ask for spend the budget:
+/// a lapse with nothing else playing (a notification sound in an in-person
+/// meeting) costs nothing, and a call whose far end keeps going quiet cannot
+/// cause repeated rebuilds. Pure value type, owned by the capture's queue.
+struct SystemAudioSignalTracker: Equatable {
+    static let maxRebuilds = 3
+    private(set) var lastSignalAt: TimeInterval?
+    private(set) var rebuilds = 0
+
+    mutating func noteSignal(at now: TimeInterval) { lastSignalAt = now }
+
+    /// A re-armed watch asked for a rebuild.
+    mutating func noteRebuild() { rebuilds += 1 }
+
+    /// True when signal was heard, then at least
+    /// `SystemAudioSilenceWatch.silenceSeconds` passed without any, and
+    /// rebuilds are left. The caller arms only when no watch is running.
+    func shouldRearm(at now: TimeInterval) -> Bool {
+        guard let lastSignalAt, rebuilds < Self.maxRebuilds else { return false }
+        return now - lastSignalAt >= SystemAudioSilenceWatch.silenceSeconds
+    }
+}
+
+extension CoreAudioSystemAudioCapture {
+    static func containsSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
+        guard buffer.format.commonFormat == .pcmFormatFloat32 else { return true }
+        for item in UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList) {
+            guard let data = item.mData else { continue }
+            let samples = data.assumingMemoryBound(to: Float.self)
+            for index in 0..<(Int(item.mDataByteSize) / MemoryLayout<Float>.size) where samples[index] != 0 {
+                return true
+            }
+        }
+        return false
     }
 }

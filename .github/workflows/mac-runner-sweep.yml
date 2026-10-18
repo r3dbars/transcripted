@@ -1,6 +1,6 @@
 name: Mac runner sweep
 
-# Swift CI can send `checks` and `spm-tests` to the owner's Mac
+# Swift CI can send `checks`, `spm-tests` and `app-build` to the owner's Mac
 # (docs/self-hosted-mac-runner.md). If the Mac goes quiet while a job waits
 # for it (asleep, off, or its service died), this re-runs that run on hosted
 # runners, so the required build-and-test check can't sit pending for up to

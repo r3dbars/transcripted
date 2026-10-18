@@ -32,6 +32,7 @@ extension DictationSessionController {
             isReady: appState.sttRouter.isModelLoaded
         )
         properties.merge(dictationSpeedContext(appState: appState)) { current, _ in current }
+        properties.merge(DictationShortcutUpgrade.analyticsProperties()) { current, _ in current }
 
         AnalyticsReporter.track(
             "dictation_start_requested",
@@ -321,6 +322,7 @@ extension DictationSessionController {
         properties["session_id"] = currentDictationSessionID.uuidString
         properties["correlation_id"] = currentDictationSessionID.uuidString
         properties["trigger"] = currentDictationTrigger.rawValue
+        properties.merge(DictationShortcutUpgrade.analyticsProperties()) { current, _ in current }
         for (key, value) in extra {
             properties[key] = value
         }

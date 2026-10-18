@@ -68,13 +68,13 @@ final class SparkleUpdateSmokeTests: XCTestCase {
 
     func testScenarioDoesNotPassOnLaunchReportLeftByEarlierRun() throws {
         let output = try temporaryDirectory()
-        let scenario = output.appendingPathComponent("available", isDirectory: true)
+        let scenario = output.appendingPathComponent("runs/run-a/available", isDirectory: true)
         try FileManager.default.createDirectory(at: scenario, withIntermediateDirectories: true)
         try JSONEncoder().encode(passingAvailableReport())
             .write(to: scenario.appendingPathComponent("launch-ui-smoke.json"))
         let app = try fakeApp(in: output, body: "exit 1")
 
-        let report = runner(output: output).runScenario(state: "available", appExecutableURL: app, outputURL: output)
+        let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
 
         XCTAssertEqual(report.status, .fail)
         XCTAssertTrue(report.checks.contains { $0.id == "launch-report" && $0.status == .fail }, "\(report.checks)")
@@ -86,9 +86,72 @@ final class SparkleUpdateSmokeTests: XCTestCase {
         try JSONEncoder().encode(passingAvailableReport()).write(to: fixture)
         let app = try fakeApp(in: output, body: "cp '\(fixture.path)' \"$TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT\"")
 
-        let report = runner(output: output).runScenario(state: "available", appExecutableURL: app, outputURL: output)
+        let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
 
         XCTAssertEqual(report.status, .pass, "\(report.checks)")
+    }
+
+    func testConcurrentRunsKeepSeparateLaunchReports() throws {
+        let output = try temporaryDirectory()
+        let fixture = output.appendingPathComponent("fresh-report.json")
+        try JSONEncoder().encode(passingAvailableReport()).write(to: fixture)
+        let app = try fakeApp(in: output, body: "cp '\(fixture.path)' \"$TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT\"")
+        let failingApp = try fakeApp(in: output, body: "exit 1", name: "failing-app.sh")
+
+        let first = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
+        let second = runner(output: output).runScenario(state: "available", runID: "run-b", appExecutableURL: failingApp, outputURL: output)
+
+        XCTAssertEqual(first.status, .pass, "\(first.checks)")
+        XCTAssertEqual(second.status, .fail, "run-b must not consume run-a's report")
+        XCTAssertNotEqual(first.reportPath, second.reportPath)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: first.reportPath ?? ""), "run-b must not delete run-a's report")
+    }
+
+    func testScenarioRejectsSymlinkAtEveryOwnedDirectoryLevel() throws {
+        for relativePath in ["runs", "runs/run-a", "runs/run-a/available"] {
+            let output = try temporaryDirectory()
+            let outside = try temporaryDirectory()
+            let link = output.appendingPathComponent(relativePath)
+            try FileManager.default.createDirectory(at: link.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: link, withDestinationURL: outside)
+            let app = try fakeApp(in: output, body: "exit 1")
+
+            let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
+
+            XCTAssertEqual(report.status, .fail)
+            XCTAssertTrue(report.checks.contains { $0.id == "scenario-directory" && $0.status == .fail }, "\(relativePath): \(report.checks)")
+            XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: outside.path), [], "\(relativePath) must not create a home, log, or report outside the owned output")
+        }
+    }
+
+    func testScenarioRejectsSymlinkedLaunchArtifactsWithoutChangingTargets() throws {
+        for artifact in ["launch-ui-smoke.json", "app.log"] {
+            let output = try temporaryDirectory()
+            let outside = try temporaryDirectory()
+            let protected = outside.appendingPathComponent("protected.txt")
+            try "keep me".write(to: protected, atomically: true, encoding: .utf8)
+            let scenario = output.appendingPathComponent("runs/run-a/available")
+            try FileManager.default.createDirectory(at: scenario, withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(at: scenario.appendingPathComponent(artifact), withDestinationURL: protected)
+            let app = try fakeApp(in: output, body: "exit 1")
+
+            let report = runner(output: output).runScenario(state: "available", runID: "run-a", appExecutableURL: app, outputURL: output)
+
+            XCTAssertEqual(report.status, .fail)
+            XCTAssertTrue(report.checks.contains { $0.id == "scenario-directory" && $0.status == .fail })
+            XCTAssertEqual(try String(contentsOf: protected, encoding: .utf8), "keep me")
+        }
+    }
+
+    func testScenarioRejectsPathComponentsThatEscapeRunOwnership() throws {
+        let output = try temporaryDirectory()
+        let app = try fakeApp(in: output, body: "exit 1")
+        for (runID, state) in [("../escape", "available"), ("run-a", "../escape"), ("..", "available"), ("", "available")] {
+            let report = runner(output: output).runScenario(state: state, runID: runID, appExecutableURL: app, outputURL: output)
+            XCTAssertEqual(report.status, .fail)
+            XCTAssertTrue(report.checks.contains { $0.id == "scenario-directory" && $0.status == .fail })
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.appendingPathComponent("runs").path))
     }
 
     private func runner(output: URL) -> SparkleUpdateSmokeRunner {
@@ -109,8 +172,8 @@ final class SparkleUpdateSmokeTests: XCTestCase {
     }
 
     /// A stand-in app executable: a shell script, never the real app.
-    private func fakeApp(in directory: URL, body: String) throws -> URL {
-        let url = directory.appendingPathComponent("fake-app.sh")
+    private func fakeApp(in directory: URL, body: String, name: String = "fake-app.sh") throws -> URL {
+        let url = directory.appendingPathComponent(name)
         try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url

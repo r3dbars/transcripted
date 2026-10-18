@@ -230,7 +230,10 @@ only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
    `python3 scripts/release/bump-release-version.py --version <version>`. The
    branch must differ from main only by that `Info.plist` bump; the workflow
    checks.
-2. `gh workflow run release-candidate.yml -f source_ref=<branch> -f version=<version>`
+2. `gh workflow run release-candidate.yml --ref main -f source_ref=<branch> -f version=<version>`,
+   then approve the `release` environment deployment. Always dispatch with
+   `--ref main`: the signing secrets live in the main-only `release`
+   environment, and the workflow file that runs is the one on the dispatch ref.
 3. Download the artifact, publish GitHub release `v<version>` with the DMG and
    any `.delta` files, and tag `source_ref` (not the run's head SHA).
 4. Land the appcast, the cask and a new
