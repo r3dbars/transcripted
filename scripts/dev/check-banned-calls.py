@@ -2,6 +2,9 @@
 """Keep calls the app must never make out of the files that must not make them.
 
 Each rule names a set of Swift files and the calls none of them may contain.
+A rule can also name `required` wiring: text that must still appear somewhere
+in its files (whitespace-insensitive), for view-wiring promises no fast test
+can render, such as "this view routes its failures through the shared copy".
 These used to be Swift fast tests that read Sources/ as text (Tests/README.md,
 "Test rules", rule 3). A banned-call scan is a lint over files, not a promise a
 test can check through inputs and outputs, so it lives here with the other
@@ -20,8 +23,11 @@ Rules:
     beep. (was Tests/DictationSoundsTests.swift)
   * An idle onboarding window never polls permissions or re-probes system
     audio on activation; the live audio check belongs to its button.
+    It still routes app activation and permission changes to its lifecycle
+    handler, and leaving it cancels the in-flight audio check.
   * The Agent page and the Settings shell never put a raw error into
-    user-facing text; the raw error goes behind Copy Details.
+    user-facing text; the raw error goes behind Copy Details. Both keep that
+    Copy Details reveal and route failures through their shared failure copy.
     (these three were Tests/UIAutomationSurfaceContractTests.swift)
 
     python3 scripts/dev/check-banned-calls.py
@@ -62,6 +68,9 @@ class Rule:
     min_files: int = 0
     strip_line_comments: bool = False
     slice: Slice | None = None
+    # Wiring that must still appear somewhere in the rule's files. Matched
+    # with runs of whitespace collapsed to one space.
+    required: tuple[str, ...] = ()
 
 
 RULES: tuple[Rule, ...] = (
@@ -109,7 +118,7 @@ RULES: tuple[Rule, ...] = (
         why="Home contextual feedback should open email without an app sound or a system beep",
     ),
     Rule(
-        name="onboarding never polls permissions",
+        name="onboarding never polls permissions and keeps its lifecycle wiring",
         files=("Sources/UI/Settings/PermissionsOnboardingView.swift",),
         banned=(
             "while !Task.isCancelled",
@@ -117,20 +126,46 @@ RULES: tuple[Rule, ...] = (
             "SystemAudioPermissionRevalidator.revalidateForStatusSurfaces",
         ),
         why="an idle onboarding window must not loop on permission probes or compete with the explicit audio check",
+        required=(
+            "publisher(for: NSApplication.didBecomeActiveNotification)) { _ in handleLifecycle(.appBecameActive) }",
+            "publisher(for: .transcriptedPermissionsDidChange)) { _ in handleLifecycle(.permissionsChanged) }",
+            ".onDisappear { handleLifecycle(.windowDisappeared) }",
+            "if effects.contains(.cancelSystemAudioCheck) { stopPermissionRevalidation() }",
+            "func stopPermissionRevalidation() { systemAudioRequestTask?.cancel()",
+            "checkWasCancelled: Task.isCancelled",
+            "actionTitle: systemAudioPresentation.actionTitle",
+        ),
     ),
     Rule(
-        name="Agent page failures never show a raw error",
+        name="Agent page failures use the shared copy, never a raw error",
         files=("Sources/UI/Settings/AgentConnectionSettingsPage.swift",),
         banned=(".failed(error.localizedDescription)", "\\(error"),
         why="setup failures show AgentSetupFailureCopy; the raw error goes behind Copy Details",
+        required=(
+            "AgentSetupFailureCopy.connectFailure(agentName:",
+            "AgentSetupFailureCopy.codexInboxFailure(",
+            "private func failureNotice(",
+            "transcripted.settings.agent.connect-error-details.",
+        ),
     ),
     Rule(
-        name="Settings shell statuses never show a raw error",
+        name="Settings shell statuses use SettingsActionFailureCopy, never a raw error",
         folder="Sources/UI/Settings",
         prefix="TranscriptedSettingsView",
         min_files=5,
-        banned=("\\(error",),
+        banned=(
+            "\\(error",
+            "Status = error.localizedDescription",
+            "statusDescription = error.localizedDescription",
+        ),
         why="Settings statuses use SettingsActionFailureCopy; the raw error goes behind Copy Details",
+        required=(
+            "func settingsFailureDetailsButton(",
+            "settingsFailureDetailsButton(details)",
+            "modelCacheCleanupStatus = SettingsActionFailureCopy.modelCacheRemoval",
+            "launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin",
+            "captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(",
+        ),
     ),
 )
 
@@ -157,9 +192,14 @@ def rule_files(root: Path, rule: Rule) -> list[str]:
     return list(rule.files)
 
 
+def collapse_whitespace(text: str) -> str:
+    return " ".join(text.split())
+
+
 def check(root: Path, rules: tuple[Rule, ...] = RULES) -> list[str]:
     problems: list[str] = []
     for rule in rules:
+        scanned: list[str] = []
         files = rule_files(root, rule)
         if rule.folder and len(files) <= rule.min_files:
             problems.append(
@@ -185,9 +225,16 @@ def check(root: Path, rules: tuple[Rule, ...] = RULES) -> list[str]:
                     continue
                 end = text.find(rule.slice.end, start)
                 text = text[start:] if end == -1 else text[start:end]
+            scanned.append(text)
             for needle in rule.banned:
                 if needle in text:
                     problems.append(f"{rel}: calls `{needle}`: {rule.why}")
+        if rule.required:
+            combined = collapse_whitespace("\n".join(scanned))
+            where = rule.folder or ", ".join(files)
+            for needle in rule.required:
+                if collapse_whitespace(needle) not in combined:
+                    problems.append(f"{where}: lost `{needle}` ({rule.name})")
     return problems
 
 
@@ -224,11 +271,34 @@ def self_test() -> None:
     )
     for index in range(5):
         good[f"Sources/UI/Settings/TranscriptedSettingsView+Part{index}.swift"] = "status = Copy.failed\n"
+    good["Sources/UI/Settings/TranscriptedSettingsView+Part0.swift"] += (
+        "func settingsFailureDetailsButton(_ details: String?) -> some View { EmptyView() }\n"
+    )
+    good["Sources/UI/Settings/TranscriptedSettingsView+Part1.swift"] += (
+        "if let details { settingsFailureDetailsButton(details) }\n"
+        "modelCacheCleanupStatus =\n    SettingsActionFailureCopy.modelCacheRemoval\n"
+        "modelCacheCleanupStatusDetails = error.localizedDescription\n"
+        "launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin\n"
+        "captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(code)\n"
+    )
     good["Sources/UI/Settings/PermissionsOnboardingView.swift"] = (
         ".onReceive(activePublisher) { _ in refresh() }\n"
+        ".onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in\n"
+        "    handleLifecycle(.appBecameActive)\n}\n"
+        ".onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in\n"
+        "    handleLifecycle(.permissionsChanged)\n}\n"
+        ".onDisappear {\n    handleLifecycle(.windowDisappeared)\n}\n"
+        "if effects.contains(.cancelSystemAudioCheck) {\n    stopPermissionRevalidation()\n}\n"
+        "private func stopPermissionRevalidation() {\n    systemAudioRequestTask?.cancel()\n}\n"
+        "Policy.result(decision, checkWasCancelled: Task.isCancelled)\n"
+        "Stage(actionTitle: systemAudioPresentation.actionTitle)\n"
     )
     good["Sources/UI/Settings/AgentConnectionSettingsPage.swift"] = (
         "phase = .failed(failure.message)\ndetails = error.localizedDescription\n"
+        "let failure = AgentSetupFailureCopy.connectFailure(agentName: name, error: error)\n"
+        "let inbox = AgentSetupFailureCopy.codexInboxFailure(error: error)\n"
+        "failureNotice(id: \"transcripted.settings.agent.connect-error-details.\\(agent.rawValue)\")\n"
+        "private func failureNotice(id: String) -> some View { EmptyView() }\n"
     )
     assert check(build(good)) == [], check(build(good))
 
@@ -254,6 +324,36 @@ def self_test() -> None:
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", ".failed(failure.message)", ".failed(error.localizedDescription)"),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", ".failed(failure.message)", '.failed("Could not connect: \\(error)")'),
         ("Sources/UI/Settings/TranscriptedSettingsView+Part2.swift", "Copy.failed", '"Copy stopped: \\(error.localizedDescription)"'),
+        # a raw error assigned straight to a status line, no interpolation
+        (
+            "Sources/UI/Settings/TranscriptedSettingsView+Part1.swift",
+            "modelCacheCleanupStatus =\n    SettingsActionFailureCopy.modelCacheRemoval",
+            "modelCacheCleanupStatus = error.localizedDescription",
+        ),
+        (
+            "Sources/UI/Settings/TranscriptedSettingsView+Part1.swift",
+            "launchAtLogin.statusDescription = SettingsActionFailureCopy.launchAtLogin",
+            "launchAtLogin.statusDescription = error.localizedDescription",
+        ),
+        # required wiring removed
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part0.swift", "func settingsFailureDetailsButton(", "func detailsButton("),
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part1.swift", "{ settingsFailureDetailsButton(details) }", "{ EmptyView() }"),
+        (
+            "Sources/UI/Settings/TranscriptedSettingsView+Part1.swift",
+            "SettingsActionFailureCopy.captureLibraryMigration(code)",
+            "message",
+        ),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "handleLifecycle(.appBecameActive)", "refresh()"),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "handleLifecycle(.permissionsChanged)", ""),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "handleLifecycle(.windowDisappeared)", ""),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "    stopPermissionRevalidation()\n", ""),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "    systemAudioRequestTask?.cancel()\n", ""),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "checkWasCancelled: Task.isCancelled", "checkWasCancelled: false"),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "systemAudioPresentation.actionTitle", '"Grant"'),
+        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "private func failureNotice(", "private func notice("),
+        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "connect-error-details.", "details."),
+        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.connectFailure(", "Copy.other("),
+        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.codexInboxFailure(", "Copy.other("),
     ]
     for rel, old, new in breaks:
         broken = dict(good)

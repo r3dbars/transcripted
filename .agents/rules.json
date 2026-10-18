@@ -286,7 +286,7 @@
     },
     {
       "id": "banned-calls",
-      "enforces": "dictation never writes the Mac-wide default input, diagnostic log writers avoid NSException-raising FileHandle APIs, and feedback submission plays no sound",
+      "enforces": "dictation never writes the Mac-wide default input, diagnostic log writers avoid NSException-raising FileHandle APIs, feedback submission plays no sound, onboarding never polls permissions and keeps its lifecycle and audio-check cancel wiring, and the Agent page and Settings shell route failures through their shared copy with a Copy Details reveal, never a raw error",
       "enforcer": "python3 scripts/dev/check-banned-calls.py",
       "level": "lint",
       "owner_doc": "Tests/README.md",

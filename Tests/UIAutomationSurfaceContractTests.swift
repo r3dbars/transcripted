@@ -13,8 +13,11 @@
 // Onboarding's lifecycle and audio check, the Home row menus, the retained-audio
 // hit target and the Agent page's failure routing are behavior tests
 // (OnboardingPermissionLifecyclePolicyTests, HomeRowControlsTests,
-// AutomationSurfaceBehaviorTests); "never call X" guards for onboarding and
-// raw errors in Settings live in scripts/dev/check-banned-calls.py.
+// AutomationSurfaceBehaviorTests). The view wiring around them (onboarding's
+// lifecycle .onReceive routes and audio-check cancel, the Agent page's and the
+// Settings shell's Copy Details reveal and shared failure copy) and the "never
+// call X" guards for onboarding and raw errors in Settings live in
+// scripts/dev/check-banned-calls.py.
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
 // identifiers, and failure copy are behavior tests in
 // AutomationSurfaceBehaviorTests.swift now. The QA CLI's ui-smoke command and
@@ -438,7 +441,9 @@ func testUIAutomationSurfaceContract() async {
 
         // Onboarding's lifecycle refreshes, audio-check cancellation and typed
         // result are behavior tests: OnboardingPermissionLifecyclePolicyTests.
-        // Its never-poll guard is in scripts/dev/check-banned-calls.py.
+        // The view wiring (the activation and permissions-changed .onReceive
+        // routes, stopPermissionRevalidation's cancel, the typed action title)
+        // and the never-poll guard are in scripts/dev/check-banned-calls.py.
 
         // The speaker autocomplete keeping the picked saved-person UUID and
         // clearing it on typing is a behavior test now:
@@ -583,8 +588,10 @@ func testUIAutomationSurfaceContract() async {
 
     // WS4 error states: the Agent page's failure split (plain message, raw
     // error behind Copy Details) is a behavior test in
-    // AutomationSurfaceBehaviorTests; "no raw error in Agent or Settings
-    // status text" is in scripts/dev/check-banned-calls.py.
+    // AutomationSurfaceBehaviorTests. The Copy Details reveals
+    // (failureNotice, settingsFailureDetailsButton), routing through
+    // AgentSetupFailureCopy / SettingsActionFailureCopy, and "no raw error in
+    // Agent or Settings status text" are in scripts/dev/check-banned-calls.py.
 }
 
 private func sourceBlock(named startMarker: String, endingBefore endMarker: String, in source: String) -> String {
