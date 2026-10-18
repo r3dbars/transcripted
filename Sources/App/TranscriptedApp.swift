@@ -267,8 +267,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 },
                 onCompleted: { [weak self] candidate, started in
                     self?.meetingPromptRecordInFlight = false
-                    guard started else { return }
-                    self?.meetingPromptDetector.markAccepted(candidate: candidate)
+                    // Record already marked the candidate accepted when the
+                    // start began; only a failed start has anything to undo.
+                    guard !started else { return }
+                    self?.meetingPromptDetector.markRecordStartFailed(candidate: candidate)
                 }
             )
             meetingPromptRecordAction = promptRecordAction
