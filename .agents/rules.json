@@ -285,6 +285,34 @@
       "proof": "9610d0330 (PR #1884); --self-test"
     },
     {
+      "id": "banned-calls",
+      "enforces": "dictation never writes the Mac-wide default input, diagnostic log writers avoid NSException-raising FileHandle APIs, and feedback submission plays no sound",
+      "enforcer": "python3 scripts/dev/check-banned-calls.py",
+      "level": "lint",
+      "owner_doc": "Tests/README.md",
+      "why": "these were Swift fast tests that read Sources/ as text (BluetoothRouteContractTests, ObservabilityLogWriterTests, DictationSoundsTests); a banned-call scan is a lint over files, not a promise a test can check (923ea0f4c)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "923ea0f4c; --self-test"
+    },
+    {
+      "id": "keyboard-identity",
+      "enforces": "the keyboard's Info.plist connection name matches TildeProductProfile.production",
+      "enforcer": "python3 scripts/dev/check-keyboard-identity.py",
+      "level": "lint",
+      "owner_doc": "Sources/TranscriptedKeyboard/AGENTS.md",
+      "why": "if the plist drifts from the profile, the keyboard installs but silently never gets a session; the old guard was a Swift test that read the plist out of Sources/ (d0cfd1824)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "d0cfd1824; --self-test"
+    },
+    {
       "id": "test-quarantine-format",
       "enforces": "every Tests/quarantine.txt line is `date | existing suite | reason`; entries older than two weeks warn",
       "enforcer": "python3 scripts/dev/check-test-shape.py (quarantine)",
