@@ -141,14 +141,14 @@ func testUIAutomationSurfaceContract() async {
     }
 
     runSuite("Acknowledged unverified system audio stays visible in the recording pill") {
-        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
+        assertTrue(contractSource("Sources/UI/Overlay/MeetingOverlayController+Island.swift").contains("systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified"),
             "The recording pill must receive recording-scoped uncertainty")
         // The PCM-evidence and tail-failure halves are behavior tests now:
         // "Capture health evidence comes from this capture, not a cached
         // permission" in MeetingSessionUIPolicyTests.
     }
     runSuite("Confirmed system-audio denial offers a grant action") {
-        let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController.swift")
+        let controller = contractSource("Sources/UI/Overlay/MeetingOverlayController+Island.swift")
         // Typed permission evidence behind the action: MeetingSessionUIPolicyTests,
         // "Capture health evidence comes from this capture, not a cached permission".
         assertTrue(controller.contains("meetingSession?.systemAudioPermissionRecoveryNeeded == true"),
@@ -471,7 +471,7 @@ func testUIAutomationSurfaceContract() async {
         // HomeMeetingPreviewFormatterTests through HomeMeetingSpeakerNamingPolicy.
 
         assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayController.swift").contains("Discard Recording…"),
+            contractSource("Sources/UI/Overlay/MeetingOverlayController+Island.swift").contains("Discard Recording…"),
             "the island's meeting right-click menu should keep a stable Discard title for automation"
         )
 

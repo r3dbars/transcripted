@@ -1,7 +1,5 @@
 {
   "_comment": "Swift files over 800 lines, grandfathered at their line count. scripts/dev/check-file-size.py --shrink only lowers counts or drops files; raising one is a reviewed human edit.",
   "limit": 800,
-  "files": {
-    "Sources/UI/Overlay/MeetingOverlayController.swift": 1178
-  }
+  "files": {}
 }
