@@ -67,12 +67,17 @@ struct DetectedMeetingPromptWiring {
         autoRecordEnabled: Bool = AutoRecordDetectedCallsPreferences.isEnabled(),
         microphoneGranted: Bool = TranscriptedPermissionAccess.isGranted(.microphone),
         systemAudioGranted: Bool? = nil,
-        liveSystemAudio: () -> Bool = { DetectedMeetingPromptWiring.liveSystemAudioGranted() },
-        cachedSystemAudio: () -> Bool = { TranscriptedPermissionAccess.systemAudioRecordingGranted() }
+        liveSystemAudio: (() -> Bool)? = nil,
+        cachedSystemAudio: (() -> Bool)? = nil
     ) -> MeetingAutoRecordPolicy.Decision {
-        let granted = systemAudioGranted ?? (
-            autoRecordEnabled ? liveSystemAudio() : cachedSystemAudio()
-        )
+        let granted: Bool
+        if let systemAudioGranted {
+            granted = systemAudioGranted
+        } else if autoRecordEnabled {
+            granted = liveSystemAudio?() ?? liveSystemAudioGranted()
+        } else {
+            granted = cachedSystemAudio?() ?? TranscriptedPermissionAccess.systemAudioRecordingGranted()
+        }
         return MeetingAutoRecordPolicy.decision(
             for: MeetingAutoRecordPolicy.Request(
                 autoRecordEnabled: autoRecordEnabled,
