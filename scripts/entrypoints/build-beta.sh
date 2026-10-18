@@ -638,4 +638,4 @@ if [ "$SKIP_NOTARIZATION" = "1" ] || [[ ! "$SIGNING_DISPLAY_NAME" == Developer\ 
 else
     echo "   Note: notarized downloads still show the standard macOS first-open confirmation once."
 fi
-echo "   If this build should update existing installs, regenerate docs/appcast.xml after you upload the DMG."
+echo "   If this build should update existing installs, publish it through the Release Candidate workflow (it builds and signs the appcast.xml release asset)."
