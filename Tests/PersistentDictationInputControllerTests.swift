@@ -169,6 +169,25 @@ private func runPersistentDictationInputControllerSuites() async {
         controller.stopMonitoring()
     }
 
+    await runSuite("Persistent input - a recording that starts during the route reads is not switched under") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        var dictationActive = false
+        hal.onSelectionLookup = { dictationActive = true }
+        let controller = hal.makeController(isDictationActive: { dictationActive })
+
+        controller.start()
+        let firstPass = controller.pendingRefresh
+        await firstPass?.value
+        assertEqual(hal.writes, [], "dictation started while the pass read the route, so nothing is written")
+        assertTrue(controller.pendingRefresh != nil && controller.pendingRefresh != firstPass, "the pass is put off, not dropped")
+
+        hal.onSelectionLookup = nil
+        dictationActive = false
+        let applied = await waitForPersistentInput { hal.writes == [persistentBuiltIn.id] }
+        assertTrue(applied, "the write lands once dictation ends")
+        controller.stopMonitoring()
+    }
+
     await runSuite("Persistent input - quitting puts the previous mic back when nothing is capturing") {
         let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
         let controller = hal.makeController()
@@ -324,6 +343,8 @@ private final class FakePersistentInputHAL {
     var reports: [PersistentDictationInputSystem.Report] = []
     var deviceListListenerRefused = false
     var selectionLookupTimesOut = false
+    /// Runs inside the route read, as if the user acted while it was suspended.
+    var onSelectionLookup: (() -> Void)?
     var deviceListAdds = 0
     var deviceListRemoves = 0
     var refreshDelays = 0
@@ -387,6 +408,7 @@ private final class FakePersistentInputHAL {
             },
             recommendedSelection: { [weak self] in
                 guard let self else { throw CancellationError() }
+                self.onSelectionLookup?()
                 if self.selectionLookupTimesOut {
                     // What the live timed lookup throws when a driver call overruns.
                     throw ParakeetSystemInputWorkError.timedOut(operation: "persistent_input_selection", timeoutMs: 1_500)

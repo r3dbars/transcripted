@@ -390,7 +390,11 @@ final class PersistentDictationInputController {
             }
             DictationPersistentInputPreferences.setRecoveryMarker(recoveryMarker, userDefaults: system.userDefaults)
             do {
-                try await system.setDefaultInput(selectedInput.id)
+                try await setDefaultInputWhileIdle(
+                    selectedInput.id,
+                    defaultInputChanged: defaultInputChanged,
+                    deviceListChanged: deviceListChanged
+                )
             } catch {
                 DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
                 throw error
@@ -440,7 +444,7 @@ final class PersistentDictationInputController {
                 )
                 return
             }
-            try await system.setDefaultInput(activeOverride.previousInput)
+            try await setDefaultInputWhileIdle(activeOverride.previousInput)
             DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             report(
                 .info,
@@ -505,7 +509,7 @@ final class PersistentDictationInputController {
                     DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
                     return
                 }
-                try await system.setDefaultInput(previous.id)
+                try await setDefaultInputWhileIdle(previous.id)
                 DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             case .preserve:
                 return
@@ -519,6 +523,22 @@ final class PersistentDictationInputController {
                 message: "Could not reconcile microphone ownership after an unclean app exit"
             )
         }
+    }
+
+    private struct CaptureBecameActive: Error {}
+
+    /// HAL reads suspend, so a recording can start after the scheduler's idle
+    /// check. Never switch the Mac-wide input under it: throw and retry later.
+    private func setDefaultInputWhileIdle(
+        _ deviceID: AudioDeviceID,
+        defaultInputChanged: Bool = false,
+        deviceListChanged: Bool = false
+    ) async throws {
+        guard !isDictationActive(), !isMeetingCaptureActive() else {
+            scheduleTopologyRefresh(defaultInputChanged: defaultInputChanged, deviceListChanged: deviceListChanged)
+            throw CaptureBecameActive()
+        }
+        try await system.setDefaultInput(deviceID)
     }
 
     private func report(
