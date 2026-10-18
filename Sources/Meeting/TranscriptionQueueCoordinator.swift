@@ -88,15 +88,6 @@ final class TranscriptionQueueCoordinator {
                 return [audioURL]
             }
         }
-
-        var artifactRetained: Bool {
-            switch kind {
-            case .recorded:
-                return true
-            case .imported:
-                return true
-            }
-        }
     }
 
     struct BackgroundTranscriptionWorkSnapshot {
@@ -346,7 +337,7 @@ final class TranscriptionQueueCoordinator {
             failureKind: "models_not_ready",
             retrySource: "queued_transcription",
             surface: "meeting",
-            artifactRetained: job.artifactRetained
+            artifactRetained: true
         )
 
         do {
@@ -379,7 +370,7 @@ final class TranscriptionQueueCoordinator {
                 result: "failed",
                 elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelRecoveryStartedAt,
                 surface: "meeting",
-                artifactRetained: job.artifactRetained
+                artifactRetained: true
             )
             return false
         }
@@ -407,7 +398,7 @@ final class TranscriptionQueueCoordinator {
             result: ready ? "success" : "failed",
             elapsedSeconds: CFAbsoluteTimeGetCurrent() - modelRecoveryStartedAt,
             surface: "meeting",
-            artifactRetained: job.artifactRetained
+            artifactRetained: true
         )
 
         return ready
