@@ -1,9 +1,7 @@
 // ModelDownloadService.swift
-// Resilient model download with HuggingFace mirror fallback, retry logic,
-// and error classification. Provides retry wrapping for FluidAudio model initialization.
+// Retry logic and error classification for FluidAudio model initialization.
 
 import Foundation
-import CryptoKit
 
 // MARK: - Error Classification
 
@@ -64,23 +62,6 @@ public struct ModelDownloadError: Error, LocalizedError {
 
 public enum ModelDownloadService {
 
-    /// HuggingFace endpoint.
-    ///
-    /// Security: previously this list also contained a third-party mirror
-    /// (`https://hf-mirror.com`) as a fallback. That fallback was removed because the manifest
-    /// served by the mirror is what supplies the per-file SHA-256 used for verification — so a
-    /// compromised mirror could simply hand back a manifest whose `lfs.sha256` matches the
-    /// malicious file it intends to serve, and the integrity check would still pass. The mirror
-    /// also lets non-LFS files (tokenizer.json, config.json, etc.) ride along with no digest
-    /// anywhere in the response.
-    ///
-    /// Treat `huggingface.co` as the only source of truth. If huggingface.co is unreachable,
-    /// fail closed and surface the network error instead of degrading silently to an untrusted
-    /// mirror.
-    private static let mirrors: [String] = [
-        "https://huggingface.co"
-    ]
-
     /// Default retry configuration
     public static let maxRetries = 3
     private static let retryDelays: [UInt64] = [2_000_000_000, 5_000_000_000, 10_000_000_000] // 2s, 5s, 10s
@@ -125,16 +106,6 @@ public enum ModelDownloadService {
         }
 
         return .unknown(error.localizedDescription)
-    }
-
-    /// Check available disk space in bytes
-    public static func availableDiskSpace() -> UInt64? {
-        let home = FileManager.default.homeDirectoryForCurrentUser
-        guard let values = try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]),
-              let available = values.volumeAvailableCapacityForImportantUsage else {
-            return nil
-        }
-        return UInt64(available)
     }
 
     // MARK: - Retry Wrapper
@@ -183,215 +154,5 @@ public enum ModelDownloadService {
         }
         let kind = classifyError(exhaustedError)
         throw ModelDownloadError(kind: kind, underlyingError: exhaustedError)
-    }
-
-    // MARK: - Filename Validation
-
-    /// Validate a filename returned by an external API before using it in a file path.
-    /// Security: filenames are attacker-controlled data from an external API response.
-    /// A compromised or impersonated server could inject path traversal sequences (e.g. "../../../.ssh/authorized_keys")
-    /// into rfilename values. We reject any name containing ".." components or absolute paths.
-    static func isSafeModelFilename(_ name: String) -> Bool {
-        guard !name.isEmpty else { return false }
-        guard !name.hasPrefix("/") else { return false }
-        let components = name.components(separatedBy: "/")
-        guard !components.contains("..") && !components.contains(".") else { return false }
-        guard !name.unicodeScalars.contains(where: { $0.value < 32 }) else { return false }
-        return true
-    }
-
-
-    // MARK: - HuggingFace Model Download Infrastructure
-
-    /// Represents a file in a Hugging Face model repository.
-    struct HFModelFile: Sendable {
-        let name: String
-        let size: Int?
-        /// SHA-256 hex digest for LFS-tracked files (e.g. model weights).
-        /// Populated from the HuggingFace API response when available.
-        /// Security: used to verify file integrity end-to-end against the digest
-        /// huggingface.co reports for the file.
-        let sha256: String?
-    }
-
-    private struct HuggingFaceModelManifest: Decodable {
-        let siblings: [HuggingFaceModelManifestSibling]
-    }
-
-    private struct HuggingFaceModelManifestSibling: Decodable {
-        let rfilename: String
-        let size: Int?
-        let lfs: HuggingFaceModelManifestLFS?
-    }
-
-    private struct HuggingFaceModelManifestLFS: Decodable {
-        let sha256: String?
-    }
-
-    /// Fetch the list of files in a HuggingFace model repository
-    static func fetchModelFileList(modelId: String) async throws -> [HFModelFile] {
-        // Try each mirror for the API call
-        for mirror in mirrors {
-            // Security: use safe URL construction — force-unwrap would crash if modelId or mirror
-            // contained URL-unsafe characters. Guard lets us skip the mirror and try the next.
-            guard let apiURL = URL(string: "\(mirror)/api/models/\(modelId)") else {
-                AppLogger.services.warning("Skipping mirror — could not construct API URL", ["mirror": mirror, "modelId": modelId])
-                continue
-            }
-
-            do {
-                let (data, response) = try await URLSession.shared.data(from: apiURL)
-
-                if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                    continue
-                }
-
-                guard let manifest = try? JSONDecoder().decode(HuggingFaceModelManifest.self, from: data) else {
-                    continue
-                }
-
-                let files = manifest.siblings.compactMap { sibling -> HFModelFile? in
-                    let name = sibling.rfilename
-                    // Security: filter out any filenames that would escape the cache directory.
-                    // Malicious or compromised API responses could include path traversal sequences.
-                    guard isSafeModelFilename(name) else {
-                        AppLogger.services.warning("Skipping unsafe filename in model manifest", ["filename": name])
-                        return nil
-                    }
-                    // Security: extract SHA-256 from LFS metadata if present.
-                    let sha256 = sibling.lfs?.sha256
-                    return HFModelFile(name: name, size: sibling.size, sha256: sha256)
-                }
-
-                if !files.isEmpty {
-                    AppLogger.services.info("Fetched model file list", [
-                        "mirror": mirror,
-                        "files": "\(files.count)"
-                    ])
-                    return files
-                }
-            } catch {
-                AppLogger.services.warning("Failed to fetch file list from mirror", [
-                    "mirror": mirror,
-                    "error": error.localizedDescription
-                ])
-                continue
-            }
-        }
-
-        throw ModelDownloadError(
-            kind: .unknown("Could not fetch model file list from any mirror"),
-            underlyingError: nil
-        )
-    }
-
-    /// Download a single file with retry. (The previous mirror-fallback loop was reduced to
-    /// huggingface.co only — see `mirrors` above for the security rationale.)
-    /// - Parameters:
-    ///   - modelId: HuggingFace model identifier
-    ///   - filename: Filename within the model repository (pre-validated by isSafeModelFilename)
-    ///   - destination: Local destination URL
-    ///   - expectedSHA256: SHA-256 hex digest from the HuggingFace API manifest (optional).
-    ///     Security: when provided, the downloaded file is verified against this digest before
-    ///     being moved to its destination.
-    static func downloadFileWithMirrorFallback(
-        modelId: String,
-        filename: String,
-        destination: URL,
-        expectedSHA256: String? = nil
-    ) async throws {
-        for mirror in mirrors {
-            // Security: use safe URL construction — force-unwrap would crash if filename contained
-            // URL-unsafe characters (e.g., spaces) not caught by isSafeModelFilename. Skip
-            // this mirror and try the next rather than crashing.
-            guard let fileURL = URL(string: "\(mirror)/\(modelId)/resolve/main/\(filename)") else {
-                AppLogger.services.warning("Skipping mirror — could not construct file URL", ["mirror": mirror, "file": filename])
-                continue
-            }
-
-            do {
-                try await withRetry(maxAttempts: 2) {
-                    let (tempURL, response) = try await URLSession.shared.download(from: fileURL)
-
-                    if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode != 200 {
-                        throw ModelDownloadError(
-                            kind: .serverError(statusCode: httpResponse.statusCode),
-                            underlyingError: nil
-                        )
-                    }
-
-                    // Security: verify SHA-256 digest of downloaded file when the API manifest
-                    // provided one. LFS-tracked files (model weights) always have a digest.
-                    // Non-LFS files (config JSON, tokenizer, etc.) do not provide a digest in the
-                    // HuggingFace manifest — log a warning so these unverified downloads are
-                    // visible in audit trails and can be investigated if a mirror is compromised.
-                    if expectedSHA256 == nil {
-                        AppLogger.services.warning("Downloading file without SHA-256 integrity check — non-LFS file has no digest in HuggingFace manifest", [
-                            "file": filename,
-                            "mirror": mirror
-                        ])
-                    }
-                    if let expected = expectedSHA256 {
-                        let computed = try sha256Hex(of: tempURL)
-                        guard computed.lowercased() == expected.lowercased() else {
-                            try? FileManager.default.removeItem(at: tempURL)
-                            AppLogger.services.error("SHA-256 mismatch for downloaded model file — rejecting", [
-                                "file": filename,
-                                "mirror": mirror,
-                                "expected": expected,
-                                "actual": computed
-                            ])
-                            throw ModelDownloadError(
-                                kind: .unknown("Integrity check failed for \(filename) — digest mismatch"),
-                                underlyingError: nil
-                            )
-                        }
-                    }
-
-                    // Move to destination
-                    try FileManager.default.moveItem(at: tempURL, to: destination)
-
-                    // Security: restrict model files to owner-only read (0o600).
-                    FileManager.default.restrictToOwnerOnly(atPath: destination.path)
-                }
-
-                AppLogger.services.debug("Downloaded \(filename) from \(mirror)")
-                return
-            } catch {
-                AppLogger.services.warning("Mirror download failed", [
-                    "mirror": mirror,
-                    "file": filename,
-                    "error": error.localizedDescription
-                ])
-                // Clean up partial file
-                try? FileManager.default.removeItem(at: destination)
-                continue
-            }
-        }
-
-        throw ModelDownloadError(
-            kind: .unknown("Failed to download \(filename) from all mirrors"),
-            underlyingError: nil
-        )
-    }
-
-    /// Compute the SHA-256 hex digest of a file by streaming it in chunks.
-    /// Security: avoids loading large model files (potentially several GB) entirely into memory.
-    /// A naive Data(contentsOf:) call could exhaust RAM and crash the app before the integrity
-    /// check completes, letting a compromised mirror bypass SHA-256 verification by serving an
-    /// oversized file. Streaming caps peak memory at one chunk (1MB) regardless of file size.
-    static func sha256Hex(of url: URL) throws -> String {
-        let fileHandle = try FileHandle(forReadingFrom: url)
-        defer { try? fileHandle.close() }
-        var hasher = CryptoKit.SHA256()
-        let chunkSize = 1024 * 1024 // 1MB chunks — large enough for throughput, small enough for memory safety
-        // Pool each chunk; otherwise every 1 MB read lives until the loop ends.
-        while try autoreleasepool(invoking: { () throws -> Bool in
-            guard let chunk = try fileHandle.read(upToCount: chunkSize), !chunk.isEmpty else { return false }
-            hasher.update(data: chunk)
-            return true
-        }) {}
-        let digest = hasher.finalize()
-        return digest.map { String(format: "%02x", $0) }.joined()
     }
 }
