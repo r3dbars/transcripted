@@ -292,7 +292,7 @@ extension MeetingSessionController {
             engine: "meeting",
             event: "meeting_transcription_cancelled",
             message: "Meeting transcription cancelled",
-            context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
+            context: baseDiagnosticsContext(extra: ["reason": "user_requested"])
         )
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcription_cancelled")
     }
