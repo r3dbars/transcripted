@@ -429,7 +429,6 @@ extension DictationSessionController {
             let saveContext = self.dictationSaveContext(text: text)
             stopTiming.finalizationStartedAt = CFAbsoluteTimeGetCurrent()
             let finalization = await DictationStopFinalizer.finalize(
-                order: DictationStopFinalizationPolicy.order,
                 startSaving: {
                     return self.startPersistingDictationTranscript(
                         text: text,
@@ -441,11 +440,6 @@ extension DictationSessionController {
                     let result = await saveTask.value
                     self.publishDictationTranscriptPersistence(result, delivery: pasteOutcome.delivery, context: saveContext)
                     return result
-                },
-                saveSynchronously: {
-                    self.persistDictationTranscript(
-                        text: text, delivery: pasteOutcome.delivery, recovery: recovery, context: saveContext
-                    )
                 },
                 performAutoEnter: {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
