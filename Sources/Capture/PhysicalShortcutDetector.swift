@@ -3,6 +3,7 @@
 // Moved out of ContextCaptureEngine.swift.
 
 import AppKit
+@preconcurrency import CoreFoundation
 import CoreGraphics
 
 // PhysicalShortcutAction and PhysicalShortcutBinding live in
@@ -20,7 +21,7 @@ enum PhysicalShortcutPhase {
     case comboInterrupted
 }
 
-final class PhysicalShortcutDetector {
+final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main; state behind stateLock
     /// Shared with `ContextCaptureEngine.updateAccessibilityRetryMonitor()`,
     /// which matches on this exact message to decide whether to poll for
     /// Accessibility permission. Keep both call sites on this constant so a

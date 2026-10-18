@@ -15,9 +15,9 @@ import CoreGraphics
 // backward clock jump silently drop all subsequent hotkey presses.
 // Each toggle action has its own bucket; push-to-talk is never debounced
 // (see HotkeyActionDebouncer and PhysicalShortcutAction.hotkeyDebounceID).
-private var hotkeyActionDebouncer = HotkeyActionDebouncer()
+@MainActor private var hotkeyActionDebouncer = HotkeyActionDebouncer()
 
-func shouldAcceptHotkeyAction(
+@MainActor func shouldAcceptHotkeyAction(
     _ action: PhysicalShortcutAction,
     now: TimeInterval = ProcessInfo.processInfo.systemUptime
 ) -> Bool {
