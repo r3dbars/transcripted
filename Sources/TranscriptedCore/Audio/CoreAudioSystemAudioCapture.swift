@@ -19,86 +19,86 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
     public let diagnosticBackendName = "core_audio_tap"
     public let deliversOwnedAudioBuffers = true
-    private let queue = DispatchQueue(label: "Transcripted.CoreAudioSystemAudioCapture", qos: .userInitiated)
-    private let queueKey = DispatchSpecificKey<Bool>()
-    private let errors = CurrentValueSubject<String?, Never>(nil)
-    private let recovery = PassthroughSubject<SystemAudioRecoveryEvent, Never>()
+    let queue = DispatchQueue(label: "Transcripted.CoreAudioSystemAudioCapture", qos: .userInitiated)
+    let queueKey = DispatchSpecificKey<Bool>()
+    let errors = CurrentValueSubject<String?, Never>(nil)
+    let recovery = PassthroughSubject<SystemAudioRecoveryEvent, Never>()
     private var tap: AudioObjectID = 0
     private var device: AudioObjectID = 0
     private var proc: AudioDeviceIOProcID?
-    private var ring: CoreAudioTapBufferRing?
+    var ring: CoreAudioTapBufferRing?
     /// The recording's format: fixed at the first tap of a recording, since
     /// the host sizes its WAV from it.
-    private var format: AVAudioFormat?
+    var format: AVAudioFormat?
     /// The live tap's format. Differs from `format` after the output route
     /// changed rate mid-recording; `converter` then resamples back.
-    private var tapFormat: AVAudioFormat?
+    var tapFormat: AVAudioFormat?
     private var converter: AVAudioConverter?
-    private var formatReconnects = 0
+    var formatReconnects = 0
     static let maxFormatReconnects = 5
-    private var callback: ((AVAudioPCMBuffer) -> Void)?
-    private var timer: DispatchSourceTimer?
+    var callback: ((AVAudioPCMBuffer) -> Void)?
+    var timer: DispatchSourceTimer?
     private var drainCadence = CoreAudioTapDrainCadence()
-    private var running = false
+    var running = false
     private var tearingDown = false
-    private var generation: UInt64 = 0
-    private var recoveryUsed = false
-    private var recoveryStarted: TimeInterval?
-    private var sleepPendingSince: TimeInterval?
+    var generation: UInt64 = 0
+    var recoveryUsed = false
+    var recoveryStarted: TimeInterval?
+    var sleepPendingSince: TimeInterval?
     /// The tap and aggregate were released for sleep and wait for the wake
     /// reconnect. Nothing stays attached to the output device while asleep.
-    private var releasedForSleep = false
+    var releasedForSleep = false
     /// Checks for a missing wake notice while the tap is released.
-    private var sleepTimer: DispatchSourceTimer?
+    var sleepTimer: DispatchSourceTimer?
     /// The tap can come back attached but delivering digital zeros (seen
     /// after a wake with AirPods as the output). Buffers still arrive, so the
     /// stall check never fires; this watch reconnects instead, and reports
     /// when the tap still hears nothing while another app plays.
-    private var silenceWatch: SystemAudioSilenceWatch?
-    private var signalTracker = SystemAudioSignalTracker()
+    var silenceWatch: SystemAudioSilenceWatch?
+    var signalTracker = SystemAudioSignalTracker()
     /// Set once the silence watch gives up on a tap that hears nothing while
     /// another app plays; cleared by real signal or the next start. Read
     /// lock-free from the main thread, which must never wait on this queue.
-    private let unheardPlayback = Atomic<Bool>(false)
+    let unheardPlayback = Atomic<Bool>(false)
     /// Latched for the recording once signal came back only after a rebuild
     /// or an output move that followed the report, so the tap really had
     /// lost the call. Signal on the same untouched tap means the call was
     /// just quiet (a lobby, nobody talking), a false alarm.
-    private let playbackLossConfirmed = Atomic<Bool>(false)
+    let playbackLossConfirmed = Atomic<Bool>(false)
     /// Queue-confined. A rebuild or output move happened after the report.
-    private var tapChangedSinceUnheardReport = false
+    var tapChangedSinceUnheardReport = false
     /// Block registered for default-output changes while recording.
-    private var defaultOutputListener: AudioObjectPropertyListenerBlock?
+    var defaultOutputListener: AudioObjectPropertyListenerBlock?
     /// Failed wake/route rebuilds retried since the last delivered buffer.
-    private var rebuildRetries = 0
-    private var pendingRebuildRetry: (trigger: RecoveryTrigger, at: TimeInterval)?
-    private var lastBuffer: TimeInterval = 0
+    var rebuildRetries = 0
+    var pendingRebuildRetry: (trigger: RecoveryTrigger, at: TimeInterval)?
+    var lastBuffer: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
     /// Host-clock end of the last delivered buffer, when the HAL stamped it.
     /// Measures a reconnect's real hole instead of drain-tick times.
-    private var lastDeliveredEnd: TimeInterval?
+    var lastDeliveredEnd: TimeInterval?
     /// Frame count of the live tap's last popped buffer. A change is a cheap
     /// hint that the route changed rate before the listener or poll noticed.
     private var lastTapBufferFrames: AVAudioFrameCount?
     /// The explained reconnect (wake, route) still waiting for its first
     /// buffer. Its no-show gets its own reconnect instead of spending the
     /// recording's one stall reconnect (deep review M6).
-    private var awaitingFirstBuffer: RecoveryTrigger?
+    var awaitingFirstBuffer: RecoveryTrigger?
     /// What the reconnect that never got a buffer was for, so its retry
     /// reports the same kind of interruption.
-    private var noFirstBufferCause: RecoveryTrigger?
-    private var overflowReconnects = 0
+    var noFirstBufferCause: RecoveryTrigger?
+    var overflowReconnects = 0
     static let maxOverflowReconnects = 3
     /// Keeps App Nap from coalescing the drain timer while recording.
-    private var activity: NSObjectProtocol?
+    var activity: NSObjectProtocol?
     private var formatListenerInstalled = false
     private var ioContext: UnsafeMutableRawPointer?
     private var listenerContext: UnsafeMutableRawPointer?
     private var lastSuccessRate: Double = 1
     private var continuityFailed = false
     private var producerStoppedSafely = true
-    private let hardwareHooks: HardwareHooks?
-    private let clock: () -> TimeInterval
+    let hardwareHooks: HardwareHooks?
+    let clock: () -> TimeInterval
     private static let formatListener: AudioObjectPropertyListenerProc = { _, _, _, context in
         if let context {
             Unmanaged<CoreAudioTapBufferRing>.fromOpaque(context).takeUnretainedValue()
@@ -137,7 +137,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     public var lastHardwareFailure: SystemAudioTapFailure? { serialized { lastFailure } }
     /// Reconnect counts and end reason for this recording. Written and read
     /// only on `queue`, never from the IOProc.
-    private var tapDiagnostics = SystemAudioTapDiagnostics()
+    var tapDiagnostics = SystemAudioTapDiagnostics()
     public var diagnostics: SystemAudioTapDiagnostics { serialized { tapDiagnostics } }
 
     private func serialized<T>(_ body: () throws -> T) rethrows -> T {
@@ -174,7 +174,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         return result
     }
 
-    private func createHardware() throws {
+    func createHardware() throws {
         if let hardwareHooks {
             let current = try hardwareHooks.prepare()
             try acceptFormat(current)
@@ -262,7 +262,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
 
     /// Runs on the consumer queue, never the IOProc thread.
-    private func convertToRecordingFormat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+    func convertToRecordingFormat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
         guard let converter, let format else { return buffer }
         let ratio = format.sampleRate / buffer.format.sampleRate
         let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 64
@@ -320,7 +320,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         }
     }
 
-    private func startHardware() throws {
+    func startHardware() throws {
         let startGeneration = generation
         if let hardwareHooks { try hardwareHooks.start() }
         else { try check(AudioDeviceStart(device, proc), "start") }
@@ -338,7 +338,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         timer.resume()
     }
 
-    private func drainAndCheck() {
+    func drainAndCheck() {
         if releasedForSleep {
             // A retry never runs between a sleep notice and its wake; the
             // wake reconnect covers it.
@@ -439,7 +439,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// reconnect's interruption where that audio began so the pad covers it,
     /// whichever reconnect runs next. Skipped while an earlier reconnect's
     /// start is still pending, since that start is already earlier.
-    private func backUpStartOverDroppedAudio(
+    func backUpStartOverDroppedAudio(
         _ ring: CoreAudioTapBufferRing,
         format tapFormat: AVAudioFormat,
         now: TimeInterval
@@ -535,146 +535,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     static var maxWakeSilenceReconnects: Int { SystemAudioSilenceWatch.maxWakeReconnects }
 
-    private func noteSilenceWatchBuffer(hasSignal: Bool, at now: TimeInterval) {
-        guard var watch = silenceWatch else { return }
-        guard watch.noteBuffer(hasSignal: hasSignal, at: now) else {
-            silenceWatch = nil
-            // Signal is back, so the tap isn't stuck silent after the wake.
-            tapDiagnostics.silentAfterWakeUnresolved = false
-            if unheardPlayback.load(ordering: .acquiring) {
-                if tapChangedSinceUnheardReport {
-                    // Publish the confirmation before clearing the report:
-                    // the host reads the two flags separately, and must never
-                    // see "hearing again" without "it was lost".
-                    playbackLossConfirmed.store(true, ordering: .releasing)
-                    AppLogger.audioSystem.info("System audio signal returned after a new tap")
-                } else {
-                    // The same tap heard the call: it was quiet, not lost.
-                    tapDiagnostics.unheardPlayback = false
-                    AppLogger.audioSystem.info("System audio signal returned on the same tap; the call was quiet")
-                }
-                tapChangedSinceUnheardReport = false
-                unheardPlayback.store(false, ordering: .releasing)
-            } else if watch.reason == .wake {
-                AppLogger.audioSystem.info("System audio signal confirmed after wake")
-            }
-            return
-        }
-        silenceWatch = watch
-    }
-
-    private func checkSilenceWatch(at now: TimeInterval) {
-        guard var watch = silenceWatch else { return }
-        // A watch that replaced one with an open report must stay to see
-        // signal return, whatever its own window says.
-        guard !watch.isExpired(at: now) || unheardPlayback.load(ordering: .acquiring) else {
-            silenceWatch = nil
-            return
-        }
-        guard watch.wantsPlaybackCheck(at: now) else { return }
-        // Zeros are normal on a quiet Mac. Only act when another app is
-        // actually playing and the tap still hears nothing.
-        let wasExhausted = watch.exhausted
-        let action = watch.evaluate(otherAudioPlaying: otherAudioIsPlaying(), at: now)
-        silenceWatch = watch
-        if watch.exhausted, !wasExhausted {
-            if watch.reason == .wake { tapDiagnostics.silentAfterWakeUnresolved = true }
-            AppLogger.audioSystem.warning("System audio still silent after reconnects while other audio plays", [
-                "watch": watch.reason.rawValue
-            ])
-        }
-        switch action {
-        case .none:
-            return
-        case .reconnect:
-            if watch.reason == .lostMidRecording { signalTracker.noteRebuild() }
-            recover(watch.reason == .wake ? .silentAfterWake : .silentWhilePlaying)
-        case .reportUnheard:
-            tapDiagnostics.unheardPlayback = true
-            tapChangedSinceUnheardReport = false
-            unheardPlayback.store(true, ordering: .releasing)
-            AppLogger.audioSystem.warning("System audio hears nothing while another app plays", [
-                "watch": watch.reason.rawValue
-            ])
-        }
-    }
-
-    /// True once the tap has heard only digital silence for a while, after
-    /// its reconnects, while another app kept playing audio. The call is
-    /// probably not being recorded. Cleared when real signal returns.
-    public var isNotHearingPlayback: Bool { unheardPlayback.load(ordering: .acquiring) }
-
-    /// True for the rest of the recording once call audio came back only
-    /// after a new tap or output, so the silence before it was a real loss.
-    public var didLosePlayback: Bool { playbackLossConfirmed.load(ordering: .acquiring) }
-
-    /// The Mac's default output changed. A tap that followed it keeps
-    /// working; one that did not goes silent, which the watch catches.
-    private func defaultOutputDidChange() {
-        guard running || releasedForSleep else { return }
-        AppLogger.audioSystem.info("Default output changed during recording")
-        if unheardPlayback.load(ordering: .acquiring) { tapChangedSinceUnheardReport = true }
-        if var watch = silenceWatch {
-            watch.restartSilence()
-            silenceWatch = watch
-        } else {
-            silenceWatch = .armed(.outputChange, at: clock())
-        }
-    }
-
-    private func installDefaultOutputListener() {
-        guard hardwareHooks == nil, defaultOutputListener == nil else { return }
-        var address = Self.defaultOutputAddress
-        let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.defaultOutputDidChange()
-        }
-        // Runs the block on `queue`, so the watch stays single-threaded.
-        guard AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener) == noErr else { return }
-        defaultOutputListener = listener
-    }
-
-    private func removeDefaultOutputListener() {
-        guard let listener = defaultOutputListener else { return }
-        var address = Self.defaultOutputAddress
-        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
-        defaultOutputListener = nil
-    }
-
-    private static let defaultOutputAddress = AudioObjectPropertyAddress(
+    static let defaultOutputAddress = AudioObjectPropertyAddress(
         mSelector: kAudioHardwarePropertyDefaultOutputDevice,
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-
-    private func otherAudioIsPlaying() -> Bool {
-        if let hardwareHooks { return hardwareHooks.otherAudioIsPlaying() }
-        return Self.anotherProcessIsPlayingAudio(excluding: getpid())
-    }
-
-    /// True when any other process is running audio output. Read-only Core
-    /// Audio process objects; nothing is attached or started.
-    static func anotherProcessIsPlayingAudio(excluding ownPID: pid_t) -> Bool {
-        let system = AudioObjectID(kAudioObjectSystemObject)
-        var listAddress = AudioObjectPropertyAddress(mSelector: kAudioHardwarePropertyProcessObjectList, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        var size: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(system, &listAddress, 0, nil, &size) == noErr, size > 0 else { return false }
-        var processes = [AudioObjectID](repeating: 0, count: Int(size) / MemoryLayout<AudioObjectID>.size)
-        guard AudioObjectGetPropertyData(system, &listAddress, 0, nil, &size, &processes) == noErr else { return false }
-        for process in processes.prefix(Int(size) / MemoryLayout<AudioObjectID>.size) {
-            var running: UInt32 = 0
-            var runningSize = UInt32(MemoryLayout<UInt32>.size)
-            var runningAddress = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyIsRunningOutput, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            guard AudioObjectGetPropertyData(process, &runningAddress, 0, nil, &runningSize, &running) == noErr,
-                  running != 0 else { continue }
-            var pid: pid_t = 0
-            var pidSize = UInt32(MemoryLayout<pid_t>.size)
-            var pidAddress = AudioObjectPropertyAddress(mSelector: kAudioProcessPropertyPID, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            if AudioObjectGetPropertyData(process, &pidAddress, 0, nil, &pidSize, &pid) == noErr, pid == ownPID { continue }
-            return true
-        }
-        return false
-    }
-
     enum RecoveryTrigger: String {
         case stall, systemWake, formatChange, silentAfterWake
         /// The tap heard only zeros while another app played, outside a wake.
@@ -685,178 +550,8 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         case noFirstBuffer
     }
 
-    /// A new output route (e.g. AirPods switching to their call profile) can
-    /// change the tap's rate. 1.1.61's ScreenCaptureKit path resampled for
-    /// us; here the tap is rebuilt and resampled to the recording's format.
-    /// Bounded so a route that keeps flapping still ends cleanly.
-    private func reconnectAfterFormatChange() {
-        // Reached from the drain loop too, possibly mid-way through an
-        // overflow's queued audio, so the pad start is fixed up here.
-        if let ring, let tapFormat {
-            backUpStartOverDroppedAudio(ring, format: tapFormat, now: clock())
-        }
-        guard formatReconnects < Self.maxFormatReconnects else {
-            fail("System audio failed - audio format changed; start a new recording.", reason: "format_change_limit")
-            return
-        }
-        formatReconnects += 1
-        recover(.formatChange)
-    }
-
-    /// Stalls get one reconnect per recording. A system wake is a separate
-    /// interruption the user caused, so it reconnects without spending (or
-    /// needing) that budget; otherwise a second lid-close ends system audio.
-    /// A wake and a format change are explained interruptions, so they
-    /// reconnect quietly: the user only hears about it if the reconnect fails
-    /// or the tap then stalls.
-    private func recover(_ trigger: RecoveryTrigger = .stall, isRetry: Bool = false) {
-        guard running || releasedForSleep else { return }
-        releasedForSleep = false
-        pendingRebuildRetry = nil
-        // The rebuilt tap gets a fresh silence window.
-        silenceWatch?.restartSilence()
-        // A wake rebuild is not evidence the silence before the sleep was a
-        // lost call: the Mac was asleep. Other rebuilds are.
-        if trigger != .systemWake, unheardPlayback.load(ordering: .acquiring) {
-            tapChangedSinceUnheardReport = true
-        }
-        if trigger == .stall {
-            guard !recoveryUsed else { fail("System audio failed - no audio buffers after reconnecting.", reason: "no_buffers_after_reconnect"); return }
-            recoveryUsed = true
-        }
-        let recoveryGeneration = generation
-        // A retry keeps the write-hold and event its first attempt sent.
-        if !isRetry {
-            rebuildRetries = 0
-            // A reconnect still waiting for its first buffer armed one write-hold.
-            // Release it before this attempt arms its own, and keep its start so
-            // the eventual pad covers the whole interruption.
-            let interruptionStart = recoveryStarted ?? lastBuffer
-            if recoveryStarted != nil {
-                recoveryStarted = nil
-                recovery.send(.recoveryAbandoned)
-                guard generation == recoveryGeneration else { return }
-            }
-            recoveryStarted = interruptionStart
-            switch trigger {
-            case .stall: tapDiagnostics.stallReconnects += 1
-            case .systemWake: tapDiagnostics.wakeReconnects += 1
-            case .formatChange: tapDiagnostics.formatReconnects += 1
-            case .silentAfterWake: tapDiagnostics.silentAfterWakeReconnects += 1
-            case .silentWhilePlaying: tapDiagnostics.silentPlaybackReconnects += 1
-            case .overflow: tapDiagnostics.overflowReconnects += 1
-            case .noFirstBuffer: tapDiagnostics.noFirstBufferReconnects += 1
-            }
-            AppLogger.audioSystem.info("System audio reconnecting", ["trigger": trigger.rawValue])
-            recovery.send(Self.recoveryEvent(
-                for: trigger == .noFirstBuffer ? (noFirstBufferCause ?? .stall) : trigger
-            ))
-            guard generation == recoveryGeneration else { return }
-            if trigger == .stall || trigger == .noFirstBuffer {
-                errors.send("System audio reconnecting after capture interruption.")
-                guard generation == recoveryGeneration else { return }
-            }
-        }
-        destroyHardware()
-        do {
-            try createHardware()
-            guard generation == recoveryGeneration else { destroyHardware(); return }
-            try startHardware()
-            awaitingFirstBuffer = trigger
-            // A route, stall or overflow rebuild is a new tap with no proof it
-            // hears anything yet. A wake arms its own watch; silent-tap
-            // reconnects keep the watch (and budget) that asked for them.
-            if silenceWatch == nil,
-               trigger == .stall || trigger == .formatChange || trigger == .overflow || trigger == .noFirstBuffer {
-                silenceWatch = .armed(.rebuild, at: clock())
-            }
-        }
-        catch {
-            // Right after a wake or route change the output can still be
-            // coming back (e.g. a 0 Hz rate). That is worth another try.
-            guard trigger != .stall, generation == recoveryGeneration else {
-                fail("System audio failed - could not reconnect. Start a new recording.", reason: "reconnect_failed")
-                return
-            }
-            retryRebuild(trigger)
-        }
-    }
-
     static let maxRebuildRetries = 4
-
-    /// 1, 2, 4, then 8 seconds of awake time.
-    static func rebuildRetryDelay(attempt: Int) -> TimeInterval {
-        min(8, TimeInterval(1 << max(0, min(attempt - 1, 3))))
-    }
-
-    /// Releases the hardware and schedules another rebuild of the same kind,
-    /// or ends system audio once the retries are spent.
-    private func retryRebuild(_ trigger: RecoveryTrigger) {
-        guard rebuildRetries < Self.maxRebuildRetries else {
-            fail("System audio failed - could not reconnect. Start a new recording.", reason: "reconnect_failed")
-            return
-        }
-        rebuildRetries += 1
-        tapDiagnostics.rebuildRetries += 1
-        destroyHardware()
-        releasedForSleep = true
-        pendingRebuildRetry = (trigger, clock() + Self.rebuildRetryDelay(attempt: rebuildRetries))
-        AppLogger.audioSystem.info("System audio rebuild retry scheduled", [
-            "trigger": trigger.rawValue,
-            "attempt": "\(rebuildRetries)"
-        ])
-        armReleasedTimer()
-    }
-
-    /// While released, a slow timer covers a missing wake notice and any
-    /// scheduled rebuild retry. Tests drive `drainForTesting` instead.
-    private func armReleasedTimer() {
-        guard releasedForSleep, hardwareHooks == nil, sleepTimer == nil else { return }
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + 1, repeating: .seconds(1), leeway: .milliseconds(100))
-        timer.setEventHandler { [weak self] in self?.drainAndCheck() }
-        sleepTimer = timer
-        timer.resume()
-    }
-
-    /// Meetings are latency-critical capture: without this, App Nap can
-    /// coalesce the drain timer long enough to overflow the ring (M5). Idle
-    /// system sleep stays allowed.
-    private func beginActivity() {
-        guard hardwareHooks == nil, activity == nil else { return }
-        activity = ProcessInfo.processInfo.beginActivity(
-            options: [.userInitiatedAllowingIdleSystemSleep, .latencyCritical],
-            reason: "Recording meeting audio"
-        )
-    }
-
-    private func endActivity() {
-        guard let activity else { return }
-        ProcessInfo.processInfo.endActivity(activity)
-        self.activity = nil
-    }
-
-    private func clearRebuildRetryState() {
-        rebuildRetries = 0
-        pendingRebuildRetry = nil
-    }
-
-    private func fail(_ message: String, reason: String) {
-        let failureGeneration = generation
-        tapDiagnostics.endReason = reason
-        releasedForSleep = false
-        silenceWatch = nil
-        removeDefaultOutputListener()
-        clearRebuildRetryState()
-        AppLogger.audioSystem.warning("System audio capture ended", ["reason": message])
-        destroyHardware()
-        endActivity()
-        if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
-        guard generation == failureGeneration else { return }
-        errors.send(message)
-    }
-
-    private func destroyHardware() {
+    func destroyHardware() {
         producerStoppedSafely = true
         let alreadyTearingDown = tearingDown
         tearingDown = true
@@ -967,79 +662,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
         }
     }
-    /// Releases the tap and aggregate before the Mac sleeps. A tap left
-    /// attached to AirPods output across sleep came back delivering zeros and
-    /// garbled their playback until they were reconnected. The wake reconnect
-    /// then builds a fresh tap on whatever output the Mac woke up with.
-    public func prepareForSystemSleep() {
-        let released = DispatchSemaphore(value: 0)
-        queue.async { [weak self] in
-            defer { released.signal() }
-            guard let self, self.running || self.releasedForSleep else { return }
-            self.tapDiagnostics.sleeps += 1
-            self.sleepPendingSince = self.clock()
-            // Already released: a second lid-close before the last wake's
-            // reconnect ran, or a pending rebuild retry. Stay released; this
-            // sleep's wake reconnect takes over.
-            guard self.running else {
-                self.pendingRebuildRetry = nil
-                return
-            }
-            self.releaseForSleep()
-        }
-        // Finish releasing before the will-sleep handler returns, so nothing
-        // is still attached to the output as the Mac sleeps (deep review
-        // M14). Bounded, so a slow HAL call on the queue can't hang the
-        // caller; the queue itself never waits on the caller.
-        if DispatchQueue.getSpecific(key: queueKey) != true {
-            _ = released.wait(timeout: .now() + Self.sleepReleaseWaitSeconds)
-        }
-    }
     static let sleepReleaseWaitSeconds: TimeInterval = 1
-    public func recoverAfterSystemWake() {
-        queue.async { [weak self] in
-            guard let self else { return }
-            self.sleepPendingSince = nil
-            let wasRunning = self.running || self.releasedForSleep
-            self.recover(.systemWake)
-            // Also covers a rebuild that failed and is waiting to retry.
-            guard wasRunning, self.running || self.releasedForSleep else { return }
-            self.silenceWatch = .armed(.wake, at: self.clock())
-        }
-    }
-
-    private func releaseForSleep() {
-        let releaseGeneration = generation
-        // Keep the queued tail: it is audio from just before the sleep.
-        let tail = ring
-        let tailFormat = tapFormat
-        destroyHardware()
-        releasedForSleep = true
-        silenceWatch = nil
-        // Sleep settles an open "can't hear the call" report neither way, and
-        // no watch is left to see signal return. End it here; the wake watch
-        // reports again if the new tap is still deaf. The diagnostic stays.
-        tapChangedSinceUnheardReport = false
-        unheardPlayback.store(false, ordering: .releasing)
-        AppLogger.audioSystem.info("System audio released for sleep")
-        if let tail, let tailFormat,
-           !tail.formatInvalidated.load(ordering: .acquiring),
-           !tail.overflowed.load(ordering: .acquiring) {
-            for _ in 0..<tail.capacity {
-                guard generation == releaseGeneration,
-                      let buffer = tail.pop(format: tailFormat) else { break }
-                lastBuffer = clock()
-                lastDeliveredEnd = Self.hostSeconds(tail.lastPoppedHostTime).map {
-                    $0 + Double(buffer.frameLength) / tailFormat.sampleRate
-                }
-                if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
-            }
-        }
-        // The host may have stopped from inside the tail callback.
-        guard generation == releaseGeneration else { return }
-        armReleasedTimer()
-    }
-
     func receiveForTesting(_ buffer: AVAudioPCMBuffer, hostTime: UInt64 = 0) {
         serialized { ring?.push(buffer.audioBufferList, hostTime: hostTime) }
     }
