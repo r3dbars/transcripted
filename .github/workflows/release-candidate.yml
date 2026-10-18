@@ -237,7 +237,7 @@ jobs:
     needs: build-unsigned
     runs-on: macos-26
     # Signing/notarization/Sparkle secrets live in the main-only `release`
-    # environment with Justin as required reviewer, and only this job names
+    # environment with the owner as required reviewer, and only this job names
     # `environment: release` or `secrets.`.
     environment: release
     timeout-minutes: 120

@@ -229,7 +229,7 @@ jobs so the code that compiles never holds a secret:
 1. `build-unsigned` (no environment, no secrets) checks out `source_ref`, builds
    deps, and runs `build-beta.sh` with `TRANSCRIPTED_UNSIGNED_APP_ONLY=1`, which
    stops after the app and dSYM. It uploads the unsigned app.
-2. `sign-and-notarize` (the main-only `release` environment, Justin approves)
+2. `sign-and-notarize` (the main-only `release` environment, the owner approves)
    checks out main, not the prep branch, and runs only
    `scripts/release/sign-release.sh`, notarytool, `fetch-sparkle-tools.sh`,
    `generate-sparkle-appcast.sh`, `sign-appcast.sh` and the cask edit. It never
