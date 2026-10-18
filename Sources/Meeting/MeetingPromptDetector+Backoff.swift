@@ -243,6 +243,28 @@ extension MeetingPromptDetector {
         cooldownReasons[candidate.id] = "record_selected"
     }
 
+    /// Auto-start already reported `.autoStarted` but capture never began.
+    /// Drop the 90-second pending window and the accepted-record snooze, then
+    /// show the island prompt so the user is not left in a silent wait.
+    func recoverFailedAutoStart(candidate: Candidate, now: Date = Date()) {
+        snoozedUntil[candidate.id] = nil
+        pendingUntil[candidate.id] = nil
+        cooldownReasons[candidate.id] = nil
+        runtimeSuppressedUntil[candidate.provider] = nil
+        runtimeSuppressionReasons[candidate.provider] = nil
+        if detectedCallSession?.sawMeetingRecording == true {
+            detectedCallSession?.sawMeetingRecording = false
+        }
+        switch onPromptFallback?(candidate) ?? .skipped {
+        case .presented:
+            pendingUntil[candidate.id] = now.addingTimeInterval(pendingCooldown)
+            cooldownReasons[candidate.id] = "prompt_pending"
+            detectedCallSession?.promptShown = true
+        case .autoStarted, .skipped:
+            break
+        }
+    }
+
     /// A prompt for `candidateID` was presented within the pending window and
     /// has not been answered. A dismissal also writes `pendingUntil` (for its
     /// whole backoff), so the cooldown reason tells the two apart.

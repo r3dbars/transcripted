@@ -520,6 +520,8 @@ func testMeetingPromptDetector() async {
             "borrowed proof must not rewrite calendar call_evidence telemetry"
         )
         assertTrue(box.candidate?.holdsMicrophone == true, "and that the native app is on the mic")
+        assertEqual(box.candidate?.borrowedProofSource, .nativeApp, "calendar keeps native proof on its own source field")
+        assertTrue(box.candidate?.nativeProcessHoldsMicrophone == true, "the native Zoom process holds the mic")
         assertFalse(
             box.candidate?.isBrowserCall == true,
             "call-end arming stays native Zoom, not a browser call"
@@ -1287,10 +1289,13 @@ func testMeetingPromptDetector() async {
         )
         live.callEvidence = .nativeApp
         live.holdsMicrophone = true
+        live.nativeProcessHoldsMicrophone = true
         live.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
         let merged = calendar.borrowingCallProof(from: live)
         assertEqual(merged.callEvidence, .none, "calendar telemetry stays call_evidence none")
+        assertEqual(merged.borrowedProofSource, .nativeApp, "native proof keeps its own source")
         assertTrue(merged.holdsMicrophone, "auto-record still sees that Zoom holds the mic")
+        assertTrue(merged.nativeProcessHoldsMicrophone, "native proof requires the native process on the mic")
         assertFalse(merged.isBrowserCall, "call-end arming stays native, not browser")
         assertEqual(
             MeetingAutoRecordPolicy.decision(
@@ -1306,11 +1311,71 @@ func testMeetingPromptDetector() async {
                     isFocusedFrontWindow: merged.isFocusedFrontWindow,
                     isMeetPreJoin: merged.isMeetPreJoin,
                     evidenceAge: merged.evidenceAge,
-                    isPlayingCallAudio: merged.isPlayingCallAudio
+                    isPlayingCallAudio: merged.isPlayingCallAudio,
+                    borrowedProofSource: merged.borrowedProofSource,
+                    nativeProcessHoldsMicrophone: merged.nativeProcessHoldsMicrophone
                 )
             ),
             .autoStart,
-            "the borrowed proof is enough to auto-start"
+            "borrowed native proof is enough to auto-start"
+        )
+    }
+
+    await runSuite("MeetingPromptDetector — borrowed tab-title proof from a background Zoom Meeting tab stays a prompt") {
+        let calendar = makeMeetingPromptCandidate(
+            id: "calendar:design-review",
+            source: .calendarEvent
+        )
+        var live = makeMeetingPromptCandidate(
+            id: "mic:zoom",
+            source: .runtimeApp,
+            reason: .micInput
+        )
+        live.callEvidence = .tabTitle
+        live.holdsMicrophone = true
+        live.isFocusedFrontWindow = false
+        live.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
+        let merged = calendar.borrowingCallProof(from: live)
+        assertEqual(merged.callEvidence, .none, "calendar telemetry stays call_evidence none")
+        assertEqual(merged.borrowedProofSource, .tabTitle, "tab-title proof keeps its own source")
+        assertFalse(merged.nativeProcessHoldsMicrophone, "a browser helper is not the native Zoom process")
+        assertEqual(
+            MeetingAutoRecordPolicy.decision(
+                for: MeetingAutoRecordPolicy.Request(
+                    autoRecordEnabled: true,
+                    evidence: merged.callEvidence,
+                    provider: merged.provider,
+                    reason: merged.reason,
+                    microphoneGranted: true,
+                    systemAudioGranted: true,
+                    otherCaptureActive: false,
+                    holdsMicrophone: merged.holdsMicrophone,
+                    isFocusedFrontWindow: merged.isFocusedFrontWindow,
+                    isMeetPreJoin: merged.isMeetPreJoin,
+                    evidenceAge: merged.evidenceAge,
+                    isPlayingCallAudio: merged.isPlayingCallAudio,
+                    borrowedProofSource: merged.borrowedProofSource,
+                    nativeProcessHoldsMicrophone: merged.nativeProcessHoldsMicrophone
+                )
+            ),
+            .prompt,
+            "a background Zoom Meeting tab must not take the native auto-start path"
+        )
+    }
+
+    await runSuite("MeetingPromptDetector — a Zoom calendar event plus a background Zoom Meeting tab stays a prompt") {
+        await assertCalendarBackgroundTabStaysPrompt(
+            provider: .zoom,
+            tabTitle: "Zoom Meeting",
+            micBundleID: "com.google.Chrome.helper"
+        )
+    }
+
+    await runSuite("MeetingPromptDetector — a Teams calendar event plus a background Teams web lobby stays a prompt") {
+        await assertCalendarBackgroundTabStaysPrompt(
+            provider: .teams,
+            tabTitle: "Meeting with Ana | Microsoft Teams",
+            micBundleID: "com.microsoft.edgemac.helper"
         )
     }
 
@@ -1530,6 +1595,72 @@ private func showBrowserWindows(_ windows: [BrowserWindowTitle], on detector: Me
     detector.browserWindowTitlesProvider = { _ in windows }
 }
 
+/// Calendar invite plus a background named call tab: the island prompt, not auto-start.
+@available(macOS 14.0, *)
+@MainActor
+private func assertCalendarBackgroundTabStaysPrompt(
+    provider: MeetingPromptProvider,
+    tabTitle: String,
+    micBundleID: String
+) async {
+    let now = Date()
+    let detector = makeIsolatedDetector(
+        calendarAccessGranted: { true },
+        calendarEventSnapshots: [
+            makeMeetingPromptCalendarSnapshot(
+                id: "scheduled-\(provider.rawValue)",
+                provider: provider,
+                startsIn: 30,
+                now: now
+            )
+        ],
+        refreshesCalendarEventSnapshots: false
+    )
+    detector.isOwnCaptureActive = { false }
+    detector.isAutoRecordEnabled = { true }
+    detector.autoRecordEvidenceHoldDuration = 0
+    detector.browserEvidenceTiming = instantBrowserEvidenceTiming
+    detector.browserMicSince = now.addingTimeInterval(-MeetingAutoRecordPolicy.evidenceHoldDuration)
+    showBrowserWindows(
+        [BrowserWindowTitle(title: tabTitle, isFocused: false, isSystemFront: false)],
+        on: detector
+    )
+    let box = CandidateBox()
+    detector.onPromptRequest = { candidate in
+        let decision = DetectedMeetingPromptWiring.autoRecordDecision(
+            for: candidate,
+            otherCaptureActive: false,
+            autoRecordEnabled: true,
+            microphoneGranted: true,
+            systemAudioGranted: true
+        )
+        if decision == .autoStart {
+            box.autoStartCount += 1
+            box.candidate = candidate
+            return .autoStarted
+        }
+        box.candidate = candidate
+        box.promptCount += 1
+        return .presented
+    }
+
+    detector.updateMicInputUsers([micBundleID])
+    await waitForPromptEvaluation(detector, until: { box.promptCount + box.autoStartCount > 0 })
+
+    assertEqual(box.autoStartCount, 0, "a background web tab must not auto-start a calendar \(provider.rawValue) event")
+    assertEqual(box.promptCount, 1, "the island Record prompt is still offered")
+    assertEqual(box.candidate?.source, .calendarEvent, "the calendar event keeps the title")
+    assertEqual(
+        box.candidate?.callEvidence,
+        Optional(MeetingPromptCallEvidence.none),
+        "borrowed proof must not rewrite calendar call_evidence"
+    )
+    assertEqual(box.candidate?.borrowedProofSource, .tabTitle, "the live proof is the tab title, not the native app")
+    assertTrue(box.candidate?.holdsMicrophone == true, "the browser helper is on the mic")
+    assertFalse(box.candidate?.isFocusedFrontWindow == true, "the named tab is in the background")
+    assertFalse(box.candidate?.nativeProcessHoldsMicrophone == true, "a browser helper is not the native process")
+}
+
 /// Saves three recent Not nows to an unrecognized browser mic, all past
 /// their quiet windows, so only the learned-off rule can keep it quiet.
 private func seedLearnedOffBrowserMic(in defaults: UserDefaults) {
@@ -1549,6 +1680,7 @@ private final class CandidateBox {
     var candidate: MeetingPromptDetector.Candidate?
     var suppression: MeetingPromptSuppression?
     var promptCount = 0
+    var autoStartCount = 0
     var suppressionCount = 0
     var unrecordedCallCount = 0
     var calendarFetchCount = 0

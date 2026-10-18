@@ -269,15 +269,15 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         autoStarted: autoStarted
                     )
                 },
-                onCompleted: { [weak self] candidate, started in
+                onCompleted: { [weak self] candidate, started, autoStarted in
                     self?.meetingPromptRecordInFlight = false
-                    guard started else { return }
-                    self?.meetingPromptDetector.markAccepted(candidate: candidate)
+                    if started { self?.meetingPromptDetector.markAccepted(candidate: candidate) }
+                    else if autoStarted { self?.meetingPromptDetector.recoverFailedAutoStart(candidate: candidate) }
                 }
             )
             meetingPromptRecordAction = promptRecordAction
-            let recordPrompt: (MeetingPromptDetector.Candidate, Bool) -> Void = { [weak self] candidate, autoStarted in
-                guard let self else { return }
+            let recordPrompt: (MeetingPromptDetector.Candidate, Bool) -> Bool = { [weak self] candidate, autoStarted in
+                guard let self else { return false }
                 // startRecording returns true early, without publishing a state
                 // transition, when a meeting is already recording/starting/stopping.
                 // Without this gate the overlay enters .preparing and never leaves
@@ -287,7 +287,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 // detector already applies in shouldSkipPromptEvaluation above.
                 guard MeetingPromptSessionPromptState(
                     self.appState.meetingSession.state
-                ).allowsDetectedMeetingPrompt else { return }
+                ).allowsDetectedMeetingPrompt else { return false }
                 let readiness = self.meetingPromptTelemetryReadiness()
                 let elapsedSeconds = self.consumeMeetingPromptShownElapsedSeconds(candidateID: candidate.id)
                 let promptFunnelProperties = MeetingPromptTelemetry.funnelProperties(
@@ -298,7 +298,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                     candidate: candidate,
                     promptTelemetryProperties: promptFunnelProperties,
                     autoStarted: autoStarted
-                ) else { return }
+                ) else { return false }
                 // Mark accepted when start begins, not only after
                 // startRecording returns. evaluate() can run while models
                 // load / .startingRecording, and would otherwise close the
@@ -311,6 +311,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         : .record(candidate, elapsedSeconds: elapsedSeconds, signals: signals),
                     readiness: readiness
                 )
+                return true
             }
             let dismissPrompt: (MeetingPromptDetector.Candidate) -> Void = { [weak self] candidate in
                 guard let self else { return }
@@ -369,7 +370,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         readiness: self.meetingPromptTelemetryReadiness()
                     )
                 },
-                onRecord: { recordPrompt($0, false) },
+                onRecord: { _ = recordPrompt($0, false) },
                 onDismiss: dismissPrompt,
                 onExpired: expirePrompt,
                 onRemind: remindPrompt,

@@ -14,13 +14,13 @@ final class MeetingPromptRecordAction {
 
     private let onStartRequested: () -> Void
     private let startRecording: StartRecording
-    private let onCompleted: (MeetingPromptDetector.Candidate, Bool) -> Void
+    private let onCompleted: (MeetingPromptDetector.Candidate, Bool, Bool) -> Void
     private var startTask: Task<Void, Never>?
 
     init(
         onStartRequested: @escaping () -> Void,
         startRecording: @escaping StartRecording,
-        onCompleted: @escaping (MeetingPromptDetector.Candidate, Bool) -> Void
+        onCompleted: @escaping (MeetingPromptDetector.Candidate, Bool, Bool) -> Void
     ) {
         self.onStartRequested = onStartRequested
         self.startRecording = startRecording
@@ -40,7 +40,7 @@ final class MeetingPromptRecordAction {
         startTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let started = await self.startRecording(candidate, promptTelemetryProperties, autoStarted)
-            self.onCompleted(candidate, started)
+            self.onCompleted(candidate, started, autoStarted)
             self.startTask = nil
         }
         return true

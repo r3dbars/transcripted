@@ -3,20 +3,23 @@ import Foundation
 /// Whether a detected-call signal should auto-start recording, keep the
 /// existing island prompt, or stay quiet.
 ///
-/// Auto-start is opt-in and narrow: Zoom or Teams must really hold the mic,
-/// or a focused Meet/Zoom/Teams tab must hold the mic and play call audio
-/// (never a background tab, a Meet lobby, or the camera). That evidence has
-/// to last a few seconds, both capture permissions must already be on, and
-/// nothing else may be recording. Every other detected call keeps today's
-/// prompt. Off by default, so Record / Not now / Remind is unchanged until
-/// the setting is on.
+/// Auto-start is opt-in and narrow: the native Zoom or Teams process must
+/// hold the mic, or a focused Meet/Zoom/Teams tab must hold the mic and play
+/// call audio (never a background tab, a Meet lobby, or the camera). That
+/// evidence has to last a few seconds, both capture permissions must already
+/// be on, and nothing else may be recording. Calendar events keep
+/// `call_evidence` none and carry borrowed proof with its own source, so a
+/// Zoom/Teams invite plus a background web tab cannot take the native path.
+/// Every other detected call keeps today's prompt. Off by default, so
+/// Record / Not now / Remind is unchanged until the setting is on.
 enum MeetingAutoRecordPolicy {
     /// How long proven evidence must last before auto-start. Prompting still
     /// happens at once when the setting is off.
     static let evidenceHoldDuration: TimeInterval = 3
 
     /// Stop reasons that count as the user explicitly ending an auto-started
-    /// recording. Call-end, inactivity, quit, and warning stops do not.
+    /// recording. Call-end, inactivity, quit, warning, debug, and lab stops
+    /// do not.
     static let explicitStopReasons: Set<String> = [
         "hotkey_toggle",
         "overlay_stop_button",
@@ -57,6 +60,11 @@ enum MeetingAutoRecordPolicy {
         /// The browser (or call app) is playing audio output. Required for
         /// a tab-title auto-start, not for native Zoom/Teams.
         var isPlayingCallAudio: Bool
+        /// Where a calendar/runtime `.none` candidate borrowed live proof.
+        /// Live ad-hoc candidates keep this `.none` and use `evidence`.
+        var borrowedProofSource: MeetingBorrowedCallProofSource = .none
+        /// The native Zoom or Teams process (not a browser helper) is on the mic.
+        var nativeProcessHoldsMicrophone: Bool = false
     }
 
     static func decision(for request: Request) -> Decision {
@@ -85,9 +93,17 @@ enum MeetingAutoRecordPolicy {
         case .tabTitle:
             return isProvenTabTitle(request)
         case .none:
-            // Calendar/runtime title carrying live proof fields, without
-            // rewriting `call_evidence` telemetry or `isBrowserCall`.
-            return isProvenNativeApp(request) || isProvenTabTitle(request)
+            // Calendar/runtime title carrying live proof, without rewriting
+            // `call_evidence` telemetry. Native vs tab-title must not share
+            // a path: a background Zoom/Teams tab is not a native app.
+            switch request.borrowedProofSource {
+            case .nativeApp:
+                return isProvenNativeApp(request)
+            case .tabTitle:
+                return isProvenTabTitle(request)
+            case .none:
+                return false
+            }
         case .callSite, .camera, .micAndOutput, .micOnly, .nonCallSite:
             return false
         }
@@ -133,7 +149,8 @@ enum MeetingAutoRecordPolicy {
     }
 
     private static func isProvenNativeApp(_ request: Request) -> Bool {
-        request.provider == .zoom || request.provider == .teams
+        request.nativeProcessHoldsMicrophone
+            && (request.provider == .zoom || request.provider == .teams)
     }
 
     private static func isProvenTabTitle(_ request: Request) -> Bool {
@@ -144,4 +161,13 @@ enum MeetingAutoRecordPolicy {
                 || request.provider == .teams
                 || request.provider == .googleMeet)
     }
+}
+
+/// Live proof a calendar or runtime `.none` candidate borrowed, without
+/// rewriting `call_evidence`. Native app and tab title stay separate so a
+/// background Zoom/Teams web tab cannot take the native auto-start path.
+enum MeetingBorrowedCallProofSource: Equatable {
+    case none
+    case nativeApp
+    case tabTitle
 }

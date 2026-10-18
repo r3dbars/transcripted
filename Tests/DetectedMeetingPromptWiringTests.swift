@@ -100,6 +100,36 @@ func testDetectedMeetingPromptWiring() async {
         assertEqual(rig.answers, [], "Record is not a user tap when auto-start fires")
     }
 
+    runSuite("an auto-start that bails at kickoff falls back to the island prompt") {
+        let rig = WiringRig()
+        rig.decision = { _ in .autoStart }
+        rig.autoStartSucceeds = false
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-bail", reason: .micInput))
+
+        assertEqual(presented, .presented, "a failed kickoff must still offer Record / Not now")
+        assertEqual(rig.autoStarts, ["wiring-bail"], "the Record path was still asked")
+        assertEqual(rig.shown, ["wiring-bail"], "the island prompt appears instead of a silent wait")
+        assertTrue(rig.island.prompt != nil, "the user can still tap Record")
+    }
+
+    runSuite("a start that bails after autoStarted falls back to the island prompt") {
+        let rig = WiringRig()
+        rig.decision = { _ in .autoStart }
+        rig.install()
+        let candidate = wiringCandidate(id: "wiring-recover", reason: .micInput)
+
+        let first = rig.detector.onPromptRequest?(candidate)
+        assertEqual(first, .autoStarted, "precondition: auto-start reported success")
+        assertTrue(rig.island.prompt == nil, "precondition: the island stayed empty")
+
+        rig.detector.recoverFailedAutoStart(candidate: candidate)
+
+        assertTrue(rig.island.prompt != nil, "the island prompt appears after capture bails")
+        assertEqual(rig.shown, ["wiring-recover"], "the user sees Record / Not now instead of a 90-second wait")
+    }
+
     runSuite("a none decision leaves the island empty") {
         let rig = WiringRig()
         rig.decision = { _ in .none }
@@ -181,6 +211,65 @@ func testDetectedMeetingPromptWiring() async {
         assertEqual(presented, .presented, "dictation must not drop calendar prompts when auto-record is off")
         assertEqual(rig.autoStarts, [], "auto-start does not fire")
         assertEqual(rig.shown, ["wiring-cal"], "the calendar prompt still reaches the island")
+    }
+
+    runSuite("the real auto-record decision keeps a Zoom calendar event plus a background Zoom Meeting tab as a prompt") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: false,
+                autoRecordEnabled: true,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+
+        var candidate = wiringCandidate(
+            id: "wiring-cal-zoom-tab",
+            reason: .calendarNearby,
+            source: .calendarEvent
+        )
+        candidate.holdsMicrophone = true
+        candidate.isFocusedFrontWindow = false
+        candidate.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
+        candidate.borrowedProofSource = .tabTitle
+        let presented = rig.detector.onPromptRequest?(candidate)
+
+        assertEqual(presented, .presented, "the island prompt is still offered")
+        assertEqual(rig.autoStarts, [], "a background Zoom Meeting tab must not auto-start")
+        assertEqual(rig.shown, ["wiring-cal-zoom-tab"], "the existing Record prompt still appears")
+    }
+
+    runSuite("the real auto-record decision keeps a Teams calendar event plus a background Teams web lobby as a prompt") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: false,
+                autoRecordEnabled: true,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+
+        var candidate = wiringCandidate(
+            id: "wiring-cal-teams-lobby",
+            reason: .calendarNearby,
+            source: .calendarEvent,
+            provider: .teams
+        )
+        candidate.holdsMicrophone = true
+        candidate.isFocusedFrontWindow = false
+        candidate.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
+        candidate.borrowedProofSource = .tabTitle
+        let presented = rig.detector.onPromptRequest?(candidate)
+
+        assertEqual(presented, .presented, "the island prompt is still offered")
+        assertEqual(rig.autoStarts, [], "a Teams web lobby must not auto-start")
+        assertEqual(rig.shown, ["wiring-cal-teams-lobby"], "the existing Record prompt still appears")
     }
 
     runSuite("the real auto-record decision auto-starts a proven call even when the candidate is a calendar event") {
@@ -306,6 +395,7 @@ private final class WiringRig {
     var shown: [String] = []
     var answers: [String] = []
     var autoStarts: [String] = []
+    var autoStartSucceeds = true
     var decision: (MeetingPromptDetector.Candidate) -> MeetingAutoRecordPolicy.Decision = { _ in .prompt }
 
     init() {
@@ -328,7 +418,10 @@ private final class WiringRig {
             decisionForCandidate: { [weak self] candidate in
                 self?.decision(candidate) ?? .prompt
             },
-            onAutoStart: { [weak self] in self?.autoStarts.append($0.id) }
+            onAutoStart: { [weak self] candidate in
+                self?.autoStarts.append(candidate.id)
+                return self?.autoStartSucceeds ?? false
+            }
         ).install(on: detector, pill: pill)
     }
 }
@@ -349,6 +442,7 @@ private func wiringCandidate(
     id: String,
     reason: MeetingPromptReason,
     source: MeetingPromptSource = .runtimeApp,
+    provider: MeetingPromptProvider = .zoom,
     provenNativeZoom: Bool = false
 ) -> MeetingPromptDetector.Candidate {
     let start = Date(timeIntervalSince1970: 2_000)
@@ -356,7 +450,7 @@ private func wiringCandidate(
         id: id,
         title: "Call detected",
         detail: "Record this call?",
-        provider: .zoom,
+        provider: provider,
         reason: reason,
         source: source,
         startDate: start,
@@ -366,6 +460,7 @@ private func wiringCandidate(
         callEvidence: provenNativeZoom ? .nativeApp : .none,
         holdsMicrophone: provenNativeZoom,
         isFocusedFrontWindow: provenNativeZoom,
-        evidenceAge: provenNativeZoom ? MeetingAutoRecordPolicy.evidenceHoldDuration : 0
+        evidenceAge: provenNativeZoom ? MeetingAutoRecordPolicy.evidenceHoldDuration : 0,
+        nativeProcessHoldsMicrophone: provenNativeZoom
     )
 }

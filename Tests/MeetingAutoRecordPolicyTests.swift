@@ -201,12 +201,65 @@ func testMeetingAutoRecordPolicy() {
             expected: .autoStart
         ),
         Row(
-            name: "a calendar candidate with live Zoom proof auto-starts without rewriting evidence",
+            name: "a calendar candidate with borrowed native Zoom proof auto-starts without rewriting evidence",
+            request: autoRecordRequest(
+                evidence: .none, provider: .zoom, reason: .calendarNearby,
+                holdsMicrophone: true, borrowedProofSource: .nativeApp,
+                nativeProcessHoldsMicrophone: true
+            ),
+            expected: .autoStart
+        ),
+        Row(
+            name: "a calendar candidate with no borrowed proof stays a prompt",
             request: autoRecordRequest(
                 evidence: .none, provider: .zoom, reason: .calendarNearby,
                 holdsMicrophone: true
             ),
+            expected: .prompt
+        ),
+        Row(
+            name: "a Zoom calendar event plus a background Zoom Meeting tab stays a prompt",
+            request: autoRecordRequest(
+                evidence: .none, provider: .zoom, reason: .calendarNearby,
+                holdsMicrophone: true, isFocusedFrontWindow: false,
+                borrowedProofSource: .tabTitle
+            ),
+            expected: .prompt
+        ),
+        Row(
+            name: "a Teams calendar event plus a background Teams web lobby stays a prompt",
+            request: autoRecordRequest(
+                evidence: .none, provider: .teams, reason: .calendarNearby,
+                holdsMicrophone: true, isFocusedFrontWindow: false,
+                borrowedProofSource: .tabTitle
+            ),
+            expected: .prompt
+        ),
+        Row(
+            name: "borrowed tab-title proof still auto-starts a focused in-call tab with audio",
+            request: autoRecordRequest(
+                evidence: .none, provider: .zoom, reason: .calendarNearby,
+                holdsMicrophone: true, isPlayingCallAudio: true,
+                borrowedProofSource: .tabTitle
+            ),
             expected: .autoStart
+        ),
+        Row(
+            name: "borrowed native proof requires the native app process on the mic",
+            request: autoRecordRequest(
+                evidence: .none, provider: .zoom, reason: .calendarNearby,
+                holdsMicrophone: true, borrowedProofSource: .nativeApp,
+                nativeProcessHoldsMicrophone: false
+            ),
+            expected: .prompt
+        ),
+        Row(
+            name: "native Zoom proof requires the native app process on the mic",
+            request: autoRecordRequest(
+                evidence: .nativeApp, provider: .zoom, reason: .micInput,
+                nativeProcessHoldsMicrophone: false
+            ),
+            expected: .prompt
         ),
         Row(
             name: "missing microphone permission stays a prompt",
@@ -285,6 +338,15 @@ func testMeetingAutoRecordPolicy() {
             MeetingAutoRecordPolicy.shouldWaitForEvidenceHold(off),
             "with the setting off, do not delay the current prompt"
         )
+        let borrowedTab = autoRecordRequest(
+            evidence: .none, provider: .zoom, reason: .calendarNearby,
+            holdsMicrophone: true, isFocusedFrontWindow: false,
+            evidenceAge: 0, borrowedProofSource: .tabTitle
+        )
+        assertFalse(
+            MeetingAutoRecordPolicy.shouldWaitForEvidenceHold(borrowedTab),
+            "a background Zoom Meeting tab must not wait, then auto-start"
+        )
     }
 
     runSuite("MeetingAutoRecordPolicy declines the rest of the call only on Stop or Discard") {
@@ -310,6 +372,8 @@ func testMeetingAutoRecordPolicy() {
             "detected_call_end_timeout",
             "audio_route_warning",
             "system_audio_warning",
+            "debug_control",
+            "lab_control",
             "unknown",
         ] {
             assertFalse(
@@ -362,9 +426,12 @@ private func autoRecordRequest(
     isFocusedFrontWindow: Bool = true,
     isMeetPreJoin: Bool = false,
     evidenceAge: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration,
-    isPlayingCallAudio: Bool = false
+    isPlayingCallAudio: Bool = false,
+    borrowedProofSource: MeetingBorrowedCallProofSource = .none,
+    nativeProcessHoldsMicrophone: Bool? = nil
 ) -> MeetingAutoRecordPolicy.Request {
-    MeetingAutoRecordPolicy.Request(
+    let micHeld = holdsMicrophone ?? (reason == .micInput)
+    return MeetingAutoRecordPolicy.Request(
         autoRecordEnabled: enabled,
         evidence: evidence,
         provider: provider,
@@ -372,10 +439,13 @@ private func autoRecordRequest(
         microphoneGranted: microphoneGranted,
         systemAudioGranted: systemAudioGranted,
         otherCaptureActive: otherCaptureActive,
-        holdsMicrophone: holdsMicrophone ?? (reason == .micInput),
+        holdsMicrophone: micHeld,
         isFocusedFrontWindow: isFocusedFrontWindow,
         isMeetPreJoin: isMeetPreJoin,
         evidenceAge: evidenceAge,
-        isPlayingCallAudio: isPlayingCallAudio
+        isPlayingCallAudio: isPlayingCallAudio,
+        borrowedProofSource: borrowedProofSource,
+        nativeProcessHoldsMicrophone: nativeProcessHoldsMicrophone
+            ?? (evidence == .nativeApp && micHeld)
     )
 }

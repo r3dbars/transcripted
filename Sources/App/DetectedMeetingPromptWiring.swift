@@ -21,7 +21,8 @@ struct DetectedMeetingPromptWiring {
     /// Defaults to prompt so existing installs and tests keep today's island.
     var decisionForCandidate: (MeetingPromptDetector.Candidate) -> MeetingAutoRecordPolicy.Decision = { _ in .prompt }
     /// Starts capture through the Record path without showing the prompt.
-    var onAutoStart: ((MeetingPromptDetector.Candidate) -> Void)? = nil
+    /// Return false when kickoff bailed so the island prompt is shown instead.
+    var onAutoStart: ((MeetingPromptDetector.Candidate) -> Bool)? = nil
 
     func install(on detector: MeetingPromptDetector, pill: CapturePillController) {
         pill.onRecord = onRecord
@@ -34,18 +35,7 @@ struct DetectedMeetingPromptWiring {
         let onShown = onShown
         let decisionForCandidate = decisionForCandidate
         let onAutoStart = onAutoStart
-        detector.onPromptRequest = { [weak pill] candidate in
-            guard onboardingCompleted() else { return .skipped }
-            switch decisionForCandidate(candidate) {
-            case .none:
-                return .skipped
-            case .autoStart:
-                guard let onAutoStart else { break }
-                onAutoStart(candidate)
-                return .autoStarted
-            case .prompt:
-                break
-            }
+        let presentPrompt: (MeetingPromptDetector.Candidate) -> MeetingPromptDetector.RequestResult = { [weak pill] candidate in
             guard let pill else { return .skipped }
             let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
                 for: candidate.reason,
@@ -58,6 +48,24 @@ struct DetectedMeetingPromptWiring {
             )
             if presented { onShown(candidate) }
             return presented ? .presented : .skipped
+        }
+        detector.onPromptFallback = { candidate in
+            guard onboardingCompleted() else { return .skipped }
+            return presentPrompt(candidate)
+        }
+        detector.onPromptRequest = { candidate in
+            guard onboardingCompleted() else { return .skipped }
+            switch decisionForCandidate(candidate) {
+            case .none:
+                return .skipped
+            case .autoStart:
+                if onAutoStart?(candidate) == true {
+                    return .autoStarted
+                }
+            case .prompt:
+                break
+            }
+            return presentPrompt(candidate)
         }
     }
 
@@ -91,7 +99,9 @@ struct DetectedMeetingPromptWiring {
                 isFocusedFrontWindow: candidate.isFocusedFrontWindow,
                 isMeetPreJoin: candidate.isMeetPreJoin,
                 evidenceAge: candidate.evidenceAge,
-                isPlayingCallAudio: candidate.isPlayingCallAudio
+                isPlayingCallAudio: candidate.isPlayingCallAudio,
+                borrowedProofSource: candidate.borrowedProofSource,
+                nativeProcessHoldsMicrophone: candidate.nativeProcessHoldsMicrophone
             )
         )
     }

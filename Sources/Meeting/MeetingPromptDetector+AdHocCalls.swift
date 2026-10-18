@@ -431,7 +431,8 @@ extension MeetingPromptDetector {
                     for: provider, evidence: evidence, reason: reason, now: now
                 ),
                 isPlayingCallAudio: evidence == .tabTitle
-                    && (titleSession.map { browserIsPlayingAudio(families: $0.families) } ?? false)
+                    && (titleSession.map { browserIsPlayingAudio(families: $0.families) } ?? false),
+                nativeProcessHoldsMicrophone: evidence == .nativeApp && reason == .micInput
             ),
             score: presentation.score
         )

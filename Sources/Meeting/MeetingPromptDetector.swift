@@ -29,10 +29,16 @@ final class MeetingPromptDetector {
         var evidenceAge: TimeInterval = 0
         /// The browser is playing call audio. Tab-title auto-start needs this.
         var isPlayingCallAudio: Bool = false
+        /// Live proof this calendar/runtime candidate borrowed. Stays `.none`
+        /// on ad-hoc candidates that already have `callEvidence`.
+        var borrowedProofSource: MeetingBorrowedCallProofSource = .none
+        /// The native Zoom or Teams process (not a browser helper) is on the mic.
+        var nativeProcessHoldsMicrophone: Bool = false
 
         /// Keep a calendar event's title and `call_evidence` while copying
         /// live-call proof that auto-record needs. Telemetry and call-end
-        /// `isBrowserCall` stay calendar-shaped.
+        /// `isBrowserCall` stay calendar-shaped. Native vs tab-title proof
+        /// keeps its own source so a background web tab cannot auto-start.
         func borrowingCallProof(from live: Candidate) -> Candidate {
             var copy = self
             copy.holdsMicrophone = live.holdsMicrophone
@@ -40,6 +46,15 @@ final class MeetingPromptDetector {
             copy.isMeetPreJoin = live.isMeetPreJoin
             copy.evidenceAge = live.evidenceAge
             copy.isPlayingCallAudio = live.isPlayingCallAudio
+            copy.nativeProcessHoldsMicrophone = live.nativeProcessHoldsMicrophone
+            switch live.callEvidence {
+            case .nativeApp:
+                copy.borrowedProofSource = .nativeApp
+            case .tabTitle:
+                copy.borrowedProofSource = .tabTitle
+            default:
+                copy.borrowedProofSource = .none
+            }
             return copy
         }
     }
@@ -57,6 +72,9 @@ final class MeetingPromptDetector {
     }
 
     var onPromptRequest: ((Candidate) -> RequestResult)?
+    /// Present the island without taking the auto-start path. Used when
+    /// capture already reported `.autoStarted` and then bailed.
+    var onPromptFallback: ((Candidate) -> RequestResult)?
     var onPromptSuppressed: ((MeetingPromptSuppression) -> Void)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
     /// A detected ad-hoc call ended without a meeting recording and passed the
@@ -194,7 +212,7 @@ final class MeetingPromptDetector {
     // never drops (a camera left on, a native app idling on output) must not
     // keep the next call of the same kind silent.
     let declinedThisCallLimit: TimeInterval = 8 * 60 * 60
-    private let pendingCooldown: TimeInterval = 90
+    let pendingCooldown: TimeInterval = 90
     // One suppression event per candidate + reason per window. It was 90s,
     // which re-sent the same "still snoozed" event every poll for the whole
     // call and made suppressions most of the prompt event volume.
@@ -393,7 +411,9 @@ final class MeetingPromptDetector {
                 isFocusedFrontWindow: match.candidate.isFocusedFrontWindow,
                 isMeetPreJoin: match.candidate.isMeetPreJoin,
                 evidenceAge: MeetingAutoRecordPolicy.evidenceHoldDuration,
-                isPlayingCallAudio: match.candidate.isPlayingCallAudio
+                isPlayingCallAudio: match.candidate.isPlayingCallAudio,
+                borrowedProofSource: match.candidate.borrowedProofSource,
+                nativeProcessHoldsMicrophone: match.candidate.nativeProcessHoldsMicrophone
             )
             if MeetingAutoRecordPolicy.isCallProven(held) {
                 let remaining = max(

@@ -50,7 +50,7 @@ func testMeetingPromptRecordAction() async {
                 startContinuation = continuation
             }
         },
-        onCompleted: { _, started in
+        onCompleted: { _, started, _ in
             completedOutcomes.append(started)
         }
     )
