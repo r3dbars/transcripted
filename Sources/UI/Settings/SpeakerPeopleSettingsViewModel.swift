@@ -356,41 +356,22 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// spec's fallback, this reuses the confirmed existing "You" semantic
     /// (`SpeakerNameSelectionPolicy.ownerLabel`, already used by the naming
     /// sheet's autocomplete for local-mic entries) through the model's own
-    /// existing rename write path — the same thing that happens if the user
-    /// types "You" into the field and presses Enter — and then folds the
-    /// result into any other profile already named "You" so the identity
-    /// stays singular instead of leaving two "You" profiles behind.
+    /// existing naming write paths: when a "You" profile already exists the
+    /// voice joins it in one transaction (`mergePendingReviewItem`, the same
+    /// path as naming a voice after a saved person), so the identity stays
+    /// singular; otherwise it is named "You" like typing it and pressing Enter.
     func markPendingReviewItemAsMe(
         _ item: SpeakerPendingReviewItem,
-        completion: ((Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         let existingOwnerProfile = profiles.first {
             $0.id != item.speakerId && SpeakerNameSelectionPolicy.isOwnerLabel($0.displayName ?? "")
         }
-        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { [weak self] didRename in
-            guard didRename else {
-                completion?(false)
-                return
-            }
-            guard let self, let existingOwnerProfile else {
-                completion?(true)
-                return
-            }
-            // `namePendingReviewItem` already refreshed `profiles` on the main
-            // actor before invoking this completion, so the just-renamed
-            // profile (now displayName == "You") is findable here.
-            guard let renamedProfile = self.profiles.first(where: { $0.id == item.speakerId }) else {
-                completion?(true)
-                return
-            }
-            // The rename to the owner label already succeeded, which is what
-            // justifies completing the queue row. The fold-into-"You" merge
-            // below is async cleanup; if it fails, the duplicate stays
-            // visible in the directory with the normal duplicate badge and
-            // Merge Into tools, so nothing is silently lost.
-            self.merge(source: renamedProfile, into: existingOwnerProfile)
-            completion?(true)
+        if let owner = existingOwnerProfile {
+            mergePendingReviewItem(item, into: owner, completion: completion)
+            return
         }
+        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { completion?($0) }
     }
 
     /// Rename from an Everyone row. A voice still waiting for a name goes
@@ -479,6 +460,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let legacyClipsDirectory = self.legacyClipsDirectory
 
         runEditInBackground(completion: completion) {
+            // A closed database reads as missing, so require the row first.
+            guard speakerDatabase.getSpeaker(id: profileId) != nil else { return false }
             speakerDatabase.deleteSpeaker(id: profileId)
             // Confirm the row is actually gone before reporting success so a
             // failed delete surfaces an error and keeps the person's review clips.

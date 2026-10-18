@@ -24,6 +24,7 @@ struct SpeakerPersonRow: View {
     @State private var isSavingRename = false
     @State private var expansionClipDuration = SpeakerClipProgressBar.fallbackDuration
     @State private var showDeleteConfirmation = false
+    @State private var actionErrorMessage: String?
     @State private var pendingMergeTarget: SpeakerProfile?
     @State private var showMergeConfirmation = false
     @State private var showUnmergeConfirmation = false
@@ -138,13 +139,23 @@ struct SpeakerPersonRow: View {
             .onTapGesture { toggleExpansion() }
             .accessibilityIdentifier("transcripted.speakers.person.row")
 
+            if let actionErrorMessage {
+                Text(actionErrorMessage)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             if isExpandedRow {
                 expansionCard
             }
         }
         .alert("Delete this speaker?", isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
-                model.delete(profile: profile)
+                actionErrorMessage = nil
+                model.delete(profile: profile) { didDelete in
+                    actionErrorMessage = SpeakerVoiceRowMenuPolicy.deleteErrorMessage(didDelete: didDelete)
+                }
             }
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
@@ -157,7 +168,10 @@ struct SpeakerPersonRow: View {
             presenting: pendingMergeTarget
         ) { target in
             Button("Merge") {
-                model.merge(source: profile, into: target)
+                actionErrorMessage = nil
+                model.merge(source: profile, into: target) { didMerge in
+                    actionErrorMessage = didMerge ? nil : "Couldn't merge these speakers. Try again."
+                }
                 // Only collapse an expansion that belongs to the merge —
                 // an unrelated open speaker (and its rename draft) stays put.
                 if expandedPersonID == profile.id || expandedPersonID == target.id {
