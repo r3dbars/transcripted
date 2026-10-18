@@ -102,6 +102,8 @@ enum DictationAudioRecovery {
         guard focusedPeak > 0.0001 else { return nil }
 
         let gain = max(1.0, min(12.0, 0.45 / focusedPeak))
+        // No trim and no gain means the retry would decode the same audio again.
+        guard start > 0 || end < samples.count || gain > 1.0 else { return nil }
         if gain > 1.0 {
             for index in focused.indices {
                 focused[index] = max(-1.0, min(1.0, focused[index] * gain))
