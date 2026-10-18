@@ -98,6 +98,29 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         XCTAssertFalse(updated.contains("Speaker 0"))
     }
 
+    func testRenameReachesTranscriptsOfAProfileDuplicateCleanupAbsorbed() throws {
+        let voice = [Float](repeating: 0.1, count: 256)
+        let older = speakerDatabase.addOrUpdateSpeaker(embedding: voice, existingId: nil)
+        let olderURL = try writeTranscript(named: "older.md", speakerId: older.id, speakerName: "Speaker 2")
+        let keeper = speakerDatabase.addOrUpdateSpeaker(embedding: voice, existingId: nil)
+        _ = speakerDatabase.addOrUpdateSpeaker(embedding: voice, existingId: keeper.id)
+        speakerDatabase.mergeDuplicates(threshold: 0.6)
+        XCTAssertNil(speakerDatabase.getSpeaker(id: older.id), "cleanup absorbed the older profile")
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .rename(profileId: keeper.id, newName: "Dana"),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertTrue(outcome.succeeded)
+        XCTAssertEqual(outcome.updatedTranscriptCount, 1)
+        let updated = try String(contentsOf: olderURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Dana""#))
+        XCTAssertTrue(updated.contains("[System/Dana]"))
+        XCTAssertTrue(updated.contains(older.id.uuidString), "keeps its db_id so undoing the merge still finds it")
+    }
+
     func testRenameFailsClosedWhileAnyAffectedTranscriptIsBeingReplaced() throws {
         let speaker = speakerDatabase.addOrUpdateSpeaker(
             embedding: [Float](repeating: 0.1, count: 256),

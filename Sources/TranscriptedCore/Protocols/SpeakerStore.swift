@@ -30,6 +30,10 @@ public protocol SpeakerStore: Sendable {
     /// Restore a profile to a previously snapshotted state.
     func restoreProfile(_ profile: SpeakerProfile)
 
+    /// Take one meeting's match back from a profile (a review row corrected or discarded)
+    /// without overwriting its name or any match that landed after the snapshot.
+    func revertMatchContribution(snapshot: SpeakerProfile)
+
     /// Delete a speaker profile
     func deleteSpeaker(id: UUID)
 
@@ -66,6 +70,9 @@ public protocol SpeakerStore: Sendable {
 
     /// The profile that now holds `profileId` after merges that were not undone, if any.
     func mergeSurvivorId(of profileId: UUID) -> UUID?
+
+    /// Every id merged into `profileId` (directly or through a chain) by merges not undone.
+    func mergedAliasIds(of profileId: UUID) -> Set<UUID>
 
     /// Record that a match suggestion was rejected by the user.
     func incrementDisputeCount(id: UUID)
@@ -116,6 +123,13 @@ public extension SpeakerStore {
 
     /// Back-compat default: stores without a merge log cannot follow a merged profile.
     func mergeSurvivorId(of profileId: UUID) -> UUID? { nil }
+
+    func mergedAliasIds(of profileId: UUID) -> Set<UUID> { [] }
+
+    /// Back-compat default: stores without match history fall back to the full snapshot restore.
+    func revertMatchContribution(snapshot: SpeakerProfile) {
+        restoreProfile(snapshot)
+    }
 
     /// Back-compat default: conformers that don't model an EMA blend weight (test doubles, simple
     /// stores) fall back to the standard write-back, ignoring `blendAlpha`. `SpeakerDatabase`
