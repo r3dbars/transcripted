@@ -189,7 +189,17 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc private func invoke() {
             guard isEnabled else { return }
+            let handler = MainQueueHandler(run: self.handler)
             DispatchQueue.main.async { [handler] in handler() }
+        }
+
+        /// Carries the handler across the main-to-main hop above. `invoke` runs
+        /// on main (AppKit menu action) and the block runs on `DispatchQueue.main`,
+        /// so the non-Sendable closure never leaves the main thread.
+        private struct MainQueueHandler: @unchecked Sendable {
+            let run: () -> Void
+
+            func callAsFunction() { run() }
         }
     }
 

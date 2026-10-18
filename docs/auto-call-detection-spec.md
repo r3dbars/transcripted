@@ -196,13 +196,12 @@ results below are the provenance for the production monitor design.
 - Construct the monitor in app setup, point it at `detector.updateMicInputUsers`,
   `start()` it beside `detector.start()`, `stop()` it beside `detector.stop()`.
 
-### Current wiring anchors (as of 2026-06-13, branch `fix/home-row-actions`; verify line numbers before editing)
-- `Sources/App/TranscriptedApp.swift:82` — `lazy var meetingPromptDetector = MeetingPromptDetector()`
-- `Sources/App/TranscriptedApp.swift:168` — `onPromptRequest = { … }`
-- `Sources/App/TranscriptedApp.swift` — `capturePillController.present(candidate:timeout:)`
-- `Sources/App/TranscriptedApp.swift:180` / `:261` — `start()` / `stop()`
+### Current wiring anchors (line numbers checked 2026-10-18; they drift, so search by the symbol if they don't match)
+- `Sources/App/TranscriptedApp.swift:134` — `lazy var meetingPromptDetector = MeetingPromptDetector(learnedBackoffDefaults: .standard)`
+- `Sources/App/DetectedMeetingPromptWiring.swift:31` — `onPromptRequest = { … }`, which calls `pill.present(candidate:timeout:detailOverride:)`
+- `Sources/App/TranscriptedApp.swift:439` / `:575` — `meetingPromptDetector.start()` / `stop()`
 - `Sources/Meeting/MeetingPromptDetector.swift` — `evaluate()` builds the candidates array; `MeetingPromptDetector+CalendarRuntime.swift` — `runtimeReminderCandidates`, `upcomingCalendarCandidates`
-- `Sources/Meeting/MeetingPromptHeuristics.swift:3` — `MeetingPromptProvider`; `:19` — `activeBundleIdentifiers`; `:38` — `supportsRuntimeOnlyPrompt`; `:181` — `runtimePresentation`
+- `Sources/Meeting/MeetingPromptHeuristics.swift:3` — `MeetingPromptProvider`; `:19` — `activeBundleIdentifiers`; `:38` — `supportsRuntimeOnlyPrompt`; `:558` — `runtimePresentation`
 - `Sources/Meeting/MeetingSessionController+State.swift` — `isRecording`
 
 ## Phase 1 — results (2026-06-14)
