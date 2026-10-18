@@ -445,25 +445,6 @@ extension ParakeetEngine {
                 return nil
             }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            if let fallbackDecision = ParakeetShortAudioGate.dictationFallback(
-                nativeSampleCount: nativeCount,
-                resampledSampleCount: resampled.count,
-                errorMessage: error.localizedDescription
-            ) {
-                var fallbackContext = fallbackDecision.context
-                fallbackContext["elapsed"] = String(format: "%.2f", elapsed)
-                EventReporter.shared.capture(
-                    level: .warning,
-                    engine: "parakeet",
-                    event: fallbackDecision.event ?? "recording_too_short",
-                    message: fallbackDecision.message ?? "Dictation audio too short for transcription",
-                    context: fallbackContext
-                )
-                lastEmptyTranscriptionReason = .recordingTooShort
-                finishTranscription(ownedBy: transcriptionLease)
-                return nil
-            }
-
             AppLogger.transcription.error("PARAKEET | transcription failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,

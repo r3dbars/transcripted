@@ -75,17 +75,6 @@ func testParakeetShortAudioGate() {
         assertEqual(transcribes.context, [:], "transcribable segments should not attach skip-only diagnostics")
     }
 
-    runSuite("ParakeetShortAudioGate.dictationFallback — treats invalid-audio errors as short-audio skips") {
-        let decision = ParakeetShortAudioGate.dictationFallback(
-            nativeSampleCount: 43_200,
-            resampledSampleCount: 14_400,
-            errorMessage: "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
-        )
-
-        assertEqual(decision?.event, "recording_too_short", "short-audio failures should collapse into the dedicated skip event")
-        assertEqual(decision?.context["samples"], "14400", "fallback skips should preserve the failing sample count")
-    }
-
     runSuite("ParakeetShortAudioGate.meetingSegmentFallback — protects the meeting pipeline from short-audio throws") {
         let decision = ParakeetShortAudioGate.meetingSegmentFallback(
             sampleCount: 15_500,
@@ -95,16 +84,6 @@ func testParakeetShortAudioGate() {
 
         assertEqual(decision?.event, "segment_too_short", "meeting fallback should reuse the dedicated short-segment event")
         assertEqual(decision?.context["source"], "microphone", "meeting fallback should preserve which stream failed")
-    }
-
-    runSuite("ParakeetShortAudioGate.dictationFallback — ignores unrelated inference failures when audio is long enough") {
-        let decision = ParakeetShortAudioGate.dictationFallback(
-            nativeSampleCount: 96_000,
-            resampledSampleCount: 32_000,
-            errorMessage: "GPU memory pressure"
-        )
-
-        assertNil(decision, "non-short-audio failures should still surface as real transcription errors")
     }
 
     runSuite("DictationEmptyTranscriptionReason keeps too-short telemetry out of no-speech") {
@@ -147,16 +126,6 @@ func testParakeetShortAudioGate() {
         for reason in [DictationEmptyTranscriptionReason.noSpeech, .modelFailure, .audioNeedsRecovery] {
             assertFalse(reason.isAccidentalStart(pressDuration: 0.4), "\(reason.rawValue) must keep its message and recovery path")
         }
-    }
-
-    runSuite("ParakeetShortAudioGate.dictationFallback — a long dictation's error is never 'too short'") {
-        let decision = ParakeetShortAudioGate.dictationFallback(
-            nativeSampleCount: 240_000,
-            resampledSampleCount: 80_000,
-            errorMessage: "Invalid audio data provided."
-        )
-
-        assertNil(decision, "five seconds of audio that fails inference is a model failure, and its audio must be kept")
     }
 
     // "Dictation mis-taps close like a cancel, not an error" is a behavior
