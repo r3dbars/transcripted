@@ -335,6 +335,9 @@ protocol ParakeetStopRecordingHost: AnyObject {
     /// Moves captured samples into the take and marks recording stopped.
     func finishStoppedRecording()
     func reportRecordingStopped()
+    /// Ends the recovery hold once a stop has the take: the next press starts
+    /// fresh, and idle route changes stay off the live-recovery path.
+    func endRecordingContinuity()
 }
 
 enum ParakeetStopRecordingSequence {
@@ -354,6 +357,7 @@ enum ParakeetStopRecordingSequence {
         }
         if host.hasSharedMeetingMicClaim {
             host.finishSharedMeetingMicStop()
+            host.endRecordingContinuity()
             return
         }
 
@@ -371,6 +375,7 @@ enum ParakeetStopRecordingSequence {
             switch host.idleStopAction() {
             case .drainRecoveredAudio:
                 host.cancelPendingRecordingRecovery()
+                host.endRecordingContinuity()
             case .cancelPendingZombieRestart:
                 // A zombie reset marks recording idle while it waits to retry,
                 // with nothing preserved. A stop then cancels that restart.
@@ -395,9 +400,13 @@ enum ParakeetStopRecordingSequence {
         }
         if host.hasPinnedDictationRecording {
             await host.stopPinnedDictationRecording()
+            host.endRecordingContinuity()
             return
         }
-        if await graph.stopRecording(finishRecording: { host.finishStoppedRecording() }) {
+        if await graph.stopRecording(finishRecording: {
+            host.finishStoppedRecording()
+            host.endRecordingContinuity()
+        }) {
             host.reportRecordingStopped()
         }
     }

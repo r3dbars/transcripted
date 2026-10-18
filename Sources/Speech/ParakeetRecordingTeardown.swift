@@ -273,6 +273,10 @@ extension ParakeetEngine: ParakeetStopRecordingHost {
         audioLevel = 0
     }
 
+    func endRecordingContinuity() {
+        preservingRecordingAcrossRecovery = false
+    }
+
     func reportRecordingStopped() {
         let stoppedSampleCount = recoveredRecordingTimeline.totalSourceSampleCount
         let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds

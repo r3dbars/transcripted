@@ -774,6 +774,7 @@ private final class FakeStopHost: ParakeetStopRecordingHost {
     var isRecording = false
     var idleAction: ParakeetIdleStopAction = .settleIdleGraph
     var hasPinnedDictationRecording = false
+    var continuityEnded = 0
 
     init(fixture: GraphFixture) {
         log = fixture.log
@@ -803,6 +804,7 @@ private final class FakeStopHost: ParakeetStopRecordingHost {
     }
 
     func reportRecordingStopped() { log.record("reportStopped") }
+    func endRecordingContinuity() { continuityEnded += 1 }
 }
 
 @MainActor
@@ -832,6 +834,7 @@ private func runStopSequenceSuites() async {
         await stop.value
         assertTrue(log.contains("finishRecording"), "the stop settles the take")
         assertTrue(log.contains("reportStopped"), "the stop reports it")
+        assertEqual(host.continuityEnded, 1, "a finished stop ends the recovery hold so the next press starts fresh")
 
         log.clear()
         host.activeConfigRecoveryGeneration = 9
@@ -873,6 +876,7 @@ private func runStopSequenceSuites() async {
         await ParakeetStopRecordingSequence.run(graph: graph, host: host)
         assertTrue(log.contains("cancelPendingRecovery"), "held speech is kept and the pending restart cancelled")
         assertFalse(log.events.contains { $0.contains("@q") }, "draining held speech touches no audio hardware")
+        assertEqual(host.continuityEnded, 1, "draining held speech ends the recovery hold")
 
         log.clear()
         host.idleAction = .cancelPendingZombieRestart
@@ -897,6 +901,7 @@ private func runStopSequenceSuites() async {
         await ParakeetStopRecordingSequence.run(graph: graph, host: host)
         assertEqual(log.events, ["invalidateSharedMic", "finishSharedMic"], "a borrowed-mic stop only ends the borrow")
         assertEqual(graph.generation, generation, "the dormant engine graph keeps its owner")
+        assertEqual(host.continuityEnded, 1, "a borrowed-mic stop ends the recovery hold")
 
         log.clear()
         host.hasSharedMeetingMicClaim = false
@@ -904,6 +909,7 @@ private func runStopSequenceSuites() async {
         host.hasPinnedDictationRecording = true
         await ParakeetStopRecordingSequence.run(graph: graph, host: host)
         assertTrue(log.contains("stopPinned"), "a pinned recording stops through its recorder")
+        assertEqual(host.continuityEnded, 2, "a pinned stop ends the recovery hold")
         assertFalse(log.events.contains { $0.contains("@q") }, "a pinned stop touches no engine hardware")
     }
 }
