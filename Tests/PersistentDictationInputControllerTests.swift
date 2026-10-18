@@ -102,6 +102,26 @@ private func runPersistentDictationInputControllerSuites() async {
         connectedController.stopMonitoring()
     }
 
+    await runSuite("Persistent input - a timed-out route lookup skips the pass without writing") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        hal.selectionLookupTimesOut = true
+        let controller = hal.makeController()
+        controller.start()
+        await controller.pendingRefresh?.value
+        assertEqual(hal.writes, [], "a stuck driver read never leads to a Mac-wide input write")
+        assertNil(hal.marker, "and leaves no restore marker for a mic we never took")
+        assertTrue(
+            hal.reports.contains { $0.event == "dictation_persistent_input_failed" && $0.level == .warning },
+            "the skipped pass is reported like any failed lookup"
+        )
+
+        hal.selectionLookupTimesOut = false
+        hal.fireDeviceListChanged()
+        await controller.pendingRefresh?.value
+        assertEqual(hal.writes, [persistentBuiltIn.id], "the next pass applies once the driver answers")
+        controller.stopMonitoring()
+    }
+
     await runSuite("Persistent input - its own writes don't trigger another pass") {
         let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
         let controller = hal.makeController()
@@ -303,6 +323,7 @@ private final class FakePersistentInputHAL {
     var writes: [UInt32] = []
     var reports: [PersistentDictationInputSystem.Report] = []
     var deviceListListenerRefused = false
+    var selectionLookupTimesOut = false
     var deviceListAdds = 0
     var deviceListRemoves = 0
     var refreshDelays = 0
@@ -366,6 +387,10 @@ private final class FakePersistentInputHAL {
             },
             recommendedSelection: { [weak self] in
                 guard let self else { throw CancellationError() }
+                if self.selectionLookupTimesOut {
+                    // What the live timed lookup throws when a driver call overruns.
+                    throw ParakeetSystemInputWorkError.timedOut(operation: "persistent_input_selection", timeoutMs: 1_500)
+                }
                 return DictationInputDeviceSelectionPolicy.selection(
                     defaultInput: try self.currentInput(),
                     defaultOutput: persistentAirPodsOutput,
