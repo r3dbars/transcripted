@@ -62,6 +62,41 @@ final class AudioRepeatStopTests: XCTestCase {
         XCTAssertNil(audio.inFlightStopGeneration)
     }
 
+    /// A start made while the last stop is still finalizing is in preflight
+    /// with no generation of its own. A stop then (the bridge's start
+    /// timeout) must still cancel it, or it would open the mic unowned later.
+    func testStopDuringInFlightStopCancelsAPendingStart() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("AudioRepeatStopTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let paths = CoreStoragePaths(
+            transcripts: root.appendingPathComponent("captures/meetings", isDirectory: true),
+            speakerDB: root.appendingPathComponent("state/speakers.sqlite"),
+            statsDB: root.appendingPathComponent("state/stats.sqlite"),
+            failedQueue: root.appendingPathComponent("state/failed_transcriptions.json"),
+            speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
+            audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
+            logs: root.appendingPathComponent("logs", isDirectory: true)
+        )
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+
+        let audio = Audio(paths: paths)
+        audio.prepareForNewRecordingStart()
+        let completed = expectation(description: "stop completed")
+        audio.onRecordingCompleteWithGeneration = { _, _, _, _ in completed.fulfill() }
+
+        audio.stop()
+        XCTAssertNotNil(audio.inFlightStopGeneration)
+        audio.start()
+        XCTAssertTrue(audio.isStarting)
+        audio.stop()
+        XCTAssertFalse(audio.isStarting, "the stop must drop the start still in preflight")
+
+        wait(for: [completed], timeout: 5.0)
+        XCTAssertFalse(audio.isStarting)
+        XCTAssertFalse(audio.isRecording)
+    }
+
     private func writeMonoWAV(to url: URL) throws {
         let format = try XCTUnwrap(AVAudioFormat(
             commonFormat: .pcmFormatFloat32,

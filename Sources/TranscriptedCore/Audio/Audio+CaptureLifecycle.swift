@@ -306,6 +306,11 @@ extension Audio {
 
     public func stop() {
         if let inFlightStopGeneration {
+            // A new start still in preflight has no generation yet; this stop cancels it.
+            if isStarting, !isRecording {
+                pendingStartIntentId = nil
+                isStarting = false
+            }
             AppLogger.audio.info("Ignoring repeat stop; this capture's stop is already finalizing", [
                 "stopGeneration": "\(inFlightStopGeneration)"
             ])
