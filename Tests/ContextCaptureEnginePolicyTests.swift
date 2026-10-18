@@ -173,32 +173,10 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("Delayed modifier press — checks the bound key, not the whole modifier family") {
-        let rightOption = UInt32(kVK_RightOption)
-        let leftOption = UInt32(kVK_Option)
-        let press = DelayedModifierShortcutPress(generation: 3, keyCode: rightOption, action: .dictationPushToTalk)
+    runSuite("Delayed modifier press — a cancelled press never activates") {
+        let press = DelayedModifierShortcutPress(generation: 3, keyCode: UInt32(kVK_RightOption), action: .dictationPushToTalk)
         assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: press,
-                expected: press,
-                keyState: { $0 == leftOption }
-            ),
-            "Left Option held must not start a Right Option push-to-talk"
-        )
-        assertTrue(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: press,
-                expected: press,
-                keyState: { $0 == rightOption }
-            ),
-            "the bound Right Option still held starts push-to-talk"
-        )
-        assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: nil,
-                expected: press,
-                keyState: { _ in true }
-            ),
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(current: nil, expected: press),
             "a press that was already cancelled never activates"
         )
     }

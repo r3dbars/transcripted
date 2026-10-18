@@ -407,8 +407,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
                 // vs Option+M) never started dictation.
                 let shouldActivate = PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                     current: currentPress,
-                    expected: press,
-                    isPhysicallyDown: true
+                    expected: press
                 )
                 if currentPress == press {
                     self.pendingModifierShortcut = nil
