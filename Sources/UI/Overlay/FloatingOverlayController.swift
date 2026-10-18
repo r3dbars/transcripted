@@ -22,10 +22,6 @@ class FloatingOverlayController {
         )
     }
 
-    enum SessionMode {
-        case dictation
-    }
-
     enum OverlayState {
         case idle
         case starting     // Microphone start requested — cancellable before recording flips on

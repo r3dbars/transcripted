@@ -180,15 +180,6 @@ enum DebugControlScreenPolicy {
     static func isAllowed(_ screen: String) -> Bool {
         ids.contains(screen)
     }
-
-    static func settingsPageID(_ screen: String) -> String? {
-        switch screen {
-        case "today", "home", "dictations", "writing", "general", "people", "connect_agent":
-            return screen
-        default:
-            return nil
-        }
-    }
 }
 
 /// AX identifiers the menu bar already exposes. Kept as strings so this

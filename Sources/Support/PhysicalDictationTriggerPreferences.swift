@@ -67,9 +67,6 @@ enum PhysicalDictationTriggerPreferences {
     /// land here through `DictationShortcutUpgrade` (custom Hands-Free
     /// becomes this one key instead).
     static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
-    /// 1.1.69 Hands-Free default. Upgrade copies a distinct stored value
-    /// onto the one dictation key, then clears this slot.
-    static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),
         modifiers: PhysicalDictationTriggerModifiers.option
@@ -120,17 +117,6 @@ enum PhysicalDictationTriggerPreferences {
         )
     }
 
-    static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        safeBinding(
-            storedBinding(
-                keyCodeKey: handsFreeKeyCodeKey,
-                modifiersKey: handsFreeModifiersKey,
-                userDefaults: userDefaults
-            ) ?? migratedHandsFreeBinding(userDefaults: userDefaults),
-            fallback: defaultHandsFreeBinding
-        )
-    }
-
     static func meetingBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
         safeBinding(
             storedBinding(
@@ -151,15 +137,6 @@ enum PhysicalDictationTriggerPreferences {
             binding,
             keyCodeKey: pushToTalkKeyCodeKey,
             modifiersKey: pushToTalkModifiersKey,
-            userDefaults: userDefaults
-        )
-    }
-
-    static func saveHandsFree(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
-        saveBinding(
-            binding,
-            keyCodeKey: handsFreeKeyCodeKey,
-            modifiersKey: handsFreeModifiersKey,
             userDefaults: userDefaults
         )
     }
@@ -611,20 +588,6 @@ enum PhysicalDictationTriggerPreferences {
 
         return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
             ? defaultPushToTalkBinding
-            : legacyCarbonDictationBinding(userDefaults: userDefaults)
-    }
-
-    private static func migratedHandsFreeBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
-        guard HotkeyPreferences.legacyDictationShortcutMode(userDefaults: userDefaults) == .handsFree else {
-            return defaultHandsFreeBinding
-        }
-
-        if userDefaults.object(forKey: keyCodeKey) != nil {
-            return legacyDictationBinding(userDefaults: userDefaults)
-        }
-
-        return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
-            ? defaultHandsFreeBinding
             : legacyCarbonDictationBinding(userDefaults: userDefaults)
     }
 

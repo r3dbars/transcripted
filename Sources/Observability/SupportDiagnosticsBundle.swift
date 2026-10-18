@@ -30,7 +30,6 @@ struct SupportDiagnosticsSnapshot: Equatable {
 }
 
 enum SupportDiagnosticsBundle {
-    static let maxRecentLogLines = 20
     static let maxReliabilityPackets = 8
 
     static func text(snapshot: SupportDiagnosticsSnapshot, now: Date = Date()) -> String {

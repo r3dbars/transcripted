@@ -250,10 +250,6 @@ final class CameraActivityMonitor: @unchecked Sendable {
         return status == noErr ? ids : nil
     }
 
-    private func isRunningSomewhere(_ device: CMIOObjectID) -> Bool {
-        isRunningSomewhereIfAvailable(device) ?? false
-    }
-
     private func isRunningSomewhereIfAvailable(_ device: CMIOObjectID) -> Bool? {
         var address = CMIOObjectPropertyAddress(
             mSelector: CMIOObjectPropertySelector(kCMIODevicePropertyDeviceIsRunningSomewhere),
