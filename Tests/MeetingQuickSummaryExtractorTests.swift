@@ -134,6 +134,78 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("audio confirmations are not promoted to action items") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        Sounds good, I can hear you now.
+
+        **00:02**  [System/Maya]
+        I can see your screen and I can hear you fine.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertEqual(sections.actionItems, "None found.", "audio checks are not tasks, got: \(sections.actionItems)")
+        assertEqual(sections.decisions, "None found.", "audio checks are not decisions, got: \(sections.decisions)")
+    }
+
+    runSuite("a connection check joined to real work does not hide the commitment") {
+        for sentence in [
+            "I can hear you now and I'll send the update tomorrow.",
+            "I can see your screen so I'll update the draft by Friday.",
+            "You're muted but we need to review the contract tomorrow.",
+            "I'll send the update tomorrow and I can hear you now.",
+        ] {
+            let sections = MeetingQuickSummaryExtractor.sections(transcript: "**00:01**  [Mic/Justin]\n\(sentence)")
+            assertTrue(sections.actionItems.contains("Justin:"), "keep the real commitment: \(sentence)")
+            assertEqual(sections.decisions, "None found.", "the connection check is not a decision")
+        }
+
+        let decision = MeetingQuickSummaryExtractor.sections(
+            transcript: "**00:01**  [System/Maya]\nI can hear you now and we've decided to use Postgres."
+        )
+        assertTrue(decision.decisions.contains("use Postgres"), "a decision after a connection check stays a decision")
+        assertEqual(decision.actionItems, "None found.", "the connection check must not supply a competing action cue")
+
+        let checksOnly = MeetingQuickSummaryExtractor.sections(
+            transcript: "**00:01**  [System/Maya]\nI can see your screen and I can hear you fine."
+        )
+        assertEqual(checksOnly.actionItems, "None found.", "joined connection checks are still not work")
+    }
+
+    runSuite("work that mentions hearing or seeing someone's input stays an action item") {
+        let transcript = """
+        **00:01**  [System/Maya]
+        We need to hear your feedback on the contract by Friday.
+
+        **00:02**  [System/Maya]
+        I can see your concern so I'll rewrite the onboarding draft.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("feedback on the contract"),
+            "asking for someone's feedback is real work, got: \(sections.actionItems)"
+        )
+        assertTrue(
+            sections.actionItems.contains("rewrite the onboarding draft"),
+            "seeing someone's concern is not an audio check, got: \(sections.actionItems)"
+        )
+    }
+
+    runSuite("a discarded closer's decision cue does not steal a real action") {
+        let transcript = """
+        **00:01**  [Mic/Justin]
+        Thanks everyone, let me know once we've decided; I'll send the update tomorrow.
+        """
+
+        let sections = MeetingQuickSummaryExtractor.sections(transcript: transcript)
+        assertTrue(
+            sections.actionItems.contains("send the update tomorrow"),
+            "the real action should be kept, got: \(sections.actionItems)"
+        )
+        assertEqual(sections.decisions, "None found.", "the closer's cue is not a decision, got: \(sections.decisions)")
+    }
+
     runSuite("extracts decisions and keeps them out of action items") {
         let transcript = """
         **00:01**  [System/Maya]

@@ -214,6 +214,8 @@ check "doc paths self-test" "python3 scripts/dev/check-doc-paths.py --self-test"
 check "doc paths (every path a doc names exists; entry files in budget)" "python3 scripts/dev/check-doc-paths.py"
 check "known traps self-test" "python3 scripts/dev/check-known-traps.py --self-test"
 check "known traps (Tools CI wiring, root commands documented, AGENTS.md-only agent docs)" "python3 scripts/dev/check-known-traps.py"
+check "window inventory self-test" "python3 scripts/dev/check-window-inventory.py --self-test"
+check "window inventory (every NSWindow/NSPanel has a screen-sharing policy)" "python3 scripts/dev/check-window-inventory.py"
 
 # ---------------------------------------------------------------- telemetry/privacy
 check "analytics emitters" "python3 scripts/dev/check-analytics-emitters.py"
@@ -224,6 +226,7 @@ else
 fi
 check "telemetry keys self-test" "python3 scripts/dev/check-telemetry-keys.py --self-test"
 check "telemetry keys survive sanitizers" "python3 scripts/dev/check-telemetry-keys.py"
+check "menu bar SVGs match their generator" "python3 docs/assets/menu-bar-icon/make_menu_bar_icons.py --check"
 check "privacy leak sweep" "python3 scripts/ops/privacy-leak-sweep.py --write-report $OUT_DIR/privacy-leak-sweep-report.json"
 
 # The strict release-health gate needs the GitHub release fixture that matches
@@ -322,6 +325,7 @@ SELF_TEST_SCRIPTS=(
 )
 PY_TEST_SUITES=(
     scripts/ops/test-native-smoke-isolation.py
+    scripts/ops/test-launch-benchmark-isolation.py
     scripts/ops/test-nightly-security-check.py
     scripts/ops/test-score-boards.py
     scripts/ops/test-risk-triage.py

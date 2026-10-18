@@ -22,14 +22,37 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertEqual(Set(observation.properties.keys), AgentCaptureQueryTelemetryPolicy.requiredProperties)
     }
 
-    /// The app-side allowlist (`AnalyticsEventPolicy` for `agent_capture_query_observed`) is
-    /// asserted against this same literal in the root AnalyticsEventPolicyTests suite. This
-    /// package can't import the app, so keep both lists identical when changing either.
-    func testAllowedPropertiesMirrorTheAppAnalyticsAllowlist() {
+    /// The app-side allowlist (`AnalyticsEventPolicy` for `agent_capture_query_observed`) and
+    /// this package's policy both have to match the shared data contract, the
+    /// `agent_capture_query_observed` row of `Resources/analytics-events.psv`. The root
+    /// AnalyticsEventPolicyTests suite checks the app policy against the same row, so the two
+    /// targets can't drift apart with both suites green.
+    func testAllowedPropertiesMatchTheSharedAnalyticsTaxonomy() throws {
         XCTAssertEqual(
             AgentCaptureQueryTelemetryPolicy.allowedProperties,
-            ["app_version", "build_channel", "build_revision", "client_family", "capture_kind", "latency_bucket", "result", "result_count_bucket", "source_count_bucket", "tool_kind"]
+            try Self.sharedTaxonomyProperties(forEvent: AgentCaptureQueryTelemetryPolicy.eventName)
         )
+    }
+
+    private static func sharedTaxonomyProperties(forEvent event: String) throws -> Set<String> {
+        let taxonomy = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent() // AgentCaptureQueryTelemetryTests.swift
+            .deletingLastPathComponent() // TranscriptedMCPTests
+            .deletingLastPathComponent() // Tests
+            .deletingLastPathComponent() // TranscriptedMCP
+            .deletingLastPathComponent() // Tools
+            .appendingPathComponent("Resources/analytics-events.psv")
+        let text = try String(contentsOf: taxonomy, encoding: .utf8)
+        for line in text.split(separator: "\n") {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.hasPrefix("#") else { continue }
+            let pieces = trimmed.split(separator: "|", maxSplits: 1, omittingEmptySubsequences: false)
+            if pieces.count == 2, pieces[0] == event {
+                return Set(pieces[1].split(separator: ",").map { String($0) })
+            }
+        }
+        XCTFail("\(event) is missing from Resources/analytics-events.psv")
+        return []
     }
 
     func testTerminalResultTaxonomyStaysCoarseAndAllowlisted() throws {

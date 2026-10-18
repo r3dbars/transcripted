@@ -5,7 +5,8 @@ Geometry is the app icon's own (docs/assets/app-icon-options/round8/H-mono-light
 units). Arcs are written as cubic Beziers so this file and Sources/UI/MenuBar/MenuBarGlyph.swift
 draw the exact same curves. Keep the numbers in the two files in sync.
 
-    python3 make_menu_bar_icons.py      # writes idle.svg, dictating.svg, meeting.svg next to this file
+    python3 make_menu_bar_icons.py          # writes idle.svg, dictating.svg, meeting.svg next to this file
+    python3 make_menu_bar_icons.py --check  # writes nothing; exits 1 if a committed SVG is stale
 """
 import math
 import os
@@ -107,7 +108,23 @@ def svg(state, ink='#000'):
 
 
 if __name__ == '__main__':
+    import sys
     here = os.path.dirname(os.path.abspath(__file__))
+    if '--check' in sys.argv[1:]:
+        stale = []
+        for st in ('idle', 'dictating', 'meeting'):
+            try:
+                with open(os.path.join(here, f'{st}.svg')) as committed:
+                    current = committed.read()
+            except OSError:
+                current = None
+            if current != svg(st):
+                stale.append(f'{st}.svg')
+        if stale:
+            print('stale: ' + ', '.join(stale) + ' (run python3 docs/assets/menu-bar-icon/make_menu_bar_icons.py)')
+            sys.exit(1)
+        print('menu bar SVGs match the generator')
+        sys.exit(0)
     for st in ('idle', 'dictating', 'meeting'):
         with open(os.path.join(here, f'{st}.svg'), 'w') as out:
             out.write(svg(st))

@@ -55,6 +55,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     /// stall check never fires; this watch reconnects instead, and reports
     /// when the tap still hears nothing while another app plays.
     private var silenceWatch: SystemAudioSilenceWatch?
+    private var signalTracker = SystemAudioSignalTracker()
     /// Set once the silence watch gives up on a tap that hears nothing while
     /// another app plays; cleared by real signal or the next start. Read
     /// lock-free from the main thread, which must never wait on this queue.
@@ -304,6 +305,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             sleepPendingSince = nil
             releasedForSleep = false
             silenceWatch = nil
+            signalTracker = SystemAudioSignalTracker()
             unheardPlayback.store(false, ordering: .releasing)
             playbackLossConfirmed.store(false, ordering: .releasing)
             tapChangedSinceUnheardReport = false
@@ -426,6 +428,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             }
             return
         }
+        if silenceWatch == nil, signalTracker.shouldRearm(at: now) {
+            silenceWatch = .armed(.lostMidRecording, at: now)
+            AppLogger.audioSystem.info("System audio went to digital silence after signal; watching")
+        }
         if silenceWatch != nil { checkSilenceWatch(at: now) }
     }
 
@@ -474,7 +480,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             lastBuffer = now
             rebuildRetries = 0
             awaitingFirstBuffer = nil
-            if silenceWatch != nil { noteSilenceWatchBuffer(buffer, at: now) }
+            let hasSignal = Self.containsSignal(buffer)
+            if hasSignal { signalTracker.noteSignal(at: now) }
+            if silenceWatch != nil { noteSilenceWatchBuffer(hasSignal: hasSignal, at: now) }
             if let started = recoveryStarted {
                 recoveryStarted = nil
                 recovery.send(.gap(duration: Self.interruptionGap(
@@ -527,9 +535,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     static var maxWakeSilenceReconnects: Int { SystemAudioSilenceWatch.maxWakeReconnects }
 
-    private func noteSilenceWatchBuffer(_ buffer: AVAudioPCMBuffer, at now: TimeInterval) {
+    private func noteSilenceWatchBuffer(hasSignal: Bool, at now: TimeInterval) {
         guard var watch = silenceWatch else { return }
-        guard watch.noteBuffer(hasSignal: Self.containsSignal(buffer), at: now) else {
+        guard watch.noteBuffer(hasSignal: hasSignal, at: now) else {
             silenceWatch = nil
             // Signal is back, so the tap isn't stuck silent after the wake.
             tapDiagnostics.silentAfterWakeUnresolved = false
@@ -579,6 +587,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         case .none:
             return
         case .reconnect:
+            if watch.reason == .lostMidRecording { signalTracker.noteRebuild() }
             recover(watch.reason == .wake ? .silentAfterWake : .silentWhilePlaying)
         case .reportUnheard:
             tapDiagnostics.unheardPlayback = true
@@ -636,18 +645,6 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         mScope: kAudioObjectPropertyScopeGlobal,
         mElement: kAudioObjectPropertyElementMain
     )
-
-    static func containsSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
-        guard buffer.format.commonFormat == .pcmFormatFloat32 else { return true }
-        for item in UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList) {
-            guard let data = item.mData else { continue }
-            let samples = data.assumingMemoryBound(to: Float.self)
-            for index in 0..<(Int(item.mDataByteSize) / MemoryLayout<Float>.size) where samples[index] != 0 {
-                return true
-            }
-        }
-        return false
-    }
 
     private func otherAudioIsPlaying() -> Bool {
         if let hardwareHooks { return hardwareHooks.otherAudioIsPlaying() }

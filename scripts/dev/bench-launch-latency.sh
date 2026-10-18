@@ -2,8 +2,8 @@
 # bench-launch-latency.sh — repeated cold-launch sampling for the launch-to-interactive budget.
 #
 # build.sh's launch smoke takes exactly one sample, which cannot distinguish a
-# real regression from scheduler noise. This runs N isolated launches and reports
-# p50/p90/p95/p99 so tail behavior is visible.
+# real regression from scheduler noise. This requires a separate OS account or
+# verified CI isolation, then runs N launches and reports p50/p90/p95/p99.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -29,6 +29,9 @@ Options:
   --reuse-home    Reuse one HOME across samples (warm caches; default is a fresh HOME per sample)
   --out PATH      Write JSON results here (default: build/benchmarks/launch-latency-<label>.json)
   -h, --help      Show this help.
+
+Native account isolation and no running Transcripted instance are required.
+HOME overrides alone do not isolate preferences. A blocked check exits 3.
 USAGE
 }
 
@@ -44,6 +47,18 @@ while [ "$#" -gt 0 ]; do
         *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
     esac
 done
+
+native_launch_ready() {
+    # Run before staging state and again before every launch. A temporary HOME
+    # does not isolate the console user's CFPreferences or TCC session.
+    /usr/bin/python3 "$REPO_ROOT/scripts/ops/native-smoke-isolation.py" || return $?
+    if pgrep -f "Transcripted.app/Contents/MacOS/Transcripted" >/dev/null 2>&1; then
+        echo "Launch benchmark incomplete: Transcripted is already running; nothing was quit." >&2
+        return 3
+    fi
+}
+
+native_launch_ready
 
 if [ ! -d "$APP_BUNDLE" ]; then
     echo "App bundle not found: $APP_BUNDLE" >&2
@@ -76,6 +91,7 @@ SAMPLES_FILE="$WORK_DIR/samples.txt"
 
 # One launch. Echoes launchToInteractiveMs on success, nothing on failure.
 run_one() {
+    native_launch_ready || return $?
     local index="$1"
     local run_dir="$WORK_DIR/run-$index"
     local report="$run_dir/launch-ui-smoke.json"

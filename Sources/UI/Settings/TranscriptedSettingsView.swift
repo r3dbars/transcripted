@@ -78,6 +78,7 @@ struct TranscriptedSettingsView: View {
     @State var modelCacheCleanupStatus: String?
     @State var meetingMicProcessingMode = MicrophoneProcessingPreferences.mode()
     @State var showsMicBoostMigrationNote = MicrophoneProcessingPreferences.showsBoostMigrationNote()
+    @State var showsDictationKeyMovedNotice = DictationShortcutUpgrade.showsMovedToRightOptionNotice()
     @State var micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
     @State var useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
     @State var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()

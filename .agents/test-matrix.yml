@@ -6,6 +6,18 @@
 
 rules:
   - paths:
+      - "scripts/dev/bench-launch-latency.sh"
+      - "scripts/dev/verify-change.sh"
+      - "scripts/ops/native-smoke-isolation.py"
+      - "scripts/ops/test-launch-benchmark-isolation.py"
+      - ".claude/skills/verify/SKILL.md"
+    checks:
+      - "bash -n scripts/dev/bench-launch-latency.sh"
+      - "bash -n scripts/dev/verify-change.sh"
+      - "python3 scripts/ops/test-native-smoke-isolation.py"
+      - "python3 scripts/ops/test-launch-benchmark-isolation.py"
+
+  - paths:
       - "Sources/**/*.swift"
       - "Tests/**/*.swift"
     checks:
@@ -211,6 +223,8 @@ rules:
       - "scripts/ops/daily-audio-reliability-check.sh"
       - "docs/qa-issue-500-meeting-audio.md"
       - "scripts/ops/transcripted-qa-bench.sh"
+      - "scripts/entrypoints/run-e2e-smoke.sh"
+      - "scripts/entrypoints/lib/shared-smoke-sources.sh"
       - "scripts/dev/check-audio-automation-contract.py"
     checks:
       - "python3 scripts/dev/check-audio-automation-contract.py --self-test"
@@ -327,6 +341,16 @@ rules:
     checks:
       - "python3 scripts/dev/check-known-traps.py --self-test"
       - "python3 scripts/dev/check-known-traps.py"
+
+  # Every NSWindow/NSPanel surface in Sources/ must be in the window inventory
+  # with its screen-sharing policy.
+  - paths:
+      - "Sources/**/*.swift"
+      - ".agents/window-inventory.json"
+      - "scripts/dev/check-window-inventory.py"
+    checks:
+      - "python3 scripts/dev/check-window-inventory.py --self-test"
+      - "python3 scripts/dev/check-window-inventory.py"
 
   - paths:
       - "scripts/dev/explain-missing-sources.py"
@@ -611,6 +635,13 @@ rules:
       - "python3 scripts/dev/check-analytics-emitters.py"
       - "bash run-tests.sh"
 
+  # The MCP package can't import the app, so AgentCaptureQueryTelemetryTests checks
+  # its agent_capture_query_observed allowlist against this file's row.
+  - paths:
+      - "Resources/analytics-events.psv"
+    checks:
+      - "swift test --package-path Tools/TranscriptedMCP"
+
   # The analytics taxonomy files are union-merged and must stay normalized, and
   # every allowlisted property must survive the sanitizers' sensitive-fragment
   # drop (an allowlisted key containing e.g. "file" or "name" never arrives).
@@ -861,6 +892,7 @@ rules:
       - "scripts/ops/nightly-security-check.py"
       - "scripts/ops/transcripted-qa-bench.sh"
     checks:
+      - "python3 docs/assets/menu-bar-icon/make_menu_bar_icons.py --check"
       - "scripts/dev/agent-preflight.sh"
       - "bash run-tests.sh"
 

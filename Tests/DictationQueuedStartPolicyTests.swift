@@ -248,6 +248,76 @@ func testDictationQueuedStartPolicy() async {
         )
     }
 
+    runSuite("Only the landed-clipboard delivery notice gives way; every other delivery message holds the next take back") {
+        let cases: [(DictationDeliveryPresentation, DictationQueuedStartPolicy.MessageKind)] = [
+            (.clipboardNotice("Copied. Press ⌘V"), .landedClipboardNotice),
+            (.success(title: "Pasted"), .other),
+            (.notPasted(message: "Not pasted", unconfirmed: false), .other),
+            (.notPasted(message: "Maybe pasted", unconfirmed: true), .other),
+            (.clipboardBusy(message: "Clipboard busy"), .other),
+            (.error("Couldn't save"), .other),
+        ]
+        for (presentation, expected) in cases {
+            assertEqual(
+                DictationQueuedStartPolicy.messageKind(for: presentation),
+                expected,
+                "\(presentation) maps to its message kind"
+            )
+        }
+        assertEqual(
+            DictationQueuedStartPolicy.messageKind(for: DictationDeliveryPresentation.clipboardNotice("Copied.").addingPendingAudioNotice(true)),
+            .landedClipboardNotice,
+            "the audio-repair suffix keeps a landed notice a passing note"
+        )
+        assertEqual(
+            DictationQueuedStartPolicy.messageKind(for: DictationDeliveryPresentation.error("Failed").addingPendingAudioNotice(true)),
+            .other,
+            "the audio-repair suffix never lets a failure give way"
+        )
+    }
+
+    runSuite("A finished take's delivery reaches the overlay with the right message kind") {
+        func shown(_ presentation: DictationDeliveryPresentation) -> [String] {
+            var events: [String] = []
+            DictationQueuedStartPolicy.presentDelivery(
+                presentation,
+                DictationQueuedStartPolicy.DeliveryOverlaySteps(
+                    showSuccess: { events.append("success \($0)") },
+                    showClipboardNotice: { message, kind in
+                        let givesWay = DictationQueuedStartPolicy.messageCanGiveWayToNextStart(kind)
+                        events.append("clipboard \(message) givesWay=\(givesWay)")
+                    },
+                    showNotPasted: { events.append("notPasted \($0) unconfirmed=\($1)") },
+                    showClipboardBusy: { events.append("busy \($0)") },
+                    showError: { events.append("error \($0)") }
+                )
+            )
+            return events
+        }
+        assertEqual(
+            shown(.clipboardNotice("Copied. Press ⌘V")),
+            ["clipboard Copied. Press ⌘V givesWay=true"],
+            "text that landed shows a notice a press for the next take may replace"
+        )
+        assertEqual(
+            shown(DictationDeliveryPresentation.clipboardNotice("Copied.").addingPendingAudioNotice(true)),
+            ["clipboard Copied. \(DictationDeliveryPresentation.pendingAudioNotice) givesWay=true"],
+            "the audio-repair suffix keeps a landed notice a passing note"
+        )
+        assertEqual(shown(.success(title: "Pasted")), ["success Pasted"], "a paste shows its success")
+        assertEqual(
+            shown(.notPasted(message: "Maybe pasted", unconfirmed: true)),
+            ["notPasted Maybe pasted unconfirmed=true"],
+            "a not-pasted take goes to the Paste notice, never the passing clipboard note"
+        )
+        assertEqual(
+            shown(.clipboardBusy(message: "Clipboard busy")),
+            ["busy Clipboard busy"],
+            "a busy clipboard goes to the Copy notice"
+        )
+        assertEqual(shown(.error("Couldn't save")), ["error Couldn't save"], "a failure goes to the error")
+    }
+
     // Still source-text, deliberately: the Esc callback wiring lives in
     // DictationSessionController, which a fast test can't build. The overlay
     // half (which messages give way) is a behavioral suite above now.

@@ -256,8 +256,15 @@ public enum SecretRules {
     /// plausible card length (13–19, longest first) against Luhn, accepting
     /// the first that validates — so a valid card prefix wins even when
     /// trailing unrelated digits made the maximal span invalid.
+    ///
+    /// A window also stops before an expiry month ("02" in
+    /// `"4111 1111 1111 1111 02/26"`). Without that, a window starting at
+    /// the card's start or at one of its later groups can be Luhn-valid only
+    /// by reaching into the month, which then gets redacted with the card
+    /// and leaves a stray "/26" behind.
     private static func creditCardMatches(_ text: String) -> [Range<String.Index>] {
         let starts = regexMatches(text, regex: cardStartRegex)
+        let expiryMonthStarts = Set(regexMatches(text, regex: cardExpiryMonthRegex).map(\.lowerBound))
         var results: [Range<String.Index>] = []
         for start in starts {
             var digits: [(character: Character, index: String.Index)] = []
@@ -266,6 +273,7 @@ public enum SecretRules {
             while index < text.endIndex, digits.count < 19 {
                 let char = text[index]
                 if char.isNumber {
+                    if expiryMonthStarts.contains(index) { break }
                     digits.append((char, index))
                     sawSeparator = false
                 } else if (char == " " || char == "-"), !sawSeparator, !digits.isEmpty {
@@ -450,6 +458,10 @@ public enum SecretRules {
     private static let jwtRegex = try? NSRegularExpression(pattern: #"\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b"#)
     private static let ibanHeaderRegex = try? NSRegularExpression(pattern: #"\b[A-Za-z]{2}\d{2}"#)
     private static let cardStartRegex = try? NSRegularExpression(pattern: #"(?<!\d)\d"#)
+    /// A one- or two-digit group right after a digit run and a separator,
+    /// directly followed by "/" and a digit: the month of an expiry date
+    /// written after a card number.
+    private static let cardExpiryMonthRegex = try? NSRegularExpression(pattern: #"(?<=\d[ -])\d{1,2}(?=/\d)"#)
     private static let ssnRegex = try? NSRegularExpression(pattern: #"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)"#)
     private static let awsAccessKeyRegex = try? NSRegularExpression(pattern: #"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"#)
     private static let openAIKeyRegex = try? NSRegularExpression(pattern: #"\bsk-[A-Za-z0-9_-]{20,}\b"#)
