@@ -2,12 +2,6 @@
   "_comment": "Swift files over 800 lines, grandfathered at their line count. scripts/dev/check-file-size.py --shrink only lowers counts or drops files; raising one is a reviewed human edit.",
   "limit": 800,
   "files": {
-    "Sources/Speech/ParakeetDeviceRecovery.swift": 805,
-    "Sources/TranscriptedCore/Audio/Audio.swift": 813,
-    "Sources/TranscriptedCore/Audio/AudioDeviceRecovery.swift": 904,
-    "Sources/TranscriptedCore/Audio/CoreAudioSystemAudioCapture.swift": 1051,
-    "Sources/TranscriptedCore/Audio/PinnedMicrophoneCapture.swift": 1106,
-    "Sources/TranscriptedCore/Audio/SCKAudioCapture.swift": 1449,
     "Sources/UI/Overlay/MeetingOverlayController.swift": 1178
   }
 }
