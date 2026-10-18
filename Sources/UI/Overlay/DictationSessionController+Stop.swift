@@ -27,7 +27,7 @@ extension DictationSessionController {
                 extra: [
                     "dictation_session_id": currentDictationSessionID.uuidString,
                     "trigger": trigger.rawValue,
-                    "overlay_state": overlayStateName(overlayController.state),
+                    "overlay_state": overlayController.state.diagnosticName,
                     "stt_recording": "\(appState.sttRouter.isRecording)"
                 ]
             )
@@ -68,7 +68,7 @@ extension DictationSessionController {
                 context: dictationContext(
                     extra: [
                         "trigger": trigger.rawValue,
-                        "overlay_state": overlayStateName(overlayController.state),
+                        "overlay_state": overlayController.state.diagnosticName,
                         "stt_recording": "\(appState.sttRouter.isRecording)"
                     ]
                 )
@@ -127,7 +127,7 @@ extension DictationSessionController {
                 context: dictationContext(
                     extra: [
                         "trigger": trigger.rawValue,
-                        "overlay_state": overlayStateName(overlayController.state),
+                        "overlay_state": overlayController.state.diagnosticName,
                         "stt_recording": "\(appState.sttRouter.isRecording)"
                     ]
                 )
@@ -147,7 +147,7 @@ extension DictationSessionController {
                         context: dictationContext(
                             extra: [
                                 "trigger": trigger.rawValue,
-                                "overlay_state": overlayStateName(overlayController.state),
+                                "overlay_state": overlayController.state.diagnosticName,
                                 "failure_kind": failureKind
                             ]
                         )
@@ -559,17 +559,6 @@ extension DictationSessionController {
                 )
             )
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
-        }
-    }
-
-    private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
-        switch state {
-        case .idle: return "idle"
-        case .starting: return "starting"
-        case .loading: return "loading"
-        case .listening: return "listening"
-        case .drafting: return "drafting"
-        case .success: return "success"
         }
     }
 }

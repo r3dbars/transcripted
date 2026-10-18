@@ -33,15 +33,7 @@ func dictationSessionStateName(_ session: DictationSessionController?) -> String
 
 @MainActor
 func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> String {
-    guard let state else { return "unknown" }
-    switch state {
-    case .idle: return "idle"
-    case .starting: return "starting"
-    case .loading: return "loading"
-    case .listening: return "listening"
-    case .drafting: return "drafting"
-    case .success: return "success"
-    }
+    state?.diagnosticName ?? "unknown"
 }
 
 // MARK: - Context Capture Engine

@@ -38,6 +38,17 @@ class FloatingOverlayController {
                 return false
             }
         }
+
+        var diagnosticName: String {
+            switch self {
+            case .idle: return "idle"
+            case .starting: return "starting"
+            case .loading: return "loading"
+            case .listening: return "listening"
+            case .drafting: return "drafting"
+            case .success: return "success"
+            }
+        }
     }
 
     /// How a drafting-state message should read: a real problem, or a calm
