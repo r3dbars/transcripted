@@ -7,6 +7,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerIsIdempotent()
         testMeetingTranscriptStylerPreservesExplicitTitle()
         testMeetingTranscriptStylerKeepsQuotedTitleValidYAML()
+        testMeetingTranscriptStylerRoundTripsQuotedTitle()
         testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead()
         testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
         testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart()
@@ -324,6 +325,26 @@ private func testMeetingTranscriptStylerPreservesExplicitTitle() {
 }
 
 private func testMeetingTranscriptStylerKeepsQuotedTitleValidYAML() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // The line Core writes for the title `Plan "B" C:\x`.
+    let savedTitleLine = #"title: "Plan \"B\" C:\\x""#
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    try? sampleImportedTranscript()
+        .replacingOccurrences(of: #"title: "Customer Interview April""#, with: savedTitleLine)
+        .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let firstPass = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let secondPass = MeetingTranscriptStyler.restyleTranscript(at: firstPass.url)
+    let markdown = (try? String(contentsOf: secondPass.url, encoding: .utf8)) ?? ""
+
+    assertEqual(secondPass.title, #"Plan "B" C:\x"#, "Styler should show the saved title as plain text")
+    assertTrue(markdown.hasPrefix("---\n\(savedTitleLine)\n"), "Restyle should keep the writer's escaped title line as written")
+    assertTrue(markdown.contains("\n# Plan \"B\" C:\\x\n"), "The heading should show the plain title")
+}
+
+private func testMeetingTranscriptStylerRoundTripsQuotedTitle() {
     let directory = makeTemporaryTestDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
 

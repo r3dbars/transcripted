@@ -158,7 +158,10 @@ enum MeetingQuickSummaryWriter {
     }
 
     private static func yamlValue(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "\n", with: " ")
+        raw.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
             .replacingOccurrences(of: "\"", with: "'")
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }

@@ -107,8 +107,7 @@ enum MeetingTranscriptStyler {
               isMeetingTranscript(frontmatter) else { return nil }
         // An explicit saved title is also buildTitle's first choice. Avoid
         // parsing preview transcript turns that cannot change that result.
-        if let title = frontmatter.values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !title.isEmpty {
+        if let title = explicitTitle(in: frontmatter.lines), !title.isEmpty {
             return (StyledMeetingTranscript(url: url, title: title), frontmatter)
         }
         guard let document = parseDocument(frontmatter, fallbackURL: url) else {
@@ -149,10 +148,9 @@ enum MeetingTranscriptStyler {
             )
         }
         guard isMeetingTranscript(frontmatter) else {
-            let explicitTitle = frontmatter.values["title"]?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let title = explicitTitle?.isEmpty == false
-                ? explicitTitle ?? fallbackTitle(for: url)
+            let savedTitle = explicitTitle(in: frontmatter.lines)
+            let title = savedTitle?.isEmpty == false
+                ? savedTitle ?? fallbackTitle(for: url)
                 : fallbackTitle(for: url)
             return StyledMeetingTranscript(
                 url: url,
@@ -180,7 +178,11 @@ enum MeetingTranscriptStyler {
             return StyledMeetingTranscript(url: url, title: title)
         }
 
-        let renderedFrontmatter = renderFrontmatter(lines: document.frontmatterLines, title: title)
+        let renderedFrontmatter = renderFrontmatter(
+            lines: document.frontmatterLines,
+            title: title,
+            keepsWriterTitleLine: document.explicitTitle?.isEmpty == false
+        )
         let body = renderBody(document: document, title: title)
         let updated = renderedFrontmatter + "\n\n" + body + "\n"
         let renameOutcome = renameTranscriptArtifactsIfNeeded(
@@ -265,7 +267,7 @@ enum MeetingTranscriptStyler {
 
         return ParsedDocument(
             frontmatterLines: frontmatter.lines,
-            explicitTitle: values["title"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+            explicitTitle: explicitTitle(in: frontmatter.lines),
             recordedAt: recordedAt,
             duration: duration,
             durationSeconds: TranscriptFrontmatter.durationSeconds(from: duration) ?? 0,
@@ -278,16 +280,33 @@ enum MeetingTranscriptStyler {
     }
 
     private static func frontmatterTitle(at url: URL) -> String? {
-        guard let values = try? TranscriptFrontmatter.readValues(
+        guard let document = try? TranscriptFrontmatter.readDocument(
             from: url,
             byteLimit: frontmatterPreviewByteLimit
         ) else {
             return nil
         }
 
-        let title = values["title"]?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let title = explicitTitle(in: document.lines)
         return title?.isEmpty == false ? title : nil
+    }
+
+    /// The writer's own `title:` line; like `TranscriptFrontmatter.values`,
+    /// the last unindented one wins.
+    private static func writerTitleLine(in lines: [String]) -> String? {
+        lines.last { $0.hasPrefix("title:") }
+    }
+
+    /// The saved title as plain text, decoded the way Core reads it. A heading
+    /// or filename can't hold a line break or tab, so those become spaces.
+    private static func explicitTitle(in lines: [String]) -> String? {
+        guard let line = writerTitleLine(in: lines) else { return nil }
+        let raw = String(line.dropFirst("title:".count))
+        return TranscriptFrontmatter.unquoteYAMLScalar(raw)
+            .replacingOccurrences(of: "\n", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\t", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private static func parseRecordedAt(values: [String: String], fallbackURL: URL) -> Date {
@@ -364,9 +383,14 @@ enum MeetingTranscriptStyler {
             }
     }
 
-    private static func renderFrontmatter(lines: [String], title: String) -> String {
-        // Preserve every writer key except `title:` (re-emitted first with the
-        // styled title) and `transcript_style:`. The persisted restyle rewrites
+    private static func renderFrontmatter(
+        lines: [String],
+        title: String,
+        keepsWriterTitleLine: Bool
+    ) -> String {
+        // Preserve every writer key except `title:` (re-emitted first: the
+        // writer's line verbatim for a saved title, else the generated title)
+        // and `transcript_style:`. The persisted restyle rewrites
         // the body into the styled grammar, so the style marker is replaced with
         // `styled` — filter-then-append keeps it from duplicating on repeat
         // passes. `format_version` passes through untouched.
@@ -376,9 +400,10 @@ enum MeetingTranscriptStyler {
             return !trimmed.hasPrefix("title:") && !trimmed.hasPrefix("transcript_style:")
         }
         filtered.append("transcript_style: styled")
+        let titleLine = keepsWriterTitleLine ? writerTitleLine(in: lines) : nil
         return ([
             "---",
-            "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
+            titleLine ?? "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
         ] + filtered + ["---"]).joined(separator: "\n")
     }
 
