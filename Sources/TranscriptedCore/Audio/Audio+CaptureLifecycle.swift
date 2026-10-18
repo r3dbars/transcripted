@@ -73,10 +73,6 @@ extension Audio {
         journalSession = nil
     }
 
-    func recordSystemAudioStartPermissionDenial(_ observed: Bool) {
-        systemAudioStartPermissionExplicitlyDenied = observed
-    }
-
     public func recordStartFailureStage(_ stage: AudioCaptureStartFailureStage) {
         startFailureStage = stage
     }
@@ -229,14 +225,10 @@ extension Audio {
     @MainActor
     private func finishSuccessfulStartIfCurrent(_ startGeneration: UInt64) {
         guard recordingSessionGeneration == startGeneration, isStarting else {
-            AppLogger.audio.warning("Audio capture start finished after session was cancelled; tearing down stale capture", [
+            AppLogger.audio.warning("Audio capture start finished after session boundary; stop() owns teardown", [
                 "startGeneration": "\(startGeneration)",
                 "currentGeneration": "\(recordingSessionGeneration)"
             ])
-            if recordingSessionGeneration == startGeneration {
-                isRecording = false
-                isStarting = false
-            }
             return
         }
 
@@ -295,7 +287,30 @@ extension Audio {
 
     // MARK: - Stop Recording
 
+    /// The generation of a stop() whose completion has not landed yet, while
+    /// no newer recording has started. A second stop joins it: finalizing the
+    /// same segments twice deletes the merged mic file the first one made.
+    public internal(set) var inFlightStopGeneration: UInt64? {
+        get {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            guard _inFlightStopGeneration == recordingSessionGenerationEpoch.snapshot().rawValue else { return nil }
+            return _inFlightStopGeneration
+        }
+        set {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            _inFlightStopGeneration = newValue
+        }
+    }
+
     public func stop() {
+        if let inFlightStopGeneration {
+            AppLogger.audio.info("Ignoring repeat stop; this capture's stop is already finalizing", [
+                "stopGeneration": "\(inFlightStopGeneration)"
+            ])
+            return
+        }
         // Bump generation synchronously on the calling thread so any
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
@@ -313,6 +328,7 @@ extension Audio {
         micAudioWriteBackpressure.beginFinishing(generation: captureGeneration)
         pendingStartIntentId = nil
         let stopGeneration = beginRecordingSessionGeneration()
+        inFlightStopGeneration = stopGeneration
         systemAudioWriteBackpressure.close(generation: captureGeneration)
         writeBackpressureStopAdmission.close(generation: captureGeneration)
         let cleanupGroup = DispatchGroup()
@@ -470,6 +486,7 @@ extension Audio {
                 )
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
+                        self.inFlightStopGeneration = nil
                         self.originalMicAudioFileURL = nil
                         self.micSegments = []
                         self.micAudioFileURL = micFinalization.micURL

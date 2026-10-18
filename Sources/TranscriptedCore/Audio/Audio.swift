@@ -389,11 +389,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // (stored inside the same critical sections): the getter is the staleness
     // gate in per-buffer audio callbacks — mic tap, recovery tap, and
     // system-audio — so a lock-free read keeps those callbacks from ever
-    // blocking behind a start/stop mid-bump. (The tap thread is not the HAL
-    // real-time thread — see calculateLevel — so this is contention hygiene,
-    // not a real-time-safety requirement.)
+    // blocking behind a start/stop mid-bump. (The tap thread is not the HAL real-time
+    // thread, see calculateLevel: contention hygiene, not a real-time-safety need.)
     var recordingSessionGenerationEpoch = SupersessionEpoch()
     let recordingSessionGenerationLock = NSLock()
+    var _inFlightStopGeneration: UInt64?  // Guarded by recordingSessionGenerationLock.
     private let recordingSessionGenerationMirror = Atomic<UInt64>(0)
     var recordingSessionGeneration: UInt64 {
         get {
