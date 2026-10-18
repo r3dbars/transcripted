@@ -14,9 +14,6 @@
     "Sources/TranscriptedCore/Speaker/SpeakerProfileProvenance.swift": 882,
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1286,
     "Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift": 920,
-    "Sources/UI/Overlay/MeetingOverlayController.swift": 1181,
-    "Sources/UI/Overlay/NotchIslandView.swift": 1286,
-    "Sources/UI/Settings/PermissionsOnboardingView.swift": 948,
-    "Sources/UI/Shared/DictionaryPastMeetingFix.swift": 894
+    "Sources/UI/Overlay/MeetingOverlayController.swift": 1178
   }
 }
