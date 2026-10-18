@@ -367,9 +367,36 @@ func testDictationSessionPipeline() async {
 
         assertEqual(host.lastCompletedText, "こんにちは", "Paste Last Dictation gets the held text")
         assertEqual(host.events.all.filter { $0.hasPrefix("paste") || $0.hasPrefix("save") || $0.hasPrefix("publish") || $0 == "pasted" }, [
-            "paste こんにちは", "save こんにちは pasted recovery=true", "pasted", "publish pasted",
+            "paste こんにちは", "save こんにちは pasted recovery=true", "publish pasted", "pasted",
         ], "pasted, saved with the paste's delivery and the kept audio, then shown")
         assertEqual(host.savedRecoveries, [recovery], "saving retires this take's own WAV")
+        assertNil(host.stoppedAudioRecovery, "the saved take no longer holds its recovery")
+    }
+
+    await runSuite("Paste Anyway whose save fails shows the save error, not Pasted") {
+        let host = PipelineFakeHost()
+        host.heldBackText = "hola"
+        host.saveFails = true
+        host.finishEmptyTake(taskSessionID: host.currentDictationSessionID, host.emptySteps(.otherLanguage, heldFor: 5))
+        host.messages.last?.action?()
+        // The pill is set in the same main-actor turn as the publish.
+        await host.waitForEvent("publish pasted")
+
+        assertFalse(host.events.all.contains("pasted"), "a failed save isn't a finished take")
+        assertEqual(host.messages.last?.message, host.failedSaveMessage)
+    }
+
+    await runSuite("Paste Anyway whose audio didn't move offers Retry Saving Audio") {
+        let host = PipelineFakeHost()
+        let recovery = host.recovery()
+        host.stoppedAudioRecovery = recovery
+        host.heldBackText = "hola"
+        host.pendingAudioRetention = recovery
+        host.finishEmptyTake(taskSessionID: host.currentDictationSessionID, host.emptySteps(.otherLanguage, heldFor: 5))
+        host.messages.last?.action?()
+        await host.waitForEvent("pending audio retry")
+
+        assertEqual(host.events.all.suffix(2), ["pasted", "pending audio retry"], "the text pasted, then the audio retry")
     }
 
     await runSuite("Paste Anyway after a new take started publishes the original save and leaves the new pill alone") {
@@ -504,6 +531,11 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
     var holdCheckpointWrite = false
     var modelWaitOutcome: DictationPostStopModelWait.Outcome = .alreadyLoaded
     var heldBackText: String?
+    var saveFails = false
+    var pendingAudioRetention: DictationStoppedAudioRecovery?
+    var failedSaveMessage: String? {
+        DictationTranscriptPersistenceResult(saved: nil, failureError: PipelineFakeError(), startedAt: 0, finishedAt: 0).failureMessage
+    }
     var publishedSaveContexts: [[String: String]] = []
     private let checkpointGate = DispatchSemaphore(value: 0)
 
@@ -665,10 +697,15 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
     ) -> Task<DictationTranscriptPersistenceResult, Never> {
         events.append("save \(text) \(delivery.rawValue) recovery=\(recovery != nil)")
         savedRecoveries.append(recovery)
+        let saveFails = saveFails
+        let pendingAudioRetention = pendingAudioRetention
         return Task {
-            DictationTranscriptPersistenceResult.measure {
-                SavedDictationTranscript(url: URL(fileURLWithPath: "/tmp/pipeline-fake.md"), title: "Fake")
+            var result = DictationTranscriptPersistenceResult.measure {
+                if saveFails { throw PipelineFakeError() }
+                return SavedDictationTranscript(url: URL(fileURLWithPath: "/tmp/pipeline-fake.md"), title: "Fake")
             }
+            result.pendingAudioRetention = pendingAudioRetention
+            return result
         }
     }
 
@@ -679,6 +716,10 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
     ) {
         publishedSaveContexts.append(context)
         events.append("publish \(delivery.rawValue)")
+    }
+
+    func showPendingAudioRetention(_ result: DictationTranscriptPersistenceResult) {
+        if result.pendingAudioRetention != nil { events.append("pending audio retry") }
     }
 
     func dictationContext(extra: [String: String]) -> [String: String] {
