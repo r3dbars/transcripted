@@ -258,6 +258,23 @@ func testAutomationSurfaceBehavior() async {
         }
     }
 
+    runSuite("A failed Agent setup shows plain words and keeps the raw error for Copy Details only") {
+        let raw = NSError(
+            domain: "AgentMCPConnector",
+            code: 7,
+            userInfo: [NSLocalizedDescriptionKey: "config.json: permission denied (raw-detail-7)"]
+        )
+        let connect = AgentSetupFailureCopy.connectFailure(agentName: "Claude Desktop", error: raw)
+        assertEqual(connect.message, AgentSetupFailureCopy.connect(agentName: "Claude Desktop"), "the page should show the plain connect copy")
+        assertFalse(connect.message.contains("raw-detail-7"), "the raw error must not reach the visible message")
+        assertEqual(connect.details, raw.localizedDescription, "Copy Details should carry the raw error")
+
+        let inbox = AgentSetupFailureCopy.codexInboxFailure(error: raw)
+        assertEqual(inbox.message, AgentSetupFailureCopy.codexInbox, "the inbox row should show the plain inbox copy")
+        assertFalse(inbox.message.contains("raw-detail-7"), "the raw error must not reach the visible message")
+        assertEqual(inbox.details, raw.localizedDescription, "Copy Details should carry the raw error")
+    }
+
     // MARK: Retained audio
 
     runSuite("Retained-audio playback follows a WAV that was recompressed to M4A") {

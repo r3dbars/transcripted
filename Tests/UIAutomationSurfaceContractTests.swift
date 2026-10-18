@@ -7,8 +7,14 @@
 //     needs a seam;
 //   - it's a view-wiring guard (a SwiftUI view calls a policy, or must never
 //     call a raw API) that no fast test can render.
-// The identifiers the QA smokes press and the Settings/Speakers click-flow
-// identifiers are checked by scripts/dev/check-ui-automation-contract.py.
+// The identifiers the QA smokes press, the Settings/Speakers click-flow
+// identifiers, the sidebar rows' page identifiers and the Speakers inbox
+// anchor are checked by scripts/dev/check-ui-automation-contract.py.
+// Onboarding's lifecycle and audio check, the Home row menus, the retained-audio
+// hit target and the Agent page's failure routing are behavior tests
+// (OnboardingPermissionLifecyclePolicyTests, HomeRowControlsTests,
+// AutomationSurfaceBehaviorTests); "never call X" guards for onboarding and
+// raw errors in Settings live in scripts/dev/check-banned-calls.py.
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
 // identifiers, and failure copy are behavior tests in
 // AutomationSurfaceBehaviorTests.swift now. The QA CLI's ui-smoke command and
@@ -269,11 +275,6 @@ func testUIAutomationSurfaceContract() async {
     }
 
     runSuite("UI automation surface contract - major settings and Home flows stay mapped") {
-        assertTrue(
-            contractSource("Sources/UI/Settings/TranscriptedSettingsSidebar.swift").contains(".accessibilityIdentifier(page.automationIdentifier)"),
-            "settings sidebar rows should expose each page's automation identifier"
-        )
-
         for requiredSourceHook in [
             "actions.importAudioFile()",
             "trackSettingsAction(\"empty_import_audio\", page: .home)",
@@ -281,10 +282,8 @@ func testUIAutomationSurfaceContract() async {
             assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
         }
 
+        // The row menus' items are behavior tests: HomeRowControlsTests.
         for requiredHomeActionHook in [
-            "HomeRowMenuItem(title: \"Open Markdown\"",
-            "HomeRowMenuItem(title: \"Report issue\"",
-            "HomeRowMenuItem(title: \"Delete meeting\"",
             "HomeDeleteConfirmationPolicy.failedMeeting",
             "homeDeleteConfirmation = HomeDeleteConfirmation(",
         ] {
@@ -314,14 +313,8 @@ func testUIAutomationSurfaceContract() async {
             homeSurfaceContractContains("HomeHitTarget.minimum"),
             "Home icon buttons and compact row actions should size their hit shape from HomeHitTarget.minimum"
         )
-        // Quiet-library redesign: the retained-audio player is
-        // HomeMeetingPodcastPlayer (HomeMeetingAudioPlayer.swift), whose
-        // transport buttons size their hit target off HomeHitTarget.minimum.
-        assertTrue(
-            contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("max(size, HomeHitTarget.minimum)")
-                && contractSource("Sources/UI/Settings/HomeMeetingAudioPlayer.swift").contains("hitTargetSize"),
-            "Home retained-audio play controls should keep a 40pt hit floor"
-        )
+        // The retained-audio player's 40pt hit floor (HomeHitTarget.hitSize)
+        // is a behavior test: HomeRowControlsTests.
         assertFalse(
             contractSource("Sources/UI/Settings/HomeView.swift").contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
@@ -443,20 +436,9 @@ func testUIAutomationSurfaceContract() async {
             )
         }
 
-        assertTrue(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("NSApplication.didBecomeActiveNotification")
-                && contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("transcriptedPermissionsDidChange"),
-            "onboarding should refresh permission state from bounded lifecycle events"
-        )
-        assertFalse(
-            contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("while !Task.isCancelled")
-                || contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift").contains("startPolling()"),
-            "an idle onboarding window must never run an infinite ScreenCaptureKit permission-probe loop"
-        )
-        let onboardingSource = contractSource("Sources/UI/Settings/PermissionsOnboardingView.swift")
-        assertFalse(onboardingSource.contains("SystemAudioPermissionRevalidator.revalidateForStatusSurfaces"), "window activation must not compete with an explicit onboarding audio check")
-        assertTrue(onboardingSource.contains("systemAudioRequestTask?.cancel()") && onboardingSource.contains("guard !Task.isCancelled else { return }"), "leaving onboarding must cancel the audio check and ignore its late result")
-        assertTrue(onboardingSource.contains("decision.probeResult") && onboardingSource.contains("systemAudioPresentation.actionTitle"), "onboarding must render the typed audio check result instead of collapsing unknown into Grant")
+        // Onboarding's lifecycle refreshes, audio-check cancellation and typed
+        // result are behavior tests: OnboardingPermissionLifecyclePolicyTests.
+        // Its never-poll guard is in scripts/dev/check-banned-calls.py.
 
         // The speaker autocomplete keeping the picked saved-person UUID and
         // clearing it on typing is a behavior test now:
@@ -478,12 +460,8 @@ func testUIAutomationSurfaceContract() async {
     }
 
     runSuite("UI automation surface contract - deterministic click-flow identifiers stay mapped") {
-        assertTrue(
-            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("transcripted.speakers.inbox")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".id(ScrollTarget.reviewQueue)")
-                && contractSource("Sources/UI/Settings/TranscriptedSettingsView.swift").contains("proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue"),
-            "The voices-to-name section should keep a stable automation anchor that review deep-links can scroll to"
-        )
+        // The voices-to-name section's automation id and scroll anchor are
+        // checked by scripts/dev/check-ui-automation-contract.py.
 
         assertEqual(SpeakerPeopleSettingsPolishContract.minimumHitTarget, 40, "speaker play and icon controls should keep a 40pt hit target")
         assertEqual(SpeakerPeopleSettingsPolishContract.quietPlayGlyphPointSize, 14, "the quiet play control should stay a small glyph, not a filled circle")
@@ -512,14 +490,8 @@ func testUIAutomationSurfaceContract() async {
             "queue and person overflow menus should use the compact 40pt hit-target label"
         )
 
-        assertTrue(
-            settingsShellSource().contains("HomeRowMenuItem(title: \"Review speakers\"")
-                && settingsShellSource().contains("let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)")
-                && settingsShellSource().contains("if !audioRevealURLs.isEmpty")
-                && settingsShellSource().contains("title: RecentMeetingRetranscriptionMenuActionPolicy.title("),
-            "meeting speaker review and re-transcribe actions should stay reachable from the row menu when retained audio has a Finder target"
-        )
-
+        // Review speakers and re-transcribe in the meeting row menu are
+        // behavior tests: HomeRowControlsTests.
     }
 
     // The QA CLI's own behavior (ui-smoke registered, INCOMPLETE exits 3, the
@@ -609,48 +581,10 @@ func testUIAutomationSurfaceContract() async {
         )
     }
 
-    runSuite("UI automation surface contract - WS4 error states act, not dump") {
-        let agent = contractSource("Sources/UI/Settings/AgentConnectionSettingsPage.swift")
-
-        // Agent page: routes through the shared copy + a Copy Details reveal, and
-        // no longer dumps a raw NSError into a user-visible label.
-        assertTrue(
-            agent.contains("AgentSetupFailureCopy.connect(agentName:")
-                && agent.contains("AgentSetupFailureCopy.codexInbox")
-                && agent.contains("private func failureNotice(")
-                && agent.contains("transcripted.settings.agent.connect-error-details."),
-            "the Agent page should surface plain-words failures with a Copy Details reveal, not raw error text"
-        )
-        assertFalse(
-            agent.contains(".failed(error.localizedDescription)")
-                || agent.contains("Could not set up Codex Inbox: \\(error"),
-            "the Agent page must not interpolate a raw error into a user-facing setup message"
-        )
-
-        // Quiet-library onboarding redesign: the first-run flow no longer offers
-        // a Claude Desktop connect card (agent connection now lives only in
-        // Settings > Agent), so there is no onboarding-side connect-failure
-        // copy to pin here anymore.
-
-        // Settings statuses: the plain-words copy itself is checked by
-        // SettingsActionFailureCopyTests; here, the shell must use it, keep a
-        // Copy Details reveal, and never put a raw error in the status line.
-        assertTrue(
-            settingsShellSource().contains("SettingsActionFailureCopy.modelCacheRemoval")
-                && settingsShellSource().contains("SettingsActionFailureCopy.launchAtLogin")
-                && settingsShellSource().contains("SettingsActionFailureCopy.captureLibraryMigration(")
-                && settingsShellSource().contains("func settingsFailureDetailsButton("),
-            "Settings action failures should route through SettingsActionFailureCopy with a Copy Details reveal"
-        )
-        assertFalse(
-            settingsShellSource().contains("setup failed: \\(error.localizedDescription)")
-                || settingsShellSource().contains("Could not remove stale models: \\(error")
-                || settingsShellSource().contains("Could not update launch at login: \\(error")
-                || settingsShellSource().contains("Copy stopped: \\(error"),
-            "Settings status lines must not interpolate a raw error into user-facing text"
-        )
-    }
-
+    // WS4 error states: the Agent page's failure split (plain message, raw
+    // error behind Copy Details) is a behavior test in
+    // AutomationSurfaceBehaviorTests; "no raw error in Agent or Settings
+    // status text" is in scripts/dev/check-banned-calls.py.
 }
 
 private func sourceBlock(named startMarker: String, endingBefore endMarker: String, in source: String) -> String {

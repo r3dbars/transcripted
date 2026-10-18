@@ -4,8 +4,11 @@
 The QA CLI smokes (Tools/TranscriptedQA UISmoke and ImportedAudioNativeSmoke) and
 build.sh's launch smoke press controls by `transcripted.<area>.<name>`
 identifier. If the app stops declaring one, the smoke fails on a machine with
-the app running, long after the change that broke it. This used to be Swift
-tests that read Sources/ as text (Tests/UIAutomationSurfaceContractTests.swift).
+the app running, long after the change that broke it. It also checks that the
+Settings sidebar puts those ids on its row buttons and that the Speakers
+voices-to-name section keeps the id and scroll anchor review deep links use.
+This used to be Swift tests that read Sources/ as text
+(Tests/UIAutomationSurfaceContractTests.swift).
 It only checks that files agree with each other and runs no app code, so it
 lives here.
 
@@ -83,6 +86,15 @@ SPEAKERS_IDS = [
 # The Speakers surface must not regrow a manual refresh button; navigation and
 # mutations refresh its model.
 SPEAKERS_FORBIDDEN_IDS = ["transcripted.speakers.refresh"]
+# The sidebar ids above only reach AX if each row's button carries them.
+SIDEBAR_FILE = "Sources/UI/Settings/TranscriptedSettingsSidebar.swift"
+SIDEBAR_APPLIES_PAGE_ID = ".accessibilityIdentifier(page.automationIdentifier)"
+# The voices-to-name section: automation finds it by id, and review deep links
+# scroll to it by its anchor, so every place that draws it carries both, and
+# the Settings shell scrolls to that same anchor.
+SPEAKERS_INBOX_ID = '.accessibilityIdentifier("transcripted.speakers.inbox")'
+SPEAKERS_INBOX_ANCHOR = ".id(ScrollTarget.reviewQueue)"
+SPEAKERS_INBOX_SCROLL = "proxy.scrollTo(SpeakerPeopleSettingsSection.ScrollTarget.reviewQueue"
 
 
 def identifiers(text: str) -> set[str]:
@@ -176,6 +188,23 @@ def check(sources: dict[str, str], pressers: dict[str, str]) -> list[str]:
         for declared_id in sorted(speakers_declared):
             if declared_id.startswith(ident):
                 problems.append(f"{declared_id} must not come back: navigation and mutations refresh the Speakers model")
+
+    if SIDEBAR_APPLIES_PAGE_ID not in sources.get(SIDEBAR_FILE, ""):
+        problems.append(
+            f"{SIDEBAR_FILE} should put each page's automation identifier on its row button "
+            f"({SIDEBAR_APPLIES_PAGE_ID}), or the smokes' sidebar ids never reach AX"
+        )
+
+    speakers_text = "\n".join(text for path, text in settings.items() if Path(path).name.startswith("SpeakerPeople"))
+    inbox_ids = speakers_text.count(SPEAKERS_INBOX_ID)
+    inbox_anchors = speakers_text.count(SPEAKERS_INBOX_ANCHOR)
+    if inbox_ids == 0 or inbox_ids != inbox_anchors:
+        problems.append(
+            f"every voices-to-name section should carry both {SPEAKERS_INBOX_ID} and {SPEAKERS_INBOX_ANCHOR} "
+            f"(found {inbox_ids} ids, {inbox_anchors} anchors)"
+        )
+    if not any(SPEAKERS_INBOX_SCROLL in text for text in settings.values()):
+        problems.append(f"review deep links should scroll to the voices-to-name anchor ({SPEAKERS_INBOX_SCROLL})")
     return problems
 
 
@@ -204,12 +233,17 @@ def load() -> tuple[dict[str, str], dict[str, str]]:
 def self_test() -> int:
     quote = lambda ids: "\n".join(f'let a = "{i}"' for i in ids)
     settings_src = quote(SETTINGS_CLICK_FLOW_IDS)
-    speakers_src = quote(SPEAKERS_IDS)
+    speakers_src = quote(SPEAKERS_IDS) + (
+        f"\nCard()\n    {SPEAKERS_INBOX_ANCHOR}\n    {SPEAKERS_INBOX_ID}\n"
+        f"Stack()\n    {SPEAKERS_INBOX_ANCHOR}\n    {SPEAKERS_INBOX_ID}\n"
+    )
     pressed_ids = [f"transcripted.menubar.item-{n}" for n in range(MIN_PRESSED)]
     sources = {
         f"{SETTINGS_DIR}/TranscriptedSettingsView.swift": settings_src,
         f"{SETTINGS_DIR}/SpeakerPeopleSettingsSection.swift": speakers_src,
         "Sources/UI/MenuBar/Menu.swift": quote(pressed_ids),
+        SIDEBAR_FILE: f"Button(action: action) {{ Row() }}\n    {SIDEBAR_APPLIES_PAGE_ID}\n",
+        f"{SETTINGS_DIR}/TranscriptedSettingsView+Scroll.swift": f"{SPEAKERS_INBOX_SCROLL}, anchor: .top)\n",
     }
     sources[PAGE_ENUM] = r"""enum P {
     case today
@@ -254,6 +288,22 @@ def self_test() -> int:
     assert any("refresh.button_test must not come back" in p for p in check(descendant, pressers))
     assert any("refresh_button must not come back" in p for p in check(descendant, pressers))
     assert any("refresh-inbox must not come back" in p for p in check(descendant, pressers))
+
+    unlabeled_sidebar = dict(sources)
+    unlabeled_sidebar[SIDEBAR_FILE] = "Button(action: action) { Row() }\n"
+    assert any("row button" in p for p in check(unlabeled_sidebar, pressers))
+    no_sidebar = {k: v for k, v in sources.items() if k != SIDEBAR_FILE}
+    assert any("row button" in p for p in check(no_sidebar, pressers))
+
+    unanchored = dict(sources)
+    unanchored[f"{SETTINGS_DIR}/SpeakerPeopleSettingsSection.swift"] = speakers_src.replace(SPEAKERS_INBOX_ANCHOR, "", 1)
+    assert any("1 anchors" in p for p in check(unanchored, pressers))
+    no_inbox = dict(sources)
+    no_inbox[f"{SETTINGS_DIR}/SpeakerPeopleSettingsSection.swift"] = quote(SPEAKERS_IDS)
+    assert any("found 0 ids" in p for p in check(no_inbox, pressers))
+    no_scroll = dict(sources)
+    no_scroll[f"{SETTINGS_DIR}/TranscriptedSettingsView+Scroll.swift"] = "proxy.scrollTo(other)\n"
+    assert any("deep links should scroll" in p for p in check(no_scroll, pressers))
 
     changed_prefix = dict(sources)
     changed_prefix[PAGE_ENUM] = sources[PAGE_ENUM].replace("sidebar.", "navigation.")

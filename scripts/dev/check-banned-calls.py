@@ -18,6 +18,11 @@ Rules:
     (was Tests/ObservabilityLogWriterTests.swift)
   * Submitting feedback opens email silently: no app sound cue and no system
     beep. (was Tests/DictationSoundsTests.swift)
+  * An idle onboarding window never polls permissions or re-probes system
+    audio on activation; the live audio check belongs to its button.
+  * The Agent page and the Settings shell never put a raw error into
+    user-facing text; the raw error goes behind Copy Details.
+    (these three were Tests/UIAutomationSurfaceContractTests.swift)
 
     python3 scripts/dev/check-banned-calls.py
     python3 scripts/dev/check-banned-calls.py --self-test
@@ -102,6 +107,30 @@ RULES: tuple[Rule, ...] = (
         slice=Slice(start="private func submitHomeFeedback", end="private func flashCopied"),
         banned=("AppSoundPlayer.shared.play", "NSSound.beep()"),
         why="Home contextual feedback should open email without an app sound or a system beep",
+    ),
+    Rule(
+        name="onboarding never polls permissions",
+        files=("Sources/UI/Settings/PermissionsOnboardingView.swift",),
+        banned=(
+            "while !Task.isCancelled",
+            "startPolling()",
+            "SystemAudioPermissionRevalidator.revalidateForStatusSurfaces",
+        ),
+        why="an idle onboarding window must not loop on permission probes or compete with the explicit audio check",
+    ),
+    Rule(
+        name="Agent page failures never show a raw error",
+        files=("Sources/UI/Settings/AgentConnectionSettingsPage.swift",),
+        banned=(".failed(error.localizedDescription)", "\\(error"),
+        why="setup failures show AgentSetupFailureCopy; the raw error goes behind Copy Details",
+    ),
+    Rule(
+        name="Settings shell statuses never show a raw error",
+        folder="Sources/UI/Settings",
+        prefix="TranscriptedSettingsView",
+        min_files=5,
+        banned=("\\(error",),
+        why="Settings statuses use SettingsActionFailureCopy; the raw error goes behind Copy Details",
     ),
 )
 
@@ -193,6 +222,14 @@ def self_test() -> None:
         "private func submitHomeFeedback() { open(url) }\n"
         "private func flashCopied() { AppSoundPlayer.shared.play(.copy) }\n"
     )
+    for index in range(5):
+        good[f"Sources/UI/Settings/TranscriptedSettingsView+Part{index}.swift"] = "status = Copy.failed\n"
+    good["Sources/UI/Settings/PermissionsOnboardingView.swift"] = (
+        ".onReceive(activePublisher) { _ in refresh() }\n"
+    )
+    good["Sources/UI/Settings/AgentConnectionSettingsPage.swift"] = (
+        "phase = .failed(failure.message)\ndetails = error.localizedDescription\n"
+    )
     assert check(build(good)) == [], check(build(good))
 
     breaks = [
@@ -207,6 +244,16 @@ def self_test() -> None:
         ("Sources/UI/Settings/TranscriptedSettingsView.swift", "{ open(url) }", "{ NSSound.beep() }"),
         # the slice anchor vanishing is a failure, not a silent pass
         ("Sources/UI/Settings/TranscriptedSettingsView.swift", "submitHomeFeedback", "sendHomeFeedback"),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "refresh() }", "startPolling() }"),
+        ("Sources/UI/Settings/PermissionsOnboardingView.swift", "refresh() }", "while !Task.isCancelled { refresh() } }"),
+        (
+            "Sources/UI/Settings/PermissionsOnboardingView.swift",
+            "refresh() }",
+            "SystemAudioPermissionRevalidator.revalidateForStatusSurfaces() }",
+        ),
+        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", ".failed(failure.message)", ".failed(error.localizedDescription)"),
+        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", ".failed(failure.message)", '.failed("Could not connect: \\(error)")'),
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part2.swift", "Copy.failed", '"Copy stopped: \\(error.localizedDescription)"'),
     ]
     for rel, old, new in breaks:
         broken = dict(good)
@@ -216,6 +263,9 @@ def self_test() -> None:
 
     # A scan that finds too few engine files fails.
     sparse = {k: v for k, v in good.items() if "ParakeetPart" not in k}
+    assert any("expected more than" in p for p in check(build(sparse)))
+    # So does a Settings shell scan that loses its files.
+    sparse = {k: v for k, v in good.items() if "TranscriptedSettingsView+" not in k}
     assert any("expected more than" in p for p in check(build(sparse)))
     # Missing listed files fail.
     assert check(build({}))

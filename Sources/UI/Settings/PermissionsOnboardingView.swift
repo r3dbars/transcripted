@@ -117,17 +117,31 @@ struct PermissionsOnboardingView: View {
             trackCurrentStepViewed()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            pendingSystemSettingsHandoff = false
-            checkAllPermissions(trackChanges: true)
+            handleLifecycle(.appBecameActive)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedPermissionsDidChange)) { _ in
-            checkAllPermissions(trackChanges: true)
+            handleLifecycle(.permissionsChanged)
         }
         .onReceive(NotificationCenter.default.publisher(for: .transcriptedOnboardingWillTerminate)) { _ in
-            trackAbandonmentIfNeeded()
+            handleLifecycle(.appWillTerminate)
         }
         .onDisappear {
+            handleLifecycle(.windowDisappeared)
+        }
+    }
+
+    private func handleLifecycle(_ event: OnboardingPermissionLifecyclePolicy.Event) {
+        let effects = OnboardingPermissionLifecyclePolicy.effects(for: event)
+        if effects.contains(.clearSystemSettingsHandoff) {
+            pendingSystemSettingsHandoff = false
+        }
+        if effects.contains(.cancelSystemAudioCheck) {
             stopPermissionRevalidation()
+        }
+        if effects.contains(.refreshPermissions) {
+            checkAllPermissions(trackChanges: true)
+        }
+        if effects.contains(.trackAbandonment) {
             trackAbandonmentIfNeeded()
         }
     }
@@ -338,10 +352,13 @@ struct PermissionsOnboardingView: View {
         if kind == .systemAudioRecording {
             systemAudioRequestTask = Task { @MainActor in
                 let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(forceRefresh: true)
-                guard !Task.isCancelled else { return }
-                systemAudioProbeResult = decision.probeResult
-                systemAudioState = decision.state
-                systemAudioGranted = decision.state.isGranted
+                guard let result = OnboardingPermissionLifecyclePolicy.systemAudioCheckResult(
+                    decision,
+                    checkWasCancelled: Task.isCancelled
+                ) else { return }
+                systemAudioProbeResult = result.probeResult
+                systemAudioState = result.state
+                systemAudioGranted = result.isGranted
                 systemAudioRequestTask = nil
             }
             return

@@ -556,155 +556,145 @@ struct TranscriptedSettingsView: View {
     }
 
     func dictationRowMenuItems(for entry: SavedDictationEntry) -> [HomeRowMenuItem] {
-        [
-            HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text") {
-                trackSettingsAction("open_recent_dictation_file", page: .home)
-                let didOpen = openOwnFile(
-                    candidateURLs: [entry.url],
-                    failureTitle: "Could not open dictation",
-                    failureMessage: SettingsArtifactMessage.dictationFileNotFound,
-                    onComplete: { ProductUsageTelemetry.trackResult(kind: .dictation, action: .openMarkdown, surface: .rowMenu, succeeded: $0, artifactDate: entry.createdAt) }
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .dictation,
-                    actionKind: .openMarkdown,
-                    surface: .homeMenu,
-                    artifactDate: entry.createdAt,
-                    result: didOpen ? .success : .failed
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .reviewYesterday,
-                    surface: .homeMenu,
-                    artifactKind: .dictation,
-                    artifactDate: entry.createdAt,
-                    result: didOpen ? .success : .failed
-                )
-            },
-            HomeRowMenuItem(title: "Reveal in Finder", symbolName: "folder", automationIdentifier: DictationRowMenuIdentifier.reveal) {
-                trackSettingsAction("reveal_dictation_in_finder", page: .home)
-                let didReveal = revealOwnFile(
-                    candidateURLs: [entry.url],
-                    failureTitle: "Could not show dictation",
-                    failureMessage: SettingsArtifactMessage.dictationFileNotFound
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .dictation,
-                    actionKind: .revealFolder,
-                    surface: .homeMenu,
-                    artifactDate: entry.createdAt,
-                    result: didReveal ? .success : .failed
-                )
+        HomeRowMenuPolicy.dictationEntries.compactMap { menuEntry in
+            let title = menuEntry.fixedTitle ?? ""
+            switch menuEntry {
+            case .openMarkdown:
+                return HomeRowMenuItem(title: title, symbolName: menuEntry.symbolName) {
+                    trackSettingsAction("open_recent_dictation_file", page: .home)
+                    let didOpen = openOwnFile(
+                        candidateURLs: [entry.url],
+                        failureTitle: "Could not open dictation",
+                        failureMessage: SettingsArtifactMessage.dictationFileNotFound,
+                        onComplete: { ProductUsageTelemetry.trackResult(kind: .dictation, action: .openMarkdown, surface: .rowMenu, succeeded: $0, artifactDate: entry.createdAt) }
+                    )
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .dictation,
+                        actionKind: .openMarkdown,
+                        surface: .homeMenu,
+                        artifactDate: entry.createdAt,
+                        result: didOpen ? .success : .failed
+                    )
+                    ActivationTelemetry.trackHabitLoopAction(
+                        actionKind: .reviewYesterday,
+                        surface: .homeMenu,
+                        artifactKind: .dictation,
+                        artifactDate: entry.createdAt,
+                        result: didOpen ? .success : .failed
+                    )
+                }
+            case .revealDictation:
+                return HomeRowMenuItem(title: title, symbolName: menuEntry.symbolName, automationIdentifier: DictationRowMenuIdentifier.reveal) {
+                    trackSettingsAction("reveal_dictation_in_finder", page: .home)
+                    let didReveal = revealOwnFile(
+                        candidateURLs: [entry.url],
+                        failureTitle: "Could not show dictation",
+                        failureMessage: SettingsArtifactMessage.dictationFileNotFound
+                    )
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .dictation,
+                        actionKind: .revealFolder,
+                        surface: .homeMenu,
+                        artifactDate: entry.createdAt,
+                        result: didReveal ? .success : .failed
+                    )
+                }
+            default:
+                return nil
             }
-            // No Report issue and no Delete here: dictations are quiet rows;
-            // the Dictations page drives per-entry delete itself through the
-            // inline-undo flow (QuietDictationLibrary), with no dialog.
-        ]
+        }
     }
 
     func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
-        var items: [HomeRowMenuItem] = []
-        let hasPendingSpeakerReview = hasSpeakerReviewWork(for: item)
-
-        items.append(contentsOf: [
-            HomeRowMenuItem(
-                title: HomeMeetingRenameAffordance.title,
-                symbolName: HomeMeetingRenameAffordance.symbolName,
-                automationIdentifier: HomeMeetingRenameAffordance.automationIdentifier
-            ) {
-                promptRenameMeeting(item)
-            },
-            HomeRowMenuItem(title: "Report issue", symbolName: "flag") {
-                trackSettingsAction("flag_meeting", page: .home)
-                homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
-            },
-            HomeRowMenuItem(title: "Show transcript in Finder", symbolName: "doc.text") {
-                trackSettingsAction("reveal_meeting_in_finder", page: .home)
-                let didReveal = revealOwnFile(
-                    candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
-                    failureTitle: "Could not show transcript",
-                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                )
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .revealFolder,
-                    surface: .homeMenu,
-                    artifactDate: item.date,
-                    result: didReveal ? .success : .failed
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .openRecentMeeting,
-                    surface: .homeMenu,
-                    artifactKind: .meeting,
-                    artifactDate: item.date,
-                    result: didReveal ? .success : .failed
-                )
-            }
-        ])
-
-        if hasPendingSpeakerReview {
-            items.append(
-                HomeRowMenuItem(title: "Review speakers", symbolName: "person.crop.circle.badge.questionmark") {
+        let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)
+        let entries = HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item),
+            offersMicBoost: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
+                audioHealth: item.audioHealth,
+                meetingDate: item.date,
+                voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
+                hintsHiddenThrough: micBoostHintsHiddenThrough
+            ),
+            hasAudioRevealTarget: !audioRevealURLs.isEmpty,
+            hasRetranscriptionInput: item.audio?.retranscriptionInput != nil
+        )
+        return entries.compactMap { menuEntry in
+            let title = menuEntry.fixedTitle ?? ""
+            let symbolName = menuEntry.symbolName
+            switch menuEntry {
+            case .renameMeeting:
+                return HomeRowMenuItem(title: title, symbolName: symbolName, automationIdentifier: HomeMeetingRenameAffordance.automationIdentifier) {
+                    promptRenameMeeting(item)
+                }
+            case .reportIssue:
+                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                    trackSettingsAction("flag_meeting", page: .home)
+                    homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
+                }
+            case .showTranscript:
+                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                    trackSettingsAction("reveal_meeting_in_finder", page: .home)
+                    let didReveal = revealOwnFile(
+                        candidateURLs: HomeMeetingRowActionTargets.transcriptRevealURLs(for: item),
+                        failureTitle: "Could not show transcript",
+                        failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
+                    )
+                    ActivationTelemetry.trackArtifactAction(
+                        artifactKind: .meeting,
+                        actionKind: .revealFolder,
+                        surface: .homeMenu,
+                        artifactDate: item.date,
+                        result: didReveal ? .success : .failed
+                    )
+                    ActivationTelemetry.trackHabitLoopAction(
+                        actionKind: .openRecentMeeting,
+                        surface: .homeMenu,
+                        artifactKind: .meeting,
+                        artifactDate: item.date,
+                        result: didReveal ? .success : .failed
+                    )
+                }
+            case .reviewSpeakers:
+                return HomeRowMenuItem(title: title, symbolName: symbolName) {
                     openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
                 }
-            )
-        }
-
-        if RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
-            audioHealth: item.audioHealth,
-            meetingDate: item.date,
-            voiceProcessingPreferenceEnabled: meetingMicProcessingMode.usesAppleVoiceProcessing,
-            hintsHiddenThrough: micBoostHintsHiddenThrough
-        ) {
-            items.append(
-                HomeRowMenuItem(title: "Boost mic next meeting", symbolName: "mic.badge.plus") {
+            case .boostMic:
+                return HomeRowMenuItem(title: title, symbolName: symbolName) {
                     // One meeting only, like the in-meeting Boost Mic prompt.
                     trackSettingsToggle("meeting_mic_boost_next_meeting", enabled: true, page: .home)
                     MicrophoneProcessingPreferences.requestBoostForNextMeeting()
                     micBoostHintsHiddenThrough = MicrophoneProcessingPreferences.micBoostHintsHiddenThrough()
                 }
-            )
-        }
-
-        if let audio = item.audio {
-            let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)
-            if !audioRevealURLs.isEmpty {
-                if audio.retranscriptionInput != nil {
-                    items.append(
-                        HomeRowMenuItem(
-                            title: RecentMeetingRetranscriptionMenuActionPolicy.title(
-                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
-                            ),
-                            symbolName: "person.2.fill",
-                            isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
-                                globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
-                            )
-                        ) {
-                            handleRetranscribeMeeting(item)
-                        }
+            case .retranscribe:
+                return HomeRowMenuItem(
+                    title: RecentMeetingRetranscriptionMenuActionPolicy.title(
+                        globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
+                    ),
+                    symbolName: symbolName,
+                    isEnabled: RecentMeetingRetranscriptionMenuActionPolicy.isEnabled(
+                        globalUnavailableReason: savedMeetingRetranscriptionUnavailableReason
+                    )
+                ) {
+                    handleRetranscribeMeeting(item)
+                }
+            case .showAudio:
+                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                    trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
+                    revealOwnFile(
+                        candidateURLs: audioRevealURLs,
+                        failureTitle: "Could not show audio",
+                        failureMessage: SettingsArtifactMessage.meetingRetainedAudioNotFound
                     )
                 }
-
-                items.append(
-                    HomeRowMenuItem(title: "Show audio in Finder", symbolName: "waveform") {
-                        trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
-                        revealOwnFile(
-                            candidateURLs: audioRevealURLs,
-                            failureTitle: "Could not show audio",
-                            failureMessage: SettingsArtifactMessage.meetingRetainedAudioNotFound
-                        )
-                    }
-                )
+            case .deleteMeeting:
+                return HomeRowMenuItem(title: title, symbolName: symbolName, isDestructive: menuEntry.isDestructive) {
+                    trackSettingsAction("delete_meeting_request", page: .home)
+                    deleteMeetingWithUndo(item)
+                }
+            case .openMarkdown, .revealDictation:
+                return nil
             }
         }
-
-        items.append(
-            HomeRowMenuItem(title: "Delete meeting", symbolName: "trash", isDestructive: true) {
-                trackSettingsAction("delete_meeting_request", page: .home)
-                deleteMeetingWithUndo(item)
-            }
-        )
-
-        return items
     }
 
     /// Quiet-library delete: trash immediately, offer an inline Undo for a few
