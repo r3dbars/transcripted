@@ -72,6 +72,22 @@ func testDictationSessionPipeline() async {
         assertEqual(already.events.all, [], "a press while dictating is neither counted nor shown")
     }
 
+    runSuite("A press while Quit is under way starts no take") {
+        let host = PipelineFakeHost()
+        host.isDictating = false
+        host.queuedStartGate.setTerminating(true)
+        let before = host.currentDictationSessionID
+
+        assertFalse(host.admitDictationStart(sourceApp: nil, trigger: .physicalKey, shortcutMode: .pushToTalk, isRetry: false),
+                    "a new take would open the mic during shutdown")
+        assertEqual(host.currentDictationSessionID, before, "no new session")
+        assertEqual(host.events.all, [], "no island, no count, no error")
+
+        host.queuedStartGate.setTerminating(false)
+        assertTrue(host.admitDictationStart(sourceApp: nil, trigger: .physicalKey, shortcutMode: .pushToTalk, isRetry: false),
+                   "a refused Quit lets presses start again")
+    }
+
     runSuite("Try Again restarts the failed take marked as a retry") {
         let host = PipelineFakeHost()
         host.currentDictationTrigger = .physicalKey

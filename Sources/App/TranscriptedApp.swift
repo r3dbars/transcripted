@@ -454,6 +454,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
                 .store(in: &meetingPromptSubscriptions)
             appState.contextCapture.onMeetingToggle = { [weak self] in
+                // No new meeting while Quit is under way.
+                guard self?.terminationCleanupStarted == false else { return }
                 self?.meetingOverlayController.toggleFromHotkey()
             }
             SpeakerNamingSheet.shared.island = notchIsland
@@ -629,7 +631,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             await AppTerminationSequence.run(AppTerminationSequence.Steps(
                 finishDictationForTermination: { await self.sessionController.finishDictationForTermination() },
                 finishWritingForTermination: { await self.appState.writingController.finishWritingForTermination() },
-                resetCleanupAdmission: { self.terminationCleanupStarted = false },
+                resetCleanupAdmission: {
+                    self.terminationCleanupStarted = false
+                    // A refused Quit lets dictation start again.
+                    self.sessionController.queuedStartGate.setTerminating(false)
+                },
                 prepareMeetingForTermination: {
                     if #available(macOS 14.0, *) {
                         await self.appState.meetingSession.prepareForTermination()

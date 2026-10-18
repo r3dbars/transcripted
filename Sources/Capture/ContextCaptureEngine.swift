@@ -83,7 +83,7 @@ class ContextCaptureEngine: ObservableObject {
     }
     private var dictationActiveObservation: AnyCancellable?
 
-    /// Gates dictation-toggle routing to the registered-hotkey window. Physical
+    /// Gates shortcut presses to the registered-hotkey window. Physical
     /// shortcut callbacks hop from the CGEventTap thread through a queued
     /// MainActor Task, so a stray press can land after `unregisterHotkey()`
     /// (e.g. during wake recovery) — this flag makes that late arrival a no-op.
@@ -238,6 +238,8 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalShortcut(_ action: PhysicalShortcutAction, phase: PhysicalShortcutPhase) {
+        // Releases and combo drops still run, so a take already started can end.
+        if phase == .press, !isHotkeyRoutingActive { return }
         switch (action, phase) {
         case (.dictationPushToTalk, .press):
             handlePhysicalDictationPushToTalkPress()
@@ -251,13 +253,10 @@ class ContextCaptureEngine: ObservableObject {
             handlePhysicalDictationHandsFreeComboInterrupted()
         case (.meeting, .press):
             handlePhysicalMeetingPress()
-        case (.dictationHandsFree, .release), (.meeting, .release):
-            break
-        case (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease):
-            break
         case (.dictationPushToTalk, .comboInterrupted):
             handlePhysicalDictationPushToTalkComboInterrupted()
-        case (.meeting, .comboInterrupted):
+        case (.dictationHandsFree, .release), (.meeting, .release), (.meeting, .comboInterrupted),
+             (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease):
             break
         }
     }

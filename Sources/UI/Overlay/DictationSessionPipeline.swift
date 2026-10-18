@@ -102,6 +102,8 @@ extension DictationSessionPipelineHost {
         shortcutMode: DictationShortcutMode?,
         isRetry: Bool
     ) -> Bool {
+        // Quit is under way: a new take would open the mic during shutdown.
+        guard !queuedStartGate.isTerminating else { return false }
         let admission = DictationStartAdmission.decide(
             DictationStartAdmission.Steps(
                 isDictating: { self.isDictating },
