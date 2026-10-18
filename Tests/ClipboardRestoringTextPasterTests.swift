@@ -9,6 +9,7 @@
 // NotchIslandDictationContent.Message.make.
 
 import AppKit
+import Carbon
 import Foundation
 
 /// True if the task completes before a generous give-up margin. The margin only keeps a
@@ -36,6 +37,25 @@ private func clipboardTestFinishes(_ task: Task<Void, Never>) async -> Bool {
 
 func testClipboardRestoringTextPaster() async {
     await MainActor.run {
+        runSuite("Paste shortcut uses the key that types v while Command is held") {
+            func layout(_ id: String) -> TISInputSource? {
+                let filter = [kTISPropertyInputSourceID as String: id] as CFDictionary
+                let sources = TISCreateInputSourceList(filter, true)?.takeRetainedValue() as? [TISInputSource]
+                return sources?.first
+            }
+            // Bundled macOS layouts. kVK_ANSI_V is 9; kVK_ANSI_Period is 47.
+            guard let us = layout("com.apple.keylayout.US"),
+                  let dvorak = layout("com.apple.keylayout.Dvorak"),
+                  let dvorakQwertyCommand = layout("com.apple.keylayout.DVORAK-QWERTYCMD") else {
+                assertTrue(false, "bundled US and Dvorak layouts should be installed")
+                return
+            }
+            assertEqual(pasteShortcutKeyCode(in: us), CGKeyCode(kVK_ANSI_V), "US pastes with the V key")
+            assertEqual(pasteShortcutKeyCode(in: dvorak), CGKeyCode(kVK_ANSI_Period), "Dvorak keeps Dvorak under Command")
+            assertEqual(pasteShortcutKeyCode(in: dvorakQwertyCommand), CGKeyCode(kVK_ANSI_V),
+                "Dvorak - QWERTY Cmd must not post Cmd+. from the unmodified v key")
+        }
+
         runSuite("ClipboardRestoringTextPaster cancellation while restoring the previous paste cannot restart") {
             let board = FakeClipboardPasteboard(initialString: "original")
             let paster = ClipboardRestoringTextPaster()
