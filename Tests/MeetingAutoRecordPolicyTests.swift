@@ -287,6 +287,18 @@ func testMeetingAutoRecordPolicy() {
             ),
             "a recording the user started themselves is not an auto-start decline"
         )
+        assertEqual(
+            MeetingAutoRecordPolicy.runtimeSuppressionReason(
+                cooldownReason: MeetingPromptSuppressionReason.declinedThisCall.rawValue
+            ),
+            .declinedThisCall,
+            "Stop/Discard rest-of-call suppression must report as a decline, not a generic skip"
+        )
+        assertEqual(
+            MeetingAutoRecordPolicy.runtimeSuppressionReason(cooldownReason: "record_selected"),
+            .runtimeSuppressed,
+            "other runtime cooldowns stay a generic skip"
+        )
     }
 }
 

@@ -82,6 +82,14 @@ enum MeetingAutoRecordPolicy {
         wasAutoStarted && userStoppedOrDiscarded
     }
 
+    /// Runtime-prompt suppression stamped as a rest-of-call decline still
+    /// reports `declinedThisCall`, not a generic runtime skip.
+    static func runtimeSuppressionReason(cooldownReason: String?) -> MeetingPromptSuppressionReason {
+        cooldownReason == MeetingPromptSuppressionReason.declinedThisCall.rawValue
+            ? .declinedThisCall
+            : .runtimeSuppressed
+    }
+
     /// Setting is on and the call would auto-start once the evidence has
     /// been held long enough. The detector waits instead of prompting.
     static func shouldWaitForEvidenceHold(_ request: Request) -> Bool {

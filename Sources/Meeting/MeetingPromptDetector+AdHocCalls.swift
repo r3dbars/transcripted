@@ -277,11 +277,12 @@ extension MeetingPromptDetector {
             }
 
             if let suppressedUntil = runtimeSuppressedUntil[candidate.provider], suppressedUntil > now {
+                let cooldown = runtimeSuppressionReasons[candidate.provider]
                 recordSuppression(
                     candidate: candidate,
-                    reason: .runtimeSuppressed,
+                    reason: MeetingAutoRecordPolicy.runtimeSuppressionReason(cooldownReason: cooldown),
                     now: now,
-                    cooldownReason: runtimeSuppressionReasons[candidate.provider]
+                    cooldownReason: cooldown
                 )
                 continue
             }
