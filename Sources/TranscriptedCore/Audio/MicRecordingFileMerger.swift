@@ -57,8 +57,13 @@ enum MicRecordingFileMerger {
 
         let mergedFilename = primaryURL.deletingPathExtension().lastPathComponent + "_merged.wav"
         let mergedURL = primaryURL.deletingLastPathComponent().appendingPathComponent(mergedFilename)
+        // Write beside the final name and move it into place once complete, so
+        // an existing `_merged.wav` always means a finished merge. A crash
+        // mid-write leaves only the partial, and launch recovery re-merges.
+        let partialURL = mergedURL.deletingPathExtension().appendingPathExtension("partial.wav")
 
         try? FileManager.default.removeItem(at: mergedURL)
+        try? FileManager.default.removeItem(at: partialURL)
 
         guard let outputFormat = AVAudioFormat(
             commonFormat: .pcmFormatFloat32,
@@ -73,23 +78,29 @@ enum MicRecordingFileMerger {
 
         let counters: SegmentCounters
         do {
-            counters = try writeMergedFile(at: mergedURL, segments: segments, outputFormat: outputFormat)
+            counters = try writeMergedFile(at: partialURL, segments: segments, outputFormat: outputFormat)
         } catch let error as MergedFileWriteError {
-            try? FileManager.default.removeItem(at: mergedURL)
+            try? FileManager.default.removeItem(at: partialURL)
             throw error.underlying
         } catch {
-            try? FileManager.default.removeItem(at: mergedURL)
+            try? FileManager.default.removeItem(at: partialURL)
             throw error
         }
 
         // A merged file with no real audio (every segment skipped) is useless;
         // throwing lets the caller fall back to the primary URL.
         guard counters.appended > 0 else {
-            try? FileManager.default.removeItem(at: mergedURL)
+            try? FileManager.default.removeItem(at: partialURL)
             throw PipelineError.emptyAudioFile
         }
 
-        FileManager.default.restrictToOwnerOnly(atPath: mergedURL.path)
+        FileManager.default.restrictToOwnerOnly(atPath: partialURL.path)
+        do {
+            try FileManager.default.moveItem(at: partialURL, to: mergedURL)
+        } catch {
+            try? FileManager.default.removeItem(at: partialURL)
+            throw error
+        }
 
         let outcome = MicRecordingMergeOutcome(
             url: mergedURL,
