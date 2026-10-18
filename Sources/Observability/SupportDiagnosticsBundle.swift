@@ -22,8 +22,7 @@ struct SupportDiagnosticsSnapshot: Equatable {
     var speakerReviewPending: Bool = false
     var queuedMeetingCount: Int = 0
     var meetingShortcut: String = "unknown"
-    var reliabilityPackets: [String]
-    var recentLogLines: [String]
+    var reliabilityPacketCount: Int
     var installUUID: String = "unknown"
     var buildRevision: String = "unknown"
     var recentFailures: [UsageFailure] = []
@@ -107,14 +106,13 @@ enum SupportDiagnosticsBundle {
             "microphone_status": snapshot.microphoneStatus,
             "pasteback_granted": bool(snapshot.pastebackGranted),
             "queued_meeting_count": "\(snapshot.queuedMeetingCount)",
-            "reliability_packet_count": "\(min(snapshot.reliabilityPackets.count, maxReliabilityPackets))",
+            "reliability_packet_count": "\(min(snapshot.reliabilityPacketCount, maxReliabilityPackets))",
             "system_recording_granted": bool(snapshot.systemAudioRecordingGranted),
         ]
         // The free-text `latest_reliability_packet` blob is intentionally not
         // emitted here: it can carry paths / free text, and
         // `reliability_packet_count` already gives the coarse signal that reaches
-        // Sentry. (The human-readable diagnostics text, built separately, still
-        // summarizes recent reliability packets for support diagnostic payloads.)
+        // Sentry.
 
         for (key, value) in safeMetadata(snapshot.audioRoute) {
             context["route_\(key)"] = value

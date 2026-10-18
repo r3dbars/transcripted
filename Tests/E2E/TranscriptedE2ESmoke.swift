@@ -485,7 +485,6 @@ private final class TranscriptedE2ESmokeHarness {
     private func verifySupportDiagnosticsPrivacy(fixtures: SmokeFixtures, logsDir: URL) throws {
         let secretMeetingTitle = "Secret Phoenix Pricing Call"
         let secretSpeaker = "Avery Confidential"
-        let secretEmail = "avery@example.com"
         let secretToken = "sk-e2esecret"
         let secretTranscript = "private launch transcript sentence"
 
@@ -525,13 +524,7 @@ private final class TranscriptedE2ESmokeHarness {
                 speakerReviewPending: false,
                 queuedMeetingCount: 1,
                 meetingShortcut: "option-shift-m",
-                reliabilityPackets: [
-                    "event=retry path=\(fixtures.meetingURL.path) token=\(secretToken) email=\(secretEmail)"
-                ],
-                recentLogLines: [
-                    "DIAG source_app_name=Codex transcript_text=\(secretTranscript)",
-                    "DIAG meeting_title=\(secretMeetingTitle) speaker_name=\(secretSpeaker)",
-                ],
+                reliabilityPacketCount: 1,
                 installUUID: "F31DB235-6730-4620-9646-55F7CBE6FA0C",
                 buildRevision: "fixture-revision",
                 recentFailures: [.init(id: "fixture", kind: "mic_unavailable", stage: "start", time: try fixedDate("2026-05-18T15:00:00Z"), version: "9.9.9")]
@@ -547,17 +540,13 @@ private final class TranscriptedE2ESmokeHarness {
             fixtures.dictationURL.path,
             secretMeetingTitle,
             secretSpeaker,
-            secretEmail,
-            secretToken,
-            secretTranscript,
             "Private Studio Mic",
             "https://meet.example.com/private-room",
         ] {
             try expect(!diagnostics.contains(forbidden), "Support diagnostics should not contain sensitive value: \(forbidden)")
         }
 
-        // Known-safe structure proves the summary is useful even though raw
-        // logs and reliability packet strings are intentionally omitted.
+        // Known-safe structure proves the summary is still useful.
         for expected in [
             "Version: 9.9.9",
             "input_device_class: built_in",
@@ -568,8 +557,6 @@ private final class TranscriptedE2ESmokeHarness {
         ] {
             try expect(diagnostics.contains(expected), "Support diagnostics should keep known-safe field: \(expected)")
         }
-        try expect(!diagnostics.contains("DIAG "), "Raw log lines must be omitted from copied diagnostics")
-        try expect(!diagnostics.contains("event=retry"), "Raw reliability packets must be omitted from copied diagnostics")
 
         let eventLog = try String(contentsOf: fixtures.eventLogURL, encoding: .utf8)
         try expect(!eventLog.contains(fixtures.meetingURL.path), "Sanitized observability event should not contain file paths")
