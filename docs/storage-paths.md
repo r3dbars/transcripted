@@ -75,7 +75,8 @@ library moves:
   the keyboard socket `ghost.sock`, `runtime.lock`, the text-free
   `Outcome Ledger/` and `Word Diary/` (Tilde's plaintext word diary isn't
   ported; accepted text is saved only by Save my writing), and the encrypted
-  `Personal History/`
+  `Personal History/`. `Outcome Ledger/events.jsonl` is cut back to its newest
+  12 MiB once it passes 24 MiB, which still covers the seven-day window
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
   excluded from backup. The Writing tab's **Delete model** empties this folder
   (never Delete all writing); it refuses the folder if it's a symlink
