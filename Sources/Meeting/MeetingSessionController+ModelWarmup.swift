@@ -137,6 +137,11 @@ extension MeetingSessionController {
         let preparedEngine = sttAdapter.transcriptionEngineDescriptor.identifier
         let selectedEngine = sttRouter.selectedModel.transcriptionEngineIdentifier
         guard preparedEngine != selectedEngine else { return }
+        // A running or queued job keeps its model; a later prepare applies the switch.
+        guard !hasBackgroundTranscriptionWork else {
+            refreshWarmupStatus()
+            return
+        }
 
         switch state {
         case .recording, .transcribing, .startingRecording, .stoppingRecording:
