@@ -480,14 +480,15 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
         runEditInBackground(completion: completion) {
             speakerDatabase.deleteSpeaker(id: profileId)
+            // Confirm the row is actually gone before reporting success so a
+            // failed delete surfaces an error and keeps the person's review clips.
+            guard speakerDatabase.getSpeaker(id: profileId) == nil else { return false }
             SpeakerClipLibrary.deleteClips(
                 for: profileId,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            // Confirm the row is actually gone before reporting success so a
-            // failed delete surfaces an error instead of silently no-opping.
-            return speakerDatabase.getSpeaker(id: profileId) == nil
+            return true
         }
     }
 

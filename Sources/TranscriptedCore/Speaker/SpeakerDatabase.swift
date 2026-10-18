@@ -115,14 +115,32 @@ public final class SpeakerDatabase: @unchecked Sendable {
         isDatabaseOpen = true
 
         // Corruption detection: run quick_check to verify database integrity
-        if !verifyDatabaseIntegrity() {
+        switch checkDatabaseIntegrity() {
+        case .healthy:
+            AppLogger.speakers.info("Opened database", ["path": dbPath.path])
+        case .unavailable(let code):
+            // Busy or locked is not corruption: keep the handle and never move the store aside.
+            AppLogger.speakers.error("Speaker database integrity check could not run — keeping database", ["sqlite_code": "\(code)"])
+        case .corrupt:
             AppLogger.speakers.error("CRITICAL: Speaker database corrupt — backing up and recreating", ["path": dbPath.path])
-            sqlite3_close(db)
-            db = nil
-            // Backup corrupt file with timestamp
+            // Backup corrupt file with timestamp. The -wal and -shm move with it so the backup
+            // keeps its uncheckpointed frames and the fresh file never replays the old WAL.
+            // Move before closing: closing the last handle truncates the -wal in place.
             let backupName = "speakers_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
             let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
-            try? FileManager.default.moveItem(at: dbPath, to: backupPath)
+            for suffix in ["", "-wal", "-shm"] {
+                let source = URL(fileURLWithPath: dbPath.path + suffix)
+                guard FileManager.default.fileExists(atPath: source.path) else { continue }
+                do {
+                    try FileManager.default.moveItem(at: source, to: URL(fileURLWithPath: backupPath.path + suffix))
+                } catch {
+                    AppLogger.speakers.error("Failed to move corrupt speaker database file aside", ["suffix": suffix])
+                    // The -shm is a rebuildable index; a stale -wal must never stay next to the new file.
+                    if !suffix.isEmpty { try? FileManager.default.removeItem(at: source) }
+                }
+            }
+            sqlite3_close(db)
+            db = nil
             // Recreate fresh database
             db = SQLiteHandle.open(
                 at: dbPath,
@@ -137,26 +155,35 @@ public final class SpeakerDatabase: @unchecked Sendable {
                 isDatabaseOpen = false
                 AppLogger.speakers.error("Failed to recreate database after corruption recovery")
             }
-        } else {
-            AppLogger.speakers.info("Opened database", ["path": dbPath.path])
         }
     }
 
-    /// Verify database integrity using PRAGMA quick_check.
-    /// Returns true if the database is healthy.
-    private func verifyDatabaseIntegrity() -> Bool {
-        guard let db = db else { return false }
+    enum IntegrityCheckResult: Equatable {
+        case healthy
+        case corrupt
+        /// The check could not run (busy, locked, I/O); not evidence of corruption.
+        case unavailable(Int32)
+    }
+
+    /// Verify database integrity using PRAGMA quick_check. Only SQLITE_CORRUPT,
+    /// SQLITE_NOTADB, or a non-"ok" first row count as corruption.
+    private func checkDatabaseIntegrity() -> IntegrityCheckResult {
+        guard let db = db else { return .unavailable(SQLITE_MISUSE) }
+        func classify(_ code: Int32) -> IntegrityCheckResult {
+            let primary = code & 0xFF
+            return primary == SQLITE_CORRUPT || primary == SQLITE_NOTADB ? .corrupt : .unavailable(code)
+        }
         var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, nil) == SQLITE_OK else {
-            return false
+        let prepared = sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, nil)
+        guard prepared == SQLITE_OK else {
+            sqlite3_finalize(stmt)
+            return classify(prepared)
         }
         defer { sqlite3_finalize(stmt) }
-        if sqlite3_step(stmt) == SQLITE_ROW {
-            if let text = sqlite3_column_text(stmt, 0) {
-                return String(cString: text) == "ok"
-            }
-        }
-        return false
+        let step = sqlite3_step(stmt)
+        guard step == SQLITE_ROW else { return classify(step) }
+        guard let text = sqlite3_column_text(stmt, 0) else { return .corrupt }
+        return String(cString: text) == "ok" ? .healthy : .corrupt
     }
 
     private func createTables() {
@@ -680,7 +707,18 @@ public final class SpeakerDatabase: @unchecked Sendable {
             return
         }
         queue.sync {
-            deleteSpeakerImpl(id: id)
+            // One transaction, so a failed speakers DELETE keeps the person's
+            // confirmations and exemplars instead of leaving them half-deleted.
+            pendingMutationError = nil
+            defer { pendingMutationError = nil }
+            do {
+                try throwingTransaction {
+                    deleteSpeakerImpl(id: id)
+                    if let pendingMutationError { throw pendingMutationError }
+                }
+            } catch {
+                AppLogger.speakers.error("deleteSpeaker rolled back", ["error": error.localizedDescription, "id": id.uuidString])
+            }
         }
     }
 
