@@ -54,6 +54,11 @@ struct SharedMeetingMicClaim {
     /// gave me this claim still alive?" without holding any reference to
     /// `MeetingSessionController` itself.
     let isSessionAlive: @MainActor () -> Bool
+
+    /// Delivers relayed mic buffers the meeting already accepted but has not
+    /// handed to dictation yet. A borrowed-mic stop awaits it before the
+    /// recorder stops accepting buffers, so the take's tail isn't dropped.
+    let flushRelayedBuffers: @MainActor () async -> Void
 }
 
 /// Pure, allocation-free staleness classification for a claim ParakeetEngine

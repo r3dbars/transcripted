@@ -333,7 +333,8 @@ final class MeetingSessionController: ObservableObject {
                     stoppingIdentity: self.stoppingRecordingIdentity,
                     isCaptureSessionActive: self.isCaptureSessionActive
                 )
-            }
+            },
+            flushRelayedBuffers: { [weak self] in await self?.capture.flushSharedDictationMicHandler() }
         )
         return sttRouter.startRecordingFromSharedMeetingMic(claim: claim)
     }

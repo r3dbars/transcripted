@@ -249,6 +249,11 @@ extension ParakeetEngine: ParakeetStopRecordingHost {
         sharedMeetingMicTransition.invalidate()
     }
 
+    func flushSharedMeetingMicBuffers() async {
+        guard let flush = sharedMeetingMicClaim?.flushRelayedBuffers else { return }
+        await flush()
+    }
+
     func finishSharedMeetingMicStop() {
         finishSharedMeetingMicRecording(keepRecordingState: false)
         EventReporter.shared.capture(

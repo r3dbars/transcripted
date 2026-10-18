@@ -782,6 +782,11 @@ private final class FakeStopHost: ParakeetStopRecordingHost {
     }
 
     func invalidateSharedMeetingMicTransition() { log.record("invalidateSharedMic") }
+    var claimEndsDuringFlush = false
+    func flushSharedMeetingMicBuffers() async {
+        log.record("flushSharedMic")
+        if claimEndsDuringFlush { hasSharedMeetingMicClaim = false }
+    }
     func finishSharedMeetingMicStop() { log.record("finishSharedMic") }
 
     func cancelAudioWatchdog() -> Bool {
@@ -899,9 +904,23 @@ private func runStopSequenceSuites() async {
 
         host.hasSharedMeetingMicClaim = true
         await ParakeetStopRecordingSequence.run(graph: graph, host: host)
-        assertEqual(log.events, ["invalidateSharedMic", "finishSharedMic"], "a borrowed-mic stop only ends the borrow")
+        assertEqual(
+            log.events,
+            ["invalidateSharedMic", "flushSharedMic", "finishSharedMic"],
+            "a borrowed-mic stop drains the relay, then ends the borrow"
+        )
         assertEqual(graph.generation, generation, "the dormant engine graph keeps its owner")
         assertEqual(host.continuityEnded, 1, "a borrowed-mic stop ends the recovery hold")
+
+        log.clear()
+        host.claimEndsDuringFlush = true
+        await ParakeetStopRecordingSequence.run(graph: graph, host: host)
+        assertEqual(
+            log.events,
+            ["invalidateSharedMic", "flushSharedMic"],
+            "a borrow the meeting already finalized during the flush is not finished twice"
+        )
+        host.claimEndsDuringFlush = false
 
         log.clear()
         host.hasSharedMeetingMicClaim = false

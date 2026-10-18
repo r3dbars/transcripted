@@ -317,6 +317,8 @@ protocol ParakeetStopRecordingHost: AnyObject {
     var hasSharedMeetingMicClaim: Bool { get }
     var isSharedMeetingMicResumeInProgress: Bool { get }
     func invalidateSharedMeetingMicTransition()
+    /// Delivers borrowed-mic buffers the meeting relay already accepted.
+    func flushSharedMeetingMicBuffers() async
     /// Ends a dictation that borrows the meeting's mic.
     func finishSharedMeetingMicStop()
     /// The config-recovery generation in flight, if any.
@@ -356,7 +358,13 @@ enum ParakeetStopRecordingSequence {
             host.invalidateSharedMeetingMicTransition()
         }
         if host.hasSharedMeetingMicClaim {
-            host.finishSharedMeetingMicStop()
+            // Drain the relay first: the recorder drops buffers after finish.
+            await host.flushSharedMeetingMicBuffers()
+            // The meeting may have ended during the flush and finalized the
+            // borrowed take itself.
+            if host.hasSharedMeetingMicClaim {
+                host.finishSharedMeetingMicStop()
+            }
             host.endRecordingContinuity()
             return
         }
