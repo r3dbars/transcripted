@@ -34,7 +34,9 @@ enum AnalyticsDeliveryPolicy {
     }
 }
 
-final class AnalyticsReporter {
+// `@unchecked Sendable`: every mutable property is only touched on `deliveryQueue`
+// (see the note above `pendingCaptures`); the rest are immutable after init.
+final class AnalyticsReporter: @unchecked Sendable {
     static let shared = AnalyticsReporter()
 
     static var isAvailable: Bool {
@@ -544,7 +546,7 @@ final class AnalyticsReporter {
 
         session.dataTask(with: request) { [weak self] _, response, error in
             let result = AnalyticsDeliveryPolicy.result(response: response, error: error)
-            self?.deliveryQueue.async {
+            self?.deliveryQueue.async { [weak self] in
                 self?.completeDeliveryLocked(for: capture, result: result)
             }
         }.resume()
