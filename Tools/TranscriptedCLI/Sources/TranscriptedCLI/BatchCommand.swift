@@ -131,14 +131,17 @@ struct Batch: AsyncParsableCommand {
     }
 
     private func writeSummary(fileCount: Int, elapsed: TimeInterval, outputDir: URL, engine: String) {
-        print("""
-        {
-          "files_processed": \(fileCount),
-          "total_processing_seconds": \(String(format: "%.1f", elapsed)),
-          "output_dir": "\(outputDir.path)",
-          "engine": "\(engine)"
-        }
-        """)
+        let summary: [String: Any] = [
+            "files_processed": fileCount,
+            "total_processing_seconds": (elapsed * 10).rounded() / 10,
+            "output_dir": outputDir.path,
+            "engine": engine,
+        ]
+        guard let data = try? JSONSerialization.data(
+            withJSONObject: summary,
+            options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
+        ) else { return }
+        print(String(decoding: data, as: UTF8.self))
     }
 
     #if TRANSCRIPTEDCLI_WITH_MEETING_IMPORT && canImport(TranscriptedCore)
