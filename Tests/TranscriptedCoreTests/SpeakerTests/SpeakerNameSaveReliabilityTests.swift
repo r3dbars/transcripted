@@ -1058,6 +1058,8 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
         }
     }
 
+    // The deadline is a hang guard, not a speed check: on a loaded Mac a
+    // 2-3 s budget timed out on work that always finishes.
     private func waitUntil(
         timeout: TimeInterval = 60.0,
         condition: @escaping @Sendable @MainActor () -> Bool
