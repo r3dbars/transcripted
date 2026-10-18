@@ -7,13 +7,15 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 `Capture` in `.agents/modules.json`.
 
 - **Owns:** global physical triggers and their routing (dictation, meeting start/stop).
-- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`.
+- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`, `PhysicalShortcutTapPolicy`.
 - **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
 - **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`.
 
 ## Files
 
-- `ContextCaptureEngine.swift` — the event tap (`PhysicalShortcutDetector`), shortcut debounce, delayed modifier presses, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`.
+- `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The CGEvent tap is not here.
+- `PhysicalShortcutDetector.swift` — the CGEvent tap (`keyDown` / `keyUp` / `flagsChanged` / `NSSystemDefined`). Media-key events always pass through and never fire dictation. F1–F20 matching ignores Fn; Cmd, Ctrl, Opt, and Shift still have to match. Logs `physical_shortcut_tap_disabled` with the reason and whether it was re-enabled. Other diagnostics hop through `onLog` onto the main actor.
+- `PhysicalShortcutTapPolicy.swift` — Foundation-pure tap mask, media-key parse (`NX_KEYTYPE_PLAY` = 16 for F8), modifier-mismatch logging (saved key only), tap-disable and install context. Fast-tested so a macOS Fn/media-key change is diagnosable without reading Sources as text.
 - `ContextCaptureEngine+DictationKeys.swift` — the dictation keys as session commands: Push to Talk press, release and combo-interrupt, and the hands-free toggle. Press/release semantics live in `DictationHotkeyRouter` (`Sources/Speech/DictationTrigger.swift`).
 - `PhysicalShortcutMatcher.swift` — Foundation-pure helpers: `configuredBindings`, exact/fallback binding precedence, release matching, and the tap and combo trackers below.
 
@@ -36,6 +38,7 @@ The paste-last-dictation shortcut is no longer registered. The unused paste-last
 - Rapid repeats are ignored with `TranscriptedConstants.hotkeyActionDebounceInterval`.
 - Registration failures surface as `hotkeyError`, which the menubar shows. The Accessibility one has its own message (`accessibilityPermissionErrorMessage`) so the menubar can offer to open that pane.
 - Keep tap callbacks tiny and bounce into `@MainActor`. Keep meeting routing separate from dictation routing.
+- A saved F1–F20 dictation key ignores `maskSecondaryFn` when matching, so F8 fires with or without the implicit Fn flag macOS attaches in media-key mode. Local diagnostics: `hotkey_fkey_arrived_as_media_key` (rate-limited 5s, never swallows play/pause), `hotkey_modifier_mismatch` (saved keycode only), `physical_shortcut_trigger_installed`. None of these go to PostHog.
 - No screenshot or OCR assumptions here unless that feature returns in the same change.
 
 ## Verify

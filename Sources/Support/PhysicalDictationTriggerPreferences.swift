@@ -303,10 +303,21 @@ enum PhysicalDictationTriggerPreferences {
         modifiers: UInt32
     ) -> Bool {
         guard !isModifierKey(binding.keyCode) else { return false }
-        // Caps Lock is latched, not held, so it never blocks a chord.
-        let relevant = PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
+        let relevant = relevantHeldModifiers(forKeyCode: binding.keyCode)
         return binding.keyCode == keyCode
             && (binding.modifiers & relevant) == (modifiers & relevant)
+    }
+
+    /// Held modifiers that must match a saved chord. Caps Lock is latched, not
+    /// held. F1-F20 also ignore Fn: macOS sets `maskSecondaryFn` on those keys
+    /// depending on "Use F1, F2, etc. as standard function keys" and the
+    /// keyboard's hardware row, so an exact-flag match silently drops F8.
+    static func relevantHeldModifiers(forKeyCode keyCode: UInt32) -> UInt32 {
+        var ignored = PhysicalDictationTriggerModifiers.capsLock
+        if isFunctionKey(keyCode) {
+            ignored |= PhysicalDictationTriggerModifiers.function
+        }
+        return PhysicalDictationTriggerModifiers.all & ~ignored
     }
 
     static func matchesFlagsChangedPress(
@@ -523,7 +534,7 @@ enum PhysicalDictationTriggerPreferences {
     private static func normalizedForComparison(_ binding: PhysicalDictationTriggerBinding) -> PhysicalDictationTriggerBinding {
         PhysicalDictationTriggerBinding(
             keyCode: binding.keyCode,
-            modifiers: binding.modifiers & PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
+            modifiers: binding.modifiers & relevantHeldModifiers(forKeyCode: binding.keyCode)
         )
     }
 
@@ -576,7 +587,7 @@ enum PhysicalDictationTriggerPreferences {
         return rejectionReason(for: binding) == nil ? binding : fallback
     }
 
-    private static func isFunctionKey(_ keyCode: UInt32) -> Bool {
+    static func isFunctionKey(_ keyCode: UInt32) -> Bool {
         switch Int(keyCode) {
         case kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
              kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20:

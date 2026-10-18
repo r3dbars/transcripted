@@ -217,7 +217,7 @@
       "affects": [
         "dictation-stop-latency"
       ],
-      "source": "Sources/Capture/ContextCaptureEngine.swift:84",
+      "source": "Sources/Capture/PhysicalShortcutDetector.swift:74",
       "risk": "Too short fires dictation when the user meant a modifier shortcut; too long adds lag before recording starts.",
       "notes": "Press-side timing: the dictation-stop bench starts from already-recorded audio and does not exercise it. Needs a press-to-recording objective before it can be tuned."
     },

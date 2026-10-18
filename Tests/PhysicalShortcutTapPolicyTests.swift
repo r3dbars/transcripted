@@ -21,6 +21,43 @@ func testPhysicalShortcutTapPolicy() {
     let savedF8 = PhysicalDictationTriggerBinding(keyCode: f8)
     let rightOption = PhysicalDictationTriggerPreferences.defaultPushToTalkBinding
 
+    runSuite("Diagnostic event names are stable and telemetry-safe") {
+        assertEqual(
+            PhysicalShortcutDiagnosticEvent.mediaKey,
+            "hotkey_fkey_arrived_as_media_key",
+            "media-key diagnosis is hotkey_fkey_arrived_as_media_key"
+        )
+        assertEqual(
+            PhysicalShortcutDiagnosticEvent.modifierMismatch,
+            "hotkey_modifier_mismatch",
+            "wrong-modifier diagnosis is hotkey_modifier_mismatch"
+        )
+        assertEqual(
+            PhysicalShortcutDiagnosticEvent.tapDisabled,
+            "physical_shortcut_tap_disabled",
+            "tap-disable diagnosis is physical_shortcut_tap_disabled"
+        )
+        assertEqual(
+            PhysicalShortcutDiagnosticEvent.installed,
+            "physical_shortcut_trigger_installed",
+            "install diagnosis is physical_shortcut_trigger_installed"
+        )
+        for name in [
+            PhysicalShortcutDiagnosticEvent.mediaKey,
+            PhysicalShortcutDiagnosticEvent.modifierMismatch,
+            PhysicalShortcutDiagnosticEvent.tapDisabled,
+            PhysicalShortcutDiagnosticEvent.installed,
+        ] {
+            let lowered = name.lowercased()
+            for fragment in PayloadSanitizationCore.baseSensitiveKeyFragments {
+                assertFalse(
+                    lowered.contains(fragment),
+                    "event \(name) contains sanitizer drop fragment \(fragment)"
+                )
+            }
+        }
+    }
+
     runSuite("The shortcut tap listens for NSSystemDefined media-key events") {
         let mask = PhysicalShortcutTapPolicy.eventsOfInterestMask()
         let systemDefinedBit = CGEventMask(1) << PhysicalShortcutTapPolicy.systemDefinedEventTypeRawValue

@@ -6,8 +6,8 @@
 // fast-tested PhysicalDictationTriggerPreferences matchers) so the chord
 // precedence can be pinned by tests without the Carbon/CGEventTap engine.
 //
-// The stateful per-action debounce and the CGEventTap wiring stay in
-// ContextCaptureEngine; only the deterministic binding-selection logic lives
+// The CGEventTap lives in PhysicalShortcutDetector; debounce stays in
+// ContextCaptureEngine. Only the deterministic binding-selection logic lives
 // here.
 
 import Foundation
