@@ -3,5 +3,6 @@
     "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
     "Tests/UIAutomationSurfaceContractTests.swift": 39
   },
-  "wall-clock": {}
+  "wall-clock": {
+  }
 }
