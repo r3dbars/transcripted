@@ -22,10 +22,6 @@ extension PinnedMicrophoneCapture {
         return try deviceFormat(streamDescriptions: descriptions)
     }
 
-    public static func canRecord(deviceID: AudioDeviceID) -> Bool {
-        deviceID != kAudioObjectUnknown && (try? inputFormat(of: deviceID)) != nil
-    }
-
     /// Pure mapping from the device's input stream formats to the buffer
     /// layout the ring copies: one interleaved stream, or several mono streams
     /// as non-interleaved channels. Anything else is unsupported.

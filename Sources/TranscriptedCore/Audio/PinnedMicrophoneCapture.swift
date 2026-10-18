@@ -730,5 +730,4 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         serialized { ring?.noteHALNotification() }
     }
     var ringStorageBytesForTesting: Int? { serialized { ring?.storageByteCount } }
-    var ringCapacityForTesting: Int? { serialized { ring?.capacity } }
 }

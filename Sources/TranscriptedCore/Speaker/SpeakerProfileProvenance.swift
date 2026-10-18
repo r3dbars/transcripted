@@ -731,22 +731,6 @@ extension SpeakerDatabase {
         return ok
     }
 
-    /// Prepare/bind/step a write with text params. Best-effort; logs on failure.
-    private func execBind(_ sql: String, _ params: [String], label: String) {
-        var statement: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            for (offset, value) in params.enumerated() {
-                sqlite3_bind_text(statement, Int32(offset + 1), (value as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            }
-            if sqlite3_step(statement) != SQLITE_DONE {
-                AppLogger.speakers.error("SQL write failed", ["label": label, "sqlite_error": dbErrorMessage()])
-            }
-        } else {
-            AppLogger.speakers.error("SQL prepare failed", ["label": label, "sqlite_error": dbErrorMessage()])
-        }
-        sqlite3_finalize(statement)
-    }
-
     private func execBindOrThrow(
         _ sql: String,
         _ params: [String],

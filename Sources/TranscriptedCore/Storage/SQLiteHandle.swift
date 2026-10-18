@@ -51,16 +51,6 @@ public enum SQLiteHandle {
         return db
     }
 
-    /// Open a private in-memory database (no file, no permissions, no pragmas — matches
-    /// the ":memory:" fast path used by ephemeral/test callers).
-    public static func openInMemory() -> OpaquePointer? {
-        var db: OpaquePointer?
-        guard sqlite3_open(":memory:", &db) == SQLITE_OK else {
-            return nil
-        }
-        return db
-    }
-
     /// Apply owner-only permissions + pragmas to an already-open handle. Exposed separately
     /// so callers that manage `sqlite3_open` themselves (e.g. corruption-recovery re-open)
     /// can still share the configuration step.

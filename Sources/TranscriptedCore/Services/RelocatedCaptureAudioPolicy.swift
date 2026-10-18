@@ -149,17 +149,6 @@ enum RelocatedCaptureAudioPolicy {
         }
     }
 
-    /// Whether the old library's archive can't be looked at right now:
-    /// its drive isn't mounted, or the nearest existing folder (the audio
-    /// archive itself included) refuses access. A readable existing folder, or
-    /// a missing one on a mounted readable disk, is checkable.
-    static func isUncheckableRightNow(_ audioFolder: URL, fileSystem: FileSystem) -> Bool {
-        if case .checkable = checkability(of: audioFolder, fileSystem: fileSystem) {
-            return false
-        }
-        return true
-    }
-
     private static func checkability(of audioFolder: URL, fileSystem: FileSystem) -> Checkability {
         if fileSystem.directoryExists(audioFolder.path) {
             return fileSystem.isAccessDenied(audioFolder.path)

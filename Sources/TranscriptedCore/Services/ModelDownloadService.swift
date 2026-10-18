@@ -3,7 +3,6 @@
 // and error classification. Provides retry wrapping for FluidAudio model initialization.
 
 import Foundation
-import Network
 import CryptoKit
 
 // MARK: - Error Classification
@@ -85,38 +84,6 @@ public enum ModelDownloadService {
     /// Default retry configuration
     public static let maxRetries = 3
     private static let retryDelays: [UInt64] = [2_000_000_000, 5_000_000_000, 10_000_000_000] // 2s, 5s, 10s
-
-    // MARK: - Network Reachability
-
-    /// Quick network connectivity check using NWPathMonitor.
-    /// Returns true if any network path is available.
-    public static func checkNetworkReachability() async -> Bool {
-        // Box to safely track whether continuation has been resumed.
-        // Both the handler and timeout run on the same serial queue, so no lock needed.
-        final class ResumeGuard: @unchecked Sendable { var done = false }
-
-        return await withCheckedContinuation { continuation in
-            let monitor = NWPathMonitor()
-            let queue = DispatchQueue(label: "com.transcripted.network-check", qos: .utility)
-            let guard_ = ResumeGuard()
-
-            monitor.pathUpdateHandler = { path in
-                guard !guard_.done else { return }
-                guard_.done = true
-                monitor.cancel()
-                continuation.resume(returning: path.status == .satisfied)
-            }
-            monitor.start(queue: queue)
-
-            // Timeout after 3 seconds — if we can't determine network status, assume offline
-            queue.asyncAfter(deadline: .now() + 3) {
-                guard !guard_.done else { return }
-                guard_.done = true
-                monitor.cancel()
-                continuation.resume(returning: false)
-            }
-        }
-    }
 
     // MARK: - Error Classification
 
