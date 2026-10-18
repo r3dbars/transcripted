@@ -342,4 +342,36 @@ func testPhysicalShortcutMatcher() {
         tracker.reset()
         assertFalse(tracker.keyDown(), "the release may have been missed while the tap was off")
     }
+
+    runSuite("PhysicalShortcutMatcher — a saved F8 fires with or without the Fn flag") {
+        let shortcuts = [
+            binding(.dictationPushToTalk, keyCode: kVK_F8),
+            binding(.meeting, keyCode: kVK_ANSI_M, modifiers: option),
+        ]
+
+        let withoutFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts, keyCode: UInt32(kVK_F8), modifiers: 0
+        )
+        assertEqual(
+            withoutFn?.action,
+            .dictationPushToTalk,
+            "F8 with no Fn flag must still resolve to the saved F8 dictation key"
+        )
+
+        let withFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts, keyCode: UInt32(kVK_F8), modifiers: function
+        )
+        assertEqual(
+            withFn?.action,
+            .dictationPushToTalk,
+            "F8 with the implicit Fn flag must still resolve to the saved F8 dictation key"
+        )
+
+        let withCommand = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_F8),
+            modifiers: PhysicalDictationTriggerModifiers.command
+        )
+        assertTrue(withCommand == nil, "Cmd+F8 must not fire a bare F8 dictation key")
+    }
 }

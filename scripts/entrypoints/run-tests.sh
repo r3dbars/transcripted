@@ -730,6 +730,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/UI/Settings/HomeMeetingSearchIndex.swift"
     "Sources/Capture/PhysicalShortcutMatcher.swift"
+    "Sources/Capture/PhysicalShortcutTapPolicy.swift"
     "Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift"
     "Sources/TranscriptedWriting/Core/Runtime/WritingKeyboardSetupState.swift"
     "Sources/Writing/WritingAnalytics.swift"

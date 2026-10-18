@@ -528,6 +528,138 @@ func testPhysicalDictationTriggerPreferences() {
             "Left and Right Option are different keys"
         )
     }
+
+    runSuite("A saved F1-F20 dictation key matches with or without the Fn flag") {
+        let function = PhysicalDictationTriggerModifiers.function
+        let command = PhysicalDictationTriggerModifiers.command
+        let option = PhysicalDictationTriggerModifiers.option
+        let shift = PhysicalDictationTriggerModifiers.shift
+        let control = PhysicalDictationTriggerModifiers.control
+        let functionKeys = [
+            kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
+            kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20,
+        ]
+
+        for virtualKey in functionKeys {
+            let keyCode = UInt32(virtualKey)
+            let savedBare = PhysicalDictationTriggerBinding(keyCode: keyCode)
+            let savedWithFn = PhysicalDictationTriggerBinding(keyCode: keyCode, modifiers: function)
+
+            assertTrue(
+                PhysicalDictationTriggerPreferences.matchesKeyDown(savedBare, keyCode: keyCode, modifiers: 0),
+                "F-key \(virtualKey) saved without Fn must fire when the event has no Fn"
+            )
+            assertTrue(
+                PhysicalDictationTriggerPreferences.matchesKeyDown(savedBare, keyCode: keyCode, modifiers: function),
+                "F-key \(virtualKey) saved without Fn must still fire when macOS sets the implicit Fn flag"
+            )
+            assertTrue(
+                PhysicalDictationTriggerPreferences.matchesKeyDown(savedWithFn, keyCode: keyCode, modifiers: 0),
+                "F-key \(virtualKey) recorded with Fn must fire when a later press has no Fn"
+            )
+            assertTrue(
+                PhysicalDictationTriggerPreferences.matchesKeyDown(savedWithFn, keyCode: keyCode, modifiers: function),
+                "F-key \(virtualKey) recorded with Fn must fire when the event also has Fn"
+            )
+        }
+
+        let f8 = UInt32(kVK_F8)
+        let savedF8 = PhysicalDictationTriggerBinding(keyCode: f8)
+        let savedCommandF8 = PhysicalDictationTriggerBinding(keyCode: f8, modifiers: command)
+
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(savedF8, keyCode: f8, modifiers: command),
+            "Cmd+F8 must not fire a bare F8 shortcut"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(savedF8, keyCode: f8, modifiers: option),
+            "Option+F8 must not fire a bare F8 shortcut"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(savedF8, keyCode: f8, modifiers: control),
+            "Control+F8 must not fire a bare F8 shortcut"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(savedF8, keyCode: f8, modifiers: shift),
+            "Shift+F8 must not fire a bare F8 shortcut"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(savedCommandF8, keyCode: f8, modifiers: 0),
+            "bare F8 must not fire a Cmd+F8 shortcut"
+        )
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(savedCommandF8, keyCode: f8, modifiers: command),
+            "Cmd+F8 must match Cmd+F8"
+        )
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                savedCommandF8,
+                keyCode: f8,
+                modifiers: command | function
+            ),
+            "Cmd+F8 must still match when macOS also sets Fn"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                savedCommandF8,
+                keyCode: f8,
+                modifiers: command | option
+            ),
+            "Cmd+Option+F8 must not match Cmd+F8"
+        )
+
+        let fnSpace = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_Space),
+            modifiers: function
+        )
+        assertTrue(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                fnSpace,
+                keyCode: UInt32(kVK_Space),
+                modifiers: function
+            ),
+            "Fn+Space still requires Fn because Space is not an F-key"
+        )
+        assertFalse(
+            PhysicalDictationTriggerPreferences.matchesKeyDown(
+                fnSpace,
+                keyCode: UInt32(kVK_Space),
+                modifiers: 0
+            ),
+            "bare Space must not fire a Fn+Space shortcut"
+        )
+    }
+
+    runSuite("F8 and Fn+F8 are the same shortcut for the duplicate check") {
+        let f8 = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_F8))
+        let fnF8 = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_F8),
+            modifiers: PhysicalDictationTriggerModifiers.function
+        )
+        let commandF8 = PhysicalDictationTriggerBinding(
+            keyCode: UInt32(kVK_F8),
+            modifiers: PhysicalDictationTriggerModifiers.command
+        )
+        let others: [(name: String, binding: PhysicalDictationTriggerBinding)] = [
+            (name: "Dictation key", binding: f8),
+        ]
+
+        assertNotNil(
+            PhysicalDictationTriggerPreferences.duplicateReason(for: fnF8, otherShortcuts: others),
+            "recording Fn+F8 must clash with a saved F8"
+        )
+        assertNotNil(
+            PhysicalDictationTriggerPreferences.duplicateReason(
+                for: f8,
+                otherShortcuts: [(name: "Meetings", binding: fnF8)]
+            ),
+            "recording F8 must clash with a saved Fn+F8"
+        )
+        assertNil(
+            PhysicalDictationTriggerPreferences.duplicateReason(for: commandF8, otherShortcuts: others),
+            "Cmd+F8 is a different shortcut from bare F8"
+        )
+    }
 }
 
 
