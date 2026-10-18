@@ -1,0 +1,82 @@
+#!/bin/bash
+# Git pre-push hook (enable with: bash scripts/dev/install-git-hooks.sh).
+#
+# 1. scripts/dev/lint.py --range R..L      new lint findings in the commits being
+#    pushed, read as committed (uncommitted edits and untracked files don't count)
+# 2. scripts/dev/check-rule-registry.py    every check is registered, docs/rules.md is current
+# 3. .githooks/public-repo-guard.py        private denylist guard: blocks the push when an
+#    outgoing added line, commit message or branch name matches a term in
+#    ~/.config/transcripted/public-repo-denylist.txt. That file lives outside the
+#    repo and is optional; the repo never holds the terms. The guard prints only
+#    where a match is, never which term.
+#
+# Git passes "<local ref> <local sha> <remote ref> <remote sha>" lines on stdin.
+# For each pushed ref, lint covers what the local tip changed since its
+# merge-base with the remote's old tip, or with origin/main for a new branch.
+# Skip all of this once with `git push --no-verify` (then say why).
+
+remote_name="${1:-origin}"
+root="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
+cd "$root" || exit 0
+
+refs="$(cat)"
+
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "pre-push: python3 not found; skipping lint, registry and denylist checks." >&2
+    exit 0
+fi
+
+failed=0
+
+is_zero() {
+    case "$1" in
+        ''|*[!0]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
+has_commit() {
+    git cat-file -e "$1^{commit}" 2>/dev/null
+}
+
+if [ -f scripts/dev/lint.py ]; then
+    while read -r local_ref local_sha remote_ref remote_sha; do
+        [ -n "$local_sha" ] || continue
+        is_zero "$local_sha" && continue   # deleting a remote branch publishes nothing
+        base=""
+        if ! is_zero "$remote_sha" && has_commit "$remote_sha"; then
+            base="$remote_sha"
+        elif has_commit "$remote_name/main"; then
+            base="$remote_name/main"
+        elif has_commit origin/main; then
+            base="origin/main"
+        fi
+        if [ -z "$base" ]; then
+            echo "pre-push: no base to lint $remote_ref against (fetch $remote_name/main); skipped lint for it." >&2
+            continue
+        fi
+        if ! python3 scripts/dev/lint.py --range "$base..$local_sha"; then
+            echo "pre-push: lint.py failed for $local_ref -> $remote_ref (see above)." >&2
+            failed=1
+        fi
+    done <<< "$refs"
+fi
+
+if [ -f scripts/dev/check-rule-registry.py ]; then
+    if ! python3 scripts/dev/check-rule-registry.py; then
+        echo "pre-push: check-rule-registry.py failed (see above; --write regenerates docs/rules.md)." >&2
+        failed=1
+    fi
+fi
+
+if [ -f .githooks/public-repo-guard.py ]; then
+    if ! printf '%s\n' "$refs" | python3 .githooks/public-repo-guard.py --remote "$remote_name"; then
+        failed=1
+    fi
+fi
+
+if [ "$failed" -ne 0 ]; then
+    echo "pre-push: push blocked. Fix the above, or skip once with --no-verify and say why." >&2
+    exit 1
+fi
+exit 0

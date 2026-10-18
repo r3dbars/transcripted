@@ -113,6 +113,18 @@ instructions unless a dated doc is explicitly the target of the task.
 path that doesn't exist, and keeps the root `AGENTS.md` inside its
 line budget. When you move or delete a file, fix the docs that name it.
 
+Rules and their enforcers:
+
+- `docs/rules.md` — generated table pairing each rule with the check that enforces it (`python3 scripts/dev/check-rule-registry.py --write`); don't edit by hand
+- `docs/lint-rules.md` — how to turn a repeated mistake into a rule: the level ladder, proof on a past commit, ratchet, suppressions; the `correct` skill (`.claude/skills/correct/SKILL.md`) walks an agent through it
+- `scripts/dev/lint.py` — the lint runner: `--all`, `--changed`, `--range A..B`, `--hook`, `--self-test`, `--explain <id>`, `--list`, `--shrink`
+- `scripts/dev/lint_rules/` — one module per lint rule, shared helpers in `scripts/dev/lint_rules/_base.py`, fixtures in `fixtures/<rule-id>/`
+- `.agents/lint-baseline.json` — per-file counts for ratcheted lint rules; only shrinks
+- `.agents/rules.json` — registry of every check that isn't a lint.py rule: what it enforces, its level, owner doc, why, proof
+- `scripts/dev/check-rule-registry.py` — fails when a check script has no registry entry, a path is missing, or `docs/rules.md` is stale
+- `.claude/settings.json` and `.claude/hooks/` — Claude Code hooks that run `scripts/dev/lint.py` on each edit and on stop
+- `.githooks/` — git hooks (`pre-push` runs `lint.py --range` on the pushed commits, the registry check and the private denylist guard); `bash scripts/dev/install-git-hooks.sh` turns them on for a clone
+
 Use these docs for these jobs:
 
 - `README.md` — public product overview and quick start

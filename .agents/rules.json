@@ -1,0 +1,599 @@
+{
+  "rules": [
+    {
+      "id": "rule-registry",
+      "enforces": "every check script has a registry entry (or a reasoned unregistered_ok line), its paths and owner doc exist, ids are unique, and docs/rules.md matches the registry",
+      "enforcer": "python3 scripts/dev/check-rule-registry.py",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "checks piled up with no record of which rule each protects or why it exists, so rules in docs drifted from what actually fails",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "pre-push"
+      ],
+      "proof": "self-test"
+    },
+    {
+      "id": "analytics-emitters-registered",
+      "enforces": "every analytics event name a call site emits exists in Resources/analytics-events.psv",
+      "enforcer": "python3 scripts/dev/check-analytics-emitters.py",
+      "level": "lint",
+      "owner_doc": "Sources/Observability/AGENTS.md",
+      "why": "AnalyticsReporter drops events missing from the PSV registry with no local sign; meeting_capture_stopped_under_controller read zero fleet-wide that way (e49fd4298, PR #1699)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "e49fd4298 (PR #1699)"
+    },
+    {
+      "id": "audio-automation-contract",
+      "enforces": "the daily audio-reliability script, the issue-500 manual proof doc, the QA bench packet and the smoke source lists name the same lanes and files",
+      "enforcer": "python3 scripts/dev/check-audio-automation-contract.py",
+      "level": "lint",
+      "owner_doc": "docs/testing-source-text-inventory.md",
+      "why": "this was a Swift test reading scripts and docs as text, so only a Mac found drift; moved to a repo check (2d2c102e1, PR #2049)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "2d2c102e1 (PR #2049); --self-test"
+    },
+    {
+      "id": "build-source-lists-exist",
+      "enforces": "every file named in the hand-kept swiftc source lists (fast tests, smokes) exists",
+      "enforcer": "python3 scripts/dev/check-build-source-lists.py",
+      "level": "lint",
+      "owner_doc": "Tests/AGENTS.md",
+      "why": "hand-kept lists rotted when files moved and the break showed up only in a Mac compile; one of ten red Swift CI runs in the week before PR #1884 was a list missing a new file (6cc8f8766, PR #1181)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "Swift CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "6cc8f8766 (PR #1181)"
+    },
+    {
+      "id": "debug-control-not-in-release",
+      "enforces": "the debug test control channel stays behind TRANSCRIPTED_DEBUG_CONTROL, which only build.sh sets; build-beta.sh refuses the flag and greps the binary",
+      "enforcer": "python3 scripts/dev/check-debug-control-release.py",
+      "level": "lint",
+      "owner_doc": "docs/debug-control-surface.md",
+      "why": "the agent control surface can start recordings and change settings, so shipping it would be a remote-control hole in user builds (5268a6874, PR #2208)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "5268a6874 (PR #2208); --self-test"
+    },
+    {
+      "id": "doc-paths-exist",
+      "enforces": "every backticked repo path in a tracked Markdown file exists, and the always-loaded entry docs stay within their line budget",
+      "enforcer": "python3 scripts/dev/check-doc-paths.py",
+      "level": "lint",
+      "owner_doc": "docs/README.md",
+      "why": "agents follow doc paths; entry docs had grown to 641 lines across three overlapping guides with dead pointers (1b432fc79, PR #1885)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "1b432fc79 (PR #1885); --self-test"
+    },
+    {
+      "id": "no-duplicate-declarations",
+      "enforces": "no Swift file declares the same symbol twice in one scope",
+      "enforcer": "python3 scripts/dev/check-duplicate-declarations.py",
+      "level": "lint",
+      "owner_doc": "scripts/README.md",
+      "why": "git auto-merges produced duplicate declarations (a doubled `let remindSize` in CapturePillController) that syntax-only parsing misses, so they failed 15-25 minutes into the Mac build (8103de399, PR #1490)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI"
+      ],
+      "proof": "8103de399 (PR #1490); --self-test"
+    },
+    {
+      "id": "file-size",
+      "enforces": "no new Swift file over 800 lines; files in .agents/file-size-baseline.json only shrink",
+      "enforcer": "python3 scripts/dev/check-file-size.py",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "big files are where agents lose the thread and merges collide; hotspot files had passed 1,500 lines (7de37226d, PR #1951)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)",
+        "auto-merge file-size lane"
+      ],
+      "proof": "7de37226d (PR #1951); --self-test"
+    },
+    {
+      "id": "tools-package-ci",
+      "enforces": "every Tools/* Swift package runs in a GitHub workflow and has a rule in .agents/test-matrix.yml (or a reviewed reason in TOOLS_WITHOUT_CI)",
+      "enforcer": "python3 scripts/dev/check-known-traps.py (tools-ci)",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "AGENTS.md said a new Tools package needs CI, and nothing failed when someone forgot (9610d0330, PR #1884)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "9610d0330 (PR #1884); --self-test"
+    },
+    {
+      "id": "root-wrappers-documented",
+      "enforces": "every root *.sh command is listed in docs/repo-layout.md",
+      "enforcer": "python3 scripts/dev/check-known-traps.py (root-wrappers)",
+      "level": "lint",
+      "owner_doc": "docs/repo-layout.md",
+      "why": "agents find commands from the layout doc; an unlisted wrapper is invisible to them (9610d0330, PR #1884)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "9610d0330 (PR #1884); --self-test"
+    },
+    {
+      "id": "agents-md-only",
+      "enforces": "agent guides live in AGENTS.md only: a tracked CLAUDE.md may only be the bare `@AGENTS.md` stub, and no CLAUDE.local.md exists",
+      "enforcer": "python3 scripts/dev/check-known-traps.py (agent-docs)",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "a CLAUDE.md is read instead of AGENTS.md, so a second copy of the rules drifted from the first (9615ec201, PR #1947)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "9615ec201 (PR #1947); --self-test"
+    },
+    {
+      "id": "fluidaudio-version-pin",
+      "enforces": "a Tools package pulling FluidAudio from SwiftPM pins the same version as FLUID_AUDIO_VERSION in build-deps.sh",
+      "enforcer": "python3 scripts/dev/check-known-traps.py (fluidaudio-pin)",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "a bundled helper could run an older FluidAudio than the app, with nothing to flag it (648273bfa, PR #1954)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "648273bfa (PR #1954); --self-test"
+    },
+    {
+      "id": "doc-pointers-in-swift",
+      "enforces": "a Sources/ or Tests/ Swift comment that names a repo .md path points at a file that exists",
+      "enforcer": "python3 scripts/dev/check-known-traps.py (doc-pointers)",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "renamed docs left dead \"read X first\" pointers in code comments (648273bfa, PR #1954)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "648273bfa (PR #1954); --self-test"
+    },
+    {
+      "id": "module-boundaries",
+      "enforces": "a Sources/ file names only types from modules its module may depend on in .agents/modules.json; every Sources/ file belongs to a module; no baseline, any crossing fails",
+      "enforcer": "python3 scripts/dev/check-module-boundaries.py",
+      "level": "lint",
+      "owner_doc": "Sources/AGENTS.md",
+      "why": "the app is one Swift target, so the compiler let any file use any type and 70 crossings piled up (7de37226d, PR #1951); the last were removed and the baseline dropped in PR #2173",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)",
+        "auto-merge module-edges lane"
+      ],
+      "proof": "7de37226d (PR #1951); --self-test"
+    },
+    {
+      "id": "qa-harness-permission-state",
+      "enforces": "the QA CLI's permission-state command, its probe matrix, the bench script and docs agree that blocked automation reports INCOMPLETE, never green",
+      "enforcer": "python3 scripts/dev/check-qa-harness-contract.py",
+      "level": "lint",
+      "owner_doc": "docs/testing-source-text-inventory.md",
+      "why": "a QA run blocked by macOS TCC could look green; the old guard was a Swift source-text test (b27ae5dd4, PR #2092 via #2173)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "b27ae5dd4 (PR #2092); --self-test"
+    },
+    {
+      "id": "source-pins",
+      "enforces": "a change doesn't break a Swift test that reads a repo file as text and pins a literal; the number of such pins in .agents/source-pin-baseline.json only shrinks",
+      "enforcer": "python3 scripts/dev/check-source-pins.py --changed-only origin/main && python3 scripts/dev/check-source-pins.py --count-baseline",
+      "level": "lint",
+      "owner_doc": "AGENTS.md",
+      "why": "editing a pinned file turned Mac-only CI red with no way to see it on Linux (b2d7d0320, PR #1805)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)",
+        "auto-merge source-pins lane"
+      ],
+      "proof": "b2d7d0320 (PR #1805); --self-test"
+    },
+    {
+      "id": "superseded-repair-pr",
+      "enforces": "before a repair or reland branch is opened, the original change isn't already merged under this or another PR (exit 3 means it landed)",
+      "enforcer": "python3 scripts/dev/check-superseded.py --pr <number>",
+      "level": "lint",
+      "owner_doc": "docs/agent-closeout.md",
+      "why": "six PRs were wasted when two threads re-opened repair branches for #1457 and #1471 after those changes had already merged (16ecf7c93, PR #1485)",
+      "runs_in": [
+        "manual, before a repair PR",
+        "linux-checks (--self-test only)"
+      ],
+      "proof": "16ecf7c93 (PR #1485); --self-test"
+    },
+    {
+      "id": "synced-copies-identical",
+      "enforces": "the three CaptureLibraryPathSafety.swift copies stay byte-identical",
+      "enforcer": "python3 scripts/dev/check-synced-copies.py",
+      "level": "lint",
+      "owner_doc": "Sources/Support/AGENTS.md",
+      "why": "if one copy drifts, build units disagree about which capture-library paths are safe; the old guard was a Swift source-text test (0be69e1b0, PR #2091)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "Swift CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "0be69e1b0 (PR #2091); --self-test"
+    },
+    {
+      "id": "telemetry-keys-survive-sanitizers",
+      "enforces": "no allowlisted telemetry key contains a fragment the off-device sanitizers drop (audio, error, file, name, path, text, title, token, url, ...)",
+      "enforcer": "python3 scripts/dev/check-telemetry-keys.py",
+      "level": "lint",
+      "owner_doc": "Sources/Observability/AGENTS.md",
+      "why": "start_profile was allowlisted but never arrived because \"profile\" contains \"file\" (196e7456d, PR #1805)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "196e7456d (PR #1805); --self-test"
+    },
+    {
+      "id": "test-shape",
+      "enforces": "no new test that reads Sources/ as text or asserts on wall-clock time; counts in .agents/test-shape-baseline.json only shrink",
+      "enforcer": "python3 scripts/dev/check-test-shape.py",
+      "level": "lint",
+      "owner_doc": "Tests/README.md",
+      "why": "in the week before PR #1884, 2 of 10 red Swift CI runs were a wall-clock test on a busy runner, and about 1 in 5 fast-test files read app code as text (9610d0330, PR #1884)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)",
+        "auto-merge test-shape lane"
+      ],
+      "proof": "9610d0330 (PR #1884); --self-test"
+    },
+    {
+      "id": "test-quarantine-format",
+      "enforces": "every Tests/quarantine.txt line is `date | existing suite | reason`; entries older than two weeks warn",
+      "enforcer": "python3 scripts/dev/check-test-shape.py (quarantine)",
+      "level": "lint",
+      "owner_doc": "Tests/README.md",
+      "why": "flaky suites got retried until green instead of fixed or benched; the bench list needs real suite names to mean anything (9610d0330, PR #1884)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "9610d0330 (PR #1884); --self-test"
+    },
+    {
+      "id": "ui-automation-identifiers",
+      "enforces": "every transcripted.<area>.<name> accessibility identifier the QA smokes and build.sh's launch smoke press is declared in the app",
+      "enforcer": "python3 scripts/dev/check-ui-automation-contract.py",
+      "level": "lint",
+      "owner_doc": "docs/testing-source-text-inventory.md",
+      "why": "a removed identifier failed the smoke only on a Mac with the app running, long after the change; the old guard was a source-text test (8b2e6286b, PR #2073 via #2173)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "8b2e6286b (PR #2073); --self-test"
+    },
+    {
+      "id": "window-screen-share-inventory",
+      "enforces": "every NSWindow/NSPanel surface in Sources/ is listed in .agents/window-inventory.json with a screen-sharing policy, and sets sharingType to match",
+      "enforcer": "python3 scripts/dev/check-window-inventory.py",
+      "level": "lint",
+      "owner_doc": "Sources/UI/Overlay/AGENTS.md",
+      "why": "AppKit windows are readable by screen sharing by default, so a new transcript panel could leak live text into a shared screen (ab664240f, PR #2244, issue #2132)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)"
+      ],
+      "proof": "ab664240f (PR #2244); --self-test"
+    },
+    {
+      "id": "concurrency-census",
+      "enforces": "Swift 6 strict-concurrency warnings per Sources/ folder stay at or under .agents/concurrency-baseline.json",
+      "enforcer": "bash scripts/dev/concurrency-census.sh && python3 scripts/dev/concurrency-census.py --log build/concurrency-census.log --mode check",
+      "level": "lint",
+      "owner_doc": "docs/concurrency-debt.md",
+      "why": "the app still builds in Swift 5 mode, so data races and wrong-thread calls only warn under a strict typecheck; without a count they grew unseen (9610d0330, PR #1884)",
+      "runs_in": [
+        "concurrency-census workflow (PRs touching Swift)",
+        "linux-checks (--self-test only)"
+      ],
+      "proof": "9610d0330 (PR #1884); --self-test"
+    },
+    {
+      "id": "privacy-leak-sweep",
+      "enforces": "synthetic secrets planted in logs, events, Sentry/PostHog payloads, QA reports, PR/release text and handoff summaries don't come out the other side",
+      "enforcer": "python3 scripts/ops/privacy-leak-sweep.py",
+      "level": "test",
+      "owner_doc": "docs/privacy-first-observability.md",
+      "why": "local-first is the product promise; this sweeps every report and handoff surface for raw user content before it leaves (e0376ebba, PR #1004)",
+      "runs_in": [
+        "linux-checks",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)",
+        "release-candidate workflow",
+        "nightly security"
+      ],
+      "proof": "e0376ebba (PR #1004)"
+    },
+    {
+      "id": "nightly-security-check",
+      "enforces": "repo, release and update drift, cask/appcast parity, PostHog schema drift, raw observability keys, entitlements, shell hazards and recent-history secrets all pass; strict release-health fixture matches Info.plist",
+      "enforcer": "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml",
+      "level": "test",
+      "owner_doc": "docs/privacy-first-observability.md",
+      "why": "the nightly security checker had gone missing and was restored with a shared sanitizer corpus (68e84492c, PR #584); 6 of 10 red Swift CI runs before PR #1884 were it tripping on half-finished release PRs, so linux-checks now runs it only when release surfaces change",
+      "runs_in": [
+        "linux-checks (release surfaces only)",
+        "repo-hygiene CI",
+        "test-matrix (check.sh)",
+        "nightly automation"
+      ],
+      "proof": "68e84492c (PR #584); Tests/NightlySecurityContractTests.swift"
+    },
+    {
+      "id": "performance-budget",
+      "enforces": "app and Resources size, bundled-model presence, launch-to-interactive, dictation start/stop and meeting throughput stay within budget",
+      "enforcer": "ruby scripts/ops/performance-budget.rb",
+      "level": "test",
+      "owner_doc": "scripts/README.md",
+      "why": "a performance audit found heavy launch work and a bundled model bloating normal builds; the budgets keep those wins from sliding back (980d36068, PR #707)",
+      "runs_in": [
+        "build.sh",
+        "build-beta.sh",
+        "Swift CI"
+      ],
+      "proof": "980d36068 (PR #707)"
+    },
+    {
+      "id": "mutation-probe",
+      "enforces": "tests for Swift policy files actually catch small breaks (mutants are KILLED, not SURVIVED)",
+      "enforcer": "python3 scripts/dev/mutation-probe.py",
+      "level": "test",
+      "owner_doc": "docs/mutation-testing.md",
+      "why": "tests that pass with the code broken looked like coverage; the probe finds missing assertions (924cf9dd8, PR #1884)",
+      "runs_in": [
+        "mutation-monthly workflow (1st of each month)",
+        "linux-checks (--self-test only)"
+      ],
+      "proof": "924cf9dd8 (PR #1884); --self-test"
+    },
+    {
+      "id": "auto-merge-baseline-shrink",
+      "enforces": "a PR merged by the auto-merge gate may change a debt baseline (.agents/*-baseline.json) only to lower counts or drop entries, never the concurrency baseline",
+      "enforcer": "python3 scripts/ops/auto-merge-gate.py",
+      "level": "lint",
+      "owner_doc": "docs/auto-merge-gate.md",
+      "why": "without it a cleanup-lane PR could raise its own baseline and merge with no owner review (e6005dafb, PR #2039)",
+      "runs_in": [
+        "auto-merge gate run",
+        "linux-checks (--self-test)"
+      ],
+      "proof": "e6005dafb (PR #2039); --self-test"
+    },
+    {
+      "id": "native-smoke-account-isolation",
+      "enforces": "app-launch smokes run only in a separate OS account, a verified hosted runner, or the throwaway Mac runner VM, so they can't read or write the owner's preferences",
+      "enforcer": "python3 scripts/ops/native-smoke-isolation.py",
+      "level": "test",
+      "owner_doc": "Tests/README.md",
+      "why": "native QA launches could run as the active macOS account and use its real preferences (8d4685290, PR #1757); HOME and CFFIXED_USER_HOME overrides don't stop UserDefaults resolving through that account's cfprefsd session, extended to the launch benchmark for issue #2256",
+      "runs_in": [
+        "Swift CI"
+      ],
+      "proof": "8d4685290 (PR #1757)"
+    },
+    {
+      "id": "no-rebuild-running-app",
+      "enforces": "build.sh and build-beta.sh refuse to delete build/Transcripted.app while that bundle is running (FORCE_REBUILD_RUNNING=1 overrides)",
+      "enforcer": "bash scripts/entrypoints/lib/running-bundle-guard.sh",
+      "level": "architecture",
+      "owner_doc": "AGENTS.md",
+      "why": "the owner often runs the app straight from a worktree's build/, and a rebuild deleted the running bundle out from under it (648273bfa, PR #1954)",
+      "runs_in": [
+        "build.sh",
+        "build-beta.sh"
+      ],
+      "proof": "648273bfa (PR #1954)"
+    },
+    {
+      "id": "off-device-payload-allowlist",
+      "enforces": "Sentry and PostHog events carry only allowlisted keys and tags; everything else is dropped before it leaves the device",
+      "enforcer": "Sources/Observability/SentryPayloadSanitizer.swift + Sources/Observability/AnalyticsPayloadSanitizer.swift (allowlists in SentryEventPolicy.swift, AnalyticsEventPolicy.swift)",
+      "level": "architecture",
+      "owner_doc": "Sources/Observability/AGENTS.md",
+      "why": "Sentry and PostHog are bounded integrations; raw transcript text, titles, names and paths must never reach them, so the only way out is through one sanitizer each",
+      "runs_in": [
+        "every Sentry/PostHog send",
+        "Swift fast tests"
+      ],
+      "proof": "telemetry-keys-survive-sanitizers + privacy-leak-sweep cover drift"
+    },
+    {
+      "id": "public-repo-private-terms",
+      "enforces": "an outgoing push adds no term from the private denylist outside the repo (~/.config/transcripted/public-repo-denylist.txt) in diffs, commit messages or branch names",
+      "enforcer": "python3 .githooks/public-repo-guard.py",
+      "level": "hook",
+      "owner_doc": "docs/lint-rules.md",
+      "why": "private research names and people's details must never land in a public repo, and history can't be quietly cleaned once pushed",
+      "runs_in": [
+        "pre-push (after scripts/dev/install-git-hooks.sh)",
+        "linux-checks + repo-hygiene CI (--self-test)"
+      ],
+      "proof": "self-test"
+    },
+    {
+      "id": "coreaudio-realtime-callbacks",
+      "enforces": "no I/O, locks, allocations or ObjC calls inside CoreAudio real-time callbacks; deep-copy buffers before any async hop",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "a blocked or allocating render callback drops audio; nothing mechanical sees what runs on the IO thread yet",
+      "runs_in": [
+        "code review"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "airpods-default-input",
+      "enforces": "code that builds an AVAudioEngine or touches inputNode says what happens when a Bluetooth headset is the default input",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "Sources/Speech/AGENTS.md",
+      "why": "a fresh engine's inputNode binds the default input; with AirPods that flips them into call mode and garbles audio, the cause of every AirPods garble bug so far (audio-tap-install-unguarded covers only tap installs)",
+      "runs_in": [
+        "code review"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "main-actor-state",
+      "enforces": "session controllers and UI state are @MainActor; capture internals use DispatchQueue + NSLock",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "wrong-thread UI and session access races; main-actor-blocking-io and concurrency-census cover parts, not the rule itself",
+      "runs_in": [
+        "code review"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "keep-product-surface",
+      "enforces": "simplification doesn't delete, hide or bury meeting detection, the Speakers directory, per-app Auto Enter, model-cache cleanup, status-item right-click or retained-audio playback without owner approval",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "cleanup passes have removed features users relied on; this is a judgment call no check can make",
+      "runs_in": [
+        "code review"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "harness-real-user-state",
+      "enforces": "scripts, labs and tests never write to the real capture library or prefs; anything that deletes checks the path is under the root it owns",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "a harness touching real state can destroy saved meetings; native-smoke-account-isolation covers app-launch smokes and the harness-delete-outside-owned-root lint covers deletes in harness code, but writes to real state are still judgment",
+      "runs_in": [
+        "code review"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "owner-commit-credit",
+      "enforces": "agent commits for the owner use the owner's noreply identity as author and committer, with no AI Co-authored-by trailers",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "commit credit is the owner's call; nothing checks author identity",
+      "runs_in": [
+        "code review"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "land-on-main-flow",
+      "enforces": "owner work rebases onto origin/main, runs check.sh, then pushes HEAD:main; never force-push; a red main is fixed forward or reverted by the session that broke it",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "PRs for owner work were slow; direct pushes trade that for a red-main risk the session must own",
+      "runs_in": [
+        "agent workflow"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "independent-review-before-push",
+      "enforces": "meaningful code gets an independent diff review (codex review or /code-review) before the push, with the verdict in the commit message",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "landing straight on main skips PR review, so this is the only second look",
+      "runs_in": [
+        "agent workflow"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "cleanup-behavior-neutral",
+      "enforces": "a cleanup/ or garden/ change is behavior-neutral: no logic, access-level, init-order or isolation changes during a move",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "AGENTS.md",
+      "why": "cleanup lanes auto-merge, so a hidden behavior change would ship without the owner seeing it",
+      "runs_in": [
+        "code review",
+        "auto-merge reviewers"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "appcast-release-only",
+      "enforces": "docs/appcast.xml and Casks/transcripted.rb change only in a release the owner asked for, cut from a commit with green Swift CI",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "docs/sparkle-updates.md",
+      "why": "Sparkle reads the appcast straight from main, so any push to it ships to every install at once",
+      "runs_in": [
+        "agent workflow"
+      ],
+      "proof": "none"
+    },
+    {
+      "id": "flaky-test-same-day",
+      "enforces": "a flaky test is fixed or benched in Tests/quarantine.txt the same day; never retry until green",
+      "enforcer": "none (judgment)",
+      "level": "doc",
+      "owner_doc": "Tests/README.md",
+      "why": "retry-until-green hides real failures; test-quarantine-format checks the bench list, not the habit",
+      "runs_in": [
+        "agent workflow"
+      ],
+      "proof": "none"
+    }
+  ],
+  "unregistered_ok": {}
+}
