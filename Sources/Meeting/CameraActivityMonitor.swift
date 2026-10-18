@@ -40,7 +40,7 @@ final class CameraActivityMonitor: @unchecked Sendable {
     /// Delivered on the main actor: `true` when at least one camera has been
     /// running continuously for `sustainInterval`, `false` on the inactive edge.
     /// Assign before calling `start()` and do not mutate while running.
-    var onChange: ((Bool) -> Void)?
+    var onChange: (@MainActor @Sendable (Bool) -> Void)?
     var onCallCameraActivity: (@MainActor @Sendable (Bool?, TimeInterval) -> Void)?
 
     private let queue = DispatchQueue(label: "CameraActivityMonitor.cmio-devices", qos: .utility)

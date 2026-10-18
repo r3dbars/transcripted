@@ -8,7 +8,8 @@ enum MeetingAudioStorageManager {
     private static let staleTemporaryAudioAge: TimeInterval = 6 * 60 * 60
     private static let managedAudioStems = ["microphone", "system_audio", "recording", "playback"]
     private static let maintenanceFailureLock = NSLock()
-    private static var maintenanceFailureHandler: ((MeetingAudioMaintenanceFailure) -> Void)?
+    // Guarded by `maintenanceFailureLock`.
+    nonisolated(unsafe) private static var maintenanceFailureHandler: ((MeetingAudioMaintenanceFailure) -> Void)?
 
     static func setMaintenanceFailureHandler(_ handler: ((MeetingAudioMaintenanceFailure) -> Void)?) {
         maintenanceFailureLock.lock()
