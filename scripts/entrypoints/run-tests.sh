@@ -688,6 +688,7 @@ APP_SOURCES=(
     "Sources/UI/Shared/HomeCopyMeetingReader.swift"
     "Sources/UI/Shared/HomeActivityIndicatorPolicy.swift"
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift"
+    "Sources/UI/Shared/DictionaryPastMeetingBackupStore.swift"
     "Sources/UI/Settings/SpeakerVoiceRowPresentation.swift"
     "Sources/UI/Settings/SpeakerMergeTargets.swift"
     "Sources/UI/Settings/SpeakerDuplicateNameMatching.swift"
