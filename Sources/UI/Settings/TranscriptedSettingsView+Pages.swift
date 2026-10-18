@@ -325,7 +325,7 @@ extension TranscriptedSettingsView {
             onCancelActivity: {
                 trackSettingsAction("cancel_current_activity", page: .home)
                 actions.cancelPendingAudioImports()
-                meetingSession.cancelActiveTranscription(reason: .userRequested)
+                meetingSession.cancelActiveTranscription()
             },
             onOpenSavedMeeting: { transcriptURL in
                 trackSettingsAction("open_saved_meeting", page: .home)

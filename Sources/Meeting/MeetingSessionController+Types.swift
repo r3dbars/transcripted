@@ -39,11 +39,6 @@ extension MeetingSessionController {
         case unknown = "unknown"
     }
 
-    enum TranscriptionCancelReason: String {
-        case userRequested = "user_requested"
-        case unknown = "unknown"
-    }
-
     typealias TerminalTranscriptionOutcome = MeetingTerminalTranscriptionOutcome
 
     struct RecordingStopSnapshot {
