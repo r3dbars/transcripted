@@ -386,7 +386,7 @@ public enum WritingSecretScrubber {
         // The same answer again: a new password or passphrase confirmed.
         if let first = state.firstAnswer, line == first { return true }
         let firstWord = line.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? line
-        if knownShellWords.contains(firstWord.lowercased()) || isPathLike(firstWord) { return false }
+        if isNextCommand(line, firstWord: firstWord, answered: state.answered, looseAnswers: state.looseAnswers) { return false }
         if line.contains(where: \.isWhitespace) {
             // Only a passphrase prompt's first answer may have spaces.
             return state.allowsSpaces && state.answered == 0
@@ -423,7 +423,7 @@ public enum WritingSecretScrubber {
         return previous[b.count] <= 2
     }
 
-    private static func isPathLike(_ word: String) -> Bool {
+    static func isPathLike(_ word: String) -> Bool {
         word.hasPrefix("/") || word.hasPrefix("./") || word.hasPrefix("../") || word.hasPrefix("~")
     }
 

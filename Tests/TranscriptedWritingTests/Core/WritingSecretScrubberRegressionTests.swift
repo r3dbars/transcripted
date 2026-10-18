@@ -298,4 +298,19 @@ struct WritingSecretScrubberRegressionTests {
         #expect(WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal").clean == text)
     }
 
+
+    @Test("A lone command word right after a sudo prompt is redacted as the password", arguments: ["docker", "python", "htop"])
+    func loneCommandWordAfterSudoPromptIsRedacted(word: String) {
+        let result = WritingSecretScrubber.scrub("sudo apt install foo\n" + word, appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix(word))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("A multi-word command after a cached sudo is kept")
+    func multiWordCommandAfterCachedSudoIsKept() {
+        let text = "sudo -v\ndocker ps"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
 }
