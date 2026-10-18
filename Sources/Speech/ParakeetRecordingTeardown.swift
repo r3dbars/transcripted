@@ -36,6 +36,12 @@ extension ParakeetEngine {
         // was heard for the recovery prompt, but without touching the engine:
         // tearing that down here would bind the default input.
         if let pinnedDictationRecording {
+            // Return without touching the engine: a reset here would bind
+            // the default input (AirPods into call mode).
+            guard !pinnedDictationRecording.stopping else {
+                AppLogger.transcription.info("PARAKEET | system wake detected during pinned stop, letting the stop finish")
+                return
+            }
             interruptPinnedDictationRecording(pinnedDictationRecording, reason: "system_wake")
             AppLogger.transcription.info("PARAKEET | system wake detected, pinned dictation interrupted")
             return

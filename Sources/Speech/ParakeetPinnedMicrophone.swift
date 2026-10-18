@@ -33,6 +33,10 @@ final class ParakeetPinnedDictationRecording: @unchecked Sendable {
     /// Reset once the capture's start returns, so waiting for the start
     /// never counts as time the recorder was open.
     var startedUptime: TimeInterval
+    /// Set on the main actor once Stop starts its drain. Wake, failure and
+    /// device-loss handlers leave a stopping take alone so its tail is
+    /// delivered and it isn't marked interrupted.
+    var stopping = false
 
     init(
         capture: PinnedMicrophoneCapture,
@@ -457,7 +461,7 @@ extension ParakeetEngine {
         _ event: PinnedMicrophoneCaptureEvent,
         recording: ParakeetPinnedDictationRecording
     ) {
-        guard pinnedDictationRecording === recording, isRecording else { return }
+        guard pinnedDictationRecording === recording, isRecording, !recording.stopping else { return }
         switch event {
         case let .gap(seconds, _):
             AppLogger.transcription.info("PARAKEET | pinned microphone resumed after a gap", [
@@ -552,7 +556,7 @@ extension ParakeetEngine {
         _ recording: ParakeetPinnedDictationRecording,
         because cause: PinnedDictationReplacementCause
     ) async {
-        guard pinnedDictationRecording === recording, isRecording else { return }
+        guard pinnedDictationRecording === recording, isRecording, !recording.stopping else { return }
         let capture = recording.capture
         let failedDeviceID = capture.deviceID
         let attempts = cause == .deviceLost ? 3 : 1
@@ -630,7 +634,8 @@ extension ParakeetEngine {
         _ recording: ParakeetPinnedDictationRecording,
         reason: String
     ) {
-        guard pinnedDictationRecording === recording else { return }
+        // The stop in flight already owns teardown and delivery.
+        guard pinnedDictationRecording === recording, !recording.stopping else { return }
         recording.delivery.cancel()
         pinnedDictationRecording = nil
         let capture = recording.capture
@@ -659,13 +664,15 @@ extension ParakeetEngine {
 
     /// User stop for the pinned path. Delivers the words captured just before
     /// Stop, then releases the device. Recording state stays set until the
-    /// drain finishes so wake and route handlers keep treating it as live.
+    /// drain finishes so wake and route handlers still see a pinned take
+    /// (and never reach the engine path); `stopping` makes them leave it be.
     /// A driver stuck in the drain gets the start's budget; after that the
     /// take keeps what already arrived and its late tail is dropped.
     func stopPinnedDictationRecording() async {
         guard let recording = pinnedDictationRecording else { return }
         // Before the drain: it only delivers audio captured before Stop.
         let stoppedUptime = ProcessInfo.processInfo.systemUptime
+        recording.stopping = true
         let capture = recording.capture
         let drained = (try? await Self.systemInputWorkCoordinator.run(
             operation: "pinned_dictation_stop",
