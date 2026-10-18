@@ -105,7 +105,7 @@ actor ScreenCaptureService {
         axWindowText: @escaping @Sendable (SCWindow, SCDisplay) -> AXWindowTextReader.Result? = {
             AXWindowTextReader.read(for: $0, display: $1)
         },
-        now: @escaping @Sendable () -> Date = Date.init,
+        now: @escaping @Sendable () -> Date = { Date() },
         diagnostics: @escaping @Sendable (String, [String: String]) -> Void = { event, metadata in
             DiagnosticsLog.shared.record(event, metadata: metadata)
         }

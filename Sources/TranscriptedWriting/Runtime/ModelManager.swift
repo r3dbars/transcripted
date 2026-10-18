@@ -155,7 +155,7 @@ final class ModelManager: @unchecked Sendable {
         callbackQueue: DispatchQueue = .main,
         onStateChange: StateHandler? = nil,
         onProgress: ProgressHandler? = nil,
-        availableDiskSpace: @escaping DiskSpaceProvider = ModelManager.defaultDiskSpace,
+        availableDiskSpace: @escaping DiskSpaceProvider = { ModelManager.defaultDiskSpace($0) },
         retryDelays: [Duration] = [
             .milliseconds(500), .seconds(1), .seconds(2), .seconds(4),
             .seconds(8), .seconds(16), .seconds(30), .seconds(30)
