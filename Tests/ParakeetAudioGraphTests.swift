@@ -920,6 +920,7 @@ private func runStopSequenceSuites() async {
             ["invalidateSharedMic", "flushSharedMic"],
             "a borrow the meeting already finalized during the flush is not finished twice"
         )
+        assertEqual(host.continuityEnded, 2, "a borrow finalized during the flush still ends the recovery hold")
         host.claimEndsDuringFlush = false
 
         log.clear()
@@ -928,7 +929,7 @@ private func runStopSequenceSuites() async {
         host.hasPinnedDictationRecording = true
         await ParakeetStopRecordingSequence.run(graph: graph, host: host)
         assertTrue(log.contains("stopPinned"), "a pinned recording stops through its recorder")
-        assertEqual(host.continuityEnded, 2, "a pinned stop ends the recovery hold")
+        assertEqual(host.continuityEnded, 3, "a pinned stop ends the recovery hold")
         assertFalse(log.events.contains { $0.contains("@q") }, "a pinned stop touches no engine hardware")
     }
 }
