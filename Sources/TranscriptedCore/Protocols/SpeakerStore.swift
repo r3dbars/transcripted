@@ -27,6 +27,9 @@ public protocol SpeakerStore: Sendable {
     /// Set the display name for a speaker
     func setDisplayName(id: UUID, name: String, source: String)
 
+    /// Set the display name, throwing when the profile row is gone
+    func requireDisplayNameUpdate(id: UUID, name: String, source: String) throws
+
     /// Restore a profile to a previously snapshotted state.
     func restoreProfile(_ profile: SpeakerProfile)
 
@@ -103,6 +106,14 @@ public extension SpeakerStore {
         try mutations()
     }
 
+    /// Back-compat default for test doubles: fails like `SpeakerDatabase` when the row is gone.
+    func requireDisplayNameUpdate(id: UUID, name: String, source: String) throws {
+        guard getSpeaker(id: id) != nil else {
+            throw SpeakerStoreProfileMissingError(id: id)
+        }
+        setDisplayName(id: id, name: name, source: source)
+    }
+
     /// Back-compat default for test doubles and lightweight stores that do not
     /// persist the explicit-confirmation ledger.
     func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws {}
@@ -155,4 +166,8 @@ public extension SpeakerStore {
     func recordNegativeExemplar(profileId: UUID, embedding: [Float]) {}
 
     func negativeExemplarsByProfile() -> [UUID: [[Float]]] { [:] }
+}
+
+private struct SpeakerStoreProfileMissingError: Error {
+    let id: UUID
 }

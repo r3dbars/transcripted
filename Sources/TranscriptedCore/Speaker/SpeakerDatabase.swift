@@ -700,8 +700,6 @@ public final class SpeakerDatabase: @unchecked Sendable {
         // restoreProfile, mergeProfiles, ...) already has: without it, calling this from
         // inside performMutationBatch's mutations closure — which runs the closure via
         // queue.sync — deadlocks/traps on a nested queue.sync onto the same serial queue.
-        // SpeakerIdentityMutationService's discard intent needs deleteSpeaker to be
-        // composable inside a mutation batch the same way every other mutator already is.
         if isExecutingOnQueue {
             deleteSpeakerImpl(id: id)
             return

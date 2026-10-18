@@ -67,11 +67,6 @@ public enum SpeakerIdentityMutationService {
             reviewedRows: [TranscriptSaver.DeferredSpeakerNameUpdate],
             confirmedTranscriptIds: [UUID]
         )
-        /// Remove a profile's database link from every saved transcript that references it.
-        /// When `matchedProfileSnapshot` is provided the profile is restored to that
-        /// snapshot (a review verdict reverting to the previously-matched person);
-        /// otherwise the profile itself is deleted (discarding a newly-created profile).
-        case discard(profileId: UUID, matchedProfileSnapshot: SpeakerProfile?)
     }
 
     /// Best-effort, non-transcript side effects that only run after both the transcript
@@ -79,14 +74,11 @@ public enum SpeakerIdentityMutationService {
     /// layout, so these are injected rather than owned by this Core-layer service.
     public struct ClipSideEffects {
         public var onMergeCommitted: (_ sourceId: UUID, _ targetId: UUID) -> Void
-        public var onDiscardDeletedProfile: (_ profileId: UUID) -> Void
 
         public init(
-            onMergeCommitted: @escaping (_ sourceId: UUID, _ targetId: UUID) -> Void = { _, _ in },
-            onDiscardDeletedProfile: @escaping (_ profileId: UUID) -> Void = { _ in }
+            onMergeCommitted: @escaping (_ sourceId: UUID, _ targetId: UUID) -> Void = { _, _ in }
         ) {
             self.onMergeCommitted = onMergeCommitted
-            self.onDiscardDeletedProfile = onDiscardDeletedProfile
         }
     }
 
@@ -174,14 +166,6 @@ public enum SpeakerIdentityMutationService {
                     reviewedRows: reviewedRows,
                     confirmedTranscriptIds: confirmedTranscriptIds
                 )
-            case let .discard(profileId, matchedProfileSnapshot):
-                return try applyDiscard(
-                    profileId: profileId,
-                    matchedProfileSnapshot: matchedProfileSnapshot,
-                    speakerDB: speakerDB,
-                    directory: directory,
-                    clipSideEffects: clipSideEffects
-                )
             }
         }
     }
@@ -224,7 +208,7 @@ public enum SpeakerIdentityMutationService {
 
         do {
             try speakerDB.performMutationBatch {
-                speakerDB.setDisplayName(id: profileId, name: newName, source: NameSource.userManual)
+                try speakerDB.requireDisplayNameUpdate(id: profileId, name: newName, source: NameSource.userManual)
                 speakerDB.resetDisputeCount(id: profileId)
             }
         } catch {
@@ -387,66 +371,6 @@ public enum SpeakerIdentityMutationService {
         return Outcome(succeeded: true, updatedTranscriptCount: written.count, resolvedDisplayName: resolvedName)
     }
 
-    // MARK: - Discard
-
-    private static func applyDiscard(
-        profileId: UUID,
-        matchedProfileSnapshot: SpeakerProfile?,
-        speakerDB: any SpeakerStore,
-        directory: URL,
-        clipSideEffects: ClipSideEffects
-    ) throws -> Outcome {
-        let dbIds = speakerDB.mergedAliasIds(of: profileId).union([profileId])
-        let planned = try planAffectedTranscripts(matchingDbIds: dbIds, directory: directory)
-        guard !replacementBlocksMutation(planned, operation: "discard") else {
-            return failure()
-        }
-
-        let rewrites: [PlannedRewrite] = planned.compactMap { entry in
-            var content = entry.content
-            var discarded = false
-            for dbId in dbIds {
-                discarded = TranscriptSaver.discardSpeakerDatabaseLink(in: &content, dbId: dbId) || discarded
-            }
-            guard discarded else { return nil }
-            return PlannedRewrite(url: entry.url, originalContent: entry.content, rewrittenContent: content)
-        }
-
-        guard let written = try writeAndTrackForRollback(rewrites) else {
-            return failure()
-        }
-
-        do {
-            try speakerDB.performMutationBatch {
-                if let matchedProfileSnapshot {
-                    speakerDB.restoreProfile(matchedProfileSnapshot)
-                    speakerDB.incrementDisputeCount(id: matchedProfileSnapshot.id)
-                } else {
-                    speakerDB.deleteSpeaker(id: profileId)
-                }
-            }
-        } catch {
-            AppLogger.speakers.error("Speaker discard persistence failed; restoring transcripts", [
-                "profileId": profileId.uuidString,
-                "error": error.localizedDescription
-            ])
-            try restoreOrThrow(written)
-            return failure()
-        }
-
-        if matchedProfileSnapshot == nil {
-            clipSideEffects.onDiscardDeletedProfile(profileId)
-        }
-
-        if !written.isEmpty {
-            AppLogger.speakers.info("Discarded speaker database link across saved transcripts", [
-                "profileId": profileId.uuidString,
-                "files": "\(written.count)"
-            ])
-        }
-        return Outcome(succeeded: true, updatedTranscriptCount: written.count, resolvedDisplayName: nil)
-    }
-
     // MARK: - Plan / snapshot / write / rollback
 
     private struct PlannedTranscript {
@@ -540,7 +464,7 @@ public enum SpeakerIdentityMutationService {
 
     /// Restores every plan to its snapshot, retrying a failed restore once (covers a
     /// transient failure — e.g. a momentary lock from a file indexer or backup agent —
-    /// without adding unbounded delay to a UI-facing rename/merge/discard call). If any
+    /// without adding unbounded delay to a UI-facing rename/merge call). If any
     /// file still can't be restored after the retry, throws `.transcriptRestoreFailed`
     /// instead of silently leaving the database and that transcript disagreeing.
     ///
