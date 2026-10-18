@@ -69,6 +69,7 @@ public final class LiveOutput {
         if let pid = Self.runningHelperPid(sessionURL: root.appendingPathComponent("session.json")) {
             throw LiveOutputError.alreadyRunning(pid: pid)
         }
+        Self.pruneOldMeetings(in: root.appendingPathComponent("meetings"), before: now() - Self.meetingRetentionSeconds)
         session = LiveSession(
             state: .idle, meetingId: nil, title: nil, source: nil, model: model,
             startedAt: nil, endedAt: nil, updatedAt: now(), utterancesPath: nil, lineCount: 0,
@@ -166,6 +167,26 @@ public final class LiveOutput {
         session.updatedAt = time
         try encoder.encode(session).write(to: sessionURL, options: .atomic)
         lastSessionWrite = time
+    }
+
+    /// How long a meeting's rough transcript stays in meetings/. The app's own
+    /// delete never reaches this folder, so the helper drops old ones itself.
+    /// Keep it above the mod's RENAME_WATCH_MS (3 h), which still reads the file.
+    static let meetingRetentionSeconds: TimeInterval = 24 * 60 * 60
+
+    /// Removes regular `.jsonl` files directly in `folder` last written before `cutoff`.
+    static func pruneOldMeetings(in folder: URL, before cutoff: Date) {
+        let fileManager = FileManager.default
+        let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
+        guard let entries = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: keys) else { return }
+        let folderPath = folder.resolvingSymlinksInPath().path + "/"
+        for entry in entries where entry.pathExtension == "jsonl" {
+            guard let values = try? entry.resourceValues(forKeys: Set(keys)),
+                  values.isRegularFile == true,
+                  let modified = values.contentModificationDate, modified < cutoff,
+                  entry.resolvingSymlinksInPath().path.hasPrefix(folderPath) else { continue }
+            try? fileManager.removeItem(at: entry)
+        }
     }
 
     /// The pid in an existing session.json, if that process is still a

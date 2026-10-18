@@ -31,6 +31,7 @@ In order of harm if it leaks or breaks:
 - The app is not sandboxed and has library validation off, because the ML stack ships dylibs with mixed signing. User-level malware that writes into the app bundle inherits its permissions. Don't widen this.
 - The MCP server has no caller authentication. Its only write tools are the companion meeting controls, gated by the app's companion permissions. Don't add others without adding auth.
 - Speech and diarization model downloads aren't hash-pinned. Trust rests on TLS to huggingface.co. Writing verifies downloaded weights against the SHA-256 digest in its bundled model descriptor (`ModelManager.swift`).
+- The live meeting helper keeps rough transcripts in `~/Library/Application Support/TranscriptedLive/meetings/` for up to 24 h, outside the capture library, so deleting a meeting in the app doesn't remove them (`docs/storage-paths.md`).
 
 ## What a reviewer should flag as high severity
 
