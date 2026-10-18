@@ -149,13 +149,18 @@ existing installed app can upgrade.
 ## Feed hosting
 
 The feed installed apps read is the `appcast.xml` asset of the latest GitHub
-release. GitHub answers `releases/latest/download/appcast.xml` with a 302 to its
-asset store. Sparkle fetches feeds and archives through `URLSession`, whose
-default is to follow redirects, and the app sets nothing that turns that off, so
-the redirect needs no app change. `verify-sparkle-release.sh` fetches the URL
-with `curl -L`, which follows it the same way. That is read from Sparkle's
-documented behavior and a curl run, not from a Sparkle check against the real
-feed: the first real upgrade (see "Not done yet") is the proof.
+release. GitHub answers `releases/latest/download/appcast.xml` with a 302 to
+`releases/download/v<latest>/appcast.xml`, which answers with another 302 to its
+asset host (`release-assets.githubusercontent.com` as of 2026-10-17; checked
+with `curl -sIL` against the 1.1.72 DMG). Sparkle fetches feeds and archives
+through `URLSession`, whose default is to follow redirects, and the app sets
+nothing that turns that off. Every shipped update already downloads its DMG or
+delta from a `releases/download/...` URL through that second redirect, so that
+hop is proven for Sparkle's download path; the feed fetch and the extra
+`latest` hop are the new part.
+`verify-sparkle-release.sh` fetches the feed with `curl -L`, which follows it the
+same way. No Sparkle build has fetched this feed URL yet: the first real upgrade
+(see "Not done yet") is the proof.
 
 Why not main: a feed on main is edited by a normal commit, so anyone who can
 land a commit there can redirect every install to a different archive. A release
