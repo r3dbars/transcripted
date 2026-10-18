@@ -104,12 +104,15 @@ enum SharedMeetingMicClaimPolicy {
     /// meeting's mic relay feed the old, orphaned claim's recorder.
     /// `currentIdentity` is `nil` between recordings (`.idle`/
     /// `.loadingModels`/`.ready`) and always fails the comparison, exactly
-    /// like any other mismatch.
+    /// like any other mismatch. `stoppingIdentity` is the identity the
+    /// session cleared when its own stop began; it stands in for
+    /// `currentIdentity` until that teardown hands dictation back.
     static func isClaimSessionAlive(
         mintedIdentity: UUID,
         currentIdentity: UUID?,
+        stoppingIdentity: UUID?,
         isCaptureSessionActive: Bool
     ) -> Bool {
-        isCaptureSessionActive && currentIdentity == mintedIdentity
+        isCaptureSessionActive && (currentIdentity ?? stoppingIdentity) == mintedIdentity
     }
 }

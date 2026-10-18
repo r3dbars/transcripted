@@ -327,7 +327,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
-        clearActiveRecordingIdentity()
+        clearActiveRecordingIdentity(keepingForStopTeardown: true)
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -362,6 +362,7 @@ extension MeetingSessionController {
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
+        stoppingRecordingIdentity = nil
         // "Record Just My Mic" never builds the system tap. Stand in the silent
         // track the old always-on tap left, so speaker review, re-transcribe
         // and retries still see a two-track meeting.

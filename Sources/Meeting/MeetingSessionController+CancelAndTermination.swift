@@ -34,7 +34,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         let recordingSnapshot = makeRecordingStopSnapshot()
-        clearActiveRecordingIdentity()
+        clearActiveRecordingIdentity(keepingForStopTeardown: true)
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -53,6 +53,7 @@ extension MeetingSessionController {
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
+        stoppingRecordingIdentity = nil
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
