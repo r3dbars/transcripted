@@ -112,6 +112,32 @@ func testContextCaptureEnginePolicy() {
         assertEqual(result.consumedKeyCodes, [fn], "the held key stays consumed; the released one is dropped")
     }
 
+    runSuite("Tap reinstall — a key held across it gets exactly one release") {
+        let rightOption = UInt32(kVK_RightOption)
+        var isDown = true
+        var releases = 0
+        var active: UInt32? = rightOption
+        var consumed: Set<UInt32> = [rightOption]
+        func reinstall() {
+            let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
+                activePushToTalkKeyCode: active,
+                consumedKeyCodes: consumed,
+                isPhysicallyDown: { _ in isDown }
+            )
+            active = result.activePushToTalkKeyCode
+            consumed = result.consumedKeyCodes
+            if result.synthesizesPushToTalkRelease { releases += 1 }
+        }
+        reinstall()
+        assertEqual(releases, 0, "a hold that survives the reinstall keeps recording")
+        assertEqual(active, rightOption, "the new tap still owns the held key, so its key-up ends the take")
+        isDown = false
+        reinstall()
+        reinstall()
+        assertEqual(releases, 1, "let go between reinstalls: one release, not one per reinstall")
+        assertNil(active, "push-to-talk is no longer active")
+    }
+
     runSuite("Tap re-enable — nothing active means no release") {
         let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
             activePushToTalkKeyCode: nil,
