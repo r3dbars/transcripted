@@ -250,7 +250,7 @@ extension MeetingPromptDetector {
         browserTitles = session
     }
 
-    private func scheduleBrowserEvidenceRecheck(at date: Date, now: Date) {
+    func scheduleBrowserEvidenceRecheck(at date: Date, now: Date) {
         if let pending = browserEvidenceRecheckAt, pending > now, pending <= date {
             return
         }

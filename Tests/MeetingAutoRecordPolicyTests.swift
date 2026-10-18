@@ -218,7 +218,7 @@ func testMeetingAutoRecordPolicy() {
             name: "with the setting off, another capture still keeps the calendar prompt",
             request: autoRecordRequest(
                 enabled: false, evidence: .none, provider: .zoom, reason: .calendarNearby,
-                holdsMicrophone: false, otherCaptureActive: true
+                otherCaptureActive: true, holdsMicrophone: false
             ),
             expected: .prompt
         ),
