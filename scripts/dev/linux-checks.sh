@@ -195,6 +195,10 @@ else
     check "source pins (Swift text contracts)" "python3 scripts/dev/check-source-pins.py"
 fi
 check "source pin count (.agents/source-pin-baseline.json; only shrinks)" "python3 scripts/dev/check-source-pins.py --count-baseline"
+check "banned calls self-test" "python3 scripts/dev/check-banned-calls.py --self-test"
+check "banned calls (no Mac-wide default-input writes from dictation, no NSException FileHandle APIs in log writers, silent feedback)" "python3 scripts/dev/check-banned-calls.py"
+check "keyboard identity self-test" "python3 scripts/dev/check-keyboard-identity.py --self-test"
+check "keyboard identity (keyboard Info.plist matches the production profile)" "python3 scripts/dev/check-keyboard-identity.py"
 check "QA harness contract self-test" "python3 scripts/dev/check-qa-harness-contract.py --self-test"
 check "QA harness contract (permission-state stays INCOMPLETE, not green)" "python3 scripts/dev/check-qa-harness-contract.py"
 check "debug control release self-test" "python3 scripts/dev/check-debug-control-release.py --self-test"
