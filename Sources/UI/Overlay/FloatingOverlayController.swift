@@ -22,7 +22,7 @@ class FloatingOverlayController {
         )
     }
 
-    enum OverlayState {
+    enum OverlayState: String {
         case idle
         case starting     // Microphone start requested — cancellable before recording flips on
         case loading      // Voice model still loading — waiting for readiness
@@ -39,16 +39,8 @@ class FloatingOverlayController {
             }
         }
 
-        var diagnosticName: String {
-            switch self {
-            case .idle: return "idle"
-            case .starting: return "starting"
-            case .loading: return "loading"
-            case .listening: return "listening"
-            case .drafting: return "drafting"
-            case .success: return "success"
-            }
-        }
+        /// The case name, for diagnostics trails.
+        var diagnosticName: String { rawValue }
     }
 
     /// How a drafting-state message should read: a real problem, or a calm
