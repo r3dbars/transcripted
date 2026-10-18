@@ -210,7 +210,7 @@ private final class SystemAudioPermissionProbeWorker: @unchecked Sendable {
         return cancelled
     }
 
-    func begin(completion: @escaping (ProbeResult) -> Void) {
+    func begin(completion: @escaping @Sendable (ProbeResult) -> Void) {
         queue.async { [self] in
             guard !isCancelled else { return }
             do {

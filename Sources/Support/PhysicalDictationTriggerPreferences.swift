@@ -85,8 +85,9 @@ enum PhysicalDictationTriggerPreferences {
     private static let meetingKeyCodeKey = "meetingTrigger-keyCode"
     private static let meetingModifiersKey = "meetingTrigger-modifiers"
     private static let oneDictationKeyMigratedKey = "dictationOneKeyMigrated"
-    private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
-    private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
+    // Immutable CFString constants.
+    nonisolated(unsafe) private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
+    nonisolated(unsafe) private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
 
     static func binding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
         pushToTalkBinding(userDefaults: userDefaults)
