@@ -28,7 +28,13 @@ Rules:
   * The Agent page and the Settings shell never put a raw error into
     user-facing text; the raw error goes behind Copy Details. Both keep that
     Copy Details reveal and route failures through their shared failure copy.
-    (these three were Tests/UIAutomationSurfaceContractTests.swift)
+  * The retained-audio player sizes its hit shape from
+    HomeHitTarget.hitSize(forVisibleSize:), so it keeps the 40pt floor.
+  * The Settings shell builds the Home row menus from HomeRowMenuPolicy and
+    feeds it the row's real state (audio to reveal, a retranscription input,
+    pending speaker review); re-transcribe takes its title from
+    RecentMeetingRetranscriptionMenuActionPolicy.
+    (these five were Tests/UIAutomationSurfaceContractTests.swift)
 
     python3 scripts/dev/check-banned-calls.py
     python3 scripts/dev/check-banned-calls.py --self-test
@@ -167,6 +173,32 @@ RULES: tuple[Rule, ...] = (
             "captureLibraryMigrationStatus = SettingsActionFailureCopy.captureLibraryMigration(",
         ),
     ),
+    Rule(
+        name="retained-audio player keeps the shared 40pt hit floor",
+        files=("Sources/UI/Settings/HomeMeetingAudioPlayer.swift",),
+        banned=(),
+        why="the player's hit shape must come from HomeHitTarget.hitSize so it never drops under 40pt",
+        required=(
+            "HomeHitTarget.hitSize(forVisibleSize: size)",
+            ".frame(width: hitTargetSize, height: hitTargetSize)",
+        ),
+    ),
+    Rule(
+        name="Settings shell builds Home row menus from HomeRowMenuPolicy",
+        folder="Sources/UI/Settings",
+        prefix="TranscriptedSettingsView",
+        min_files=5,
+        banned=(),
+        why="the row menus must come from HomeRowMenuPolicy, fed the row's real state",
+        required=(
+            "HomeRowMenuPolicy.dictationEntries",
+            "HomeRowMenuPolicy.meetingEntries(",
+            "hasAudioRevealTarget: !audioRevealURLs.isEmpty",
+            "hasRetranscriptionInput: item.audio?.retranscriptionInput != nil",
+            "hasPendingSpeakerReview: hasSpeakerReviewWork(for: item)",
+            "title: RecentMeetingRetranscriptionMenuActionPolicy.title(",
+        ),
+    ),
 )
 
 
@@ -300,6 +332,18 @@ def self_test() -> None:
         "failureNotice(id: \"transcripted.settings.agent.connect-error-details.\\(agent.rawValue)\")\n"
         "private func failureNotice(id: String) -> some View { EmptyView() }\n"
     )
+    good["Sources/UI/Settings/HomeMeetingAudioPlayer.swift"] = (
+        "private var hitTargetSize: CGFloat {\n    HomeHitTarget.hitSize(forVisibleSize: size)\n}\n"
+        "Image(systemName: glyph)\n    .frame(width: hitTargetSize, height: hitTargetSize)\n"
+    )
+    good["Sources/UI/Settings/TranscriptedSettingsView+Part3.swift"] += (
+        "HomeRowMenuPolicy.dictationEntries.compactMap { entry in item(entry) }\n"
+        "let entries = HomeRowMenuPolicy.meetingEntries(\n"
+        "    hasPendingSpeakerReview: hasSpeakerReviewWork(for: item),\n"
+        "    hasAudioRevealTarget: !audioRevealURLs.isEmpty,\n"
+        "    hasRetranscriptionInput: item.audio?.retranscriptionInput != nil\n)\n"
+        "HomeRowMenuItem(\n    title: RecentMeetingRetranscriptionMenuActionPolicy.title(\n        reason: reason\n    )\n)\n"
+    )
     assert check(build(good)) == [], check(build(good))
 
     breaks = [
@@ -354,6 +398,24 @@ def self_test() -> None:
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "connect-error-details.", "details."),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.connectFailure(", "Copy.other("),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.codexInboxFailure(", "Copy.other("),
+        # the retained-audio player drops its hit floor
+        ("Sources/UI/Settings/HomeMeetingAudioPlayer.swift", "HomeHitTarget.hitSize(forVisibleSize: size)", "size"),
+        ("Sources/UI/Settings/HomeMeetingAudioPlayer.swift", "width: hitTargetSize, height: hitTargetSize", "width: size, height: size"),
+        # Home row menus stop coming from the policy, or stop feeding it real state
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "HomeRowMenuPolicy.dictationEntries", "[.openMarkdown]"),
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "HomeRowMenuPolicy.meetingEntries(", "fixedEntries("),
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "!audioRevealURLs.isEmpty", "true"),
+        (
+            "Sources/UI/Settings/TranscriptedSettingsView+Part3.swift",
+            "item.audio?.retranscriptionInput != nil",
+            "item.audio != nil",
+        ),
+        ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "hasSpeakerReviewWork(for: item)", "false"),
+        (
+            "Sources/UI/Settings/TranscriptedSettingsView+Part3.swift",
+            "title: RecentMeetingRetranscriptionMenuActionPolicy.title(",
+            'title: "Re-transcribe", reasonLabel: (',
+        ),
     ]
     for rel, old, new in breaks:
         broken = dict(good)

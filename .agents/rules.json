@@ -286,7 +286,7 @@
     },
     {
       "id": "banned-calls",
-      "enforces": "dictation never writes the Mac-wide default input, diagnostic log writers avoid NSException-raising FileHandle APIs, feedback submission plays no sound, onboarding never polls permissions and keeps its lifecycle and audio-check cancel wiring, and the Agent page and Settings shell route failures through their shared copy with a Copy Details reveal, never a raw error",
+      "enforces": "dictation never writes the Mac-wide default input, diagnostic log writers avoid NSException-raising FileHandle APIs, feedback submission plays no sound, onboarding never polls permissions and keeps its lifecycle and audio-check cancel wiring, the Agent page and Settings shell route failures through their shared copy with a Copy Details reveal, never a raw error, the retained-audio player keeps the 40pt hit floor, and the Settings shell builds Home row menus from HomeRowMenuPolicy",
       "enforcer": "python3 scripts/dev/check-banned-calls.py",
       "level": "lint",
       "owner_doc": "Tests/README.md",

@@ -14,10 +14,12 @@
 // hit target and the Agent page's failure routing are behavior tests
 // (OnboardingPermissionLifecyclePolicyTests, HomeRowControlsTests,
 // AutomationSurfaceBehaviorTests). The view wiring around them (onboarding's
-// lifecycle .onReceive routes and audio-check cancel, the Agent page's and the
-// Settings shell's Copy Details reveal and shared failure copy) and the "never
-// call X" guards for onboarding and raw errors in Settings live in
-// scripts/dev/check-banned-calls.py.
+// lifecycle .onReceive routes and audio-check cancel, the Settings shell
+// building the Home row menus from HomeRowMenuPolicy with the row's real state,
+// the retained-audio player sizing its hit shape from HomeHitTarget.hitSize,
+// the Agent page's and the Settings shell's Copy Details reveal and shared
+// failure copy) and the "never call X" guards for onboarding and raw errors in
+// Settings live in scripts/dev/check-banned-calls.py.
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
 // identifiers, and failure copy are behavior tests in
 // AutomationSurfaceBehaviorTests.swift now. The QA CLI's ui-smoke command and
@@ -285,7 +287,9 @@ func testUIAutomationSurfaceContract() async {
             assertTrue(settingsSurfaceContractContains(requiredSourceHook), "\(requiredSourceHook) should stay source-addressable")
         }
 
-        // The row menus' items are behavior tests: HomeRowControlsTests.
+        // The row menus' items are behavior tests: HomeRowControlsTests. The
+        // shell building them from HomeRowMenuPolicy (and the state it passes
+        // in) is checked by scripts/dev/check-banned-calls.py.
         for requiredHomeActionHook in [
             "HomeDeleteConfirmationPolicy.failedMeeting",
             "homeDeleteConfirmation = HomeDeleteConfirmation(",
@@ -317,7 +321,8 @@ func testUIAutomationSurfaceContract() async {
             "Home icon buttons and compact row actions should size their hit shape from HomeHitTarget.minimum"
         )
         // The retained-audio player's 40pt hit floor (HomeHitTarget.hitSize)
-        // is a behavior test: HomeRowControlsTests.
+        // is a behavior test: HomeRowControlsTests. The player using it for its
+        // frame is checked by scripts/dev/check-banned-calls.py.
         assertFalse(
             contractSource("Sources/UI/Settings/HomeView.swift").contains("representedObject = item.id"),
             "Home row menus should not depend on unstable SwiftUI-generated menu item IDs"
@@ -496,7 +501,9 @@ func testUIAutomationSurfaceContract() async {
         )
 
         // Review speakers and re-transcribe in the meeting row menu are
-        // behavior tests: HomeRowControlsTests.
+        // behavior tests: HomeRowControlsTests. The shell passing pending
+        // speaker review and the retranscription input into the policy, and
+        // the re-transcribe title, are checked by scripts/dev/check-banned-calls.py.
     }
 
     // The QA CLI's own behavior (ui-smoke registered, INCOMPLETE exits 3, the
