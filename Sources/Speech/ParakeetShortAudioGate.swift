@@ -210,8 +210,21 @@ enum ParakeetShortAudioGate {
             || normalized.contains("invalid audio data")
             || normalized.contains("recording too short")
             || normalized.contains("too short")
-        guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) || messageSaysTooShort else {
-            return nil
+        guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) else {
+            guard messageSaysTooShort else { return nil }
+            // Long audio the model rejected: still left empty (a rethrow would abort the
+            // whole meeting batch), but reported as a failure, not as short audio.
+            let audioDuration = Double(sampleCount) / TranscriptedConstants.parakeetSampleRate
+            return ParakeetTranscriptionDecision(
+                shouldTranscribe: false,
+                event: "meeting_segment_inference_failed",
+                message: "Parakeet rejected a full-length meeting segment; segment left empty",
+                context: [
+                    "samples": "\(sampleCount)",
+                    "audio_duration_s": String(format: "%.2f", audioDuration),
+                    "source": sourceDescription,
+                ]
+            )
         }
 
         return meetingSegment(

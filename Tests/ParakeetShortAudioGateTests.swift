@@ -86,6 +86,24 @@ func testParakeetShortAudioGate() {
         assertEqual(decision?.context["source"], "microphone", "meeting fallback should preserve which stream failed")
     }
 
+    runSuite("ParakeetShortAudioGate.meetingSegmentFallback — a long segment the model rejects is a failure, not short audio") {
+        let rejected = ParakeetShortAudioGate.meetingSegmentFallback(
+            sampleCount: 96_000,
+            sourceDescription: "system",
+            errorMessage: "Invalid audio data"
+        )
+        let unrelated = ParakeetShortAudioGate.meetingSegmentFallback(
+            sampleCount: 96_000,
+            sourceDescription: "system",
+            errorMessage: "Model not loaded"
+        )
+
+        assertEqual(rejected?.shouldTranscribe, false, "a rejected long segment is still skipped rather than aborting the meeting")
+        assertEqual(rejected?.event, "meeting_segment_inference_failed", "a 6 s segment must not be reported as segment_too_short")
+        assertEqual(rejected?.context["audio_duration_s"], "6.00", "failure diagnostics should carry the real segment duration")
+        assertNil(unrelated, "other long-segment errors should still rethrow")
+    }
+
     runSuite("DictationEmptyTranscriptionReason keeps too-short telemetry out of no-speech") {
         assertEqual(
             DictationEmptyTranscriptionReason.recordingTooShort.analyticsEventName,
