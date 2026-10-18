@@ -177,8 +177,8 @@ public class FailedTranscriptionManager: ObservableObject {
             AppLogger.pipeline.info("Loaded failed transcriptions", ["count": "\(failedTranscriptions.count)"])
             return true
         } catch {
-            // Backup corrupt file before it gets overwritten on next save
-            let backupURL = storageURL.deletingLastPathComponent().appendingPathComponent("failed_transcriptions_backup.json")
+            // Backup corrupt file before it gets overwritten on next save; a unique name so an older backup can't block it
+            let backupURL = storageURL.deletingLastPathComponent().appendingPathComponent("failed_transcriptions_backup_\(DateFormattingHelper.formatFilenamePrecise(Date())).json")
             do {
                 try FileManager.default.copyItem(at: storageURL, to: backupURL)
             } catch {
