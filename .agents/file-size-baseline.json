@@ -6,7 +6,7 @@
     "Sources/Meeting/MeetingAudioStorageManager.swift": 1229,
     "Sources/Meeting/MeetingImportedAudioPreparer.swift": 819,
     "Sources/Meeting/MeetingPromptHeuristics.swift": 992,
-    "Sources/Meeting/MeetingSessionController.swift": 833,
+    "Sources/Meeting/MeetingSessionController.swift": 827,
     "Sources/Observability/AnalyticsReporter.swift": 885,
     "Sources/Observability/SparkleUpdaterController.swift": 1176,
     "Sources/Speech/ParakeetDeviceRecovery.swift": 805,
@@ -21,7 +21,7 @@
     "Sources/TranscriptedCore/Speaker/SpeakerProfileProvenance.swift": 882,
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift": 1286,
     "Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift": 920,
-    "Sources/UI/Overlay/MeetingOverlayController.swift": 1181,
+    "Sources/UI/Overlay/MeetingOverlayController.swift": 1174,
     "Sources/UI/Overlay/NotchIslandView.swift": 1286,
     "Sources/UI/Settings/PermissionsOnboardingView.swift": 948,
     "Sources/UI/Shared/DictionaryPastMeetingFix.swift": 894

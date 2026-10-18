@@ -251,6 +251,9 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 if copy == .notYetAllowed { return .turnOn }
                 return .askWhileRecording
             }
+            meetingSession.onAutoStartedRecordingWillEnd = { [weak self] in
+                self?.meetingPromptDetector.declineRestOfDetectedCall()
+            }
             let promptRecordAction = MeetingPromptRecordAction(
                 onStartRequested: { [weak self] in
                     self?.meetingPromptRecordInFlight = true
@@ -301,13 +304,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 // load / .startingRecording, and would otherwise close the
                 // detected-call session as unrecorded.
                 self.meetingPromptDetector.markAccepted(candidate: candidate)
-                if autoStarted { return }
+                let signals = self.meetingPromptDetector.currentSignalSnapshot()
                 MeetingPromptTelemetry.emit(
-                    .record(
-                        candidate,
-                        elapsedSeconds: elapsedSeconds,
-                        signals: self.meetingPromptDetector.currentSignalSnapshot()
-                    ),
+                    autoStarted
+                        ? .autoStart(candidate, signals: signals)
+                        : .record(candidate, elapsedSeconds: elapsedSeconds, signals: signals),
                     readiness: readiness
                 )
             }

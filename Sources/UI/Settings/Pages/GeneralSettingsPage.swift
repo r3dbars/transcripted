@@ -137,7 +137,7 @@ struct GeneralSettingsPage<
                         : "Ask before recording a detected call.",
                     info: GeneralInfo(
                         title: "Record detected calls automatically",
-                        message: "When Zoom or Teams is using the mic, or a browser tab names a Meet, Zoom, or Teams call, start recording without asking. Needs Auto-detect calls, plus microphone and System Audio Recording already allowed. Off by default: the other people on the call are not asked."
+                        message: "When Zoom or Teams is using the mic, or the front Meet, Zoom, or Teams tab is, start recording without asking. A tab title or the camera is never enough on its own. Needs Auto-detect calls, plus microphone and System Audio Recording already allowed. Off by default: the other people on the call are not asked."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-record-detected-calls",
                     isEnabled: autoDetectCallsEnabled

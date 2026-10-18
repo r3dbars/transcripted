@@ -7,6 +7,7 @@ import Foundation
 enum AutoRecordDetectedCallsPreferences {
 
     static let enabledKey = "auto-record-detected-calls-enabled"
+    static let consentAcknowledgedKey = "auto-record-detected-calls-consent-acknowledged"
 
     /// Stored toggle, ignoring whether auto-detect is on. Absent means off.
     static func isStoredOn(userDefaults: UserDefaults = .standard) -> Bool {
@@ -22,6 +23,25 @@ enum AutoRecordDetectedCallsPreferences {
     static func setEnabled(_ enabled: Bool, userDefaults: UserDefaults = .standard) {
         userDefaults.set(enabled, forKey: enabledKey)
         NotificationCenter.default.post(name: .autoRecordDetectedCallsPrefsDidChange, object: nil)
+    }
+
+    static func hasAcknowledgedConsent(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: consentAcknowledgedKey)
+    }
+
+    static func acknowledgeConsent(userDefaults: UserDefaults = .standard) {
+        userDefaults.set(true, forKey: consentAcknowledgedKey)
+    }
+}
+
+/// Copy and the one-time enable confirmation for auto-record.
+enum AutoRecordDetectedCallsConsentPolicy {
+    static let title = "Record other people without asking?"
+    static let message = "When Transcripted is sure you're in a Zoom, Teams, or Meet call, it will start recording on its own. The other people on the call are not asked."
+    static let confirmTitle = "Record automatically"
+
+    static func shouldConfirm(acknowledged: Bool) -> Bool {
+        !acknowledged
     }
 }
 

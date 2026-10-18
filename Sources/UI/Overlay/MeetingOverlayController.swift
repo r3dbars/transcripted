@@ -169,15 +169,10 @@ final class MeetingOverlayController: NSObject {
         guard let session = meetingSession else { return }
         Task { [weak session] in
             guard let session else { return }
-            switch session.state {
-            case .idle, .ready, .transcribing, .error:
-                await session.startRecording(trigger: .hotkey)
-            case .loadingModels, .startingRecording, .stoppingRecording:
-                // Still loading, or a start/stop is already in flight —
-                // ignore to avoid double-starts/double-stops.
-                break
-            case .recording:
-                await session.stopRecording(reason: .hotkeyToggle)
+            switch MeetingHotkeyTogglePolicy.action(for: session.state, startCallInFlight: session.startRecordingCallInFlight) {
+            case .start: await session.startRecording(trigger: .hotkey)
+            case .stop: await session.stopRecording(reason: .hotkeyToggle)
+            case .ignore: break
             }
         }
     }
@@ -1066,7 +1061,15 @@ final class MeetingOverlayController: NSObject {
             callAudioNote: callAudioNote,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             asksAboutCallAudio: islandCallAudioAskPending,
-            autoRecordNote: state == .recording && meetingSession?.activeRecordingWasAutoStarted == true
+            autoRecordNote: autoRecordNoteVisible
+        )
+    }
+
+    private var autoRecordNoteVisible: Bool {
+        MeetingAutoRecordNoteCopy.isVisible(
+            duration: currentDuration,
+            asksAboutCallAudio: islandCallAudioAskPending,
+            noteEnabled: state == .recording && meetingSession?.activeRecordingWasAutoStarted == true
         )
     }
 
@@ -1082,10 +1085,8 @@ final class MeetingOverlayController: NSObject {
     private func handleIslandAction(_ action: NotchIslandAction) {
         switch MeetingAutoRecordIslandActionPolicy.route(
             action: action,
-            noteVisible: state == .recording
-                && promptKind == nil
-                && meetingSession?.activeRecordingWasAutoStarted == true,
-            overlayPromptActive: state == .prompt
+            noteVisible: autoRecordNoteVisible,
+            overlayPromptActive: state == .prompt || islandCallAudioAskPending
         ) {
         case .stop:
             handleCloseTapped()

@@ -536,6 +536,7 @@ APP_SOURCES=(
     "Sources/Meeting/MicActivityMonitor.swift"
     "Sources/Meeting/MeetingEndDetectionPolicy.swift"
     "Sources/Meeting/MeetingAutoRecordPolicy.swift"
+    "Sources/Meeting/MeetingHotkeyTogglePolicy.swift"
     "Sources/Meeting/CameraActivityMonitor.swift"
     "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/BrowserCallEvidence.swift"

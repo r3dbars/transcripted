@@ -63,18 +63,31 @@ struct DetectedMeetingPromptWiring {
 
     static func autoRecordDecision(
         for candidate: MeetingPromptDetector.Candidate,
-        otherCaptureActive: Bool
+        otherCaptureActive: Bool,
+        autoRecordEnabled: Bool = AutoRecordDetectedCallsPreferences.isEnabled(),
+        microphoneGranted: Bool = TranscriptedPermissionAccess.isGranted(.microphone),
+        systemAudioGranted: Bool? = nil
     ) -> MeetingAutoRecordPolicy.Decision {
         MeetingAutoRecordPolicy.decision(
             for: MeetingAutoRecordPolicy.Request(
-                autoRecordEnabled: AutoRecordDetectedCallsPreferences.isEnabled(),
+                autoRecordEnabled: autoRecordEnabled,
                 evidence: candidate.callEvidence,
                 provider: candidate.provider,
                 reason: candidate.reason,
-                microphoneGranted: TranscriptedPermissionAccess.isGranted(.microphone),
-                systemAudioGranted: TranscriptedPermissionAccess.isGranted(.systemAudioRecording),
-                otherCaptureActive: otherCaptureActive
+                microphoneGranted: microphoneGranted,
+                systemAudioGranted: systemAudioGranted ?? liveSystemAudioGranted(),
+                otherCaptureActive: otherCaptureActive,
+                holdsMicrophone: candidate.holdsMicrophone,
+                isFocusedFrontWindow: candidate.isFocusedFrontWindow,
+                isMeetPreJoin: candidate.isMeetPreJoin,
+                evidenceAge: candidate.evidenceAge
             )
         )
+    }
+
+    /// Prompt-free live TCC read. A cached UserDefaults grant is not enough:
+    /// auto-start must not raise the macOS box from the background.
+    static func liveSystemAudioGranted() -> Bool {
+        TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem() == .authorized
     }
 }

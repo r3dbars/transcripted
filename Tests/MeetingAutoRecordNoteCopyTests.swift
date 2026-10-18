@@ -42,4 +42,27 @@ func testMeetingAutoRecordNoteCopy() {
             .inherit
         )
     }
+
+    runSuite("the auto-record note clears after a short time and yields to the call-audio ask") {
+        assertTrue(
+            MeetingAutoRecordNoteCopy.isVisible(
+                duration: 1, asksAboutCallAudio: false, noteEnabled: true
+            ),
+            "the consent note should show right after auto-start"
+        )
+        assertFalse(
+            MeetingAutoRecordNoteCopy.isVisible(
+                duration: MeetingAutoRecordNoteCopy.visibleDuration,
+                asksAboutCallAudio: false,
+                noteEnabled: true
+            ),
+            "the consent note must not stay up for the whole recording"
+        )
+        assertFalse(
+            MeetingAutoRecordNoteCopy.isVisible(
+                duration: 1, asksAboutCallAudio: true, noteEnabled: true
+            ),
+            "the call-audio ask must not be hidden behind the consent note"
+        )
+    }
 }

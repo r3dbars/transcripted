@@ -514,6 +514,8 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 1, "one prompt should be presented")
         assertEqual(box.candidate?.source, .calendarEvent, "native mic evidence should keep matching calendar context")
         assertEqual(box.candidate?.suggestedTranscriptTitle, "Design review", "native calendar-backed mic calls should keep the meeting title hint")
+        assertEqual(box.candidate?.callEvidence, .nativeApp, "calendar enrichment must keep the live call's proof")
+        assertTrue(box.candidate?.holdsMicrophone == true, "and that the native app is on the mic")
     }
 
     await runSuite("MeetingPromptDetector.updateMicInputUsers — the prompt names the user's own meeting shortcut") {
@@ -1174,6 +1176,31 @@ func testMeetingPromptDetector() async {
 
         assertEqual(box.promptCount, 1, "the call the user just said Not now to must not be re-asked as Google Meet")
         assertEqual(box.suppression?.reason, .declinedThisCall, "the skip should say the call was already declined")
+    }
+
+    await runSuite("MeetingPromptDetector — Stop on an auto-started recording declines the rest of the call") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+            box.suppressionCount += 1
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount, 1, "precondition: Zoom prompted")
+        detector.declineRestOfDetectedCall()
+
+        detector.updateMicInputUsers(["us.zoom.xos", "com.microsoft.teams2"])
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount, 1, "Stop/Discard must not let auto-start or a prompt restart this call")
+        assertEqual(box.suppression?.reason, .declinedThisCall, "the rest of the call is a decline for every provider")
     }
 
     await runSuite("MeetingPromptDetector learned backoff — never learned off without window titles") {

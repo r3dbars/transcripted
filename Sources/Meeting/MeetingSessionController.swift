@@ -170,7 +170,6 @@ extension MeetingSessionController {
             calendarTitle: calendarSuggestedTitleProvider?()
         )
         activeRecordingTrigger = trigger
-        activeRecordingWasAutoStarted = autoStarted
         activeRecordingIdentity = UUID()
         disableCallEndDetection()
         micBoostPromptRecordingIdentity = nil
@@ -265,6 +264,7 @@ extension MeetingSessionController {
         }
 
         activeRecordingStartedAt = Date()
+        activeRecordingWasAutoStarted = autoStarted
         unexpectedCaptureStopEvidence = nil
         if trigger == .detectedPrompt {
             activeDetectedPromptRecordingStartedAt = activeRecordingStartedAt
@@ -320,6 +320,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
+        finishAutoStartedRecording(recordDecline: true)
         clearActiveRecordingIdentity()
 
         DiagnosticsTrail.record(

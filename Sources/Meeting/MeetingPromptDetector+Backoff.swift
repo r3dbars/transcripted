@@ -64,6 +64,35 @@ extension MeetingPromptDetector {
         learnedBackoff.reset()
     }
 
+    /// Stop or Discard on an auto-started recording: do not auto-start or
+    /// prompt again until this call ends, for every provider.
+    func declineRestOfDetectedCall(now: Date = Date()) {
+        guard var session = detectedCallSession else { return }
+        session.userDeclined = true
+        session.autoStartDeclined = true
+        let kinds = MeetingPromptLearnedBackoff.browserKinds.union(
+            Set(MeetingPromptProvider.allCases.map { MeetingPromptLearnedBackoff.nativeKind(for: $0) })
+        )
+        for kind in kinds {
+            session.declinedKinds[kind] = now
+        }
+        if var titles = browserTitles {
+            for kind in MeetingPromptLearnedBackoff.browserKinds {
+                titles.declinedKinds[kind] = now
+            }
+            browserTitles = titles
+        }
+        let until = now.addingTimeInterval(declinedThisCallLimit)
+        for provider in MeetingPromptProvider.allCases {
+            suppressRuntimePrompts(
+                for: provider,
+                until: until,
+                reason: MeetingPromptSuppressionReason.declinedThisCall.rawValue
+            )
+        }
+        detectedCallSession = session
+    }
+
     /// Consecutive explicit dismissals for `provider` since the last accepted
     /// recording, for the dismiss-streak telemetry bucket.
     func dismissStreak(for provider: MeetingPromptProvider) -> Int {

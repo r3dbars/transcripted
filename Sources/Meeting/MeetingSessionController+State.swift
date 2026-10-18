@@ -8,24 +8,10 @@
 // and the model downloader. Exposes @Published state for the meeting UI to
 // bind against.
 //
-// Boot sequence:
-//   1. init() constructs all Core services with app-owned CoreStoragePaths
-//      so meeting captures follow the selected capture library while speakers DB,
-//      stats DB, failed-queue, logs, and scratch audio stay under the app-owned
-//      Transcripted Application Support folders.
-//   2. prepareModels() loads the selected STT model + offline PyAnnote/WeSpeaker diarization.
-//      TranscriptedAppState runs it quietly at launch. Optional streaming
-//      diarization warms only when bundled and never blocks the current
-//      meeting transcript path.
-//   3. startRecording() begins capture via MeetingCaptureBridge. It never waits
-//      on step 2; models that are still loading catch up in the background.
-//   4. stopRecording() awaits capture files, then either starts a background
-//      transcription immediately or enqueues it behind the current one.
-//      TranscriptionTaskManager still runs one diarize→transcribe→save
-//      pipeline at a time and writes a .md to MeetingStoragePaths.transcriptsFolder.
-//
-// The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
-// wires those up.
+// Boot: init() builds Core services with app-owned paths; prepareModels()
+// loads STT + diarization in the background; startRecording() never waits
+// on that; stopRecording() then transcribes or enqueues.
+// The session controller does not own a hotkey or UI.
 import AppKit
 import Combine
 import Foundation
@@ -183,6 +169,7 @@ final class MeetingSessionController: ObservableObject {
     var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     var activeRecordingTrigger: StartTrigger = .unknown
     var activeRecordingWasAutoStarted = false
+    var onAutoStartedRecordingWillEnd: (() -> Void)?
     var activeRecordingIdentity: UUID?
     var micBoostPromptRecordingIdentity: UUID?
     var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
@@ -658,12 +645,22 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    func finishAutoStartedRecording(recordDecline: Bool = false) {
+        if MeetingAutoRecordPolicy.recordsDeclineOnEnd(
+            wasAutoStarted: activeRecordingWasAutoStarted,
+            userStoppedOrDiscarded: recordDecline
+        ) {
+            onAutoStartedRecordingWillEnd?()
+        }
+        activeRecordingWasAutoStarted = false
+    }
+
     func clearActiveRecordingIdentity() {
         if let identity = activeRecordingIdentity {
             LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
         }
         activeRecordingIdentity = nil
-        activeRecordingWasAutoStarted = false
+        finishAutoStartedRecording()
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil

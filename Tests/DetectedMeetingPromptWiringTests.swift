@@ -112,6 +112,104 @@ func testDetectedMeetingPromptWiring() async {
         assertEqual(rig.autoStarts, [], "auto-start does not fire")
         assertEqual(rig.shown, [], "no shown event")
     }
+
+    runSuite("the real auto-record decision auto-starts a proven native Zoom call") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: false,
+                autoRecordEnabled: true,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(
+            wiringCandidate(id: "wiring-real-zoom", reason: .micInput, provenNativeZoom: true)
+        )
+
+        assertEqual(presented, true, "the detector still treats the call as handled")
+        assertTrue(rig.island.prompt == nil, "a proven call must not show Record / Not now")
+        assertEqual(rig.autoStarts, ["wiring-real-zoom"], "the real policy must reach the Record start path")
+        assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
+    }
+
+    runSuite("the real auto-record decision never auto-starts a tab title without the mic") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: false,
+                autoRecordEnabled: true,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+
+        var candidate = wiringCandidate(id: "wiring-tab", reason: .cameraInput)
+        candidate.callEvidence = .tabTitle
+        candidate.holdsMicrophone = false
+        candidate.isFocusedFrontWindow = true
+        candidate.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
+        let presented = rig.detector.onPromptRequest?(candidate)
+
+        assertEqual(presented, true, "the island prompt is still offered")
+        assertEqual(rig.autoStarts, [], "a tab title without the mic must not auto-start")
+        assertEqual(rig.shown, ["wiring-tab"], "the existing Record prompt still appears")
+    }
+
+    runSuite("the real auto-record decision keeps a calendar prompt while dictating") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: true,
+                autoRecordEnabled: false,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(
+            wiringCandidate(id: "wiring-cal", reason: .calendarNearby)
+        )
+
+        assertEqual(presented, true, "dictation must not drop calendar prompts when auto-record is off")
+        assertEqual(rig.autoStarts, [], "auto-start does not fire")
+        assertEqual(rig.shown, ["wiring-cal"], "the calendar prompt still reaches the island")
+    }
+
+    runSuite("the real auto-record decision auto-starts a proven call even when the candidate is a calendar event") {
+        let rig = WiringRig()
+        rig.decision = { candidate in
+            DetectedMeetingPromptWiring.autoRecordDecision(
+                for: candidate,
+                otherCaptureActive: false,
+                autoRecordEnabled: true,
+                microphoneGranted: true,
+                systemAudioGranted: true
+            )
+        }
+        rig.install()
+
+        let presented = rig.detector.onPromptRequest?(
+            wiringCandidate(
+                id: "wiring-cal-proof",
+                reason: .calendarNearby,
+                source: .calendarEvent,
+                provenNativeZoom: true
+            )
+        )
+
+        assertEqual(presented, true, "the detector still treats the call as handled")
+        assertTrue(rig.island.prompt == nil, "a proven call must not show Record / Not now just because a calendar event also matched")
+        assertEqual(rig.autoStarts, ["wiring-cal-proof"], "calendar enrichment must not block auto-start")
+        assertEqual(rig.shown, [], "no shown event for a prompt nobody saw")
+    }
 }
 
 @available(macOS 14.0, *)
@@ -164,7 +262,12 @@ private final class WiringFakeIsland: NotchIslandCallPromptPresenting {
 
 @available(macOS 14.0, *)
 @MainActor
-private func wiringCandidate(id: String, reason: MeetingPromptReason) -> MeetingPromptDetector.Candidate {
+private func wiringCandidate(
+    id: String,
+    reason: MeetingPromptReason,
+    source: MeetingPromptSource = .runtimeApp,
+    provenNativeZoom: Bool = false
+) -> MeetingPromptDetector.Candidate {
     let start = Date(timeIntervalSince1970: 2_000)
     return MeetingPromptDetector.Candidate(
         id: id,
@@ -172,10 +275,14 @@ private func wiringCandidate(id: String, reason: MeetingPromptReason) -> Meeting
         detail: "Record this call?",
         provider: .zoom,
         reason: reason,
-        source: .runtimeApp,
+        source: source,
         startDate: start,
         endDate: start.addingTimeInterval(1_800),
         meetingURL: nil,
-        suggestedTranscriptTitle: nil
+        suggestedTranscriptTitle: nil,
+        callEvidence: provenNativeZoom ? .nativeApp : .none,
+        holdsMicrophone: provenNativeZoom,
+        isFocusedFrontWindow: provenNativeZoom,
+        evidenceAge: provenNativeZoom ? MeetingAutoRecordPolicy.evidenceHoldDuration : 0
     )
 }

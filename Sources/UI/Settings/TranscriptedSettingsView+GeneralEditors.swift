@@ -50,6 +50,12 @@ extension TranscriptedSettingsView {
                 get: { autoDetectCallsEnabled && autoRecordDetectedCallsEnabled },
                 set: { newValue in
                     guard autoDetectCallsEnabled else { return }
+                    if newValue, AutoRecordDetectedCallsConsentPolicy.shouldConfirm(
+                        acknowledged: AutoRecordDetectedCallsPreferences.hasAcknowledgedConsent()
+                    ) {
+                        confirmsAutoRecordConsent = true
+                        return
+                    }
                     autoRecordDetectedCallsEnabled = newValue
                     trackSettingsToggle("auto_record_detected_calls", enabled: newValue, page: .general)
                     AutoRecordDetectedCallsPreferences.setEnabled(newValue)
@@ -85,6 +91,21 @@ extension TranscriptedSettingsView {
             permissionsEditor: { generalPermissionsEditor },
             reportingEditor: { generalReportingEditor }
         )
+        .confirmationDialog(
+            AutoRecordDetectedCallsConsentPolicy.title,
+            isPresented: $confirmsAutoRecordConsent,
+            titleVisibility: .visible
+        ) {
+            Button(AutoRecordDetectedCallsConsentPolicy.confirmTitle) {
+                AutoRecordDetectedCallsPreferences.acknowledgeConsent()
+                autoRecordDetectedCallsEnabled = true
+                trackSettingsToggle("auto_record_detected_calls", enabled: true, page: .general)
+                AutoRecordDetectedCallsPreferences.setEnabled(true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(AutoRecordDetectedCallsConsentPolicy.message)
+        }
         .sheet(isPresented: $showCorrectionsSheet) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {

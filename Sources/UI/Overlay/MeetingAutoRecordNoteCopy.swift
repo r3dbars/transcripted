@@ -9,6 +9,16 @@ enum MeetingAutoRecordNoteCopy {
     static let detail = "This call started without asking."
     static let primaryTitle = "Stop"
     static let secondaryTitle = "Discard"
+    /// Short enough to get out of the way of the call-audio ask.
+    static let visibleDuration: TimeInterval = 8
+
+    static func isVisible(
+        duration: TimeInterval,
+        asksAboutCallAudio: Bool,
+        noteEnabled: Bool
+    ) -> Bool {
+        noteEnabled && !asksAboutCallAudio && duration < visibleDuration
+    }
 
     static var prompt: NotchIslandMeetingContent.Prompt {
         NotchIslandMeetingContent.Prompt(

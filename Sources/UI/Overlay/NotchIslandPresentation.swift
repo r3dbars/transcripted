@@ -514,11 +514,16 @@ enum NotchIslandPresentation {
         if case .error(let title, let message, let canOpen, let grantsSystemAudio)? = meeting?.phase {
             return .meetingError(title: title, message: message, canOpen: canOpen, grantsSystemAudio: grantsSystemAudio)
         }
-        if let meeting, meeting.isRecording, meeting.autoRecordNote {
-            return .meetingPrompt(MeetingAutoRecordNoteCopy.prompt)
-        }
         if let meeting, meeting.isRecording, meeting.asksAboutCallAudio, meeting.callAudioNote == .off {
             return .meetingCallAudioAsk
+        }
+        if let meeting, meeting.isRecording,
+           MeetingAutoRecordNoteCopy.isVisible(
+            duration: meeting.duration,
+            asksAboutCallAudio: meeting.asksAboutCallAudio,
+            noteEnabled: meeting.autoRecordNote
+           ) {
+            return .meetingPrompt(MeetingAutoRecordNoteCopy.prompt)
         }
         return nil
     }

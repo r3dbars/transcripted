@@ -30,6 +30,12 @@ extension MeetingPromptDetector {
         var readToken = 0
         /// Browser kinds the user said Not now to in this session.
         var declinedKinds: [String: Date] = [:]
+        /// The named call is in the focused/front window right now.
+        var namedCallIsFocused = false
+        /// The focused window is Meet's pre-join lobby.
+        var namedCallIsPreJoin = false
+        /// When the focused in-call tab and the browser mic were both true.
+        var autoStartProofSince: Date?
 
         var verdict: BrowserCallTitleVerdict? {
             if let namedCall { return .call(provider: namedCall) }
@@ -227,6 +233,19 @@ extension MeetingPromptDetector {
             }
         case .callSite, .unknown:
             break
+        }
+        if let focusedProof = BrowserCallEvidence.focusedInCallProof(in: titles) {
+            session.namedCallIsFocused = true
+            session.namedCallIsPreJoin = focusedProof.isMeetPreJoin
+            if !focusedProof.isMeetPreJoin, browserMicSince != nil {
+                session.autoStartProofSince = session.autoStartProofSince ?? now
+            } else {
+                session.autoStartProofSince = nil
+            }
+        } else {
+            session.namedCallIsFocused = false
+            session.namedCallIsPreJoin = false
+            session.autoStartProofSince = nil
         }
         browserTitles = session
     }

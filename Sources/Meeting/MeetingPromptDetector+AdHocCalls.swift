@@ -14,6 +14,7 @@ extension MeetingPromptDetector {
     func updateMicInputUsers(_ bundleIDs: Set<String>) {
         guard bundleIDs != micActiveBundleIDs else { return }
         micActiveBundleIDs = bundleIDs
+        refreshNativeMicSince()
         if bundleIDs.contains(where: MeetingPromptProvider.isBrowserBundleID) {
             browserMicEndTask?.cancel()
             browserMicEndTask = nil
@@ -104,6 +105,9 @@ extension MeetingPromptDetector {
         // Whether a meeting recording during this call already counted as a
         // "yes" for the learning.
         var countedRecordingForLearning = false
+        /// Stop or Discard on an auto-started recording: stay quiet until
+        /// this call ends, for every provider.
+        var autoStartDeclined = false
     }
 
     // MARK: - Detected-call session (missed-call nudge)
@@ -384,6 +388,7 @@ extension MeetingPromptDetector {
             meetingShortcut: meetingShortcutDisplay()
         )
 
+        let titleSession = evidence == .tabTitle ? browserTitles : nil
         return ScoredCandidate(
             candidate: Candidate(
                 id: id,
@@ -396,10 +401,50 @@ extension MeetingPromptDetector {
                 endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
                 meetingURL: nil,
                 suggestedTranscriptTitle: nil,
-                callEvidence: evidence
+                callEvidence: evidence,
+                holdsMicrophone: reason == .micInput,
+                isFocusedFrontWindow: evidence == .nativeApp || titleSession?.namedCallIsFocused == true,
+                isMeetPreJoin: titleSession?.namedCallIsPreJoin == true,
+                evidenceAge: autoRecordEvidenceAge(
+                    for: provider, evidence: evidence, reason: reason, now: now
+                )
             ),
             score: presentation.score
         )
+    }
+
+    func refreshNativeMicSince(now: Date = Date()) {
+        let native = Set(
+            micActiveBundleIDs.compactMap { bundleID -> MeetingPromptProvider? in
+                guard let provider = MeetingPromptProvider.micInputProvider(forBundleID: bundleID),
+                      provider != .googleMeet else { return nil }
+                return provider
+            }
+        )
+        for provider in native where nativeMicSince[provider] == nil {
+            nativeMicSince[provider] = now
+        }
+        nativeMicSince = nativeMicSince.filter { native.contains($0.key) }
+    }
+
+    func autoRecordEvidenceAge(
+        for provider: MeetingPromptProvider,
+        evidence: MeetingPromptCallEvidence,
+        reason: MeetingPromptReason,
+        now: Date
+    ) -> TimeInterval {
+        guard reason == .micInput else { return 0 }
+        let since: Date?
+        switch evidence {
+        case .tabTitle:
+            since = browserTitles?.autoStartProofSince ?? browserMicSince
+        case .nativeApp:
+            since = nativeMicSince[provider]
+        default:
+            return 0
+        }
+        guard let since else { return 0 }
+        return max(0, now.timeIntervalSince(since))
     }
 
     func micCandidateID(for provider: MeetingPromptProvider) -> String {

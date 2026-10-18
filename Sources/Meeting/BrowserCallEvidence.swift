@@ -45,8 +45,13 @@ import Foundation
 /// One browser window's title as read through Accessibility.
 struct BrowserWindowTitle: Equatable {
     let title: String
-    /// Whether this is the browser app's focused (key) window.
+    /// The Mac's front window, not a background browser's internally focused one.
     let isFocused: Bool
+
+    /// AX focused on a background browser is not the front window.
+    static func isSystemFront(appPID: Int32, frontmostPID: Int32?, windowIsAppFocused: Bool) -> Bool {
+        windowIsAppFocused && frontmostPID == appPID
+    }
 }
 
 /// What the browser window titles say about the current mic use.
@@ -245,6 +250,28 @@ enum BrowserCallEvidence {
         return .unknown
     }
 
+    /// Meet's lobby / pre-join screen: "Ready to join", or a title that is
+    /// only the meeting code (`Meet - abc-defg-hij`). Named in-call titles
+    /// (`Meet - Weekly sync`) are not.
+    static func isMeetPreJoinTitle(_ rawTitle: String) -> Bool {
+        let title = normalized(rawTitle)
+        if meetPreJoinMarkers.contains(where: { containsWord(title, $0) }) {
+            return true
+        }
+        return isMeetCodeOnlyTitle(title)
+    }
+
+    /// The focused/front window's in-call provider, if that window names a
+    /// call. Auto-record uses this so a Meet tab in the background cannot
+    /// start capture. Prompting still classifies every window.
+    static func focusedInCallProof(
+        in windows: [BrowserWindowTitle]
+    ) -> (provider: MeetingPromptProvider, isMeetPreJoin: Bool)? {
+        guard let focused = windows.first(where: \.isFocused) else { return nil }
+        guard let provider = inCallProvider(forTitle: focused.title) else { return nil }
+        return (provider, provider == .googleMeet && isMeetPreJoinTitle(focused.title))
+    }
+
     /// The provider when `rawTitle` only exists while a call is on, else `nil`.
     static func inCallProvider(forTitle rawTitle: String) -> MeetingPromptProvider? {
         let title = normalized(rawTitle)
@@ -332,6 +359,29 @@ enum BrowserCallEvidence {
             options: .regularExpression
         ) != nil
     }
+
+    /// A title that is only the Meet code (plus an optional browser suffix).
+    /// That is the pre-join lobby for an unnamed meeting; once you are in
+    /// the call the tab usually picks up the meeting name.
+    private static func isMeetCodeOnlyTitle(_ title: String) -> Bool {
+        let page = title.replacingOccurrences(
+            of: #" - (google chrome|safari|microsoft edge|arc|brave|firefox|dia).*$"#,
+            with: "",
+            options: .regularExpression
+        )
+        return page.range(
+            of: #"^(meet - )?[a-z]{3}-[a-z]{4}-[a-z]{3}$"#,
+            options: .regularExpression
+        ) != nil
+    }
+
+    private static let meetPreJoinMarkers: [String] = [
+        "ready to join",
+        "ask to join",
+        "waiting to join",
+        "you'll join",
+        "you will join",
+    ]
 
     /// Teams web window titles during a meeting or call ("Meeting with Ana |
     /// Microsoft Teams", "Call with Sam | Microsoft Teams"). Chat, calendar

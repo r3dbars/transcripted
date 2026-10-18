@@ -19,6 +19,25 @@ final class MeetingPromptDetector {
         /// What convinced us this is a call. Set on ad-hoc (mic / camera /
         /// output) candidates; `.none` for calendar and runtime prompts.
         var callEvidence: MeetingPromptCallEvidence = .none
+        /// The call app or browser is actually on the mic.
+        var holdsMicrophone: Bool = false
+        /// The named call is in the focused/front tab or window.
+        var isFocusedFrontWindow: Bool = false
+        /// Meet's pre-join / lobby screen, not an in-call tab.
+        var isMeetPreJoin: Bool = false
+        /// How long the auto-start evidence has been true.
+        var evidenceAge: TimeInterval = 0
+
+        /// Keep a calendar event's title while retaining the live call's proof.
+        func borrowingCallProof(from live: Candidate) -> Candidate {
+            var copy = self
+            copy.callEvidence = live.callEvidence
+            copy.holdsMicrophone = live.holdsMicrophone
+            copy.isFocusedFrontWindow = live.isFocusedFrontWindow
+            copy.isMeetPreJoin = live.isMeetPreJoin
+            copy.evidenceAge = live.evidenceAge
+            return copy
+        }
     }
 
     struct ScoredCandidate {
@@ -70,6 +89,8 @@ final class MeetingPromptDetector {
     /// How long an unrecognized browser has to hold the mic before it prompts.
     /// Tests shrink these.
     var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
+    /// How long proven auto-start evidence must last. Tests set this to 0.
+    var autoRecordEvidenceHoldDuration: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration
 
     // State below that isn't `private` is only internal because the
     // MeetingPromptDetector+*.swift extensions use it. Treat it as private
@@ -111,6 +132,8 @@ final class MeetingPromptDetector {
     private var suppressionTelemetryUntil: [String: Date] = [:]
     // Bundle IDs currently holding the mic input, pushed by MicActivityMonitor.
     var micActiveBundleIDs: Set<String> = []
+    /// When each native conferencing app first showed up on the mic this call.
+    var nativeMicSince: [MeetingPromptProvider: Date] = [:]
     // Whether a camera is confirmed in use, pushed by CameraActivityMonitor.
     var cameraInUse = false
     // Native conferencing bundle IDs confirmed playing audio output, pushed by
@@ -328,6 +351,41 @@ final class MeetingPromptDetector {
         let sortedCandidates = candidates.sorted(by: sortCandidates)
         guard let match = preferredCandidate(from: sortedCandidates) else { return }
 
+        if detectedCallSession?.autoStartDeclined == true {
+            recordSuppression(
+                candidate: match.candidate,
+                reason: .declinedThisCall,
+                now: now,
+                cooldownReason: MeetingPromptSuppressionReason.declinedThisCall.rawValue
+            )
+            return
+        }
+
+        if AutoRecordDetectedCallsPreferences.isEnabled(),
+           match.candidate.evidenceAge < autoRecordEvidenceHoldDuration {
+            let held = MeetingAutoRecordPolicy.Request(
+                autoRecordEnabled: true,
+                evidence: match.candidate.callEvidence,
+                provider: match.candidate.provider,
+                reason: match.candidate.reason,
+                microphoneGranted: true,
+                systemAudioGranted: true,
+                otherCaptureActive: false,
+                holdsMicrophone: match.candidate.holdsMicrophone,
+                isFocusedFrontWindow: match.candidate.isFocusedFrontWindow,
+                isMeetPreJoin: match.candidate.isMeetPreJoin,
+                evidenceAge: MeetingAutoRecordPolicy.evidenceHoldDuration
+            )
+            if MeetingAutoRecordPolicy.isCallProven(held) {
+                let remaining = max(
+                    0.05,
+                    autoRecordEvidenceHoldDuration - match.candidate.evidenceAge
+                )
+                scheduleBrowserEvidenceRecheck(at: now.addingTimeInterval(remaining), now: now)
+                return
+            }
+        }
+
         if shouldSkipPromptEvaluation?() == true {
             recordSuppression(
                 candidate: match.candidate,
@@ -384,7 +442,11 @@ final class MeetingPromptDetector {
         // could be any provider, so it only defers to a calendar prompt that
         // is already showing or snoozed.
         guard first.candidate.isGenericBrowserCall else {
-            return calendarCandidate ?? first
+            guard let calendarCandidate else { return first }
+            return ScoredCandidate(
+                candidate: calendarCandidate.candidate.borrowingCallProof(from: first.candidate),
+                score: calendarCandidate.score
+            )
         }
         return sortedCandidates.first {
             $0.candidate.source == .calendarEvent &&
