@@ -146,6 +146,8 @@
         "build-beta.sh",
         "scripts/entrypoints/build-beta.sh",
         "docs/appcast.xml",
+        "config/release/legacy-appcast-freeze.json",
+        "scripts/entrypoints/lib/release-package.sh",
         "docs/release-packaging.md",
         "docs/sparkle-updates.md"
       ],

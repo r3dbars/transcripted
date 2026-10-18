@@ -1,5 +1,20 @@
 name: Release Candidate
 
+# Three jobs, so the code that compiles never sees a signing secret:
+#
+#   build-unsigned   no environment, no secrets. Compiles the app from the
+#                    trusted release-prep ref and uploads it unsigned.
+#   sign-and-notarize  `release` environment (required reviewer, main only).
+#                    Runs only checked-in signing/appcast scripts from main on
+#                    the uploaded app: no build.sh, build-beta.sh,
+#                    build-deps.sh, swift build or swift run.
+#   verify-candidate no environment, no secrets. Opens the signed DMG and runs
+#                    the packaged-app smoke, privacy sweep and release audit.
+#
+# Nothing here publishes. The final artifact holds the notarized DMG, the
+# signed appcast.xml and the deltas; the owner uploads them to a GitHub release
+# (docs/release-packaging.md).
+
 on:
   workflow_dispatch:
     inputs:
@@ -11,24 +26,29 @@ on:
         description: Release version without the v prefix
         required: true
         type: string
+      mark_critical_for_old_builds:
+        description: Mark the new feed item critical for builds 1.1.22-1.1.62 (owner decision; see docs/sparkle-updates.md)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
 
 jobs:
-  build-notarized-candidate:
+  build-unsigned:
     runs-on: macos-26
-    # Signing/notarization/Sparkle secrets live in the main-only `release`
-    # environment with Justin as required reviewer. Justin must create that
-    # environment (and move the 6 secrets) BEFORE this merges, or RCs fail.
-    # Dispatch from main: gh workflow run release-candidate.yml --ref main -f source_ref=<prep branch> -f version=<x.y.z>
-    environment: release
-    timeout-minutes: 180
+    # No `environment:` and no `secrets.` anywhere in this job: it compiles
+    # repository code. The signing job below is the only one that holds
+    # credentials. Dispatch from main:
+    # gh workflow run release-candidate.yml --ref main -f source_ref=<prep branch> -f version=<x.y.z>
+    timeout-minutes: 120
+    outputs:
+      source_sha: ${{ steps.pin.outputs.source_sha }}
     env:
       GH_TOKEN: ${{ github.token }}
       TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
       RELEASE_VERSION: ${{ inputs.version }}
-      SPARKLE_MAXIMUM_DELTAS: "5"
 
     steps:
       - name: Checkout release candidate
@@ -36,8 +56,10 @@ jobs:
         with:
           ref: ${{ inputs.source_ref }}
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Verify trusted release-only diff
+        id: pin
         shell: bash
         run: |
           set -euo pipefail
@@ -86,6 +108,9 @@ jobs:
             exit 1
           fi
 
+          # Later jobs check out this exact commit, not the branch name.
+          echo "source_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Free disk space
         shell: bash
         run: |
@@ -93,29 +118,6 @@ jobs:
           sudo rm -rf /Library/Developer/CoreSimulator/Profiles/Runtimes || true
           sudo rm -rf "$HOME/Library/Developer/Xcode/DerivedData" || true
           df -h /
-
-      - name: Install Developer ID certificate
-        shell: bash
-        env:
-          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_CERT }}
-          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
-          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
-        run: |
-          set -euo pipefail
-          # Only /usr/bin/codesign may use the key (no `import -A`). Nothing
-          # here uses productsign, and trusting /usr/bin/security would let it
-          # export the private key without a prompt. The keychain relocks after
-          # 3 h (the job timeout) and the always() step at the end deletes it.
-          keychain_path="$RUNNER_TEMP/transcripted-signing.keychain-db"
-          certificate_path="$RUNNER_TEMP/developer-id.p12"
-          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security set-keychain-settings -lut 10800 "$keychain_path"
-          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
-          printf '%s' "$DEVELOPER_ID_CERT" | base64 --decode -o "$certificate_path"
-          security import "$certificate_path" -P "$DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12 -k "$keychain_path"
-          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
-          security list-keychain -d user -s "$keychain_path"
-          security find-identity -v -p codesigning "$keychain_path"
 
       - name: Restore release models from latest public build
         shell: bash
@@ -204,12 +206,106 @@ jobs:
           fi
           bash build-deps.sh
 
-      - name: Build signed distribution package
+      # No signing identity exists on this job's keychain. build-beta.sh stops
+      # after the app and dSYM; the signing job signs and packages it.
+      - name: Build unsigned app
         shell: bash
         env:
-          SKIP_NOTARIZATION: "1"
-          SIGNING_IDENTITY: Developer ID Application
+          TRANSCRIPTED_UNSIGNED_APP_ONLY: "1"
         run: bash build-beta.sh '' GitHub
+
+      - name: Package unsigned app and debug symbols
+        shell: bash
+        run: |
+          set -euo pipefail
+          ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app "build/Transcripted-$RELEASE_VERSION-unsigned-app.zip"
+          ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-$RELEASE_VERSION.dSYM.zip"
+          shasum -a 256 "build/Transcripted-$RELEASE_VERSION-unsigned-app.zip" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload unsigned build
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-unsigned-build
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+          path: |
+            build/Transcripted-${{ inputs.version }}-unsigned-app.zip
+            build/Transcripted-${{ inputs.version }}.dSYM.zip
+
+  sign-and-notarize:
+    needs: build-unsigned
+    runs-on: macos-26
+    # Signing/notarization/Sparkle secrets live in the main-only `release`
+    # environment with Justin as required reviewer, and only this job names
+    # `environment: release` or `secrets.`.
+    environment: release
+    timeout-minutes: 120
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_VERSION: ${{ inputs.version }}
+      SPARKLE_MAXIMUM_DELTAS: "5"
+
+    steps:
+      - name: Require a dispatch from main
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Signing runs only for workflows dispatched from main (this one is $GITHUB_REF)."
+            exit 1
+          fi
+
+      # The checkout is the dispatched commit on main, not the release-prep
+      # branch: the signing scripts below are the reviewed ones on main.
+      - name: Checkout signing scripts
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Download unsigned build
+        uses: actions/download-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-unsigned-build
+          path: ${{ runner.temp }}/unsigned-build
+
+      - name: Unpack unsigned app
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf build/Transcripted.app
+          mkdir -p build
+          ditto -x -k "$RUNNER_TEMP/unsigned-build/Transcripted-$RELEASE_VERSION-unsigned-app.zip" build/
+          test -d build/Transcripted.app
+
+      - name: Install Developer ID certificate
+        shell: bash
+        env:
+          DEVELOPER_ID_CERT: ${{ secrets.DEVELOPER_ID_CERT }}
+          DEVELOPER_ID_PASSWORD: ${{ secrets.DEVELOPER_ID_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Only /usr/bin/codesign may use the key (no `import -A`). Nothing
+          # here uses productsign, and trusting /usr/bin/security would let it
+          # export the private key without a prompt. The keychain relocks after
+          # 3 h (the job timeout) and the always() step at the end deletes it.
+          keychain_path="$RUNNER_TEMP/transcripted-signing.keychain-db"
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 10800 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          printf '%s' "$DEVELOPER_ID_CERT" | base64 --decode -o "$certificate_path"
+          security import "$certificate_path" -P "$DEVELOPER_ID_PASSWORD" -T /usr/bin/codesign -t cert -f pkcs12 -k "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Sign app and build signed DMG
+        shell: bash
+        env:
+          SIGNING_IDENTITY: Developer ID Application
+        run: bash scripts/release/sign-release.sh --app build/Transcripted.app --version "$RELEASE_VERSION"
 
       - name: Notarize and staple DMG
         shell: bash
@@ -233,9 +329,8 @@ jobs:
       # Sparkle builds a delta update from every older DMG in the updates
       # folder, so clients on a recent version download only what changed
       # (about 1-3 MB) instead of the full ~510 MB DMG. The models are copied
-      # from the previous release above, so their bytes never change between
-      # releases (1.1.67 adds Nemotron and ReDimNet2, so its deltas are
-      # bigger once). A missing old DMG only means no delta for that version.
+      # from the previous release in the build job, so their bytes never change
+      # between releases. A missing old DMG only means no delta for that version.
       - name: Download recent releases for delta updates
         shell: bash
         run: |
@@ -253,25 +348,52 @@ jobs:
             if ! [[ "$old_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || [ "$old_version" = "$RELEASE_VERSION" ]; then
               continue
             fi
-            if [ -f "$RUNNER_TEMP/previous-release/$dmg_name" ]; then
-              mv "$RUNNER_TEMP/previous-release/$dmg_name" "$delta_sources/"
-            elif ! gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$dmg_name" --dir "$delta_sources"; then
+            if ! gh release download "$tag" --repo "$GITHUB_REPOSITORY" --pattern "$dmg_name" --dir "$delta_sources"; then
               echo "::warning::Could not download $dmg_name; clients on $old_version will get the full update."
             fi
           done
           ls -la "$delta_sources"
           df -h "$RUNNER_TEMP"
 
-      - name: Generate signed Sparkle metadata
+      # generate_appcast and sign_update come straight from the pinned, sha256
+      # checked Sparkle release. This job does not run build-deps.sh.
+      - name: Fetch Sparkle tools
+        shell: bash
+        run: bash scripts/release/fetch-sparkle-tools.sh
+
+      # The feed is the appcast.xml asset of the latest GitHub release. Start
+      # from the one published with the previous release so history is kept; the
+      # first release on this feed starts from the frozen legacy
+      # docs/appcast.xml instead.
+      - name: Fetch the current feed
+        shell: bash
+        run: |
+          set -euo pipefail
+          feed_dir="$RUNNER_TEMP/feed"
+          mkdir -p "$feed_dir/base"
+          previous_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
+          if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir "$feed_dir/base"; then
+            echo "Merging into the feed published with $previous_tag."
+          else
+            echo "::notice::$previous_tag has no appcast.xml asset; starting from the frozen legacy docs/appcast.xml (first release on the release-asset feed)."
+            cp docs/appcast.xml "$feed_dir/base/appcast.xml"
+          fi
+
+      - name: Generate Sparkle metadata
         shell: bash
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           set -euo pipefail
           updates_dir="$RUNNER_TEMP/transcripted-updates"
+          feed_dir="$RUNNER_TEMP/feed"
           mkdir -p "$updates_dir"
           cp "build/Transcripted-$RELEASE_VERSION.dmg" "$updates_dir/"
           find "$RUNNER_TEMP/sparkle-delta-sources" -maxdepth 1 -name 'Transcripted-*.dmg' -exec mv {} "$updates_dir/" \;
+          # The shipped Info.plist, not the checkout's: it is the one the
+          # minimum macOS version and version number come from.
+          export INFO_PLIST_PATH="build/Transcripted.app/Contents/Info.plist"
+          export REPO_APPCAST_PATH="$feed_dir/appcast.xml"
           # generate_appcast unpacks every DMG here into its cache (~0.5 GB
           # each), so clear the old DMGs and that cache once they're used.
           sparkle_cache="$HOME/Library/Caches/Sparkle_generate_appcast"
@@ -286,6 +408,7 @@ jobs:
           elif command -v timeout >/dev/null 2>&1; then
             delta_timeout=(timeout 45m)
           fi
+          cp "$feed_dir/base/appcast.xml" "$REPO_APPCAST_PATH"
           delta_attempt_failed=0
           if ! ${delta_timeout[@]+"${delta_timeout[@]}"} bash scripts/release/generate-sparkle-appcast.sh "$updates_dir"; then
             delta_attempt_failed=1
@@ -293,7 +416,7 @@ jobs:
             # this release with full downloads only, exactly like before.
             echo "::warning::Sparkle metadata with delta updates failed; retrying with the full DMG only."
             free_delta_disk
-            git checkout -- docs/appcast.xml
+            cp "$feed_dir/base/appcast.xml" "$REPO_APPCAST_PATH"
             rm -rf "$updates_dir"
             mkdir -p "$updates_dir"
             cp "build/Transcripted-$RELEASE_VERSION.dmg" "$updates_dir/"
@@ -321,6 +444,24 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The signature covers the whole file, so this is the last edit to it.
+      - name: Mark critical and sign the feed
+        shell: bash
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+          MARK_CRITICAL: ${{ inputs.mark_critical_for_old_builds }}
+        run: |
+          set -euo pipefail
+          feed="$RUNNER_TEMP/feed/appcast.xml"
+          if [ "$MARK_CRITICAL" = "true" ]; then
+            python3 scripts/release/mark-appcast-critical.py --appcast "$feed"
+          fi
+          if ! python3 scripts/release/mark-appcast-critical.py --appcast "$feed" --check; then
+            echo "::warning::The previous release's feed item was marked critical for old builds and this one is not. Re-dispatch with mark_critical_for_old_builds=true unless that is on purpose."
+          fi
+          bash scripts/release/sign-appcast.sh "$feed"
+          cp "$feed" build/appcast.xml
+
       - name: Prepare Homebrew cask metadata
         shell: bash
         run: |
@@ -338,6 +479,85 @@ jobs:
           open(path, 'w', encoding='utf-8').write(text)
           PY
 
+      # Not the final artifact: the verify job has to pass before this counts
+      # as a release candidate.
+      - name: Upload signed build for verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-signed-unverified
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
+          path: |
+            build/Transcripted-${{ inputs.version }}.dmg
+            build/sparkle-deltas/*.delta
+            build/appcast.xml
+            Casks/transcripted.rb
+
+      - name: Cleanup signing keychain
+        if: always()
+        shell: bash
+        run: security delete-keychain "$RUNNER_TEMP/transcripted-signing.keychain-db" 2>/dev/null || true
+
+  verify-candidate:
+    needs: [build-unsigned, sign-and-notarize]
+    runs-on: macos-26
+    # No `environment:` and no `secrets.`: this job runs repository code
+    # (swift run) against the signed output, so it must not hold credentials.
+    timeout-minutes: 90
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+      RELEASE_VERSION: ${{ inputs.version }}
+
+    steps:
+      - name: Checkout release candidate
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.build-unsigned.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Download signed build
+        uses: actions/download-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-signed-unverified
+
+      - name: Download debug symbols
+        uses: actions/download-artifact@v4
+        with:
+          name: Transcripted-${{ inputs.version }}-unsigned-build
+          path: ${{ runner.temp }}/unsigned-build
+
+      - name: Open the signed DMG
+        shell: bash
+        run: |
+          set -euo pipefail
+          dmg="build/Transcripted-$RELEASE_VERSION.dmg"
+          attach_plist="$RUNNER_TEMP/signed-attach.plist"
+          hdiutil attach -nobrowse -readonly -plist "$dmg" > "$attach_plist"
+          mount_point="$(python3 - "$attach_plist" <<'PY'
+          import plistlib, sys
+          with open(sys.argv[1], 'rb') as handle:
+              payload = plistlib.load(handle)
+          for entity in payload.get('system-entities', []):
+              mount = entity.get('mount-point')
+              if mount:
+                  print(mount)
+                  break
+          PY
+          )"
+          if [ -z "$mount_point" ]; then
+            echo "::error::Could not mount the signed DMG."
+            exit 1
+          fi
+          trap 'hdiutil detach "$mount_point" >/dev/null 2>&1 || true' EXIT
+          rm -rf build/Transcripted.app
+          ditto "$mount_point/Transcripted.app" build/Transcripted.app
+          hdiutil detach "$mount_point"
+          trap - EXIT
+          ditto -x -k "$RUNNER_TEMP/unsigned-build/Transcripted-$RELEASE_VERSION.dSYM.zip" build/
+          codesign --verify --deep --strict --verbose=2 build/Transcripted.app
+
       - name: Verify packaged candidate
         shell: bash
         run: |
@@ -345,6 +565,7 @@ jobs:
           swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke \
             --app build/Transcripted.app \
             --dsym build/Transcripted.app.dSYM \
+            --appcast build/appcast.xml \
             --run-ui-smoke \
             --run-first-run-reliability \
             --report build/packaged-app-smoke.json
@@ -352,6 +573,7 @@ jobs:
           python3 scripts/release/post-dmg-release-audit.py \
             --version "$RELEASE_VERSION" \
             --artifact "build/Transcripted-$RELEASE_VERSION.dmg" \
+            --appcast build/appcast.xml \
             --skip-live
 
       # A failed verification used to leave its reports on the runner, so the
@@ -371,12 +593,12 @@ jobs:
             build/privacy-leak-sweep-report.json
             build/Transcripted-${{ inputs.version }}.dmg
             build/sparkle-deltas/*.delta
-            docs/appcast.xml
+            build/appcast.xml
             Casks/transcripted.rb
 
-      - name: Bundle debug symbols
+      - name: Stage the release candidate
         shell: bash
-        run: ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-$RELEASE_VERSION.dSYM.zip"
+        run: cp "$RUNNER_TEMP/unsigned-build/Transcripted-$RELEASE_VERSION.dSYM.zip" build/
 
       - name: Upload notarized candidate and metadata
         uses: actions/upload-artifact@v4
@@ -389,12 +611,7 @@ jobs:
             build/Transcripted-${{ inputs.version }}.dmg
             build/Transcripted-${{ inputs.version }}.dSYM.zip
             build/sparkle-deltas/*.delta
+            build/appcast.xml
             build/packaged-app-smoke.json
             build/privacy-leak-sweep-report.json
-            docs/appcast.xml
             Casks/transcripted.rb
-
-      - name: Cleanup signing keychain
-        if: always()
-        shell: bash
-        run: security delete-keychain "$RUNNER_TEMP/transcripted-signing.keychain-db" 2>/dev/null || true
