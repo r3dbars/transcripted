@@ -590,6 +590,8 @@ APP_SOURCES=(
     "Sources/Observability/TelemetryContext.swift"
     "Sources/Observability/InstallIdentity.swift"
     "Sources/Observability/AnalyticsReporter.swift"
+    "Sources/Observability/AnalyticsDeliveryBufferStore.swift"
+    "Sources/Observability/AnalyticsRuntimeConfiguration.swift"
     "Sources/Observability/AnalyticsActiveDay.swift"
     "Sources/Observability/MachineClassTelemetry.swift"
     "Sources/Observability/LaunchTimingTelemetry.swift"
