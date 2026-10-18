@@ -72,6 +72,16 @@ final class MeetingImportPublisherTests: XCTestCase {
         }
     }
 
+    func testDatedFilenameUsesLocalTime() throws {
+        let saved = NSTimeZone.default
+        NSTimeZone.default = TimeZone(identifier: "America/Los_Angeles")!
+        defer { NSTimeZone.default = saved }
+        try withRoot { root in
+            let name = try publish(in: root).transcriptPath.asFileURL.lastPathComponent
+            XCTAssertTrue(name.hasPrefix("2023-11-14_14-13-20 "), name)
+        }
+    }
+
     func testPlainFilenameUsesJustTheTitle() throws {
         try withRoot { root in
             let source = try makeSource(in: root)
