@@ -5,13 +5,17 @@
 //     their own next;
 //   - the code is the meeting overlay controller, whose island path still
 //     needs a seam;
-//   - it's a contract with a script or another package (the QA CLI and bench,
-//     and the identifiers the QA smokes press).
+//   - it's a view-wiring guard (a SwiftUI view calls a policy, or must never
+//     call a raw API) that no fast test can render.
 // The identifiers the QA smokes press and the Settings/Speakers click-flow
 // identifiers are checked by scripts/dev/check-ui-automation-contract.py.
 // The menu bar rows, app commands, onboarding footer, launch-smoke and QA-smoke
 // identifiers, and failure copy are behavior tests in
-// AutomationSurfaceBehaviorTests.swift now.
+// AutomationSurfaceBehaviorTests.swift now. The QA CLI's ui-smoke command and
+// report are tested in its own package (UISmokeReportTests); the QA tools are
+// read here only as data (which identifiers and launch settings they use) and
+// run through the app's compiled policies. Hit-target and empty-state values
+// are checked by value (HomeHitTarget, SpeakerPeopleSettingsConstants).
 //
 // Adding a new contract guard is purely additive: call `contractSource("Sources/.../X.swift")`
 // inline inside an assertion. Do NOT reintroduce a top-of-suite block of
@@ -152,9 +156,11 @@ func testUIAutomationSurfaceContract() async {
     }
     runSuite("UI automation surface contract - menubar controls expose stable identifiers") {
         // These raw values are the strings external automation looks up. The
-        // QA AX smoke (Tools/TranscriptedQA UISmoke) and the build.sh launch
-        // smoke keep their own copies, so the cross-package lists stay pinned
-        // here against the compiled enum.
+        // QA AX smoke (Tools/TranscriptedQA UISmoke) keeps its own copies, so
+        // its identifier list is read as data and checked against the compiled
+        // enum. The build.sh launch smoke's rows are checked against the real
+        // views in AutomationSurfaceBehaviorTests ("The launch smoke's menu bar
+        // expectations match the real rows").
         let expected: [MenuBarAutomationID: String] = [
             .statusItemButton: "transcripted.status-item.button",
             .startMeeting: "transcripted.menubar.primary.start-meeting",
@@ -164,19 +170,10 @@ func testUIAutomationSurfaceContract() async {
             .quit: "transcripted.menubar.utility.quit",
         ]
         assertEqual(MenuBarAutomationID.allCases.count, expected.count, "every menubar automation id should be listed here")
+        let qaUISmokeIDs = qaUISmokeIdentifiers()
         for id in MenuBarAutomationID.allCases {
             assertEqual(id.rawValue, expected[id], "\(id) should keep the identifier external automation expects")
-            assertTrue(
-                (contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift")
-                    + contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmokeMenuBarAudit.swift")).contains(id.rawValue),
-                "\(id.rawValue) should stay in the QA AX smoke's expected list"
-            )
-        }
-        for id in MenuBarAutomationID.allCases where id != .statusItemButton {
-            assertTrue(
-                contractSource("scripts/entrypoints/build.sh").contains(id.rawValue),
-                "\(id.rawValue) should stay enforced by the build.sh launch smoke"
-            )
+            assertTrue(qaUISmokeIDs.contains(id.rawValue), "\(id.rawValue) should stay in the QA AX smoke's expected list")
         }
 
         _ = NSApplication.shared
@@ -308,11 +305,14 @@ func testUIAutomationSurfaceContract() async {
         ] {
             assertTrue(homeSurfaceContractContains(requiredHomeRendererHook), "\(requiredHomeRendererHook) should keep Home action rendering visible")
         }
+        assertEqual(HomeHitTarget.minimum, 40, "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor")
         assertTrue(
-            homeSurfaceContractContains("enum HomeHitTarget")
-                && homeSurfaceContractContains("static let minimum: CGFloat = 40")
-                && homeSurfaceContractContains("HomeHitTarget.minimum"),
-            "Home icon buttons and compact row actions should keep a shared 40pt hit-target floor"
+            HomeHitTarget.compactVisibleSize < HomeHitTarget.minimum,
+            "a compact Home icon may look smaller than its hit target, never the other way round"
+        )
+        assertTrue(
+            homeSurfaceContractContains("HomeHitTarget.minimum"),
+            "Home icon buttons and compact row actions should size their hit shape from HomeHitTarget.minimum"
         )
         // Quiet-library redesign: the retained-audio player is
         // HomeMeetingPodcastPlayer (HomeMeetingAudioPlayer.swift), whose
@@ -458,11 +458,10 @@ func testUIAutomationSurfaceContract() async {
         assertTrue(onboardingSource.contains("systemAudioRequestTask?.cancel()") && onboardingSource.contains("guard !Task.isCancelled else { return }"), "leaving onboarding must cancel the audio check and ignore its late result")
         assertTrue(onboardingSource.contains("decision.probeResult") && onboardingSource.contains("systemAudioPresentation.actionTitle"), "onboarding must render the typed audio check result instead of collapsing unknown into Grant")
 
-        assertTrue(
-            contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = selectedOption?.id")
-                && contractSource("Sources/UI/Settings/SpeakerNameAutocompleteField.swift").contains("selectedOptionID?.wrappedValue = nil"),
-            "meeting speaker autocomplete must preserve the selected saved-person UUID and clear it on typing"
-        )
+        // The speaker autocomplete keeping the picked saved-person UUID and
+        // clearing it on typing is a behavior test now:
+        // SpeakerNameAutocompleteFieldTests ("Explicit non-first suggestion
+        // selection commits its plain name and exact UUID").
         assertTrue(
             contractSource("Sources/UI/Settings/TranscriptedSettingsWindowController.swift").contains("transcriptDirectory: MeetingStoragePaths.transcriptsFolder"),
             "saved-person rename/merge must scan the active capture library, including relocated libraries"
@@ -486,15 +485,18 @@ func testUIAutomationSurfaceContract() async {
             "The voices-to-name section should keep a stable automation anchor that review deep-links can scroll to"
         )
 
+        assertEqual(SpeakerPeopleSettingsPolishContract.minimumHitTarget, 40, "speaker play and icon controls should keep a 40pt hit target")
+        assertEqual(SpeakerPeopleSettingsPolishContract.quietPlayGlyphPointSize, 14, "the quiet play control should stay a small glyph, not a filled circle")
+        assertEqual(SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter, 28, "the compact icon should look smaller than its hit target")
         assertTrue(
-            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("enum SpeakerPeopleSettingsPolishContract")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerCompactIconLabel")
+            SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter < SpeakerPeopleSettingsPolishContract.minimumHitTarget,
+            "speaker settings should keep quiet icon chrome separate from the 40pt hit shape"
+        )
+        assertTrue(
+            contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerCompactIconLabel")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerQuietPlayButton")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let minimumHitTarget: CGFloat = 40")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let quietPlayGlyphPointSize: CGFloat = 14")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("static let compactIconVisibleDiameter: CGFloat = 28")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".contentShape(Rectangle())"),
-            "speaker settings should pin quiet play/icon chrome separately from the 40pt hit shape"
+            "speaker settings should draw quiet play/icon chrome inside a full hit shape"
         )
 
         // The person card's player is a bare glyph (SpeakerQuietPlayButton);
@@ -520,33 +522,15 @@ func testUIAutomationSurfaceContract() async {
 
     }
 
-    runSuite("UI automation surface contract - QA CLI exposes a real AX smoke") {
-        assertTrue(
-            contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/TranscriptedQA.swift").contains("UISmoke.self")
-                && contractSource("Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift").contains("commandName: \"ui-smoke\""),
-            "TranscriptedQA should expose a ui-smoke command for repo-owned UI automation"
-        )
-
-        for requiredHarnessHook in [
-            "AXIsProcessTrustedWithOptions",
-            "UIAutomationSmokeStatus",
-            "case incomplete = \"INCOMPLETE\"",
-            "exitCode = 3",
-            "observability-anonymous-analytics-enabled",
-            "observability-crash-reporting-enabled",
-            "TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT",
-            "Existing Transcripted processes were explicitly allowed",
-            "runOnboardingSmoke",
-            "onboarding-isolated-home",
-            "onboardingAppLogPath",
-            "appInspector",
-            "systemUIServerStatusItem",
-            "selectRow(identifier:",
-            "kAXSelectedAttribute",
-            "performPress(identifier:",
-            "performPressOrClick(identifier:",
-            "CGEvent(mouseEventSource:",
-            "AXChildrenInNavigationOrder",
+    // The QA CLI's own behavior (ui-smoke registered, INCOMPLETE exits 3, the
+    // report carries the onboarding evidence) is tested in its package:
+    // Tools/TranscriptedQA/Tests/TranscriptedQATests/UISmokeReportTests.swift.
+    // The bench running ui-smoke with a JSON report is checked by
+    // scripts/dev/check-qa-harness-contract.py. Here, the harness's choices are
+    // read as data and run through the app's compiled policies.
+    runSuite("UI automation surface contract - the QA AX smoke drives the app's real surfaces") {
+        let qaUISmokeIDs = qaUISmokeIdentifiers()
+        for identifier in [
             "transcripted.status-item.button",
             "transcripted.menubar.utility.open-transcripted",
             "transcripted.home.find.toggle",
@@ -555,29 +539,45 @@ func testUIAutomationSurfaceContract() async {
             "transcripted.settings.sidebar.dictations",
             "transcripted.onboarding.permissions.system-audio",
         ] {
-            let sourcePath = [
-                "kAXSelectedAttribute",
-                "performPress(identifier:",
-                "CGEvent(mouseEventSource:",
-                "AXChildrenInNavigationOrder",
-            ].contains(requiredHarnessHook)
-                ? "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/AXInspector.swift"
-                : [
-                    "UIAutomationSmokeStatus",
-                    "case incomplete = \"INCOMPLETE\"",
-                    "exitCode = 3",
-                ].contains(requiredHarnessHook)
-                ? "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmokeReport.swift"
-                : "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/UISmoke.swift"
-            assertTrue(contractSource(sourcePath).contains(requiredHarnessHook), "\(requiredHarnessHook) should stay pinned in the UI smoke harness")
+            assertTrue(qaUISmokeIDs.contains(identifier), "the QA AX smoke should still check \(identifier)")
         }
+    }
 
+    runSuite("UI automation surface contract - the QA AX smoke launches the app as an automated run with telemetry off") {
+        let smoke = qaUISmokeText()
+        let preferenceKeys = capturedStrings(in: smoke, pattern: #""(observability-[a-z-]+)":\s*false"#)
+        assertTrue(preferenceKeys.count >= 2, "the isolated home should switch off both telemetry preferences")
+
+        let suiteName = "transcripted-tests-qa-ui-smoke-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "a scratch defaults suite should open")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        assertTrue(AnalyticsPreferences.isEnabled(userDefaults: defaults), "analytics should default on, so the test below proves the smoke's keys turn it off")
+        assertTrue(CrashReportingPreferences.isEnabled(userDefaults: defaults), "crash reports should default on, so the test below proves the smoke's keys turn them off")
+        for key in preferenceKeys {
+            defaults.set(false, forKey: key)
+        }
+        assertFalse(AnalyticsPreferences.isEnabled(userDefaults: defaults), "the QA smoke's preferences should turn the app's analytics off")
+        assertFalse(CrashReportingPreferences.isEnabled(userDefaults: defaults), "the QA smoke's preferences should turn the app's crash reports off")
+
+        let environmentKeys = capturedStrings(in: smoke, pattern: #"environment\["(TRANSCRIPTED_[A-Z_]+)"\]\s*="#)
+        assertFalse(environmentKeys.isEmpty, "the QA smoke should mark its launch through the environment")
+        for key in environmentKeys {
+            assertTrue(
+                AutomatedLaunchEnvironment.isActive(environment: [key: "/tmp/transcripted-ui-smoke/launch-report.json"]),
+                "\(key) set by the QA smoke should make the app treat the launch as automated"
+            )
+        }
+    }
+
+    runSuite("UI automation surface contract - the QA bench offers a ui mode") {
+        let help = runQABenchHelp()
+        assertEqual(help.status, 0, "the QA bench help should print without running anything")
         assertTrue(
-            contractSource("scripts/ops/transcripted-qa-bench.sh").contains("quick|deep|full|ui|imported-audio-native|sparkle-update|packaged|artifact")
-                && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("run_ui_tail")
-                && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("transcripted-qa ui-smoke")
-                && contractSource("scripts/ops/transcripted-qa-bench.sh").contains("ui-automation-smoke.json"),
-            "QA bench should keep a callable ui mode with local JSON evidence"
+            help.output.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces).hasPrefix("ui ") },
+            "the QA bench should list a ui mode for the AX smoke"
         )
     }
 
@@ -588,14 +588,20 @@ func testUIAutomationSurfaceContract() async {
     runSuite("UI automation surface contract - WS4 empty states teach") {
         let speakers = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
 
+        assertEqual(SpeakerPeopleEmptyState.title, "No speakers yet", "the Speakers empty state should say plainly that there are no speakers yet")
         assertTrue(
-            speakers.contains("enum SpeakerPeopleEmptyState")
-                && speakers.contains("static let title = \"No speakers yet\"")
-                && speakers.contains("static let actionTitle = \"Record a meeting\"")
-                && speakers.contains("transcripted.speakers.empty.start-meeting")
-                && speakers.contains("struct SpeakersEmptyStateView")
-                && speakers.contains("Transcripted learns each voice as you record."),
-            "the Speakers surface should teach an empty first-run state, not render bare gray placeholder text"
+            SpeakerPeopleEmptyState.message.hasPrefix("Transcripted learns each voice as you record."),
+            "the Speakers empty state should teach how the list fills, not show bare gray placeholder text"
+        )
+        assertEqual(SpeakerPeopleEmptyState.actionTitle, "Record a meeting", "the Speakers empty state should offer the one action that fills it")
+        assertEqual(
+            SpeakerPeopleEmptyState.actionAutomationIdentifier,
+            "transcripted.speakers.empty.start-meeting",
+            "the empty state's action should keep a stable automation identifier"
+        )
+        assertTrue(
+            speakers.contains("struct SpeakersEmptyStateView"),
+            "the Speakers surface should render the teaching empty state view"
         )
         assertFalse(
             speakers.contains("No speakers yet. After your next meeting, the people in it will appear here."),
@@ -658,6 +664,51 @@ private func sourceBlock(named startMarker: String, endingBefore endMarker: Stri
 private func countOccurrences(of needle: String, in haystack: String) -> Int {
     guard !needle.isEmpty else { return 0 }
     return haystack.components(separatedBy: needle).count - 1
+}
+
+/// The QA AX smoke (Tools/TranscriptedQA UISmoke and its UISmoke*.swift
+/// extensions), read as data: the identifiers it checks and the launch
+/// settings it uses are its inputs, not app code.
+private func qaUISmokeText() -> String {
+    let directory = "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands"
+    let names = ((try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(directory).path)) ?? [])
+        .filter { $0.hasPrefix("UISmoke") && $0.hasSuffix(".swift") }
+        .sorted()
+    return names
+        .map { (try? String(contentsOf: repoFixtureURL("\(directory)/\($0)"), encoding: .utf8)) ?? "" }
+        .joined(separator: "\n")
+}
+
+private func qaUISmokeIdentifiers() -> Set<String> {
+    automationIdentifierLiterals(in: qaUISmokeText())
+}
+
+private func capturedStrings(in text: String, pattern: String) -> [String] {
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return [] }
+    let range = NSRange(text.startIndex..., in: text)
+    return regex.matches(in: text, range: range).compactMap { match in
+        Range(match.range(at: 1), in: text).map { String(text[$0]) }
+    }
+}
+
+/// Runs the QA bench's `--help`, which prints its usage and exits before any
+/// step runs.
+private func runQABenchHelp() -> (status: Int32, output: String) {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/bash")
+    process.arguments = [repoFixtureURL("scripts/ops/transcripted-qa-bench.sh").path, "--help"]
+    process.currentDirectoryURL = repoFixtureURL(".")
+    let pipe = Pipe()
+    process.standardOutput = pipe
+    process.standardError = pipe
+    do {
+        try process.run()
+    } catch {
+        return (-127, String(describing: error))
+    }
+    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+    process.waitUntilExit()
+    return (process.terminationStatus, String(decoding: data, as: UTF8.self))
 }
 
 /// The row answers AXPress first and runs its action on the next main-queue

@@ -668,6 +668,8 @@ APP_SOURCES=(
     "Sources/UI/Settings/SpeakerNameAutocompleteField.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
+    "Sources/UI/Settings/HomeHitTarget.swift"
+    "Sources/UI/Settings/SpeakerPeopleSettingsConstants.swift"
     "Sources/UI/Settings/SettingsActionFailureCopy.swift"
     "Sources/UI/Settings/OnboardingAbandonmentReasonPolicy.swift"
     "Sources/UI/Settings/HomeRootAlertPolicy.swift"

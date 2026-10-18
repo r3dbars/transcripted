@@ -6,7 +6,8 @@
     "Tests/HomeFirstArtifactVisibilityTests.swift": 2,
     "Tests/ObservabilityLogWriterTests.swift": 6,
     "Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift": 1,
-    "Tests/UIAutomationSurfaceContractTests.swift": 45
+    "Tests/UIAutomationSurfaceContractTests.swift": 39
   },
-  "wall-clock": {}
+  "wall-clock": {
+  }
 }

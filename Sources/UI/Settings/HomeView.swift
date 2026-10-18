@@ -519,11 +519,6 @@ private struct HomeAttentionActionButton: View {
     }
 }
 
-enum HomeHitTarget {
-    static let minimum: CGFloat = 40
-    static let compactVisibleSize: CGFloat = 26
-}
-
 private struct HomeCompactIconButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> Body {
         Body(configuration: configuration)
