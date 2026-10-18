@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Retroactive Speaker Updates: "(likely)" hedge
 //
-// Used by `applyRetroactiveRename` in RetroactiveSpeakerUpdater.swift, which
+// Used by `applyRetroactiveRename` in RetroactiveSpeakerUpdater+RowRename.swift, which
 // profile renames and merges (Settings > Speakers) run across saved transcripts.
 
 extension TranscriptSaver {

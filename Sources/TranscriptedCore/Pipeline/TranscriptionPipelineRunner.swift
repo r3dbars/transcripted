@@ -5,38 +5,6 @@ import AVFoundation
 
 extension TranscriptionTaskManager {
 
-    struct SavedTranscriptAudioResolution: Sendable {
-        let includesMicrophone: Bool
-        let includesSystemAudio: Bool
-        let healthInfo: RecordingHealthInfo?
-    }
-
-    /// Resolve partial-success audio channels before formatting and retention.
-    /// Unusable channels are excluded from source metadata and mark the artifact
-    /// degraded. A failed mic keeps flowing through archival for future retry;
-    /// a corrupt/short system file is excluded from retained playback.
-    nonisolated static func savedTranscriptAudioResolution(
-        microphoneURLWasProvided: Bool,
-        microphoneOutcome: TranscriptionResult.MicrophoneAudioOutcome,
-        systemOutcome: TranscriptionResult.SystemAudioOutcome = .usable,
-        healthInfo: RecordingHealthInfo?
-    ) -> SavedTranscriptAudioResolution {
-        let includesMicrophone = microphoneURLWasProvided && microphoneOutcome != .unusable
-        let includesSystemAudio = systemOutcome == .usable
-        var resolvedHealth = healthInfo
-        if microphoneURLWasProvided && microphoneOutcome == .unusable {
-            resolvedHealth = (resolvedHealth ?? .perfect).markingMicrophoneAudioUnusable()
-        }
-        if systemOutcome == .unusable {
-            resolvedHealth = (resolvedHealth ?? .perfect).markingSystemAudioMissing()
-        }
-        return SavedTranscriptAudioResolution(
-            includesMicrophone: includesMicrophone,
-            includesSystemAudio: includesSystemAudio,
-            healthInfo: resolvedHealth
-        )
-    }
-
     struct SpeakerClassificationKnowledge: Sendable {
         let speakerId: String
         let profile: SpeakerProfile
@@ -600,6 +568,9 @@ extension TranscriptionTaskManager {
                 speakerSources[key] = "db_pending"
             }
         }
+        // Call-app names for voices the voiceprint didn't name (shown, still in review).
+        let callAppNames = await resolveCallSpeakerNames(isImport: isImport, recordingDate: recordingDate, result: result, dbKnowledge: dbKnowledge,
+            autoAcceptedIds: autoAcceptedIds, reviewIds: needsActionIds, speakerDB: speakerDB, speakerMappings: &speakerMappings, speakerSources: &speakerSources)
 
         let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)
         let transcriptId = replacementTranscriptRollback?.transcriptId
@@ -738,6 +709,7 @@ extension TranscriptionTaskManager {
                         matchedProfileSnapshot: context?.matchedProfileSnapshot
                     ))
                 }
+                namingEntries = Self.withCallAppSuggestedNames(namingEntries, callAppNames)
                 Self.registerSpeakerClipsRollback(clips.map(\.clipURL), channel: "system", into: rollback)
             } catch {
                 AppLogger.pipeline.warning("System clip extraction failed, skipping system naming", ["error": error.localizedDescription])

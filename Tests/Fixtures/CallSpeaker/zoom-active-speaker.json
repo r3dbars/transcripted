@@ -1,0 +1,16 @@
+{
+  "role": "AXWindow",
+  "title": "Zoom Meeting",
+  "children": [
+    { "role": "AXPopUpButton", "description": "Ivy Chen, profile options" },
+    {
+      "role": "AXGroup",
+      "children": [
+        { "role": "AXGroup", "roleDescription": "video render", "description": "Gus Moreno, Video on, active speaker" },
+        { "role": "AXGroup", "roleDescription": "video render", "description": "Hana Sato, computer audio muted, active speaker" },
+        { "role": "AXGroup", "roleDescription": "video render", "description": "Ivy Chen, Video off" },
+        { "role": "AXGroup", "roleDescription": "video render", "description": "Video off" }
+      ]
+    }
+  ]
+}

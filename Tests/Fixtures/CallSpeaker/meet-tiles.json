@@ -1,0 +1,42 @@
+{
+  "role": "AXWindow",
+  "title": "Meet - abc-defg-hij - Google Chrome",
+  "children": [
+    {
+      "role": "AXWebArea",
+      "children": [
+        {
+          "role": "AXGroup",
+          "domClassList": ["oZRSLe", "tile"],
+          "children": [
+            { "role": "AXButton", "description": "More options for Jo Lind" },
+            { "role": "AXGroup", "domClassList": ["kssMZb"] },
+            { "role": "AXStaticText", "value": "Jo Lind" }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": ["oZRSLe"],
+          "children": [
+            { "role": "AXButton", "title": "More options for Kai Moss" },
+            { "role": "AXStaticText", "value": "Kai Moss" }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": ["oZRSLe"],
+          "children": [
+            { "role": "AXGroup", "description": "Lea Varga, speaking" }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": ["oZRSLe"],
+          "children": [
+            { "role": "AXStaticText", "value": "You" }
+          ]
+        }
+      ]
+    }
+  ]
+}

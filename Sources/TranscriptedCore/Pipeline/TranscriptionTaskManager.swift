@@ -184,6 +184,14 @@ public class TranscriptionTaskManager: ObservableObject {
     /// Called once per transcription run with the meeting's recording date; imported
     /// files never call it (their date can't name a meeting).
     public var lineupNamingProvider: (@Sendable (_ recordingDate: Date?) async -> SpeakerNamingPolicy.LineupRequest?)?
+    /// Call-app speaker names: what the call app (Zoom, Meet, Teams, Slack) showed
+    /// about who was talking during this recording, read by the app over
+    /// Accessibility. After voiceprint classification, call-audio voices that
+    /// `CallSpeakerAttributionPolicy` can name (and no voiceprint names
+    /// differently) show that name in the transcript but stay in review. Called
+    /// once per live meeting with its recording date; imported files never call
+    /// it. Nil (the default) keeps today's behavior.
+    public var callSpeakerActivityProvider: (@Sendable (_ recordingDate: Date?) async -> CallSpeakerActivity?)?
     /// True when the speaker review lists voices that were named on their own
     /// (the Notch island's "who was on the call"). Only then does the pipeline
     /// cut a clip for each recognized voice and queue a review for a meeting
