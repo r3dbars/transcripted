@@ -144,54 +144,10 @@ enum DictationAutoSendPolicy {
             blockReason: blockReason
         )
     }
-
-    static func isRequested(
-        isEnabled: Bool,
-        text: String,
-        duration: TimeInterval,
-        sourceBundleID: String?,
-        allowedBundleIDs: Set<String>
-    ) -> Bool {
-        requestDecision(
-            isEnabled: isEnabled,
-            key: .enter,
-            text: text,
-            duration: duration,
-            sourceBundleID: sourceBundleID,
-            allowedBundleIDs: allowedBundleIDs
-        ).expected
-    }
-
-    static func shouldSend(
-        isEnabled: Bool,
-        pasteOutcome: TextPasteOutcome,
-        text: String,
-        duration: TimeInterval,
-        sourceBundleID: String?,
-        allowedBundleIDs: Set<String>
-    ) -> Bool {
-        guard pasteOutcome.allowsAutoSend else { return false }
-        return isRequested(
-            isEnabled: isEnabled,
-            text: text,
-            duration: duration,
-            sourceBundleID: sourceBundleID,
-            allowedBundleIDs: allowedBundleIDs
-        )
-    }
 }
 
 extension TextPasteOutcome {
     var allowsAutoSend: Bool {
-        switch self {
-        case .pasted:
-            return true
-        case .likelyPasted, .copied, .failed:
-            return false
-        }
-    }
-
-    var requiresClipboardReadinessBeforeAutoSend: Bool {
         switch self {
         case .pasted:
             return true

@@ -1923,10 +1923,6 @@ func testClipboardRestoringTextPaster() async {
 
         assertEqual(outcome, .likelyPasted, "an immediate read by the still-frontmost target should be a likely paste")
         assertFalse(outcome.allowsAutoSend, "an unattributed pasteboard read must not make an Auto Enter attempt eligible")
-        assertFalse(
-            outcome.requiresClipboardReadinessBeforeAutoSend,
-            "a likely paste must not arm the Auto Enter readiness path"
-        )
         assertEqual(outcome.autoSendBlockReason, .pasteUnverified, "Auto Enter telemetry should say why Return was not pressed")
         await paster.waitForPendingClipboardRestore()
         let restoredClipboard = await MainActor.run {

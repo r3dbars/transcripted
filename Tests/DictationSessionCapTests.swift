@@ -11,37 +11,14 @@
 import Foundation
 
 func testDictationSessionCap() {
-    // The cap's whole point: recover the work without injecting it anywhere.
-    // DictationAutoSendPolicy requires a paste outcome, so the session-cap save
-    // can never auto-send — even with every other condition satisfied.
-    runSuite("A session-cap save can never auto-send into the focused app") {
-        let allowed: Set<String> = ["com.example.editor"]
-        let satisfiedDuration = TranscriptedConstants.dictationAutoEnterMinimumDuration + 1
-
-        // Control: a normal pasted delivery with everything satisfied DOES send.
-        assertTrue(
-            DictationAutoSendPolicy.shouldSend(
-                isEnabled: true,
-                pasteOutcome: .pasted,
-                text: "ship the release notes",
-                duration: satisfiedDuration,
-                sourceBundleID: "com.example.editor",
-                allowedBundleIDs: allowed
-            ),
-            "a pasted delivery in an allowed app should auto-send (control)"
-        )
-
-        // The cap delivery must NOT send, with otherwise-identical inputs.
+    // The cap path (finalizeWithoutPaste) never reaches the Auto Enter step.
+    // This only checks the outcome it reports: a failed paste can't authorize
+    // Auto Enter if it ever did.
+    runSuite("A saved-without-paste outcome never allows Auto Enter") {
+        assertTrue(TextPasteOutcome.pasted.allowsAutoSend, "a pasted delivery allows Auto Enter (control)")
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
-                isEnabled: true,
-                pasteOutcome: .failed("saved without paste", reason: .unknown),
-                text: "ship the release notes",
-                duration: satisfiedDuration,
-                sourceBundleID: "com.example.editor",
-                allowedBundleIDs: allowed
-            ),
-            "a session-cap save must never auto-send into the focused app"
+            TextPasteOutcome.failed("saved without paste", reason: .unknown).allowsAutoSend,
+            "a failed paste outcome must never allow Auto Enter"
         )
     }
 
