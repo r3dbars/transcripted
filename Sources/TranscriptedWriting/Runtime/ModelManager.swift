@@ -36,7 +36,6 @@ final class ModelManager: @unchecked Sendable {
 
     var state: ModelState { stateQueue.sync { stateStorage } }
     var currentState: ModelState { state }
-    var installedModelURL: URL? { state.modelURL }
 
     /// Revalidates the exact bytes at the runtime handoff. A prior `.ready`
     /// state is not enough because the external file can be replaced after the

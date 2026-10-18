@@ -184,12 +184,4 @@ public struct ScreenSnapshot: Equatable, Sendable {
         self.blocks = blocks
         self.evidence = evidence ?? .unspecified(at: capturedAt)
     }
-
-    /// Every window bundle identifier this snapshot's text touched, deduped.
-    /// This is what capture-time exclusion logic (and, later, redaction
-    /// scoping) checks against. Capture reads only the focused window now,
-    /// so this is normally that one app.
-    public var ownerBundleIdentifiers: Set<String> {
-        Set(blocks.compactMap(\.windowOwnerBundleIdentifier))
-    }
 }
