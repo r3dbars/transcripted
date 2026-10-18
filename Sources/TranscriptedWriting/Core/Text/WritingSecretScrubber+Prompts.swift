@@ -48,7 +48,8 @@ extension WritingSecretScrubber {
 
     /// Commands and shell keywords a line after a prompt can start with when
     /// it's the next command, not a password (sudo had cached credentials, or
-    /// the prompt never came).
+    /// the prompt never came). A lone one inside the loose-answer window still
+    /// counts as the answer; see `isNextCommand`.
     static let knownShellWords: Set<String> = [
         "ls", "ll", "la", "cd", "pwd", "clear", "cls", "exit", "logout", "whoami", "history", "top", "htop",
         "btop", "vim", "vi", "nvim", "nano", "emacs", "code", "cursor", "git", "gh", "brew", "npm", "npx",

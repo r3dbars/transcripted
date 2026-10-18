@@ -298,7 +298,6 @@ struct WritingSecretScrubberRegressionTests {
         #expect(WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal").clean == text)
     }
 
-
     @Test("A lone command word right after a sudo prompt is redacted as the password", arguments: ["docker", "python", "htop"])
     func loneCommandWordAfterSudoPromptIsRedacted(word: String) {
         let result = WritingSecretScrubber.scrub("sudo apt install foo\n" + word, appBundleIdentifier: "com.apple.Terminal")
@@ -312,5 +311,22 @@ struct WritingSecretScrubberRegressionTests {
         let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
         #expect(result.clean == text)
         #expect(result.kinds.isEmpty)
+    }
+
+    // The trade-off the owner accepted on #2165: a real one-word command after
+    // a cached sudo or a key-based ssh now reads as the password too.
+    @Test("A lone command word after a cached sudo or a key-based ssh is redacted", arguments: ["sudo -v\nhtop", "ssh host\nhtop"])
+    func loneCommandWordInsideLooseWindowIsRedacted(text: String) {
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix("htop"))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("A lone command word after sudo's first answer is kept as the next command")
+    func loneCommandWordPastLooseWindowIsKept() {
+        let result = WritingSecretScrubber.scrub("sudo apt install foo\nsunshine\ndocker", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.contains("sunshine"))
+        #expect(result.clean.hasSuffix("\ndocker"))
+        #expect(result.kinds == [.password])
     }
 }
