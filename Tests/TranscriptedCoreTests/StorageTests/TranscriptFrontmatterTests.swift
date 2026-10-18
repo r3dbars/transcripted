@@ -161,4 +161,27 @@ final class TranscriptFrontmatterTests: XCTestCase {
 
         XCTAssertNil(document)
     }
+
+    func testSavedTitleWithQuotesAndBackslashRoundTrips() {
+        let title = #"Review "Atlas" \ ops "Q3""#
+        let markdown = TranscriptSaver.formatTranscriptMarkdown(
+            result: TranscriptionResult(
+                micUtterances: [],
+                systemUtterances: [],
+                duration: 2,
+                processingTime: 0.5
+            ),
+            transcriptId: UUID(uuidString: "00000000-0000-0000-0000-000000000700")!,
+            date: Date(timeIntervalSince1970: 0),
+            meetingTitle: title
+        )
+
+        XCTAssertEqual(TranscriptFrontmatter.values(in: markdown)?["title"], title)
+    }
+
+    func testUnquoteLeavesUnquotedValuesAlone() {
+        XCTAssertEqual(TranscriptFrontmatter.unquoteYAMLScalar(#" Re: "Launch" "#), #"Re: "Launch""#)
+        XCTAssertEqual(TranscriptFrontmatter.unquoteYAMLScalar(#""unterminated"#), #""unterminated"#)
+        XCTAssertEqual(TranscriptFrontmatter.unquoteYAMLScalar(#""a\nb""#), "a\nb")
+    }
 }

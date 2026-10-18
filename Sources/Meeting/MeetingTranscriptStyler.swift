@@ -376,10 +376,9 @@ enum MeetingTranscriptStyler {
             return !trimmed.hasPrefix("title:") && !trimmed.hasPrefix("transcript_style:")
         }
         filtered.append("transcript_style: styled")
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "'")
         return ([
             "---",
-            "title: \"\(escapedTitle)\""
+            "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
         ] + filtered + ["---"]).joined(separator: "\n")
     }
 

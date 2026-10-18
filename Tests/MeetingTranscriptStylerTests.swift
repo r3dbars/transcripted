@@ -6,6 +6,7 @@ func testMeetingTranscriptStyler() {
         testMeetingTranscriptStylerDoesNotCreateSiblingArtifacts()
         testMeetingTranscriptStylerIsIdempotent()
         testMeetingTranscriptStylerPreservesExplicitTitle()
+        testMeetingTranscriptStylerKeepsQuotedTitleValidYAML()
         testMeetingTranscriptStylerDisplaysExplicitTitleWithoutFullBodyRead()
         testMeetingTranscriptStylerPreviewReadsBoundedMeetingMetadata()
         testMeetingTranscriptStylerPreviewReadsLegacyHeadingAtBodyStart()
@@ -320,6 +321,25 @@ private func testMeetingTranscriptStylerPreservesExplicitTitle() {
     assertEqual(styled.title, "Customer Interview April", "Styler should respect an explicit imported transcript title")
     assertEqual(styled.url.lastPathComponent, "2026-04-07 Customer Interview April.md", "Explicit titles should drive the date-prefixed final transcript filename")
     assertTrue(updatedMarkdown?.contains("# Customer Interview April") == true, "Explicit titles should be written back into the rendered markdown")
+}
+
+private func testMeetingTranscriptStylerKeepsQuotedTitleValidYAML() {
+    let directory = makeTemporaryTestDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let title = #"Review "Atlas" \ ops "Q3""#
+    let transcriptURL = directory.appendingPathComponent("Call_2026-04-07_09-14-00.md")
+    let raw = sampleImportedTranscript().replacingOccurrences(
+        of: #"title: "Customer Interview April""#,
+        with: "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
+    )
+    try? raw.write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+    let styled = MeetingTranscriptStyler.restyleTranscript(at: transcriptURL)
+    let updatedMarkdown = (try? String(contentsOf: styled.url, encoding: .utf8)) ?? ""
+
+    assertEqual(styled.title, title, "Styler should show the decoded saved title")
+    assertEqual(TranscriptFrontmatter.values(in: updatedMarkdown)?["title"], title, "Restyled frontmatter should round-trip a title with quotes and backslashes")
 }
 
 private func testMeetingTranscriptStylerPreservesImportedRecordingDate() {
