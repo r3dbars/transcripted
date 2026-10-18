@@ -660,14 +660,17 @@ extension ParakeetEngine {
     /// User stop for the pinned path. Delivers the words captured just before
     /// Stop, then releases the device. Recording state stays set until the
     /// drain finishes so wake and route handlers keep treating it as live.
+    /// A driver stuck in the drain gets the start's budget; after that the
+    /// take keeps what already arrived and its late tail is dropped.
     func stopPinnedDictationRecording() async {
         guard let recording = pinnedDictationRecording else { return }
         // Before the drain: it only delivers audio captured before Stop.
         let stoppedUptime = ProcessInfo.processInfo.systemUptime
         let capture = recording.capture
-        await Task.detached(priority: .userInitiated) {
-            capture.finishAndDrain()
-        }.value
+        let drained = (try? await Self.systemInputWorkCoordinator.run(
+            operation: "pinned_dictation_stop",
+            timeoutNanoseconds: Self.pinnedDictationStartTimeout
+        ) { capture.finishAndDrain() }) != nil
         recording.delivery.cancel()
         if pinnedDictationRecording === recording {
             pinnedDictationRecording = nil
@@ -678,6 +681,21 @@ extension ParakeetEngine {
         }
         isRecording = false
         audioLevel = 0
+        guard drained else {
+            // Releases the device if the drain never got to run.
+            stopPinnedCaptureOffMain(capture)
+            EventReporter.shared.capture(
+                level: .error,
+                engine: "parakeet",
+                event: "pinned_microphone_stop_timed_out",
+                message: "Pinned dictation microphone did not finish stopping in time",
+                context: [
+                    "backend": PinnedMicrophoneCapture.diagnosticBackendName,
+                    "timeout_ms": "\(Self.pinnedDictationStartTimeout / 1_000_000)"
+                ]
+            )
+            return
+        }
         let diagnostics = capture.diagnostics
         let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds
         AppLogger.transcription.info("PARAKEET | pinned recording stopped", [
