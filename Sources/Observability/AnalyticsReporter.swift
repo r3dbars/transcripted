@@ -34,9 +34,7 @@ enum AnalyticsDeliveryPolicy {
     }
 }
 
-// `@unchecked Sendable`: every mutable property is only touched on `deliveryQueue`
-// (see the note above `pendingCaptures`); the rest are immutable after init.
-final class AnalyticsReporter: @unchecked Sendable {
+final class AnalyticsReporter: @unchecked Sendable { // mutable state is confined to deliveryQueue (see pendingCaptures)
     static let shared = AnalyticsReporter()
 
     static var isAvailable: Bool {
