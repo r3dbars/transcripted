@@ -1960,6 +1960,51 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(restoredClipboard, existingClipboard, "a likely paste should restore the user's clipboard")
     }
 
+    await runSuite("ClipboardRestoringTextPaster.paste — focus moving after the target read the clipboard stays a likely paste") {
+        let existingClipboard = "focus after read original clipboard"
+        let dictationText = "focus after read dictation"
+        let pasteboardName = NSPasteboard.Name("TranscriptedFocusAfterRead-\(UUID().uuidString)")
+        let paster = await MainActor.run { ClipboardRestoringTextPaster() }
+        let adapter = await MainActor.run { SyntheticPasteTargetAdapter(kind: .codex) }
+
+        let outcome = await MainActor.run {
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            pasteboard.setString(existingClipboard, forType: .string)
+            var focusChecks = 0
+            return paster.paste(
+                dictationText,
+                pasteboard: pasteboard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    let clipboardRead = pasteboard.string(forType: .string)
+                    adapter.receivePaste(dictationText, clipboardRead: clipboardRead != nil)
+                    return true
+                },
+                confirmationSource: { adapter },
+                targetIsFrontmost: {
+                    focusChecks += 1
+                    return focusChecks == 1
+                },
+                restoreDelay: 5_000_000,
+                fallbackRestoreDelay: 20_000_000,
+                pasteConfirmationWait: 0.35,
+                endWaitOnLikelyPaste: false
+            )
+        }
+
+        assertEqual(outcome, .likelyPasted, "a read before focus moved should not ask for a manual ⌘V")
+        assertFalse(outcome.allowsAutoSend, "focus moving away must still block Auto Enter")
+        let pasteCount = await MainActor.run { adapter.pasteCount }
+        assertEqual(pasteCount, 1, "the target should get exactly one paste gesture")
+        await paster.waitForPendingClipboardRestore()
+        let restoredClipboard = await MainActor.run {
+            NSPasteboard(name: pasteboardName).string(forType: .string)
+        }
+        assertEqual(restoredClipboard, existingClipboard, "the user's clipboard should come back after a likely paste")
+    }
+
     await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait") {
         if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
             print("    SKIPPED: wall-clock timing proof — covered by local runs")
