@@ -442,12 +442,15 @@ def build_checks(args: argparse.Namespace) -> tuple[list[Check], dict[str, Any]]
         add(checks, "appcast-parse", "PASS", "Local appcast is parseable", normalize_path(appcast_path, root), "Latest item loaded.")
         feed_url = str(app_info.get("SUFeedURL", "")).strip()
         # Since the feed moved to a release asset, docs/appcast.xml is the frozen
-        # legacy feed for old installs. Its self link and version no longer have
-        # to match the packaged app; the new feed is built and checked from the
-        # release workflow's generated appcast.xml instead.
-        feed_is_release_asset = feed_url.endswith("/releases/latest/download/appcast.xml")
+        # legacy feed for old installs. When that legacy file is the one being
+        # read, its self link and version no longer have to match the packaged
+        # app. The release workflow's generated appcast.xml carries the new self
+        # link, so passing it still gets the full self-link and version checks.
+        feed_is_release_asset = (
+            feed_url.endswith("/releases/latest/download/appcast.xml") and appcast["self_url"] != feed_url
+        )
         if feed_is_release_asset:
-            add(checks, "appcast-feed-url", "PASS", "Packaged SUFeedURL is the latest release's appcast.xml asset", feed_url, "The committed docs/appcast.xml is the frozen legacy feed and is not compared.")
+            add(checks, "appcast-feed-url", "PASS", "Packaged SUFeedURL is the latest release's appcast.xml asset", feed_url, "The appcast read here is the legacy feed (docs/appcast.xml), so it is not compared; pass the generated appcast.xml to compare it.")
         elif appcast["self_url"] == feed_url:
             add(checks, "appcast-feed-url", "PASS", "Appcast self link matches packaged SUFeedURL", appcast["self_url"], "Feed URL is coherent.")
         else:

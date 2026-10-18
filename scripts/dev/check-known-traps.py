@@ -25,7 +25,8 @@ do:
 
   legacy-appcast Once config/release/legacy-appcast-freeze.json exists, nothing
                  may edit docs/appcast.xml: its sha256 must match the record,
-                 and the record itself may not change against origin/main.
+                 the record itself may not change against origin/main, and
+                 no commit after the freeze commit may touch either file.
                  (The Sparkle feed moved to a release asset; the old file is
                  frozen. See docs/sparkle-updates.md.)
 
@@ -232,6 +233,29 @@ def _base_freeze_record(root: Path) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def _git_out(root: Path, *args: str) -> str | None:
+    try:
+        result = subprocess.run(["git", "-C", str(root), *args], capture_output=True, text=True, check=False)
+    except OSError:
+        return None
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _commits_after_freeze(root: Path) -> list[str]:
+    """Commits after the one that added the freeze record that still touch the
+    legacy feed or the record. Comparing against origin/main can't see an edit
+    that was pushed straight to main (origin/main already holds it); history can.
+    Skipped in a shallow clone, where the freeze commit may not be present."""
+    if _git_out(root, "rev-parse", "--is-shallow-repository") != "false":
+        return []
+    added = _git_out(root, "log", "--diff-filter=A", "--format=%H", "--", FREEZE_RECORD)
+    if not added:
+        return []
+    freeze_commit = added.splitlines()[-1]
+    later = _git_out(root, "log", "--format=%h %s", f"{freeze_commit}..HEAD", "--", "docs/appcast.xml", FREEZE_RECORD)
+    return later.splitlines() if later else []
+
+
 def check_legacy_appcast(root: Path, base_record: str | None = None) -> list[str]:
     record_path = root / FREEZE_RECORD
     if base_record is None:
@@ -255,6 +279,11 @@ def check_legacy_appcast(root: Path, base_record: str | None = None) -> list[str
         )
     if base_record is not None and base_record.strip() != record_path.read_text(encoding="utf-8").strip():
         problems.append(f"{FREEZE_RECORD} differs from origin/main; a freeze record is never edited after it lands.")
+    for commit in _commits_after_freeze(root):
+        problems.append(
+            f"commit {commit} edits docs/appcast.xml or {FREEZE_RECORD} after the freeze; the legacy feed is "
+            "written once (docs/sparkle-updates.md, 'Legacy feed')."
+        )
     return problems
 
 
@@ -402,6 +431,30 @@ def self_test() -> None:
         (root / FREEZE_RECORD).unlink()
         problems = check_legacy_appcast(root, base_record=record)
         assert len(problems) == 1 and "missing here" in problems[0], problems
+    with tempfile.TemporaryDirectory() as tmp:
+        # History catches an edit that also rewrote the record, even after it
+        # reached origin/main (a direct push).
+        root = Path(tmp)
+        git = ["git", "-C", tmp, "-c", "user.name=Test", "-c", "user.email=test@example.invalid", "-c", "commit.gpgsign=false"]
+        subprocess.run([*git, "init", "-q"], check=True)
+        (root / "docs").mkdir()
+        (root / "config/release").mkdir(parents=True)
+        (root / "docs/appcast.xml").write_text("<rss/>\n", encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "legacy feed"], check=True)
+        record = json.dumps({"legacy_appcast_sha256": hashlib.sha256(b"<rss>final</rss>\n").hexdigest()})
+        (root / "docs/appcast.xml").write_text("<rss>final</rss>\n", encoding="utf-8")
+        (root / FREEZE_RECORD).write_text(record, encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "freeze"], check=True)
+        assert check_legacy_appcast(root, base_record=record) == [], check_legacy_appcast(root, base_record=record)
+        edited = json.dumps({"legacy_appcast_sha256": hashlib.sha256(b"<rss>again</rss>\n").hexdigest()})
+        (root / "docs/appcast.xml").write_text("<rss>again</rss>\n", encoding="utf-8")
+        (root / FREEZE_RECORD).write_text(edited, encoding="utf-8")
+        subprocess.run([*git, "add", "-A"], check=True)
+        subprocess.run([*git, "commit", "-q", "-m", "edit after freeze"], check=True)
+        problems = check_legacy_appcast(root, base_record=edited)
+        assert len(problems) == 1 and "after the freeze" in problems[0], problems
     print("check-known-traps self-test passed")
 
 

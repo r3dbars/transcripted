@@ -198,14 +198,28 @@ step. The signature is made with the same key whose public half is
 Sparkle 2.9.1 is the pinned version (`build-deps.sh`). What it does and does not
 give us:
 
-- the framework contains the signed-feed code and `SUVerifyUpdateBeforeExtraction`
-  (found by reading the vendored binary's strings; its headers are not shipped
-  in `deps-frameworks/`)
-- the feed signature is checked when the feed carries one. Whether an unsigned
-  or stripped feed is refused depends on Sparkle's rules for apps that have not
-  yet seen a signed feed, which this repo has not tested against the real
-  updater. Do not claim that an unsigned feed is rejected until the staged
-  upgrade test (`docs/staged-sparkle-update-test.md`) proves it
+- the framework has both `SUVerifyUpdateBeforeExtraction` (Sparkle 2.7.3+) and
+  `SURequireSignedFeed` (Sparkle 2.9+), plus `SUSignedFeedFailureExpirationInterval`
+  (found in the vendored binary's strings; its headers are not shipped in
+  `deps-frameworks/`, and Sparkle's customization docs describe all three)
+- `SUVerifyUpdateBeforeExtraction` is on. `SURequireSignedFeed` is **not** on
+  yet, on purpose. Sparkle's docs say that with it on, external release notes
+  must be signed too, and every item's `sparkle:releaseNotesLink` points at a
+  GitHub release page (`releases/tag/v<version>`), which is HTML GitHub renders
+  and nobody can sign. How Sparkle 2.9.1 treats an unsigned release-notes link
+  under that key is not documented, so turning it on today could break the
+  update window on the first build that has it. To turn it on: switch new items
+  to embedded release notes (`<description>`) or a static, signed notes file,
+  add the key to `Info.plist`, and prove it with the staged upgrade test
+  (`docs/staged-sparkle-update-test.md`) before the release ships. The key only
+  affects builds that carry it, so it can land in any later release.
+- with `SURequireSignedFeed` off, nothing here proves Sparkle checks the
+  embedded feed signature, or refuses an unsigned or stripped feed. Don't claim
+  either. The signature still pays off: `sign-appcast.sh` and
+  `verify-sparkle-release.sh` check it, and it is in place for the day the key
+  is on. Sparkle's docs also say that once the key is on, a feed that keeps
+  failing validation shows updates again after 20 days
+  (`SUSignedFeedFailureExpirationInterval`), as a failsafe for a lost key
 - archives and deltas are already EdDSA-signed in the feed; with
   `SUVerifyUpdateBeforeExtraction` on, that check happens before the archive is
   unpacked
@@ -232,8 +246,11 @@ python3 scripts/release/freeze-legacy-appcast.py \
    with the file's sha256. It refuses unless the item is the version in that
    `Info.plist`, that `Info.plist` has the new `SUFeedURL`, the item is signed,
    and the freeze file does not exist yet. `--dry-run` shows the plan.
-3. commit both files and land them on main. That push is publishing and needs
-   the owner's explicit go. Old installs see the new item on their next check,
+3. commit both files and land them on main in the same change as that release's
+   `Info.plist` version bump and cask (release step 4 in
+   `docs/release-packaging.md`); `ReleaseMetadataContractTests` expect the
+   legacy feed's newest item to match `Info.plist` until the freeze record
+   exists. That push is publishing and needs the owner's explicit go. Old installs see the new item on their next check,
    update to the build that reads the new feed, and never read the legacy file
    again.
 

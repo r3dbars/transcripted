@@ -269,9 +269,11 @@ local `build-beta.sh` only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
    the live feed through the same redirect Sparkle follows). For the first
    release on the new feed only, also run
    `scripts/release/freeze-legacy-appcast.py` ("Legacy feed" in
-   `docs/sparkle-updates.md`) and land its two files. Land the cask and a new
-   `Tests/Fixtures/release-health-github-release-<version>.json` on main in one
-   PR (#1863 is the example). No release step commits an appcast to main any
+   `docs/sparkle-updates.md`). Land the cask, a new
+   `Tests/Fixtures/release-health-github-release-<version>.json` and (first
+   new-feed release only) the freeze's two files on main in one change (#1863
+   is the example). Until the freeze lands, installs older than this release
+   keep reading `docs/appcast.xml` and see no update. No release step commits an appcast to main any
    more.
 5. Sync and deploy the website. It's the separate repo
    `r3dbars/transcripted-webapp` (clone at `~/transcripted-webapp`, Cloudflare

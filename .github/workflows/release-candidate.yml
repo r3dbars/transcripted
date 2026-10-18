@@ -374,6 +374,13 @@ jobs:
           previous_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
           if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir "$feed_dir/base"; then
             echo "Merging into the feed published with $previous_tag."
+          elif [ -f config/release/legacy-appcast-freeze.json ]; then
+            # After the freeze every release carries the feed. A latest release
+            # without one is a broken publish (or a failed download), and
+            # starting over from the legacy file would drop every release
+            # since the freeze.
+            echo "::error::$previous_tag has no appcast.xml asset (or it could not be downloaded), and the legacy feed is frozen. Fix the latest release's feed first."
+            exit 1
           else
             echo "::notice::$previous_tag has no appcast.xml asset; starting from the frozen legacy docs/appcast.xml (first release on the release-asset feed)."
             cp docs/appcast.xml "$feed_dir/base/appcast.xml"

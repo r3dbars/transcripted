@@ -241,6 +241,10 @@ func testCIWorkflowContract() {
         for required in ["sign-release.sh", "notarytool", "generate-sparkle-appcast.sh", "sign-appcast.sh", "fetch-sparkle-tools.sh"] {
             assertTrue(signCommands.contains(required), "the signing job should run \(required)")
         }
+        assertTrue(
+            signCommands.contains("config/release/legacy-appcast-freeze.json"),
+            "once the legacy feed is frozen, a latest release without appcast.xml must fail the run instead of restarting from docs/appcast.xml"
+        )
 
         let build = release.job("build-unsigned")
         let buildCommands = (build?.commands ?? []).joined(separator: "\n")
