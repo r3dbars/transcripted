@@ -96,7 +96,7 @@ The same commands run everywhere, so a rule that passes locally passes in CI:
 
 - **While an agent edits.** `.claude/settings.json` has a PostToolUse hook on `Edit|Write|MultiEdit` that runs `python3 scripts/dev/lint.py --hook` on the edited file. New findings come back on stderr right away, so the agent fixes them in the same turn. It's well under a second and fails open on any internal error.
 - **When an agent stops.** A Stop hook (`.claude/hooks/stop-lint.sh`) runs `lint.py --changed` and sends the agent back if the branch has new findings. It won't loop: when the hook is already active it lets the stop through.
-- **Before a push.** `.githooks/pre-push` runs `lint.py --range <remote tip>..<local tip>` for each pushed ref (committed content only, so scratch files and uncommitted edits don't block a push) and `scripts/dev/check-rule-registry.py`. Turn it on once per clone with `bash scripts/dev/install-git-hooks.sh` (sets `core.hooksPath` to `.githooks`).
+- **Before a push.** `.githooks/pre-push` runs `lint.py --range <remote tip>..<local tip>` for each pushed ref (committed content only, so scratch files and uncommitted edits don't block a push) `scripts/dev/check-commit-credit.py --range` (commits made as the owner carry no AI author or co-author trailer), and `scripts/dev/check-rule-registry.py`. `.githooks/commit-msg` runs the same credit check on each commit message. Turn them on once per clone with `bash scripts/dev/install-git-hooks.sh` (sets `core.hooksPath` to `.githooks`).
 - **In CI.** `scripts/dev/linux-checks.sh` (and so the repo-hygiene job and `bash check.sh quick`) runs `lint.py --self-test`, `lint.py --all`, `check-rule-registry.py --self-test` and `scripts/dev/check-rule-registry.py`.
 
 ## How `docs/rules.md` is made

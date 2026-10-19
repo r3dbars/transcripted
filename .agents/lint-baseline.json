@@ -5,6 +5,9 @@
     "Sources/TranscriptedWriting/Runtime/KeyboardInstaller.swift": 1,
     "Sources/UI/Settings/TranscriptedSettingsRows.swift": 1
   },
+  "coreaudio-default-input-owner": {
+    "Sources/Meeting/MicActivityMonitor.swift": 1
+  },
   "harness-delete-outside-owned-root": {
     "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/MeetingLab.swift": 1,
     "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/GenerateFixtures.swift": 1,
@@ -33,6 +36,13 @@
     "Sources/UI/Settings/TranscriptedSettingsView.swift": 2,
     "Sources/UI/Shared/MeetingAudioPlayback.swift": 1,
     "Sources/UI/Shared/SpeakerClipPlayback.swift": 2
+  },
+  "native-launch-without-isolation-guard": {
+    "scripts/dev/transcripted-debug.py": 1,
+    "scripts/hillclimb/benches/dictation_stop.py": 1,
+    "scripts/hillclimb/lab_control.py": 1,
+    "scripts/ops/daily-audio-reliability-check.sh": 1,
+    "scripts/ops/dictation-stop-autoeval.sh": 1
   },
   "test-fixed-sleep-sync": {
     "Tests/AnalyticsReporterTests.swift": 1,

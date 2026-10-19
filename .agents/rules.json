@@ -507,7 +507,7 @@
       "enforcer": "none (judgment)",
       "level": "doc",
       "owner_doc": "Sources/Speech/AGENTS.md",
-      "why": "a fresh engine's inputNode binds the default input; with AirPods that flips them into call mode and garbles audio, the cause of every AirPods garble bug so far (audio-tap-install-unguarded covers only tap installs)",
+      "why": "a fresh engine's inputNode binds the default input; with AirPods that flips them into call mode and garbles audio, the cause of every AirPods garble bug so far (audio-tap-install-unguarded covers tap installs and coreaudio-default-input-owner covers reads, listeners and writes of the default input; engine and inputNode construction is still judgment)",
       "runs_in": [
         "code review"
       ],
@@ -543,7 +543,7 @@
       "enforcer": "none (judgment)",
       "level": "doc",
       "owner_doc": "AGENTS.md",
-      "why": "a harness touching real state can destroy saved meetings; native-smoke-account-isolation covers app-launch smokes and the harness-delete-outside-owned-root lint covers deletes in harness code, but writes to real state are still judgment",
+      "why": "a harness touching real state can destroy saved meetings; native-smoke-account-isolation and the native-launch-without-isolation-guard lint cover app launches, the harness-delete-outside-owned-root lint covers deletes in harness code, but other writes to real state are still judgment",
       "runs_in": [
         "code review"
       ],
@@ -551,15 +551,17 @@
     },
     {
       "id": "owner-commit-credit",
-      "enforces": "agent commits for the owner use the owner's noreply identity as author and committer, with no AI Co-authored-by trailers",
-      "enforcer": "none (judgment)",
-      "level": "doc",
+      "enforces": "commits made as the owner's noreply identity have no AI author and no AI Co-authored-by trailer; human co-authors and other committers are left alone",
+      "enforcer": "python3 scripts/dev/check-commit-credit.py",
+      "level": "hook",
       "owner_doc": "AGENTS.md",
-      "why": "commit credit is the owner's call; nothing checks author identity",
+      "why": "agents kept adding AI Co-authored-by trailers after the rule was written (14 owner-committed commits on main between 2026-09-29 and 2026-10-17, e.g. c7bb1694d, bc32aab5f); the author half (owner identity as author) still needs review when the committer isn't the owner",
       "runs_in": [
-        "code review"
+        "commit-msg hook (--message-file)",
+        "pre-push hook (--range)",
+        "linux-checks (--self-test)"
       ],
-      "proof": "none"
+      "proof": "c7bb1694d (--range c7bb1694d^..c7bb1694d fails); --self-test"
     },
     {
       "id": "land-on-main-flow",
