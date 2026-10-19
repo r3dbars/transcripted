@@ -123,7 +123,6 @@ struct HomeMeetingSpeakerPicker: View {
                 onSubmit: save,
                 onCancel: onCancel
             )
-            .frame(height: 28)
 
             if saveFailed {
                 Text("Couldn’t save that name. Nothing else was changed.")
@@ -358,7 +357,6 @@ struct HomeMeetingSpeakerNamingRow: View {
                 accessibilityIdentifier: "transcripted.home.speaker-sheet.row.\(draft.id).name",
                 onSubmit: {}
             )
-            .frame(height: 30)
         }
         .padding(14)
         .background(

@@ -108,7 +108,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `SpeakerReviewStack.swift` - Foundation-pure card stack: call order (skipped out, Later last), which voices Everyone hides (only the open top card's, never during a search, so deeper voices stay reachable with a "Waiting in review" badge), Home's "speakers need names" count (skipped calls don't count). The model rebuilds it when the queue, a skip, or Later changes.
 - `SpeakerNamingSheet.swift` - presenter for the post-meeting review. Held while a meeting records (`SpeakerReviewPresentationGate.swift`), then asks in the Notch island (`Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift`). Later saves what was answered and the rest waits in Speakers. Calendar invitees come from `MeetingInviteeSuggestionPolicy`. There is no review window.
 - `SpeakerVoiceRowPresentation.swift`, `SpeakerMergeTargets.swift`, `SpeakerDuplicateNameMatching.swift`, `SpeakerDuplicateDetection.swift` - Foundation-pure row policies, merge-target index (built once per snapshot), duplicate-name rule, and a whole-profile duplicate cache (only unchanged profiles reuse the all-pairs result; clips, review rows, undo reload).
-- `SpeakerNameAutocompleteField.swift` / `RetainedDataSourceComboBox.swift` - `NSComboBox` autocomplete; the subclass keeps its data source alive (a dangling `assign` data source crashed).
+- `SpeakerNameAutocompleteField.swift` - SwiftUI suggestion list under an `NSTextField`; ranking is `SpeakerNameTypingSuggestionPolicy`. Inline combo completion stays off. `RetainedDataSourceComboBox.swift` still owns the crash fix for any leftover combo box (`assign` data source).
 - `AutoEnterDisplayNameResolver.swift` - fallback chain for Auto Enter app names.
 
 ### Pages/

@@ -8,23 +8,26 @@ private final class SpeakerNameFieldFixture {
     var submissions = 0
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 320, height: 80),
                           styleMask: [.titled], backing: .buffered, defer: false)
-    var field: SpeakerNameAutocompleteField!
-    var coordinator: SpeakerNameAutocompleteField.Coordinator!
-    var combo: NSComboBox!
-    var editor: NSTextView { combo.currentEditor() as! NSTextView }
+    let session = SpeakerNameAutocompleteSession()
+    var field: SpeakerNameAutocompleteNSField!
+    var coordinator: SpeakerNameAutocompleteNSField.Coordinator!
+    var fieldView: NSTextField!
+    var editor: NSTextView { fieldView.currentEditor() as! NSTextView }
 
     init(options: [SpeakerNameChoice]) {
         _ = NSApplication.shared
-        field = SpeakerNameAutocompleteField(
+        field = SpeakerNameAutocompleteNSField(
             text: Binding(get: { self.text }, set: { self.text = $0 }),
             placeholder: "Name", options: options,
             selectedOptionID: Binding(get: { self.selectedID }, set: { self.selectedID = $0 }),
+            session: session,
             onSubmit: { self.submissions += 1 })
         coordinator = field.makeCoordinator()
-        combo = field.makeComboBox(coordinator: coordinator)
-        combo.frame = NSRect(x: 10, y: 20, width: 280, height: 24)
-        window.contentView!.addSubview(combo)
-        window.makeFirstResponder(combo)
+        fieldView = field.makeTextField(coordinator: coordinator)
+        fieldView.frame = NSRect(x: 10, y: 20, width: 280, height: 24)
+        window.contentView!.addSubview(fieldView)
+        window.makeFirstResponder(fieldView)
+        session.isFocused = true
     }
 
     func type(_ value: String) {
@@ -39,10 +42,9 @@ private final class SpeakerNameFieldFixture {
     }
 
     func close() {
-        SpeakerNameAutocompleteField.dismantleNSView(combo, coordinator: coordinator)
+        SpeakerNameAutocompleteNSField.dismantleNSView(fieldView, coordinator: coordinator)
         window.orderOut(nil)
-        // Bindings capture the fixture; release the view/coordinator explicitly.
-        combo.dataSource = nil
+        fieldView.delegate = nil
         coordinator = nil
         field = nil
     }
@@ -90,14 +92,10 @@ func testSpeakerNameAutocompleteField() async {
     defer { fixture.close() }
     runSuite("Speaker suggestions retain distinct saved identities") {
         fixture.type("Sam")
-        assertEqual(fixture.coordinator.numberOfItems(in: fixture.combo), 2)
-        fixture.combo.selectItem(at: 1)
-        fixture.coordinator.comboBoxSelectionDidChange(
-            Notification(name: NSComboBox.selectionDidChangeNotification, object: fixture.combo))
-    }
-    // Drain the selection callback's next-main-queue commit without a timing assertion.
-    await withCheckedContinuation { continuation in
-        DispatchQueue.main.async { continuation.resume() }
+        let suggestions = fixture.coordinator.currentSuggestions(for: fixture.fieldView.stringValue)
+        assertEqual(suggestions.count, 2, "loose prefix match lists both saved people")
+        assertEqual(suggestions.map(\.person.id), [samuel.id, duplicate.id])
+        fixture.coordinator.applySuggestion(suggestions[1], field: fixture.fieldView)
     }
     runSuite("Explicit non-first suggestion selection commits its plain name and exact UUID") {
         assertEqual(fixture.text, "Samuel Example")
@@ -106,10 +104,53 @@ func testSpeakerNameAutocompleteField() async {
         fixture.type("Sam New")
         assertEqual(fixture.text, "Sam New")
         assertNil(fixture.selectedID, "editing a selection clears its identity")
-        let handled = fixture.coordinator.control(fixture.combo, textView: fixture.editor,
+        let handled = fixture.coordinator.control(fixture.fieldView, textView: fixture.editor,
                                                   doCommandBy: #selector(NSResponder.insertNewline(_:)))
         assertTrue(handled)
         assertEqual(fixture.submissions, 1)
         assertEqual(fixture.text, "Sam New", "Return submits typed text without accepting a prefix")
+    }
+
+    let kim = SpeakerNameChoice(id: UUID(), displayName: "Daniel Kim", callCount: 4)
+    let park = SpeakerNameChoice(id: UUID(), displayName: "Daniel Park", callCount: 4)
+    runSuite("Speaker name arrows highlight a suggestion and Return picks it") {
+        let naming = SpeakerNameFieldFixture(options: [kim, park])
+        defer { naming.close() }
+        naming.type("Dan")
+        let suggestions = naming.coordinator.currentSuggestions(for: naming.fieldView.stringValue)
+        assertEqual(suggestions.map(\.person.displayName), ["Daniel Kim", "Daniel Park"])
+        let moved = naming.coordinator.control(
+            naming.fieldView, textView: naming.editor,
+            doCommandBy: #selector(NSResponder.moveDown(_:))
+        )
+        assertTrue(moved, "down arrow stays in the suggestion list")
+        assertEqual(naming.session.highlightedIndex, 0)
+        let submitted = naming.coordinator.control(
+            naming.fieldView, textView: naming.editor,
+            doCommandBy: #selector(NSResponder.insertNewline(_:))
+        )
+        assertTrue(submitted)
+        assertEqual(naming.text, "Daniel Kim")
+        assertEqual(naming.selectedID, kim.id)
+        assertEqual(naming.submissions, 1, "Return on a highlighted row also submits")
+    }
+
+    runSuite("Speaker name Escape hides the suggestion list") {
+        let naming = SpeakerNameFieldFixture(options: [kim, park])
+        defer { naming.close() }
+        naming.type("Dan")
+        assertEqual(
+            naming.coordinator.currentSuggestions(for: naming.fieldView.stringValue).count, 2
+        )
+        let handled = naming.coordinator.control(
+            naming.fieldView, textView: naming.editor,
+            doCommandBy: #selector(NSResponder.cancelOperation(_:))
+        )
+        assertTrue(handled, "Escape is consumed while the list is open")
+        assertTrue(naming.session.listDismissed)
+        assertEqual(
+            naming.coordinator.currentSuggestions(for: naming.fieldView.stringValue).count, 0,
+            "the list stays hidden until the next edit"
+        )
     }
 }
