@@ -197,6 +197,22 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] in
             self?.pasteLastDictationFromSettings()
         }
+        // Next Sentence's voice changes: Transcripted's own dictation, stopped without pasting
+        // anywhere. The card takes what was said once it's transcribed.
+        appState.nextSentence.startDictation = { [weak self] in
+            self?.sessionController.startDictation(sourceApp: NSWorkspace.shared.frontmostApplication, trigger: .menu)
+        }
+        appState.nextSentence.finishDictation = { [weak self] deliver in
+            guard let self else { return nil }
+            let watch = self.sessionController.$lastCompletedText
+                .dropFirst()
+                .compactMap { $0 }
+                .first()
+                .receive(on: DispatchQueue.main)
+                .sink { text in MainActor.assumeIsolated { deliver(text) } }
+            self.sessionController.stopDictationAndPaste(trigger: .menu, autoPaste: false)
+            return watch
+        }
         notchIsland.prewarm()
         AppLaunchSteps.runAfterOverlaySetup(dictation: sessionController)
 

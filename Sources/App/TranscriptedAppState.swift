@@ -19,6 +19,8 @@ class TranscriptedAppState: ObservableObject {
     let runtimeDiagnostics = RuntimeDiagnostics()
     /// Writing's autocomplete runtime. Idle until `initialize()` starts it.
     let writingController = WritingController()
+    /// Owner-only lab: ⌃⌥Space writes your next sentence. Off unless NextSentenceEnabled is set.
+    let nextSentence = NextSentenceController()
 
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that
     /// don't exercise the meeting feature don't pay the construction cost.
@@ -142,6 +144,7 @@ class TranscriptedAppState: ObservableObject {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 writingController.startIfEnabled { [weak self] message in self?.logger.log(message) }
+                nextSentence.startIfEnabled()
             }
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
@@ -241,6 +244,7 @@ class TranscriptedAppState: ObservableObject {
         audioStorageMaintenanceTask = nil
         sttRouter.cleanup()
         writingController.stop()
+        nextSentence.stop()
         contextCapture.unregisterHotkey()
         if let observer = promptsObserver {
             NotificationCenter.default.removeObserver(observer)

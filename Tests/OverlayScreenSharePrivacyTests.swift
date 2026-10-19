@@ -15,7 +15,7 @@
 // `.agents/window-inventory.json`, and `scripts/dev/check-window-inventory.py`
 // fails when a NEW NSWindow/NSPanel shows up in Sources/ without an entry (or
 // without setting `sharingType`). Each window is built below. Summary:
-//   protected (.none):      NotchIslandPanel, PasteLastDictationFeedbackPanel
+//   protected (.none):      NotchIslandPanel, PasteLastDictationFeedbackPanel, NextSentencePanel
 //   capturable (.readOnly): Onboarding window, Settings window,
 //                           MenuBarPopoverAnchorPanel (checked in MenuBarPopoverPresentationTests)
 
@@ -25,6 +25,23 @@ import Foundation
 @MainActor
 func testOverlayScreenSharePrivacy() async {
     _ = NSApplication.shared
+
+    runSuite("Next Sentence's card is excluded from screen capture and never takes focus") {
+        let panel = NextSentencePanel(contentRect: NSRect(x: 0, y: 0, width: 460, height: 90),
+                                      styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
+        assertEqual(panel.sharingType, .none, "the card shows text written from the user's screen and must not be visible to screen sharing")
+        assertFalse(panel.canBecomeKey, "the card must not pull focus from the app being typed in")
+        assertFalse(panel.canBecomeMain, "the card is never a main window")
+        let suiteName = "OverlayScreenSharePrivacyTests.nextSentence.\(UUID().uuidString)"
+        if let defaults = UserDefaults(suiteName: suiteName) {
+            defer { defaults.removePersistentDomain(forName: suiteName) }
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .none, "hidden from screen sharing by default")
+            NotchIslandPreferences.setVisibleInScreenSharing(true, userDefaults: defaults)
+            panel.applyScreenSharingPreference(userDefaults: defaults)
+            assertEqual(panel.sharingType, .readOnly, "visible only when the user allows the island in screen sharing")
+        }
+    }
 
     runSuite("NotchIslandPanel is excluded from screen capture and never takes focus") {
         // Same arguments NotchIslandController.ensurePanel() uses.
