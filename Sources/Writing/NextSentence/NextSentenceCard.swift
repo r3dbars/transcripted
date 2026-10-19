@@ -364,6 +364,7 @@ final class NextSentenceCard: NSObject {
         textView.textColor = NextSentenceCardStyle.body
         textView.defaultParagraphStyle = attributes[.paragraphStyle] as? NSParagraphStyle
         textView.typingAttributes = attributes
+        textView.bodyStyle = attributes
     }
 
     private func fadeText() {

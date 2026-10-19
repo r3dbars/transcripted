@@ -12,6 +12,9 @@ final class NextSentenceTextView: NSTextView {
     /// A word double-clicked, or a span of several words dragged across.
     var onPickSelection: ((NSRange) -> Void)?
     var onTextChange: (() -> Void)?
+    /// The card's text style. While editing, everything in the box is kept in it, however the text
+    /// got there (typing, paste, dictation, autocorrect), so edits never look different.
+    var bodyStyle: [NSAttributedString.Key: Any] = [:]
     /// The word under the pointer and its rect in this view, or nil when it's over no word.
     var onHoverWord: ((NSRange, NSRect)?) -> Void = { _ in }
     /// Whether scrolling over this word should roll it (it has options) rather than scroll the text.
@@ -55,6 +58,8 @@ final class NextSentenceTextView: NSTextView {
         selectedTextAttributes = [.backgroundColor: NextSentenceCardStyle.accent.withAlphaComponent(0.42)]
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
+        isAutomaticTextCompletionEnabled = false
+        if #available(macOS 14.0, *) { inlinePredictionType = .no }
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseMoved, .mouseEnteredAndExited, .inVisibleRect],
                                        owner: self))
     }
@@ -177,6 +182,19 @@ final class NextSentenceTextView: NSTextView {
 
     override func didChangeText() {
         super.didChangeText()
+        if isEditable { applyBodyStyle() }
         onTextChange?()
+    }
+
+    /// Restyles all of the text (outside any text still being composed) and what's typed next.
+    func applyBodyStyle() {
+        guard !bodyStyle.isEmpty, let storage = textStorage, storage.length > 0, !hasMarkedText() else {
+            if !bodyStyle.isEmpty { typingAttributes = bodyStyle }
+            return
+        }
+        storage.beginEditing()
+        storage.setAttributes(bodyStyle, range: NSRange(location: 0, length: storage.length))
+        storage.endEditing()
+        typingAttributes = bodyStyle
     }
 }
