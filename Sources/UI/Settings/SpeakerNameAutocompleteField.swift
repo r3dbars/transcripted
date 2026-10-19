@@ -335,8 +335,11 @@ final class SpeakerNameAutocompleteSession: ObservableObject {
         if isBrowsingAll {
             listDismissed = false
             isFocused = true
+            restoreFieldFocus()
+            // makeFirstResponder can fire end-editing on the already-focused
+            // field before begin-editing. Keep the directory open.
+            isFocused = true
         }
-        restoreFieldFocus()
     }
 
     func dismissList() {
@@ -360,8 +363,9 @@ final class SpeakerNameAutocompleteSession: ObservableObject {
     }
 
     func restoreFieldFocus() {
-        guard let field else { return }
-        field.window?.makeFirstResponder(field)
+        guard let field, let window = field.window else { return }
+        if window.firstResponder === field || field.currentEditor() != nil { return }
+        window.makeFirstResponder(field)
     }
 }
 

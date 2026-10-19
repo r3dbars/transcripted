@@ -271,6 +271,7 @@ func testSpeakerNameAutocompleteField() async {
         assertEqual(naming.suggestions().count, 0, "an empty field has no typing list")
         naming.session.toggleBrowseAll()
         assertTrue(naming.session.isBrowsingAll)
+        assertTrue(naming.session.isFocused, "the chevron keeps the field focused so the directory stays open")
         assertEqual(
             naming.suggestions().map(\.person.displayName),
             ["Alex 1", "Alex 2", "Alex 3", "Alex 4", "Alex 5", "Alex 6"],
