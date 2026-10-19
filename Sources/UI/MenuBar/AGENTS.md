@@ -27,15 +27,15 @@ Shell:
 
 Header and rows:
 
-- `MenuBarHeaderView.swift` has no title: hidden when idle and ready; shows a status line for warmup, a transcript being made, and starting/saving a meeting (a steady recording has no line; the red Stop button with its timer says it), plus hotkey warnings, clickable when they have a fix to open. `MenuBarHeaderStatusPresentation` picks text and tone (recording wins over ready/warmup), `MenuBarHeaderLayoutPolicy` the layout, `MenuBarMeetingCapturePhase` the starting/recording/saving phase.
-- `MenuBarShortcutWarningPresentation.swift` is the shortcut warning's copy and click action (Accessibility access). The macOS Fn key conflict is not shown here; it lives in Settings > Shortcuts.
+- `MenuBarHeaderView.swift` has no title: hidden when idle and ready; shows a status line for warmup, a transcript being made, and starting/saving a meeting (a steady recording has no line; the red Stop button with its timer says it), plus hotkey warnings, clickable when they have a fix to open. `MenuBarHeaderStatusPresentation` picks text and tone (recording wins over ready/warmup), `MenuBarHeaderLayoutPolicy` the layout, `MenuBarMeetingCapturePhase` the starting/recording/saving phase. A Secure Keyboard Entry notice uses this same warning row (not clickable).
+- `MenuBarShortcutWarningPresentation.swift` is the shortcut warning's copy and click action (Accessibility access). Registration failures win over a Secure Keyboard Entry notice. The macOS Fn key conflict is not shown here; it lives in Settings > Shortcuts.
 - `MenuBarPrimaryActionsView.swift` is the Record and Dictate buttons side by side. `MenuBarPrimaryButtonTitle` gives short titles ("Record", "Stop", "Dictate", "Done"; the full title stays the accessibility label and the launch smoke's snapshot title). Each button shows its shortcut beside the title only when it fits. The global Paste Last Dictation shortcut is not registered. Its in-island Paste again action and delivery feedback remain; there is no separate menu row.
 - `MenuBarUtilityActionsView.swift` is the Open Transcripted, Check for Updates and Quit rows (Settings lives inside Open Transcripted). `MenuBarActionRowView` is the AppKit control behind the buttons and rows.
 - `PasteLastDictationFeedback.swift` is the toast model (title, detail, tone, dismiss delay) and presenter for pasted, copied-fallback ("Paste not confirmed"), failed and no-saved-dictation outcomes. Its panel is excluded from screen capture.
 
 ## Tests
 
-`bash run-tests.sh --filter MenuBar`, `--filter PasteLastDictationFeedback`, `--filter StatusItemPresentation`. `FocusOrderContractTests` checks the Tab order against the views, and `UIAutomationSurfaceContractTests` the AX ids. For automation-facing changes run `bash scripts/ops/transcripted-qa-bench.sh --mode ui`.
+`bash run-tests.sh --filter MenuBar`, `--filter PasteLastDictationFeedback`, `--filter StatusItemPresentation`, `--filter MenuBarShortcutWarning`. `FocusOrderContractTests` checks the Tab order against the views, and `UIAutomationSurfaceContractTests` the AX ids. For automation-facing changes run `bash scripts/ops/transcripted-qa-bench.sh --mode ui`.
 
 ## Rules
 

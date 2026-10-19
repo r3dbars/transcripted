@@ -7,7 +7,7 @@
 
 import Foundation
 
-func testSecureKeyboardEntryWarningPolicy() {
+func testSecureKeyboardEntryWarningPolicy() async {
     let obsidian = SecureEventInputSnapshot(
         isEnabled: true,
         ownerProcessID: 4242,
@@ -379,4 +379,99 @@ func testSecureKeyboardEntryWarningPolicy() {
         assertTrue(text.contains("F7"), "a saved F7 binding must appear in the notice")
         assertFalse(text.contains("F8"), "do not claim F8 when another key is bound")
     }
+
+    await MainActor.run {
+        runSuite("The monitor uses NSRunningApplication's name, then proc_name") {
+            let source = FakeSecureEventInputSource()
+            source.enabled = true
+            source.pid = 9
+            let namer = FakeSecureEventInputNamer()
+            namer.processNames[9] = "obsidian"
+            let monitor = SecureKeyboardEntryMonitor(source: source, namer: namer, selfProcessID: 1)
+            var lastNotice: String?
+            monitor.onNoticeChange = { lastNotice = $0 }
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 50
+            )
+            assertTrue(
+                lastNotice?.contains("obsidian") == true,
+                "with no running-app name the notice falls back to proc_name"
+            )
+
+            source.pid = 10
+            namer.appNames[10] = "Obsidian"
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 51
+            )
+            assertTrue(
+                lastNotice?.contains("Obsidian") == true,
+                "a new pid with a running-app name uses that name"
+            )
+
+            var noticeChanges = 0
+            monitor.onNoticeChange = { text in
+                noticeChanges += 1
+                lastNotice = text
+            }
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 52
+            )
+            assertEqual(noticeChanges, 0, "the same owner must not notify again")
+
+            monitor.check(
+                dictationUsesModifierKey: true,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "Right Option",
+                now: 53
+            )
+            assertEqual(noticeChanges, 1, "switching to a modifier binding must clear once")
+            assertNil(lastNotice, "a modifier binding takes the notice down")
+        }
+
+        runSuite("The monitor stays quiet when dictation is a modifier key") {
+            let source = FakeSecureEventInputSource()
+            source.enabled = true
+            source.pid = 4242
+            let namer = FakeSecureEventInputNamer()
+            namer.appNames[4242] = "Obsidian"
+            let monitor = SecureKeyboardEntryMonitor(source: source, namer: namer, selfProcessID: 1)
+            var lastNotice: String? = "unset"
+            monitor.onNoticeChange = { lastNotice = $0 }
+            monitor.check(
+                dictationUsesModifierKey: true,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "Right Option",
+                now: 1
+            )
+            assertEqual(lastNotice, "unset", "Right Option still works, so the monitor must not fire")
+        }
+    }
+}
+
+@MainActor
+private final class FakeSecureEventInputSource: SecureEventInputReading {
+    var enabled = false
+    var pid: Int32?
+
+    func isEnabled() -> Bool { enabled }
+    func ownerProcessID() -> Int32? { pid }
+}
+
+@MainActor
+private final class FakeSecureEventInputNamer: SecureEventInputProcessNaming {
+    var appNames: [Int32: String] = [:]
+    var processNames: [Int32: String] = [:]
+
+    func runningApplicationDisplayName(forProcessID pid: Int32) -> String? { appNames[pid] }
+    func processName(forProcessID pid: Int32) -> String? { processNames[pid] }
 }

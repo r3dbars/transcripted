@@ -7,14 +7,18 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 `Capture` in `.agents/modules.json`.
 
 - **Owns:** global physical triggers and their routing (dictation, meeting start/stop).
-- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`.
+- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`, `SecureKeyboardEntryWarningPolicy`.
 - **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
-- **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`.
+- **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`, `--filter SecureKeyboardEntry`.
 
 ## Files
 
-- `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The event tap itself (`PhysicalShortcutDetector`, delayed modifier presses) is in `PhysicalShortcutDetector.swift`.
+- `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The event tap itself (`PhysicalShortcutDetector`, delayed modifier presses) is in `PhysicalShortcutDetector.swift`. `secureKeyboardEntryNotice` is the menu-bar warning while another app holds Secure Keyboard Entry and dictation is bound to a non-modifier key.
 - `ContextCaptureEngine+DictationKeys.swift` — the dictation keys as session commands: Push to Talk press, release and combo-interrupt, and the hands-free toggle. Press/release semantics live in `DictationHotkeyRouter` (`Sources/Speech/DictationTrigger.swift`).
+- `ContextCaptureEngine+SecureKeyboardEntry.swift` — polls Secure Keyboard Entry (~2.5 s) and also checks on app activation and `flagsChanged`, because a CGEventTap cannot see F8 `keyDown` while another app holds it. Harness launches skip the watch.
+- `SecureKeyboardEntryWarningPolicy.swift` — Foundation-pure on/off, owner-change, modifier-silence, and local-log decisions. Fast tests drive it with snapshots.
+- `SecureEventInputSource.swift` — Carbon `IsSecureEventInputEnabled()` and the public IOKit `IOConsoleUsers` / `kCGSSessionSecureInputPID` probe, plus `NSRunningApplication` / `proc_name` naming, behind protocols. Never shells out to `ioreg`.
+- `SecureKeyboardEntryMonitor.swift` — holds watch state and talks to those protocols so tests can fake Carbon/IOKit.
 - `PhysicalShortcutMatcher.swift` — Foundation-pure helpers: `configuredBindings`, exact/fallback binding precedence, release matching, and the tap and combo trackers below.
 
 ## Dictation key behavior
@@ -35,6 +39,7 @@ The paste-last-dictation shortcut is no longer registered. The unused paste-last
 - **Tap to toggle is followed too.** `HandsFreeModifierComboTracker` follows a press that starts a take until release, so Fn+arrow can't leave dictation running. It trusts only the tap's own events. Never gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running.
 - Rapid repeats are ignored with `TranscriptedConstants.hotkeyActionDebounceInterval`.
 - Registration failures surface as `hotkeyError`, which the menubar shows. The Accessibility one has its own message (`accessibilityPermissionErrorMessage`) so the menubar can offer to open that pane.
+- **Secure Keyboard Entry:** a non-modifier dictation key (F8) can go silent while another app holds Secure Keyboard Entry, and the tap cannot see that F8 press. Warn once per owner in the menu bar; clear when it releases; stay quiet when dictation is a modifier (Right Option still arrives as `flagsChanged`). Log `secure_input_state_changed` locally only — never PostHog or Sentry. Do not treat our own PID as a foreign owner.
 - Keep tap callbacks tiny and bounce into `@MainActor`. Keep meeting routing separate from dictation routing.
 - No screenshot or OCR assumptions here unless that feature returns in the same change.
 
@@ -46,3 +51,4 @@ The paste-last-dictation shortcut is no longer registered. The unused paste-last
 - Hold or tap: a quick Right Option tap keeps listening and the next press pastes. A hold starts on press and pastes on release. Right Option then M, or é via Right Option+E, leaves no dictation running. A stray key late in a hold still pastes. Within a second of typing, the press waits out the chord delay.
 - The meeting key toggles meeting capture. Rapid repeats are ignored.
 - Sleep and wake: see `Sources/Reliability/AGENTS.md`.
+- Bind dictation to F8, enable Secure Keyboard Entry in Terminal or another app: the menu bar names that app and says F8 won't work until it releases. Right Option as the dictation key must stay quiet. Releasing Secure Keyboard Entry clears the notice.

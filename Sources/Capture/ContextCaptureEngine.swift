@@ -51,6 +51,11 @@ class ContextCaptureEngine: ObservableObject {
     var pushToTalkPressStoppedTake = false
     private let physicalShortcutDetector = PhysicalShortcutDetector()
     private var physicalTriggerError: String?
+    private var secureKeyboardEntryMonitor: SecureKeyboardEntryMonitor?
+    private var secureKeyboardEntryPollTask: Task<Void, Never>?
+    private var secureKeyboardEntryActivationObserver: NSObjectProtocol?
+    private var secureKeyboardEntryFlagsMonitor: Any?
+    private var secureKeyboardEntryFlagsCheckPending = false
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
     @Published var dictationShortcutDisplay: String = ContextCaptureEngine.currentDictationShortcutDisplay()
@@ -60,6 +65,11 @@ class ContextCaptureEngine: ObservableObject {
 
     /// Non-nil when hotkey registration failed — shown as a dismissible banner in MenuBarPanel
     @Published var hotkeyError: String?
+
+    /// Non-nil while another app holds Secure Keyboard Entry and dictation is
+    /// bound to a non-modifier key. Shown in the menu bar header. Modifier
+    /// bindings (Right Option) stay quiet because flagsChanged still works.
+    @Published var secureKeyboardEntryNotice: String?
 
     /// The exact `hotkeyError` text when the shortcut event tap needs
     /// Accessibility, so the menu bar can offer to open that pane.
@@ -111,6 +121,8 @@ class ContextCaptureEngine: ObservableObject {
                 self?.reRegisterHotkeys()
             }
         }
+
+        startSecureKeyboardEntryWatch()
     }
 
     /// Unregisters the current meeting hotkey and re-registers with latest preferences.
@@ -119,6 +131,7 @@ class ContextCaptureEngine: ObservableObject {
         refreshShortcutDisplays()
         physicalShortcutDetector.remove()
         configurePhysicalShortcutDetector()
+        evaluateSecureKeyboardEntry()
     }
 
     private func refreshShortcutDisplays() {
@@ -284,12 +297,20 @@ class ContextCaptureEngine: ObservableObject {
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        if let observer = secureKeyboardEntryActivationObserver {
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+        }
+        if let flagsMonitor = secureKeyboardEntryFlagsMonitor {
+            NSEvent.removeMonitor(flagsMonitor)
+        }
+        secureKeyboardEntryPollTask?.cancel()
         physicalShortcutDetector.remove()
     }
 
     func unregisterHotkey() {
         accessibilityRetryTask?.cancel()
         accessibilityRetryTask = nil
+        stopSecureKeyboardEntryWatch()
         if let observer = hotkeyChangeObserver {
             NotificationCenter.default.removeObserver(observer)
             hotkeyChangeObserver = nil

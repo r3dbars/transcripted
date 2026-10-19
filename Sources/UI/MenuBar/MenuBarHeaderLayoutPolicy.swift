@@ -4,7 +4,7 @@ import CoreGraphics
 /// space when it has something to say: a status line (recording, making a
 /// transcript, or warmup progress) and/or a shortcut warning.
 enum MenuBarHeaderLayoutPolicy {
-    static let warningTextHeight: CGFloat = 26
+    static let warningTextHeight: CGFloat = 56
     static let statusRowHeight: CGFloat = 20
     static let progressTop: CGFloat = 20
     static let detailTop: CGFloat = 32
