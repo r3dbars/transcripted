@@ -54,7 +54,7 @@ enum NextSentencePolicy {
         static let up: Int64 = 126
         static let slash: Int64 = 44
         static let delete: Int64 = 51
-        static let capsLock: Int64 = 57
+        static let fn: Int64 = 63
     }
 
     static func isReturn(_ keyCode: Int64) -> Bool { keyCode == KeyCode.returnKey || keyCode == KeyCode.keypadEnter }
@@ -82,6 +82,15 @@ enum NextSentencePolicy {
     /// Whether the tap swallows the key (the app never sees it).
     static func consumes(_ action: KeyAction) -> Bool {
         action != .passThrough
+    }
+
+    // MARK: The fn key
+
+    /// A quick press of fn on its own, not fn held as a modifier for another key.
+    static let fnTapLimit: TimeInterval = 0.4
+
+    static func isFnTap(heldFor seconds: TimeInterval, withOtherKey: Bool) -> Bool {
+        !withOtherKey && seconds < fnTapLimit
     }
 
     // MARK: Holds and drags
@@ -116,10 +125,28 @@ enum NextSentencePolicy {
                 y: (CGFloat(length) + 0.5) / CGFloat(lengthCount) * size.height)
     }
 
-    /// The handle at the end of the message: every 30pt dragged right is one length longer, left shorter.
-    /// `wanted` can run past the ends so the hint can say "that's the longest".
-    static func gripLength(base: Int, dragged dx: CGFloat, step: CGFloat = 30) -> (length: Int, wanted: Int) {
-        let wanted = base + Int((dx / step).rounded())
-        return (stepLength(wanted, by: 0), wanted)
+    // MARK: The end handle
+
+    /// How many words to keep when the end of the message is dragged to character `index`: every word
+    /// that starts before it. At least one word always stays.
+    static func wordsKept(before index: Int, in text: String) -> Int {
+        let ns = text as NSString
+        var kept = 0
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { _, range, _, stop in
+            if range.location < index { kept += 1 } else { stop.pointee = true }
+        }
+        return max(1, kept)
     }
+
+    static func wordCount(_ text: String) -> Int { text.split(whereSeparator: \.isWhitespace).count }
+
+    /// `text` without its last `count` words, and without a comma or dash left dangling at the end.
+    static func trimWords(_ text: String, dropping count: Int) -> String {
+        let words = text.split(whereSeparator: \.isWhitespace)
+        guard count > 0, !words.isEmpty else { return text }
+        var result = words.dropLast(min(count, words.count - 1)).joined(separator: " ")
+        while let last = result.last, ",;:—–-".contains(last) { result.removeLast() }
+        return result
+    }
+
 }

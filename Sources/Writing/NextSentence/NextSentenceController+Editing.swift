@@ -17,8 +17,7 @@ extension NextSentenceController {
     func endEditing() {
         custom = card.currentText
         card.endEditing()
-        card.hideRemixChip()
-        remix = nil
+        card.closeOptions()
         note = nil
         keyTap.start()
         render()
@@ -26,35 +25,52 @@ extension NextSentenceController {
 
     func textEdited() {
         custom = card.currentText
-        if remix != nil, card.isEditing { remix = nil; card.hideRemixChip() }
+        trimSource = nil
+        card.closeOptions()
     }
 
-    // MARK: Words
+    // MARK: Picking a word or part
 
-    /// Picks `word` for the word at `range`. The word it replaces goes back to the top of the list,
+    /// They highlighted a word or a few words: float other ways to say it above, to click or scroll through.
+    func picked(_ range: NSRange) {
+        let text = card.currentText
+        guard NSMaxRange(range) <= (text as NSString).length else { return }
+        let part = (text as NSString).substring(with: range)
+        guard !part.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+        if let options = swaps[part.lowercased()], !options.isEmpty { return card.showOptions(for: range) }
+        card.showOptionsLoading(for: range)
+        alternatives(for: part, in: text) { options in
+            self.swaps[part.lowercased()] = Array(options.prefix(3))
+            if self.card.optionsRange == range { self.card.showOptions(for: range) }
+        }
+    }
+
+    /// Puts `option` in place of the part at `range`. What it replaces goes back to the top of the list,
     /// so rolling the same way walks through every option and comes back around.
-    func swap(_ range: NSRange, to word: String, step: Int) {
+    func swap(_ range: NSRange, to option: String, step: Int) {
         let text = card.currentText as NSString
         guard NSMaxRange(range) <= text.length else { return }
         let old = text.substring(with: range)
         let pool = swaps[old.lowercased()] ?? []
-        swaps[word.lowercased()] = [old.lowercased()] + pool.filter { $0.lowercased() != word.lowercased() && $0.lowercased() != old.lowercased() }
-        let cased = old.first?.isUppercase == true ? word.prefix(1).uppercased() + word.dropFirst() : word
+        swaps[option.lowercased()] = [old] + pool.filter { $0.lowercased() != option.lowercased() && $0.lowercased() != old.lowercased() }
+        let cased = old.first?.isUppercase == true ? option.prefix(1).uppercased() + option.dropFirst() : option
         let newRange = card.replace(range, with: cased)
         custom = card.currentText
+        trimSource = nil
         NextSentenceCardStyle.tick()
-        render()
-        card.showWordFloat(for: newRange)
+        NextSentenceSounds.shared.play(.roll(up: step > 0))
+        card.animateWordIn(newRange)
+        card.showOptions(for: newRange, rolled: step)
     }
 
-    /// One scroll step over a word: +1 brings in the option nearest it (the bottom of the list).
+    /// One scroll step: +1 brings in the option nearest the text (the bottom of the list).
     func roll(_ range: NSRange, step: Int) {
-        let word = (card.currentText as NSString).substring(with: range).lowercased()
-        guard let options = swaps[word], !options.isEmpty else { return }
+        let part = (card.currentText as NSString).substring(with: range).lowercased()
+        guard let options = swaps[part], !options.isEmpty else { return }
         swap(range, to: (step > 0 ? options.last : options.first) ?? options[0], step: step)
     }
 
-    /// Asks once for the words in a settled message worth swapping, so hovering is instant.
+    /// Asks once for the words in a settled message worth swapping, so picking one is instant.
     func fetchSwapsIfNeeded(for text: String) {
         swapWork?.cancel()
         guard !text.isEmpty, !swapsRequested.contains(text), !rewriting, !card.isEditing else { return }
@@ -68,7 +84,6 @@ extension NextSentenceController {
                 DispatchQueue.main.async { MainActor.assumeIsolated {
                     guard gen == self.generation, case .success(let object) = result else { return }
                     self.swaps.merge(NextSentencePrompt.parseSwaps(object)) { current, _ in current }
-                    self.render()
                 } }
             }
         }
@@ -76,47 +91,22 @@ extension NextSentenceController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
-    // MARK: Parts
+    // MARK: The end handle
 
-    /// A word double-clicked gets its options; several words dragged across get a remix chip.
-    func picked(_ range: NSRange) {
-        let text = card.currentText as NSString
-        guard NSMaxRange(range) <= text.length else { return }
-        let part = text.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !part.isEmpty else { return }
-        if part.contains(" ") {
-            remix = (range, [part], 0)
-            card.showRemixChip(for: range)
-            return
-        }
-        if swaps[part.lowercased()] != nil { return card.showWordFloat(for: range) }
-        alternatives(for: part, in: text as String) { options in
-            self.swaps[part.lowercased()] = options
-            self.card.showWordFloat(for: range)
-        }
+    /// The whole message the handle cuts from: the one before any words were cut.
+    func gripStarted() -> String {
+        trimSource ?? card.currentText.nextSentenceCollapsedWhitespace
     }
 
-    /// Each press of the chip swaps in the next rephrasing, and wraps back to what it said.
-    func remixPart(_ range: NSRange) {
-        guard var state = remix else { return }
-        if state.variants.count < 2 {
-            note = "Remixing…"
-            render()
-            alternatives(for: state.variants[0], in: card.currentText) { options in
-                guard self.remix?.range == range else { return }
-                self.remix?.variants = [state.variants[0]] + options
-                self.note = self.card.isEditing ? "Editing · Return inserts · Esc stops editing" : nil
-                self.remixPart(range)
-            }
+    /// Let go: keep the shorter message, or (pulled past the end) show the next longer version.
+    func gripEnded(kept: String?, whole: String) {
+        guard let kept else {
+            set(tone: toneIndex, length: length + 1)
             return
         }
-        state.index = (state.index + 1) % state.variants.count
-        let newRange = card.replace(state.range, with: state.variants[state.index])
-        state.range = newRange
-        remix = state
-        custom = card.currentText
-        NextSentenceCardStyle.tick()
-        card.showRemixChip(for: newRange)
+        custom = kept
+        trimSource = kept == whole ? nil : whole
+        render()
     }
 
     private func alternatives(for part: String, in text: String, then use: @escaping @MainActor ([String]) -> Void) {
@@ -138,12 +128,13 @@ extension NextSentenceController {
         let current = card.currentText.nextSentenceCollapsedWhitespace
         guard !current.isEmpty, let request = request() else { return }
         if card.isEditing { card.endEditing(); keyTap.start() }
+        if instruction.isEmpty { NextSentenceSounds.shared.play(.remix) }
         rewriteGeneration += 1
         let gen = generation
         let rewriteGen = rewriteGeneration
         rewriting = true
-        remix = nil
-        card.hideRemixChip()
+        trimSource = nil
+        card.closeOptions()
         note = instruction.isEmpty ? "Fresh take…" : nil
         render()
         let image = snapshot?.screenshotJPEG
@@ -183,6 +174,7 @@ extension NextSentenceController {
         listening = true
         heard = nil
         NextSentenceCardStyle.tick()
+        NextSentenceSounds.shared.play(.listenStart)
         render()
         startDictation?()
     }
@@ -190,6 +182,7 @@ extension NextSentenceController {
     func finishListening() {
         guard listening else { return }
         listening = false
+        NextSentenceSounds.shared.play(.listenStop)
         heard = "Got it. Rewriting…"
         render()
         let gen = generation

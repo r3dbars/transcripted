@@ -46,6 +46,7 @@ enum NextSentenceCardStyle {
     @MainActor static func tick() {
         NSHapticFeedbackManager.defaultPerformer.perform(.alignment, performanceTime: .now)
     }
+
 }
 
 /// Top-down coordinates, so the card lays out like the page it was designed on.
@@ -63,15 +64,21 @@ final class NextSentenceCapsuleButton: NSButton {
     var holdDuration: TimeInterval?
     var onHoldProgress: ((Double) -> Void)?
     var onHeld: (() -> Void)?
+    /// Pointer in or out, for the card's own tooltips (system ones don't show over another app).
+    var onHover: ((Bool) -> Void)?
     var fill: NSColor { didSet { layer?.backgroundColor = fill.cgColor } }
     private let height: CGFloat
+    /// A labeled main action: more room around the title.
+    private let wide: Bool
     private var holdStart: Date?
     private var holdTimer: Timer?
 
-    init(title: String, fill: NSColor, height: CGFloat = 28) {
+    init(title: String, fill: NSColor, height: CGFloat = 28, wide: Bool = false) {
         self.fill = fill
         self.height = height
+        self.wide = wide
         super.init(frame: .zero)
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect], owner: self))
         isBordered = false
         wantsLayer = true
         layer?.backgroundColor = fill.cgColor
@@ -91,7 +98,7 @@ final class NextSentenceCapsuleButton: NSButton {
 
     func set(title: String, icon: NSImage?, color: NSColor = .white) {
         attributedTitle = NSAttributedString(string: title, attributes: [
-            .font: NSFont.systemFont(ofSize: height < 22 ? 10.5 : 12, weight: .semibold), .foregroundColor: color,
+            .font: NSFont.systemFont(ofSize: height < 22 ? 10.5 : wide ? 13 : 12, weight: .semibold), .foregroundColor: color,
         ])
         imagePosition = title.isEmpty ? .imageOnly : .imageLeading
         if let icon {
@@ -111,12 +118,16 @@ final class NextSentenceCapsuleButton: NSButton {
     override var intrinsicContentSize: NSSize {
         let base = super.intrinsicContentSize
         let empty = attributedTitle.length == 0
-        return NSSize(width: empty ? height : base.width + 22, height: height)
+        let title = attributedTitle.size().width + (image == nil ? 0 : 19)
+        return NSSize(width: empty ? height : ceil(max(base.width, title)) + (wide ? 36 : 22), height: height)
     }
 
     var fittingWidth: CGFloat { ceil(intrinsicContentSize.width) }
 
     @objc private func pressed() { onPress?() }
+
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
 
     override func mouseDown(with event: NSEvent) {
         guard holdDuration != nil else { return super.mouseDown(with: event) }
@@ -160,6 +171,9 @@ final class NextSentenceMoodPad: NextSentenceFlippedView {
     var tone = 1
     var length = NextSentencePrompt.mediumLength
     var onChange: ((Int, Int) -> Void)?
+    /// Being dragged, or not.
+    var onActive: ((Bool) -> Void)?
+    var onHover: ((Bool) -> Void)?
     private let dot = NSView()
     private let core = CALayer()
     private var dragging = false
@@ -180,7 +194,7 @@ final class NextSentenceMoodPad: NextSentenceFlippedView {
         core.shadowOffset = .zero
         dot.layer?.addSublayer(core)
         addSubview(dot)
-        toolTip = "Drag: left more direct, right warmer, up shorter, down longer"
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect], owner: self))
         place(animated: false)
     }
 
@@ -209,8 +223,12 @@ final class NextSentenceMoodPad: NextSentenceFlippedView {
         edge.stroke()
     }
 
+    override func mouseEntered(with event: NSEvent) { onHover?(true) }
+    override func mouseExited(with event: NSEvent) { onHover?(false) }
+
     override func mouseDown(with event: NSEvent) {
         dragging = true
+        onActive?(true)
         follow(event)
     }
 
@@ -218,6 +236,7 @@ final class NextSentenceMoodPad: NextSentenceFlippedView {
 
     override func mouseUp(with event: NSEvent) {
         dragging = false
+        onActive?(false)
         place(animated: true)
     }
 
@@ -242,17 +261,20 @@ final class NextSentenceMoodPad: NextSentenceFlippedView {
             context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1.3)
             dot.animator().setFrameOrigin(origin)
         }
+        NextSentenceMotion.pop(core)
     }
 }
 
 // MARK: Length handle
 
-/// A small bar at the very end of the message. Drag it right for a longer message, left for shorter.
+/// A small bar at the very end of the message. Drag it left to cut words one at a time, right to
+/// bring them back and then for a longer message. Shows a left-right cursor and its own tooltip.
 final class NextSentenceLengthGrip: NextSentenceFlippedView {
-    static let size = CGSize(width: 16, height: 20)
+    static let size = CGSize(width: 18, height: 22)
+    var onHover: ((Bool) -> Void)?
     var onDragStart: (() -> Void)?
-    /// Points dragged since the press, positive to the right.
-    var onDrag: ((CGFloat) -> Void)?
+    /// Where the pointer is, in window coordinates.
+    var onDrag: ((NSPoint) -> Void)?
     var onDragEnd: (() -> Void)?
     private let bar = NSView()
     private var startX: CGFloat?
@@ -265,16 +287,30 @@ final class NextSentenceLengthGrip: NextSentenceFlippedView {
         bar.wantsLayer = true
         bar.layer?.cornerRadius = 1.5
         addSubview(bar)
-        addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .inVisibleRect], owner: self))
-        toolTip = "Drag right for longer, left for shorter"
+        addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .inVisibleRect],
+                                       owner: self))
         paint()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    override func mouseEntered(with event: NSEvent) { hovering = true; paint() }
-    override func mouseExited(with event: NSEvent) { hovering = false; paint() }
+    override func mouseEntered(with event: NSEvent) {
+        hovering = true
+        NSCursor.resizeLeftRight.set()
+        paint()
+        onHover?(true)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hovering = false
+        if startX == nil { NSCursor.arrow.set() }
+        paint()
+        onHover?(false)
+    }
+
+    override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
 
     override func mouseDown(with event: NSEvent) {
         startX = event.locationInWindow.x
@@ -283,12 +319,14 @@ final class NextSentenceLengthGrip: NextSentenceFlippedView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let startX else { return }
-        onDrag?(event.locationInWindow.x - startX)
+        NSCursor.resizeLeftRight.set()
+        guard startX != nil else { return }
+        onDrag?(event.locationInWindow)
     }
 
     override func mouseUp(with event: NSEvent) {
         startX = nil
+        if !hovering { NSCursor.arrow.set() }
         paint()
         onDragEnd?()
     }
@@ -300,55 +338,6 @@ final class NextSentenceLengthGrip: NextSentenceFlippedView {
         bar.layer?.backgroundColor = (active ? NextSentenceCardStyle.accent : NSColor(white: 1, alpha: 0.35)).cgColor
         layer?.backgroundColor = (active ? NSColor(white: 1, alpha: 0.08) : .clear).cgColor
     }
-}
-
-// MARK: The other replies, peeking out behind
-
-/// One of the other replies, stacked behind the card. Only its top edge shows, with its label and
-/// first words. Hover lifts it into view; a click brings it to the front.
-final class NextSentencePeekCard: NextSentenceFlippedView {
-    var onPick: (() -> Void)?
-    private let label = NextSentenceCardStyle.label(.systemFont(ofSize: 11, weight: .semibold), NextSentenceCardStyle.title)
-    private let dim = NSView()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        layer?.backgroundColor = NextSentenceCardStyle.background.cgColor
-        layer?.cornerRadius = NextSentenceCardStyle.cornerRadius
-        layer?.cornerCurve = .continuous
-        layer?.borderWidth = 0.5
-        layer?.borderColor = NSColor(white: 1, alpha: 0.08).cgColor
-        layer?.masksToBounds = true
-        addSubview(label)
-        dim.wantsLayer = true
-        dim.layer?.backgroundColor = NSColor(white: 0, alpha: 0.25).cgColor
-        addSubview(dim)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    func set(label title: String, text: String) {
-        let line = NSMutableAttributedString(string: title.isEmpty ? "" : title + "  ", attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .semibold), .foregroundColor: NextSentenceCardStyle.title,
-        ])
-        line.append(NSAttributedString(string: text, attributes: [
-            .font: NSFont.systemFont(ofSize: 11, weight: .regular), .foregroundColor: NSColor(white: 1, alpha: 0.5),
-        ]))
-        label.attributedStringValue = line
-    }
-
-    /// Lifted cards show at full strength; resting ones are dimmed.
-    func set(dimmed: Bool) { dim.alphaValue = dimmed ? 1 : 0 }
-
-    override func layout() {
-        super.layout()
-        label.frame = NSRect(x: 14, y: 5, width: bounds.width - 28, height: 15)
-        dim.frame = bounds
-    }
-
-    override func mouseDown(with event: NSEvent) { onPick?() }
 }
 
 // MARK: Rings around the card
@@ -413,6 +402,39 @@ final class NextSentenceRing: NSView {
         progressLayer.strokeEnd = progress
         progressLayer.isHidden = progress <= 0
         CATransaction.commit()
+    }
+
+    /// One pass of light around the edge, then gone. For the card's arrival.
+    func sweepOnce(color: NSColor) {
+        let sweepLayer = CAShapeLayer()
+        sweepLayer.frame = bounds
+        sweepLayer.path = Self.path(in: bounds.insetBy(dx: 1.5, dy: 1.5), radius: NextSentenceCardStyle.cornerRadius + 2)
+        sweepLayer.fillColor = nil
+        sweepLayer.strokeColor = color.cgColor
+        sweepLayer.lineWidth = 1.5
+        sweepLayer.lineCap = .round
+        sweepLayer.strokeStart = 0
+        sweepLayer.strokeEnd = 0
+        layer?.addSublayer(sweepLayer)
+        let head = CABasicAnimation(keyPath: "strokeEnd")
+        head.fromValue = 0
+        head.toValue = 1
+        head.duration = 0.55
+        head.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0.1, 0.2, 1)
+        let tail = CABasicAnimation(keyPath: "strokeStart")
+        tail.fromValue = 0
+        tail.toValue = 1
+        tail.beginTime = 0.12
+        tail.duration = 0.55
+        tail.timingFunction = head.timingFunction
+        let group = CAAnimationGroup()
+        group.animations = [head, tail]
+        group.duration = 0.67
+        group.beginTime = CACurrentMediaTime() + 0.18
+        group.fillMode = .both
+        group.isRemovedOnCompletion = false
+        sweepLayer.add(group, forKey: "sweep")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { sweepLayer.removeFromSuperlayer() }
     }
 
     func set(listening: Bool) {

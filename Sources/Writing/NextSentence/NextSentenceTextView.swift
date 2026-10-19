@@ -17,13 +17,16 @@ final class NextSentenceTextView: NSTextView {
     var bodyStyle: [NSAttributedString.Key: Any] = [:]
     /// The word under the pointer and its rect in this view, or nil when it's over no word.
     var onHoverWord: ((NSRange, NSRect)?) -> Void = { _ in }
-    /// Whether scrolling over this word should roll it (it has options) rather than scroll the text.
-    var canRoll: (NSRange) -> Bool = { _ in false }
-    /// One step of a roll: +1 brings in the option nearest the word, -1 the farthest.
-    var onRoll: ((NSRange, Int) -> Void)?
+    /// Whether scrolling should roll the picked word or part (its options are showing) rather than scroll the text.
+    var canRoll: () -> Bool = { false }
+    /// One step of a roll: +1 brings in the option nearest the text, -1 the farthest.
+    var onRoll: ((Int) -> Void)?
+    /// A click that left nothing selected.
+    var onSelectionCleared: (() -> Void)?
     private var hovered: NSRange?
     private var rollAccumulator: CGFloat = 0
     private var lastRoll = Date.distantPast
+    private var rolledThisGesture = false
 
     override init(frame frameRect: NSRect, textContainer container: NSTextContainer?) {
         super.init(frame: frameRect, textContainer: container)
@@ -112,6 +115,17 @@ final class NextSentenceTextView: NSTextView {
         return NSPoint(x: last.maxX, y: last.minY)
     }
 
+    /// `range` without spaces or punctuation at either end.
+    static func trimmed(_ range: NSRange, in text: NSString) -> NSRange {
+        var start = range.location
+        var end = NSMaxRange(range)
+        let edge = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
+        func isEdge(_ index: Int) -> Bool { Unicode.Scalar(text.character(at: index)).map { edge.contains($0) } ?? false }
+        while start < end, isEdge(start) { start += 1 }
+        while end > start, isEdge(end - 1) { end -= 1 }
+        return NSRange(location: start, length: end - start)
+    }
+
     private static func isWordCharacter(_ unit: unichar) -> Bool {
         guard let scalar = Unicode.Scalar(unit) else { return false }
         return CharacterSet.alphanumerics.contains(scalar) || unit == 0x27 || unit == 0x2019
@@ -128,12 +142,17 @@ final class NextSentenceTextView: NSTextView {
 
     override func mouseExited(with event: NSEvent) {
         super.mouseExited(with: event)
-        hovered = nil
-        onHoverWord(nil)
+        hover(at: nil)
     }
 
     private func updateHover(_ event: NSEvent) {
-        let range = wordRange(at: convert(event.locationInWindow, from: nil))
+        hover(at: convert(event.locationInWindow, from: nil))
+    }
+
+    /// The card also calls this from its own pointer tracking: NSTextView manages its tracking
+    /// areas itself and can drop the one added here.
+    func hover(at point: NSPoint?) {
+        let range = point.flatMap { wordRange(at: $0) }
         guard range != hovered else { return }
         hovered = range
         rollAccumulator = 0
@@ -141,25 +160,30 @@ final class NextSentenceTextView: NSTextView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let point = convert(event.locationInWindow, from: nil)
-        guard let range = wordRange(at: point), canRoll(range) else { return super.scrollWheel(with: event) }
+        guard canRoll() else { return super.scrollWheel(with: event) }
+        // Momentum doesn't keep rolling: one flick or one wheel notch is one option.
+        guard event.momentumPhase.isEmpty else { return }
+        if event.phase == .began { rollAccumulator = 0; rolledThisGesture = false }
         rollAccumulator += event.scrollingDeltaY * (event.hasPreciseScrollingDeltas ? 1 : 12)
-        guard abs(rollAccumulator) >= 12, Date().timeIntervalSince(lastRoll) > 0.14 else { return }
+        // The first movement of a gesture rolls at once; after that, every 10pt or so.
+        let needed: CGFloat = rolledThisGesture ? 10 : 2
+        guard abs(rollAccumulator) >= needed, Date().timeIntervalSince(lastRoll) > 0.07 else { return }
+        rolledThisGesture = event.hasPreciseScrollingDeltas
         // Fingers moving up (content scrolling down) brings in the option nearest the word.
         let step = rollAccumulator < 0 ? 1 : -1
         rollAccumulator = 0
         lastRoll = Date()
-        onRoll?(range, step)
+        onRoll?(step)
     }
 
     override func mouseDown(with event: NSEvent) {
         if !isEditable { onBeginEditing?() }
         super.mouseDown(with: event) // tracks until mouse up
-        let range = selectedRange()
-        guard range.length > 0 else { return }
-        let picked = (string as NSString).substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !picked.isEmpty else { return }
-        if event.clickCount == 2 || picked.contains(" ") { onPickSelection?(range) }
+        let range = Self.trimmed(selectedRange(), in: string as NSString)
+        guard range.length > 0 else { return onSelectionCleared?() ?? () }
+        // A word or several, highlighted by double-click or drag: offer other words for it.
+        setSelectedRange(range)
+        onPickSelection?(range)
     }
 
     // MARK: Keys while editing

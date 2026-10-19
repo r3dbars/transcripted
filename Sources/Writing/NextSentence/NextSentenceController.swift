@@ -2,10 +2,10 @@ import AppKit
 import Carbon.HIToolbox
 import Combine
 
-/// Next Sentence: Caps Lock (or ⌃⌥Space) writes the next thing you'd type, from what's on screen and
+/// Next Sentence: a tap of fn (or ⌃⌥Space) writes the next thing you'd type, from what's on screen and
 /// your saved context. Tab moves between three different replies; ↑/↓ shorter and longer; ←/→ more
-/// direct and warmer (the mood pad does both). Hover a word for others, drag across a part to remix
-/// it, type to edit. Caps Lock again listens for a spoken change. Return inserts; hold it to send.
+/// direct and warmer (the mood pad does both). Highlight a word or a few for other ways to say
+/// it (scroll to roll through them), drag the end handle to cut words, type to edit. fn again listens for a spoken change. Return inserts; hold it to send.
 /// Owner-only lab feature, off unless `NextSentencePreferences.isEnabled()`. See that type for why.
 @MainActor
 final class NextSentenceController {
@@ -16,12 +16,13 @@ final class NextSentenceController {
 
     let card = NextSentenceCard()
     let history = NextSentenceHistory()
+    let semantic = NextSentenceSemanticIndex()
     let claude = NextSentenceClaude()
     let paster = ClipboardRestoringTextPaster()
     lazy var keyTap = NextSentenceKeyTap { [weak self] action, typed, keyCode in
         self?.handle(action, typed: typed, keyCode: keyCode)
     }
-    lazy var capsLock = NextSentenceCapsLock { [weak self] in self?.capsLockPressed() }
+    lazy var fnKey = NextSentenceFnKey { [weak self] in self?.fnTapped() }
     private var hotKey: EventHotKeyRef?
     private var handlerInstalled = false
 
@@ -30,6 +31,7 @@ final class NextSentenceController {
     var snapshot: NextSentenceSnapshot?
     var sources: [NextSentencePrompt.Source] = []
     var voice: [String] = []
+    var people: [String] = []
     var generation = 0
     var streamText = ""
     var streamDone = false
@@ -53,7 +55,8 @@ final class NextSentenceController {
     var swaps: [String: [String]] = [:]
     var swapsRequested: Set<String> = []
     var swapWork: DispatchWorkItem?
-    var remix: (range: NSRange, variants: [String], index: Int)?
+    /// The end handle: the message before any words were cut, how many are cut, and where a drag began.
+    var trimSource: String?
     var rewriteGeneration = 0
     var rewriting = false
     var listening = false
@@ -69,18 +72,21 @@ final class NextSentenceController {
         installHotKeyHandler()
         let id = EventHotKeyID(signature: OSType(0x4E58_5354), id: 1) // "NXST"
         RegisterEventHotKey(UInt32(kVK_Space), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &hotKey)
-        capsLock.start()
+        fnKey.start()
         wireCard()
         history.prewarm()
+        semantic.refresh()
+        NextSentenceSounds.shared.preload()
         DispatchQueue.global(qos: .utility).async { [claude] in claude.prewarm() }
     }
 
     func stop() {
         if let hotKey { UnregisterEventHotKey(hotKey) }
         hotKey = nil
-        capsLock.stop()
+        fnKey.stop()
         close()
         history.stop()
+        semantic.stop()
         claude.stop()
     }
 
@@ -108,19 +114,16 @@ final class NextSentenceController {
         card.onTextEdited = { [weak self] in self?.textEdited() }
         card.onReturnDown = { [weak self] in self?.returnDown() }
         card.onReturnUp = { [weak self] in self?.returnUp() }
-        card.onPickReply = { [weak self] index in self?.pickReply(index) }
         card.onMood = { [weak self] tone, length in self?.set(tone: tone, length: length) }
-        card.onLength = { [weak self] length in
-            guard let self else { return }
-            self.set(tone: self.toneIndex, length: length)
-        }
+        card.onGripStart = { [weak self] in self?.gripStarted() }
+        card.onGripEnd = { [weak self] kept, whole in self?.gripEnded(kept: kept, whole: whole) }
+        card.onSelectionCleared = { [weak self] in self?.card.closeOptions() }
         card.onFreshTake = { [weak self] in self?.rewrite(instruction: "") }
-        card.onMic = { [weak self] in self?.capsLockPressed() }
+        card.onMic = { [weak self] in self?.fnTapped() }
         card.wordOptions = { [weak self] word in self?.swaps[word] ?? [] }
         card.onWordPick = { [weak self] range, word in self?.swap(range, to: word, step: 1) }
         card.onWordRoll = { [weak self] range, step in self?.roll(range, step: step) }
         card.onPickSelection = { [weak self] range in self?.picked(range) }
-        card.onRemixPart = { [weak self] range in self?.remixPart(range) }
     }
 
     // MARK: Open and write
@@ -129,8 +132,8 @@ final class NextSentenceController {
         card.isVisible && !card.content.compact ? close() : open()
     }
 
-    /// Caps Lock: closed, it opens the card; open, it starts listening; listening, it finishes.
-    func capsLockPressed() {
+    /// fn: closed, it opens the card; open, it starts listening; listening, it finishes.
+    func fnTapped() {
         guard card.isVisible, !card.content.compact else { return open() }
         if listening { finishListening() } else if heard == nil { startListening() }
     }
@@ -146,6 +149,7 @@ final class NextSentenceController {
         targetApp = app
         resetDraft()
         sources = []
+        people = []
         voice = []
         swaps = [:]
         swapsRequested = []
@@ -160,10 +164,20 @@ final class NextSentenceController {
             guard gen == self.generation else { return }
             self.snapshot = window
             self.render()
-            let found = await self.history.lookUp(screen: window.screenText + "\n" + window.draft)
+            // By meaning (EmbeddingGemma, on this Mac) and by keyword, at the same time.
+            // Plus everything said about the people on screen, from their dictations, writing and meetings.
+            let screen = window.screenText + "\n" + window.draft
+            let names = NextSentencePrompt.people(screen: window.screenText, windowTitle: window.windowTitle)
+            async let meaning = self.semantic.search(screen, screen: window.screenText)
+            async let mentions = self.semantic.mentions(of: names, relatedTo: screen)
+            async let keywords = self.history.lookUp(screen: screen)
+            let (hits, aboutPeople, found) = await (meaning, mentions, keywords)
             guard gen == self.generation else { return }
-            self.sources = found.sources
-            self.voice = found.voice
+            self.people = names
+            self.sources = NextSentencePrompt.mergeSources(meaning: hits.map(\.chunk), people: aboutPeople, keywords: found.sources)
+            self.voice = found.voice.isEmpty
+                ? hits.filter { $0.chunk.kind != "meeting" }.prefix(3).map { String($0.chunk.text.prefix(240)) }
+                : found.voice
             self.write(steer: "")
         }
     }
@@ -172,7 +186,7 @@ final class NextSentenceController {
         guard let snap = snapshot else { return nil }
         return NextSentencePrompt.Request(
             appName: snap.appName, windowTitle: snap.windowTitle, screenText: snap.screenText, draft: snap.draft,
-            hasScreenshot: snap.screenshotJPEG != nil, sources: sources, voiceExamples: voice, steer: steer)
+            hasScreenshot: snap.screenshotJPEG != nil, sources: sources, voiceExamples: voice, steer: steer, people: people)
     }
 
     /// Three requests at once: the likeliest reply streamed word by word, three different replies in the
@@ -241,7 +255,7 @@ final class NextSentenceController {
         length = NextSentencePrompt.mediumLength
         guessIndex = 0
         custom = nil
-        remix = nil
+        trimSource = nil
         rewriting = false
         listening = false
         heard = nil
@@ -254,6 +268,7 @@ final class NextSentenceController {
     func pickReply(_ index: Int) {
         guard guesses.count > 1, index != guessIndex else { return }
         guessIndex = (index + guesses.count) % guesses.count
+        NextSentenceSounds.shared.play(.step(tone: toneIndex, length: length))
         changedVersion()
     }
 
@@ -263,15 +278,16 @@ final class NextSentenceController {
         guard newTone != toneIndex || newLength != self.length else { return }
         toneIndex = newTone
         self.length = newLength
+        NextSentenceSounds.shared.play(.step(tone: newTone, length: newLength))
         changedVersion()
     }
 
     private func changedVersion() {
         custom = nil
-        remix = nil
+        trimSource = nil
         rewriteGeneration += 1
         rewriting = false
-        card.hideRemixChip()
+        card.closeOptions()
         fadeNext = true
         render()
     }
@@ -339,7 +355,8 @@ final class NextSentenceController {
         guard !text.isEmpty, !listening, let app = targetApp else { return }
         generation += 1 // ignore anything still on its way
         keyTap.stop()
-        card.hide()
+        NextSentenceSounds.shared.play(send ? .send : .insert)
+        card.hide(leaving: true, sending: send)
         let target = DictationPasteTarget.capture(sourceApp: app)
         app.activate(options: [])
         switch paster.paste(text, target: target) {
@@ -356,11 +373,12 @@ final class NextSentenceController {
     }
 
     func close() {
+        if card.isVisible, !card.content.compact { NextSentenceSounds.shared.play(.close) }
         generation += 1
         if listening { cancelListening() }
         resetDraft()
         keyTap.stop()
-        card.hide()
+        card.hide(leaving: true)
     }
 
     /// A short note in the card's place, then gone.

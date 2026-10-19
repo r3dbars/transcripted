@@ -1,7 +1,7 @@
 import AppKit
 
-/// The Next Sentence card: the likeliest reply in front, the other two peeking out behind it.
-/// A mood pad in the corner sets tone and length; a handle at the end of the message stretches it.
+/// The Next Sentence card: one message, written for them. A mood pad in the corner sets tone and
+/// length; a handle at the end of the message stretches it.
 /// Hovering a word offers others (scroll to roll one in); words from their history are shaded and
 /// say where they came from. The card is one fixed size, so nothing jumps while they play with it.
 @MainActor
@@ -13,32 +13,22 @@ final class NextSentenceCard: NSObject {
         let quote: String
     }
 
-    struct Peek {
-        let index: Int
-        let label: String
-        let text: String
-    }
-
     struct Content {
+        /// Shown faintly in the text box while there's no message yet (or if it failed), and as the
+        /// whole card for short notes.
         var status: String
         var busy = false
-        var replyIndex = 0
-        var replyCount = 0
-        var replyLabel = ""
-        /// The other replies, nearest first.
-        var peeks: [Peek] = []
         var text = ""
         var marks: [Mark] = []
         /// Lowercased words that have other words to swap in.
-        var swappable: Set<String> = []
         var streaming = false
         /// Cross-fade to the new text (a different reply, tone or length), rather than replace it.
         var fade = false
         var tone = 1
         var length = NextSentencePrompt.mediumLength
         var hint = ""
-        var insertTitle = "Insert"
-        var insertIcon: NSImage?
+        /// "Insert into Messages. Hold to send.", for the Insert button's tooltip.
+        var insertHelp = "Insert. Hold to send."
         var showsButtons = false
         var listening = false
         /// What they said, shown while it rewrites.
@@ -55,61 +45,62 @@ final class NextSentenceCard: NSObject {
     var onTextEdited: (() -> Void)?
     var onReturnDown: (() -> Void)?
     var onReturnUp: (() -> Void)?
-    var onPickReply: ((Int) -> Void)?
     var onMood: ((_ tone: Int, _ length: Int) -> Void)?
-    var onLength: ((Int) -> Void)?
     var onFreshTake: (() -> Void)?
     var onMic: (() -> Void)?
     var wordOptions: (String) -> [String] = { _ in [] }
     var onWordPick: ((NSRange, String) -> Void)?
     var onWordRoll: ((NSRange, Int) -> Void)?
-    var onRemixPart: ((NSRange) -> Void)?
+    /// The end handle. Start returns the whole message (before any words were cut); let go hands back
+    /// the shorter message, or nil for "write a longer one".
+    var onGripStart: (() -> String?)?
+    var onGripEnd: ((_ kept: String?, _ whole: String) -> Void)?
+    /// Nothing is selected any more: close the options.
+    var onSelectionCleared: (() -> Void)?
     var onPickSelection: ((NSRange) -> Void)?
 
     static let margin: CGFloat = 14
     static let headroom: CGFloat = 130
     static let textHeight = NextSentenceCardStyle.lineHeight * NextSentenceCardStyle.textLines + 2
     static let fullHeight: CGFloat = textTop + textHeight + 10 + 28 + 12
-    /// Where the text box starts, below the status line.
-    static let textTop: CGFloat = 44
+    /// Where the text box starts. The mood pad sits in its top right corner and the text wraps around it.
+    static let textTop: CGFloat = 16
     static let compactHeight: CGFloat = 38
     private var width: CGFloat { NextSentenceCardStyle.width }
 
     private let panel: NextSentencePanel
     private let root = NextSentenceCardRoot()
-    private let peekCards = [NextSentencePeekCard(frame: .zero), NextSentencePeekCard(frame: .zero)]
     private let front = NextSentenceFlippedView()
     private let ring = NextSentenceRing(frame: .zero)
     private let busyDot = NSView()
     private let statusLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.titleFont, NextSentenceCardStyle.title)
-    private let replyDots = NextSentenceFlippedView()
-    private let replyLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.titleFont, NSColor(white: 1, alpha: 0.45))
+    private let placeholder = NextSentenceCardStyle.label(NextSentenceCardStyle.bodyFont, NextSentenceCardStyle.faint)
     private let pad = NextSentenceMoodPad(frame: .zero)
-    private let padLabel = NextSentenceCardStyle.label(.systemFont(ofSize: 11, weight: .semibold), NextSentenceCardStyle.title)
     private let scroll = NSScrollView()
     let textView = NextSentenceTextView(width: NextSentenceCardStyle.width - 28)
     private let grip = NextSentenceLengthGrip(frame: .zero)
     private let gripHint = NextSentenceCardStyle.label(.systemFont(ofSize: 10.5, weight: .semibold), NextSentenceCardStyle.title)
-    private let ticks = NextSentenceFlippedView()
-    private let lengthLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.hintFont, NextSentenceCardStyle.faint)
     private let hintLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.hintFont, NextSentenceCardStyle.faint)
     private let waveform = NextSentenceWaveform(frame: .zero)
     private let micButton = NextSentenceCapsuleButton(title: "", fill: NextSentenceCardStyle.buttonSubtle)
     private let remixButton = NextSentenceCapsuleButton(title: "", fill: NextSentenceCardStyle.buttonSubtle)
-    private let insertButton = NextSentenceCapsuleButton(title: "Insert", fill: NextSentenceCardStyle.accent)
-    private let remixChip = NextSentenceCapsuleButton(title: "↻ remix", fill: NextSentenceCardStyle.accent, height: 18)
+    private let insertButton = NextSentenceCapsuleButton(title: "Insert", fill: NextSentenceCardStyle.accent, wide: true)
     private let float = NextSentenceWordFloat(frame: .zero)
     private let tip = NextSentenceSourceTip(frame: .zero)
+    private let buttonTip = NextSentenceSourceTip(frame: .zero)
+    private let rollOverlay = NextSentenceCardStyle.label(NextSentenceCardStyle.bodyFont, NextSentenceCardStyle.body)
 
     private(set) var content = Content(status: "")
     private var anchor: CGRect = .zero
     private var shownSignature = ""
-    private var lifted: Int?
-    private var gripBase = 0
-    private var floatRange: NSRange?
-    private var floatWork: DispatchWorkItem?
-    private var remixRange: NSRange?
     private var insertHeldFull = false
+    private var placedAbove = false
+    private var padActive = false
+    /// Bumped on every show, so a leave animation that finishes late can't hide the new card.
+    private var shownCount = 0
+    /// While the end handle is dragged: the whole message, how many words stay, and whether they've
+    /// pulled past the end for a longer version.
+    private var gripDrag: (whole: String, kept: Int, longer: Bool)?
 
     override init() {
         panel = NextSentencePanel(contentRect: NSRect(x: 0, y: 0, width: 500, height: 300),
@@ -143,51 +134,85 @@ final class NextSentenceCard: NSObject {
         }
         endEditing()
         shownSignature = ""
-        lifted = nil
         update(content)
-        panel.alphaValue = 0
+        panel.alphaValue = 1
+        shownCount += 1
+        front.layer?.removeAnimation(forKey: "leave")
         panel.orderFrontRegardless()
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.14
-            panel.animator().alphaValue = 1
-        }
+        animateIn()
+        if !content.compact { NextSentenceSounds.shared.play(.open) }
     }
 
-    func hide() {
+    /// The card springs out of the text cursor: from its corner nearest the caret, a little small,
+    /// settling with a soft overshoot, then a thin light runs once around its edge.
+    private func animateIn() {
+        guard let layer = front.layer else { return }
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let fade = CABasicAnimation(keyPath: "opacity")
+            fade.fromValue = 0
+            fade.duration = 0.15
+            layer.add(fade, forKey: "intro")
+            return
+        }
+        // Grow from the corner by the caret: top left when the card sits below the line, bottom left above it.
+        let corner = CGPoint(x: 0, y: placedAbove ? front.bounds.height : 0)
+        let shrink = CATransform3DConcat(
+            CATransform3DConcat(CATransform3DMakeTranslation(-corner.x, -corner.y, 0), CATransform3DMakeScale(0.9, 0.9, 1)),
+            CATransform3DMakeTranslation(corner.x, corner.y, 0))
+        let spring = CASpringAnimation(keyPath: "transform")
+        spring.fromValue = shrink
+        spring.toValue = CATransform3DIdentity
+        spring.mass = 0.8
+        spring.stiffness = 320
+        spring.damping = 19
+        spring.duration = spring.settlingDuration
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0
+        fade.toValue = 1
+        fade.duration = 0.16
+        fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(spring, forKey: "introScale")
+        layer.add(fade, forKey: "introFade")
+        ring.sweepOnce(color: NSColor(white: 1, alpha: 0.55))
+    }
+
+    /// `leaving` animates it away first: back toward the caret, or lifting off when it was sent.
+    func hide(leaving: Bool = false, sending: Bool = false) {
         endEditing()
         closeFloats()
         ring.set(listening: false)
         waveform.set(animating: false)
-        panel.orderOut(nil)
+        guard leaving, isVisible, let layer = front.layer else { return panel.orderOut(nil) }
+        let shown = shownCount
+        NextSentenceMotion.leave(layer, toward: CGPoint(x: 0, y: placedAbove ? front.bounds.height : 0), sending: sending) { [weak self] in
+            guard let self, shown == self.shownCount else { return }
+            self.panel.orderOut(nil)
+            self.front.layer?.removeAnimation(forKey: "leave")
+        }
     }
 
     func update(_ new: Content) {
-        let wasCompact = content.compact
         let wasListening = content.listening
+        let previousLength = content.length
         content = new
         statusLabel.stringValue = new.status
+        placeholder.stringValue = new.status
         busyDot.isHidden = !new.busy
-        replyLabel.stringValue = new.replyLabel
-        padLabel.stringValue = "\(NextSentencePrompt.Tone.padOrder[new.tone].rawValue.capitalized) · \(NextSentencePrompt.lengthNames[new.length])"
         pad.set(tone: new.tone, length: new.length)
-        lengthLabel.stringValue = NextSentencePrompt.lengthNames[new.length]
         hintLabel.stringValue = new.listening ? "" : new.hint
-        let signature = "\(new.text)|\(new.streaming)|\(new.marks.map { "\($0.range)" })|\(new.swappable.sorted())"
+        let signature = "\(new.text)|\(new.streaming)|\(new.marks.map { "\($0.range)" })"
         if !isEditing && signature != shownSignature {
-            if new.fade && !new.streaming { fadeText() }
+            if new.fade && !new.streaming { NextSentenceMotion.textChanged(textView.layer, direction: new.length - previousLength) }
             textView.textStorage?.setAttributedString(attributed(new))
             shownSignature = signature
             textView.scrollToBeginningOfDocument(nil)
-            if let remixRange, NSMaxRange(remixRange) > (textView.string as NSString).length { hideRemixChip() }
+            if optionsRange != nil { closeOptions() }
         }
-        insertButton.set(title: insertHeldFull ? "Release to send" : new.insertTitle, icon: new.insertIcon)
+        insertButton.set(title: insertHeldFull ? "Release to send" : "Insert", icon: nil)
         ring.set(listening: new.listening)
         if new.listening != wasListening { waveform.set(animating: new.listening) }
-        for (card, peek) in zip(peekCards, new.peeks + [Peek](repeating: Peek(index: 0, label: "", text: ""), count: 2)) {
-            card.set(label: peek.label, text: peek.text)
-        }
         glow()
-        layout(animatePeeks: wasCompact == new.compact)
+        layout()
     }
 
     // MARK: Editing
@@ -238,93 +263,89 @@ final class NextSentenceCard: NSObject {
     func setSendArmed(_ armed: Bool) {
         guard armed != insertHeldFull else { return }
         insertHeldFull = armed
-        if armed { NextSentenceCardStyle.tick() }
-        insertButton.set(title: armed ? "Release to send" : content.insertTitle, icon: content.insertIcon)
+        if armed {
+            NextSentenceCardStyle.tick()
+            NextSentenceSounds.shared.play(.armed)
+        }
+        insertButton.set(title: armed ? "Release to send" : "Insert", icon: nil)
         layoutFoot()
     }
 
-    // MARK: Words
+    // MARK: Options for a picked word or part
 
-    /// Floats the other words for `range` above it. Called on hover, and again after each swap.
-    func showWordFloat(for range: NSRange) {
+    /// The word or words picked, while their options float above them.
+    private(set) var optionsRange: NSRange?
+
+    /// Floats the options for the picked word or part above it, closest one nearest the text.
+    /// Called when they pick it, and again after each swap.
+    /// `rolled` is the scroll step that just swapped one in (0 for none), so the list slides the same way.
+    func showOptions(for range: NSRange, rolled: Int = 0) {
         let text = textView.string as NSString
-        guard NSMaxRange(range) <= text.length else { return closeFloats() }
-        let options = wordOptions(text.substring(with: range).lowercased())
-        guard !options.isEmpty else { return closeFloats() }
-        clearWordHighlight()
-        floatRange = range
-        textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NSColor(white: 1, alpha: 0.12), forCharacterRange: range)
-        let rect = textView.convert(textView.rect(for: range), to: root)
-        float.show(options, above: rect)
+        guard NSMaxRange(range) <= text.length else { return closeOptions() }
+        let options = Array(wordOptions(text.substring(with: range).lowercased()).prefix(3))
+        guard !options.isEmpty else { return closeOptions() }
+        if rolled != 0, !float.isHidden, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+            let slide = CATransition()
+            slide.type = .push
+            slide.subtype = rolled > 0 ? .fromBottom : .fromTop
+            slide.duration = 0.12
+            slide.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            float.layer?.add(slide, forKey: "roll")
+        }
+        placeOptions(options, for: range)
         float.onPick = { [weak self] option in self?.onWordPick?(range, option) }
+    }
+
+    /// A placeholder above the picked part while its options are written.
+    func showOptionsLoading(for range: NSRange) {
+        guard NSMaxRange(range) <= (textView.string as NSString).length else { return }
+        placeOptions(["…"], for: range)
+        float.onPick = { _ in }
+    }
+
+    private func placeOptions(_ options: [String], for range: NSRange) {
+        optionsRange = range
+        // The picked part stands out: bright blue behind white text.
+        if isEditing { textView.setSelectedRange(range) }
+        if let previous = optionsRange, previous != range, NSMaxRange(previous) <= (textView.string as NSString).length {
+            clearHighlight(previous)
+        }
+        textView.layoutManager?.addTemporaryAttributes([.backgroundColor: NextSentenceCardStyle.accent.withAlphaComponent(0.7),
+                                                        .foregroundColor: NSColor.white], forCharacterRange: range)
+        let rect = textView.convert(textView.rect(for: range), to: root)
+        float.show(options, above: rect, within: root.bounds.insetBy(dx: 6, dy: 0))
         float.isHidden = false
     }
 
-    /// Highlights a picked part and puts a remix chip after it.
-    func showRemixChip(for range: NSRange) {
-        guard NSMaxRange(range) <= (textView.string as NSString).length else { return }
-        hideRemixChip()
-        remixRange = range
-        textView.layoutManager?.addTemporaryAttribute(.backgroundColor, value: NextSentenceCardStyle.accent.withAlphaComponent(0.42),
-                                                      forCharacterRange: range)
-        let end = textView.rect(for: NSRange(location: NSMaxRange(range) - 1, length: 1))
-        let chipWidth = remixChip.fittingWidth
-        remixChip.frame = NSRect(x: min(end.maxX + 4, textView.bounds.width - chipWidth), y: end.minY + 1, width: chipWidth, height: 18)
-        remixChip.isHidden = false
+    private func clearHighlight(_ range: NSRange) {
+        textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: range)
+        textView.layoutManager?.removeTemporaryAttribute(.foregroundColor, forCharacterRange: range)
     }
 
-    func hideRemixChip() {
-        if let remixRange, NSMaxRange(remixRange) <= (textView.string as NSString).length {
-            textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: remixRange)
+    func closeOptions() {
+        if let optionsRange, NSMaxRange(optionsRange) <= (textView.string as NSString).length {
+            clearHighlight(optionsRange)
         }
-        remixRange = nil
-        remixChip.isHidden = true
+        optionsRange = nil
+        float.isHidden = true
     }
 
+    /// Hovering only explains: a tinted phrase says where it came from.
     private func hover(_ hit: (NSRange, NSRect)?) {
-        floatWork?.cancel()
-        guard !isEditing, let (range, _) = hit else {
+        guard !isEditing, let (range, _) = hit,
+              let mark = content.marks.first(where: { NSIntersectionRange($0.range, range).length > 0 }) else {
             tip.isHidden = true
-            return scheduleFloatClose()
-        }
-        if let mark = content.marks.first(where: { NSIntersectionRange($0.range, range).length > 0 }) {
-            scheduleFloatClose()
-            let phrase = textView.convert(textView.rect(for: mark.range), to: root)
-            tip.show(heading: mark.heading, quote: mark.quote, above: phrase, within: root.bounds.insetBy(dx: 4, dy: 4))
-            tip.isHidden = false
             return
         }
-        tip.isHidden = true
-        guard range != floatRange else { return }
-        let word = (textView.string as NSString).substring(with: range).lowercased()
-        guard content.swappable.contains(word) else { return scheduleFloatClose() }
-        let work = DispatchWorkItem { [weak self] in self?.showWordFloat(for: range) }
-        floatWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + (floatRange == nil ? 0.3 : 0.05), execute: work)
-    }
-
-    private func scheduleFloatClose() {
-        guard floatRange != nil else { return }
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.float.isHovered else { return }
-            self.closeFloats()
-        }
-        floatWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        let phrase = textView.convert(textView.rect(for: mark.range), to: root)
+        tip.show(heading: mark.heading, quote: mark.quote, above: phrase, within: root.bounds.insetBy(dx: 4, dy: 4))
+        tip.isHidden = false
     }
 
     private func closeFloats() {
-        floatWork?.cancel()
-        clearWordHighlight()
-        floatRange = nil
-        float.isHidden = true
+        closeOptions()
         tip.isHidden = true
-    }
-
-    private func clearWordHighlight() {
-        if let floatRange, NSMaxRange(floatRange) <= (textView.string as NSString).length {
-            textView.layoutManager?.removeTemporaryAttribute(.backgroundColor, forCharacterRange: floatRange)
-        }
+        buttonTip.isHidden = true
     }
 
     // MARK: Building
@@ -339,15 +360,8 @@ final class NextSentenceCard: NSObject {
 
     private func attributed(_ content: Content) -> NSAttributedString {
         let result = NSMutableAttributedString(string: content.text, attributes: bodyAttributes)
-        let ns = content.text as NSString
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { word, range, _, _ in
-            guard let word, content.swappable.contains(word.lowercased()) else { return }
-            result.addAttributes([.underlineStyle: NSUnderlineStyle.single.rawValue | NSUnderlineStyle.patternDot.rawValue,
-                                  .underlineColor: NSColor(white: 1, alpha: 0.28)], range: range)
-        }
         for mark in content.marks where NSMaxRange(mark.range) <= result.length {
             result.addAttribute(.foregroundColor, value: mark.color, range: mark.range)
-            result.removeAttribute(.underlineStyle, range: mark.range)
         }
         if content.streaming {
             var caret = bodyAttributes
@@ -367,37 +381,23 @@ final class NextSentenceCard: NSObject {
         textView.bodyStyle = attributes
     }
 
-    private func fadeText() {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
-        let fade = CATransition()
-        fade.type = .fade
-        fade.duration = 0.22
-        textView.layer?.add(fade, forKey: "fade")
-    }
-
     private func glow() {
         guard let layer = front.layer else { return }
+        // Tone shows as a soft colored glow around the card, not a border: blue for direct, amber for warm,
+        // none for casual. It brightens while the pad is dragged.
         let color = NextSentenceCardStyle.toneColors[content.tone]
         let neutral = content.tone == 1 || content.listening
-        layer.borderColor = color.withAlphaComponent(neutral ? 0.1 : 0.45).cgColor
+        layer.borderColor = NSColor(white: 1, alpha: 0.08).cgColor
         layer.shadowColor = (neutral ? NSColor.black : color).cgColor
-        layer.shadowOpacity = neutral ? 0.3 : 0.32
-        layer.shadowRadius = neutral ? 15 : 12
+        layer.shadowOpacity = neutral ? 0.3 : (padActive ? 0.85 : 0.6)
+        layer.shadowRadius = neutral ? 15 : (padActive ? 26 : 20)
         layer.shadowOffset = neutral ? CGSize(width: 0, height: -10) : .zero
     }
 
     private func build() {
         panel.contentView = root
         root.onMouseMoved = { [weak self] point in self?.rootMoved(point) }
-        root.onMouseExited = { [weak self] in self?.setLifted(nil) }
-
-        for (rank, card) in peekCards.enumerated() {
-            card.onPick = { [weak self] in
-                guard let self, self.content.peeks.indices.contains(rank) else { return }
-                self.onPickReply?(self.content.peeks[rank].index)
-            }
-            root.addSubview(card, positioned: .below, relativeTo: nil)
-        }
+        root.onMouseExited = { [weak self] in self?.textView.hover(at: nil) }
         front.wantsLayer = true
         front.layer?.backgroundColor = NextSentenceCardStyle.background.cgColor
         front.layer?.cornerRadius = NextSentenceCardStyle.cornerRadius
@@ -409,10 +409,23 @@ final class NextSentenceCard: NSObject {
         busyDot.wantsLayer = true
         busyDot.layer?.backgroundColor = NextSentenceCardStyle.accent.cgColor
         busyDot.layer?.cornerRadius = 3
-        replyDots.wantsLayer = true
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        padLabel.alignment = .right
+        placeholder.maximumNumberOfLines = 2
         pad.onChange = { [weak self] tone, length in self?.onMood?(tone, length) }
+        pad.onActive = { [weak self] active in
+            guard let self else { return }
+            self.padActive = active
+            self.buttonTip.isHidden = true
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.25
+                context.allowsImplicitAnimation = true
+                self.glow()
+            }
+        }
+        pad.onHover = { [weak self] inside in
+            guard let self, !self.padActive else { return }
+            self.showButtonTip(inside ? "Left: more direct. Right: warmer. Up: shorter. Down: longer." : nil, over: self.pad)
+        }
 
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = false
@@ -428,34 +441,25 @@ final class NextSentenceCard: NSObject {
         textView.onTextChange = { [weak self] in self?.onTextEdited?() }
         textView.onPickSelection = { [weak self] range in self?.onPickSelection?(range) }
         textView.onHoverWord = { [weak self] hit in self?.hover(hit) }
-        textView.canRoll = { [weak self] range in
-            guard let self, !self.isEditing else { return false }
-            return self.content.swappable.contains((self.textView.string as NSString).substring(with: range).lowercased())
+        // Scrolling anywhere over the text rolls the picked word or part, once its options are there.
+        textView.canRoll = { [weak self] in
+            guard let self, let range = self.optionsRange,
+                  NSMaxRange(range) <= (self.textView.string as NSString).length else { return false }
+            return !self.wordOptions((self.textView.string as NSString).substring(with: range).lowercased()).isEmpty
         }
-        textView.onRoll = { [weak self] range, step in self?.onWordRoll?(range, step) }
+        textView.onRoll = { [weak self] step in
+            guard let self, let range = self.optionsRange else { return }
+            self.onWordRoll?(range, step)
+        }
+        textView.onSelectionCleared = { [weak self] in self?.onSelectionCleared?() }
         textView.addSubview(grip)
-        textView.addSubview(remixChip)
-        remixChip.isHidden = true
-        remixChip.onPress = { [weak self] in
-            guard let self, let range = self.remixRange else { return }
-            self.onRemixPart?(range)
+        grip.onHover = { [weak self] inside in
+            guard let self, self.gripHint.isHidden else { return }
+            self.showButtonTip(inside ? "Drag left to cut words. Drag right to make it longer." : nil, over: self.grip)
         }
-        grip.onDragStart = { [weak self] in
-            guard let self else { return }
-            self.gripBase = self.content.length
-            self.gripHint.isHidden = false
-            self.showGripHint(wanted: self.gripBase)
-        }
-        grip.onDrag = { [weak self] dx in
-            guard let self else { return }
-            let step = NextSentencePolicy.gripLength(base: self.gripBase, dragged: dx)
-            if step.length != self.content.length {
-                NextSentenceCardStyle.tick()
-                self.onLength?(step.length)
-            }
-            self.showGripHint(wanted: step.wanted)
-        }
-        grip.onDragEnd = { [weak self] in self?.gripHint.isHidden = true }
+        grip.onDragStart = { [weak self] in self?.gripBegan() }
+        grip.onDrag = { [weak self] point in self?.gripMoved(to: point) }
+        grip.onDragEnd = { [weak self] in self?.gripEnded() }
         gripHint.wantsLayer = true
         gripHint.drawsBackground = true
         gripHint.backgroundColor = NSColor(white: 0.11, alpha: 1)
@@ -463,12 +467,13 @@ final class NextSentenceCard: NSObject {
         gripHint.layer?.cornerRadius = 6
         gripHint.isHidden = true
 
-        ticks.wantsLayer = true
         micButton.set(title: "", icon: NSImage(systemSymbolName: "mic.fill", accessibilityDescription: "Say a change"), color: NextSentenceCardStyle.title)
-        micButton.toolTip = "Say a change (or press Caps Lock)"
         micButton.onPress = { [weak self] in self?.onMic?() }
-        remixButton.set(title: "", icon: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Fresh take"), color: NextSentenceCardStyle.title)
-        remixButton.toolTip = "Hold for a fresh take"
+        remixButton.set(title: "", icon: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Remix the whole message"), color: NextSentenceCardStyle.title)
+        // System tooltips don't show over another app's window, so the card draws its own.
+        micButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? "Say a change. Or tap fn." : nil, over: self?.micButton) }
+        remixButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? "Hold to remix the whole message" : nil, over: self?.remixButton) }
+        insertButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? self?.content.insertHelp : nil, over: self?.insertButton) }
         remixButton.holdDuration = NextSentencePolicy.holdToRemix
         remixButton.onHoldProgress = { [weak self] progress in self?.ring.set(progress: progress, color: NextSentenceCardStyle.accent) }
         remixButton.onHeld = { [weak self] in self?.onFreshTake?() }
@@ -480,26 +485,67 @@ final class NextSentenceCard: NSObject {
         insertButton.onPress = { [weak self] in self?.onInsert?(false) }
         insertButton.onHeld = { [weak self] in self?.onInsert?(true) }
 
-        for view in [busyDot, statusLabel, replyDots, replyLabel, padLabel, pad, scroll, ticks, lengthLabel, hintLabel,
-                     waveform, micButton, remixButton, insertButton] as [NSView] {
+        for view in [busyDot, statusLabel, scroll, placeholder, pad, hintLabel, waveform, micButton, remixButton, insertButton] as [NSView] {
             front.addSubview(view)
         }
+        rollOverlay.isHidden = true
+        textView.addSubview(rollOverlay)
         float.isHidden = true
-        float.onExit = { [weak self] in self?.scheduleFloatClose() }
         tip.isHidden = true
         root.addSubview(gripHint)
         root.addSubview(float)
         root.addSubview(tip)
+        buttonTip.isHidden = true
+        root.addSubview(buttonTip)
+    }
+
+    private func showButtonTip(_ text: String?, over button: NSView?) {
+        guard let text, let button, !button.isHidden else { buttonTip.isHidden = true; return }
+        let rect = button.convert(button.bounds, to: root)
+        buttonTip.show(heading: text, quote: "", above: rect, within: root.bounds.insetBy(dx: 4, dy: 4))
+        buttonTip.isHidden = false
+    }
+
+    /// The new word rolls in from above, where the options float, instead of just appearing.
+    func animateWordIn(_ range: NSRange) {
+        let text = textView.string as NSString
+        guard NSMaxRange(range) <= text.length, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let layoutManager = textView.layoutManager else { return }
+        let rect = textView.rect(for: range)
+        let attributes = textView.textStorage?.attributes(at: range.location, effectiveRange: nil) ?? bodyAttributes
+        rollOverlay.attributedStringValue = NSAttributedString(string: text.substring(with: range), attributes: attributes)
+        let size = rollOverlay.intrinsicContentSize
+        guard size.width <= rect.width + 6 else { return } // a part that wraps lines just appears
+        let final = NSRect(x: rect.minX - 2, y: rect.minY + (rect.height - size.height) / 2, width: size.width + 4, height: size.height)
+        rollOverlay.frame = final.offsetBy(dx: 0, dy: -9)
+        rollOverlay.alphaValue = 0
+        rollOverlay.isHidden = false
+        layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor.clear, forCharacterRange: range)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.12
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1.2)
+            rollOverlay.animator().frame = final
+            rollOverlay.animator().alphaValue = 1
+        }, completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.rollOverlay.isHidden = true
+                if NSMaxRange(range) <= (self.textView.string as NSString).length {
+                    self.textView.layoutManager?.removeTemporaryAttribute(.foregroundColor, forCharacterRange: range)
+                }
+            }
+        })
     }
 
     // MARK: Layout
 
-    private func layout(animatePeeks: Bool) {
+    private func layout() {
         let cardHeight = content.compact ? Self.compactHeight : Self.fullHeight
         let size = CGSize(width: width, height: cardHeight)
         let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
         let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1_440, height: 900)
         let placement = NextSentencePolicy.place(card: size, under: anchor, in: visible)
+        placedAbove = placement.above
         let m = Self.margin
         let frame = CGRect(x: placement.origin.x - m, y: placement.origin.y - m,
                            width: width + 2 * m, height: Self.headroom + cardHeight + m)
@@ -509,26 +555,26 @@ final class NextSentenceCard: NSObject {
         front.layer?.shadowPath = CGPath(roundedRect: front.bounds, cornerWidth: 16, cornerHeight: 16, transform: nil)
         ring.frame = front.frame.insetBy(dx: -3, dy: -3)
         layoutFront()
-        layoutPeeks(animated: animatePeeks)
     }
 
     private func layoutFront() {
         let compact = content.compact
-        for view in [replyDots, pad, scroll, hintLabel, micButton, remixButton, insertButton] as [NSView] {
+        for view in [pad, scroll, hintLabel, micButton, remixButton, insertButton] as [NSView] {
             view.isHidden = compact
         }
-        replyLabel.isHidden = true
-        padLabel.isHidden = true
+        // The status line only exists for short notes; otherwise status shows faintly in the text box.
+        statusLabel.isHidden = !compact
+        busyDot.isHidden = !compact || !content.busy
         let inset: CGFloat = 16
         let x: CGFloat = content.busy ? inset + 12 : inset
         busyDot.frame = NSRect(x: inset, y: 17, width: 6, height: 6)
-        pad.frame = NSRect(x: width - inset - NextSentenceMoodPad.size.width, y: 10, width: NextSentenceMoodPad.size.width,
+        statusLabel.frame = NSRect(x: x, y: 12, width: width - inset - x, height: 16)
+        pad.frame = NSRect(x: width - inset - NextSentenceMoodPad.size.width, y: 12, width: NextSentenceMoodPad.size.width,
                            height: NextSentenceMoodPad.size.height)
-        let dotsWidth = content.replyCount > 1 ? CGFloat(content.replyCount) * 9 + 6 : 0
-        let statusLimit = (compact ? width - inset : pad.frame.minX - 12 - dotsWidth) - x
-        let statusWidth = min(ceil(statusLabel.intrinsicContentSize.width), statusLimit)
-        statusLabel.frame = NSRect(x: x, y: 12, width: statusWidth, height: 16)
-        layoutReplyDots(after: statusLabel.frame.maxX + 10)
+        placeholder.isHidden = compact || !content.text.isEmpty || isEditing
+        placeholder.wantsLayer = true
+        NextSentenceMotion.shimmer(placeholder, on: !placeholder.isHidden && content.busy)
+        placeholder.frame = NSRect(x: inset, y: Self.textTop + 2, width: pad.frame.minX - inset - 12, height: 44)
 
         scroll.frame = NSRect(x: inset, y: Self.textTop, width: width - 2 * inset, height: Self.textHeight)
         textView.frame.size.width = width - 2 * inset
@@ -541,20 +587,70 @@ final class NextSentenceCard: NSObject {
         layoutFoot()
     }
 
-    private func layoutReplyDots(after x: CGFloat) {
-        replyDots.subviews.forEach { $0.removeFromSuperview() }
-        let count = content.compact || content.replyCount < 2 ? 0 : content.replyCount
-        for index in 0..<count {
-            let dot = NSView(frame: NSRect(x: CGFloat(index) * 9, y: 0, width: 5, height: 5))
-            dot.wantsLayer = true
-            dot.layer?.cornerRadius = 2.5
-            dot.layer?.backgroundColor = NSColor(white: 1, alpha: index == content.replyIndex ? 1 : 0.25).cgColor
-            replyDots.addSubview(dot)
+    // MARK: The end handle
+
+    /// Shows the whole message, with the words currently cut faded, so dragging back can bring them back.
+    private func gripBegan() {
+        buttonTip.isHidden = true
+        closeOptions()
+        let current = currentText
+        let whole = onGripStart?() ?? current
+        let kept = NextSentencePolicy.wordCount(current)
+        textView.textStorage?.setAttributedString(NSAttributedString(string: whole, attributes: bodyAttributes))
+        shownSignature = "grip"
+        gripDrag = (whole, kept, false)
+        showCut()
+    }
+
+    /// The end follows the pointer to the nearest word; past the end of the whole message means longer.
+    private func gripMoved(to windowPoint: NSPoint) {
+        guard var drag = gripDrag, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
+        let point = textView.convert(windowPoint, from: nil)
+        let inContainer = NSPoint(x: point.x - textView.textContainerOrigin.x, y: point.y - textView.textContainerOrigin.y)
+        let length = (drag.whole as NSString).length
+        let last = textView.rect(for: NSRange(location: max(0, length - 1), length: 1))
+        let pastEnd = (point.y > last.maxY + 4) || (point.y >= last.minY - 4 && point.x > last.maxX + 28)
+        let index = layoutManager.characterIndex(for: inContainer, in: container, fractionOfDistanceBetweenInsertionPoints: nil)
+        let kept = pastEnd ? NextSentencePolicy.wordCount(drag.whole) : NextSentencePolicy.wordsKept(before: index, in: drag.whole)
+        guard kept != drag.kept || pastEnd != drag.longer else { return }
+        let total = max(1, NextSentencePolicy.wordCount(drag.whole))
+        NextSentenceSounds.shared.play(pastEnd ? .armed : .trim(kept: Double(kept) / Double(total)))
+        drag.kept = kept
+        drag.longer = pastEnd
+        gripDrag = drag
+        NextSentenceCardStyle.tick()
+        showCut()
+    }
+
+    private func gripEnded() {
+        gripHint.isHidden = true
+        guard let drag = gripDrag else { return }
+        gripDrag = nil
+        shownSignature = ""
+        let total = NextSentencePolicy.wordCount(drag.whole)
+        onGripEnd?(drag.longer ? nil : NextSentencePolicy.trimWords(drag.whole, dropping: total - drag.kept), drag.whole)
+    }
+
+    private func showCut() {
+        guard let drag = gripDrag, let layoutManager = textView.layoutManager else { return }
+        let ns = drag.whole as NSString
+        let total = NextSentencePolicy.wordCount(drag.whole)
+        let cutAt = (NextSentencePolicy.trimWords(drag.whole, dropping: total - drag.kept) as NSString).length
+        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: NSRange(location: 0, length: ns.length))
+        if cutAt < ns.length {
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor(white: 1, alpha: 0.2),
+                                                forCharacterRange: NSRange(location: cutAt, length: ns.length - cutAt))
         }
-        replyDots.frame = NSRect(x: x, y: 17.5, width: max(0, CGFloat(count) * 9 - 4), height: 5)
+        // The handle sits right after the last word kept.
+        let end = textView.rect(for: NSRange(location: max(0, cutAt - 1), length: 1))
+        let size = NextSentenceLengthGrip.size
+        grip.frame = NSRect(x: end.maxX + 3, y: end.minY + (NextSentenceCardStyle.lineHeight - size.height) / 2, width: size.width, height: size.height)
+        showGripHint(drag.longer ? "Let go for a longer version"
+                     : drag.kept == total ? "All \(total) words · drag left to cut" : "\(drag.kept) of \(total) words")
     }
 
     func placeGrip() {
+        guard gripDrag == nil else { return }
         let showGrip = !content.compact && !isEditing && !content.streaming && !content.text.isEmpty && !content.listening
         grip.isHidden = !showGrip
         guard showGrip else { return }
@@ -566,12 +662,9 @@ final class NextSentenceCard: NSObject {
         grip.frame = NSRect(x: end.x + 3, y: end.y + (NextSentenceCardStyle.lineHeight - size.height) / 2, width: size.width, height: size.height)
     }
 
-    private func showGripHint(wanted: Int) {
-        let names = NextSentencePrompt.lengthNames
-        let shown = NextSentencePolicy.stepLength(wanted, by: 0)
-        gripHint.stringValue = wanted > names.count - 1 ? "\(names[shown]) · that's the longest"
-            : wanted < 0 ? "\(names[shown]) · that's the shortest" : names[shown]
-        placeGrip()
+    private func showGripHint(_ text: String) {
+        gripHint.stringValue = text
+        gripHint.isHidden = text.isEmpty
         let gripInRoot = grip.convert(grip.bounds, to: root)
         let hintWidth = ceil(gripHint.intrinsicContentSize.width) + 14
         gripHint.frame = NSRect(x: gripInRoot.midX - hintWidth / 2, y: gripInRoot.minY - 22, width: hintWidth, height: 18)
@@ -581,8 +674,6 @@ final class NextSentenceCard: NSObject {
         let y = Self.textTop + Self.textHeight + 10
         let listening = content.listening && !content.compact
         let heard = content.heard != nil && !content.compact
-        ticks.isHidden = true
-        lengthLabel.isHidden = true
         micButton.isHidden = content.compact || listening || heard || !content.showsButtons
         remixButton.isHidden = micButton.isHidden
         insertButton.isHidden = micButton.isHidden
@@ -599,7 +690,7 @@ final class NextSentenceCard: NSObject {
         if listening {
             waveform.frame = NSRect(x: 16, y: y + 7, width: NextSentenceWaveform.size.width, height: NextSentenceWaveform.size.height)
             hintX = waveform.frame.maxX + 10
-            hintLabel.stringValue = "Listening. Press Caps Lock again to finish."
+            hintLabel.stringValue = "Listening. Tap fn again to finish."
         } else if let said = content.heard {
             hintX = 16
             hintLabel.stringValue = "“\(said)”"
@@ -609,46 +700,13 @@ final class NextSentenceCard: NSObject {
         hintLabel.frame = NSRect(x: hintX, y: y + 7, width: max(0, right - hintX - 4), height: 15)
     }
 
-    private func layoutPeeks(animated: Bool) {
-        let m = Self.margin
-        let reduce = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        NSAnimationContext.runAnimationGroup { context in
-            context.duration = animated && !reduce ? 0.3 : 0
-            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.9, 0.3, 1.15)
-            context.allowsImplicitAnimation = true
-            for (offset, card) in peekCards.enumerated() {
-                let rank = CGFloat(offset + 1)
-                let shown = !content.compact && content.peeks.count > offset
-                let isLifted = lifted == offset
-                let scale = 1 - (isLifted ? 0.02 : 0.035) * rank
-                let cardWidth = width * scale
-                let rise = 14 * rank + (isLifted ? 26 : 0)
-                card.animator().frame = NSRect(x: m + (width - cardWidth) / 2, y: Self.headroom - rise, width: cardWidth,
-                                               height: Self.fullHeight * scale)
-                card.animator().alphaValue = shown ? (isLifted ? 1 : (offset == 0 ? 0.85 : 0.6)) : 0
-                card.set(dimmed: !isLifted)
-                card.isHidden = !shown
-            }
-        }
-    }
-
     private func rootMoved(_ point: NSPoint) {
-        guard !content.compact, !front.frame.contains(point) else { return setLifted(nil) }
-        let hit = peekCards.indices.first { index in
-            !peekCards[index].isHidden && peekCards[index].frame.contains(point)
-                && !(index == 1 && peekCards[0].frame.contains(point))
-        }
-        setLifted(hit)
-    }
-
-    private func setLifted(_ index: Int?) {
-        guard index != lifted else { return }
-        lifted = index
-        layoutPeeks(animated: true)
+        let inText = !content.compact && !scroll.isHidden && scroll.convert(scroll.bounds, to: root).contains(point)
+        textView.hover(at: inText ? textView.convert(point, from: root) : nil)
     }
 }
 
-/// The card window's content: tracks the pointer for the peeking cards, and lets clicks on its empty
+/// The card window's content: tracks the pointer for word hovers, and lets clicks on its empty
 /// margins fall through.
 final class NextSentenceCardRoot: NextSentenceFlippedView {
     var onMouseMoved: ((NSPoint) -> Void)?
@@ -671,3 +729,4 @@ final class NextSentenceCardRoot: NextSentenceFlippedView {
         return hit === self ? nil : hit
     }
 }
+

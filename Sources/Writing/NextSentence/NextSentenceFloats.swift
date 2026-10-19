@@ -1,7 +1,7 @@
 import AppKit
 
-/// Other words for the hovered word, stacked just above it, the closest one nearest the word.
-/// Click one to use it; scrolling over the word rolls the nearest one in.
+/// Other words for the picked word or part, stacked just above it, the closest one nearest the text.
+/// Click one to use it; scrolling rolls the nearest one in.
 final class NextSentenceWordFloat: NextSentenceFlippedView {
     var onPick: ((String) -> Void)?
     private var chips: [NextSentenceOptionChip] = []
@@ -15,15 +15,10 @@ final class NextSentenceWordFloat: NextSentenceFlippedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
-    var isHovered = false
-    var onExit: (() -> Void)?
-
-    override func mouseEntered(with event: NSEvent) { isHovered = true }
-    override func mouseExited(with event: NSEvent) { isHovered = false; onExit?() }
 
     /// Lays the options out top to bottom, and sizes itself so its bottom sits `gap` above `word`
     /// (a rect in the superview's coordinates).
-    func show(_ options: [String], above word: NSRect, gap: CGFloat = 6) {
+    func show(_ options: [String], above word: NSRect, within limit: NSRect, gap: CGFloat = 6) {
         chips.forEach { $0.removeFromSuperview() }
         chips = options.map { option in
             let chip = NextSentenceOptionChip(text: option)
@@ -34,25 +29,28 @@ final class NextSentenceWordFloat: NextSentenceFlippedView {
         var width: CGFloat = 0
         for chip in chips {
             let size = chip.fittingSize
-            chip.frame = NSRect(x: 0, y: y, width: size.width, height: size.height)
+            chip.frame = NSRect(x: 0, y: y, width: min(size.width, limit.width), height: size.height)
             addSubview(chip)
             y += size.height + 2
-            width = max(width, size.width)
+            width = max(width, min(size.width, limit.width))
         }
         let height = max(0, y - 2)
-        frame = NSRect(x: word.minX - 8, y: word.minY - gap - height, width: width, height: height)
+        let x = min(max(word.minX - 9, limit.minX), limit.maxX - width)
+        frame = NSRect(x: x, y: max(limit.minY, word.minY - gap - height), width: width, height: height)
     }
 }
 
 final class NextSentenceOptionChip: NextSentenceFlippedView {
     var onPick: (() -> Void)?
-    private let label = NextSentenceCardStyle.label(.systemFont(ofSize: 14), NSColor(white: 1, alpha: 0.55))
+    private let label = NextSentenceCardStyle.label(.systemFont(ofSize: 15, weight: .medium), NSColor(white: 1, alpha: 0.92))
 
     init(text: String) {
         super.init(frame: .zero)
         wantsLayer = true
-        layer?.backgroundColor = NSColor(white: 0.07, alpha: 1).cgColor
-        layer?.cornerRadius = 6
+        layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
+        layer?.cornerRadius = 7
+        layer?.borderWidth = 0.5
+        layer?.borderColor = NSColor(white: 1, alpha: 0.14).cgColor
         layer?.shadowColor = NSColor.black.cgColor
         layer?.shadowOpacity = 0.4
         layer?.shadowRadius = 6
@@ -65,25 +63,30 @@ final class NextSentenceOptionChip: NextSentenceFlippedView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
 
+    /// Measured from the text itself, so no option is ever cut short.
+    private var textSize: NSSize {
+        let size = (label.stringValue as NSString).size(withAttributes: [.font: label.font ?? NSFont.systemFont(ofSize: 15)])
+        return NSSize(width: ceil(size.width) + 4, height: ceil(size.height))
+    }
+
     override var fittingSize: NSSize {
-        let size = label.intrinsicContentSize
-        return NSSize(width: ceil(size.width) + 16, height: ceil(size.height) + 4)
+        NSSize(width: textSize.width + 18, height: textSize.height + 6)
     }
 
     override func layout() {
         super.layout()
-        let size = label.intrinsicContentSize
-        label.frame = NSRect(x: 8, y: (bounds.height - size.height) / 2, width: bounds.width - 16, height: size.height)
+        let size = textSize
+        label.frame = NSRect(x: 9, y: (bounds.height - size.height) / 2, width: min(size.width, bounds.width - 18), height: size.height)
     }
 
     override func mouseEntered(with event: NSEvent) {
         label.textColor = .white
-        layer?.backgroundColor = NSColor(white: 0.15, alpha: 1).cgColor
+        layer?.backgroundColor = NextSentenceCardStyle.accent.withAlphaComponent(0.85).cgColor
     }
 
     override func mouseExited(with event: NSEvent) {
-        label.textColor = NSColor(white: 1, alpha: 0.55)
-        layer?.backgroundColor = NSColor(white: 0.07, alpha: 1).cgColor
+        label.textColor = NSColor(white: 1, alpha: 0.92)
+        layer?.backgroundColor = NSColor(white: 0.16, alpha: 1).cgColor
     }
 
     override func mouseDown(with event: NSEvent) { onPick?() }

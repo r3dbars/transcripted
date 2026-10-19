@@ -14,6 +14,32 @@ enum NextSentencePreferences {
     /// Full path to the `claude` CLI when it isn't in one of the usual places.
     static let claudePathKey = "NextSentenceClaudePath"
 
+    /// The local EmbeddingGemma server (llama.cpp `llama-server --embedding`) that finds context by
+    /// meaning. Everything it sees stays on this Mac. If it isn't running and the server and model
+    /// paths are set, Next Sentence starts it.
+    static let embeddingURLKey = "NextSentenceEmbeddingURL"
+    static let embeddingServerKey = "NextSentenceEmbeddingServer"
+    static let embeddingModelKey = "NextSentenceEmbeddingModel"
+    static let defaultEmbeddingURL = "http://127.0.0.1:8811"
+
+    static func embeddingURL(userDefaults: UserDefaults = .standard) -> URL? {
+        URL(string: userDefaults.string(forKey: embeddingURLKey).flatMap { $0.isEmpty ? nil : $0 } ?? defaultEmbeddingURL)
+    }
+
+    /// The server binary and model, when both are set.
+    static func embeddingLaunch(userDefaults: UserDefaults = .standard) -> (server: String, model: String)? {
+        guard let server = userDefaults.string(forKey: embeddingServerKey), !server.isEmpty,
+              let model = userDefaults.string(forKey: embeddingModelKey), !model.isEmpty else { return nil }
+        return (server, model)
+    }
+
+    /// The card's sounds. On unless set to NO.
+    static let soundsKey = "NextSentenceSounds"
+
+    static func soundsEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.object(forKey: soundsKey) == nil || userDefaults.bool(forKey: soundsKey)
+    }
+
     static func isEnabled(userDefaults: UserDefaults = .standard) -> Bool {
         userDefaults.bool(forKey: enabledKey)
     }

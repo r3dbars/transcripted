@@ -70,10 +70,10 @@ func testNextSentencePolicy() {
         let center = NextSentencePolicy.padCenter(tone: 1, length: 2, size: pad)
         let back = NextSentencePolicy.padCell(at: center, size: pad)
         assertTrue(back.tone == 1 && back.length == 2, "the dot rests in the middle of its cell")
-        assertEqual(NextSentencePolicy.gripLength(base: 2, dragged: 31).length, 3, "30pt right is one length longer")
-        assertEqual(NextSentencePolicy.gripLength(base: 2, dragged: -65).length, 0, "two steps left is Tiny")
-        let past = NextSentencePolicy.gripLength(base: 4, dragged: 40)
-        assertTrue(past.length == 4 && past.wanted == 5, "dragging past Full stays Full but knows they wanted more")
+assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"), 3, "the end snaps to the words before the pointer")
+        assertEqual(NextSentencePolicy.wordsKept(before: 0, in: "Yes, Nov 3 still on"), 1, "one word always stays")
+        assertEqual(NextSentencePolicy.trimWords("Yes, Nov 3 still, beta goes out first.", dropping: 4), "Yes, Nov 3 still",
+                    "cut at a word, with no dangling comma")
     }
 
     runSuite("Next Sentence searches for the distinctive words, newest first, without filler") {
@@ -126,7 +126,7 @@ func testNextSentencePolicy() {
     runSuite("A single word asks for replacements, a phrase asks for rephrasings") {
         assertTrue(NextSentencePrompt.alternativesPrompt(text: "we pushed it a week", selection: "pushed").contains("replacements for the word"),
                    "one word gets word swaps")
-        assertTrue(NextSentencePrompt.alternativesPrompt(text: "we pushed it a week", selection: "pushed it a week").contains("rephrasings"),
+        assertTrue(NextSentencePrompt.alternativesPrompt(text: "we pushed it a week", selection: "pushed it a week").contains("3 rephrasings"),
                    "several words get rephrased")
         assertEqual(NextSentencePrompt.parseOptions(["options": [" moved ", "", "slid"]]), ["moved", "slid"], "blank options are dropped")
     }
@@ -145,5 +145,93 @@ func testNextSentencePolicy() {
         assertTrue(fresh.contains("fresh take") && fresh.contains("Nov 3."), "no instruction asks for a fresh take of the card's message")
         let spoken = NextSentencePrompt.rewritePrompt(request, current: "Nov 3.", instruction: "mention the beta")
         assertTrue(spoken.contains("mention the beta") && spoken.contains("like they wrote it"), "a spoken change is worked in, in their voice")
+    }
+
+    runSuite("Captures split into passages, and context found by meaning comes first") {
+        let day = """
+        ---
+        title: "Dictations for October 2, 2026"
+        date: 2026-10-02
+        ---
+
+        # Dictations for October 2, 2026
+
+        ## 9:10 AM - Launch thoughts
+
+        Entry ID: `dictation-1`
+        Source app: Notes
+        Words: 14
+
+        We should slide the launch to November third so the audio fixes get another week.
+
+        ## 9:12 AM - g i t
+
+        g
+        i
+        t
+        """
+        let passages = NextSentenceChunker.chunks(markdown: day, kind: "dictation")
+        assertEqual(passages.count, 1, "keystroke noise is skipped")
+        assertEqual(passages.first?.text, "We should slide the launch to November third so the audio fixes get another week.",
+                    "bookkeeping lines are dropped")
+        assertTrue(passages.first?.date == "2026-10-02" && passages.first?.title == "9:10 AM", "date and time come along")
+
+        let meeting = """
+        ---
+        title: "Launch sync"
+        date: 2026-10-01
+        ---
+
+        ## Transcript
+
+        **00:00**  [System/Riley]
+        Marketing needs the launch date by Friday so they can book the posts.
+
+        **00:09**  [Mic/You]
+        Then let's lock November third at Tuesday's sync.
+        """
+        let turns = NextSentenceChunker.chunks(markdown: meeting, kind: "meeting")
+        assertEqual(turns.count, 1, "short meetings stay one passage")
+        assertTrue(turns.first?.text.hasPrefix("Riley: Marketing needs") == true && turns.first?.text.contains("You: Then") == true,
+                   "turns read as speaker: words")
+        assertEqual(NextSentenceChunker.split(String(repeating: "word ", count: 400)).count, 3, "long text splits between words")
+
+        let merged = NextSentencePrompt.mergeSources(
+            meaning: [.init(kind: "meeting", date: "2026-10-01", title: "Launch sync", text: "Marketing needs the launch date by Friday.")],
+            keywords: [.init(id: "S1", kind: "dictation", date: "2026-10-02", title: "", quote: "We should slide the launch.")])
+        assertEqual(merged.map(\.id), ["S1", "S2"], "renumbered in order")
+        assertEqual(merged.first?.kind, "meeting", "the passage found by meaning comes first")
+    }
+
+    runSuite("Words from their history are tinted; words from the screen are not") {
+        let sources = [NextSentencePrompt.Source(id: "S1", kind: "meeting", date: "", title: "", quote: "we moved launch to November third for the audio fixes")]
+        let text = "Yes, launch is November third, after the audio fixes."
+        let marks = NextSentencePrompt.historyRanges(in: text, sources: sources, screen: "when is the launch?")
+        let phrases = marks.map { (text as NSString).substring(with: $0.range) }
+        assertTrue(phrases.contains("November third"), "adjacent history words join into one phrase")
+        assertTrue(phrases.contains("audio fixes"), "every phrase from the source is found")
+        assertFalse(phrases.contains { $0.contains("launch") }, "a word that's on screen isn't credited to history")
+    }
+
+    runSuite("Only a quick tap of fn on its own opens the card") {
+        assertTrue(NextSentencePolicy.isFnTap(heldFor: 0.12, withOtherKey: false), "a quick tap counts")
+        assertFalse(NextSentencePolicy.isFnTap(heldFor: 0.12, withOtherKey: true), "fn with another key is a shortcut, not a tap")
+        assertFalse(NextSentencePolicy.isFnTap(heldFor: 0.9, withOtherKey: false), "holding fn down isn't a tap")
+    }
+
+    runSuite("The people in a conversation are found from the title, speaker labels and repeated names") {
+        let people = NextSentencePrompt.people(screen: "Riley Park: are we still on for launch?\nme: I think so\nRiley Park: ok tell Dana too",
+                                               windowTitle: "Riley Park")
+        assertEqual(people.first, "Riley", "the window title and speaker labels name the person, by first name")
+        assertFalse(people.contains("Park"), "last names aren't searched on their own")
+        assertFalse(people.contains("I"), "pronouns aren't people")
+        assertTrue(NextSentencePrompt.people(screen: "Monday works. Thanks!", windowTitle: "Messages").isEmpty, "days and app names aren't people")
+        let merged = NextSentencePrompt.mergeSources(
+            meaning: [], people: [("Riley", .init(kind: "meeting", date: "2026-10-01", title: "1:1", text: "Riley owns the launch checklist."))],
+            keywords: [])
+        assertEqual(merged.first?.about, "Riley", "a passage found for a person says who it's about")
+        let request = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Riley Park", screenText: "", draft: "",
+                                                 hasScreenshot: false, sources: merged, voiceExamples: [], people: ["Riley"])
+        assertTrue(NextSentencePrompt.body(request, json: false).contains("PEOPLE IN THIS CONVERSATION: Riley"), "the writer is told who's involved")
     }
 }

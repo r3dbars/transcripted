@@ -19,6 +19,91 @@ enum NextSentencePrompt {
         let date: String
         let title: String
         let quote: String
+        /// The person on screen this passage mentions, when it was found for them.
+        var about: String = ""
+    }
+
+    // MARK: People
+
+    private static let notNames: Set<String> = Set("""
+    i im ive ill id me my you your we our they them he she it the a an and or but so ok okay yes no hey hi hello thanks \
+    monday tuesday wednesday thursday friday saturday sunday today tomorrow yesterday january february march april may \
+    june july august september october november december am pm messages slack mail chrome safari notes claude textedit \
+    transcripted zoom teams discord whatsapp signal google apple new reply send sent delivered read typing
+    """.split(whereSeparator: \.isWhitespace).map(String.init))
+
+    /// Who the conversation is with or about: the window title (Messages, Slack and mail put the person
+    /// there), "Name:" speaker labels, and capitalized names that come up more than once. At most `limit`.
+    static func people(screen: String, windowTitle: String, limit: Int = 3) -> [String] {
+        var scores: [String: Int] = [:]
+        func consider(_ raw: String, weight: Int) {
+            let name = raw.trimmingCharacters(in: CharacterSet.letters.inverted)
+            guard name.count >= 2, name.first?.isUppercase == true, name.allSatisfy({ $0.isLetter || $0 == "-" || $0 == "'" }),
+                  !notNames.contains(name.lowercased()) else { return }
+            scores[name, default: 0] += weight
+        }
+        let titleWords = windowTitle.split(whereSeparator: { $0.isWhitespace || $0 == "," || $0 == "|" || $0 == "·" || $0 == "-" })
+        // First names: that's how they come up in dictations and meetings.
+        if let first = titleWords.first { consider(String(first), weight: 5) }
+        for line in screen.components(separatedBy: "\n").suffix(80) {
+            var said = Substring(line)
+            if let colon = line.firstIndex(of: ":"), line.distance(from: line.startIndex, to: colon) <= 24 {
+                if let first = line[..<colon].split(separator: " ").first { consider(String(first), weight: 3) }
+                said = line[line.index(after: colon)...]
+            }
+            let words = said.split(separator: " ")
+            for (index, word) in words.enumerated() where index > 0 && !(words[index - 1].last.map { ".!?".contains($0) } ?? false) {
+                consider(String(word), weight: 1)
+            }
+        }
+        return scores.filter { $0.value >= 2 }.sorted { $0.value != $1.value ? $0.value > $1.value : $0.key < $1.key }
+            .prefix(limit).map(\.key)
+    }
+
+    // MARK: Merging context
+
+    /// Passages found by meaning first (they're the better match), then what's known about the people
+    /// on screen, then keyword hits, numbered S1...
+    static func mergeSources(meaning: [NextSentenceChunker.Chunk], people: [(name: String, chunk: NextSentenceChunker.Chunk)] = [],
+                             keywords: [Source], limit: Int = 10) -> [Source] {
+        var merged = meaning.prefix(4).map { Source(id: "", kind: $0.kind, date: $0.date, title: $0.title, quote: String($0.text.prefix(400))) }
+        for (name, chunk) in people where merged.count < limit - 1 {
+            let quote = String(chunk.text.prefix(400))
+            guard !merged.contains(where: { $0.quote == quote }) else { continue }
+            merged.append(Source(id: "", kind: chunk.kind, date: chunk.date, title: chunk.title, quote: quote, about: name))
+        }
+        for source in keywords where merged.count < limit {
+            let opening = source.quote.prefix(60)
+            if !merged.contains(where: { $0.quote.contains(opening) }) { merged.append(source) }
+        }
+        return merged.enumerated().map { index, source in
+            Source(id: "S\(index + 1)", kind: source.kind, date: source.date, title: source.title, quote: source.quote, about: source.about)
+        }
+    }
+
+    /// Words in a reply that came from their history rather than the screen: specific words (names,
+    /// numbers, longer words) that appear in a source but nowhere on screen. Adjacent ones join into
+    /// one phrase. Catches what the model didn't list as a fact, and works on edited text too.
+    static func historyRanges(in text: String, sources: [Source], screen: String) -> [(range: NSRange, source: String)] {
+        let ns = text as NSString
+        let screenWords = Set(NextSentenceChunker.normalized(screen).split(separator: " ").map(String.init))
+        let quotes = sources.map { (id: $0.id, words: Set(NextSentenceChunker.normalized($0.quote).split(separator: " ").map(String.init))) }
+        var marks: [(range: NSRange, source: String)] = []
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { word, range, _, _ in
+            guard let word else { return }
+            let key = NextSentenceChunker.normalized(word)
+            let specific = key.first?.isNumber == true || key.count >= 5 || (word.first?.isUppercase == true && key.count >= 3 && range.location > 0)
+            guard specific, !stopWords.contains(key), !screenWords.contains(key),
+                  let source = quotes.first(where: { $0.words.contains(key) }) else { return }
+            if let last = marks.last, last.source == source.id,
+               ns.substring(with: NSRange(location: NSMaxRange(last.range), length: range.location - NSMaxRange(last.range)))
+                .trimmingCharacters(in: .whitespaces).isEmpty {
+                marks[marks.count - 1].range = NSUnionRange(last.range, range)
+            } else {
+                marks.append((range, source.id))
+            }
+        }
+        return marks
     }
 
     // MARK: Search terms
@@ -62,6 +147,8 @@ enum NextSentencePrompt {
         var sources: [Source]
         var voiceExamples: [String]
         var steer: String = ""
+        /// Who the conversation is with or about.
+        var people: [String] = []
     }
 
     /// Shared body. `json` asks for structured output with facts marked; otherwise plain text.
@@ -88,7 +175,15 @@ enum NextSentencePrompt {
         if r.sources.isEmpty {
             lines.append("(nothing found)")
         } else {
-            for s in r.sources { lines.append("[\(s.id)] \(s.kind) \(s.date) \(s.title): \(s.quote)") }
+            for s in r.sources {
+                let about = s.about.isEmpty ? "" : " (about \(s.about))"
+                lines.append("[\(s.id)] \(s.kind) \(s.date) \(s.title)\(about): \(s.quote)")
+            }
+        }
+        if !r.people.isEmpty {
+            lines.append("")
+            lines.append("PEOPLE IN THIS CONVERSATION: \(r.people.joined(separator: ", "))")
+            lines.append("Use what their context says about each of them: who they are to the user, what's been discussed or promised, how the user talks with them. Write the way the user would write to this person.")
         }
         lines.append("")
         lines.append("Use a fact from their context ONLY if it clearly answers or helps with what's on screen. Never invent dates, numbers, names or commitments that aren't on screen or in their context.")
@@ -132,7 +227,7 @@ enum NextSentencePrompt {
         <<<
         \(text)
         >>>
-        \(isWord ? "Give 4 replacements for the word" : "Give 3 rephrasings of the part") "\(selection)" that fit back into the message exactly where it is, keep the meaning close, and sound like the rest of it. Plain words, no em dashes. Return JSON {"options": [...]}, each option only the replacement text.
+        \(isWord ? "Give 3 replacements for the word" : "Give 3 rephrasings of the part") "\(selection)" that fit back into the message exactly where it is, keep the meaning close, and sound like the rest of it. Plain words, no em dashes. Return JSON {"options": [...]}, each option only the replacement text.
         """
     }
 
@@ -165,13 +260,13 @@ enum NextSentencePrompt {
         <<<
         \(text)
         >>>
-        Pick up to 10 single words in it a person might want to swap for a different word: verbs, adjectives, adverbs, filler and casual words. Skip names, dates, numbers, and words that state a fact. For each, give 4 single-word or two-word replacements that fit exactly where it is and sound like the rest of the message, the closest in meaning first. "word" is the word exactly as it appears. Plain words, no em dashes.
+        Pick up to 16 single words in it a person might want to swap for a different word: verbs, adjectives, adverbs, filler and casual words. Skip names, dates, numbers, and words that state a fact. For each, give 3 single-word or two-word replacements that fit exactly where it is and sound like the rest of the message, the closest in meaning first. "word" is the word exactly as it appears. Plain words, no em dashes.
         """
     }
 
     static var swapsSchema: [String: Any] {
         let swap = object(["word": ["type": "string"], "options": ["type": "array", "items": ["type": "string"]]], required: ["word", "options"])
-        return object(["swaps": ["type": "array", "items": swap, "maxItems": 10]], required: ["swaps"])
+        return object(["swaps": ["type": "array", "items": swap, "maxItems": 16]], required: ["swaps"])
     }
 
     /// Lowercased word -> replacements, closest first.
@@ -181,7 +276,7 @@ enum NextSentencePrompt {
             guard let word = (item["word"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
                   !word.isEmpty, !word.contains(" ") else { continue }
             let options = parseOptions(item).filter { $0.lowercased() != word }
-            if !options.isEmpty { swaps[word] = Array(options.prefix(5)) }
+            if !options.isEmpty { swaps[word] = Array(options.prefix(3)) }
         }
         return swaps
     }

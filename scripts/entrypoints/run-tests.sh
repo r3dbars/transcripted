@@ -436,6 +436,7 @@ APP_SOURCES=(
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Writing/NextSentence/NextSentencePolicy.swift"
     "Sources/Writing/NextSentence/NextSentencePrompt.swift"
+    "Sources/Writing/NextSentence/NextSentenceChunker.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoppedAudioRecovery.swift"
     "Sources/Dictation/DictationAudioArchive.swift"

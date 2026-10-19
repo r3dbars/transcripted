@@ -52,30 +52,24 @@ extension NextSentenceController {
         } else if shown.waiting {
             hint = "Writing that version…"
         } else {
-            hint = guesses.count > 1 ? "⇥ another reply    hold ↵ to send" : "hold ↵ to send"
+            hint = "hold ↵ to send"
         }
 
-        let peeks: [NextSentenceCard.Peek] = guesses.count > 1
-            ? (1..<guesses.count).map { offset in
-                let index = (guessIndex + offset) % guesses.count
-                return .init(index: index, label: guesses[index].label, text: text(forReply: index).text)
-            }
-            : []
-        let marks = NextSentencePrompt.factRanges(in: shown.text, facts: shown.facts).map { mark -> NextSentenceCard.Mark in
+        let stated = NextSentencePrompt.factRanges(in: shown.text, facts: shown.facts)
+        let found = NextSentencePrompt.historyRanges(in: shown.text, sources: sources, screen: snapshot?.screenText ?? "")
+            .filter { mark in !stated.contains { NSIntersectionRange($0.range, mark.range).length > 0 } }
+        let marks = (streaming ? [] : stated + found).map { mark -> NextSentenceCard.Mark in
             let source = sources.first { $0.id == mark.source }
-            let heading = [source?.kind.capitalized, source?.title, source?.date].compactMap { $0 }.filter { !$0.isEmpty }
+            let about = source.map { $0.about.isEmpty ? nil : "about \($0.about)" } ?? nil
+            let heading = [source?.kind.capitalized, source?.title, source?.date, about].compactMap { $0 }.filter { !$0.isEmpty }
             return .init(range: mark.range, color: color(forSource: mark.source),
                          heading: heading.isEmpty ? "From your history" : heading.joined(separator: " · "),
                          quote: String((source?.quote ?? "").prefix(180)))
         }
-        let words = Set(shown.text.lowercased().split { !($0.isLetter || $0 == "'" || $0 == "’") }.map(String.init))
         return .init(
-            status: status, busy: busy, replyIndex: guessIndex, replyCount: guesses.count,
-            replyLabel: guesses.indices.contains(guessIndex) ? guesses[guessIndex].label : "",
-            peeks: peeks, text: shown.text, marks: marks,
-            swappable: streaming ? [] : words.filter { !(swaps[$0] ?? []).isEmpty },
+            status: shown.text.isEmpty || failure != nil ? status : "", busy: busy, text: shown.text, marks: marks,
             streaming: streaming, fade: fadeNext, tone: toneIndex, length: length, hint: hint,
-            insertTitle: app.isEmpty ? "Insert" : "Insert into \(app)", insertIcon: targetApp?.icon,
+            insertHelp: app.isEmpty ? "Insert. Hold to send." : "Insert into \(app). Hold to send.",
             showsButtons: failure == nil && !shown.text.isEmpty,
             listening: listening, heard: heard)
     }
