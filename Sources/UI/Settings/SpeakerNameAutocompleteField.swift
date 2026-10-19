@@ -24,7 +24,7 @@ struct SpeakerNameAutocompleteField: View {
     @StateObject private var session = SpeakerNameAutocompleteSession()
 
     var body: some View {
-        let suggestions = Self.suggestions(
+        let suggestions = speakerNameFieldSuggestions(
             query: text,
             session: session,
             options: options,
@@ -58,21 +58,6 @@ struct SpeakerNameAutocompleteField: View {
             }
         }
         .zIndex(1)
-    }
-
-    fileprivate static func suggestions(
-        query: String,
-        session: SpeakerNameAutocompleteSession,
-        options: [SpeakerNameChoice],
-        untouchedPrefill: String?
-    ) -> [SpeakerNameTypingSuggestionPolicy.Suggestion] {
-        SpeakerNameTypingSuggestionPolicy.suggestions(
-            query: query,
-            isFocused: session.isFocused || session.pointerInsideList,
-            people: options,
-            listDismissed: session.listDismissed,
-            untouchedPrefill: untouchedPrefill
-        )
     }
 
     private func applySuggestion(_ suggestion: SpeakerNameTypingSuggestionPolicy.Suggestion) {
@@ -143,20 +128,22 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
         field.delegate = nil
     }
 
+    @MainActor
     final class Coordinator: NSObject, NSTextFieldDelegate {
         var parent: SpeakerNameAutocompleteNSField
         /// Set once SwiftUI tears the view down. Work already queued must
         /// check it before touching bindings.
         var isDismantled = false
+        let session: SpeakerNameAutocompleteSession
 
         init(_ parent: SpeakerNameAutocompleteNSField) {
             self.parent = parent
+            self.session = parent.session
+            super.init()
         }
 
-        var session: SpeakerNameAutocompleteSession { parent.session }
-
         func currentSuggestions(for query: String? = nil) -> [SpeakerNameTypingSuggestionPolicy.Suggestion] {
-            SpeakerNameAutocompleteField.suggestions(
+            speakerNameFieldSuggestions(
                 query: query ?? parent.text,
                 session: session,
                 options: parent.options,
@@ -353,4 +340,19 @@ private struct SpeakerNameSuggestionRow: View {
             .accessibilityIdentifier(accessibilityIdentifier)
             .accessibilityLabel(label)
     }
+}
+
+private func speakerNameFieldSuggestions(
+    query: String,
+    session: SpeakerNameAutocompleteSession,
+    options: [SpeakerNameChoice],
+    untouchedPrefill: String?
+) -> [SpeakerNameTypingSuggestionPolicy.Suggestion] {
+    SpeakerNameTypingSuggestionPolicy.suggestions(
+        query: query,
+        isFocused: session.isFocused || session.pointerInsideList,
+        people: options,
+        listDismissed: session.listDismissed,
+        untouchedPrefill: untouchedPrefill
+    )
 }
