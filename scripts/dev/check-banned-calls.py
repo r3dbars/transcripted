@@ -24,14 +24,16 @@ Rules:
   * An idle onboarding window never polls permissions or re-probes system
     audio on activation; the live audio check belongs to its button.
     It still routes app activation and permission changes to its lifecycle
-    handler, and leaving it cancels the in-flight audio check.
+    handler, leaving it cancels the in-flight audio check, and the check's
+    typed probe result reaches the view.
   * The Agent page and the Settings shell never put a raw error into
     user-facing text; the raw error goes behind Copy Details. Both keep that
     Copy Details reveal and route failures through their shared failure copy.
   * The retained-audio player sizes its hit shape from
     HomeHitTarget.hitSize(forVisibleSize:), so it keeps the 40pt floor.
   * The Settings shell builds the Home row menus from HomeRowMenuPolicy and
-    feeds it the row's real state (audio to reveal, a retranscription input,
+    feeds it the row's real state (audio to reveal, taken from
+    HomeMeetingRowActionTargets, a retranscription input,
     pending speaker review); re-transcribe takes its title from
     RecentMeetingRetranscriptionMenuActionPolicy.
     (these five were Tests/UIAutomationSurfaceContractTests.swift)
@@ -140,6 +142,7 @@ RULES: tuple[Rule, ...] = (
             "func stopPermissionRevalidation() { systemAudioRequestTask?.cancel()",
             "checkWasCancelled: Task.isCancelled",
             "actionTitle: systemAudioPresentation.actionTitle",
+            "systemAudioProbeResult = result.probeResult",
         ),
     ),
     Rule(
@@ -193,6 +196,7 @@ RULES: tuple[Rule, ...] = (
         required=(
             "HomeRowMenuPolicy.dictationEntries",
             "HomeRowMenuPolicy.meetingEntries(",
+            "let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)",
             "hasAudioRevealTarget: !audioRevealURLs.isEmpty",
             "hasRetranscriptionInput: item.audio?.retranscriptionInput != nil",
             "hasPendingSpeakerReview: hasSpeakerReviewWork(for: item)",
@@ -324,6 +328,7 @@ def self_test() -> None:
         "private func stopPermissionRevalidation() {\n    systemAudioRequestTask?.cancel()\n}\n"
         "Policy.result(decision, checkWasCancelled: Task.isCancelled)\n"
         "Stage(actionTitle: systemAudioPresentation.actionTitle)\n"
+        "systemAudioProbeResult = result.probeResult\n"
     )
     good["Sources/UI/Settings/AgentConnectionSettingsPage.swift"] = (
         "phase = .failed(failure.message)\ndetails = error.localizedDescription\n"
@@ -338,6 +343,7 @@ def self_test() -> None:
     )
     good["Sources/UI/Settings/TranscriptedSettingsView+Part3.swift"] += (
         "HomeRowMenuPolicy.dictationEntries.compactMap { entry in item(entry) }\n"
+        "let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)\n"
         "let entries = HomeRowMenuPolicy.meetingEntries(\n"
         "    hasPendingSpeakerReview: hasSpeakerReviewWork(for: item),\n"
         "    hasAudioRevealTarget: !audioRevealURLs.isEmpty,\n"
@@ -394,6 +400,12 @@ def self_test() -> None:
         ("Sources/UI/Settings/PermissionsOnboardingView.swift", "    systemAudioRequestTask?.cancel()\n", ""),
         ("Sources/UI/Settings/PermissionsOnboardingView.swift", "checkWasCancelled: Task.isCancelled", "checkWasCancelled: false"),
         ("Sources/UI/Settings/PermissionsOnboardingView.swift", "systemAudioPresentation.actionTitle", '"Grant"'),
+        # the typed probe result stops reaching the view
+        (
+            "Sources/UI/Settings/PermissionsOnboardingView.swift",
+            "systemAudioProbeResult = result.probeResult",
+            "systemAudioProbeResult = nil",
+        ),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "private func failureNotice(", "private func notice("),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "connect-error-details.", "details."),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.connectFailure(", "Copy.other("),
@@ -405,6 +417,12 @@ def self_test() -> None:
         ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "HomeRowMenuPolicy.dictationEntries", "[.openMarkdown]"),
         ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "HomeRowMenuPolicy.meetingEntries(", "fixedEntries("),
         ("Sources/UI/Settings/TranscriptedSettingsView+Part3.swift", "!audioRevealURLs.isEmpty", "true"),
+        # the reveal targets stop coming from the row's real audio
+        (
+            "Sources/UI/Settings/TranscriptedSettingsView+Part3.swift",
+            "let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)",
+            "let audioRevealURLs: [URL] = []",
+        ),
         (
             "Sources/UI/Settings/TranscriptedSettingsView+Part3.swift",
             "item.audio?.retranscriptionInput != nil",

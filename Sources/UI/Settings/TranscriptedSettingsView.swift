@@ -599,7 +599,7 @@ struct TranscriptedSettingsView: View {
                         result: didReveal ? .success : .failed
                     )
                 }
-            default:
+            case .renameMeeting, .reportIssue, .showTranscript, .reviewSpeakers, .boostMic, .retranscribe, .showAudio, .deleteMeeting:
                 return nil
             }
         }
