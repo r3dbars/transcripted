@@ -453,6 +453,7 @@ private struct SpeakerNameSuggestionRow: View {
     }
 }
 
+@MainActor
 private func speakerNameFieldSuggestions(
     query: String,
     session: SpeakerNameAutocompleteSession,
