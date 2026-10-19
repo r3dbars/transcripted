@@ -37,6 +37,36 @@ Rules:
     pending speaker review); re-transcribe takes its title from
     RecentMeetingRetranscriptionMenuActionPolicy.
     (these five were Tests/UIAutomationSurfaceContractTests.swift)
+  * Settings opens the real window through the declarative ⌘, command, never a
+    blank SwiftUI Settings scene plus a one-shot AppKit menu mutation.
+  * The Settings shell (TranscriptedSettingsView.swift and every
+    TranscriptedSettingsView+*.swift) never hands a scan-time URL straight to
+    NSWorkspace, never stacks legacy `.alert(item:)` modifiers or hand-builds
+    the failed-meeting delete NSAlert, has no failed-row "dismiss" path, never
+    puts a raw error into a status line, and never saves Apple voice
+    processing for every meeting from the Home Boost row.
+  * Home copy-for-agent and meeting-preview telemetry go through
+    HomeMeetingActionTelemetry, which owns the event order: the view never
+    calls the Activation/ProductUsage trackers directly there, and it must
+    still call HomeMeetingActionTelemetry so the events can't be silently
+    disconnected.
+    Every outcome keeps its own routed call (copy: missing file, read
+    failure, resolved; preview: loaded and not loaded), so dropping one
+    outcome's events fails.
+  * Clearing a failed row reports its abandonment with
+    HomeFailedMeetingCleanupTelemetry.reasonKind, not a hand-picked reason.
+  * The fallback Settings view still closes itself before it opens the real
+    window, through TranscriptedSettingsFallback.open(dismiss:openSettings:).
+  * Menu commands still reach the app: TranscriptedMenuCommands and the
+    fallback Settings scene route through TranscriptedMenuCommandCatalog, and
+    the TranscriptedAppDelegate menu hops still call the real Settings window.
+    The routing tests use a recording fake host, so they can't see these.
+    (the last seven were Tests/UIAutomationSurfaceContractTests.swift)
+
+A rule can also pin `required_counts`: text that must appear exactly that
+many times in its files (or slice), so an extra call (say, a second
+telemetry emit fired early) fails as surely as a dropped one. A slice whose
+start or end anchor is gone fails too, instead of scanning the wrong text.
 
     python3 scripts/dev/check-banned-calls.py
     python3 scripts/dev/check-banned-calls.py --self-test
@@ -79,6 +109,29 @@ class Rule:
     # Wiring that must still appear somewhere in the rule's files. Matched
     # with runs of whitespace collapsed to one space.
     required: tuple[str, ...] = ()
+    # (text, count) pairs: the text must appear exactly `count` times in the
+    # rule's files (or slices), whitespace collapsed like `required`.
+    required_counts: tuple[tuple[str, int], ...] = ()
+
+
+# TranscriptedSettingsView.swift plus its TranscriptedSettingsView+*.swift
+# extensions. The core file alone isn't enough: a "must never" guard on it
+# passes no matter what the extensions do.
+SETTINGS_SHELL_FOLDER = "Sources/UI/Settings"
+SETTINGS_SHELL_PREFIX = "TranscriptedSettingsView"
+SETTINGS_SHELL_MIN_FILES = 5
+
+# Direct tracker calls HomeMeetingActionTelemetry owns for the Home copy and
+# preview flows. Calling one inline would double-count or reorder the events.
+HOME_MEETING_DIRECT_TRACKERS = (
+    "ActivationTelemetry.trackHabitLoopAction(",
+    "ActivationTelemetry.trackArtifactAction(",
+    "ActivationTelemetry.trackAgentPromptAction(",
+    "ProductUsageTelemetry.trackResult(",
+)
+HOME_MEETING_TELEMETRY_WHY = (
+    "Home copy/preview telemetry goes through HomeMeetingActionTelemetry, which owns the event order"
+)
 
 
 RULES: tuple[Rule, ...] = (
@@ -203,6 +256,139 @@ RULES: tuple[Rule, ...] = (
             "title: RecentMeetingRetranscriptionMenuActionPolicy.title(",
         ),
     ),
+    Rule(
+        name="Settings opens through the declarative command, not a blank scene",
+        files=("Sources/App/TranscriptedApp.swift", "Sources/App/TranscriptedMenuCommands.swift"),
+        banned=("Settings { EmptyView() }", "installSettingsMenuHandler(", "openSettingsFromAppMenu"),
+        why="Settings must not depend on a blank scene plus a one-shot AppKit menu mutation",
+    ),
+    Rule(
+        name="Home own-file actions never open a scan-time URL directly",
+        folder=SETTINGS_SHELL_FOLDER,
+        prefix=SETTINGS_SHELL_PREFIX,
+        min_files=SETTINGS_SHELL_MIN_FILES,
+        banned=(
+            "activateFileViewerSelecting([entry.url])",
+            "activateFileViewerSelecting(audioRevealURLs)",
+            "activateFileViewerSelecting(\n" + " " * 20 + "HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)",
+            "NSWorkspace.shared.open(entry.url)",
+            "NSWorkspace.shared.open(preview.transcriptURL)",
+            "NSWorkspace.shared.open(item.transcriptURL)",
+            "NSWorkspace.shared.open(notice.transcriptURL)",
+            "NSWorkspace.shared.open(transcriptURL)",
+        ),
+        why="a file can move after scanning, so NSWorkspace on the raw URL is a silent no-op; route it through OwnFileResolver",
+    ),
+    Rule(
+        name="Home alerts share one presenter",
+        folder=SETTINGS_SHELL_FOLDER,
+        prefix=SETTINGS_SHELL_PREFIX,
+        min_files=SETTINGS_SHELL_MIN_FILES,
+        banned=(
+            ".alert(item: $homeDeleteConfirmation)",
+            ".alert(item: $homeDeleteFailure)",
+            "presentFailedMeetingDeleteConfirmation(",
+        ),
+        why="stacked legacy `.alert(item:)` modifiers shadow all but the last, and a hand-built NSAlert bypasses the shared rootAlertBinding",
+    ),
+    Rule(
+        name="failed-row cleanup has one destructive path",
+        folder=SETTINGS_SHELL_FOLDER,
+        prefix=SETTINGS_SHELL_PREFIX,
+        min_files=SETTINGS_SHELL_MIN_FILES,
+        banned=("dismissFailedMeeting",),
+        why="clearing a failed row deletes its audio, so it goes through requestClearFailedMeeting's confirmation, not a dismiss",
+    ),
+    Rule(
+        name="Settings status lines never show a raw error",
+        folder=SETTINGS_SHELL_FOLDER,
+        prefix=SETTINGS_SHELL_PREFIX,
+        min_files=SETTINGS_SHELL_MIN_FILES,
+        banned=(
+            "setup failed: \\(error.localizedDescription)",
+            "Could not remove stale models: \\(error",
+            "Could not update launch at login: \\(error",
+            "Copy stopped: \\(error",
+        ),
+        why="status lines use SettingsActionFailureCopy; the raw error goes behind Copy Details",
+    ),
+    Rule(
+        name="the Home Boost row never saves voice processing for every meeting",
+        folder=SETTINGS_SHELL_FOLDER,
+        prefix=SETTINGS_SHELL_PREFIX,
+        min_files=SETTINGS_SHELL_MIN_FILES,
+        banned=("MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)",),
+        why="the Home Boost row must not save Apple voice processing for every meeting",
+    ),
+    Rule(
+        name="Home copy-for-agent telemetry routes through HomeMeetingActionTelemetry",
+        files=("Sources/UI/Settings/TranscriptedSettingsView.swift",),
+        slice=Slice(start="func handleCopyMeeting(", end="private func handleRetranscribeMeeting("),
+        banned=HOME_MEETING_DIRECT_TRACKERS,
+        # Exactly one emit per outcome, so dropping any outcome's events fails,
+        # and so does an extra emit (say, a premature success before the await).
+        required_counts=(
+            ("HomeMeetingActionTelemetry.emit(", 3),
+            ("HomeMeetingActionTelemetry.copyEvents(for: .missingFile)", 1),
+            ("HomeMeetingActionTelemetry.copyEvents(for: .readFailure)", 1),
+            ("HomeMeetingActionTelemetry.copyEvents(for: .resolved(", 1),
+        ),
+        why=HOME_MEETING_TELEMETRY_WHY,
+    ),
+    Rule(
+        name="Home meeting-preview telemetry routes through HomeMeetingActionTelemetry",
+        files=("Sources/UI/Settings/TranscriptedSettingsView.swift",),
+        slice=Slice(start="func toggleHomeMeetingExpansion(", end="func collapseHomeMeetingExpansion("),
+        banned=HOME_MEETING_DIRECT_TRACKERS,
+        # Exactly one emit per outcome, so dropping either outcome's events
+        # fails, and so does an extra emit before the read finishes.
+        required_counts=(
+            ("HomeMeetingActionTelemetry.emit(", 2),
+            ("HomeMeetingActionTelemetry.previewEvents(loaded: true)", 1),
+            ("HomeMeetingActionTelemetry.previewEvents(loaded: false)", 1),
+        ),
+        why=HOME_MEETING_TELEMETRY_WHY,
+    ),
+    Rule(
+        name="failed-row cleanup reports the shared abandonment reason",
+        files=("Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift",),
+        banned=(),
+        required=("reasonKind: HomeFailedMeetingCleanupTelemetry.reasonKind",),
+        why="failed-row cleanup must report HomeFailedMeetingCleanupTelemetry.reasonKind, not a hand-picked reason like .dismissed",
+    ),
+    Rule(
+        name="the fallback Settings view closes itself before opening the real window",
+        files=("Sources/UI/Settings/TranscriptedSettingsFallbackView.swift",),
+        banned=(),
+        required=("TranscriptedSettingsFallback.open(dismiss:",),
+        why="the fallback button must go through TranscriptedSettingsFallback.open(dismiss:openSettings:) so the blank scene closes first",
+    ),
+    Rule(
+        name="menu commands route through TranscriptedMenuCommandCatalog",
+        files=("Sources/App/TranscriptedMenuCommands.swift",),
+        banned=(),
+        required=("TranscriptedMenuCommandCatalog.perform(action, on: appDelegate)",),
+        why="every menu item reaches the app delegate through TranscriptedMenuCommandCatalog.perform",
+    ),
+    Rule(
+        name="the fallback Settings scene opens the real window through the catalog",
+        files=("Sources/App/TranscriptedApp.swift",),
+        banned=(),
+        required=("TranscriptedMenuCommandCatalog.perform(.openSettings, on: appDelegate)",),
+        why="the fallback Settings scene must open the real window through TranscriptedMenuCommandCatalog",
+    ),
+    Rule(
+        name="app-delegate menu hops still reach the Settings window",
+        files=("Sources/App/TranscriptedApp.swift",),
+        slice=Slice(start="// MARK: - Menu Bar Commands", end="// MARK: - NSPopoverDelegate"),
+        banned=(),
+        required=(
+            "showSettingsWindow(page: page, source: source)",
+            "settingsWindowController.focusSpeakerSearch(source: source)",
+            "settingsWindowController.focusHomeFind(source: source)",
+        ),
+        why="the TranscriptedAppDelegate menu hops must call the real Settings window (the routing tests only see a fake host)",
+    ),
 )
 
 
@@ -260,7 +446,10 @@ def check(root: Path, rules: tuple[Rule, ...] = RULES) -> list[str]:
                     problems.append(f"{rel}: lost `{rule.slice.start}`, so `{rule.name}` can't be checked")
                     continue
                 end = text.find(rule.slice.end, start)
-                text = text[start:] if end == -1 else text[start:end]
+                if end == -1:
+                    problems.append(f"{rel}: lost `{rule.slice.end}` after `{rule.slice.start}`, so `{rule.name}` can't be checked")
+                    continue
+                text = text[start:end]
             scanned.append(text)
             for needle in rule.banned:
                 if needle in text:
@@ -271,6 +460,13 @@ def check(root: Path, rules: tuple[Rule, ...] = RULES) -> list[str]:
             for needle in rule.required:
                 if collapse_whitespace(needle) not in combined:
                     problems.append(f"{where}: lost `{needle}` ({rule.name})")
+        if rule.required_counts:
+            combined = collapse_whitespace("\n".join(scanned))
+            where = rule.folder or ", ".join(files)
+            for needle, expected in rule.required_counts:
+                found = combined.count(collapse_whitespace(needle))
+                if found != expected:
+                    problems.append(f"{where}: has {found} `{needle}`, expected exactly {expected} ({rule.name})")
     return problems
 
 
@@ -304,9 +500,60 @@ def self_test() -> None:
     good["Sources/UI/Settings/TranscriptedSettingsView.swift"] = (
         "private func submitHomeFeedback() { open(url) }\n"
         "private func flashCopied() { AppSoundPlayer.shared.play(.copy) }\n"
+        "func handleCopyMeeting(_ item: Item) {\n"
+        "    HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.copyEvents(for: .missingFile), artifactDate: d)\n"
+        "    HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.copyEvents(for: .readFailure), artifactDate: d)\n"
+        "    HomeMeetingActionTelemetry.emit(\n"
+        "        HomeMeetingActionTelemetry.copyEvents(for: .resolved(usedBundle: b, copied: c)), artifactDate: d)\n"
+        "}\n"
+        "private func handleRetranscribeMeeting(_ item: Item) {\n"
+        "    ActivationTelemetry.trackArtifactAction(.retranscribe)\n"
+        "}\n"
+        "func toggleHomeMeetingExpansion(_ item: Item) {\n"
+        "    HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: true), artifactDate: d)\n"
+        "    HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: false), artifactDate: d)\n"
+        "}\n"
+        "func collapseHomeMeetingExpansion() {}\n"
+        "func openRow() { ProductUsageTelemetry.trackResult(kind: .dictation) }\n"
     )
-    for index in range(5):
-        good[f"Sources/UI/Settings/TranscriptedSettingsView+Part{index}.swift"] = "status = Copy.failed\n"
+    good["Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift"] = (
+        "ActivationTelemetry.trackWorkflowAbandoned(\n"
+        "    reasonKind: HomeFailedMeetingCleanupTelemetry.reasonKind,\n"
+        ")\n"
+    )
+    good["Sources/App/TranscriptedApp.swift"] = (
+        "Settings { TranscriptedSettingsFallbackView { open() } }\n"
+        "func open() { TranscriptedMenuCommandCatalog.perform(.openSettings, on: appDelegate) }\n"
+        "// MARK: - Menu Bar Commands\n"
+        "func openSettingsWindow(page: Page, source: String) {\n"
+        "    showSettingsWindow(page: page, source: source)\n"
+        "}\n"
+        "func focusHomeFindFromMenu(source: String) {\n"
+        "    settingsWindowController.focusHomeFind(source: source)\n"
+        "}\n"
+        "func focusSpeakerSearchFromMenu(source: String) {\n"
+        "    settingsWindowController.focusSpeakerSearch(source: source)\n"
+        "}\n"
+        "// MARK: - NSPopoverDelegate\n"
+        "func popoverDidClose() { settingsWindowController.focusHomeFind(source: source) }\n"
+    )
+    good["Sources/App/TranscriptedMenuCommands.swift"] = (
+        "CommandGroup(replacing: .appSettings) { item }\n"
+        "private func perform(_ action: Action) { TranscriptedMenuCommandCatalog.perform(action, on: appDelegate) }\n"
+    )
+    good["Sources/UI/Settings/TranscriptedSettingsFallbackView.swift"] = (
+        "Button(title) { TranscriptedSettingsFallback.open(dismiss: { dismiss() }, openSettings: openSettings) }\n"
+    )
+    shell_part = "Sources/UI/Settings/TranscriptedSettingsView+Part{}.swift"
+    for index in range(SETTINGS_SHELL_MIN_FILES):
+        good[shell_part.format(index)] = (
+            "status = Copy.failed\n"
+            "revealOwnFile(candidateURLs: urls)\n"
+            ".alert(item: rootAlertBinding)\n"
+            "status = SettingsActionFailureCopy.launchAtLogin\n"
+        )
+    # Not part of the shell split: its raw NSWorkspace call is out of scope.
+    good["Sources/UI/Settings/OtherSettingsPage.swift"] = "NSWorkspace.shared.open(item.transcriptURL)\n"
     good["Sources/UI/Settings/TranscriptedSettingsView+Part0.swift"] += (
         "func settingsFailureDetailsButton(_ details: String?) -> some View { EmptyView() }\n"
     )
@@ -352,6 +599,10 @@ def self_test() -> None:
     )
     assert check(build(good)) == [], check(build(good))
 
+    settings_view = "Sources/UI/Settings/TranscriptedSettingsView.swift"
+    failed_actions = "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift"
+    copy_emit = "HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.copyEvents(for: .missingFile), artifactDate: d)"
+    preview_emit = "HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: true), artifactDate: d)"
     breaks = [
         ("Sources/Speech/ParakeetPart3.swift", "let ok = 1\n", "device.setDefaultInputDeviceID(id)\n"),
         ("Sources/Speech/ParakeetPart4.swift", "let ok = 1\n", "setDefaultInputDevice(id)\n"),
@@ -434,6 +685,94 @@ def self_test() -> None:
             "title: RecentMeetingRetranscriptionMenuActionPolicy.title(",
             'title: "Re-transcribe", reasonLabel: (',
         ),
+        ("Sources/App/TranscriptedApp.swift", "TranscriptedSettingsFallbackView { open() }", "EmptyView()"),
+        ("Sources/App/TranscriptedMenuCommands.swift", "{ item }", "{ installSettingsMenuHandler() }"),
+        ("Sources/App/TranscriptedApp.swift", "{ open() }", "{ openSettingsFromAppMenu() }"),
+        (shell_part.format(0), "revealOwnFile(candidateURLs: urls)", "NSWorkspace.shared.open(item.transcriptURL)"),
+        (shell_part.format(1), "revealOwnFile(candidateURLs: urls)", "NSWorkspace.shared.activateFileViewerSelecting([entry.url])"),
+        (
+            shell_part.format(2),
+            "revealOwnFile(candidateURLs: urls)",
+            "activateFileViewerSelecting(\n" + " " * 20 + "HomeMeetingRowActionTargets.transcriptRevealURLs(for: item)",
+        ),
+        ("Sources/UI/Settings/TranscriptedSettingsView.swift", "{ open(url) }", "{ NSWorkspace.shared.open(transcriptURL) }"),
+        (shell_part.format(3), ".alert(item: rootAlertBinding)", ".alert(item: $homeDeleteFailure)"),
+        (shell_part.format(4), ".alert(item: rootAlertBinding)", ".alert(item: $homeDeleteConfirmation)"),
+        (shell_part.format(0), ".alert(item: rootAlertBinding)", "presentFailedMeetingDeleteConfirmation(item)"),
+        (shell_part.format(1), "revealOwnFile(candidateURLs: urls)", "dismissFailedMeeting(item)"),
+        (shell_part.format(2), "SettingsActionFailureCopy.launchAtLogin", '"Could not update launch at login: \\(error)"'),
+        (shell_part.format(3), "SettingsActionFailureCopy.launchAtLogin", '"Copy stopped: \\(error.localizedDescription)"'),
+        (shell_part.format(4), "revealOwnFile(candidateURLs: urls)", "MicrophoneProcessingPreferences.setVoiceProcessingEnabled(true)"),
+        # Home copy/preview telemetry: direct tracker calls inside either slice
+        # (added next to the routing call, so only the ban can catch them)
+        (settings_view, copy_emit, copy_emit + "\n    ActivationTelemetry.trackHabitLoopAction(.copiedForAgent)"),
+        (settings_view, copy_emit, copy_emit + "\n    ActivationTelemetry.trackArtifactAction(.copy)"),
+        (settings_view, copy_emit, copy_emit + "\n    ActivationTelemetry.trackAgentPromptAction(.copy)"),
+        (settings_view, copy_emit, copy_emit + "\n    ProductUsageTelemetry.trackResult(kind: .meeting)"),
+        (settings_view, preview_emit, preview_emit + "\n    ActivationTelemetry.trackHabitLoopAction(.preview)"),
+        (settings_view, preview_emit, preview_emit + "\n    ActivationTelemetry.trackArtifactAction(.preview)"),
+        (settings_view, preview_emit, preview_emit + "\n    ActivationTelemetry.trackAgentPromptAction(.preview)"),
+        (settings_view, preview_emit, preview_emit + "\n    ProductUsageTelemetry.trackResult(kind: .meeting)"),
+        # ... and the routing call removed from either slice
+        (settings_view, "HomeMeetingActionTelemetry.copyEvents(", "copyEvents("),
+        (settings_view, "HomeMeetingActionTelemetry.previewEvents(", "previewEvents("),
+        (settings_view, copy_emit, "trackCopy()"),
+        (settings_view, preview_emit, "trackPreview()"),
+        # ... and either slice anchor vanishing
+        (settings_view, "func handleCopyMeeting(", "func copyMeeting("),
+        (settings_view, "func toggleHomeMeetingExpansion(", "func toggleExpansion("),
+        # ... and any one outcome's routed events dropped
+        (settings_view, copy_emit + "\n", ""),
+        (settings_view, "HomeMeetingActionTelemetry.copyEvents(for: .readFailure), artifactDate: d)\n", "noop()\n"),
+        (
+            settings_view,
+            "HomeMeetingActionTelemetry.copyEvents(for: .resolved(usedBundle: b, copied: c)), artifactDate: d)",
+            "noop())",
+        ),
+        (settings_view, preview_emit + "\n", ""),
+        (settings_view, "HomeMeetingActionTelemetry.previewEvents(loaded: false), artifactDate: d)", "noop())"),
+        # the fallback view opening Settings without closing itself first
+        (
+            "Sources/UI/Settings/TranscriptedSettingsFallbackView.swift",
+            "TranscriptedSettingsFallback.open(dismiss: { dismiss() }, openSettings: openSettings)",
+            "openSettings()",
+        ),
+        # menu commands or the fallback scene no longer routing through the catalog
+        ("Sources/App/TranscriptedMenuCommands.swift", "TranscriptedMenuCommandCatalog.perform(action, on: appDelegate)", ""),
+        ("Sources/App/TranscriptedApp.swift", "TranscriptedMenuCommandCatalog.perform(.openSettings, on: appDelegate)", ""),
+        # app-delegate menu hops emptied (a copy after the slice doesn't count)
+        ("Sources/App/TranscriptedApp.swift", "showSettingsWindow(page: page, source: source)", "_ = (page, source)"),
+        ("Sources/App/TranscriptedApp.swift", "    settingsWindowController.focusHomeFind(source: source)\n", "    _ = source\n"),
+        ("Sources/App/TranscriptedApp.swift", "settingsWindowController.focusSpeakerSearch(source: source)", "_ = source"),
+        # ... and the Menu Bar Commands section anchor vanishing
+        ("Sources/App/TranscriptedApp.swift", "// MARK: - Menu Bar Commands", "// MARK: - Commands"),
+        # failed-row cleanup reporting a hand-picked reason
+        (
+            failed_actions,
+            "reasonKind: HomeFailedMeetingCleanupTelemetry.reasonKind",
+            "reasonKind: .dismissed",
+        ),
+        # an extra emit in either slice (say, a premature success before the
+        # await) fails the exact counts even though every outcome is still there
+        (settings_view, copy_emit, copy_emit + "\n    " + copy_emit),
+        (
+            settings_view,
+            copy_emit,
+            "HomeMeetingActionTelemetry.emit(\n"
+            "        HomeMeetingActionTelemetry.copyEvents(for: .resolved(usedBundle: b, copied: true)), artifactDate: d)\n    "
+            + copy_emit,
+        ),
+        (settings_view, preview_emit, preview_emit + "\n    " + preview_emit),
+        (
+            settings_view,
+            "HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: false), artifactDate: d)",
+            "HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: false), artifactDate: d)\n"
+            "    HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: false), artifactDate: d)",
+        ),
+        # a slice end anchor vanishing fails instead of scanning to end of file
+        (settings_view, "private func handleRetranscribeMeeting(", "private func retranscribeMeeting("),
+        (settings_view, "func collapseHomeMeetingExpansion(", "func collapseExpansion("),
+        ("Sources/App/TranscriptedApp.swift", "// MARK: - NSPopoverDelegate", "// MARK: - Popover"),
     ]
     for rel, old, new in breaks:
         broken = dict(good)
@@ -447,6 +786,17 @@ def self_test() -> None:
     # So does a Settings shell scan that loses its files.
     sparse = {k: v for k, v in good.items() if "TranscriptedSettingsView+" not in k}
     assert any("expected more than" in p for p in check(build(sparse)))
+    # So does a Settings shell scan that loses its extensions.
+    shell_only = {k: v for k, v in good.items() if "TranscriptedSettingsView+" not in k}
+    assert any("TranscriptedSettingsView*.swift" in p for p in check(build(shell_only)))
+    # A missing end anchor is reported as such.
+    no_end = dict(good)
+    no_end[settings_view] = no_end[settings_view].replace("func collapseHomeMeetingExpansion(", "func collapse(")
+    assert any("lost `func collapseHomeMeetingExpansion(`" in p for p in check(build(no_end))), check(build(no_end))
+    # A duplicated emit is reported as a count mismatch.
+    doubled = dict(good)
+    doubled[settings_view] = doubled[settings_view].replace(preview_emit, preview_emit + "\n    " + preview_emit)
+    assert any("expected exactly 2" in p for p in check(build(doubled))), check(build(doubled))
     # Missing listed files fail.
     assert check(build({}))
     print("check-banned-calls self-test passed")

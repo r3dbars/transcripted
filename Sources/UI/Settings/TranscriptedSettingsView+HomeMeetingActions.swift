@@ -226,11 +226,11 @@ extension TranscriptedSettingsView {
             )
         } else {
             ActivationTelemetry.trackWorkflowAbandoned(
-                workflowKind: .failedMeetingRetry,
-                stage: "retry_available",
-                reasonKind: .deleted,
+                workflowKind: HomeFailedMeetingCleanupTelemetry.workflowKind,
+                stage: HomeFailedMeetingCleanupTelemetry.stage,
+                reasonKind: HomeFailedMeetingCleanupTelemetry.reasonKind,
                 surface: .home,
-                priorReadyState: canRetryFailedMeetings ? "retry_ready" : "retry_blocked"
+                priorReadyState: HomeFailedMeetingCleanupTelemetry.priorReadyState(canRetry: canRetryFailedMeetings)
             )
         }
     }

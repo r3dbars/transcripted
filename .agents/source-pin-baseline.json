@@ -2,6 +2,6 @@
   "resolved-pins": {
     "Tests/HomeFirstArtifactVisibilityTests.swift": 3,
     "Tests/NightlySecurityContractTests.swift": 8,
-    "Tests/UIAutomationSurfaceContractTests.swift": 33
+    "Tests/UIAutomationSurfaceContractTests.swift": 16
   }
 }

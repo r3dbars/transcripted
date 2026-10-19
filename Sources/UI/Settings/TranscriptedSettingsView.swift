@@ -311,21 +311,9 @@ struct TranscriptedSettingsView: View {
             let result = await Self.loadCopyMeetingText(for: item)
             switch result {
             case .missingFile:
-                ProductUsageTelemetry.trackResult(kind: .meeting, action: .copy, surface: .meetings, succeeded: false, artifactDate: item.date)
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .whatDidIPromise,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
-                    artifactDate: item.date,
-                    result: .failed
-                )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .meetingBundle,
-                    actionKind: .copied,
-                    agentTarget: .localAgent,
-                    surface: .homeRow,
-                    result: .failed,
-                    artifactKind: .meeting
+                HomeMeetingActionTelemetry.emit(
+                    HomeMeetingActionTelemetry.copyEvents(for: .missingFile),
+                    artifactDate: item.date
                 )
                 presentHomeActionFailure(
                     title: "Could not copy meeting",
@@ -335,21 +323,9 @@ struct TranscriptedSettingsView: View {
                     }
                 )
             case .readFailure:
-                ProductUsageTelemetry.trackResult(kind: .meeting, action: .copy, surface: .meetings, succeeded: false, artifactDate: item.date)
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .whatDidIPromise,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
-                    artifactDate: item.date,
-                    result: .failed
-                )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .meetingBundle,
-                    actionKind: .copied,
-                    agentTarget: .localAgent,
-                    surface: .homeRow,
-                    result: .failed,
-                    artifactKind: .meeting
+                HomeMeetingActionTelemetry.emit(
+                    HomeMeetingActionTelemetry.copyEvents(for: .readFailure),
+                    artifactDate: item.date
                 )
                 presentHomeActionFailure(
                     title: "Could not copy meeting",
@@ -364,20 +340,9 @@ struct TranscriptedSettingsView: View {
                 let copied = ProductUsageTelemetry.copy(kind: .meeting, surface: .meetings, artifactDate: item.date) {
                     pasteboard.setString(text, forType: .string)
                 }
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .whatDidIPromise,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
-                    artifactDate: item.date,
-                    result: copied ? .success : .failed
-                )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: usedBundle ? .meetingBundle : .meetingMarkdown,
-                    actionKind: .copied,
-                    agentTarget: .localAgent,
-                    surface: .homeRow,
-                    result: copied ? (usedBundle ? .success : .fallbackCopied) : .failed,
-                    artifactKind: .meeting
+                HomeMeetingActionTelemetry.emit(
+                    HomeMeetingActionTelemetry.copyEvents(for: .resolved(usedBundle: usedBundle, copied: copied)),
+                    artifactDate: item.date
                 )
                 if copied { flashCopied(rowID: item.id) }
             }
@@ -449,36 +414,15 @@ struct TranscriptedSettingsView: View {
             switch readResult {
             case .success(let markdown, let content):
                 homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: markdown, content: content)
-                ProductUsageTelemetry.trackResult(kind: .meeting, action: .preview, surface: .meetings, succeeded: true, artifactDate: item.date)
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .preview,
-                    surface: .homeRow,
-                    artifactDate: item.date,
-                    result: .success
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .openRecentMeeting,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
+                HomeMeetingActionTelemetry.emit(
+                    HomeMeetingActionTelemetry.previewEvents(loaded: true),
                     artifactDate: item.date
                 )
             case .failure(let message):
                 homeExpandedMeetingPreview = HomeMeetingPreview(item: item, markdown: "", readError: message)
-                ProductUsageTelemetry.trackResult(kind: .meeting, action: .preview, surface: .meetings, succeeded: false, artifactDate: item.date)
-                ActivationTelemetry.trackArtifactAction(
-                    artifactKind: .meeting,
-                    actionKind: .preview,
-                    surface: .homeRow,
-                    artifactDate: item.date,
-                    result: .failed
-                )
-                ActivationTelemetry.trackHabitLoopAction(
-                    actionKind: .openRecentMeeting,
-                    surface: .homeRow,
-                    artifactKind: .meeting,
-                    artifactDate: item.date,
-                    result: .failed
+                HomeMeetingActionTelemetry.emit(
+                    HomeMeetingActionTelemetry.previewEvents(loaded: false),
+                    artifactDate: item.date
                 )
             }
         }

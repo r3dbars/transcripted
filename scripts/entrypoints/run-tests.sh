@@ -668,6 +668,8 @@ APP_SOURCES=(
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
     "Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift"
+    "Sources/UI/Settings/TranscriptedSettingsFallbackView.swift"
+    "Sources/UI/Settings/HomeMeetingActionTelemetry.swift"
     "Sources/UI/Settings/OnboardingNavigation.swift"
     "Sources/UI/Settings/AgentSetupFailureCopy.swift"
     "Sources/Writing/WritingSidebarNewBadge.swift"
