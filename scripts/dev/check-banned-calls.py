@@ -59,7 +59,8 @@ Rules:
     window, through TranscriptedSettingsFallback.open(dismiss:openSettings:).
   * Menu commands still reach the app: TranscriptedMenuCommands and the
     fallback Settings scene route through TranscriptedMenuCommandCatalog, and
-    the TranscriptedAppDelegate menu hops still call the real Settings window.
+    the TranscriptedAppDelegate menu hops still call the real Settings window,
+    dictation start, meeting toggle and audio import.
     The routing tests use a recording fake host, so they can't see these.
     (the last seven were Tests/UIAutomationSurfaceContractTests.swift)
 
@@ -386,8 +387,11 @@ RULES: tuple[Rule, ...] = (
             "showSettingsWindow(page: page, source: source)",
             "settingsWindowController.focusSpeakerSearch(source: source)",
             "settingsWindowController.focusHomeFind(source: source)",
+            "startDictationFromSettings()",
+            "meetingOverlayController.toggleFromHotkey()",
+            "importAudioFileFromSettings()",
         ),
-        why="the TranscriptedAppDelegate menu hops must call the real Settings window (the routing tests only see a fake host)",
+        why="the TranscriptedAppDelegate menu hops must call the real Settings window, dictation, meeting toggle and import (the routing tests only see a fake host)",
     ),
 )
 
@@ -533,6 +537,15 @@ def self_test() -> None:
         "}\n"
         "func focusSpeakerSearchFromMenu(source: String) {\n"
         "    settingsWindowController.focusSpeakerSearch(source: source)\n"
+        "}\n"
+        "func startDictationFromMenu() {\n"
+        "    startDictationFromSettings()\n"
+        "}\n"
+        "func toggleMeetingRecordingFromMenu() {\n"
+        "    meetingOverlayController.toggleFromHotkey()\n"
+        "}\n"
+        "func importAudioFromMenu() {\n"
+        "    importAudioFileFromSettings()\n"
         "}\n"
         "// MARK: - NSPopoverDelegate\n"
         "func popoverDidClose() { settingsWindowController.focusHomeFind(source: source) }\n"
@@ -744,6 +757,9 @@ def self_test() -> None:
         ("Sources/App/TranscriptedApp.swift", "showSettingsWindow(page: page, source: source)", "_ = (page, source)"),
         ("Sources/App/TranscriptedApp.swift", "    settingsWindowController.focusHomeFind(source: source)\n", "    _ = source\n"),
         ("Sources/App/TranscriptedApp.swift", "settingsWindowController.focusSpeakerSearch(source: source)", "_ = source"),
+        ("Sources/App/TranscriptedApp.swift", "    startDictationFromSettings()\n", "    NSSound.beep()\n"),
+        ("Sources/App/TranscriptedApp.swift", "    meetingOverlayController.toggleFromHotkey()\n", "    NSSound.beep()\n"),
+        ("Sources/App/TranscriptedApp.swift", "    importAudioFileFromSettings()\n", "    NSSound.beep()\n"),
         # ... and the Menu Bar Commands section anchor vanishing
         ("Sources/App/TranscriptedApp.swift", "// MARK: - Menu Bar Commands", "// MARK: - Commands"),
         # failed-row cleanup reporting a hand-picked reason
