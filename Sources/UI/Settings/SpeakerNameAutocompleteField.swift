@@ -15,7 +15,7 @@ struct SpeakerNameAutocompleteField: View {
     var selectedOptionID: Binding<UUID?>? = nil
     /// When a picker opens prefilled with the current transcript label, that
     /// label is not a search query. The list stays hidden until the person types.
-    var showAllWhenTextEquals: String? = nil
+    var untouchedPrefill: String? = nil
     var accessibilityIdentifier: String?
     var autoFocus = false
     var onSubmit: () -> Void
@@ -28,44 +28,94 @@ struct SpeakerNameAutocompleteField: View {
             query: text,
             session: session,
             options: options,
-            untouchedPrefill: showAllWhenTextEquals
+            untouchedPrefill: untouchedPrefill
         )
         VStack(alignment: .leading, spacing: 4) {
-            SpeakerNameAutocompleteNSField(
-                text: $text,
-                placeholder: placeholder,
-                options: options,
-                selectedOptionID: selectedOptionID,
-                showAllWhenTextEquals: showAllWhenTextEquals,
-                accessibilityIdentifier: accessibilityIdentifier,
-                autoFocus: autoFocus,
-                session: session,
-                onSubmit: onSubmit,
-                onCancel: onCancel
-            )
-            .frame(height: 28)
+            HStack(alignment: .center, spacing: 4) {
+                SpeakerNameAutocompleteNSField(
+                    text: $text,
+                    placeholder: placeholder,
+                    options: options,
+                    selectedOptionID: selectedOptionID,
+                    untouchedPrefill: untouchedPrefill,
+                    accessibilityIdentifier: accessibilityIdentifier,
+                    autoFocus: autoFocus,
+                    session: session,
+                    onSubmit: onSubmit,
+                    onCancel: onCancel
+                )
+                .frame(height: 28)
+
+                if !options.isEmpty {
+                    browseButton
+                }
+            }
 
             if !suggestions.isEmpty {
-                SpeakerNameSuggestionList(
-                    suggestions: suggestions,
-                    highlightedIndex: $session.highlightedIndex,
-                    accessibilityIdentifier: accessibilityIdentifier,
-                    onPointerInside: { session.pointerInsideList = $0 },
-                    onSelect: { suggestion in
-                        applySuggestion(suggestion)
-                    }
-                )
+                suggestionList(suggestions)
             }
         }
         .zIndex(1)
     }
 
+    private var browseButton: some View {
+        Button {
+            session.toggleBrowseAll()
+        } label: {
+            Image(systemName: session.isBrowsingAll ? "chevron.up" : "chevron.down")
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(LibraryTokens.ink3)
+                .frame(width: 22, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .accessibilityLabel(session.isBrowsingAll ? "Hide saved people" : "Browse saved people")
+        .accessibilityIdentifier(browseIdentifier)
+    }
+
+    @ViewBuilder
+    private func suggestionList(
+        _ suggestions: [SpeakerNameTypingSuggestionPolicy.Suggestion]
+    ) -> some View {
+        let list = SpeakerNameSuggestionList(
+            suggestions: suggestions,
+            visualHighlightIndex: session.visualHighlightIndex,
+            selectedIndex: session.keyboardHighlightIndex,
+            accessibilityIdentifier: accessibilityIdentifier,
+            onPointerInside: { session.pointerInsideList = $0 },
+            onHoverRow: { index, hovering in
+                if hovering {
+                    session.hoverEntered(index: index)
+                } else {
+                    session.hoverExited(index: index)
+                }
+            },
+            onSelect: { suggestion in
+                applySuggestion(suggestion)
+            }
+        )
+        if session.isBrowsingAll {
+            ScrollView {
+                list
+            }
+            .frame(maxHeight: 220)
+        } else {
+            list
+        }
+    }
+
+    private var browseIdentifier: String {
+        if let accessibilityIdentifier, !accessibilityIdentifier.isEmpty {
+            return "\(accessibilityIdentifier).browse"
+        }
+        return "transcripted.speaker-name.browse"
+    }
+
     private func applySuggestion(_ suggestion: SpeakerNameTypingSuggestionPolicy.Suggestion) {
         text = suggestion.person.displayName
         selectedOptionID?.wrappedValue = suggestion.person.id
-        session.highlightedIndex = nil
-        session.listDismissed = true
-        session.pointerInsideList = false
+        session.commitPick()
     }
 }
 
@@ -76,7 +126,7 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
     var placeholder: String
     var options: [SpeakerNameChoice]
     var selectedOptionID: Binding<UUID?>? = nil
-    var showAllWhenTextEquals: String? = nil
+    var untouchedPrefill: String? = nil
     var accessibilityIdentifier: String?
     var autoFocus = false
     var session: SpeakerNameAutocompleteSession
@@ -86,7 +136,9 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
     func makeNSView(context: Context) -> NSTextField {
-        makeTextField(coordinator: context.coordinator)
+        let field = makeTextField(coordinator: context.coordinator)
+        session.field = field
+        return field
     }
 
     func makeTextField(coordinator: Coordinator) -> NSTextField {
@@ -112,11 +164,13 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
                 field.window?.makeFirstResponder(field)
             }
         }
+        session.field = field
         return field
     }
 
     func updateNSView(_ field: NSTextField, context: Context) {
         context.coordinator.parent = self
+        session.field = field
         if field.stringValue != text {
             field.stringValue = text
         }
@@ -125,6 +179,7 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
 
     static func dismantleNSView(_ field: NSTextField, coordinator: Coordinator) {
         coordinator.isDismantled = true
+        coordinator.session.field = nil
         field.delegate = nil
     }
 
@@ -147,7 +202,7 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
                 query: query ?? parent.text,
                 session: session,
                 options: parent.options,
-                untouchedPrefill: parent.showAllWhenTextEquals
+                untouchedPrefill: parent.untouchedPrefill
             )
         }
 
@@ -159,9 +214,7 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
             field?.stringValue = resolved
             parent.text = resolved
             parent.selectedOptionID?.wrappedValue = suggestion.person.id
-            session.highlightedIndex = nil
-            session.listDismissed = true
-            session.pointerInsideList = false
+            session.commitPick()
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
@@ -176,13 +229,13 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
-            // Wait one turn so a mouse-down on a suggestion can land before
-            // the list unmounts. The island keeps its rows for the same reason.
+            // Always drop keyboard focus. `pointerInsideList` keeps the rows
+            // mounted for this turn so a mouse-down can land; the next turn
+            // clears it so Tab / click-away cannot leave the list stuck.
+            session.isFocused = false
             DispatchQueue.main.async { [weak self] in
                 guard let self, !self.isDismantled else { return }
-                if !self.session.pointerInsideList {
-                    self.session.isFocused = false
-                }
+                self.session.pointerInsideList = false
             }
         }
 
@@ -195,16 +248,16 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
             let suggestions = currentSuggestions(for: field.stringValue)
 
             if commandSelector == #selector(NSResponder.moveDown(_:)) {
-                session.highlightedIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
-                    from: session.highlightedIndex,
+                session.keyboardHighlightIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
+                    from: session.keyboardHighlightIndex,
                     by: 1,
                     count: suggestions.count
                 )
                 return !suggestions.isEmpty
             }
             if commandSelector == #selector(NSResponder.moveUp(_:)) {
-                session.highlightedIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
-                    from: session.highlightedIndex,
+                session.keyboardHighlightIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
+                    from: session.keyboardHighlightIndex,
                     by: -1,
                     count: suggestions.count
                 )
@@ -212,8 +265,9 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
             }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 switch SpeakerNameTypingSuggestionPolicy.returnDecision(
-                    highlighted: session.highlightedIndex,
-                    suggestionCount: suggestions.count
+                    highlighted: session.keyboardHighlightIndex,
+                    suggestionCount: suggestions.count,
+                    hoverHighlight: session.hoverHighlightIndex
                 ) {
                 case .selectIndex(let index):
                     applySuggestion(suggestions[index], field: field)
@@ -231,8 +285,7 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
                     hasCancelHandler: parent.onCancel != nil
                 ) {
                 case .hideSuggestions:
-                    session.listDismissed = true
-                    session.highlightedIndex = nil
+                    session.dismissList()
                     return true
                 case .cancel:
                     parent.onCancel?()
@@ -246,15 +299,69 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
     }
 }
 
+@MainActor
 final class SpeakerNameAutocompleteSession: ObservableObject {
     @Published var isFocused = false
-    @Published var highlightedIndex: Int? = nil
+    @Published var keyboardHighlightIndex: Int? = nil
+    @Published var hoverHighlightIndex: Int? = nil
     @Published var listDismissed = false
     @Published var pointerInsideList = false
+    @Published var isBrowsingAll = false
+    weak var field: NSTextField?
+
+    var visualHighlightIndex: Int? { hoverHighlightIndex ?? keyboardHighlightIndex }
 
     func queryChanged() {
-        highlightedIndex = nil
+        keyboardHighlightIndex = nil
+        hoverHighlightIndex = nil
         listDismissed = false
+        isBrowsingAll = false
+    }
+
+    func hoverEntered(index: Int) {
+        hoverHighlightIndex = index
+    }
+
+    func hoverExited(index: Int) {
+        if hoverHighlightIndex == index {
+            hoverHighlightIndex = nil
+        }
+    }
+
+    func toggleBrowseAll() {
+        isBrowsingAll.toggle()
+        keyboardHighlightIndex = nil
+        hoverHighlightIndex = nil
+        if isBrowsingAll {
+            listDismissed = false
+            isFocused = true
+        }
+        restoreFieldFocus()
+    }
+
+    func dismissList() {
+        listDismissed = true
+        isBrowsingAll = false
+        keyboardHighlightIndex = nil
+        hoverHighlightIndex = nil
+    }
+
+    func commitPick() {
+        keyboardHighlightIndex = nil
+        hoverHighlightIndex = nil
+        listDismissed = true
+        isBrowsingAll = false
+        pointerInsideList = false
+        isFocused = true
+        DispatchQueue.main.async { [weak self] in
+            self?.isFocused = true
+            self?.restoreFieldFocus()
+        }
+    }
+
+    func restoreFieldFocus() {
+        guard let field else { return }
+        field.window?.makeFirstResponder(field)
     }
 }
 
@@ -262,9 +369,11 @@ final class SpeakerNameAutocompleteSession: ObservableObject {
 /// still lands after the text field resigns first responder.
 struct SpeakerNameSuggestionList: View {
     let suggestions: [SpeakerNameTypingSuggestionPolicy.Suggestion]
-    @Binding var highlightedIndex: Int?
+    var visualHighlightIndex: Int?
+    var selectedIndex: Int?
     var accessibilityIdentifier: String?
     var onPointerInside: (Bool) -> Void
+    var onHoverRow: (Int, Bool) -> Void
     var onSelect: (SpeakerNameTypingSuggestionPolicy.Suggestion) -> Void
 
     var body: some View {
@@ -272,14 +381,14 @@ struct SpeakerNameSuggestionList: View {
             ForEach(Array(suggestions.enumerated()), id: \.element.id) { index, suggestion in
                 SpeakerNameSuggestionRow(
                     label: suggestion.label,
-                    isHighlighted: highlightedIndex == index,
+                    isHighlighted: visualHighlightIndex == index,
+                    isSelected: selectedIndex == index,
                     accessibilityIdentifier: rowIdentifier(index: index)
                 ) {
-                    highlightedIndex = index
                     onSelect(suggestion)
                 }
                 .onHover { hovering in
-                    if hovering { highlightedIndex = index }
+                    onHoverRow(index, hovering)
                 }
             }
         }
@@ -312,6 +421,7 @@ struct SpeakerNameSuggestionList: View {
 private struct SpeakerNameSuggestionRow: View {
     let label: String
     let isHighlighted: Bool
+    let isSelected: Bool
     var accessibilityIdentifier: String
     let onSelect: () -> Void
     @State private var didAct = false
@@ -336,7 +446,8 @@ private struct SpeakerNameSuggestionRow: View {
                         didAct = false
                     }
             )
-            .accessibilityAddTraits(.isButton)
+            .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+            .accessibilityAction { onSelect() }
             .accessibilityIdentifier(accessibilityIdentifier)
             .accessibilityLabel(label)
     }
@@ -353,6 +464,7 @@ private func speakerNameFieldSuggestions(
         isFocused: session.isFocused || session.pointerInsideList,
         people: options,
         listDismissed: session.listDismissed,
-        untouchedPrefill: untouchedPrefill
+        untouchedPrefill: untouchedPrefill,
+        isBrowsingAll: session.isBrowsingAll
     )
 }

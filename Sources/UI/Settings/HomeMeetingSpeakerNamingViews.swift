@@ -117,7 +117,7 @@ struct HomeMeetingSpeakerPicker: View {
                 placeholder: "Type a name",
                 options: knownPeople,
                 selectedOptionID: $selectedProfileID,
-                showAllWhenTextEquals: identity.displayName,
+                untouchedPrefill: identity.displayName,
                 accessibilityIdentifier: "transcripted.home.speaker-picker.name",
                 autoFocus: true,
                 onSubmit: save,
@@ -353,7 +353,7 @@ struct HomeMeetingSpeakerNamingRow: View {
                 placeholder: "Type a name",
                 options: knownPeople,
                 selectedOptionID: $draft.selectedProfileID,
-                showAllWhenTextEquals: draft.identity.displayName,
+                untouchedPrefill: draft.identity.displayName,
                 accessibilityIdentifier: "transcripted.home.speaker-sheet.row.\(draft.id).name",
                 onSubmit: {}
             )

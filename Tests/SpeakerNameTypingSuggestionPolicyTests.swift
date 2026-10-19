@@ -180,6 +180,108 @@ func testSpeakerNameTypingSuggestionPolicy() {
             .submitTyped,
             "a stale highlight does not pick from an empty list"
         )
+        assertEqual(
+            Policy.returnDecision(highlighted: nil, suggestionCount: 2, hoverHighlight: 1),
+            .submitTyped,
+            "a pointer hover is not a Return target"
+        )
+        assertEqual(
+            Policy.returnDecision(highlighted: 0, suggestionCount: 2, hoverHighlight: 1),
+            .selectIndex(0),
+            "Return keeps the arrow highlight even when another row is hovered"
+        )
+    }
+
+    runSuite("An exact name ranks ahead of a longer prefix match") {
+        let ann = SpeakerNameChoice(id: UUID(), displayName: "Ann", callCount: 1)
+        let anna = SpeakerNameChoice(id: UUID(), displayName: "Anna", callCount: 12)
+        assertEqual(
+            suggestionNames(query: "Ann", people: [anna, ann]),
+            ["Ann", "Anna"],
+            "Ann is an exact match, so it stays above Anna even when Anna has more calls"
+        )
+    }
+
+    runSuite("A hyphenated given name ranks as its own word") {
+        let anneMarie = SpeakerNameChoice(id: UUID(), displayName: "Anne-Marie", callCount: 1)
+        let rosemarie = SpeakerNameChoice(id: UUID(), displayName: "Rosemarie", callCount: 12)
+        assertEqual(
+            suggestionNames(query: "Marie", people: [rosemarie, anneMarie]),
+            ["Anne-Marie", "Rosemarie"],
+            "Marie in Anne-Marie is a word start, ahead of a contains match with more calls"
+        )
+        assertEqual(
+            suggestionNames(query: "Anne", people: [anneMarie, kim]),
+            ["Anne-Marie"],
+            "the first half of a hyphenated name is still a prefix"
+        )
+    }
+
+    runSuite("Cyrillic and transliterated names stay distinct") {
+        let cyrillic = SpeakerNameChoice(id: UUID(), displayName: "Андрій", callCount: 3)
+        let latin = SpeakerNameChoice(id: UUID(), displayName: "Andrii", callCount: 3)
+        let people = [cyrillic, latin]
+        assertEqual(
+            suggestionNames(query: "Андрій", people: people),
+            ["Андрій"],
+            "the native spelling is an exact match for itself"
+        )
+        assertEqual(
+            suggestionNames(query: "Andrii", people: people),
+            ["Andrii"],
+            "the transliteration is an exact match for itself"
+        )
+        assertEqual(
+            suggestionNames(query: "Андр", people: people),
+            ["Андрій"],
+            "a Cyrillic prefix does not pick up the Latin spelling"
+        )
+        assertEqual(
+            suggestionNames(query: "Andr", people: people),
+            ["Andrii"],
+            "a Latin prefix does not pick up the Cyrillic spelling"
+        )
+    }
+
+    runSuite("Browsing everyone lists the full sorted directory, not the typing cap") {
+        let crowd = (1...6).map { index in
+            SpeakerNameChoice(
+                id: UUID(),
+                displayName: "Alex \(index)",
+                callCount: 7 - index
+            )
+        }
+        let own = crowd[0]
+        assertEqual(
+            suggestionNames(query: "", people: crowd, isBrowsingAll: true),
+            ["Alex 1", "Alex 2", "Alex 3", "Alex 4", "Alex 5", "Alex 6"],
+            "the chevron shows every saved person, highest call count first"
+        )
+        assertEqual(
+            suggestionNames(
+                query: "zzz",
+                people: crowd,
+                excluding: own.id,
+                isBrowsingAll: true
+            ),
+            ["Alex 2", "Alex 3", "Alex 4", "Alex 5", "Alex 6"],
+            "browsing still hides this voice and ignores the typed filter"
+        )
+        assertEqual(
+            suggestionNames(
+                query: "Alex 1",
+                people: crowd,
+                untouchedPrefill: "Alex 1",
+                isBrowsingAll: true
+            ).count,
+            6,
+            "the chevron is allowed to open on the unused current name"
+        )
+        assertEqual(
+            suggestionNames(query: "", people: crowd, isFocused: false, isBrowsingAll: true),
+            [],
+            "an unfocused field does not leave the directory hanging open"
+        )
     }
 
     runSuite("Escape hides the list, then cancels if the caller asked") {
@@ -208,7 +310,8 @@ private func suggestionNames(
     isFocused: Bool = true,
     excluding excludedID: UUID? = nil,
     listDismissed: Bool = false,
-    untouchedPrefill: String? = nil
+    untouchedPrefill: String? = nil,
+    isBrowsingAll: Bool = false
 ) -> [String] {
     SpeakerNameTypingSuggestionPolicy.suggestions(
         query: query,
@@ -216,6 +319,7 @@ private func suggestionNames(
         people: people,
         excluding: excludedID,
         listDismissed: listDismissed,
-        untouchedPrefill: untouchedPrefill
+        untouchedPrefill: untouchedPrefill,
+        isBrowsingAll: isBrowsingAll
     ).map(\.person.displayName)
 }

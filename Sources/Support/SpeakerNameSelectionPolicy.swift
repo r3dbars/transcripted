@@ -154,7 +154,11 @@ enum SpeakerNameSelectionPolicy {
         let normalizedLabel = normalizedSearchText(label)
         let name = optionsByLabel[label].map(displayName) ?? label
         let normalizedDisplayName = normalizedSearchText(name)
-        let displayWords = normalizedDisplayName.split(separator: " ")
+        let wordSeparators = CharacterSet.whitespacesAndNewlines
+            .union(CharacterSet(charactersIn: "-"))
+        let displayWords = normalizedDisplayName
+            .components(separatedBy: wordSeparators)
+            .filter { !$0.isEmpty }
 
         if normalizedDisplayName == normalizedQuery { return 0 }
         if normalizedDisplayName.hasPrefix(normalizedQuery) { return 1 }
