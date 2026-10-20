@@ -6,28 +6,6 @@ import QuartzCore
 enum NextSentenceMotion {
     static var reduced: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
 
-    /// The card leaves: back toward the caret and gone (insert, close), or lifting away (send).
-    static func leave(_ layer: CALayer, toward corner: CGPoint, sending: Bool, then done: @escaping @MainActor () -> Void) {
-        guard !reduced else { return done() }
-        let end = sending
-            ? CATransform3DMakeTranslation(0, -12, 0)
-            : scale(0.94, about: corner)
-        CATransaction.begin()
-        CATransaction.setCompletionBlock { MainActor.assumeIsolated { done() } }
-        let move = CABasicAnimation(keyPath: "transform")
-        move.toValue = end
-        let fade = CABasicAnimation(keyPath: "opacity")
-        fade.toValue = 0
-        let group = CAAnimationGroup()
-        group.animations = [move, fade]
-        group.duration = sending ? 0.2 : 0.14
-        group.timingFunction = CAMediaTimingFunction(name: .easeIn)
-        group.fillMode = .forwards
-        group.isRemovedOnCompletion = false
-        layer.add(group, forKey: "leave")
-        CATransaction.commit()
-    }
-
     /// A different version of the message: the new text settles in from the direction it grew
     /// (longer comes from below, shorter from above) as it fades in.
     static func textChanged(_ layer: CALayer?, direction: Int) {

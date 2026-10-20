@@ -207,17 +207,19 @@ enum NextSentencePrompt {
         body(r, json: false) + "\n\nWrite the reply they're most likely to send, in \"\(tone.rawValue)\" tone, medium length (one or two sentences). Output only the message text itself: no quotes, no labels, no JSON."
     }
 
-    /// Three different replies (different intents), current tone, medium. Quick, so ↑/↓ works early.
-    static func guessesPrompt(_ r: Request, tone: Tone) -> String {
-        body(r, json: true) + "\n\n" + guessRule + " For each, write only the \"\(tone.rawValue)\" tone, medium length (one or two sentences), as \"text\"."
-    }
+    /// The one reply, rewritten in every tone and length, so the mood pad, arrows and end handle are
+    /// instant. `base` is the reply as streamed (or as rewritten), at `tone` and `length`.
+    static func variationsPrompt(_ r: Request, base: String, tone: Tone, length: Int) -> String {
+        body(r, json: true) + """
 
-    /// The same three replies in every tone and length. Slower; fills in while they read.
-    static func fullPrompt(_ r: Request) -> String {
-        body(r, json: true) + "\n\n" + guessRule + " For each, write three tones, \"casual\", \"direct\" and \"warm\", each as exactly 5 lengths: [tiny, short, medium, long, full]. Tiny is two to four words. Short is one short sentence. Medium is one or two sentences. Long is two or three. Full is at most four sentences and adds a useful detail from their context. Each length should read as a natural message, not a cut-off version of the next."
-    }
 
-    private static let guessRule = "Write exactly 3 different replies they might send, as \"guesses\": the most likely first, then two with a genuinely different intent (for example agree, push back, ask a question). \"label\" names each intent in 2-4 plain words."
+        THE REPLY THEY'RE GOING WITH
+        <<<
+        \(base)
+        >>>
+        It is written in "\(tone.rawValue)" tone at \(lengthNames[max(0, min(4, length))].lowercased()) length. Rewrite this same reply, keeping its meaning, intent and facts, in three tones, "casual", "direct" and "warm", each as exactly 5 lengths: [tiny, short, medium, long, full]. Tiny is two to four words. Short is one short sentence. Medium is one or two sentences. Long is two or three. Full is at most four sentences and adds a useful detail from their context. Each length should read as a natural message, not a cut-off version of the next. The "\(tone.rawValue)" \(lengthNames[max(0, min(4, length))].lowercased()) version is the reply above, as is.
+        """
+    }
 
     /// Replacements for a word, or rephrasings for a longer selection, that fit back into the text.
     static func alternativesPrompt(text: String, selection: String) -> String {
@@ -309,16 +311,10 @@ enum NextSentencePrompt {
         ["type": "array", "items": object(["phrase": ["type": "string"], "source": ["type": "string"]], required: ["phrase", "source"])]
     }
 
-    static var guessesSchema: [String: Any] {
-        let guess = object(["label": ["type": "string"], "text": ["type": "string"], "facts": factsSchema], required: ["label", "text", "facts"])
-        return object(["guesses": ["type": "array", "items": guess, "minItems": 3, "maxItems": 3]], required: ["guesses"])
-    }
-
-    static var fullSchema: [String: Any] {
+    static var variationsSchema: [String: Any] {
         let lengths: [String: Any] = ["type": "array", "items": ["type": "string"], "minItems": 5, "maxItems": 5]
-        let guess = object(["label": ["type": "string"], "casual": lengths, "direct": lengths, "warm": lengths, "facts": factsSchema],
-                           required: ["label", "casual", "direct", "warm", "facts"])
-        return object(["guesses": ["type": "array", "items": guess, "minItems": 3, "maxItems": 3]], required: ["guesses"])
+        return object(["casual": lengths, "direct": lengths, "warm": lengths, "facts": factsSchema],
+                      required: ["casual", "direct", "warm", "facts"])
     }
 
     static var alternativesSchema: [String: Any] {
@@ -332,27 +328,14 @@ enum NextSentencePrompt {
         }
     }
 
-    /// Three guesses with one tone's medium filled in.
-    static func parseGuesses(_ object: [String: Any], tone: Tone) -> [Guess]? {
-        guard let list = object["guesses"] as? [[String: Any]], list.count == 3 else { return nil }
-        return list.map { item in
-            Guess(label: item["label"] as? String ?? "", texts: [tone: [nil, nil, item["text"] as? String, nil, nil]], facts: facts(item["facts"]))
+    /// The reply in every tone and length, or nil if any tone is missing a length.
+    static func parseVariations(_ object: [String: Any]) -> Guess? {
+        var texts: [Tone: [String?]] = [:]
+        for tone in Tone.allCases {
+            guard let lengths = object[tone.rawValue] as? [String], lengths.count == 5 else { return nil }
+            texts[tone] = lengths
         }
-    }
-
-    /// Three guesses with every tone and length.
-    static func parseFull(_ object: [String: Any]) -> [Guess]? {
-        guard let list = object["guesses"] as? [[String: Any]], list.count == 3 else { return nil }
-        var guesses: [Guess] = []
-        for item in list {
-            var texts: [Tone: [String?]] = [:]
-            for tone in Tone.allCases {
-                guard let lengths = item[tone.rawValue] as? [String], lengths.count == 5 else { return nil }
-                texts[tone] = lengths
-            }
-            guesses.append(Guess(label: item["label"] as? String ?? "", texts: texts, facts: facts(item["facts"])))
-        }
-        return guesses
+        return Guess(label: "", texts: texts, facts: facts(object["facts"]))
     }
 
     static func parseOptions(_ object: [String: Any]) -> [String] {

@@ -58,7 +58,7 @@ final class NextSentenceSounds {
             pair.speed.rate = rate
             pair.player.volume = sample.gain
             pair.player.scheduleBuffer(sample.buffer, at: nil, options: .interrupts)
-            if !pair.player.isPlaying { pair.player.play() }
+            if !pair.player.isPlaying, !engine.outputConnectionPoints(for: pair.player, outputBus: 0).isEmpty { pair.player.play() }
             scheduleIdleStop()
             return
         }
@@ -67,8 +67,16 @@ final class NextSentenceSounds {
         let player = players[next % players.count]
         next += 1
         player.scheduleBuffer(buffer, at: nil, options: .interrupts)
-        if !player.isPlaying { player.play() }
+        if !player.isPlaying, !engine.outputConnectionPoints(for: player, outputBus: 0).isEmpty { player.play() }
         scheduleIdleStop()
+    }
+
+    /// The pad's tick walks a full octave from bottom (Full) to top (Tiny), on a pentatonic scale so
+    /// every step sounds like a note. Left and right nudge it a semitone: direct a touch brighter.
+    static func stepRatio(tone: Int, length: Int) -> Double {
+        let scale = [12.0, 9, 7, 4, 0] // Tiny ... Full, in semitones above the bottom note
+        let semitones = scale[max(0, min(4, length))] + Double(1 - max(0, min(2, tone)))
+        return pow(2, (semitones - 6) / 12) // centered, so the middle of the pad sits near the tick's own pitch
     }
 
     /// Which kit file plays, and how fast (pitch) for the moments that carry a position.
@@ -76,7 +84,7 @@ final class NextSentenceSounds {
         switch sound {
         case .open: return ("open", 1)
         case .close: return ("close", 1)
-        case .step(let tone, let length): return ("step", 0.9 + 0.05 * Float(4 - length) + 0.03 * Float(2 - tone))
+        case .step(let tone, let length): return ("step", Float(stepRatio(tone: tone, length: length)))
         case .trim(let kept): return ("trim", 0.8 + 0.4 * Float(max(0, min(1, kept))))
         case .roll(let up): return ("roll", up ? 1.06 : 0.94)
         case .armed: return ("armed", 1)
@@ -129,9 +137,7 @@ final class NextSentenceSounds {
         case .close:
             return [Note(frequency: 659, duration: 0.06, volume: 0.035), Note(frequency: 440, duration: 0.09, volume: 0.03, delay: 0.04)]
         case .step(let tone, let length):
-            // Up the pad (shorter) and toward direct is brighter; down and warm is rounder.
-            let frequency = 620 + Double(2 - tone) * 50 + Double(4 - length) * 45
-            return [Note(frequency: frequency, duration: 0.035, volume: 0.04, triangle: true)]
+            return [Note(frequency: 620 * stepRatio(tone: tone, length: length), duration: 0.035, volume: 0.04, triangle: true)]
         case .trim(let kept):
             return [Note(frequency: 420 + 520 * max(0, min(1, kept)), duration: 0.028, volume: 0.035, triangle: true)]
         case .roll(let up):

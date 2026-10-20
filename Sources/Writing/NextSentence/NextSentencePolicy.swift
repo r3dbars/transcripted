@@ -149,4 +149,26 @@ enum NextSentencePolicy {
         return result
     }
 
+
+    // MARK: Word morph
+
+    /// The ranges in `new` of words that weren't in `old`. Pure, so tests pin it.
+    static func newWordRanges(from old: String, to new: String) -> [NSRange] {
+        var pool: [String: Int] = [:]
+        for word in old.lowercased().split(whereSeparator: \.isWhitespace) { pool[String(word), default: 0] += 1 }
+        var ranges: [NSRange] = []
+        let ns = new as NSString
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { word, range, _, _ in
+            guard let word else { return }
+            let key = word.lowercased()
+            if let count = pool[key], count > 0 {
+                pool[key] = count - 1
+            } else if let alt = pool.keys.first(where: { $0.trimmingCharacters(in: .punctuationCharacters) == key }), let count = pool[alt], count > 0 {
+                pool[alt] = count - 1
+            } else {
+                ranges.append(range)
+            }
+        }
+        return ranges
+    }
 }

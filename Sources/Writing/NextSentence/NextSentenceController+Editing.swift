@@ -59,7 +59,7 @@ extension NextSentenceController {
         trimSource = nil
         NextSentenceCardStyle.tick()
         NextSentenceSounds.shared.play(.roll(up: step > 0))
-        card.animateWordIn(newRange)
+        card.animateWordIn(newRange, replacing: old)
         card.showOptions(for: newRange, rolled: step)
     }
 
@@ -137,6 +137,7 @@ extension NextSentenceController {
         card.closeOptions()
         note = instruction.isEmpty ? "Fresh take…" : nil
         render()
+        if instruction.isEmpty { card.burstText() }
         let image = snapshot?.screenshotJPEG
         var text = ""
         claude.stream(prompt: NextSentencePrompt.rewritePrompt(request, current: current, instruction: instruction), image: image, onText: { piece in
@@ -153,16 +154,16 @@ extension NextSentenceController {
                 self.rewriting = false
                 self.heard = nil
                 switch result {
-                case .success(let final): self.custom = final; self.note = nil
+                case .success(let final):
+                    self.custom = final
+                    self.note = nil
+                    // The other tones and lengths follow the new wording.
+                    self.writeVariations(of: final, tone: self.tone, length: self.length)
                 case .failure(let error): self.note = error.localizedDescription
                 }
                 self.render()
             } }
         })
-        // A spoken change should hold when they then pick another tone or length.
-        if !instruction.isEmpty, let steered = self.request(steer: "Start from this draft: \"\(current)\". They asked: \(instruction)") {
-            writeAllVersions(steered, image: image)
-        }
     }
 
     func startListening() {

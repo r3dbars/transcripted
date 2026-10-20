@@ -90,29 +90,27 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
                                                  sources: [.init(id: "S1", kind: "meeting", date: "2026-10-14", title: "Sync", quote: "ship on the 3rd")],
                                                  voiceExamples: ["yeah let's ship it"])
         let streamed = NextSentencePrompt.streamPrompt(request, tone: .direct)
-        let full = NextSentencePrompt.fullPrompt(request)
+        let full = NextSentencePrompt.variationsPrompt(request, base: "Nov 3.", tone: .direct, length: 2)
         assertTrue(streamed.contains("[S1] meeting 2026-10-14 Sync: ship on the 3rd"), "sources are listed with their ids")
         assertTrue(streamed.contains("screenshot of the window"), "the screenshot is explained when there is one")
         assertFalse(streamed.contains("Output JSON only"), "the streamed version is plain text")
         assertTrue(full.contains("Output JSON only") && full.contains("\"facts\""), "the full version asks for marked facts")
     }
 
-    runSuite("Three guesses parse with every tone and length, and the quick pass fills one tone") {
+    runSuite("The one reply comes back in every tone and length") {
         let lengths = ["Yes.", "Yes, Nov 3.", "Yes, Nov 3 still.", "Yes, Nov 3 still. Beta first.", "Yes, Nov 3 still. Beta goes out first."]
-        let item: [String: Any] = ["label": "Confirm", "casual": lengths, "direct": lengths, "warm": lengths,
-                                   "facts": [["phrase": "Nov 3", "source": "S1"]]]
-        let full = NextSentencePrompt.parseFull(["guesses": [item, item, item]])
-        assertEqual(full?.count, 3, "three guesses")
-        assertEqual(full?.first?.text(tone: .warm, length: 4), "Yes, Nov 3 still. Beta goes out first.", "all five lengths are there, Tiny to Full")
-        assertTrue(NextSentencePrompt.parseFull(["guesses": [item]]) == nil, "fewer than three guesses is rejected, not half-shown")
-
-        let quick = NextSentencePrompt.parseGuesses(["guesses": [
-            ["label": "Confirm", "text": "Yes, Nov 3.", "facts": []],
-            ["label": "Push back", "text": "Not yet.", "facts": []],
-            ["label": "Ask", "text": "Which date?", "facts": []],
-        ]], tone: .direct)
-        assertEqual(quick?[1].text(tone: .direct, length: NextSentencePrompt.mediumLength), "Not yet.", "the quick pass fills the current tone's medium")
-        assertTrue(quick?[1].text(tone: .warm, length: NextSentencePrompt.mediumLength) == nil, "other tones wait for the full pass")
+        let object: [String: Any] = ["casual": lengths, "direct": lengths, "warm": lengths, "facts": [["phrase": "Nov 3", "source": "S1"]]]
+        let reply = NextSentencePrompt.parseVariations(object)
+        assertEqual(reply?.text(tone: .warm, length: 4), "Yes, Nov 3 still. Beta goes out first.", "all five lengths are there, Tiny to Full")
+        assertEqual(reply?.facts.first?.phrase, "Nov 3", "facts come along")
+        var short = object
+        short["warm"] = ["Yes."]
+        assertTrue(NextSentencePrompt.parseVariations(short) == nil, "a tone missing lengths is rejected, not half-shown")
+        let request = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Riley", screenText: "launch?", draft: "",
+                                                 hasScreenshot: false, sources: [], voiceExamples: [])
+        let prompt = NextSentencePrompt.variationsPrompt(request, base: "Yes, still Nov 3.", tone: .casual, length: 2)
+        assertTrue(prompt.contains("Yes, still Nov 3.") && prompt.contains("\"casual\" medium version is the reply above"),
+                   "the variations are built from the exact reply shown")
     }
 
     runSuite("Facts are underlined where their words appear in the reply") {
@@ -233,5 +231,12 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         let request = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Riley Park", screenText: "", draft: "",
                                                  hasScreenshot: false, sources: merged, voiceExamples: [], people: ["Riley"])
         assertTrue(NextSentencePrompt.body(request, json: false).contains("PEOPLE IN THIS CONVERSATION: Riley"), "the writer is told who's involved")
+    }
+
+    runSuite("A new version keeps the words it shares and only the new ones bloom") {
+        let ranges = NextSentencePolicy.newWordRanges(from: "Yes, still Nov 3.", to: "Yes! Still on for Nov 3.")
+        let words = ranges.map { ("Yes! Still on for Nov 3." as NSString).substring(with: $0) }
+        assertEqual(words, ["on", "for"], "shared words stay put, regardless of case or punctuation")
+        assertEqual(NextSentencePolicy.newWordRanges(from: "a a", to: "a a a").count, 1, "repeats are counted")
     }
 }

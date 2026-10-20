@@ -39,9 +39,7 @@ extension NextSentenceController {
 
         var status = listening ? "Listening" : continuing ? "Continuing your text in \(app)" : "Replying in \(place)"
         let busy = failure == nil && (streamText.isEmpty || !streamDone || rewriting)
-        if shown.text.isEmpty && busy {
-            status = sources.isEmpty && snapshot?.screenText.isEmpty == false ? "Writing it like you" : "Reading the window and your history"
-        }
+        if shown.text.isEmpty && busy { status = waitingStatus() }
         if let failure { status = failure }
 
         var hint: String
@@ -72,6 +70,17 @@ extension NextSentenceController {
             insertHelp: app.isEmpty ? "Insert. Hold to send." : "Insert into \(app). Hold to send.",
             showsButtons: failure == nil && !shown.text.isEmpty,
             listening: listening, heard: heard)
+    }
+
+    /// What the card is doing before its first words: reading, then what it found, then writing.
+    func waitingStatus() -> String {
+        guard let found = contextFoundAt else { return "Reading the window" }
+        guard Date().timeIntervalSince(found) < 1.4, !sources.isEmpty else { return "Writing it like you" }
+        if let person = people.first {
+            let about = sources.filter { $0.about == person }.count
+            if about > 0 { return "Found \(about) \(about == 1 ? "note" : "notes") about \(person)" }
+        }
+        return "Found \(sources.count) related \(sources.count == 1 ? "note" : "notes")"
     }
 
     private func color(forSource source: String) -> NSColor {

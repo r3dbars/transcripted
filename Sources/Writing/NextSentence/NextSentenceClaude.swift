@@ -22,13 +22,12 @@ final class NextSentenceClaude: @unchecked Sendable {
 
     /// Each kind keeps its own warm process, because each is started with its own output format.
     enum Kind: CaseIterable, Sendable {
-        case stream, guesses, full, alternatives, swaps
+        case stream, variations, alternatives, swaps
 
         var schema: [String: Any]? {
             switch self {
             case .stream: return nil
-            case .guesses: return NextSentencePrompt.guessesSchema
-            case .full: return NextSentencePrompt.fullSchema
+            case .variations: return NextSentencePrompt.variationsSchema
             case .alternatives: return NextSentencePrompt.alternativesSchema
             case .swaps: return NextSentencePrompt.swapsSchema
             }

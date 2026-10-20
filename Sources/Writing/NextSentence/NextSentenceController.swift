@@ -32,6 +32,8 @@ final class NextSentenceController {
     var sources: [NextSentencePrompt.Source] = []
     var voice: [String] = []
     var people: [String] = []
+    /// When the context search finished, so the card can say what it found for a moment.
+    var contextFoundAt: Date?
     var generation = 0
     var streamText = ""
     var streamDone = false
@@ -150,6 +152,7 @@ final class NextSentenceController {
         resetDraft()
         sources = []
         people = []
+        contextFoundAt = nil
         voice = []
         swaps = [:]
         swapsRequested = []
@@ -175,6 +178,13 @@ final class NextSentenceController {
             guard gen == self.generation else { return }
             self.people = names
             self.sources = NextSentencePrompt.mergeSources(meaning: hits.map(\.chunk), people: aboutPeople, keywords: found.sources)
+            self.contextFoundAt = Date()
+            self.render()
+            Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.45))
+                guard gen == self.generation else { return }
+                self.render()
+            }
             self.voice = found.voice.isEmpty
                 ? hits.filter { $0.chunk.kind != "meeting" }.prefix(3).map { String($0.chunk.text.prefix(240)) }
                 : found.voice
@@ -189,8 +199,8 @@ final class NextSentenceController {
             hasScreenshot: snap.screenshotJPEG != nil, sources: sources, voiceExamples: voice, steer: steer, people: people)
     }
 
-    /// Three requests at once: the likeliest reply streamed word by word, three different replies in the
-    /// current tone (~4s, so Tab works early), and all three in every tone and length (~13s).
+    /// The one reply, streamed word by word. The moment it's done, the same reply is rewritten in every
+    /// tone and length in the background, so the pad, arrows and end handle are instant after that.
     func write(steer: String) {
         guard let request = request(steer: steer) else { return }
         let gen = generation
@@ -211,35 +221,27 @@ final class NextSentenceController {
                 case .success(let text):
                     self.streamText = text
                     self.streamDone = true
+                    self.writeVariations(of: text, tone: currentTone, length: NextSentencePrompt.mediumLength)
                 case .failure(let error):
-                    if self.guesses.isEmpty { self.failure = error.localizedDescription }
+                    self.failure = error.localizedDescription
                 }
                 self.render()
             } }
         })
-        claude.structured(.guesses, prompt: NextSentencePrompt.guessesPrompt(request, tone: currentTone), image: image) { result in
-            DispatchQueue.main.async { MainActor.assumeIsolated {
-                guard gen == self.generation, !self.haveAllVersions,
-                      case .success(let object) = result,
-                      let quick = NextSentencePrompt.parseGuesses(object, tone: currentTone) else { return }
-                self.guesses = quick
-                self.render()
-            } }
-        }
-        writeAllVersions(request, image: image)
     }
 
-    /// Every reply in every tone and length. Also re-run after a spoken change, so the other tones
-    /// and lengths carry it too.
-    func writeAllVersions(_ request: NextSentencePrompt.Request, image: Data?) {
+    /// The reply on the card in all 3 tones and 5 lengths. Also re-run after a fresh take or a spoken
+    /// change, so picking another tone or length keeps the new wording.
+    func writeVariations(of base: String, tone baseTone: NextSentencePrompt.Tone, length baseLength: Int) {
+        guard let request = request() else { return }
         let gen = generation
-        claude.structured(.full, prompt: NextSentencePrompt.fullPrompt(request), image: image) { result in
+        let prompt = NextSentencePrompt.variationsPrompt(request, base: base, tone: baseTone, length: baseLength)
+        claude.structured(.variations, prompt: prompt, image: snapshot?.screenshotJPEG) { result in
             DispatchQueue.main.async { MainActor.assumeIsolated {
                 guard gen == self.generation, case .success(let object) = result,
-                      let full = NextSentencePrompt.parseFull(object) else { return }
-                self.guesses = full
+                      let variations = NextSentencePrompt.parseVariations(object) else { return }
+                self.guesses = [variations]
                 self.haveAllVersions = true
-                self.failure = nil
                 self.render()
             } }
         }
@@ -335,7 +337,7 @@ final class NextSentenceController {
     private func returnTick() {
         guard let start = returnDownAt else { return }
         let progress = NextSentencePolicy.holdProgress(heldFor: Date().timeIntervalSince(start), needed: NextSentencePolicy.holdToSend)
-        card.setRing(progress, color: NextSentenceCardStyle.send)
+        card.setCharge(progress)
         card.setSendArmed(progress >= 1)
     }
 
@@ -343,7 +345,7 @@ final class NextSentenceController {
         returnTimer?.invalidate()
         returnTimer = nil
         returnDownAt = nil
-        card.setRing(0, color: NextSentenceCardStyle.send)
+        card.setCharge(0)
         card.setSendArmed(false)
     }
 
@@ -356,7 +358,7 @@ final class NextSentenceController {
         generation += 1 // ignore anything still on its way
         keyTap.stop()
         NextSentenceSounds.shared.play(send ? .send : .insert)
-        card.hide(leaving: true, sending: send)
+        card.hide(exit: send ? .send : .insert)
         let target = DictationPasteTarget.capture(sourceApp: app)
         app.activate(options: [])
         switch paster.paste(text, target: target) {
@@ -378,7 +380,7 @@ final class NextSentenceController {
         if listening { cancelListening() }
         resetDraft()
         keyTap.stop()
-        card.hide(leaving: true)
+        card.hide(exit: .dismiss)
     }
 
     /// A short note in the card's place, then gone.
