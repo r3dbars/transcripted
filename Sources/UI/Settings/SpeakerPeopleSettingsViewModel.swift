@@ -219,18 +219,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     var filteredProfiles: [SpeakerProfile] {
         let duplicateIds = duplicateProfileIDs
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(profiles, duplicateIds: duplicateIds)
-        }
-
-        let query = trimmed.lowercased()
-        let matches = profiles.filter { profile in
-            if let name = profile.displayName?.lowercased(), name.contains(query) {
-                return true
-            }
-            return profile.id.uuidString.lowercased().contains(query)
-        }
+        let matches = SpeakerNameSelectionPolicy.matchingProfiles(
+            profiles,
+            query: searchText,
+            id: { $0.id },
+            displayName: { $0.displayName }
+        )
         return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(matches, duplicateIds: duplicateIds)
     }
 

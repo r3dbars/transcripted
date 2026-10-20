@@ -78,6 +78,68 @@ func testSpeakerNameSelectionPolicy() {
         assertTrue(SpeakerNameSelectionPolicy.isOwnerLabel("  you  "), "owner label should ignore case and surrounding whitespace")
         assertFalse(SpeakerNameSelectionPolicy.isOwnerLabel("Young"), "nearby names should not collapse to the owner speaker")
     }
+
+    runSuite("Speakers directory search finds the same people the island ranks for An") {
+        struct Person { let id: UUID; let name: String? }
+        let andrii = Person(id: UUID(), name: "Andrii")
+        let anna = Person(id: UUID(), name: "Anna")
+        let bob = Person(id: UUID(), name: "Bob")
+        let people = [bob, andrii, anna]
+
+        let directory = SpeakerNameSelectionPolicy.matchingProfiles(
+            people, query: "An", id: { $0.id }, displayName: { $0.name }
+        ).compactMap(\.name)
+        let ranked = SpeakerNameSelectionPolicy.sortedLabels(
+            matching: "An",
+            labels: people.compactMap(\.name),
+            optionsByLabel: Dictionary(
+                uniqueKeysWithValues: people.compactMap { person in
+                    person.name.map { ($0, $0) }
+                }
+            ),
+            displayName: { $0 },
+            callCount: { _ in 0 }
+        )
+
+        assertEqual(Set(directory), ["Andrii", "Anna"], "An is enough to find Andrii and Anna in the Speakers list")
+        assertEqual(Set(ranked), ["Andrii", "Anna"], "the island ranks the same two people for An")
+        assertEqual(Set(directory), Set(ranked), "directory search and the island share one matcher")
+        assertFalse(directory.contains("Bob"), "Bob is not an An match")
+    }
+
+    runSuite("Speakers directory search uses the shared name matcher, not a case-only contains") {
+        struct Person { let id: UUID; let name: String? }
+        let jose = Person(id: UUID(), name: "José García")
+        let anneMarie = Person(id: UUID(), name: "Anne-Marie")
+        let unnamed = Person(id: UUID(), name: nil)
+        let people = [jose, anneMarie, unnamed]
+
+        let byPrefix = SpeakerNameSelectionPolicy.matchingProfiles(
+            people, query: "jose", id: { $0.id }, displayName: { $0.name }
+        )
+        assertEqual(byPrefix.map(\.id), [jose.id], "accents fold the same way the island folds them")
+
+        let byWord = SpeakerNameSelectionPolicy.matchingProfiles(
+            people, query: "Marie", id: { $0.id }, displayName: { $0.name }
+        )
+        assertEqual(byWord.map(\.id), [anneMarie.id], "a hyphenated last half is still a word start")
+
+        let byID = SpeakerNameSelectionPolicy.matchingProfiles(
+            people, query: String(unnamed.id.uuidString.prefix(8)), id: { $0.id }, displayName: { $0.name }
+        )
+        assertEqual(byID.map(\.id), [unnamed.id], "a UUID fragment still finds an unnamed voice")
+
+        assertEqual(
+            SpeakerNameSelectionPolicy.matchingProfiles(
+                people, query: "   ", id: { $0.id }, displayName: { $0.name }
+            ).map(\.id),
+            people.map(\.id),
+            "spaces alone leave the directory unfiltered"
+        )
+        assertFalse(SpeakerNameSelectionPolicy.matches("José García", query: ""), "an empty query is not a name hit")
+        assertTrue(SpeakerNameSelectionPolicy.matches("Andrii", query: "An"), "An is a prefix of Andrii")
+        assertTrue(SpeakerNameSelectionPolicy.matches("Anna", query: "An"), "An is a prefix of Anna")
+    }
 }
 
 private func makeSpeakerIdentityOption(name: String, calls: Int) -> SpeakerIdentityOption {

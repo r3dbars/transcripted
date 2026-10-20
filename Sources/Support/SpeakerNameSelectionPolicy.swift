@@ -41,6 +41,40 @@ enum SpeakerNameSelectionPolicy {
         return (labels, lookup)
     }
 
+    /// Whether `text` is a speaker-name hit for `query` — the same exact,
+    /// prefix, hyphen-aware word-start, and contains ranks `sortedLabels`
+    /// uses. Empty or whitespace-only queries match nothing.
+    static func matches(_ text: String, query: String) -> Bool {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        return matchRank(
+            for: text,
+            query: trimmed,
+            optionsByLabel: [text: text],
+            displayName: { $0 }
+        ) < Int.max
+    }
+
+    /// Directory / people-list filter. Same name matcher as `sortedLabels`
+    /// (and therefore the island and the main-app typing list). An empty
+    /// query keeps everyone. A UUID substring still finds unnamed voices.
+    static func matchingProfiles<Profile>(
+        _ profiles: [Profile],
+        query: String,
+        id: (Profile) -> UUID,
+        displayName: (Profile) -> String?
+    ) -> [Profile] {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return profiles }
+        let needle = normalizedSearchText(trimmed)
+        return profiles.filter { profile in
+            if let name = displayName(profile), matches(name, query: trimmed) {
+                return true
+            }
+            return normalizedSearchText(id(profile).uuidString).contains(needle)
+        }
+    }
+
     static func sortedLabels<Option>(
         matching query: String,
         labels: [String],
