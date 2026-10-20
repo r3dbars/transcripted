@@ -97,6 +97,8 @@ enum NextSentencePolicy {
 
     /// Hold Return or Insert this long and it sends, not just inserts.
     static let holdToSend: TimeInterval = 0.7
+    /// After typing, how long the first Esc waits for a second one to close the card.
+    static let escapeConfirmWindow: TimeInterval = 1.5
     /// Hold the remix button this long for a fresh take.
     static let holdToRemix: TimeInterval = 0.65
 

@@ -67,6 +67,9 @@ final class NextSentenceController {
     var swapWork: DispatchWorkItem?
     /// The end handle: the message before any words were cut, how many are cut, and where a drag began.
     var trimSource: String?
+    /// They typed into this version of the message, so a single Esc only warns before closing.
+    var typedEdits = false
+    var escapeArmedAt: Date?
     var rewriteGeneration = 0
     var rewriting = false
     var listening = false
@@ -131,7 +134,7 @@ final class NextSentenceController {
 
     private func wireCard() {
         card.onInsert = { [weak self] send in self?.insert(send: send) }
-        card.onClose = { [weak self] in self?.close() }
+        card.onClose = { [weak self] in self?.escapePressed() }
         card.onBeginEditing = { [weak self] in self?.beginEditing(typing: nil) }
         card.onEndEditing = { [weak self] in self?.endEditing() }
         card.onTextEdited = { [weak self] in self?.textEdited() }
@@ -315,6 +318,7 @@ final class NextSentenceController {
         guessIndex = 0
         custom = nil
         trimSource = nil
+        typedEdits = false
         rewriting = false
         listening = false
         heard = nil
@@ -343,6 +347,7 @@ final class NextSentenceController {
 
     private func changedVersion() {
         if card.isEditing { endEditing() }
+        typedEdits = false
         custom = nil
         trimSource = nil
         rewriteGeneration += 1
@@ -369,7 +374,7 @@ final class NextSentenceController {
             if keyCode == NextSentencePolicy.KeyCode.delete { card.deleteBackward() }
         case .returnDown: returnDown()
         case .returnUp: returnUp()
-        case .close: listening && !awaitingIntent ? cancelListening() : close()
+        case .close: listening && !awaitingIntent ? cancelListening() : escapePressed()
         case .ignore, .passThrough: break
         }
     }
@@ -432,7 +437,28 @@ final class NextSentenceController {
         }
     }
 
+    /// Esc closes the card. If they've typed into it, the first Esc only says so, and a second within
+    /// 1.5 seconds closes: a stray press can't lose their words. Without typing, one Esc closes.
+    func escapePressed() {
+        let armed = escapeArmedAt.map { Date().timeIntervalSince($0) < NextSentencePolicy.escapeConfirmWindow } ?? false
+        guard typedEdits, !armed else { return close() }
+        let armedAt = Date()
+        escapeArmedAt = armedAt
+        note = Self.escapeHint
+        NextSentenceCardStyle.tick()
+        render()
+        DispatchQueue.main.asyncAfter(deadline: .now() + NextSentencePolicy.escapeConfirmWindow) { [weak self] in
+            guard let self, self.escapeArmedAt == armedAt else { return }
+            self.escapeArmedAt = nil
+            if self.note == Self.escapeHint { self.note = nil }
+            self.render()
+        }
+    }
+
+    static let escapeHint = "Press Esc again to close"
+
     func close() {
+        escapeArmedAt = nil
         if card.isVisible, !card.content.compact { NextSentenceSounds.shared.play(.close) }
         generation += 1
         if listening { cancelListening() }

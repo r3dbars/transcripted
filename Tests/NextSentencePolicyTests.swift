@@ -244,6 +244,11 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         assertTrue(NextSentencePolicy.matchedWords(from: "", to: "Hello there").isEmpty, "nothing to glide from an empty card")
     }
 
+    runSuite("After typing, Esc waits a moment for a second press") {
+        assertTrue(NextSentencePolicy.escapeConfirmWindow >= 1 && NextSentencePolicy.escapeConfirmWindow <= 2,
+                   "long enough to press Esc twice on purpose, short enough that a later Esc warns again")
+    }
+
     runSuite("Stretching the card keeps whole sentences") {
         let text = "Thanks for the call. Can you send it by Thursday? That way we ship next week!  "
         let ends = NextSentencePolicy.sentenceEnds(in: text)

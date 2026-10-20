@@ -25,6 +25,7 @@ extension NextSentenceController {
     }
 
     func textEdited() {
+        typedEdits = true
         custom = card.currentText
         trimSource = nil
         card.closeOptions()
@@ -137,6 +138,7 @@ extension NextSentenceController {
         let rewriteGen = rewriteGeneration
         rewriting = true
         trimSource = nil
+        typedEdits = false
         card.closeOptions()
         note = instruction.isEmpty ? "Fresh take…" : nil
         render()
