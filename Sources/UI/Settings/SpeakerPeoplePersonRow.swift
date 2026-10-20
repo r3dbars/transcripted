@@ -101,7 +101,7 @@ struct SpeakerPersonRow: View {
                         }
                     }
 
-                    if let quote = model.clipSampleText(for: profile.id) {
+                    if let quote = displayedQuote {
                         Text("“\(quote)”")
                             .font(.system(size: 12.5))
                             .foregroundStyle(LibraryTokens.ink2)
@@ -491,6 +491,15 @@ struct SpeakerPersonRow: View {
 
     private var isPlaying: Bool {
         model.clipURL(for: profile.id).map(playback.isPlaying) ?? false
+    }
+
+    /// While this row's clip plays, show the quote that was checked against
+    /// the same bytes that started, not a later live reread.
+    private var displayedQuote: String? {
+        if let url = model.clipURL(for: profile.id), playback.isPlaying(url) {
+            return playback.activeValidatedQuote
+        }
+        return model.clipSampleText(for: profile.id)
     }
 
     // MARK: - Voice print

@@ -381,37 +381,274 @@ final class SpeakerClipSidecarTests: XCTestCase {
         )
     }
 
-    func testMeetingDeletionLeavesThePersonsVoiceSample() throws {
+    func testPersistDropsASidecarThatDoesNotMatchItsSourceWav() throws {
+        let directory = temporaryClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceId = UUID()
+        let targetId = UUID()
+        let sourceTemp = try writeTempClip(named: "source.wav", in: directory, bytes: Data([1, 2, 3, 4]))
+        XCTAssertTrue(
+            SpeakerClipExtractor.persistClip(
+                from: sourceTemp,
+                speakerId: sourceId,
+                clipsDirectory: directory,
+                sidecar: SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 1, end: 3, text: "Words from this wav.")],
+                    sampleText: "Words from this wav."
+                )
+            )
+        )
+        let sourceClip = try XCTUnwrap(
+            SpeakerClipExtractor.persistentClipURL(for: sourceId, clipsDirectory: directory)
+        )
+
+        let otherWav = try writeTempClip(named: "other.wav", in: directory, bytes: Data([9, 9, 9, 9]))
+        var hijacked = SpeakerClipSidecar(
+            channel: "system",
+            diarizerSpeakerId: "1",
+            segments: [.init(start: 5, end: 8, text: "Quote from a wav that never landed.")],
+            sampleText: "Quote from a wav that never landed."
+        )
+        hijacked = try XCTUnwrap(hijacked.stamped(withWavAt: otherWav))
+        try hijacked.write(nextTo: sourceClip)
+        XCTAssertNil(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: sourceClip),
+            "the crash-window pair is already mismatched on disk"
+        )
+
+        XCTAssertTrue(
+            SpeakerClipExtractor.persistClip(
+                from: sourceClip,
+                speakerId: targetId,
+                clipsDirectory: directory
+            ),
+            "the wav itself still copies"
+        )
+        let promoted = try XCTUnwrap(
+            SpeakerClipExtractor.persistentClipURL(for: targetId, clipsDirectory: directory)
+        )
+        XCTAssertEqual(try Data(contentsOf: promoted), Data([1, 2, 3, 4]))
+        XCTAssertNil(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: promoted),
+            "a sidecar that did not match the source wav must not be restamped onto the copy"
+        )
+    }
+
+    func testRecordedFramesCropTheQuoteWhenTheWriterReadsShort() {
+        let planned = SpeakerClipSamplePolicy.WrittenSegment(
+            start: 1.0,
+            end: 4.0,
+            text: "Full turn that was not fully written.",
+            wasCropped: false
+        )
+        let recorded = try? XCTUnwrap(
+            SpeakerClipSamplePolicy.recordedSegment(
+                from: planned,
+                framesWritten: 8_000,
+                sampleRate: 16_000
+            )
+        )
+        XCTAssertEqual(recorded?.start, 1.0)
+        XCTAssertEqual(recorded?.end, 1.5)
+        XCTAssertEqual(recorded?.wasCropped, true)
+        XCTAssertEqual(
+            SpeakerClipSamplePolicy.sampleText(from: recorded.map { [$0] } ?? []),
+            "",
+            "a short read must not keep the planned turn's full text"
+        )
+
+        let complete = SpeakerClipSamplePolicy.recordedSegment(
+            from: planned,
+            framesWritten: 48_000,
+            sampleRate: 16_000
+        )
+        XCTAssertEqual(complete?.end, 4.0)
+        XCTAssertEqual(complete?.wasCropped, false)
+        XCTAssertEqual(
+            SpeakerClipSamplePolicy.sampleText(from: complete.map { [$0] } ?? []),
+            planned.text
+        )
+    }
+
+    func testDeleteUsesTheSameProfileLockAsSave() throws {
         let directory = temporaryClipsDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let speakerId = UUID()
-        let temp = try writeTempClip(named: "person.wav", in: directory, bytes: Data([3, 1, 4]))
-        let meetingURL = directory.appendingPathComponent("Deleted_Call.md")
-        try "deleted meeting".write(to: meetingURL, atomically: true, encoding: .utf8)
-        SpeakerClipExtractor.persistClip(
-            from: temp,
-            speakerId: speakerId,
-            clipsDirectory: directory,
-            sidecar: SpeakerClipSidecar(
-                transcriptId: UUID(),
-                channel: "system",
-                diarizerSpeakerId: "1",
-                segments: [.init(start: 2, end: 6, text: "This voice sample stays.")],
-                sampleText: "This voice sample stays."
+        let temp = try writeTempClip(named: "locked.wav", in: directory, bytes: Data([2, 2, 2]))
+        XCTAssertTrue(
+            SpeakerClipExtractor.persistClip(
+                from: temp,
+                speakerId: speakerId,
+                clipsDirectory: directory,
+                sidecar: SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 1, end: 2, text: "Hold this.")],
+                    sampleText: "Hold this."
+                )
             )
         )
         let persisted = try XCTUnwrap(
             SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: directory)
         )
 
+        let deleteReachedLock = DispatchSemaphore(value: 0)
+        let releaseLock = DispatchSemaphore(value: 0)
+        let deleteFinished = DispatchSemaphore(value: 0)
+        var skipFirstAcquire = true
+        SpeakerClipExtractor.persistLockWillAcquire = { id in
+            guard id == speakerId else { return }
+            if skipFirstAcquire { return }
+            deleteReachedLock.signal()
+        }
+        defer { SpeakerClipExtractor.persistLockWillAcquire = nil }
+
+        SpeakerClipExtractor.withPersistLock(for: speakerId) {
+            skipFirstAcquire = false
+            DispatchQueue.global(qos: .userInitiated).async {
+                SpeakerClipExtractor.deletePersistedClip(for: speakerId, clipsDirectory: directory)
+                deleteFinished.signal()
+            }
+            XCTAssertEqual(
+                deleteReachedLock.wait(timeout: .now() + 5),
+                .success,
+                "delete must take the same per-profile lock as save"
+            )
+            XCTAssertTrue(
+                FileManager.default.fileExists(atPath: persisted.path),
+                "delete must not remove the clip while save holds the profile lock"
+            )
+            releaseLock.signal()
+        }
+        _ = releaseLock.wait(timeout: .now() + 5)
+        XCTAssertEqual(deleteFinished.wait(timeout: .now() + 5), .success)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: persisted.path))
+    }
+
+    func testFailedMergeTransferLeavesTheSourceClip() throws {
+        let directory = temporaryClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceId = UUID()
+        let targetId = UUID()
+        let sourceTemp = try writeTempClip(named: "keep-source.wav", in: directory, bytes: Data([4, 5, 6]))
+        XCTAssertTrue(
+            SpeakerClipExtractor.persistClip(
+                from: sourceTemp,
+                speakerId: sourceId,
+                clipsDirectory: directory,
+                sidecar: SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 1, end: 2, text: "Only copy.")],
+                    sampleText: "Only copy."
+                )
+            )
+        )
+        let sourceClip = try XCTUnwrap(
+            SpeakerClipExtractor.persistentClipURL(for: sourceId, clipsDirectory: directory)
+        )
+
+        let notADirectory = directory.appendingPathComponent("not-a-directory")
+        try Data([1]).write(to: notADirectory)
+        XCTAssertFalse(
+            SpeakerClipExtractor.transferOnMerge(
+                from: sourceId,
+                to: targetId,
+                clipsDirectory: notADirectory
+            ),
+            "a silent persist failure must not report success"
+        )
+        XCTAssertTrue(FileManager.default.fileExists(atPath: sourceClip.path))
+        XCTAssertEqual(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: sourceClip)?.sampleText,
+            "Only copy.",
+            "merge must not delete the source clip after a failed copy"
+        )
+        XCTAssertNil(
+            SpeakerClipExtractor.persistentClipURL(for: targetId, clipsDirectory: directory)
+        )
+    }
+
+    func testWavIdentityCacheFollowsSizeAndMtime() throws {
+        let directory = temporaryClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = try writeTempClip(named: "cached.wav", in: directory, bytes: Data([1, 1, 1, 1]))
+
+        let first = try XCTUnwrap(SpeakerClipSidecar.wavIdentity(of: url))
+        let again = try XCTUnwrap(SpeakerClipSidecar.wavIdentity(of: url))
+        XCTAssertEqual(first.sha256, again.sha256)
+
+        try Data([2, 2, 2, 2, 2]).write(to: url)
+        try FileManager.default.setAttributes(
+            [.modificationDate: Date(timeIntervalSince1970: 1_800_000_000)],
+            ofItemAtPath: url.path
+        )
+        let updated = try XCTUnwrap(SpeakerClipSidecar.wavIdentity(of: url))
+        XCTAssertNotEqual(updated.sha256, first.sha256)
+        XCTAssertEqual(updated.byteCount, 5)
+    }
+
+    func testMeetingDeletionLeavesThePersonsVoiceSample() throws {
+        let directory = temporaryClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let speakerId = UUID()
+        let transcriptId = UUID()
+        let meetingURL = directory.appendingPathComponent("Pricing_Memo.md")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let meeting = """
+        ---
+        capture_id: "\(transcriptId.uuidString)"
+        transcript_id: "\(transcriptId.uuidString)"
+        capture_type: meeting
+        title: "Pricing memo"
+        ---
+
+        # Pricing memo
+
+        ## Transcript
+
+        **00:02** [System/Speaker 1]
+        This voice sample stays.
+        """
+        try meeting.write(to: meetingURL, atomically: true, encoding: .utf8)
+        let temp = try writeTempClip(named: "person.wav", in: directory, bytes: Data([3, 1, 4]))
+        XCTAssertTrue(
+            SpeakerClipExtractor.persistClip(
+                from: temp,
+                speakerId: speakerId,
+                clipsDirectory: directory,
+                sidecar: SpeakerClipSidecar(
+                    transcriptId: transcriptId,
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 2, end: 6, text: "This voice sample stays.")],
+                    sampleText: "This voice sample stays."
+                )
+            )
+        )
+        let persisted = try XCTUnwrap(
+            SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: directory)
+        )
+        XCTAssertEqual(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.transcriptId,
+            transcriptId,
+            "the sidecar must name the meeting that produced this clip"
+        )
+
         try FileManager.default.removeItem(at: meetingURL)
 
+        XCTAssertFalse(FileManager.default.fileExists(atPath: meetingURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: persisted.path))
         XCTAssertEqual(
             SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.sampleText,
             "This voice sample stays.",
-            "the clip is the person's voice sample, not meeting-owned media, so deleting a meeting keeps it"
+            "the clip is the person's voice sample, not meeting-owned media, so deleting that meeting keeps it"
         )
     }
 }

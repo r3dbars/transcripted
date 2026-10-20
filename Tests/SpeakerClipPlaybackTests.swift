@@ -1,10 +1,15 @@
 import AVFoundation
+import CryptoKit
 import Foundation
 
 @MainActor
 func testSpeakerClipPlayback() async {
     let url = FileManager.default.temporaryDirectory.appendingPathComponent("SpeakerPlayback-\(UUID().uuidString).wav")
-    defer { try? FileManager.default.removeItem(at: url) }
+    let sidecarURL = url.deletingPathExtension().appendingPathExtension("json")
+    defer {
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: sidecarURL)
+    }
     do {
         try writeSilentSpeakerPlaybackFixture(to: url)
     } catch {
@@ -79,6 +84,50 @@ func testSpeakerClipPlayback() async {
         assertEqual(player.currentItem, nil)
     }
 
+    await runSuite("SpeakerClipPlayback quotes the wav bytes it loaded, not a later replace") {
+        let playback = SpeakerClipPlayback()
+        defer { playback.stop() }
+        let quote = "Words from these bytes."
+        do {
+            try writeMatchingSpeakerClipSidecar(nextTo: url, sampleText: quote)
+        } catch {
+            assertTrue(false, "could not write matching sidecar: \(error)")
+            return
+        }
+        let loaded = (try? Data(contentsOf: url)) ?? Data()
+        assertTrue(!loaded.isEmpty, "the playback fixture must have wav bytes")
+        assertEqual(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: loaded),
+            quote
+        )
+
+        playback.play(url)
+        do {
+            try Data(repeating: 9, count: loaded.count + 8).write(to: url)
+            try writeMatchingSpeakerClipSidecar(nextTo: url, sampleText: "Quote for a later wav.")
+        } catch {
+            assertTrue(false, "could not replace the clip after play: \(error)")
+            return
+        }
+        assertEqual(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: loaded),
+            quote,
+            "the already-read bytes still match the original sidecar"
+        )
+        assertEqual(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: (try? Data(contentsOf: url)) ?? Data()),
+            "Quote for a later wav.",
+            "a live reread after replace would see the new pair"
+        )
+        if playback.isPlaying(url) {
+            assertEqual(
+                playback.activeValidatedQuote,
+                quote,
+                "play must keep the quote from the bytes it loaded"
+            )
+        }
+    }
+
     await runSuite("SpeakerClipPlayback clears failed retained-audio startup") {
         let brokenURL = url.deletingPathExtension().appendingPathExtension("m4a")
         try? Data([0, 1, 2]).write(to: brokenURL)
@@ -104,4 +153,20 @@ private func writeSilentSpeakerPlaybackFixture(to url: URL) throws {
     buffer.floatChannelData![0].initialize(repeating: 0, count: Int(buffer.frameLength))
     let file = try AVAudioFile(forWriting: url, settings: format.settings)
     try file.write(from: buffer)
+}
+
+private func writeMatchingSpeakerClipSidecar(nextTo clipURL: URL, sampleText: String) throws {
+    let wav = try Data(contentsOf: clipURL)
+    let digest = SHA256.hash(data: wav).map { String(format: "%02x", $0) }.joined()
+    let json: [String: Any] = [
+        "channel": "system",
+        "diarizerSpeakerId": "1",
+        "segments": [["start": 0.2, "end": 0.6, "text": sampleText]],
+        "sampleText": sampleText,
+        "formatVersion": 1,
+        "wavByteCount": wav.count,
+        "wavSHA256": digest
+    ]
+    let data = try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
+    try data.write(to: clipURL.deletingPathExtension().appendingPathExtension("json"))
 }

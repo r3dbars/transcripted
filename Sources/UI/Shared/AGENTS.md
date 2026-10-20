@@ -35,7 +35,7 @@ Changing saved meetings:
 
 Playback:
 
-- `MeetingAudioPlayback.swift` is the `NSSound`-backed play/pause/resume/seek-from-timestamp controller; `MeetingAudioArchiveResolver.swift` finds the retained audio that belongs to a transcript; `SpeakerClipPlayback.swift` plays persisted speaker sample clips.
+- `MeetingAudioPlayback.swift` is the `NSSound`-backed play/pause/resume/seek-from-timestamp controller; `MeetingAudioArchiveResolver.swift` finds the retained audio that belongs to a transcript; `SpeakerClipPlayback.swift` plays persisted speaker sample clips. A profile clip is read once: the sidecar quote is checked against those bytes, then `NSSound` plays the same `Data`, so a replace mid-play cannot pair a new quote with the audio that already started.
 
 Presentation, tokens and support:
 

@@ -69,13 +69,27 @@ public struct SpeakerClipSidecar: Codable, Equatable, Sendable {
     }
 
     public func matchesWav(at clipURL: URL) -> Bool {
-        guard formatVersion == Self.currentFormatVersion,
-              wavByteCount > 0,
-              !wavSHA256.isEmpty,
-              let identity = Self.wavIdentity(of: clipURL) else {
-            return false
+        guard let identity = Self.wavIdentity(of: clipURL) else { return false }
+        return matches(byteCount: identity.byteCount, sha256: identity.sha256)
+    }
+
+    public func matches(wavData: Data) -> Bool {
+        guard !wavData.isEmpty else { return false }
+        return matches(byteCount: wavData.count, sha256: Self.sha256Hex(wavData))
+    }
+
+    /// Accept a sidecar only when it is unbound (this write's own quote) or
+    /// already describes `sourceURL`. A crash-window json stamped for a wav
+    /// that never landed must not be restamped onto a different file.
+    public static func acceptedIncoming(
+        _ sidecar: SpeakerClipSidecar?,
+        matchingSourceAt sourceURL: URL
+    ) -> SpeakerClipSidecar? {
+        guard let sidecar, sidecar.formatVersion == currentFormatVersion else { return nil }
+        if sidecar.wavByteCount == 0, sidecar.wavSHA256.isEmpty {
+            return sidecar
         }
-        return identity.byteCount == wavByteCount && identity.sha256 == wavSHA256
+        return sidecar.matchesWav(at: sourceURL) ? sidecar : nil
     }
 
     public func stamped(withWavAt clipURL: URL) -> SpeakerClipSidecar? {
@@ -88,9 +102,33 @@ public struct SpeakerClipSidecar: Codable, Equatable, Sendable {
     }
 
     public static func wavIdentity(of clipURL: URL) -> (byteCount: Int, sha256: String)? {
+        let path = clipURL.standardizedFileURL.path
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        let size = (attrs?[.size] as? NSNumber)?.intValue
+        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970
+
+        if let size, let mtime, let cached = WavIdentityCache.entry(path: path, size: size, mtime: mtime) {
+            return (cached.byteCount, cached.sha256)
+        }
+
         guard let data = try? Data(contentsOf: clipURL), !data.isEmpty else { return nil }
-        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let digest = sha256Hex(data)
+        if let size, let mtime {
+            WavIdentityCache.store(path: path, size: size, mtime: mtime, byteCount: data.count, sha256: digest)
+        }
         return (data.count, digest)
+    }
+
+    private func matches(byteCount: Int, sha256: String) -> Bool {
+        formatVersion == Self.currentFormatVersion
+            && wavByteCount > 0
+            && !wavSHA256.isEmpty
+            && wavByteCount == byteCount
+            && wavSHA256 == sha256
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     public func write(nextTo clipURL: URL) throws {
@@ -178,6 +216,34 @@ public enum SpeakerClipSamplePolicy {
             .joined(separator: " ")
     }
 
+    /// Crop the planned segment to the frames the writer actually kept.
+    /// About 1.5 frames of slack so rounding a complete turn does not empty
+    /// the quote.
+    public static func recordedSegment(
+        from planned: WrittenSegment,
+        framesWritten: Int,
+        sampleRate: Double
+    ) -> WrittenSegment? {
+        guard framesWritten > 0,
+              sampleRate.isFinite,
+              sampleRate > 0,
+              planned.start.isFinite,
+              planned.end.isFinite,
+              planned.end > planned.start else {
+            return nil
+        }
+        let recordedDuration = Double(framesWritten) / sampleRate
+        let plannedDuration = planned.end - planned.start
+        let epsilon = 1.5 / sampleRate
+        let wasCropped = planned.wasCropped || recordedDuration + epsilon < plannedDuration
+        return WrittenSegment(
+            start: planned.start,
+            end: planned.start + min(recordedDuration, plannedDuration),
+            text: planned.text,
+            wasCropped: wasCropped
+        )
+    }
+
     public static func sidecar(
         channel: String,
         diarizerSpeakerId: String,
@@ -225,5 +291,32 @@ public enum SpeakerClipSamplePolicy {
             totalDuration += duration
         }
         return selected.sorted { $0.start < $1.start }
+    }
+}
+
+private enum WavIdentityCache {
+    struct Entry {
+        let size: Int
+        let mtime: TimeInterval
+        let byteCount: Int
+        let sha256: String
+    }
+
+    private static let lock = NSLock()
+    private static var entries: [String: Entry] = [:]
+
+    static func entry(path: String, size: Int, mtime: TimeInterval) -> Entry? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let cached = entries[path], cached.size == size, cached.mtime == mtime else {
+            return nil
+        }
+        return cached
+    }
+
+    static func store(path: String, size: Int, mtime: TimeInterval, byteCount: Int, sha256: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        entries[path] = Entry(size: size, mtime: mtime, byteCount: byteCount, sha256: sha256)
     }
 }

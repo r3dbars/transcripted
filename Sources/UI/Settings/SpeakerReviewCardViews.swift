@@ -201,7 +201,7 @@ struct SpeakerReviewNamedRow: View {
                 Text(voice.name)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
-                if let quote = model.clipSampleText(for: voice.personID) {
+                if let quote = displayedQuote {
                     Text("“\(quote)”")
                         .font(.system(size: 12.5))
                         .foregroundStyle(LibraryTokens.ink2)
@@ -223,6 +223,13 @@ struct SpeakerReviewNamedRow: View {
         .padding(.vertical, 10)
         .accessibilityElement(children: .combine)
         .onAppear(perform: celebrate)
+    }
+
+    private var displayedQuote: String? {
+        if let url = model.clipURL(for: voice.personID), playback.isPlaying(url) {
+            return playback.activeValidatedQuote
+        }
+        return model.clipSampleText(for: voice.personID)
     }
 
     /// Lights the earned ring with the island's match animation, then shows

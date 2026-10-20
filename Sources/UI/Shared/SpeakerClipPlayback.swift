@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CryptoKit
 import Foundation
 
 /// Plays one persisted speaker sample clip at a time.
@@ -23,6 +24,9 @@ final class SpeakerClipPlayback: ObservableObject {
     /// transitions rather than consulting `NSSound.isPlaying` at read time,
     /// so observers and the AX layer always agree with what was started.
     @Published private(set) var activeURL: URL?
+    /// Quote validated against the same wav bytes that started playing.
+    /// Nil when the sidecar does not describe those bytes, or nothing is playing.
+    @Published private(set) var activeValidatedQuote: String?
     @Published private(set) var activeRetainedSample: SpeakerRetainedAudioSample?
 
     private final class PlaybackDelegate: NSObject, NSSoundDelegate {
@@ -59,10 +63,14 @@ final class SpeakerClipPlayback: ObservableObject {
         }
 
         stop()
+        guard let wavData = try? Data(contentsOf: url), !wavData.isEmpty else { return }
+        let quote = SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: wavData)
+        guard let sound = NSSound(data: wavData) else { return }
+        sound.delegate = playbackDelegate
         activeURL = url
-        activeSound = NSSound(contentsOf: url, byReference: false)
-        activeSound?.delegate = playbackDelegate
-        if activeSound?.play() == true {
+        activeValidatedQuote = quote
+        activeSound = sound
+        if sound.play() {
             notifyStateDidChange()
         } else {
             stop()
@@ -142,6 +150,7 @@ final class SpeakerClipPlayback: ObservableObject {
         activeSound?.stop()
         activeSound = nil
         activeURL = nil
+        activeValidatedQuote = nil
         retainedAudioStatusObserver?.invalidate()
         retainedAudioStatusObserver = nil
         retainedAudioPlayer.pause()
@@ -157,6 +166,7 @@ final class SpeakerClipPlayback: ObservableObject {
         activeSound?.delegate = nil
         activeSound = nil
         activeURL = nil
+        activeValidatedQuote = nil
         notifyStateDidChange()
     }
 
@@ -165,5 +175,35 @@ final class SpeakerClipPlayback: ObservableObject {
             name: Self.stateDidChangeNotification,
             object: activeURL
         )
+    }
+}
+
+/// Decodes the sidecar JSON by key so this module does not name the Core
+/// sidecar type. The quote is returned only when it describes `wavData`.
+enum SpeakerClipSidecarQuote {
+    struct Payload: Decodable {
+        var sampleText: String
+        var formatVersion: Int
+        var wavByteCount: Int
+        var wavSHA256: String
+    }
+
+    static func validatedText(nextTo clipURL: URL, wavData: Data) -> String? {
+        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.formatVersion == 1,
+              payload.wavByteCount > 0,
+              !payload.wavSHA256.isEmpty,
+              wavData.count == payload.wavByteCount,
+              sha256Hex(wavData) == payload.wavSHA256.lowercased() else {
+            return nil
+        }
+        let text = payload.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    private static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

@@ -148,12 +148,12 @@ final class SpeakerSettingsStore: Sendable {
                 directory: transcriptDirectory,
                 clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
                     onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, targetId in
-                        SpeakerClipLibrary.promoteClipIfNeeded(
+                        guard SpeakerClipLibrary.transferOnMerge(
                             from: sourceId,
                             to: targetId,
                             preferredClipsDirectory: preferredClipsDirectory,
                             legacyClipsDirectory: legacyClipsDirectory
-                        )
+                        ) else { return }
                         SpeakerClipLibrary.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
@@ -218,12 +218,12 @@ final class SpeakerSettingsStore: Sendable {
                 directory: transcriptDirectory,
                 clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
                     onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, targetId in
-                        SpeakerClipLibrary.promoteClipIfNeeded(
+                        guard SpeakerClipLibrary.transferOnMerge(
                             from: sourceId,
                             to: targetId,
                             preferredClipsDirectory: preferredClipsDirectory,
                             legacyClipsDirectory: legacyClipsDirectory
-                        )
+                        ) else { return }
                         SpeakerClipLibrary.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
