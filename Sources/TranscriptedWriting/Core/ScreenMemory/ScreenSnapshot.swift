@@ -113,10 +113,7 @@ public struct NormalizedDisplayRect: Equatable, Sendable {
 
     /// Boundary-inclusive intersection: two rects that only touch along an
     /// edge (sharing a point or a line, zero-area overlap) still count as
-    /// intersecting. `CaptureChangeDetector.mergeBlocks` relies on this —
-    /// erring toward "intersects" for an edge-touching block matches the
-    /// region's own one-tile padding, which exists precisely to avoid
-    /// clipping a block that sits right on the boundary.
+    /// intersecting.
     public func intersects(_ other: NormalizedDisplayRect) -> Bool {
         minX <= other.maxX && maxX >= other.minX && minY <= other.maxY && maxY >= other.minY
     }
@@ -183,13 +180,5 @@ public struct ScreenSnapshot: Equatable, Sendable {
         self.displayID = displayID
         self.blocks = blocks
         self.evidence = evidence ?? .unspecified(at: capturedAt)
-    }
-
-    /// Every window bundle identifier this snapshot's text touched, deduped.
-    /// This is what capture-time exclusion logic (and, later, redaction
-    /// scoping) checks against. Capture reads only the focused window now,
-    /// so this is normally that one app.
-    public var ownerBundleIdentifiers: Set<String> {
-        Set(blocks.compactMap(\.windowOwnerBundleIdentifier))
     }
 }

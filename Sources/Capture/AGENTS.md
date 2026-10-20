@@ -13,7 +13,7 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 
 ## Files
 
-- `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The CGEvent tap is not here.
+- `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The event tap itself (`PhysicalShortcutDetector`, delayed modifier presses) is in `PhysicalShortcutDetector.swift`.
 - `PhysicalShortcutDetector.swift` — the CGEvent tap (`keyDown` / `keyUp` / `flagsChanged` / `NSSystemDefined`). Media-key events always pass through and never fire dictation. NSSystemDefined skips `NSEvent` wrapping unless dictation is F1–F12. F1–F20 matching ignores Fn; Cmd, Ctrl, Opt, and Shift still have to match. Logs `physical_shortcut_tap_disabled` with the reason and whether it was re-enabled. Other diagnostics hop through `onLog` onto the main actor.
 - `PhysicalShortcutTapPolicy.swift` — Foundation-pure tap mask, media-key parse (`NX_KEYTYPE_PLAY` = 16 for F8), NSEvent-wrap gate, F8 press/repeat/release sequence, modifier-mismatch logging (saved dictation key only, never the meeting key), tap-disable and install context. Fast-tested so a macOS Fn/media-key change is diagnosable without reading Sources as text.
 - `ContextCaptureEngine+DictationKeys.swift` — the dictation keys as session commands: Push to Talk press, release and combo-interrupt, and the hands-free toggle. Press/release semantics live in `DictationHotkeyRouter` (`Sources/Speech/DictationTrigger.swift`).

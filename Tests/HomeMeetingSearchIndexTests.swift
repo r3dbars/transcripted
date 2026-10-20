@@ -160,24 +160,6 @@ func testHomeMeetingSearchIndex() async {
         assertEqual(rows["/tmp/row.md"]?.metadata.speakerNames, ["Dana"], "the payload decodes")
     }
 
-    runSuite("HomeMeetingSearchIndex.removeMeeting drops a deleted row") {
-        let scanned = [
-            RecentMeetingIndexEntry(
-                path: "/tmp/keep.md",
-                stamp: RecentMeetingCacheStamp(transcriptModified: 1, transcriptSize: 1),
-                item: searchIndexSampleItem(title: "Retro keep", path: "/tmp/keep.md")
-            ),
-            RecentMeetingIndexEntry(
-                path: "/tmp/gone.md",
-                stamp: RecentMeetingCacheStamp(transcriptModified: 1, transcriptSize: 1),
-                item: searchIndexSampleItem(title: "Retro gone", path: "/tmp/gone.md")
-            )
-        ]
-        var index = HomeMeetingSearchIndex(scanned: scanned)
-        index.removeMeeting(id: "/tmp/gone.md")
-        assertEqual(index.search(query: "retro", limit: 10).items.map(\.title), ["Retro keep"])
-    }
-
     await runSuite("loadSearchIndex finds meetings past the Home slice, by speaker name") {
         await withSearchIndexMeetingsFolder { folder in
             for number in 0..<25 {

@@ -22,11 +22,7 @@ class FloatingOverlayController {
         )
     }
 
-    enum SessionMode {
-        case dictation
-    }
-
-    enum OverlayState {
+    enum OverlayState: String {
         case idle
         case starting     // Microphone start requested — cancellable before recording flips on
         case loading      // Voice model still loading — waiting for readiness
@@ -42,6 +38,9 @@ class FloatingOverlayController {
                 return false
             }
         }
+
+        /// The case name, for diagnostics trails.
+        var diagnosticName: String { rawValue }
     }
 
     /// How a drafting-state message should read: a real problem, or a calm

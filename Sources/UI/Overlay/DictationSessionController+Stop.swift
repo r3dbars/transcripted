@@ -27,7 +27,7 @@ extension DictationSessionController {
                 extra: [
                     "dictation_session_id": currentDictationSessionID.uuidString,
                     "trigger": trigger.rawValue,
-                    "overlay_state": overlayStateName(overlayController.state),
+                    "overlay_state": overlayController.state.diagnosticName,
                     "stt_recording": "\(appState.sttRouter.isRecording)"
                 ]
             )
@@ -68,7 +68,7 @@ extension DictationSessionController {
                 context: dictationContext(
                     extra: [
                         "trigger": trigger.rawValue,
-                        "overlay_state": overlayStateName(overlayController.state),
+                        "overlay_state": overlayController.state.diagnosticName,
                         "stt_recording": "\(appState.sttRouter.isRecording)"
                     ]
                 )
@@ -127,7 +127,7 @@ extension DictationSessionController {
                 context: dictationContext(
                     extra: [
                         "trigger": trigger.rawValue,
-                        "overlay_state": overlayStateName(overlayController.state),
+                        "overlay_state": overlayController.state.diagnosticName,
                         "stt_recording": "\(appState.sttRouter.isRecording)"
                     ]
                 )
@@ -147,7 +147,7 @@ extension DictationSessionController {
                         context: dictationContext(
                             extra: [
                                 "trigger": trigger.rawValue,
-                                "overlay_state": overlayStateName(overlayController.state),
+                                "overlay_state": overlayController.state.diagnosticName,
                                 "failure_kind": failureKind
                             ]
                         )
@@ -429,7 +429,6 @@ extension DictationSessionController {
             let saveContext = self.dictationSaveContext(text: text)
             stopTiming.finalizationStartedAt = CFAbsoluteTimeGetCurrent()
             let finalization = await DictationStopFinalizer.finalize(
-                order: DictationStopFinalizationPolicy.order,
                 startSaving: {
                     return self.startPersistingDictationTranscript(
                         text: text,
@@ -441,11 +440,6 @@ extension DictationSessionController {
                     let result = await saveTask.value
                     self.publishDictationTranscriptPersistence(result, delivery: pasteOutcome.delivery, context: saveContext)
                     return result
-                },
-                saveSynchronously: {
-                    self.persistDictationTranscript(
-                        text: text, delivery: pasteOutcome.delivery, recovery: recovery, context: saveContext
-                    )
                 },
                 performAutoEnter: {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
@@ -565,17 +559,6 @@ extension DictationSessionController {
                 )
             )
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
-        }
-    }
-
-    private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
-        switch state {
-        case .idle: return "idle"
-        case .starting: return "starting"
-        case .loading: return "loading"
-        case .listening: return "listening"
-        case .drafting: return "drafting"
-        case .success: return "success"
         }
     }
 }

@@ -274,7 +274,7 @@ extension TranscriptedSettingsView {
     private func prepareSilentNameCorrections(
         _ assignments: [HomeMeetingSpeakerAssignment],
         in preview: HomeMeetingPreview,
-        completion: @escaping ([[String: String]]) -> Void
+        completion: @escaping @MainActor @Sendable ([[String: String]]) -> Void
     ) {
         let corrections = HomeMeetingSpeakerNamingPolicy.silentNameCorrections(
             assignments,

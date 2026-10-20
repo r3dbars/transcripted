@@ -27,7 +27,9 @@ extension PersistentDictationInputSystem {
             defaultInputMonitor: DefaultInputDeviceMonitor.shared,
             // Every Mac-wide input write goes through the shared monitor so
             // its echo is classified as a self-write for every subscriber.
-            setDefaultInput: { try DefaultInputDeviceMonitor.shared.setDefaultInputDevice($0) },
+            setDefaultInput: {
+                try await DefaultInputDeviceMonitor.shared.setDefaultInputDevice($0, on: halWorkCoordinator)
+            },
             // Runs on HALListenerRegistrationQueue through `registerListener`
             // below, never on main. Callbacks still arrive on main.
             addDeviceListListener: Self.addSystemDeviceListListener(handler:),
@@ -41,12 +43,18 @@ extension PersistentDictationInputSystem {
                 )
             },
             recommendedSelection: {
-                try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
-                    prefersBuiltInBluetoothInput: true
-                )
+                try await halRead("persistent_input_selection") {
+                    try CoreAudioInputDeviceLookup.preferredDictationInputSelection(
+                        prefersBuiltInBluetoothInput: true
+                    )
+                }
             },
-            availableInputs: { try CoreAudioInputDeviceLookup.availableInputDevices() },
-            currentDefaultInputID: { try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID() },
+            availableInputs: {
+                try await halRead("persistent_input_devices") { try CoreAudioInputDeviceLookup.availableInputDevices() }
+            },
+            currentDefaultInputID: {
+                try await halRead("persistent_input_default") { try CoreAudioInputDeviceLookup.currentDefaultInputDeviceID() }
+            },
             hasExternalInputActivity: { try CoreAudioInputDeviceLookup.hasExternalInputActivity() },
             report: { report in
                 EventReporter.shared.capture(
@@ -64,6 +72,23 @@ extension PersistentDictationInputSystem {
                 HALListenerRegistrationQueue.run(work, then: completion)
             }
         )
+    }
+
+    /// This controller's own serial queue for HAL reads and its write, so a
+    /// write never waits behind dictation's system-input work (the self-write
+    /// echo window is 500 ms), and a stuck driver call trips the breaker.
+    private static let halWorkCoordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+        label: "com.transcripted.persistent-input"
+    )
+
+    /// Runs one HAL read off main, timed. A timeout or open circuit throws.
+    private static func halRead<T>(_ operation: String, _ read: @escaping () throws -> T) async throws -> T {
+        try await halWorkCoordinator.run(
+            operation: operation,
+            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
+        ) {
+            Result { try read() }
+        }.get()
     }
 
     /// Nonisolated on purpose: it runs on the registration queue.

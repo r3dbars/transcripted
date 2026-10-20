@@ -10,7 +10,8 @@ exercise (it needs real TCC state), so this is a consistency check across files:
   * the QA bench runs permission-state before the live capture smoke and skips
     the smoke when the preflight warns or fails,
   * the bench's manual scenarios mark permission blockers and duplicate running
-    apps INCOMPLETE instead of ambiguous UI proof,
+    apps INCOMPLETE instead of ambiguous UI proof, and its ui mode runs
+    `transcripted-qa ui-smoke` with a local JSON evidence report,
   * the docs and .agents/qa-gates.yml say permission blockers are INCOMPLETE.
 
     python3 scripts/dev/check-qa-harness-contract.py
@@ -56,6 +57,10 @@ BENCH_PHRASES = [
     ("INCOMPLETE: harness permission blocked", "stop false-green UI automation when macOS blocks events"),
     ("prove a visible state change after each click", "require proof of a state change after each click"),
     ("No duplicate or wrong running Transcripted app instance", "make duplicate running apps incomplete instead of ambiguous"),
+    (
+        'transcripted-qa ui-smoke --app build/Transcripted.app --report $(shell_quote "${RAW_DIR}/ui-automation-smoke.json")',
+        "run the AX ui-smoke in ui mode and keep its local JSON evidence",
+    ),
 ]
 
 
@@ -180,6 +185,7 @@ GOOD_BENCH = (
     "INCOMPLETE: harness permission blocked\n"
     "prove a visible state change after each click\n"
     "No duplicate or wrong running Transcripted app instance\n"
+    'transcripted-qa ui-smoke --app build/Transcripted.app --report $(shell_quote "${RAW_DIR}/ui-automation-smoke.json")\n'
 )
 
 
@@ -218,6 +224,7 @@ def self_test() -> None:
         (BENCH, "fi\nINCOMPLETE", f"fi\n{LIVE_SMOKE_STEP}\nINCOMPLETE"),
         (BENCH, f"run_live_tail() {{\n  {LIVE_SMOKE_STEP}", "run_live_tail() {\n  :"),
         (BENCH, "INCOMPLETE: harness permission blocked", ""),
+        (BENCH, "ui-automation-smoke.json", "ui-smoke.log"),
         (QA_DOCS, "harness permission blocked", ""),
         (QA_GATES, "Permission blockers are INCOMPLETE, not green", ""),
     ] + [(COMMAND, probe, "x") for probe in EXPECTED_PROBES]:

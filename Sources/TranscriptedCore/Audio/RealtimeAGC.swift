@@ -49,21 +49,26 @@ public final class RealtimeAGC {
     /// Blue Yeti-style USB mic self-noise during pauses.
     public let noiseGatePeak: Float
 
-    /// Number of recent buffers used for the windowed peak. With ~85ms
-    /// buffers (4096 frames at 48 kHz), 16 buffers ≈ 1.4 s of history —
-    /// long enough to ride past a single transient, short enough to track
-    /// when WebRTC contention starts and stops mid-recording.
+    /// Number of peak slots in the window. Each slot covers about
+    /// `bufferTimeMs` of audio whatever the buffer size, so 16 × 85 ms ≈
+    /// 1.4 s of history — long enough to ride past a single transient,
+    /// short enough to track when WebRTC contention starts and stops
+    /// mid-recording.
     public let windowSize: Int
 
-    /// One-pole coefficients for gain smoothing, computed at init from
-    /// attack/release times. `α = 1 − exp(−bufferTime / timeConstant)`.
-    private let attackCoef: Float
-    private let releaseCoef: Float
+    /// Gain smoothing time constants and peak-slot duration, in seconds.
+    /// The per-buffer coefficient comes from each buffer's real duration,
+    /// because the pinned recorder delivers ~10 ms buffers and the engine
+    /// tap ~85 ms ones.
+    private let attackTime: Float
+    private let releaseTime: Float
+    private let slotDuration: Float
 
     // MARK: - State
 
     private var recentPeaks: [Float]
     private var nextPeakIndex: Int = 0
+    private var slotElapsed: Float = 0
     private var currentGain: Float = 1.0
 
     // MARK: - Init
@@ -78,14 +83,14 @@ public final class RealtimeAGC {
     ///   - noiseGatePeak: Raw idle-noise threshold. 0.002 matches the
     ///     activity floor used by `QuietMicAttenuationDetector`; values below
     ///     this are not treated as voice-like input.
-    ///   - windowSize: Buffers of peak history.
+    ///   - windowSize: Slots of peak history, each `bufferTimeMs` long.
     ///   - attackTimeMs: Time constant for *reducing* gain when input
     ///     suddenly grows. Fast attack avoids clipping. 20ms.
     ///   - releaseTimeMs: Time constant for *raising* gain when input
     ///     stays quiet. Slow release avoids audible pumping. 300ms.
-    ///   - bufferTimeMs: Approximate duration of one tap-callback buffer
-    ///     in milliseconds, used to convert time constants into per-buffer
-    ///     coefficients. 4096 frames at 48 kHz ≈ 85ms.
+    ///   - bufferTimeMs: Duration of one peak-window slot in milliseconds.
+    ///     85ms matches one 4096-frame engine tap buffer at 48 kHz; smaller
+    ///     buffers share a slot until it holds this much audio.
     public init(
         targetPeak: Float = 0.45,
         maxGain: Float = 25.0,
@@ -102,11 +107,9 @@ public final class RealtimeAGC {
         self.noiseGatePeak = max(self.minPeak, noiseGatePeak)
         self.windowSize = max(1, windowSize)
         self.recentPeaks = [Float](repeating: 0, count: max(1, windowSize))
-        // α = 1 − exp(−Δt / τ). When Δt ≥ τ we approach 1.0 (snap to target);
-        // when Δt ≪ τ we approach 0.0 (very gradual).
-        let bufferTime = max(0.001, bufferTimeMs)
-        self.attackCoef = 1.0 - expf(-bufferTime / max(0.1, attackTimeMs))
-        self.releaseCoef = 1.0 - expf(-bufferTime / max(0.1, releaseTimeMs))
+        self.attackTime = max(0.1, attackTimeMs) / 1000
+        self.releaseTime = max(0.1, releaseTimeMs) / 1000
+        self.slotDuration = max(0.001, bufferTimeMs) / 1000
     }
 
     // MARK: - Public API
@@ -121,6 +124,7 @@ public final class RealtimeAGC {
             recentPeaks[index] = 0
         }
         nextPeakIndex = 0
+        slotElapsed = 0
         currentGain = 1.0
     }
 
@@ -136,6 +140,9 @@ public final class RealtimeAGC {
         guard let channelData = buffer.floatChannelData else { return }
         let channelCount = Int(buffer.format.channelCount)
         guard channelCount > 0 else { return }
+        let sampleRate = Float(buffer.format.sampleRate)
+        guard sampleRate > 0 else { return }
+        let bufferTime = Float(buffer.frameLength) / sampleRate
 
         // 1. Buffer peak across all channels (vDSP_maxmgv = max |x|).
         var bufferPeak: Float = 0
@@ -158,14 +165,12 @@ public final class RealtimeAGC {
         // from the current recovery level instead of pumping up from unity.
         if bufferPeak > 0, bufferPeak < noiseGatePeak {
             clear(buffer: buffer, frameCount: frameCount, channelCount: channelCount)
-            recentPeaks[nextPeakIndex] = 0
-            nextPeakIndex = (nextPeakIndex + 1) % recentPeaks.count
+            recordPeak(0, duration: bufferTime)
             return
         }
 
         // 3. Slot into rolling peak window and pick window peak.
-        recentPeaks[nextPeakIndex] = bufferPeak
-        nextPeakIndex = (nextPeakIndex + 1) % recentPeaks.count
+        recordPeak(bufferPeak, duration: bufferTime)
         var windowPeak: Float = 0
         for value in recentPeaks {
             if value > windowPeak { windowPeak = value }
@@ -181,8 +186,9 @@ public final class RealtimeAGC {
         }
 
         // 5. Smooth gain via one-pole IIR. Fast when reducing (attack),
-        // slow when raising (release).
-        let coef = (targetGain < currentGain) ? attackCoef : releaseCoef
+        // slow when raising (release). α = 1 − exp(−Δt / τ).
+        let timeConstant = (targetGain < currentGain) ? attackTime : releaseTime
+        let coef = 1.0 - expf(-bufferTime / timeConstant)
         currentGain = currentGain + coef * (targetGain - currentGain)
 
         // 6. Apply gain in place. vDSP_vsmul works for both interleaved
@@ -210,6 +216,22 @@ public final class RealtimeAGC {
             for ch in 0..<channelCount {
                 vDSP_vclip(channelData[ch], 1, &lo, &hi, channelData[ch], 1, frameCount)
             }
+        }
+    }
+
+    /// Max `peak` into the current slot; move to the next slot once this one
+    /// holds `slotDuration` of audio, so window length doesn't depend on
+    /// buffer size.
+    private func recordPeak(_ peak: Float, duration: Float) {
+        if slotElapsed == 0 {
+            recentPeaks[nextPeakIndex] = peak
+        } else if peak > recentPeaks[nextPeakIndex] {
+            recentPeaks[nextPeakIndex] = peak
+        }
+        slotElapsed += duration
+        if slotElapsed >= slotDuration {
+            nextPeakIndex = (nextPeakIndex + 1) % recentPeaks.count
+            slotElapsed = 0
         }
     }
 

@@ -113,6 +113,18 @@ instructions unless a dated doc is explicitly the target of the task.
 path that doesn't exist, and keeps the root `AGENTS.md` inside its
 line budget. When you move or delete a file, fix the docs that name it.
 
+Rules and their enforcers:
+
+- `docs/rules.md` — generated table pairing each rule with the check that enforces it (`python3 scripts/dev/check-rule-registry.py --write`); don't edit by hand
+- `docs/lint-rules.md` — how to turn a repeated mistake into a rule: the level ladder, proof on a past commit, ratchet, suppressions; the `correct` skill (`.claude/skills/correct/SKILL.md`) walks an agent through it
+- `scripts/dev/lint.py` — the lint runner: `--all`, `--changed`, `--range A..B`, `--hook`, `--self-test`, `--explain <id>`, `--list`, `--shrink`
+- `scripts/dev/lint_rules/` — one module per lint rule, shared helpers in `scripts/dev/lint_rules/_base.py`, fixtures in `fixtures/<rule-id>/`
+- `.agents/lint-baseline.json` — per-file counts for ratcheted lint rules; only shrinks
+- `.agents/rules.json` — registry of every check that isn't a lint.py rule: what it enforces, its level, owner doc, why, proof
+- `scripts/dev/check-rule-registry.py` — fails when a check script has no registry entry, a path is missing, or `docs/rules.md` is stale
+- `.claude/settings.json` and `.claude/hooks/` — Claude Code hooks that run `scripts/dev/lint.py` on each edit and on stop
+- `.githooks/` — git hooks (`pre-push` runs `lint.py --range` on the pushed commits, the registry check and the private denylist guard); `bash scripts/dev/install-git-hooks.sh` turns them on for a clone
+
 Use these docs for these jobs:
 
 - `README.md` — public product overview and quick start
@@ -190,6 +202,7 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/App/TranscriptedApp.swift` (app entry, the delegate's stored state, launch wiring, detected-meeting prompts, Quit, status item) plus `TranscriptedAppDelegate+LaunchReports`, `+Lifecycle`, `+MenuBar`, `+SettingsActions`. The most source-pinned file: its pins still read `TranscriptedApp.swift` only, so pinned code stays there.
 - `Sources/Meeting/MeetingPromptDetector.swift` plus `+Backoff`, `+CalendarRuntime`, `+AdHocCalls`, `+BrowserEvidence` and `MeetingPromptCalendarReader.swift` — decides when to offer "record this meeting?".
 - `Sources/Speech/ParakeetEngine.swift` (core state, native AVAudioEngine calls; the graph itself, with rebuild/retire, is `ParakeetAudioGraph`) plus `ParakeetInputReadiness`, `ParakeetInputRoute`, `ParakeetAudioTap`, `ParakeetRecordingStart`, `ParakeetRecordingTeardown`, `ParakeetDictationTranscription`, `ParakeetASRInference` — the dictation STT engine and `@MainActor` home for recording state. Engine and `inputNode` code here is AirPods-sensitive; read `Sources/Speech/AGENTS.md` first.
+- `Sources/UI/Overlay/MeetingOverlayController.swift` (stored state, subscriptions, session-state mapping, show/hide) plus `+Island` (the island snapshot, taps, right-click Discard), `+WarningPrompts` (prompt countdown and system-audio auto-hide) and `+PromptCopy` — the island's meeting. Its source pins in `Tests/UIAutomationSurfaceContractTests.swift` read `+Island.swift`.
 - `Sources/UI/Overlay/DictationSessionController.swift` plus `+RecordingStart`, `+Stop`, `+PasteBack`, `+Persistence`, `+Recovery`, `+Presses`, `+SessionCap`, `+Telemetry` and `DictationSessionDeliveryTypes.swift` — dictation session orchestration. `stopDictationAndPaste` is in `+Stop`, `installSessionTimeout` in `+SessionCap`.
 - `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
 - `Sources/UI/Settings/TranscriptedSettingsView.swift` (stored state, `init`, `body`, Home row actions) plus `+Pages`, `+HomeMeetingActions`, `+GeneralEditors`, `+Refresh`, `+Preferences` — the Settings window shell, page routing, and every Home side effect. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings. The Home row actions in the core file are still pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.

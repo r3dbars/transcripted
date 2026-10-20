@@ -318,16 +318,17 @@ enum MeetingArtifactRenamer {
         guard let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
         var didChange = false
-        let escapedTitle = displayTitle?.replacingOccurrences(of: "\"", with: "'")
+        // Quoted the way TranscriptFrontmatter reads it back, so a backslash survives.
+        let quotedTitle = displayTitle.map(TranscriptFrontmatter.quotedYAMLScalar)
         let updatedLines = raw.components(separatedBy: "\n").map { line -> String in
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("source_transcript:") {
                 didChange = true
                 return line.replacingOccurrences(of: oldName, with: newName)
             }
-            if let escapedTitle, trimmed.hasPrefix("summary_title:") {
+            if let quotedTitle, trimmed.hasPrefix("summary_title:") {
                 didChange = true
-                return "summary_title: \"\(escapedTitle)\""
+                return "summary_title: \(quotedTitle)"
             }
             return line
         }

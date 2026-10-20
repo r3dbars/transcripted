@@ -95,7 +95,7 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Onboarding
 
-- `PermissionsOnboardingView.swift` - three steps (welcome, permissions, done), one path. Permission refresh is event-driven; never add a repeating ScreenCaptureKit probe. The Done screen watches `STTRouter` and says "Almost set." with download progress until the voice model is on this Mac. After a Don't Allow on the microphone, "Skip for now" still reaches file import and Done says the mic is off.
+- `PermissionsOnboardingView.swift` - three steps (welcome, permissions, done), one path. Permission refresh is event-driven; never add a repeating ScreenCaptureKit probe. The Done screen watches `STTRouter` and says "Almost set." with download progress until the voice model is on this Mac. After a Don't Allow on the microphone, "Skip for now" still reaches file import and Done says the mic is off. The window shell, nav bar and Done step are in `PermissionsOnboardingShell.swift`; the source pins read only `PermissionsOnboardingView.swift`.
 - `OnboardingNavigation.swift`, `OnboardingAbandonmentReasonPolicy.swift` - step navigation; maps an exit to its telemetry reason.
 
 ### Speakers

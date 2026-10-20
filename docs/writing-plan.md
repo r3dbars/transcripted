@@ -403,8 +403,8 @@ Rules:
 - `TranscriptedStoragePaths.swift`: the manifest gets an optional writing folder; `prepareCaptureLibraryURL`.
 - `CaptureLibraryMigrationPlanner.swift`: without it, Move and Copy silently leave writing behind.
 - `RecentCaptureScanners.swift`.
-- the first-run report in `TranscriptedApp.swift:1200`.
-- `ExistingInstallModelPrefetchPolicy.swift:62`.
+- the first-run report in `TranscriptedAppDelegate+LaunchReports.swift`.
+- `ExistingInstallModelPrefetchPolicy.swift` (`captureLibraryHasContent`).
 - `docs/storage-paths.md`.
 
 ## Agent tools
@@ -412,8 +412,8 @@ Rules:
 Writing isn't useful to agents until the tools read it:
 
 - **CaptureKit:** add a `Writing_` prefix, a writing-day parser, and a `TRANSCRIPTED_WRITING_DIR` override in `CaptureLibraryResolver`.
-- **MCP:** `TranscriptLoader.swift:129-144` treats any non-`Dictations_` Markdown file with frontmatter as a meeting, so writing files would be indexed as meetings. Check `Writing_` first. Then:
-  - add a `writing` capture kind (`Models.swift`, `AgentCaptureQueryTelemetry.swift:262`)
+- **MCP:** `TranscriptLoader.swift` treated any non-`Dictations_` Markdown file with frontmatter as a meeting, so writing files would be indexed as meetings. Check `Writing_` first. Then:
+  - add a `writing` capture kind (`Models.swift`, `AgentCaptureQueryTelemetry.swift`)
   - index it (`TranscriptIndex.swift`; bump the schema version)
   - teach list, read, search, `search_context` and `recent_context` about it (`ToolHandlers.swift`)
   - update the Claude Desktop self-test struct
@@ -427,7 +427,7 @@ Writing isn't useful to agents until the tools read it:
 - **Shell.** `TranscriptedSettingsView.swift` is a hotspot pinned by literal-text tests. Only add routing cases there (`pageBody`, the discovery-area switch, `onChange`, Today's open-item switch, refresh). All Writing UI lives in `Pages/` and `Settings/Writing/`.
 - **Other exhaustive switches:** `SettingsRecentCaptureRefreshPolicy.swift`, the Go menu in `TranscriptedMenuCommands.swift`, `FocusOrderContract.swift`.
 - **Pinned tests to update in the same change:**
-  - `UIAutomationSurfaceContractTests.swift` (`:218-251` shortcuts, `:294-322` page cases)
+  - `UIAutomationSurfaceContractTests.swift` (shortcuts and page cases)
   - `FocusOrderContractTests.swift` (asserts 5 pages)
   - `SettingsRecentCaptureRefreshPolicyTests.swift` (pins Agent on ⌘5)
   - `Tools/TranscriptedQA/.../UISmoke.swift`
@@ -438,10 +438,10 @@ Writing isn't useful to agents until the tools read it:
 
 - **Keep Screen Recording out of the global permissions list.** Adding a case to `TranscriptedPermissionKind` would add a Screen Recording row to the settings rows, onboarding and `PermissionSnapshot` for every user, including people who never touch Writing. Writing owns its own permission state (Screen Recording plus keyboard enabled and selected) and shows it only in the Writing tab.
 - **Fix copy that's no longer true.** Today the app promises it never needs full Screen Recording:
-  - `TranscriptedPermissionKind.swift:82` and `:113-115`, which tell users to turn the broader permission off
-  - `Sources/Support/AGENTS.md:65`
+  - `TranscriptedPermissionKind.swift`, which told users to turn the broader permission off
+  - `Sources/Support/AGENTS.md`
 
-  The new rule: meetings don't need screen access; Writing's autocomplete does. Update the two tests that pin the old copy, `TranscriptedPermissionAccessTests.swift:193` and `MeetingRecordingStartGateTests.swift:147`.
+  The new rule: meetings don't need screen access; Writing's autocomplete does. Update the two tests that pin the old copy, `TranscriptedPermissionAccessTests.swift` and `MeetingRecordingStartGateTests.swift`.
 - **The main app holds Screen Recording**, not the keyboard, because Screen Memory runs in the app, as in Tilde.
 
 ## Analytics

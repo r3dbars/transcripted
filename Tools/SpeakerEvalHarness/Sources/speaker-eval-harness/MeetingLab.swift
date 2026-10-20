@@ -492,7 +492,13 @@ func runMeetingSeries(_ args: [String]) async {
         }
         let freshDB = meeting.fresh_db ?? true
         let runDir = workRoot.appendingPathComponent(meeting.id, isDirectory: true)
-        try? fm.removeItem(at: runDir)
+        do {
+            guard try LabSharedSpeakerDB.reset(runDir, workRoot: workRoot) else {
+                log("[lab] \(meeting.id): run dir escapes --work, skipped"); continue
+            }
+        } catch {
+            log("[lab] \(meeting.id): could not clear run dir: \(error.localizedDescription)"); continue
+        }
         let dbDir = freshDB ? runDir.appendingPathComponent("db", isDirectory: true) : sharedDBDir
         let paths = CoreStoragePaths(
             transcripts: runDir.appendingPathComponent("transcripts"),

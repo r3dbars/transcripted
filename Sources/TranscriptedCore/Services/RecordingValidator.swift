@@ -11,7 +11,7 @@ public enum RecordingValidator {
     public static let minimumDiskSpace: Int64 = 1024 * 1024 * 1024
 
     /// Result of validation check
-    public enum ValidationResult {
+    public enum ValidationResult: Sendable {
         case success
         case failure(String)
 
@@ -187,12 +187,7 @@ public enum RecordingValidator {
             return .failure("Microphone access denied. Go to System Settings \u{2192} Privacy & Security \u{2192} Microphone and enable Transcripted.")
         }
 
-        // If not authorized (notDetermined or restricted), allow recording to proceed
-        // but warn that recording will fail until permission is granted
-        if microphoneStatus != .authorized {
-            return .success
-        }
-
+        // notDetermined and restricted pass here; Audio.start() requests permission.
         return .success
     }
 }

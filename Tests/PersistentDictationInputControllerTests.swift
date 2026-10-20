@@ -102,6 +102,26 @@ private func runPersistentDictationInputControllerSuites() async {
         connectedController.stopMonitoring()
     }
 
+    await runSuite("Persistent input - a timed-out route lookup skips the pass without writing") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        hal.selectionLookupTimesOut = true
+        let controller = hal.makeController()
+        controller.start()
+        await controller.pendingRefresh?.value
+        assertEqual(hal.writes, [], "a stuck driver read never leads to a Mac-wide input write")
+        assertNil(hal.marker, "and leaves no restore marker for a mic we never took")
+        assertTrue(
+            hal.reports.contains { $0.event == "dictation_persistent_input_failed" && $0.level == .warning },
+            "the skipped pass is reported like any failed lookup"
+        )
+
+        hal.selectionLookupTimesOut = false
+        hal.fireDeviceListChanged()
+        await controller.pendingRefresh?.value
+        assertEqual(hal.writes, [persistentBuiltIn.id], "the next pass applies once the driver answers")
+        controller.stopMonitoring()
+    }
+
     await runSuite("Persistent input - its own writes don't trigger another pass") {
         let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
         let controller = hal.makeController()
@@ -147,6 +167,42 @@ private func runPersistentDictationInputControllerSuites() async {
         let applied = await waitForPersistentInput { hal.writes == [persistentBuiltIn.id, persistentUSB.id] }
         assertTrue(applied, "the new preference lands after the meeting ends")
         controller.stopMonitoring()
+    }
+
+    await runSuite("Persistent input - a recording that starts during the route reads is not switched under") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        var dictationActive = false
+        hal.onSelectionLookup = { dictationActive = true }
+        let controller = hal.makeController(isDictationActive: { dictationActive })
+
+        controller.start()
+        let firstPass = controller.pendingRefresh
+        await firstPass?.value
+        assertEqual(hal.writes, [], "dictation started while the pass read the route, so nothing is written")
+        assertTrue(controller.pendingRefresh != nil && controller.pendingRefresh != firstPass, "the pass is put off, not dropped")
+
+        hal.onSelectionLookup = nil
+        dictationActive = false
+        let applied = await waitForPersistentInput { hal.writes == [persistentBuiltIn.id] }
+        assertTrue(applied, "the write lands once dictation ends")
+        controller.stopMonitoring()
+    }
+
+    await runSuite("Persistent input - a timed-out write keeps the marker so a late landing can be undone") {
+        let hal = FakePersistentInputHAL(defaultInput: persistentAirPods, inputs: [persistentAirPods, persistentBuiltIn])
+        hal.writeTimesOutAfterLanding = true
+        let controller = hal.makeController()
+        controller.start()
+        await controller.pendingRefresh?.value
+        assertEqual(hal.writes, [persistentBuiltIn.id], "the write ran past its budget but landed")
+        assertEqual(hal.marker, .init(selectedUID: "builtin", previousUID: "airpods"), "the marker survives the timeout")
+
+        hal.writeTimesOutAfterLanding = false
+        hal.monitor.fire(isSelfWrite: false)
+        await controller.pendingRefresh?.value
+        await controller.stopAndRestore()
+        assertEqual(hal.writes, [persistentBuiltIn.id, persistentAirPods.id], "quitting still puts AirPods back")
+        assertNil(hal.marker, "and the restore clears the marker")
     }
 
     await runSuite("Persistent input - quitting puts the previous mic back when nothing is capturing") {
@@ -303,6 +359,11 @@ private final class FakePersistentInputHAL {
     var writes: [UInt32] = []
     var reports: [PersistentDictationInputSystem.Report] = []
     var deviceListListenerRefused = false
+    var selectionLookupTimesOut = false
+    /// Runs inside the route read, as if the user acted while it was suspended.
+    var onSelectionLookup: (() -> Void)?
+    /// The write lands, then reports a timeout, like a driver call that overran.
+    var writeTimesOutAfterLanding = false
     var deviceListAdds = 0
     var deviceListRemoves = 0
     var refreshDelays = 0
@@ -351,8 +412,12 @@ private final class FakePersistentInputHAL {
             userDefaults: defaults,
             defaultInputMonitor: monitor,
             setDefaultInput: { [weak self] id in
-                self?.writes.append(id)
-                self?.defaultInputID = id
+                guard let self else { return }
+                self.writes.append(id)
+                self.defaultInputID = id
+                if self.writeTimesOutAfterLanding {
+                    throw ParakeetSystemInputWorkError.timedOut(operation: "persistent_input_write", timeoutMs: 1_500)
+                }
             },
             addDeviceListListener: { [weak self] handler in
                 guard let self, !self.deviceListListenerRefused else { return nil }
@@ -366,6 +431,11 @@ private final class FakePersistentInputHAL {
             },
             recommendedSelection: { [weak self] in
                 guard let self else { throw CancellationError() }
+                self.onSelectionLookup?()
+                if self.selectionLookupTimesOut {
+                    // What the live timed lookup throws when a driver call overruns.
+                    throw ParakeetSystemInputWorkError.timedOut(operation: "persistent_input_selection", timeoutMs: 1_500)
+                }
                 return DictationInputDeviceSelectionPolicy.selection(
                     defaultInput: try self.currentInput(),
                     defaultOutput: persistentAirPodsOutput,

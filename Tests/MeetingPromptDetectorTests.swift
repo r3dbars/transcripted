@@ -809,6 +809,48 @@ func testMeetingPromptDetector() async {
         assertEqual(box.unrecordedCallCount, 0, "a call shorter than the minimum duration must not raise the missed-call nudge")
     }
 
+    await runSuite("MeetingPromptDetector.markRecordStartFailed — a Record that never started leaves the call unrecorded") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        var summary: MeetingPromptDetectedCallSummary?
+        detector.onDetectedCallEnded = { summary = $0 }
+        detector.onUnrecordedCallEnded = { _ in box.unrecordedCallCount += 1 }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate, let live = detector.detectedCallSession else {
+            assertTrue(false, "a Zoom mic should prompt and open a detected-call session")
+            return
+        }
+        // A call long enough for the missed-call nudge.
+        detector.detectedCallSession = MeetingPromptDetector.DetectedCallSession(
+            providers: live.providers,
+            seenReasons: live.seenReasons,
+            startedAt: Date().addingTimeInterval(-2 * MissedCallNudgePolicy.minimumCallDuration),
+            sawMeetingRecording: false,
+            userDeclined: false,
+            promptShown: true
+        )
+
+        detector.markAccepted(candidate: candidate)
+        detector.markRecordStartFailed(candidate: candidate)
+
+        detector.requestEvaluation()
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount, 2, "a Record that failed to start must let the call prompt again")
+
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        assertEqual(summary?.wasRecorded, false, "a Record that failed to start must not count the call as recorded")
+        assertEqual(box.unrecordedCallCount, 1, "a Record that failed to start must still raise the missed-call nudge")
+    }
+
     await runSuite("MeetingPromptDetector browser evidence — an unrecognized site waits before prompting") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }

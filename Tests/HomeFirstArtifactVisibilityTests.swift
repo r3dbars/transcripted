@@ -75,10 +75,12 @@ func testHomeFirstArtifactVisibility() {
             encoding: .utf8
         )) ?? ""
 
-        assertTrue(
-            settingsSource.contains(#"HomeRowMenuItem(title: "Open Markdown", symbolName: "doc.text")"#),
+        assertEqual(
+            HomeRowMenuPolicy.dictationEntries.first?.fixedTitle,
+            "Open Markdown",
             "the shell's dictation menu items should keep the Open Markdown wording meeting previews use (the Dictations card itself shows Show in Finder, not Open Markdown)"
         )
+        assertEqual(HomeRowMenuEntry.openMarkdown.symbolName, "doc.text", "Open Markdown should keep its document glyph")
         assertTrue(
             homeSettingsPageSource.contains("QuietWorkingRow("),
             "Home should render in-flight transcription activity as a quiet row"
@@ -88,7 +90,7 @@ func testHomeFirstArtifactVisibility() {
             "Home should pass the terminal activity tone instead of making every state look busy"
         )
         assertFalse(
-            settingsSource.contains(#"HomeRowMenuItem(title: "Open saved file""#)
+            HomeRowMenuEntry.allCases.contains { $0.fixedTitle == "Open saved file" }
                 || settingsSource.contains(#"actionTitle: activity.transcriptURL == nil ? nil : "Open Transcript""#),
             "old vague saved-file copy should not return"
         )

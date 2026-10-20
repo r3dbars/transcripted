@@ -104,8 +104,8 @@ class DictationSessionController: ObservableObject {
             }
             // Any Esc, including the first of "press again to discard",
             // takes back a start that is waiting on this take.
-            overlayController?.onEscapeKeyDuringSession = { [weak self] in
-                self?.dropQueuedDictationStart(showMessage: false)
+            overlayController?.onEscapeKeyDuringSession = DictationQueuedStartPolicy.escapeKeyAction { [weak self] showMessage in
+                self?.dropQueuedDictationStart(showMessage: showMessage)
             }
         }
     }

@@ -147,6 +147,8 @@ final class MeetingPromptDetector {
     var browserFirstTitleReadPending = false
 
     var detectedCallSession: DetectedCallSession?
+    // Keyed by candidate id; written by markAccepted, read by markRecordStartFailed.
+    var recordStartUndo: [String: RecordStartUndo] = [:]
     var lastMissedCallNudgeAt: Date?
     // Consecutive explicit dismissals per provider since the last accepted
     // recording — the "keeps hitting Not now" telemetry signal.

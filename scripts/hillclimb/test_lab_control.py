@@ -294,12 +294,21 @@ class LaunchSafetyTests(unittest.TestCase):
         self.assertEqual(args, [
             "-observability-anonymous-analytics-enabled", "NO",
             "-observability-crash-reporting-enabled", "NO",
+            "-SUEnableAutomaticChecks", "NO",
+            "-SUAutomaticallyUpdate", "NO",
         ])
         self.assertTrue(plan["telemetry_off_for_this_run"])
         direct = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), use_open=False)
-        self.assertEqual(direct["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS])
+        self.assertEqual(direct["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS, *lab_control.UPDATES_OFF_ARGS])
         allowed = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), use_open=False, telemetry_off=False)
-        self.assertEqual(allowed["argv"], ["/bin/app"])
+        self.assertEqual(allowed["argv"], ["/bin/app", *lab_control.UPDATES_OFF_ARGS])
+
+    def test_plan_turns_updates_off_but_leaves_harness_flag_off(self) -> None:
+        plan = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), use_open=False, telemetry_off=False)
+        self.assertIn("-SUEnableAutomaticChecks", plan["argv"])
+        self.assertEqual(plan["argv"][plan["argv"].index("-SUEnableAutomaticChecks") + 1], "NO")
+        self.assertEqual(plan["argv"][plan["argv"].index("-SUAutomaticallyUpdate") + 1], "NO")
+        self.assertNotIn("TRANSCRIPTED_AUTOMATED_HARNESS", plan["env"])
 
     def test_both_overrides_skip_defaults_entirely(self) -> None:
         reader = fake_defaults({})
@@ -419,9 +428,10 @@ class LaunchTests(TempDirCase):
 
     def test_plan_flags(self) -> None:
         plan = lab_control.launch_plan(Path("/lab"), Path("/bin/app"), allow_second_instance=True, container=Path("/c"))
-        self.assertEqual(plan["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS])
+        self.assertEqual(plan["argv"], ["/bin/app", *lab_control.TELEMETRY_OFF_ARGS, *lab_control.UPDATES_OFF_ARGS])
         self.assertEqual(plan["env"], {
             "TRANSCRIPTED_LAB_CONTROL_DIR": "/lab",
+            "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1",
             "TRANSCRIPTED_DISABLE_SINGLE_INSTANCE_GUARD": "1",
             "TRANSCRIPTED_CONTAINER_DIR": "/c",
         })
@@ -433,7 +443,7 @@ class LaunchTests(TempDirCase):
             plistlib.dump({"CFBundleExecutable": "RealName"}, handle)
         self.assertEqual(lab_control.resolve_executable(bundle), bundle / "Contents" / "MacOS" / "RealName")
         plan = lab_control.launch_plan(self.root, bundle, use_open=False)
-        self.assertEqual(plan["argv"], [str(bundle / "Contents" / "MacOS" / "RealName"), *lab_control.TELEMETRY_OFF_ARGS])
+        self.assertEqual(plan["argv"], [str(bundle / "Contents" / "MacOS" / "RealName"), *lab_control.TELEMETRY_OFF_ARGS, *lab_control.UPDATES_OFF_ARGS])
 
     def test_launch_refuses_before_starting_anything(self) -> None:
         app = self.make_fake_app()

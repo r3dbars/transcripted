@@ -128,6 +128,9 @@ struct HomeFailedMeetingRowActions: Equatable {
     let retryDisabled: Bool
     let deleteTitle: String
     let deleteIsDestructive: Bool
+    /// A running retry already has the audio open and would save the meeting
+    /// back after a delete, so delete waits for the retry to finish.
+    let deleteDisabled: Bool
 
     static func make(
         item: FailedMeetingPresentation.FailedMeetingItem,
@@ -143,7 +146,8 @@ struct HomeFailedMeetingRowActions: Equatable {
                 usableAudio: item.usableAudio
             ),
             deleteTitle: "Delete failed meeting",
-            deleteIsDestructive: true
+            deleteIsDestructive: true,
+            deleteDisabled: item.isRetrying
         )
     }
 }

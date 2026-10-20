@@ -53,21 +53,6 @@ struct TranscriptedMenuCommands: Commands {
     }
 
     private func perform(_ action: TranscriptedMenuCommandCatalog.Action) {
-        switch action {
-        case .openSettings:
-            appDelegate.menuOpenSettings()
-        case .startDictation:
-            appDelegate.menuStartDictation()
-        case .toggleMeetingRecording:
-            appDelegate.menuToggleMeetingRecording()
-        case .importAudio:
-            appDelegate.menuImportAudio()
-        case let .openPage(page):
-            appDelegate.menuOpenPage(page)
-        case .findCaptures:
-            appDelegate.menuFindCaptures()
-        case .findSpeaker:
-            appDelegate.menuFindSpeaker()
-        }
+        TranscriptedMenuCommandCatalog.perform(action, on: appDelegate)
     }
 }

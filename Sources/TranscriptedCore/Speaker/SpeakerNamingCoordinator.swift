@@ -31,7 +31,7 @@ extension TranscriptionTaskManager {
     enum PlannedSpeakerMutation {
         case merge(sourceId: UUID, into: UUID)
         case setDisplayName(id: UUID, name: String)
-        case restoreProfile(SpeakerProfile)
+        case revertMatchContribution(SpeakerProfile)
         case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
         /// Adds a voice sample to a saved person who existed at Save. Unlike
         /// `addOrUpdateEmbedding`, it never creates the person: if they were removed
@@ -482,7 +482,7 @@ extension TranscriptionTaskManager {
             let deferredProfileId = UUID()
             redirectedSpeakerIdsByKey[key] = deferredProfileId
             reviewClipSpeakerIdsByKey[key] = deferredProfileId
-            mutations.append(.restoreProfile(matchedProfile))
+            mutations.append(.revertMatchContribution(matchedProfile))
             mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: deferredProfileId))
         }
 
@@ -511,7 +511,7 @@ extension TranscriptionTaskManager {
             let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
             guard let snapshot = clipsBySpeakerId[key]?.matchedProfileSnapshot else { continue }
 
-            speakerDB.restoreProfile(snapshot)
+            speakerDB.revertMatchContribution(snapshot: snapshot)
             speakerDB.incrementDisputeCount(id: snapshot.id)
             AppLogger.speakers.info("Collapsed mic speaker — restored matched profile", [
                 "profileId": snapshot.id.uuidString,
@@ -541,7 +541,7 @@ extension TranscriptionTaskManager {
                 // record a negative exemplar: unlike an explicit correction, a discard says "don't
                 // save this sample", not "this voice is a different known person". Negative
                 // exemplars are scoped to the `.corrected` path.
-                speakerDB.restoreProfile(snapshot)
+                speakerDB.revertMatchContribution(snapshot: snapshot)
                 speakerDB.incrementDisputeCount(id: snapshot.id)
                 AppLogger.speakers.info("Discarded speaker sample and restored matched profile", [
                     "profileId": snapshot.id.uuidString,

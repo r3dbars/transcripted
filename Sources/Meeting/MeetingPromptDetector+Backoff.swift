@@ -185,7 +185,21 @@ extension MeetingPromptDetector {
         return decision
     }
 
+    /// What `markAccepted` changed, so `markRecordStartFailed` can put it back.
+    struct RecordStartUndo {
+        let callStartedAt: Date?
+        let sawMeetingRecording: Bool
+        let runtimeSuppressedUntil: Date?
+        let runtimeSuppressionReason: String?
+    }
+
     func markAccepted(candidate: Candidate) {
+        recordStartUndo[candidate.id] = RecordStartUndo(
+            callStartedAt: detectedCallSession?.startedAt,
+            sawMeetingRecording: detectedCallSession?.sawMeetingRecording ?? false,
+            runtimeSuppressedUntil: runtimeSuppressedUntil[candidate.provider],
+            runtimeSuppressionReason: runtimeSuppressionReasons[candidate.provider]
+        )
         // Recording is starting; the session is covered even if the recording
         // begins after the next evaluate() pass samples own-capture state.
         detectedCallSession?.sawMeetingRecording = true
@@ -211,6 +225,25 @@ extension MeetingPromptDetector {
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
         cooldownReasons[candidate.id] = "record_selected"
+    }
+
+    /// The Record start `markAccepted` covered did not start. The call is
+    /// unrecorded again (funnel, missed-call nudge) and may prompt again. The
+    /// learned "yes" stays: the user did choose Record for this kind of call.
+    func markRecordStartFailed(candidate: Candidate) {
+        guard let undo = recordStartUndo.removeValue(forKey: candidate.id) else { return }
+        if let session = detectedCallSession, session.startedAt == undo.callStartedAt {
+            detectedCallSession?.sawMeetingRecording = undo.sawMeetingRecording
+        }
+        if cooldownReasons[candidate.id] == "record_selected" {
+            snoozedUntil[candidate.id] = nil
+            pendingUntil[candidate.id] = nil
+            cooldownReasons[candidate.id] = nil
+        }
+        if runtimeSuppressionReasons[candidate.provider] == "record_selected" {
+            runtimeSuppressedUntil[candidate.provider] = undo.runtimeSuppressedUntil
+            runtimeSuppressionReasons[candidate.provider] = undo.runtimeSuppressionReason
+        }
     }
 
     /// A prompt for `candidateID` was presented within the pending window and

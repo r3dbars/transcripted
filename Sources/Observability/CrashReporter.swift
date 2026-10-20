@@ -10,7 +10,10 @@ import AppKit
 import Foundation
 import Sentry
 
-final class CrashReporter {
+// `@unchecked Sendable`: the mutable session state below is only touched on the
+// main thread, and the instance methods Sentry calls from its own threads
+// (`sanitize`, the capture helpers) read no mutable state.
+final class CrashReporter: @unchecked Sendable {
     static let shared = CrashReporter()
 
     static var isAvailable: Bool {

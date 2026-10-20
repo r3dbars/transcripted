@@ -14,9 +14,10 @@
 // This file intentionally does not know about meetings or dictations. The
 // trash-planning logic for meetings already lives in `HomeMeetingDeletion`;
 // the day-file entry-removal logic already lives in `DictationTranscriptStore`.
-// Callers compute *what* to delete and hand this file the URLs / before-and-
-// after file content; this file only performs and reverses the mechanical
-// move/rewrite and runs the grace-window bookkeeping.
+// Callers perform the delete themselves (meetings through
+// `HomeMeetingDeletion.trash`/`restore` under the transcript serializer), then
+// call `stage` with the reversing action; this file only runs the
+// grace-window bookkeeping.
 
 import Combine
 import Foundation
@@ -81,47 +82,13 @@ final class CaptureUndoManager: ObservableObject {
         offers.first { $0.id == id }
     }
 
-    // MARK: Trash-based file deletion (meetings: transcript + retained audio)
-
-    /// Moves every URL in `urls` to the Trash immediately, then opens an
-    /// undo offer for `id`. `urls` is the flat file list a caller already
-    /// planned (e.g. `HomeMeetingDeletion.plan(for:)`'s transcript, summary,
-    /// and audio-directory URLs) — this performs and reverses the move, it
-    /// does not decide what belongs to one logical capture.
-    ///
-    /// `finalize` runs once the deletion becomes permanent (grace window
-    /// elapses, or an explicit `finalize(id)`/next `deleteFiles`
-    /// call for the same id) — use it for any additional bookkeeping the
-    /// existing deletion path did alongside the file removal (cache
-    /// invalidation, change notifications, etc.), not for anything that
-    /// needs to be reversible: reversible state belongs in the trash move
-    /// itself.
-    @discardableResult
-    func deleteFiles(
-        id: String,
-        urls: [URL],
-        message: String,
-        fileManager: FileManager = .default,
-        finalize: @escaping () -> Void = {}
-    ) throws -> UndoOffer {
-        cancelExisting(id)
-
-        let trashed = try CaptureTrashOperation.trash(urls, fileManager: fileManager)
-        let revert = {
-            CaptureTrashOperation.restore(trashed, fileManager: fileManager)
-        }
-
-        return register(id: id, message: message, revert: revert, finalize: finalize)
-    }
-
     // MARK: Staged reversible actions (caller already performed the mutation)
 
     /// Registers an undo offer for a reversible action the caller has
     /// ALREADY performed — e.g. a lock-protected day-file rewrite done by
     /// the owner of that file's grammar (`DictationTranscriptStore`).
     /// `undoAction` must fully reverse it; `finalize` runs when the action
-    /// becomes permanent. Unlike `deleteFiles`, this performs
-    /// no file work itself.
+    /// becomes permanent.
     @discardableResult
     func stage(
         id: String,
@@ -216,14 +183,13 @@ enum CaptureUndoError: LocalizedError {
     }
 }
 
-/// The reversible move/restore mechanics behind `deleteFiles`, kept
+/// The reversible move/restore mechanics behind `HomeMeetingDeletion`'s trash/restore, kept
 /// Foundation-pure (no `@MainActor`, no SwiftUI) so it is directly unit
 /// testable without the grace-window bookkeeping around it.
 enum CaptureTrashOperation {
     /// Moves every URL that exists on disk to the Trash, recording where
     /// each one landed. URLs that no longer exist are skipped (already gone
-    /// is not a failure — mirrors `HomeMeetingDeletion`'s existing-only
-    /// removal). On any failure partway through, moves everything already
+    /// is not a failure). On any failure partway through, moves everything already
     /// trashed back to its original location before rethrowing, so the
     /// operation is all-or-nothing.
     @discardableResult

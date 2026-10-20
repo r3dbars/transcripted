@@ -113,35 +113,6 @@ final class HomeViewModel: ObservableObject {
         scanWarningDismissed = true
     }
 
-    func removeVisibleMeeting(id: String) {
-        meetingSearchIndex?.removeMeeting(id: id)
-        meetingSearchResults?.removeAll { $0.id == id }
-        if isSearchingMeetings {
-            // An in-flight pass captured the index before this removal and
-            // would publish it back; restart it on the trimmed index.
-            runMeetingSearch(debounce: false)
-        }
-
-        var didRemove = false
-        meetingDaySections = meetingDaySections.compactMap { section in
-            let remainingItems = section.items.filter { item in
-                let shouldKeep = item.id != id
-                if !shouldKeep {
-                    didRemove = true
-                }
-                return shouldKeep
-            }
-            guard !remainingItems.isEmpty else { return nil }
-            return HomeDaySection(day: section.day, label: section.label, items: remainingItems)
-        }
-
-        guard didRemove else { return }
-        todayMeetingCount = meetingDaySections
-            .flatMap(\.items)
-            .filter { Calendar.current.isDateInToday($0.date) }
-            .count
-    }
-
     func loadMoreDictations() {
         guard !isLoading, !isLoadingMore, canLoadMoreDictations else { return }
         dictationLimit += initialDictationLimit

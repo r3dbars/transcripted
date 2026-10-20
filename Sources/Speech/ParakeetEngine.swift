@@ -295,10 +295,6 @@ class ParakeetEngine: ObservableObject {
         )
     }
 
-    func runAudioEngineWork<T>(_ work: @escaping (AVAudioEngine) -> T) async -> T {
-        await audioGraph.run(work)
-    }
-
     func installAudioObserversIfNeeded() {
         installAudioEngineConfigObserverIfNeeded()
 
@@ -396,10 +392,6 @@ class ParakeetEngine: ObservableObject {
 
     func currentAudioGraphOwnerToken() -> ParakeetAudioGraphOwnerToken {
         audioGraph.graphOwner
-    }
-
-    func ownsAudioGraph(_ owner: ParakeetAudioGraphOwnerToken) -> Bool {
-        audioGraph.owns(owner)
     }
 
     func currentAudioEngineQueueOwnerToken() -> ParakeetAudioEngineQueueOwnerToken {

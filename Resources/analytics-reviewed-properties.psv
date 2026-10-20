@@ -157,7 +157,6 @@ output_ducking_measurement
 output_rate_hz
 output_signal
 page_id
-paste_available
 pasteback_status
 pause_reason
 permission_kind

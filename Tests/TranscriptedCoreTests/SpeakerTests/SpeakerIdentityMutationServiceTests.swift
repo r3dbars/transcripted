@@ -1,9 +1,8 @@
 import Foundation
 import XCTest
-import SQLite3
 @testable import TranscriptedCore
 
-/// Covers `SpeakerIdentityMutationService`, the canonical rename/merge/discard sequence
+/// Covers `SpeakerIdentityMutationService`, the canonical rename/merge sequence
 /// that replaced three independently-implemented orderings (see the type's doc comment
 /// for the full history). These tests pin the one behavior none of the three old paths
 /// had everywhere: a transcript-write failure must leave the speaker database untouched,
@@ -98,6 +97,29 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         XCTAssertFalse(updated.contains("Speaker 0"))
     }
 
+    func testRenameReachesTranscriptsOfAProfileDuplicateCleanupAbsorbed() throws {
+        let voice = [Float](repeating: 0.1, count: 256)
+        let older = speakerDatabase.addOrUpdateSpeaker(embedding: voice, existingId: nil)
+        let olderURL = try writeTranscript(named: "older.md", speakerId: older.id, speakerName: "Speaker 2")
+        let keeper = speakerDatabase.addOrUpdateSpeaker(embedding: voice, existingId: nil)
+        _ = speakerDatabase.addOrUpdateSpeaker(embedding: voice, existingId: keeper.id)
+        speakerDatabase.mergeDuplicates(threshold: 0.6)
+        XCTAssertNil(speakerDatabase.getSpeaker(id: older.id), "cleanup absorbed the older profile")
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .rename(profileId: keeper.id, newName: "Dana"),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertTrue(outcome.succeeded)
+        XCTAssertEqual(outcome.updatedTranscriptCount, 1)
+        let updated = try String(contentsOf: olderURL, encoding: .utf8)
+        XCTAssertTrue(updated.contains(#"name: "Dana""#))
+        XCTAssertTrue(updated.contains("[System/Dana]"))
+        XCTAssertTrue(updated.contains(older.id.uuidString), "keeps its db_id so undoing the merge still finds it")
+    }
+
     func testRenameFailsClosedWhileAnyAffectedTranscriptIsBeingReplaced() throws {
         let speaker = speakerDatabase.addOrUpdateSpeaker(
             embedding: [Float](repeating: 0.1, count: 256),
@@ -121,6 +143,24 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: firstURL, encoding: .utf8), firstOriginal)
         XCTAssertEqual(try String(contentsOf: secondURL, encoding: .utf8), secondOriginal)
         TranscriptSaver.finishReplacingTranscript(reservation)
+    }
+
+    /// A profile row that vanished (absorbed or pruned by another meeting's cleanup)
+    /// must fail the rename and put the transcripts back, not report success.
+    func testRenameOfAProfileWithNoDatabaseRowFailsAndRestoresTranscripts() throws {
+        let missingId = UUID()
+        let transcriptURL = try writeTranscript(named: "gone.md", speakerId: missingId, speakerName: "Speaker 0")
+        let original = try String(contentsOf: transcriptURL, encoding: .utf8)
+
+        let outcome = try SpeakerIdentityMutationService.apply(
+            .rename(profileId: missingId, newName: "Dana"),
+            speakerDB: speakerDatabase,
+            directory: temporaryDirectory
+        )
+
+        XCTAssertFalse(outcome.succeeded)
+        XCTAssertNil(speakerDatabase.getSpeaker(id: missingId))
+        XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
     }
 
     /// Pins the new atomicity: when one of several affected transcripts can't be written,
@@ -346,62 +386,6 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: transcriptURL, encoding: .utf8), original)
     }
 
-    // MARK: - Discard
-
-    func testDiscardRestoresMatchedProfileSnapshotAndClearsTranscriptLink() throws {
-        let matched = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.3, count: 256), existingId: nil)
-        speakerDatabase.setDisplayName(id: matched.id, name: "Priya", source: NameSource.userManual)
-        guard let snapshot = speakerDatabase.getSpeaker(id: matched.id) else {
-            return XCTFail("expected snapshot")
-        }
-        // Simulate the review flow overwriting the profile with a tentative match before
-        // the user discards it — the snapshot is what gets restored.
-        speakerDatabase.setDisplayName(id: matched.id, name: "Wrong Guess", source: NameSource.userManual)
-        let transcriptURL = try writeTranscript(named: "discard.md", speakerId: matched.id, speakerName: "Wrong Guess")
-
-        var deletedCalled = false
-        let outcome = try SpeakerIdentityMutationService.apply(
-            .discard(profileId: matched.id, matchedProfileSnapshot: snapshot),
-            speakerDB: speakerDatabase,
-            directory: temporaryDirectory,
-            clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                onDiscardDeletedProfile: { _ in deletedCalled = true }
-            )
-        )
-
-        XCTAssertTrue(outcome.succeeded)
-        XCTAssertFalse(deletedCalled, "a snapshot restore must not also delete the profile")
-        XCTAssertEqual(speakerDatabase.getSpeaker(id: matched.id)?.displayName, "Priya")
-        XCTAssertEqual(speakerDatabase.getSpeaker(id: matched.id)?.disputeCount, 1)
-
-        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertFalse(updated.contains(matched.id.uuidString))
-        XCTAssertTrue(updated.contains("confidence: unknown"))
-        XCTAssertTrue(updated.contains("source: unknown"))
-    }
-
-    func testDiscardWithoutSnapshotDeletesProfileAndInvokesClipCleanup() throws {
-        let profile = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.4, count: 256), existingId: nil)
-        let transcriptURL = try writeTranscript(named: "discard-new.md", speakerId: profile.id, speakerName: "Speaker 0")
-
-        var deletedIds: [UUID] = []
-        let outcome = try SpeakerIdentityMutationService.apply(
-            .discard(profileId: profile.id, matchedProfileSnapshot: nil),
-            speakerDB: speakerDatabase,
-            directory: temporaryDirectory,
-            clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                onDiscardDeletedProfile: { id in deletedIds.append(id) }
-            )
-        )
-
-        XCTAssertTrue(outcome.succeeded)
-        XCTAssertEqual(deletedIds, [profile.id])
-        XCTAssertNil(speakerDatabase.getSpeaker(id: profile.id))
-
-        let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertFalse(updated.contains(profile.id.uuidString))
-    }
-
     // MARK: - Codex review follow-ups (PR #1630)
 
     /// P1a: a byte pre-scan match that can't be confirmed by a full read must abort the
@@ -433,52 +417,6 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
 
         // Nothing was mutated: the database still has the pre-rename name.
         XCTAssertEqual(speakerDatabase.getSpeaker(id: speaker.id)?.displayName, "Speaker 0")
-    }
-
-    /// P1b: a delete failure inside the discard mutation batch must roll the whole batch
-    /// back — the profile must survive and the transcript's database link must be restored
-    /// — not commit with the transcript link removed while the row stays.
-    func testDiscardDeleteFailureRollsBackTheBatch() throws {
-        let profile = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.4, count: 256), existingId: nil)
-        let transcriptURL = try writeTranscript(named: "discard-delete-fails.md", speakerId: profile.id, speakerName: "Speaker 0")
-        let original = try String(contentsOf: transcriptURL, encoding: .utf8)
-
-        // Deny DELETEs on the speakers table so the SQL step inside deleteSpeakerImpl fails.
-        // Mirrors the sqlite3_set_authorizer technique SpeakerNamingCoordinatorTests uses to
-        // force a deterministic DB-layer failure.
-        let authorizerResult = speakerDatabase.queue.sync {
-            sqlite3_set_authorizer(speakerDatabase.db, { _, action, tableName, _, _, _ in
-                guard action == SQLITE_DELETE, let tableName, String(cString: tableName) == "speakers" else {
-                    return SQLITE_OK
-                }
-                return SQLITE_DENY
-            }, nil)
-        }
-        XCTAssertEqual(authorizerResult, SQLITE_OK)
-        defer {
-            _ = speakerDatabase.queue.sync {
-                sqlite3_set_authorizer(speakerDatabase.db, nil, nil)
-            }
-        }
-
-        var deletedCalled = false
-        let outcome = try SpeakerIdentityMutationService.apply(
-            .discard(profileId: profile.id, matchedProfileSnapshot: nil),
-            speakerDB: speakerDatabase,
-            directory: temporaryDirectory,
-            clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                onDiscardDeletedProfile: { _ in deletedCalled = true }
-            )
-        )
-
-        XCTAssertFalse(outcome.succeeded)
-        XCTAssertFalse(deletedCalled, "clip cleanup must not run when the DB transaction fails")
-        XCTAssertNotNil(speakerDatabase.getSpeaker(id: profile.id), "the row must survive a rolled-back delete")
-        XCTAssertEqual(
-            try String(contentsOf: transcriptURL, encoding: .utf8),
-            original,
-            "the transcript's database link must be restored, not left removed"
-        )
     }
 
     /// P2a: when a restore itself can't be completed (even after the built-in retry), the

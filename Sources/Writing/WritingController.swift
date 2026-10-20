@@ -122,13 +122,6 @@ final class WritingController {
 
     var modelState: ModelState? { runtime?.models.manager.state }
 
-    var modelProgress: Double? {
-        guard case let .downloading(receivedBytes, totalBytes) = modelState, totalBytes > 0 else {
-            return nil
-        }
-        return min(1, max(0, Double(receivedBytes) / Double(totalBytes)))
-    }
-
     var runtimeState: LlamaRuntimeSnapshot? { runtime?.llamaServerHost.snapshot }
     /// The current model's store, while Writing runs.
     var modelManager: ModelManager? { runtime?.models.manager }

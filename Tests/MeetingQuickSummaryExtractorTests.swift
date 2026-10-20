@@ -309,6 +309,21 @@ func testMeetingQuickSummaryExtractor() {
         )
     }
 
+    runSuite("writer escapes backslashes in frontmatter values") {
+        let markdown = #"""
+        ---
+        capture_type: meeting
+        ---
+
+        ## Transcript
+
+        **00:01**  [Mic/Riley]
+        I'll copy the logs to C:\Users\shared before Monday.
+        """#
+        let updated = MeetingQuickSummaryWriter.markdown(byApplyingQuickSummaryTo: markdown) ?? ""
+        assertTrue(updated.contains(#"C:\\Users\\shared"#), "backslashes should be escaped inside double-quoted YAML")
+    }
+
     runSuite("writer is idempotent and skips non-meetings") {
         let alreadyDone = """
         ---

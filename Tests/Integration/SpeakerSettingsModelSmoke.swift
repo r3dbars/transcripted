@@ -211,6 +211,45 @@ import TranscriptedCore
             "rejected completion publishes the restored queue")
     }
 
+    @MainActor static func thisIsMeJoinsExistingOwnerBeforeCompletion() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let voice = try fixture.voice()
+        let owner = try fixture.voice(name: SpeakerNameSelectionPolicy.ownerLabel, embedding: [0, 1])
+        _ = try fixture.meeting(voice: voice, filename: "mine")
+        let model = await fixture.load()
+        let saved = await withCheckedContinuation { continuation in
+            model.markReviewVoiceAsMe(model.reviewQueueItems[0]) { continuation.resume(returning: $0) }
+        }
+        check(saved?.personID == owner.id && saved?.confirmedAfter == 1,
+            "This is me reports the existing You after the voice joined it")
+        check(fixture.database.getSpeaker(id: voice.id) == nil && model.profiles.count == 1,
+            "This is me leaves a single You profile")
+    }
+
+    @MainActor static func failedDeleteKeepsVoiceClip() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let voice = try fixture.voice(name: "Alex")
+        let clip = fixture.clips.appendingPathComponent("\(voice.id.uuidString).wav")
+        let model = await fixture.load()
+        var connection: OpaquePointer?
+        let opened = sqlite3_open(fixture.root.appendingPathComponent("speakers.sqlite").path, &connection)
+        check(opened == SQLITE_OK, "failure injection opens only the temporary database")
+        defer { sqlite3_close(connection) }
+        let trigger = sqlite3_exec(connection, """
+            CREATE TRIGGER reject_test_delete BEFORE DELETE ON speakers
+            BEGIN SELECT RAISE(ABORT, 'synthetic delete rejection'); END;
+            """, nil, nil, nil)
+        check(trigger == SQLITE_OK, "synthetic delete rejection is installed")
+        let didDelete = await withCheckedContinuation { continuation in
+            model.delete(profile: model.profiles[0]) { continuation.resume(returning: $0) }
+        }
+        check(!didDelete && fixture.database.getSpeaker(id: voice.id) != nil,
+            "a rejected delete reports failure and keeps the person")
+        check(FileManager.default.fileExists(atPath: clip.path), "a rejected delete keeps the voice clip")
+    }
+
     @MainActor static func main() async throws {
         guard ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1" else {
             fatalError("Smoke requires file logging disabled")
@@ -219,6 +258,8 @@ import TranscriptedCore
         try await existingNameJoinsAndDeduplicatesMeetings()
         try await failedSaveReturnsNoCelebrationOrMutation()
         try await databaseRejectionRestoresWrittenMeetings()
+        try await thisIsMeJoinsExistingOwnerBeforeCompletion()
+        try await failedDeleteKeepsVoiceClip()
         print("Speaker settings model smoke: \(assertions) assertions passed")
     }
 }

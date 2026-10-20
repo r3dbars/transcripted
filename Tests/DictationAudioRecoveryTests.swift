@@ -2,9 +2,9 @@
 //
 // Two kinds of coverage live in this file; they are NOT the same strength of proof:
 //
-// REAL BEHAVIORAL COVERAGE (compiled): the first four suites exercise the Foundation-pure
+// REAL BEHAVIORAL COVERAGE (compiled): the first five suites exercise the Foundation-pure
 // DictationAudioRecovery type compiled into the fast-test runner — silence detection,
-// quiet-speech focus/normalize/retry, sub-threshold burst rejection, and non-finite
+// quiet-speech focus/normalize/retry, sub-threshold burst rejection, no-op retry skip, and non-finite
 // sample-rate handling. These run the real logic and assert real outputs (analysis flags,
 // diagnostic context, retry sample shaping).
 //
@@ -88,6 +88,28 @@ func testDictationAudioRecovery() {
                 analysis: analysis
             ),
             "short bursts should not be retried"
+        )
+    }
+
+    runSuite("DictationAudioRecovery.retrySamples — skips a retry that would repeat the same audio") {
+        var samples = [Float](repeating: 0, count: 64_000)
+        for index in 1_000..<63_000 {
+            samples[index] = index.isMultiple(of: 2) ? 0.5 : -0.5
+        }
+
+        let analysis = DictationAudioRecovery.analyze(
+            samples: samples,
+            sampleRate: TranscriptedConstants.parakeetSampleRate
+        )
+
+        assertTrue(analysis.hasUsableSpeechSignal, "loud sustained audio should look like speech")
+        assertNil(
+            DictationAudioRecovery.retrySamples(
+                from: samples,
+                sampleRate: TranscriptedConstants.parakeetSampleRate,
+                analysis: analysis
+            ),
+            "loud audio active near both ends has nothing to trim or boost, so it should not be retried"
         )
     }
 

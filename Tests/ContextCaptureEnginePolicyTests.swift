@@ -112,6 +112,32 @@ func testContextCaptureEnginePolicy() {
         assertEqual(result.consumedKeyCodes, [fn], "the held key stays consumed; the released one is dropped")
     }
 
+    runSuite("Tap reinstall — a key held across it gets exactly one release") {
+        let rightOption = UInt32(kVK_RightOption)
+        var isDown = true
+        var releases = 0
+        var active: UInt32? = rightOption
+        var consumed: Set<UInt32> = [rightOption]
+        func reinstall() {
+            let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
+                activePushToTalkKeyCode: active,
+                consumedKeyCodes: consumed,
+                isPhysicallyDown: { _ in isDown }
+            )
+            active = result.activePushToTalkKeyCode
+            consumed = result.consumedKeyCodes
+            if result.synthesizesPushToTalkRelease { releases += 1 }
+        }
+        reinstall()
+        assertEqual(releases, 0, "a hold that survives the reinstall keeps recording")
+        assertEqual(active, rightOption, "the new tap still owns the held key, so its key-up ends the take")
+        isDown = false
+        reinstall()
+        reinstall()
+        assertEqual(releases, 1, "let go between reinstalls: one release, not one per reinstall")
+        assertNil(active, "push-to-talk is no longer active")
+    }
+
     runSuite("Tap re-enable — nothing active means no release") {
         let result = PhysicalShortcutMatcher.reconcileAfterTapDisabled(
             activePushToTalkKeyCode: nil,
@@ -147,32 +173,10 @@ func testContextCaptureEnginePolicy() {
         )
     }
 
-    runSuite("Delayed modifier press — checks the bound key, not the whole modifier family") {
-        let rightOption = UInt32(kVK_RightOption)
-        let leftOption = UInt32(kVK_Option)
-        let press = DelayedModifierShortcutPress(generation: 3, keyCode: rightOption, action: .dictationPushToTalk)
+    runSuite("Delayed modifier press — a cancelled press never activates") {
+        let press = DelayedModifierShortcutPress(generation: 3, keyCode: UInt32(kVK_RightOption), action: .dictationPushToTalk)
         assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: press,
-                expected: press,
-                keyState: { $0 == leftOption }
-            ),
-            "Left Option held must not start a Right Option push-to-talk"
-        )
-        assertTrue(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: press,
-                expected: press,
-                keyState: { $0 == rightOption }
-            ),
-            "the bound Right Option still held starts push-to-talk"
-        )
-        assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: nil,
-                expected: press,
-                keyState: { _ in true }
-            ),
+            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(current: nil, expected: press),
             "a press that was already cancelled never activates"
         )
     }

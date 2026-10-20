@@ -230,7 +230,7 @@ extension MeetingSessionController {
 
     /// Cancel any in-progress pipeline. Does not cancel an active recording —
     /// use stopRecording() for that.
-    func cancelActiveTranscription(reason: TranscriptionCancelReason = .unknown) {
+    func cancelActiveTranscription() {
         meetingActionIdentity = UUID()
         // An in-flight imported-audio copy is cancellable too. Cancelling the
         // task makes the preparer interrupt the copy and remove the partial
@@ -256,33 +256,20 @@ extension MeetingSessionController {
                 failedMeetingStore.preserveFailedMeetingForRetry(
                     transcriptionQueue.failedQueueRow(for: job, errorMessage: "Transcription cancelled")
                 )
-            case .imported(let audioURL, let suggestedTitle, let recordingDate):
-                if reason == .userRequested {
-                    guard transcriptionQueue.prepareImportedScratchCleanup(for: job) else {
-                        continue
-                    }
-                    do {
-                        try FileManager.default.removeItem(at: audioURL)
-                        transcriptionQueue.confirmImportedScratchCleanup(for: job)
-                    } catch where (error as NSError).code == NSFileNoSuchFileError {
-                        transcriptionQueue.confirmImportedScratchCleanup(for: job)
-                    } catch {
-                        AppLogger.pipeline.warning("Failed to discard queued imported scratch audio", [
-                            "file": audioURL.lastPathComponent,
-                            "errorType": String(describing: type(of: error))
-                        ])
-                    }
-                } else {
-                    if failedMeetingStore.preserveFailedMeetingForRetry(
-                        micAudioURL: nil,
-                        systemAudioURL: audioURL,
-                        errorMessage: "Imported audio saved before cancellation. Audio is safe; finish the transcript from the Meetings page.",
-                        meetingTitle: suggestedTitle,
-                        recordingDate: recordingDate,
-                        languageSelection: job.languageSelection
-                    ) {
-                        transcriptionQueue.confirmImportedFailedQueueHandoff(for: job)
-                    }
+            case .imported(let audioURL, _, _):
+                guard transcriptionQueue.prepareImportedScratchCleanup(for: job) else {
+                    continue
+                }
+                do {
+                    try FileManager.default.removeItem(at: audioURL)
+                    transcriptionQueue.confirmImportedScratchCleanup(for: job)
+                } catch where (error as NSError).code == NSFileNoSuchFileError {
+                    transcriptionQueue.confirmImportedScratchCleanup(for: job)
+                } catch {
+                    AppLogger.pipeline.warning("Failed to discard queued imported scratch audio", [
+                        "file": audioURL.lastPathComponent,
+                        "errorType": String(describing: type(of: error))
+                    ])
                 }
             }
         }
@@ -305,7 +292,7 @@ extension MeetingSessionController {
             engine: "meeting",
             event: "meeting_transcription_cancelled",
             message: "Meeting transcription cancelled",
-            context: baseDiagnosticsContext(extra: ["reason": reason.rawValue])
+            context: baseDiagnosticsContext(extra: ["reason": "user_requested"])
         )
         Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "transcription_cancelled")
     }

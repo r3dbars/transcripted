@@ -1,19 +1,19 @@
-// Security contracts: manifest checks, offline built-app behavior, and source checks.
+// Security contracts: manifest checks and the nightly checker's behavior.
 // The suites parsing config/security/nightly-security-manifest.json are real data
-// contracts (they decode and validate manifest values). The remaining doc and
-// checker-script suites mostly pin source structure. The offline built-app
-// suite invokes Python behavioral tests with synthetic plists and signed-payload
-// stubs; it does not require real signing, keychain access, or hardware.
+// contracts (they decode and validate manifest values). The checker's own
+// behavior (built-app entitlements per channel, version drift, release-health
+// gates, PostHog schema, Sentry lookups, forbidden entitlements) is tested by
+// scripts/ops/test-nightly-security-check.py on synthetic fixtures; the first
+// suite runs it. No real signing, keychain access, network, or hardware.
+// The one suite that still reads text checks that docs and the agent preflight
+// point at the checker: that promise is about the words in those files.
 
 import Foundation
 
 func testNightlySecurityContract() {
-    runSuite("Nightly built-app security enforces the exact contract for each build channel") {
-        let result = runNightlySecurityChecker(
-            arguments: [],
-            script: "scripts/ops/test-nightly-security-check.py"
-        )
-        assertEqual(result.status, 0, "offline signed-app entitlement fixtures should pass: \(result.output)")
+    runSuite("The nightly security checker passes its offline behavior tests") {
+        let result = runRepoPythonScript("scripts/ops/test-nightly-security-check.py", arguments: [])
+        assertEqual(result.status, 0, "the checker's synthetic-fixture tests should pass: \(result.output)")
     }
 
     runSuite("Nightly security manifest is parseable and weights sum to 100") {
@@ -94,7 +94,9 @@ func testNightlySecurityContract() {
         let forbidden = Set(manifest["forbidden_entitlements"]?.arrayValue?.compactMap(\.stringValue) ?? [])
         let localEntitlements = Set(loadPlistDictionary("config/entitlements/local.plist").keys)
         let betaEntitlements = Set(loadPlistDictionary("config/entitlements/beta.plist").keys)
-        let checker = (try? String(contentsOf: repoFixtureURL("scripts/ops/nightly-security-check.py"), encoding: .utf8)) ?? ""
+        // The checker rejecting these in the committed plists and in a built
+        // app is tested in scripts/ops/test-nightly-security-check.py
+        // (CommittedEntitlementTests, BuiltAppEntitlementTests).
 
         assertTrue(
             forbidden.contains("com.apple.security.files.user-selected.read-write"),
@@ -115,14 +117,6 @@ func testNightlySecurityContract() {
         assertTrue(
             betaEntitlements.isDisjoint(with: forbidden),
             "beta entitlements should not include forbidden broad OS permissions"
-        )
-        assertTrue(
-            checker.contains("forbidden_entitlements"),
-            "nightly checker should enforce the forbidden-entitlements contract"
-        )
-        assertTrue(
-            checker.contains("built-forbidden-entitlements"),
-            "built app verification should reject forbidden entitlements too"
         )
     }
 
@@ -148,11 +142,13 @@ func testNightlySecurityContract() {
         )
     }
 
-    runSuite("Nightly security docs reference the deterministic checker") {
+    // Text on purpose: the promise is that these docs and the agent preflight
+    // name the checker, which only the words in those files can show.
+    runSuite("Nightly security docs and the agent preflight point at the deterministic checker") {
         let scriptsReadme = (try? String(contentsOf: repoFixtureURL("scripts/README.md"), encoding: .utf8)) ?? ""
         let privacyDoc = (try? String(contentsOf: repoFixtureURL("docs/privacy-first-observability.md"), encoding: .utf8)) ?? ""
         let releaseDoc = (try? String(contentsOf: repoFixtureURL("docs/release-packaging.md"), encoding: .utf8)) ?? ""
-        let testMatrix = (try? String(contentsOf: repoFixtureURL(".agents/test-matrix.yml"), encoding: .utf8)) ?? ""
+        let preflight = (try? String(contentsOf: repoFixtureURL("scripts/dev/agent-preflight.sh"), encoding: .utf8)) ?? ""
 
         assertTrue(scriptsReadme.contains("nightly-security-check.py"), "scripts README should mention the nightly security checker")
         assertTrue(scriptsReadme.contains("--strict --live-release-surfaces"), "scripts README should show the live release-health gate")
@@ -161,50 +157,52 @@ func testNightlySecurityContract() {
         assertTrue(privacyDoc.contains("privacy-leak-sweep.py"), "privacy observability doc should mention the synthetic privacy leak sweep")
         assertTrue(releaseDoc.contains("--strict --live-release-surfaces"), "release packaging docs should point release agents at the strict live-surface gate")
         assertTrue(releaseDoc.contains("privacy-leak-sweep.py"), "release docs should route release-note privacy checks through the synthetic sweep")
-        assertTrue(testMatrix.contains("privacy-leak-sweep.py"), "test matrix should route edits to the privacy leak sweep checks")
-    }
-
-    runSuite("Nightly security checker exposes strict release-health flags") {
-        let checker = (try? String(contentsOf: repoFixtureURL("scripts/ops/nightly-security-check.py"), encoding: .utf8)) ?? ""
-        let preflight = (try? String(contentsOf: repoFixtureURL("scripts/dev/agent-preflight.sh"), encoding: .utf8)) ?? ""
-        let matrix = (try? String(contentsOf: repoFixtureURL(".agents/test-matrix.yml"), encoding: .utf8)) ?? ""
-
-        assertTrue(checker.contains("--strict"), "nightly checker should expose a failing gate mode")
-        assertTrue(checker.contains("--live-release-surfaces"), "nightly checker should expose live release-surface checks")
-        assertTrue(checker.contains("--github-release-json"), "nightly checker should accept deterministic GitHub release fixtures")
-        assertTrue(checker.contains("live_appcast_urls"), "live release-surface checks should include the Sparkle feed used by installed apps")
-        assertTrue(checker.contains("--sentry-release-health"), "nightly checker should expose Sentry release existence checks")
-        assertTrue(checker.contains("--require-sentry-release-health"), "nightly checker should expose required Sentry release checks")
-        assertTrue(checker.contains("--require-release-debug-files"), "nightly checker should expose release dSYM verification")
-        assertTrue(checker.contains("has_required_release_health_failure"), "required release-health checks should fail even outside strict mode")
-        assertTrue(checker.contains("has_blocking_release_health_watch_item"), "release-health checks should fail on stale appcast watch items")
-        assertTrue(checker.contains("should_check_automation_prompt"), "release-health gates should not depend on local Codex automation state")
-        assertFalse(checker.contains("SENTRY_AUTH_TOKEN is not configured"), "Sentry release checks should let configured sentry-cli auth attempt the lookup")
-        assertTrue(checker.contains("info-version-build-mismatch"), "nightly checker should fail bundle short/build version drift before release")
-        assertTrue(checker.contains("appcast-version-field-missing"), "nightly checker should fail appcast entries missing either Sparkle version field")
-        assertTrue(checker.contains("appcast-version-build-mismatch"), "nightly checker should fail appcast short/build version drift")
-        assertTrue(checker.contains("is_unreleased_patch_candidate"), "nightly checker should keep the one-patch release-candidate exception explicit")
-        assertTrue(checker.contains("check_cask"), "nightly checker should verify Homebrew cask parity")
-        assertTrue(checker.contains("check_github_release_metadata"), "nightly checker should verify GitHub release asset metadata")
-        assertTrue(checker.contains("github-release-asset-digest"), "nightly checker should compare the cask checksum to the GitHub asset digest")
-        assertTrue(checker.contains("check_observability_payload_keys"), "nightly checker should scan observability allowlists for raw payload keys")
-        assertTrue(checker.contains("check_posthog_health_schema"), "nightly checker should pin PostHog health schema to AnalyticsEventPolicy")
-        assertTrue(checker.contains("first_value_sources"), "PostHog first-value event checks should inspect each probe source independently")
-        assertTrue(checker.contains("posthog-first-value-schema-"), "PostHog first-value drift findings should identify the missing probe source")
         assertTrue(
             preflight.contains("python3 scripts/dev/test-matrix-checks.py --matrix .agents/test-matrix.yml"),
             "agent preflight should execute the matrix that owns the strict checker command"
         )
-        assertTrue(matrix.contains("--github-release-json Tests/Fixtures/release-health-github-release-1.1.72.json"), "test matrix should suggest a strict checker command with deterministic GitHub release metadata")
+    }
+
+    runSuite("Editing the nightly checker or the privacy sweep routes to its gate") {
+        let checkerRoute = runRepoPythonScript(
+            "scripts/dev/test-matrix-checks.py",
+            arguments: ["--matrix", ".agents/test-matrix.yml", "scripts/ops/nightly-security-check.py"]
+        )
+        assertEqual(checkerRoute.status, 0, "the matrix should select checks for the nightly checker: \(checkerRoute.output)")
+        let strictCommand = checkerRoute.output
+            .split(separator: "\n")
+            .map(String.init)
+            .first { $0.contains("scripts/ops/nightly-security-check.py") && $0.contains("--strict") }
+        assertNotNil(strictCommand, "editing the nightly checker should suggest its strict gate")
+        let arguments = strictCommand?.split(separator: " ").map(String.init) ?? []
+        let releaseFixture = arguments.firstIndex(of: "--github-release-json").flatMap { index in
+            arguments.indices.contains(index + 1) ? arguments[index + 1] : nil
+        }
+        assertNotNil(releaseFixture, "the strict gate should run with deterministic GitHub release metadata")
+        if let releaseFixture {
+            assertTrue(
+                FileManager.default.fileExists(atPath: repoFixtureURL(releaseFixture).path),
+                "the strict gate's GitHub release fixture \(releaseFixture) should exist"
+            )
+        }
+
+        let sweepRoute = runRepoPythonScript(
+            "scripts/dev/test-matrix-checks.py",
+            arguments: ["--matrix", ".agents/test-matrix.yml", "scripts/ops/privacy-leak-sweep.py"]
+        )
+        assertTrue(
+            sweepRoute.output.split(separator: "\n").contains { $0.hasPrefix("python3 scripts/ops/privacy-leak-sweep.py") },
+            "editing the privacy leak sweep should suggest running it: \(sweepRoute.output)"
+        )
     }
 
     runSuite("Nightly security checker fails stale GitHub release asset metadata") {
-        let passing = runNightlySecurityChecker(arguments: [
+        let passing = runRepoPythonScript("scripts/ops/nightly-security-check.py", arguments: [
             "--strict",
             "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
             "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.72.json"
         ])
-        let staleCask = runNightlySecurityChecker(arguments: [
+        let staleCask = runRepoPythonScript("scripts/ops/nightly-security-check.py", arguments: [
             "--strict",
             "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
             "--github-release-json", "Tests/Fixtures/release-health-github-release-stale-cask.json"
@@ -233,13 +231,10 @@ private struct ShellResult {
     let output: String
 }
 
-private func runNightlySecurityChecker(
-    arguments: [String],
-    script: String = "scripts/ops/nightly-security-check.py"
-) -> ShellResult {
+private func runRepoPythonScript(_ script: String, arguments: [String]) -> ShellResult {
     let process = Process()
     let outputURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
-        .appendingPathComponent("nightly-security-check-\(UUID().uuidString).log")
+        .appendingPathComponent("nightly-security-contract-\(UUID().uuidString).log")
     FileManager.default.createFile(atPath: outputURL.path, contents: nil)
     guard let outputHandle = try? FileHandle(forWritingTo: outputURL) else {
         return ShellResult(status: -127, output: "Unable to create checker output file")

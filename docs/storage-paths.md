@@ -75,7 +75,8 @@ library moves:
   the keyboard socket `ghost.sock`, `runtime.lock`, the text-free
   `Outcome Ledger/` and `Word Diary/` (Tilde's plaintext word diary isn't
   ported; accepted text is saved only by Save my writing), and the encrypted
-  `Personal History/`
+  `Personal History/`. `Outcome Ledger/events.jsonl` is cut back to its newest
+  12 MiB once it passes 24 MiB, which still covers the seven-day window
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
   excluded from backup. The Writing tab's **Delete model** empties this folder
   (never Delete all writing); it refuses the folder if it's a symlink
@@ -134,6 +135,14 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 
 - MCP helper: `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`
 - MCP directory manifest: `~/Library/Application Support/Transcripted/mcp-directories.json`
+
+The opt-in live meeting helper (`Tools/TranscriptedLive`) writes outside the app's folder, under
+`~/Library/Application Support/TranscriptedLive/` (or `TRANSCRIPTED_LIVE_DIR`):
+
+- `session.json`: the helper's state and current ghost lines
+- `meetings/<id>.jsonl`: the rough transcript of each meeting it heard; the helper deletes ones older
+  than 24 h when it starts. Deleting a meeting in the app, moving the capture library and the app's
+  cleanup never touch this folder
 
 Script-installed experimental models (never downloaded by the app) live under:
 

@@ -197,9 +197,7 @@ extension DictationSessionController {
             sessionID: sessionID, currentSessionID: currentDictationSessionID,
             isDictating: isDictating, cancelled: Task.isCancelled
         ) else { return .disabled }
-        if pasteOutcome.requiresClipboardReadinessBeforeAutoSend {
-            await textPaster.waitForClipboardReadyForAutoEnter()
-        }
+        await textPaster.waitForClipboardReadyForAutoEnter()
         guard DictationSessionCompletionPolicy.canPublish(
             sessionID: sessionID, currentSessionID: currentDictationSessionID,
             isDictating: isDictating, cancelled: Task.isCancelled

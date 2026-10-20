@@ -231,7 +231,7 @@ enum MeetingImportPublisher {
     private static func dateStamp(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        // Local time, like app-made meetings, so filenames sort with them.
         formatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
         return formatter.string(from: date)
     }

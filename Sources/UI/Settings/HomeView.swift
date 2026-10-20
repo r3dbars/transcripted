@@ -189,7 +189,17 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
         @objc private func invoke() {
             guard isEnabled else { return }
+            let handler = MainQueueHandler(run: self.handler)
             DispatchQueue.main.async { [handler] in handler() }
+        }
+
+        /// Carries the handler across the main-to-main hop above. `invoke` runs
+        /// on main (AppKit menu action) and the block runs on `DispatchQueue.main`,
+        /// so the non-Sendable closure never leaves the main thread.
+        private struct MainQueueHandler: @unchecked Sendable {
+            let run: () -> Void
+
+            func callAsFunction() { run() }
         }
     }
 
@@ -399,6 +409,7 @@ struct HomeFailedMeetingInlineRow: View {
                 HomeRowMenuItem(
                     title: rowActions.deleteTitle,
                     symbolName: "trash",
+                    isEnabled: !rowActions.deleteDisabled,
                     isDestructive: rowActions.deleteIsDestructive,
                     action: onClear
                 )
@@ -517,11 +528,6 @@ private struct HomeAttentionActionButton: View {
     private var shadowColor: Color {
         isDisabled ? Color.clear : tint.opacity(0.16)
     }
-}
-
-enum HomeHitTarget {
-    static let minimum: CGFloat = 40
-    static let compactVisibleSize: CGFloat = 26
 }
 
 private struct HomeCompactIconButtonStyle: ButtonStyle {

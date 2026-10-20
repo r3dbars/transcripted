@@ -345,6 +345,31 @@ final class FailedTranscriptionManagerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
     }
 
+    func testCorruptQueueIsBackedUpEvenWhenAnOlderBackupExists() throws {
+        let paths = makePaths(root: testRoot)
+        let stateDir = paths.failedQueue.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)
+        let olderCorrupt = Data("older-corrupt-queue".utf8)
+        let newerCorrupt = Data("newer-corrupt-queue".utf8)
+        try olderCorrupt.write(to: stateDir.appendingPathComponent("failed_transcriptions_backup.json"))
+        try newerCorrupt.write(to: paths.failedQueue)
+        let micURL = paths.audioCaptures.appendingPathComponent("safe-mic.wav")
+        FileManager.default.createFile(atPath: micURL.path, contents: Data("mic".utf8))
+
+        let manager = FailedTranscriptionManager(paths: paths)
+        XCTAssertTrue(manager.addFailedTranscription(
+            micAudioURL: micURL,
+            systemAudioURL: nil,
+            errorMessage: "Temporary transcription failure"
+        ))
+
+        let saved = try FileManager.default.contentsOfDirectory(at: stateDir, includingPropertiesForKeys: nil)
+            .map { try Data(contentsOf: $0) }
+        XCTAssertTrue(saved.contains(olderCorrupt))
+        XCTAssertTrue(saved.contains(newerCorrupt))
+    }
+
     func testInitKeepsMicOnlyMissingSystemAudioFailuresRetryable() throws {
         let paths = makePaths(root: testRoot)
         try FileManager.default.createDirectory(at: paths.audioCaptures, withIntermediateDirectories: true)

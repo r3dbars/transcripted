@@ -234,7 +234,7 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
     /// Starts one operation's budget and calls `expire` when it runs out.
     /// Tests pass a timer they fire by hand, so "the work entered before its
     /// budget ran out" is a fact the test sets up, not a race with host load.
-    typealias TimeoutScheduler = (_ timeoutNanoseconds: UInt64, _ expire: @escaping () -> Void) -> Void
+    typealias TimeoutScheduler = @Sendable (_ timeoutNanoseconds: UInt64, _ expire: @escaping @Sendable () -> Void) -> Void
 
     static let wallClockTimeouts: TimeoutScheduler = { timeoutNanoseconds, expire in
         DispatchQueue.global(qos: .userInitiated).asyncAfter(
@@ -244,6 +244,27 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
     }
 
     private static let maximumTimedOutWorkers = 2
+
+    /// One scheduled operation's "who finished first" flags, shared by the
+    /// work block and its timeout. `@unchecked Sendable`: both flags are only
+    /// read or written under `lock`.
+    private final class CompletionState: @unchecked Sendable {
+        let lock = NSLock()
+        var didComplete = false
+        var didStart = false
+    }
+
+    /// The caller's closures, handed to the worker queue and the timeout.
+    /// `@unchecked Sendable`: callers write them to run off the main actor,
+    /// `work` and the late cleanup run only on the worker queue, and
+    /// `completion` runs once, on whichever side claims `CompletionState`.
+    private struct Callbacks<Value>: @unchecked Sendable {
+        let value: Value
+
+        init(_ value: Value) {
+            self.value = value
+        }
+    }
 
     private let lock = NSLock()
     private let label: String
@@ -310,23 +331,27 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
             return
         }
 
-        let completionLock = NSLock()
-        var didComplete = false
-        var didStart = false
+        let completionState = CompletionState()
+        let callbacks = Callbacks((
+            work: work,
+            completion: completion,
+            cleanupAfterLateCompletion: cleanupAfterLateCompletion
+        ))
         let timeoutMs = Int(timeoutNanoseconds / 1_000_000)
 
         lease.0.async { [self] in
-            let shouldRun = completionLock.withLock {
-                guard !didComplete else { return false }
-                didStart = true
+            let (work, completion, cleanupAfterLateCompletion) = callbacks.value
+            let shouldRun = completionState.lock.withLock {
+                guard !completionState.didComplete else { return false }
+                completionState.didStart = true
                 return true
             }
             guard shouldRun else { return }
 
             let value = work()
-            let completedBeforeTimeout = completionLock.withLock {
-                guard !didComplete else { return false }
-                didComplete = true
+            let completedBeforeTimeout = completionState.lock.withLock {
+                guard !completionState.didComplete else { return false }
+                completionState.didComplete = true
                 return true
             }
 
@@ -339,12 +364,13 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
         }
 
         scheduleTimeout(timeoutNanoseconds) { [self] in
-            let timedOut = completionLock.withLock { () -> Bool in
-                guard !didComplete else { return false }
-                didComplete = true
+            let completion = callbacks.value.completion
+            let timedOut = completionState.lock.withLock { () -> Bool in
+                guard !completionState.didComplete else { return false }
+                completionState.didComplete = true
                 handleTimeout(
                     ifGeneration: lease.1,
-                    workStarted: didStart
+                    workStarted: completionState.didStart
                 )
                 return true
             }

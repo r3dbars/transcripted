@@ -259,7 +259,7 @@ func testDictationTranscriptStore() {
         assertEqual(pruned.totalWords, 6, "deleted day files should be removed from word totals")
     }
 
-    runSuite("DictationTranscriptStore.deleteEntry — removes only the matching entry ID") {
+    runSuite("DictationTranscriptStore.deleteEntryReversibly — removes only the matching entry ID") {
         let fm = FileManager.default
         let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
@@ -308,9 +308,9 @@ func testDictationTranscriptStore() {
         }
 
         do {
-            try DictationTranscriptStore.deleteEntry(second)
+            _ = try DictationTranscriptStore.deleteEntryReversibly(second)
         } catch {
-            assertionFailure("deleteEntry should not throw: \(error)")
+            assertionFailure("deleteEntryReversibly should not throw: \(error)")
         }
 
         let remainingContent = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
@@ -321,11 +321,11 @@ func testDictationTranscriptStore() {
         assertEqual(
             dictationStoreFilePermissions(of: dayFile),
             NSNumber(value: 0o600),
-            "deleteEntry rewrites should restore owner-only permissions"
+            "deleteEntryReversibly rewrites should restore owner-only permissions"
         )
     }
 
-    runSuite("DictationTranscriptStore.deleteEntry — same-timestamp saved entries keep distinct IDs") {
+    runSuite("DictationTranscriptStore.deleteEntryReversibly — same-timestamp saved entries keep distinct IDs") {
         let fm = FileManager.default
         let tempRoot = temporaryDictationStoreTestRoot(fileManager: fm)
         let outputDir = tempRoot.appendingPathComponent("dictations", isDirectory: true)
@@ -359,9 +359,9 @@ func testDictationTranscriptStore() {
         }
 
         do {
-            try DictationTranscriptStore.deleteEntry(second)
+            _ = try DictationTranscriptStore.deleteEntryReversibly(second)
         } catch {
-            assertionFailure("deleteEntry should not throw for unique same-timestamp save: \(error)")
+            assertionFailure("deleteEntryReversibly should not throw for unique same-timestamp save: \(error)")
         }
 
         let remainingEntries = DictationTranscriptStore.recentSavedDictations(limit: 5, directory: outputDir)

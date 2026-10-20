@@ -95,8 +95,8 @@ struct CaptureLibraryMigrationPlanner {
 
         if !markdownFiles(in: meetings).isEmpty { return true }
         if !directoryContents(of: audioDirectory(in: meetings)).isEmpty { return true }
-        if !markdownFiles(in: dictations).isEmpty { return true }
-        if !markdownFiles(in: writing).isEmpty { return true }
+        if !markdownFiles(in: dictations, prefix: Self.dictationDayFilePrefix).isEmpty { return true }
+        if !markdownFiles(in: writing, prefix: Self.writingDayFilePrefix).isEmpty { return true }
         return false
     }
 
@@ -136,7 +136,7 @@ struct CaptureLibraryMigrationPlanner {
         }
 
         let destinationDictations = dictationsDirectory(in: destination)
-        for dayFile in markdownFiles(in: dictationsDirectory(in: source)) {
+        for dayFile in markdownFiles(in: dictationsDirectory(in: source), prefix: Self.dictationDayFilePrefix) {
             plan(.dictationTranscript, from: dayFile, into: destinationDictations)
         }
 
@@ -159,7 +159,7 @@ struct CaptureLibraryMigrationPlanner {
         // skip, and Move keeps an original that changed after its copy (today's
         // file gains entries while the user keeps typing).
         let destinationWriting = writingDirectory(in: destination)
-        for dayFile in markdownFiles(in: writingDirectory(in: source)) {
+        for dayFile in markdownFiles(in: writingDirectory(in: source), prefix: Self.writingDayFilePrefix) {
             plan(.writingTranscript, from: dayFile, into: destinationWriting)
         }
 
@@ -318,9 +318,15 @@ struct CaptureLibraryMigrationPlanner {
         )) ?? []
     }
 
-    private func markdownFiles(in directory: URL) -> [URL] {
+    // Only the names the app itself writes, so other Markdown a user keeps in
+    // dictations/ or writing/ is never copied or sent to the Trash by a Move.
+    // meetings/ has no filename rule, so it takes every .md.
+    private static let dictationDayFilePrefix = "Dictations_"
+    private static let writingDayFilePrefix = "Writing_"
+
+    private func markdownFiles(in directory: URL, prefix: String = "") -> [URL] {
         directoryContents(of: directory)
-            .filter { $0.pathExtension.lowercased() == "md" && !isDirectory($0) }
+            .filter { $0.pathExtension.lowercased() == "md" && $0.lastPathComponent.hasPrefix(prefix) && !isDirectory($0) }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
 

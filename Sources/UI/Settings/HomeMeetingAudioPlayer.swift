@@ -119,7 +119,7 @@ private struct HomePodcastPlayerButton: View {
     let action: () -> Void
 
     private var hitTargetSize: CGFloat {
-        max(size, HomeHitTarget.minimum)
+        HomeHitTarget.hitSize(forVisibleSize: size)
     }
 
     var body: some View {

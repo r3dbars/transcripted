@@ -3,44 +3,6 @@ import Foundation
 import CoreAudio
 import Synchronization
 
-/// What a pinned microphone capture reports to its owner. Delivered on the
-/// capture's serial queue. `.gap` and `.silentInput` are in order with the
-/// audio buffers; the state events (`.restarted`, `.deviceLost`, `.failed`)
-/// are reported as soon as they happen.
-public enum PinnedMicrophoneCaptureEvent: Equatable, Sendable {
-    /// Audio resumed after a hole: a restart, a dropped callback, a device
-    /// switch, or a wake. `paddedSeconds` of silence follow this event, ahead
-    /// of the next real buffer, so the timeline stays continuous (zero when
-    /// padding is off; less than `seconds` when the hole was longer than
-    /// `maxSilencePadSeconds`). Long pads are paced across timer ticks so the
-    /// owner's writer never takes them in one burst.
-    case gap(seconds: TimeInterval, paddedSeconds: TimeInterval)
-    /// The IOProc was rebuilt on the same pinned device.
-    case restarted(PinnedMicrophoneRestartTrigger)
-    /// The pinned device went away. Nothing is captured until the owner calls
-    /// `switchDevice(to:)` or stops. `isWaitingForDevice` stays true until then.
-    case deviceLost
-    /// The device has delivered `silentInputDetectionSeconds` of samples that
-    /// are all exactly 0.0 (a closed MacBook lid, a digitally muted input).
-    /// Reported once per device; `switchDevice(to:)` re-arms it. Capture keeps
-    /// running; the owner decides whether to move to another input.
-    case silentInput
-    /// Capture cannot continue on its own. The owner should stop.
-    case failed(String)
-}
-
-public enum PinnedMicrophoneRestartTrigger: String, Sendable {
-    case stall
-    case formatChange = "format_change"
-}
-
-public struct PinnedMicrophoneCaptureDiagnostics: Equatable, Sendable {
-    public let restarts: Int
-    public let gaps: Int
-    public let paddedSeconds: TimeInterval
-    public let droppedCallbacks: Int
-}
-
 /// Records one specific input device through a Core Audio IOProc bound to
 /// its `AudioDeviceID`, the same way `CoreAudioSystemAudioCapture` reads the
 /// system-audio tap.
@@ -90,7 +52,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
 
     /// Why a queued item waits: silence padding is paced, and real buffers and
     /// in-order events queued behind it must not overtake it.
-    private enum PendingOutput {
+    enum PendingOutput {
         case audio(AVAudioPCMBuffer)
         case silence(frames: Int)
         case event(PinnedMicrophoneCaptureEvent)
@@ -140,8 +102,8 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private let queue = DispatchQueue(label: "Transcripted.PinnedMicrophoneCapture", qos: .userInitiated)
     private let queueKey = DispatchSpecificKey<Bool>()
     private let listenerQueue = DispatchQueue(label: "Transcripted.PinnedMicrophoneCapture.listeners", qos: .userInitiated)
-    private let configuration: Configuration
-    private let hardwareHooks: HardwareHooks?
+    let configuration: Configuration
+    let hardwareHooks: HardwareHooks?
     private let clock: () -> TimeInterval
 
     private var pinnedDeviceID: AudioDeviceID
@@ -154,27 +116,27 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private var listeners: [(address: AudioObjectPropertyAddress, block: AudioObjectPropertyListenerBlock)] = []
     /// The recording's format, fixed at the first prepare: owners size their
     /// files and sample timelines from it.
-    private var format: AVAudioFormat?
+    var format: AVAudioFormat?
     /// The live device format. Differs from `format` after the device changed
     /// rate or channels; `converter` then resamples back.
-    private var deviceFormat: AVAudioFormat?
-    private var converter: AVAudioConverter?
-    private var callback: ((AVAudioPCMBuffer) -> Void)?
-    private var eventHandler: ((PinnedMicrophoneCaptureEvent) -> Void)?
+    var deviceFormat: AVAudioFormat?
+    var converter: AVAudioConverter?
+    var callback: ((AVAudioPCMBuffer) -> Void)?
+    var eventHandler: ((PinnedMicrophoneCaptureEvent) -> Void)?
     private var timer: DispatchSourceTimer?
     /// Hardware is running (IOProc started).
     private var running = false
     /// Between a successful start and stop/finish, including while waiting
     /// for the owner to replace a lost device.
     private var active = false
-    private var tearingDown = false
+    var tearingDown = false
     private var waitingForDevice = false
     /// Set by `fail`: waiting for nothing, the owner should stop.
     private var hasFailed = false
-    private var generation: UInt64 = 0
+    var generation: UInt64 = 0
     private var lastBufferClock: TimeInterval = 0
     private var lastFormatCheck: TimeInterval = 0
-    private var expectedNextHostSeconds: TimeInterval?
+    var expectedNextHostSeconds: TimeInterval?
     private var consecutiveRestarts = 0
     private var consecutiveFormatSettleRebuilds = 0
     private var sleepPendingSince: TimeInterval?
@@ -193,12 +155,12 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     private var rebuildRetryAt: TimeInterval?
     private var rebuildRetryAttempt = 0
     private var rebuildRetryTrigger: PinnedMicrophoneRestartTrigger = .formatChange
-    private var pendingOutput: [PendingOutput] = []
-    private var silentInputRunSeconds: TimeInterval = 0
-    private var silentInputReported = false
+    var pendingOutput: [PendingOutput] = []
+    var silentInputRunSeconds: TimeInterval = 0
+    var silentInputReported = false
     private var restartCount = 0
-    private var gapCount = 0
-    private var paddedSecondsTotal: TimeInterval = 0
+    var gapCount = 0
+    var paddedSecondsTotal: TimeInterval = 0
     private var retiredDroppedCallbacks = 0
     /// Owner-facing copies, so main-thread readers never wait on `queue`
     /// while it is inside a slow HAL call. Written only from `queue`.
@@ -757,340 +719,6 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         emit(.failed(message))
     }
 
-    private func emit(_ event: PinnedMicrophoneCaptureEvent) {
-        eventHandler?(event)
-    }
-
-    /// Hands `item` to the owner now when nothing waits ahead of it, else
-    /// queues it behind the pending pad so order is kept. Silence is always
-    /// queued: it is only ever delivered by `flushPendingOutput`, paced.
-    private func deliverInOrder(_ item: PendingOutput) {
-        guard pendingOutput.isEmpty else {
-            pendingOutput.append(item)
-            return
-        }
-        switch item {
-        case let .audio(buffer):
-            callback?(buffer)
-        case let .event(event):
-            emit(event)
-        case .silence:
-            pendingOutput.append(item)
-        }
-    }
-
-    private func deliver(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval) {
-        let deliveryGeneration = generation
-        if hostSeconds > 0 {
-            if let expected = expectedNextHostSeconds {
-                let hole = hostSeconds - expected
-                if hole > Self.gapThresholdSeconds {
-                    scheduleGap(seconds: hole)
-                    guard generation == deliveryGeneration, callback != nil else { return }
-                }
-            }
-            let rate = buffer.format.sampleRate
-            expectedNextHostSeconds = hostSeconds + (rate > 0 ? Double(buffer.frameLength) / rate : 0)
-        } else {
-            // No timestamp: never measure the next hole from a stale one.
-            expectedNextHostSeconds = nil
-        }
-        if let converted = convertToRecordingFormat(buffer) { deliverInOrder(.audio(converted)) }
-        guard generation == deliveryGeneration else { return }
-        trackSilentInput(buffer)
-    }
-
-    /// Reports the hole and queues its silence. The silence goes out paced by
-    /// `flushPendingOutput`, always ahead of the buffer that revealed the hole.
-    private func scheduleGap(seconds: TimeInterval) {
-        let gapGeneration = generation
-        var paddedFrames = 0
-        var paddedSeconds: TimeInterval = 0
-        if configuration.padsGapsWithSilence, let format, format.sampleRate > 0 {
-            let target = min(seconds, configuration.maxSilencePadSeconds)
-            if target.isFinite, target > 0 {
-                paddedFrames = Int((target * format.sampleRate).rounded())
-                paddedSeconds = Double(paddedFrames) / format.sampleRate
-            }
-        }
-        gapCount += 1
-        deliverInOrder(.event(.gap(seconds: seconds, paddedSeconds: paddedSeconds)))
-        guard generation == gapGeneration, paddedFrames > 0 else { return }
-        pendingOutput.append(.silence(frames: paddedFrames))
-    }
-
-    /// Delivers queued output in order. Silence is limited to
-    /// `padFrameBudget` frames per call; when the budget runs out mid-pad the
-    /// rest waits for the next tick, or is dropped when
-    /// `dropsSilenceOverBudget` (finishing: keep the tail audio, not the pad).
-    private func flushPendingOutput(padFrameBudget: Int, dropsSilenceOverBudget: Bool) {
-        let flushGeneration = generation
-        var budget = padFrameBudget
-        while let item = pendingOutput.first {
-            switch item {
-            case let .audio(buffer):
-                pendingOutput.removeFirst()
-                callback?(buffer)
-            case let .event(event):
-                pendingOutput.removeFirst()
-                emit(event)
-            case let .silence(frames):
-                let wanted = min(frames, max(0, budget))
-                let delivered = wanted > 0 ? deliverSilence(frames: wanted) : 0
-                // The owner stopped the capture from inside a callback.
-                guard !pendingOutput.isEmpty else { return }
-                let stillCurrent = generation == flushGeneration
-                budget -= delivered
-                if delivered == frames || (stillCurrent && (delivered < wanted || dropsSilenceOverBudget)) {
-                    // Done; or silence could not be allocated; or finishing.
-                    pendingOutput.removeFirst()
-                } else {
-                    // Out of budget (or the owner switched devices from a
-                    // callback): the rest goes out on a later tick.
-                    pendingOutput[0] = .silence(frames: frames - delivered)
-                    return
-                }
-            }
-            guard generation == flushGeneration else { return }
-        }
-    }
-
-    /// Returns the frames handed to the owner (fewer than asked only when a
-    /// buffer cannot be allocated or the owner stopped the capture).
-    private func deliverSilence(frames: Int) -> Int {
-        guard let format, format.sampleRate > 0 else { return 0 }
-        let silenceGeneration = generation
-        var delivered = 0
-        while delivered < frames {
-            let chunk = min(frames - delivered, Int(Self.silenceChunkFrames))
-            guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(chunk)) else { break }
-            silence.frameLength = AVAudioFrameCount(chunk)
-            for item in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
-                if let data = item.mData { memset(data, 0, Int(item.mDataByteSize)) }
-            }
-            callback?(silence)
-            delivered += chunk
-            paddedSecondsTotal += Double(chunk) / format.sampleRate
-            guard generation == silenceGeneration else { break }
-        }
-        return delivered
-    }
-
-    /// Frames of padding one delivery may carry: `seconds` of the recording
-    /// format (no time cap when nil) and never more than `bytes`.
-    static func padFrameBudget(format: AVAudioFormat, seconds: TimeInterval?, bytes: Int) -> Int {
-        let frameBytes = max(1, Int(format.channelCount)) * MemoryLayout<Float>.size
-        var frames = max(1, bytes / frameBytes)
-        if let seconds, seconds.isFinite, format.sampleRate > 0 {
-            let bySeconds = seconds * format.sampleRate
-            if bySeconds < Double(frames) { frames = max(1, Int(bySeconds.rounded(.down))) }
-        }
-        return frames
-    }
-
-    // MARK: - Silent input
-
-    /// Runs on the serial queue on each real buffer, in the device format,
-    /// before conversion. Padding never counts. Stops looking once reported.
-    private func trackSilentInput(_ buffer: AVAudioPCMBuffer) {
-        guard !silentInputReported, !tearingDown, buffer.frameLength > 0 else { return }
-        let rate = buffer.format.sampleRate
-        guard rate > 0 else { return }
-        guard Self.isDigitalSilence(buffer) else {
-            silentInputRunSeconds = 0
-            return
-        }
-        silentInputRunSeconds += Double(buffer.frameLength) / rate
-        // A hair of tolerance so 1.5 s summed from buffer lengths counts.
-        guard silentInputRunSeconds + 1e-9 >= Self.silentInputDetectionSeconds else { return }
-        silentInputReported = true
-        deliverInOrder(.event(.silentInput))
-    }
-
-    private func resetSilentInputDetection() {
-        silentInputRunSeconds = 0
-        silentInputReported = false
-    }
-
-    /// Every sample is exactly 0.0 (negative zero included). Exits at the
-    /// first non-zero sample, which for a live mic is almost always the first.
-    static func isDigitalSilence(_ buffer: AVAudioPCMBuffer) -> Bool {
-        guard buffer.format.commonFormat == .pcmFormatFloat32,
-              let channels = buffer.floatChannelData else { return false }
-        let frames = Int(buffer.frameLength)
-        guard frames > 0 else { return false }
-        let channelCount = Int(buffer.format.channelCount)
-        let interleaved = buffer.format.isInterleaved
-        let pointerCount = interleaved ? 1 : channelCount
-        let samplesPerPointer = interleaved ? frames * channelCount : frames
-        for index in 0..<pointerCount {
-            let data = channels[index]
-            for sample in 0..<samplesPerPointer where data[sample] != 0 {
-                return false
-            }
-        }
-        return true
-    }
-
-    // MARK: - Format
-
-    /// A later device format (another app changed the mic's rate, or a
-    /// replacement device) keeps the recording's format and is resampled.
-    private func acceptFormat(_ current: AVAudioFormat) throws {
-        guard let format, !format.isEqual(current) else {
-            if format == nil { format = current }
-            deviceFormat = current
-            converter = nil
-            return
-        }
-        guard let converter = AVAudioConverter(from: current, to: format) else {
-            throw Self.error(-3, "Microphone format changed and could not be converted.")
-        }
-        converter.downmix = current.channelCount > format.channelCount
-        deviceFormat = current
-        self.converter = converter
-    }
-
-    /// Runs on the capture queue, never the IOProc thread.
-    private func convertToRecordingFormat(_ buffer: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let converter, let format else { return buffer }
-        let ratio = format.sampleRate / buffer.format.sampleRate
-        let capacity = AVAudioFrameCount((Double(buffer.frameLength) * ratio).rounded(.up)) + 64
-        guard let output = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return nil }
-        var supplied = false
-        var conversionError: NSError?
-        let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
-            if supplied {
-                inputStatus.pointee = .noDataNow
-                return nil
-            }
-            supplied = true
-            inputStatus.pointee = .haveData
-            return buffer
-        }
-        guard status != .error, conversionError == nil, output.frameLength > 0 else { return nil }
-        return output
-    }
-
-    private func currentFormat(of deviceID: AudioDeviceID) throws -> AVAudioFormat {
-        if let hardwareHooks { return try hardwareHooks.currentFormat(deviceID) }
-        return try Self.inputFormat(of: deviceID)
-    }
-
-    private func isAlive(_ deviceID: AudioDeviceID) -> Bool {
-        if let hardwareHooks { return hardwareHooks.isAlive(deviceID) }
-        return Self.deviceIsAlive(deviceID)
-    }
-
-    // MARK: - HAL reads (no side effects)
-
-    /// The PCM layout the IOProc delivers for `deviceID`'s input streams, or
-    /// an error when this backend cannot record it (owners then fall back to
-    /// `AVAudioEngine`). Reads properties of that device only.
-    public static func inputFormat(of deviceID: AudioDeviceID) throws -> AVAudioFormat {
-        let streams = try inputStreams(of: deviceID)
-        var descriptions: [AudioStreamBasicDescription] = []
-        for stream in streams {
-            var asbd = AudioStreamBasicDescription()
-            var size = UInt32(MemoryLayout<AudioStreamBasicDescription>.size)
-            var address = AudioObjectPropertyAddress(mSelector: kAudioStreamPropertyVirtualFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-            try check(AudioObjectGetPropertyData(stream, &address, 0, nil, &size, &asbd), "stream format query")
-            descriptions.append(asbd)
-        }
-        return try deviceFormat(streamDescriptions: descriptions)
-    }
-
-    public static func canRecord(deviceID: AudioDeviceID) -> Bool {
-        deviceID != kAudioObjectUnknown && (try? inputFormat(of: deviceID)) != nil
-    }
-
-    /// Pure mapping from the device's input stream formats to the buffer
-    /// layout the ring copies: one interleaved stream, or several mono streams
-    /// as non-interleaved channels. Anything else is unsupported.
-    static func deviceFormat(streamDescriptions: [AudioStreamBasicDescription]) throws -> AVAudioFormat {
-        guard let first = streamDescriptions.first else {
-            throw error(-5, "The microphone has no input streams.")
-        }
-        let rate = first.mSampleRate
-        guard rate.isFinite, rate >= 8000, rate <= 384_000 else {
-            throw error(-5, "Unsupported microphone sample rate.")
-        }
-        for description in streamDescriptions {
-            let flags = description.mFormatFlags
-            guard description.mFormatID == kAudioFormatLinearPCM,
-                  flags & kAudioFormatFlagIsFloat != 0,
-                  flags & kAudioFormatFlagIsBigEndian == 0,
-                  flags & kAudioFormatFlagIsNonInterleaved == 0,
-                  description.mBitsPerChannel == 32,
-                  description.mChannelsPerFrame >= 1,
-                  description.mBytesPerFrame == 4 * description.mChannelsPerFrame,
-                  description.mSampleRate == rate else {
-                throw error(-5, "Unsupported microphone format.")
-            }
-        }
-        let channels: AVAudioChannelCount
-        let interleaved: Bool
-        if streamDescriptions.count == 1 {
-            channels = first.mChannelsPerFrame
-            interleaved = channels > 1
-        } else {
-            guard streamDescriptions.allSatisfy({ $0.mChannelsPerFrame == 1 }) else {
-                throw error(-5, "Unsupported microphone stream layout.")
-            }
-            channels = AVAudioChannelCount(streamDescriptions.count)
-            interleaved = false
-        }
-        guard channels <= 64 else { throw error(-5, "Unsupported microphone channel count.") }
-        let result: AVAudioFormat?
-        if channels <= 2 {
-            result = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, channels: channels, interleaved: interleaved)
-        } else if let layout = AVAudioChannelLayout(layoutTag: kAudioChannelLayoutTag_DiscreteInOrder | channels) {
-            result = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: rate, interleaved: interleaved, channelLayout: layout)
-        } else {
-            result = nil
-        }
-        guard let result else { throw error(-5, "Unsupported microphone format.") }
-        return result
-    }
-
-    private static func inputStreams(of deviceID: AudioDeviceID) throws -> [AudioStreamID] {
-        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyStreams, mScope: kAudioObjectPropertyScopeInput, mElement: kAudioObjectPropertyElementMain)
-        var size: UInt32 = 0
-        try check(AudioObjectGetPropertyDataSize(deviceID, &address, 0, nil, &size), "stream list size")
-        let count = Int(size) / MemoryLayout<AudioStreamID>.size
-        guard count > 0 else { throw error(-5, "The microphone has no input streams.") }
-        var streams = [AudioStreamID](repeating: kAudioObjectUnknown, count: count)
-        try check(AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &streams), "stream list")
-        return Array(streams.prefix(Int(size) / MemoryLayout<AudioStreamID>.size))
-    }
-
-    static func bufferFrameSize(of deviceID: AudioDeviceID) -> UInt32? {
-        var frames: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyBufferFrameSize, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &frames) == noErr, frames > 0 else { return nil }
-        return frames
-    }
-
-    static func deviceIsAlive(_ deviceID: AudioDeviceID) -> Bool {
-        guard deviceID != kAudioObjectUnknown else { return false }
-        var alive: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        var address = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyDeviceIsAlive, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
-        guard AudioObjectGetPropertyData(deviceID, &address, 0, nil, &size, &alive) == noErr else { return false }
-        return alive != 0
-    }
-
-    private static func check(_ status: OSStatus, _ operation: String) throws {
-        guard status == noErr else {
-            throw NSError(domain: "PinnedMicrophoneCapture", code: Int(status), userInfo: [NSLocalizedDescriptionKey: "Microphone \(operation) failed (\(status))."])
-        }
-    }
-
-    private static func error(_ code: Int, _ message: String) -> NSError {
-        NSError(domain: "PinnedMicrophoneCapture", code: code, userInfo: [NSLocalizedDescriptionKey: message])
-    }
-
     // MARK: - Test seams
 
     func receiveForTesting(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval) {
@@ -1102,5 +730,4 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         serialized { ring?.noteHALNotification() }
     }
     var ringStorageBytesForTesting: Int? { serialized { ring?.storageByteCount } }
-    var ringCapacityForTesting: Int? { serialized { ring?.capacity } }
 }

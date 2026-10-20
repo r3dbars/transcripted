@@ -18,6 +18,7 @@ import SwiftUI
 /// order-dependent side effects beyond a single trailing closure are left as
 /// hand-written `Binding(get:set:)` blocks rather than forced through this
 /// helper.
+@MainActor
 func persistedSettingsBinding<Value>(
     _ state: Binding<Value>,
     persist: @escaping (Value) -> Void,

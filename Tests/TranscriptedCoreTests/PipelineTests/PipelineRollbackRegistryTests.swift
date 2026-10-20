@@ -33,7 +33,7 @@ private actor CallRecorder {
 /// Covers `PipelineRollbackRegistry`, the accumulator `transcribeMultichannelPipeline` /
 /// `transcribeMicrophoneOnlyPipeline` use so a late cancellation rolls back exactly the side
 /// effects that happened by that point, without every checkpoint re-stating a growing
-/// "what to clean up" parameter list (see `Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift`).
+/// "what to clean up" parameter list (see `Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner+SideEffects.swift`).
 ///
 /// Two layers:
 ///  - Generic registry mechanics (order, idempotency, non-cancelled no-op).

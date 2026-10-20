@@ -191,12 +191,14 @@ extension SpeakerDatabase {
                     "sqlite_error": dbErrorMessage(),
                     "profileId": profileId.uuidString
                 ])
+                recordMutationFailure(operation: "delete speaker negative exemplars", code: sqlite3_errcode(db))
             }
         } else {
             AppLogger.speakers.error("Failed to prepare delete negative exemplars", [
                 "sqlite_error": dbErrorMessage(),
                 "profileId": profileId.uuidString
             ])
+            recordMutationFailure(operation: "prepare delete speaker negative exemplars", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }

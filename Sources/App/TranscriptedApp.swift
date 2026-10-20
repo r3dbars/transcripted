@@ -27,35 +27,12 @@ struct TranscriptedApp: App {
         // TranscriptedMenuCommands and routes to the real window.
         Settings {
             TranscriptedSettingsFallbackView {
-                appDelegate.menuOpenSettings()
+                TranscriptedMenuCommandCatalog.perform(.openSettings, on: appDelegate)
             }
         }
         .commands {
             TranscriptedMenuCommands(appDelegate: appDelegate)
         }
-    }
-}
-
-private struct TranscriptedSettingsFallbackView: View {
-    @Environment(\.dismiss) private var dismiss
-    let openSettings: () -> Void
-
-    var body: some View {
-        VStack(spacing: 14) {
-            Text("Transcripted Settings")
-                .font(.headline)
-            Text("Open the full Transcripted window to change settings.")
-                .foregroundStyle(.secondary)
-            Button("Open Settings") {
-                dismiss()
-                openSettings()
-            }
-            .keyboardShortcut(.defaultAction)
-            .accessibilityIdentifier("transcripted.settings.fallback.open")
-        }
-        .multilineTextAlignment(.center)
-        .padding(32)
-        .frame(width: 360, height: 180)
     }
 }
 
@@ -267,8 +244,10 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 },
                 onCompleted: { [weak self] candidate, started in
                     self?.meetingPromptRecordInFlight = false
-                    guard started else { return }
-                    self?.meetingPromptDetector.markAccepted(candidate: candidate)
+                    // Record already marked the candidate accepted when the
+                    // start began; only a failed start has anything to undo.
+                    guard !started else { return }
+                    self?.meetingPromptDetector.markRecordStartFailed(candidate: candidate)
                 }
             )
             meetingPromptRecordAction = promptRecordAction
@@ -452,6 +431,8 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 }
                 .store(in: &meetingPromptSubscriptions)
             appState.contextCapture.onMeetingToggle = { [weak self] in
+                // No new meeting while Quit is under way.
+                guard self?.terminationCleanupStarted == false else { return }
                 self?.meetingOverlayController.toggleFromHotkey()
             }
             SpeakerNamingSheet.shared.island = notchIsland
@@ -627,7 +608,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             await AppTerminationSequence.run(AppTerminationSequence.Steps(
                 finishDictationForTermination: { await self.sessionController.finishDictationForTermination() },
                 finishWritingForTermination: { await self.appState.writingController.finishWritingForTermination() },
-                resetCleanupAdmission: { self.terminationCleanupStarted = false },
+                resetCleanupAdmission: {
+                    self.terminationCleanupStarted = false
+                    // A refused Quit lets dictation start again.
+                    self.sessionController.queuedStartGate.setTerminating(false)
+                },
                 prepareMeetingForTermination: {
                     if #available(macOS 14.0, *) {
                         await self.appState.meetingSession.prepareForTermination()
@@ -734,16 +719,25 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
 
     // MARK: - Menu Bar Commands
 
-    /// Thin entry points for `TranscriptedMenuCommands`, reusing the action
-    /// helpers in the `TranscriptedAppDelegate+*` extensions. Each one mirrors
-    /// a path users already have via the popover, the sidebar, or a recordable
-    /// trigger — nothing here remaps those triggers.
+    /// `TranscriptedMenuCommandHost`: thin entry points that
+    /// `TranscriptedMenuCommandCatalog.perform` routes each menu action to,
+    /// reusing the action helpers in the `TranscriptedAppDelegate+*`
+    /// extensions. Each one mirrors a path users already have via the popover,
+    /// the sidebar, or a recordable trigger — nothing here remaps those triggers.
 
-    func menuStartDictation() {
+    func closeMenuBarPopover() {
+        closePopover()
+    }
+
+    func openSettingsWindow(page: TranscriptedSettingsPage, source: String) {
+        showSettingsWindow(page: page, source: source)
+    }
+
+    func startDictationFromMenu() {
         startDictationFromSettings()
     }
 
-    func menuToggleMeetingRecording() {
+    func toggleMeetingRecordingFromMenu() {
         guard #available(macOS 14.0, *) else {
             NSSound.beep()
             return
@@ -753,25 +747,16 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         meetingOverlayController.toggleFromHotkey()
     }
 
-    func menuImportAudio() {
+    func importAudioFromMenu() {
         importAudioFileFromSettings()
     }
 
-    func menuOpenPage(_ page: TranscriptedSettingsPage) {
-        showSettingsWindow(page: page, source: "menu_command")
+    func focusHomeFindFromMenu(source: String) {
+        settingsWindowController.focusHomeFind(source: source)
     }
 
-    func menuOpenSettings() {
-        closePopover()
-        showSettingsWindow(page: .general, source: "app_menu")
-    }
-
-    func menuFindSpeaker() {
-        settingsWindowController.focusSpeakerSearch(source: "menu_command")
-    }
-
-    func menuFindCaptures() {
-        settingsWindowController.focusHomeFind(source: "menu_command")
+    func focusSpeakerSearchFromMenu(source: String) {
+        settingsWindowController.focusSpeakerSearch(source: source)
     }
 
     // MARK: - NSPopoverDelegate
@@ -783,5 +768,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         }
     }
 }
+
+extension TranscriptedAppDelegate: TranscriptedMenuCommandHost {}
 
 extension DictationSessionController: AppLaunchDictationHost {}

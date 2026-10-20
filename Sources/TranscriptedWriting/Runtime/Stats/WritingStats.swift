@@ -18,10 +18,6 @@ enum TildeStats {
         dayDict(todayKey)["wordsAccepted"] ?? 0
     }
 
-    static func todaySuggestionsShown() -> Int {
-        dayDict(todayKey)["suggestionsShown"] ?? 0
-    }
-
     static func todaySuggestionsAccepted() -> Int {
         dayDict(todayKey)["suggestionsAccepted"] ?? 0
     }
@@ -29,16 +25,6 @@ enum TildeStats {
     static func lifetimeWordsAccepted() -> Int {
         guard let suite = UserDefaults(suiteName: TildeSettings.keyboardSuiteName) else { return 0 }
         return sumWordsAccepted(in: suite.dictionaryRepresentation())
-    }
-
-    static func lifetimeSuggestionsShown() -> Int {
-        guard let suite = UserDefaults(suiteName: TildeSettings.keyboardSuiteName) else { return 0 }
-        return sumSuggestionsShown(in: suite.dictionaryRepresentation())
-    }
-
-    static func lifetimeSuggestionsAccepted() -> Int {
-        guard let suite = UserDefaults(suiteName: TildeSettings.keyboardSuiteName) else { return 0 }
-        return sumSuggestionsAccepted(in: suite.dictionaryRepresentation())
     }
 
     static func sumWordsAccepted(in values: [String: Any]) -> Int {
