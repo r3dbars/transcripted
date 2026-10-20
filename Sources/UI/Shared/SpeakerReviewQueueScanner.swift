@@ -376,9 +376,12 @@ enum SpeakerReviewQueueScanner {
 
             let clipURL = clipURLsByProfileID[dbId]
             let fallback = clipURL == nil ? retainedSample(for: entry, audio: audio) : nil
-            let sampleText = clipURL == nil
-                ? (fallback?.text ?? entry.sampleText)
-                : clipSidecarSampleText(nextTo: clipURL)
+            let sampleText: String?
+            if let clipURL {
+                sampleText = clipSidecarSampleText(nextTo: clipURL)
+            } else {
+                sampleText = fallback?.text ?? entry.sampleText
+            }
             return SpeakerPendingReviewItem(
                 speakerId: dbId,
                 diarizerSpeakerId: speaker.id,
