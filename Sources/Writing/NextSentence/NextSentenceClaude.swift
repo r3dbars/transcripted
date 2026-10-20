@@ -34,8 +34,13 @@ final class NextSentenceClaude: @unchecked Sendable {
         }
     }
 
-    static let model = "opus"
     static let effort = "low"
+
+    /// The streamed reply (and rewrites of it) is what they read first, so it gets the reply model;
+    /// everything else runs in the background on the lighter one. See NextSentencePreferences.
+    static func model(for kind: Kind) -> String {
+        kind == .stream ? NextSentencePreferences.replyModel() : NextSentencePreferences.backgroundModel()
+    }
 
     private let lock = NSLock()
     private var warm: [Kind: NextSentenceLineProcess] = [:]
@@ -157,7 +162,7 @@ final class NextSentenceClaude: @unchecked Sendable {
 
     private func spawn(_ kind: Kind) -> NextSentenceLineProcess? {
         guard let binary = Self.binary() else { return nil }
-        var arguments = ["-p", "--model", Self.model, "--effort", Self.effort,
+        var arguments = ["-p", "--model", Self.model(for: kind), "--effort", Self.effort,
                          "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", "",
                          "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
         if let schema = schemaJSON[kind] { arguments += ["--json-schema", schema] } else { arguments += ["--include-partial-messages"] }

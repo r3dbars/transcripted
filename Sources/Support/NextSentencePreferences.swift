@@ -33,6 +33,20 @@ enum NextSentencePreferences {
         return (server, model)
     }
 
+    /// Which Claude model writes. The reply you read first uses `replyModelKey` (Opus by default);
+    /// the background work (every tone and length, word swaps, rephrasings) uses `backgroundModelKey`
+    /// (Sonnet by default, about half the usage). Any `claude --model` name works: opus, sonnet, haiku.
+    static let replyModelKey = "NextSentenceReplyModel"
+    static let backgroundModelKey = "NextSentenceBackgroundModel"
+
+    static func replyModel(userDefaults: UserDefaults = .standard) -> String {
+        userDefaults.string(forKey: replyModelKey).flatMap { $0.isEmpty ? nil : $0 } ?? "opus"
+    }
+
+    static func backgroundModel(userDefaults: UserDefaults = .standard) -> String {
+        userDefaults.string(forKey: backgroundModelKey).flatMap { $0.isEmpty ? nil : $0 } ?? "sonnet"
+    }
+
     /// The card's sounds. On unless set to NO.
     static let soundsKey = "NextSentenceSounds"
 
