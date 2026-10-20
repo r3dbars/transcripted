@@ -63,7 +63,9 @@ enum SecureKeyboardEntryWarningPolicy {
     /// in the requested 2–3 s window.
     static let pollIntervalNanoseconds: UInt64 = 2_500_000_000
 
-    static let logInterval: TimeInterval = 2
+    /// Local `secure_input_state_changed` at most once per poll. Shorter than
+    /// the poll would let a queued flagsChanged log on the same hold.
+    static let logInterval: TimeInterval = Double(pollIntervalNanoseconds) / 1_000_000_000.0
 
     static let unknownOwnerDisplayName = "Another app"
 
@@ -74,11 +76,29 @@ enum SecureKeyboardEntryWarningPolicy {
         dictationShortcutsEnabled && !dictationUsesModifierKey
     }
 
+    /// App-activation and flagsChanged hops already queued at stop must not
+    /// revive the 2.5 s poll. The live watch still polls for F-key bindings.
+    static func shouldStartPoll(
+        isWatching: Bool,
+        dictationUsesModifierKey: Bool,
+        dictationShortcutsEnabled: Bool
+    ) -> Bool {
+        isWatching && shouldPoll(
+            dictationUsesModifierKey: dictationUsesModifierKey,
+            dictationShortcutsEnabled: dictationShortcutsEnabled
+        )
+    }
+
+    /// A deferred flagsChanged or activation is a no-op once the watch stopped.
+    static func shouldAcceptWatchCallback(isWatching: Bool) -> Bool {
+        isWatching
+    }
+
     static func noticeText(ownerDisplayName: String?, dictationKeyDisplay: String) -> String {
         let owner = cleaned(ownerDisplayName) ?? unknownOwnerDisplayName
         let key = cleaned(dictationKeyDisplay)
         let keyPhrase = key.map { "\($0) dictation" } ?? "Dictation"
-        return "\(owner) is blocking keyboard shortcuts (Secure Keyboard Entry). \(keyPhrase) won't work until it releases. Right Option still works."
+        return "Shortcuts are blocked until \(owner) releases Secure Keyboard Entry. \(keyPhrase) won't work."
     }
 
     static func resolveOwnerDisplayName(
@@ -136,14 +156,22 @@ enum SecureKeyboardEntryWarningPolicy {
         }
 
         let key = ownerKey(processID: snapshot.ownerProcessID, displayName: snapshot.ownerDisplayName)
-        if previous.visibleNotice != nil, previous.noticedOwnerKey == key {
-            return (previous, SecureKeyboardEntryDecision(notice: .unchanged, log: nil))
-        }
-
         let text = noticeText(
             ownerDisplayName: snapshot.ownerDisplayName,
             dictationKeyDisplay: dictationKeyDisplay
         )
+
+        if previous.visibleNotice != nil, previous.noticedOwnerKey == key {
+            if previous.visibleNotice == text {
+                return (previous, SecureKeyboardEntryDecision(notice: .unchanged, log: nil))
+            }
+            var next = previous
+            next.visibleNotice = text
+            next.lastOwnerProcessID = snapshot.ownerProcessID
+            next.lastOwnerDisplayName = snapshot.ownerDisplayName
+            return (next, SecureKeyboardEntryDecision(notice: .show(text), log: nil))
+        }
+
         let logEvent = SecureKeyboardEntryLogEvent(
             isEnabled: true,
             ownerDisplayName: snapshot.ownerDisplayName,

@@ -72,14 +72,21 @@ extension ContextCaptureEngine {
         }
     }
 
-    func evaluateSecureKeyboardEntry() {
+    func evaluateSecureKeyboardEntry(refreshOwner: Bool = false) {
+        // A flagsChanged or app-activation hop can already be queued when
+        // stopSecureKeyboardEntryWatch runs. Those must not revive the poll.
+        guard SecureKeyboardEntryWarningPolicy.shouldAcceptWatchCallback(
+            isWatching: secureKeyboardEntryMonitor != nil
+        ) else { return }
+
         let binding = PhysicalDictationTriggerPreferences.pushToTalkBinding()
         let usesModifier = PhysicalDictationTriggerPreferences.isModifierKey(binding.keyCode)
         let shortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
         secureKeyboardEntryMonitor?.check(
             dictationUsesModifierKey: usesModifier,
             dictationShortcutsEnabled: shortcutsEnabled,
-            dictationKeyDisplay: PhysicalDictationTriggerPreferences.displayString(for: binding)
+            dictationKeyDisplay: PhysicalDictationTriggerPreferences.displayString(for: binding),
+            refreshOwner: refreshOwner
         )
         updateSecureKeyboardEntryPoll(
             dictationUsesModifierKey: usesModifier,
@@ -88,6 +95,9 @@ extension ContextCaptureEngine {
     }
 
     private func noteSecureKeyboardEntryFlagsChanged() {
+        guard SecureKeyboardEntryWarningPolicy.shouldAcceptWatchCallback(
+            isWatching: secureKeyboardEntryMonitor != nil
+        ) else { return }
         guard !secureKeyboardEntryFlagsCheckPending else { return }
         secureKeyboardEntryFlagsCheckPending = true
         Task { @MainActor [weak self] in
@@ -100,7 +110,8 @@ extension ContextCaptureEngine {
         dictationUsesModifierKey: Bool,
         dictationShortcutsEnabled: Bool
     ) {
-        let shouldPoll = SecureKeyboardEntryWarningPolicy.shouldPoll(
+        let shouldPoll = SecureKeyboardEntryWarningPolicy.shouldStartPoll(
+            isWatching: secureKeyboardEntryMonitor != nil,
             dictationUsesModifierKey: dictationUsesModifierKey,
             dictationShortcutsEnabled: dictationShortcutsEnabled
         )
@@ -116,7 +127,7 @@ extension ContextCaptureEngine {
                     nanoseconds: SecureKeyboardEntryWarningPolicy.pollIntervalNanoseconds
                 )
                 guard !Task.isCancelled else { return }
-                self?.evaluateSecureKeyboardEntry()
+                self?.evaluateSecureKeyboardEntry(refreshOwner: true)
             }
         }
     }

@@ -11,6 +11,9 @@ final class SecureKeyboardEntryMonitor {
     private let namer: SecureEventInputProcessNaming
     private let selfProcessID: Int32
     private var state = SecureEventInputWatchState.idle
+    /// Owner pid + display name for the current hold. flagsChanged must not
+    /// redo IOKit / namer while this is still valid; the 2.5 s poll refreshes.
+    private var cachedHold: SecureEventInputSnapshot?
 
     var onNoticeChange: ((String?) -> Void)?
     var onLog: ((SecureKeyboardEntryLogEvent) -> Void)?
@@ -31,15 +34,17 @@ final class SecureKeyboardEntryMonitor {
         dictationUsesModifierKey: Bool,
         dictationShortcutsEnabled: Bool,
         dictationKeyDisplay: String,
-        now: TimeInterval = ProcessInfo.processInfo.systemUptime
+        now: TimeInterval = ProcessInfo.processInfo.systemUptime,
+        refreshOwner: Bool = false
     ) {
         let snapshot: SecureEventInputSnapshot
         if SecureKeyboardEntryWarningPolicy.shouldPoll(
             dictationUsesModifierKey: dictationUsesModifierKey,
             dictationShortcutsEnabled: dictationShortcutsEnabled
         ) {
-            snapshot = makeSnapshot()
+            snapshot = makeSnapshot(refreshOwner: refreshOwner)
         } else {
+            cachedHold = nil
             snapshot = .inactive
         }
 
@@ -57,14 +62,21 @@ final class SecureKeyboardEntryMonitor {
     }
 
     func reset() {
+        cachedHold = nil
         if state.visibleNotice != nil {
             onNoticeChange?(nil)
         }
         state = .idle
     }
 
-    private func makeSnapshot() -> SecureEventInputSnapshot {
-        guard source.isEnabled() else { return .inactive }
+    private func makeSnapshot(refreshOwner: Bool) -> SecureEventInputSnapshot {
+        guard source.isEnabled() else {
+            cachedHold = nil
+            return .inactive
+        }
+        if !refreshOwner, let cached = cachedHold, cached.isEnabled {
+            return cached
+        }
         let pid = source.ownerProcessID()
         let name = pid.flatMap { processID in
             SecureKeyboardEntryWarningPolicy.resolveOwnerDisplayName(
@@ -73,11 +85,13 @@ final class SecureKeyboardEntryMonitor {
                 processName: namer.processName(forProcessID: processID)
             )
         }
-        return SecureEventInputSnapshot(
+        let snapshot = SecureEventInputSnapshot(
             isEnabled: true,
             ownerProcessID: pid,
             ownerDisplayName: name
         )
+        cachedHold = snapshot
+        return snapshot
     }
 
     private func apply(_ decision: SecureKeyboardEntryDecision) {

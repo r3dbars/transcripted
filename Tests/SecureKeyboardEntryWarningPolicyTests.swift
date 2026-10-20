@@ -1,9 +1,9 @@
 // SecureKeyboardEntryWarningPolicyTests.swift
 // Promises for the Secure Keyboard Entry warning: F8-style dictation keys go
 // silent while another app holds secure input, so the menu bar must tell the
-// user once per owner and clear when it releases. Right Option still works,
-// so a modifier binding must stay quiet. IOKit/Carbon are faked; this does
-// not prove a live CGEventTap under Secure Keyboard Entry.
+// user once per owner and clear when it releases. A modifier dictation key
+// stays quiet (no second dictation binding is live). IOKit/Carbon are faked;
+// this does not prove a live CGEventTap under Secure Keyboard Entry.
 
 import Foundation
 
@@ -32,7 +32,7 @@ func testSecureKeyboardEntryWarningPolicy() async {
         key: String = "F8",
         selfPID: Int32 = 1,
         now: TimeInterval = 100,
-        logInterval: TimeInterval = 2
+        logInterval: TimeInterval = SecureKeyboardEntryWarningPolicy.logInterval
     ) -> (SecureEventInputWatchState, SecureKeyboardEntryDecision) {
         SecureKeyboardEntryWarningPolicy.evaluate(
             previous: previous,
@@ -70,8 +70,12 @@ func testSecureKeyboardEntryWarningPolicy() async {
             "the notice must name the bound dictation key"
         )
         assertTrue(
+            text?.contains("Obsidian") == true && text?.localizedCaseInsensitiveContains("release") == true,
+            "the notice must say shortcuts stay blocked until that app releases secure input"
+        )
+        assertFalse(
             text?.contains("Right Option") == true,
-            "the notice must mention that Right Option still works"
+            "only one dictation key is live; do not claim Right Option still works"
         )
         assertEqual(next.visibleNotice, text, "the watch must keep the notice until secure input turns off")
         assertEqual(decision.log?.isEnabled, true, "turning on must log locally")
@@ -109,6 +113,43 @@ func testSecureKeyboardEntryWarningPolicy() async {
         let (_, again) = decide(previous: shown, snapshot: obsidian, now: 30)
         assertEqual(again.notice, .unchanged, "time passing is not a new owner")
         assertNil(again.log, "the log is rate-limited to owner or on/off changes")
+    }
+
+    runSuite("Rebinding the dictation key while the same owner holds updates the notice") {
+        let (shown, _) = decide(snapshot: obsidian, key: "F8", now: 100)
+        let (next, decision) = decide(previous: shown, snapshot: obsidian, key: "F7", now: 101)
+        let text = shownText(decision)
+        assertTrue(text?.contains("F7") == true, "the notice must follow the new binding")
+        assertFalse(text?.contains("F8") == true, "the old key must leave the notice")
+        assertEqual(next.visibleNotice, text, "the watch keeps the updated copy")
+        assertNil(decision.log, "a rebind is not a new hold")
+    }
+
+    runSuite("A name that resolves later updates the notice for the same pid") {
+        let unnamed = SecureEventInputSnapshot(
+            isEnabled: true,
+            ownerProcessID: 4242,
+            ownerDisplayName: nil
+        )
+        let named = SecureEventInputSnapshot(
+            isEnabled: true,
+            ownerProcessID: 4242,
+            ownerDisplayName: "Obsidian"
+        )
+        let (shown, first) = decide(snapshot: unnamed, now: 100)
+        assertTrue(
+            shownText(first)?.contains(SecureKeyboardEntryWarningPolicy.unknownOwnerDisplayName) == true,
+            "setup: first observation has no app name"
+        )
+        let (next, decision) = decide(previous: shown, snapshot: named, now: 101)
+        let text = shownText(decision)
+        assertTrue(text?.contains("Obsidian") == true, "the notice must pick up the resolved name")
+        assertFalse(
+            text?.contains(SecureKeyboardEntryWarningPolicy.unknownOwnerDisplayName) == true,
+            "Another app must not stay on screen after the name is known"
+        )
+        assertEqual(next.visibleNotice, text, "the watch keeps the named copy")
+        assertNil(decision.log, "a name fill-in is not a new hold")
     }
 
     // MARK: - Owner change
@@ -155,7 +196,7 @@ func testSecureKeyboardEntryWarningPolicy() async {
 
     runSuite("A modifier dictation key never shows a Secure Keyboard Entry notice") {
         let (_, decision) = decide(snapshot: obsidian, modifier: true)
-        assertEqual(decision.notice, .unchanged, "Right Option still works, so there is nothing to warn about")
+        assertEqual(decision.notice, .unchanged, "a modifier dictation key is the one live binding, so there is nothing to warn about")
         assertNil(decision.log, "modifier bindings do not log Secure Keyboard Entry")
         assertFalse(
             SecureKeyboardEntryWarningPolicy.shouldPoll(
@@ -174,7 +215,7 @@ func testSecureKeyboardEntryWarningPolicy() async {
             modifier: true,
             now: 105
         )
-        assertEqual(decision.notice, .clear, "Right Option no longer needs the warning")
+        assertEqual(decision.notice, .clear, "a modifier binding no longer needs the warning")
         assertNil(next.visibleNotice, "the notice comes down with the binding change")
         assertNil(decision.log, "the other app is still holding secure input; do not log off")
     }
@@ -215,6 +256,46 @@ func testSecureKeyboardEntryWarningPolicy() async {
         let ns = SecureKeyboardEntryWarningPolicy.pollIntervalNanoseconds
         assertTrue(ns >= 2_000_000_000, "poll at least every 2 s")
         assertTrue(ns <= 3_000_000_000, "poll no slower than every 3 s")
+        let pollSeconds = TimeInterval(ns) / 1_000_000_000
+        assertTrue(
+            SecureKeyboardEntryWarningPolicy.logInterval >= pollSeconds,
+            "the local log must not fire more often than the poll"
+        )
+    }
+
+    runSuite("A queued check after the watch stops does not start the poll") {
+        assertFalse(
+            SecureKeyboardEntryWarningPolicy.shouldStartPoll(
+                isWatching: false,
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true
+            ),
+            "app-activation or flagsChanged work already queued at stop must not revive the 2.5 s poll"
+        )
+        assertTrue(
+            SecureKeyboardEntryWarningPolicy.shouldStartPoll(
+                isWatching: true,
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true
+            ),
+            "the live watch still polls for an F-key binding"
+        )
+        assertFalse(
+            SecureKeyboardEntryWarningPolicy.shouldAcceptWatchCallback(isWatching: false),
+            "a deferred flagsChanged or activation must no-op once the watch is stopped"
+        )
+        assertTrue(
+            SecureKeyboardEntryWarningPolicy.shouldAcceptWatchCallback(isWatching: true),
+            "callbacks while the watch is running still evaluate"
+        )
+        assertFalse(
+            SecureKeyboardEntryWarningPolicy.shouldStartPoll(
+                isWatching: true,
+                dictationUsesModifierKey: true,
+                dictationShortcutsEnabled: true
+            ),
+            "a live watch with a modifier dictation key still must not poll"
+        )
     }
 
     runSuite("Disabled dictation shortcuts do not poll") {
@@ -378,6 +459,9 @@ func testSecureKeyboardEntryWarningPolicy() async {
         )
         assertTrue(text.contains("F7"), "a saved F7 binding must appear in the notice")
         assertFalse(text.contains("F8"), "do not claim F8 when another key is bound")
+        assertFalse(text.contains("Right Option"), "do not claim a second dictation key")
+        assertTrue(text.contains("Obsidian"), "the blocking app stays in the copy")
+        assertTrue(text.localizedCaseInsensitiveContains("release"), "the copy says when it will work again")
     }
 
     await MainActor.run {
@@ -408,11 +492,12 @@ func testSecureKeyboardEntryWarningPolicy() async {
                 dictationUsesModifierKey: false,
                 dictationShortcutsEnabled: true,
                 dictationKeyDisplay: "F8",
-                now: 51
+                now: 51,
+                refreshOwner: true
             )
             assertTrue(
                 lastNotice?.contains("Obsidian") == true,
-                "a new pid with a running-app name uses that name"
+                "a poll that sees a new pid with a running-app name uses that name"
             )
 
             var noticeChanges = 0
@@ -453,7 +538,177 @@ func testSecureKeyboardEntryWarningPolicy() async {
                 dictationKeyDisplay: "Right Option",
                 now: 1
             )
-            assertEqual(lastNotice, "unset", "Right Option still works, so the monitor must not fire")
+            assertEqual(
+                lastNotice,
+                "unset",
+                "a modifier dictation key is the live binding, so the monitor must not fire"
+            )
+        }
+
+        runSuite("The monitor caches the owner lookup for the rest of a hold") {
+            let source = FakeSecureEventInputSource()
+            source.enabled = true
+            source.pid = 4242
+            let namer = FakeSecureEventInputNamer()
+            namer.appNames[4242] = "Obsidian"
+            let monitor = SecureKeyboardEntryMonitor(source: source, namer: namer, selfProcessID: 1)
+            var lastNotice: String?
+            monitor.onNoticeChange = { lastNotice = $0 }
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 50
+            )
+            assertEqual(source.ownerLookups, 1, "the first observation looks up the secure-input pid")
+            let namerLookupsAfterFirst = namer.appLookups + namer.processLookups
+            assertTrue(namerLookupsAfterFirst >= 1, "the first observation names the owner")
+            assertTrue(lastNotice?.contains("Obsidian") == true, "setup: notice is up")
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 51
+            )
+            assertEqual(
+                source.ownerLookups,
+                1,
+                "a modifier press while the lock is held must not redo the IOKit owner lookup"
+            )
+            assertEqual(
+                namer.appLookups + namer.processLookups,
+                namerLookupsAfterFirst,
+                "a modifier press while the lock is held must not redo the process namer"
+            )
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 52.5,
+                refreshOwner: true
+            )
+            assertEqual(
+                source.ownerLookups,
+                2,
+                "the 2.5 s poll is allowed to refresh the owner"
+            )
+        }
+
+        runSuite("Rebinding the key updates a cached hold without another owner lookup") {
+            let source = FakeSecureEventInputSource()
+            source.enabled = true
+            source.pid = 4242
+            let namer = FakeSecureEventInputNamer()
+            namer.appNames[4242] = "Obsidian"
+            let monitor = SecureKeyboardEntryMonitor(source: source, namer: namer, selfProcessID: 1)
+            var lastNotice: String?
+            monitor.onNoticeChange = { lastNotice = $0 }
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 50
+            )
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F7",
+                now: 51
+            )
+            assertEqual(source.ownerLookups, 1, "a rebind is not a new hold")
+            assertTrue(lastNotice?.contains("F7") == true, "the notice follows the new key")
+            assertFalse(lastNotice?.contains("F8") == true, "the old key leaves the notice")
+        }
+
+        runSuite("A poll can fill in an owner name that missed on the first check") {
+            let source = FakeSecureEventInputSource()
+            source.enabled = true
+            source.pid = 4242
+            let namer = FakeSecureEventInputNamer()
+            let monitor = SecureKeyboardEntryMonitor(source: source, namer: namer, selfProcessID: 1)
+            var lastNotice: String?
+            monitor.onNoticeChange = { lastNotice = $0 }
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 50
+            )
+            assertTrue(
+                lastNotice?.contains(SecureKeyboardEntryWarningPolicy.unknownOwnerDisplayName) == true,
+                "setup: first observation has no app name"
+            )
+
+            namer.appNames[4242] = "Obsidian"
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 51
+            )
+            assertTrue(
+                lastNotice?.contains(SecureKeyboardEntryWarningPolicy.unknownOwnerDisplayName) == true,
+                "a cached hold keeps the unresolved name until a poll refreshes"
+            )
+            assertFalse(
+                lastNotice?.contains("Obsidian") == true,
+                "the name must not appear from a cached miss"
+            )
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 52.5,
+                refreshOwner: true
+            )
+            assertTrue(lastNotice?.contains("Obsidian") == true, "a poll retry can fill in the name")
+            assertFalse(
+                lastNotice?.contains(SecureKeyboardEntryWarningPolicy.unknownOwnerDisplayName) == true,
+                "Another app must not stay on screen after the name is known"
+            )
+        }
+
+        runSuite("Releasing Secure Keyboard Entry drops the cached owner") {
+            let source = FakeSecureEventInputSource()
+            source.enabled = true
+            source.pid = 4242
+            let namer = FakeSecureEventInputNamer()
+            namer.appNames[4242] = "Obsidian"
+            let monitor = SecureKeyboardEntryMonitor(source: source, namer: namer, selfProcessID: 1)
+            var lastNotice: String? = "unset"
+            monitor.onNoticeChange = { lastNotice = $0 }
+
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 50
+            )
+            source.enabled = false
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 51
+            )
+            assertNil(lastNotice, "release must take the notice down")
+            assertEqual(source.ownerLookups, 1, "a release is Carbon's on/off, not another IOKit lookup")
+
+            source.enabled = true
+            monitor.check(
+                dictationUsesModifierKey: false,
+                dictationShortcutsEnabled: true,
+                dictationKeyDisplay: "F8",
+                now: 52
+            )
+            assertEqual(source.ownerLookups, 2, "a new hold looks up the owner again")
+            assertTrue(lastNotice?.contains("Obsidian") == true, "a new hold warns again")
         }
     }
 }
@@ -462,16 +717,34 @@ func testSecureKeyboardEntryWarningPolicy() async {
 private final class FakeSecureEventInputSource: SecureEventInputReading {
     var enabled = false
     var pid: Int32?
+    var enabledLookups = 0
+    var ownerLookups = 0
 
-    func isEnabled() -> Bool { enabled }
-    func ownerProcessID() -> Int32? { pid }
+    func isEnabled() -> Bool {
+        enabledLookups += 1
+        return enabled
+    }
+
+    func ownerProcessID() -> Int32? {
+        ownerLookups += 1
+        return pid
+    }
 }
 
 @MainActor
 private final class FakeSecureEventInputNamer: SecureEventInputProcessNaming {
     var appNames: [Int32: String] = [:]
     var processNames: [Int32: String] = [:]
+    var appLookups = 0
+    var processLookups = 0
 
-    func runningApplicationDisplayName(forProcessID pid: Int32) -> String? { appNames[pid] }
-    func processName(forProcessID pid: Int32) -> String? { processNames[pid] }
+    func runningApplicationDisplayName(forProcessID pid: Int32) -> String? {
+        appLookups += 1
+        return appNames[pid]
+    }
+
+    func processName(forProcessID pid: Int32) -> String? {
+        processLookups += 1
+        return processNames[pid]
+    }
 }

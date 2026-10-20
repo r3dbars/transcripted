@@ -45,22 +45,12 @@ struct LiveSecureEventInputProcessNamer: SecureEventInputProcessNaming {
 }
 
 enum SecureEventInputIORegistry {
-    /// Public IOKit only: IOResources holds the `IOConsoleUsers` array that
-    /// `ioreg` prints. Root is a fallback if that node is missing the property.
+    /// Public IOKit only. `IOConsoleUsers` / `kCGSSessionSecureInputPID` live
+    /// on the IORegistry root, not the IOResources node — looking up
+    /// IOResources first always misses.
     static func ownerProcessID() -> Int32? {
-        if let users = consoleUsers(fromServiceNamed: "IOResources")
-            ?? consoleUsersFromRoot(),
-           let pid = SecureKeyboardEntryWarningPolicy.ownerProcessID(fromConsoleUsers: users) {
-            return pid
-        }
-        return nil
-    }
-
-    private static func consoleUsers(fromServiceNamed name: String) -> [[String: Any]]? {
-        let service = IOServiceGetMatchingService(kIOMainPortDefault, IOServiceMatching(name))
-        guard service != 0 else { return nil }
-        defer { IOObjectRelease(service) }
-        return consoleUsers(from: service)
+        guard let users = consoleUsersFromRoot() else { return nil }
+        return SecureKeyboardEntryWarningPolicy.ownerProcessID(fromConsoleUsers: users)
     }
 
     private static func consoleUsersFromRoot() -> [[String: Any]]? {
