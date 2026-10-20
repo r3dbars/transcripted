@@ -126,7 +126,6 @@ func testSpeakerClipPlayback() async {
             nil,
             "the old bytes must not match the replacement sidecar"
         )
-        _ = quoteHeldAtPlay
     }
 
     await runSuite("SpeakerClipPlayback clears failed retained-audio startup") {
