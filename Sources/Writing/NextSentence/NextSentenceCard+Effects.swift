@@ -5,72 +5,21 @@ import QuartzCore
 /// The card's livelier moments: listening, a tone change, a swapped word, a fresh take, and a tinted
 /// word showing where it came from.
 extension NextSentenceCard {
-    // MARK: Listening: a breathing orb, an aurora edge, and the text rippling with your voice
+    // MARK: Listening: the card's edge glows with your voice
 
+    /// While it listens, the edge is the only thing that moves: one clear signal.
     func startListeningEffects() {
-        listenTimer?.invalidate()
-        orb.frame = pad.frame
-        orb.isHidden = false
-        let start = Date()
-        let words = wordRanges()
-        let colors = [NSColor(srgbRed: 1, green: 0.27, blue: 0.23, alpha: 1), NSColor(srgbRed: 1, green: 0.62, blue: 0.04, alpha: 1),
-                      NSColor(srgbRed: 0.62, green: 0.42, blue: 1, alpha: 1)]
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let t = Date().timeIntervalSince(start)
-                let level = Self.voiceLevel(at: t)
-                self.orb.set(level: level)
-                // The edge glows in a slow aurora of red, amber and violet that swells as you speak.
-                let phase = (t * 0.35).truncatingRemainder(dividingBy: 1) * Double(colors.count)
-                let from = colors[Int(phase) % colors.count], to = colors[(Int(phase) + 1) % colors.count]
-                let color = from.blended(withFraction: CGFloat(phase - floor(phase)), of: to) ?? from
-                if let layer = self.front.layer {
-                    CATransaction.begin()
-                    CATransaction.setDisableActions(true)
-                    layer.shadowColor = color.cgColor
-                    layer.shadowOpacity = 0.75
-                    layer.shadowRadius = 14 + 20 * level
-                    layer.shadowOffset = .zero
-                    layer.borderColor = color.withAlphaComponent(0.25 + 0.3 * level).cgColor
-                    CATransaction.commit()
-                }
-                // The words ripple gently, like the sentence is listening too.
-                guard NextSentenceMotion.reduced == false, !self.isEditing, let storage = self.textView.textStorage else { return }
-                storage.beginEditing()
-                for (index, range) in words.enumerated() where NSMaxRange(range) <= storage.length {
-                    let lift = 1.5 + 2.4 * Double(level) * sin(t * 6 - Double(index) * 0.7)
-                    storage.addAttribute(.baselineOffset, value: lift, range: range)
-                }
-                storage.endEditing()
-            }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        listenTimer = timer
+        voiceGlow.start()
     }
 
-    func stopListeningEffects() {
-        listenTimer?.invalidate()
-        listenTimer = nil
-        orb.isHidden = true
-        if let storage = textView.textStorage, storage.length > 0 {
-            storage.addAttribute(.baselineOffset, value: 1.5, range: NSRange(location: 0, length: storage.length))
-        }
-        front.layer?.borderColor = NSColor(white: 1, alpha: 0.08).cgColor
-        glow()
+    /// The microphone's loudness right now, 0...1.
+    func setVoiceLevel(_ level: CGFloat) {
+        voiceGlow.set(level: level)
     }
 
-    /// A stand-in for the microphone's loudness: a lively, uneven rise and fall.
-    static func voiceLevel(at t: Double) -> CGFloat {
-        let v = abs(sin(t * 7.3) * sin(t * 2.1 + 1)) * 0.7 + 0.3 * abs(sin(t * 13))
-        return CGFloat(min(1, v))
-    }
-
-    private func wordRanges() -> [NSRange] {
-        let ns = textView.string as NSString
-        var ranges: [NSRange] = []
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { _, range, _, _ in ranges.append(range) }
-        return ranges
+    /// With `flare` (they let go), the edge breathes bright once with the chime before it fades.
+    func stopListeningEffects(flare: Bool) {
+        voiceGlow.stop(flare: flare)
     }
 
     // MARK: Tone change: words morph, and the new tone's glow washes around the edge

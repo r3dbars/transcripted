@@ -38,12 +38,26 @@ extension NextSentenceController {
         let streaming = (custom == nil && !streamText.isEmpty && !streamDone && guessIndex == 0) || rewriting
 
         var status = listening ? "Listening" : continuing ? "Continuing your text in \(app)" : "Replying in \(place)"
-        let busy = failure == nil && (streamText.isEmpty || !streamDone || rewriting)
+        var busy = failure == nil && (streamText.isEmpty || !streamDone || rewriting)
         if shown.text.isEmpty && busy { status = waitingStatus() }
+        // Held fn to open it: it asks what the message should say, and waits.
+        if listening && awaitingIntent {
+            status = liveWords.isEmpty ? "What should it say?" : Self.tail(of: liveWords)
+            busy = false
+        }
         if let failure { status = failure }
 
         var hint: String
-        if let note {
+        if listening && !awaitingIntent && !liveWords.isEmpty {
+            hint = "“\(Self.tail(of: liveWords, limit: 70))”"
+        } else if let intent, shown.text.isEmpty, failure == nil {
+            // What they said stays in view while it becomes the message.
+            hint = "“\(Self.tail(of: intent, limit: 70))”"
+        } else if listening {
+            hint = heldListening
+                ? (awaitingIntent ? "Say what it should say, then let go of fn." : "Say the change, then let go of fn.")
+                : "Listening. Tap fn again to finish."
+        } else if let note {
             hint = note
         } else if failure != nil {
             hint = "esc close"
@@ -70,6 +84,14 @@ extension NextSentenceController {
             insertHelp: app.isEmpty ? "Insert. Hold to send." : "Insert into \(app). Hold to send.",
             showsButtons: failure == nil && !shown.text.isEmpty,
             listening: listening, heard: heard)
+    }
+
+    /// The end of what they're saying, so the newest words stay in view.
+    static func tail(of words: String, limit: Int = 170) -> String {
+        guard words.count > limit else { return words }
+        let cut = words.suffix(limit)
+        let start = cut.firstIndex(of: " ").map { cut.index(after: $0) } ?? cut.startIndex
+        return "…" + cut[start...]
     }
 
     /// What the card is doing before its first words: reading, then what it found, then writing.

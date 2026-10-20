@@ -59,7 +59,8 @@ final class NextSentenceCard: NSObject {
     var onSelectionCleared: (() -> Void)?
     var onPickSelection: ((NSRange) -> Void)?
 
-    static let margin: CGFloat = 14
+    /// Room around the card for its shadow and the listening bloom (clicks there fall through).
+    static let margin: CGFloat = 28
     static let headroom: CGFloat = 130
     static let textHeight = NextSentenceCardStyle.lineHeight * NextSentenceCardStyle.textLines + 2
     static let fullHeight: CGFloat = textTop + textHeight + 10 + 28 + 12
@@ -108,9 +109,9 @@ final class NextSentenceCard: NSObject {
     /// pulled past the end for a longer version.
     var gripDrag: (whole: String, kept: Int, longer: Bool)?
     // Effects (NextSentenceCard+Effects.swift).
-    let orb = NextSentenceOrb(frame: .zero)
+    /// While it listens, the card's edge glows with your voice.
+    let voiceGlow = NextSentenceVoiceGlow(frame: .zero)
     let meltOverlay = NextSentenceCardStyle.label(NextSentenceCardStyle.bodyFont, NextSentenceCardStyle.body)
-    var listenTimer: Timer?
     var bloom = NextSentenceBloom()
     var bloomTimer: Timer?
     var hoveredMark: NSRange?
@@ -196,7 +197,7 @@ final class NextSentenceCard: NSObject {
         closeFloats()
         ring.set(listening: false)
         waveform.set(animating: false)
-        stopListeningEffects()
+        stopListeningEffects(flare: false)
         aurora.set(active: false)
         statusLine.set(running: false)
         NextSentenceSynth.shared.stopLoading(ready: false)
@@ -222,9 +223,11 @@ final class NextSentenceCard: NSObject {
         if new.tone != previousTone && !new.compact && isVisible { washTone(new.tone) }
         statusLabel.stringValue = new.status
         placeholder.stringValue = new.status
+        // Their own words, live while they talk, read as words, not a faint prompt.
+        placeholder.textColor = new.listening && new.status != "What should it say?" ? NextSentenceCardStyle.body : NextSentenceCardStyle.faint
         busyDot.isHidden = !new.busy
         pad.set(tone: new.tone, length: new.length)
-        hintLabel.stringValue = new.listening ? "" : new.hint
+        hintLabel.stringValue = new.hint
         let signature = "\(new.text)|\(new.streaming)|\(new.marks.map { "\($0.range)" })"
         // Waiting: aurora and skeleton behind, what it's doing in the footer.
         let waiting = !new.compact && new.text.isEmpty && new.busy && !new.listening
@@ -260,7 +263,7 @@ final class NextSentenceCard: NSObject {
         insertButton.set(title: insertHeldFull ? "Release to send" : "Insert", icon: nil)
         if new.listening != wasListening {
             waveform.set(animating: new.listening)
-            new.listening ? startListeningEffects() : stopListeningEffects()
+            new.listening ? startListeningEffects() : stopListeningEffects(flare: true)
         }
         glow()
         layout()
@@ -474,12 +477,17 @@ final class NextSentenceCard: NSObject {
         front.layer?.borderWidth = 1
         root.addSubview(front)
         root.addSubview(ring)
+        root.addSubview(voiceGlow)
 
         busyDot.wantsLayer = true
         busyDot.layer?.backgroundColor = NextSentenceCardStyle.accent.cgColor
         busyDot.layer?.cornerRadius = 3
         statusLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        placeholder.maximumNumberOfLines = 2
+        // Wraps across the whole text box, so live words read as a paragraph, not one cut-off line.
+        placeholder.maximumNumberOfLines = Int(NextSentenceCardStyle.textLines)
+        placeholder.lineBreakMode = .byWordWrapping
+        placeholder.cell?.wraps = true
+        placeholder.cell?.truncatesLastVisibleLine = true
         pad.onChange = { [weak self] tone, length in self?.onMood?(tone, length) }
         pad.onActive = { [weak self] active in
             guard let self else { return }
@@ -563,7 +571,6 @@ final class NextSentenceCard: NSObject {
         textView.addSubview(rollOverlay)
         meltOverlay.isHidden = true
         textView.addSubview(meltOverlay)
-        front.addSubview(orb)
         float.isHidden = true
         tip.isHidden = true
         root.addSubview(gripHint)
@@ -597,6 +604,7 @@ final class NextSentenceCard: NSObject {
         front.frame = CGRect(x: m, y: Self.headroom, width: width, height: cardHeight)
         front.layer?.shadowPath = CGPath(roundedRect: front.bounds, cornerWidth: 16, cornerHeight: 16, transform: nil)
         ring.frame = front.frame.insetBy(dx: -3, dy: -3)
+        voiceGlow.frame = front.frame.insetBy(dx: -NextSentenceVoiceGlow.reach, dy: -NextSentenceVoiceGlow.reach)
         layoutFront()
     }
 
@@ -605,7 +613,7 @@ final class NextSentenceCard: NSObject {
         for view in [pad, scroll, hintLabel, micButton, remixButton, insertButton] as [NSView] {
             view.isHidden = compact
         }
-        // While it listens, the breathing orb takes the mood pad's place.
+        // While it listens the edge glows, so the mood pad steps aside to keep the corner quiet.
         pad.isHidden = compact || content.listening
         // The status line only exists for short notes; otherwise status shows faintly in the text box.
         statusLabel.isHidden = !compact
@@ -621,7 +629,7 @@ final class NextSentenceCard: NSObject {
         aurora.frame = front.bounds
         warp.frame = front.bounds
         aurora.textFrame = NSRect(x: inset, y: Self.textTop, width: pad.frame.minX - inset - 14, height: Self.textHeight)
-        placeholder.frame = NSRect(x: inset, y: Self.textTop + 2, width: pad.frame.minX - inset - 12, height: 44)
+        placeholder.frame = NSRect(x: inset, y: Self.textTop + 2, width: pad.frame.minX - inset - 12, height: Self.textHeight)
 
         scroll.frame = NSRect(x: inset, y: Self.textTop, width: width - 2 * inset, height: Self.textHeight)
         textView.frame.size.width = width - 2 * inset
@@ -641,7 +649,7 @@ final class NextSentenceCard: NSObject {
         micButton.isHidden = content.compact || listening || heard || !content.showsButtons
         remixButton.isHidden = micButton.isHidden
         insertButton.isHidden = micButton.isHidden
-        waveform.isHidden = !listening
+        waveform.isHidden = true // the edge glow is the listening signal
         let waiting = aurora.active && !content.compact
         hintLabel.isHidden = content.compact || waiting
         statusLine.isHidden = !waiting
@@ -655,9 +663,8 @@ final class NextSentenceCard: NSObject {
         }
         let hintX: CGFloat
         if listening {
-            waveform.frame = NSRect(x: 16, y: y + 7, width: NextSentenceWaveform.size.width, height: NextSentenceWaveform.size.height)
-            hintX = waveform.frame.maxX + 10
-            hintLabel.stringValue = "Listening. Tap fn again to finish."
+            hintX = 16
+            hintLabel.stringValue = content.hint.isEmpty ? "Listening. Tap fn again to finish." : content.hint
         } else if let said = content.heard {
             hintX = 16
             hintLabel.stringValue = "“\(said)”"

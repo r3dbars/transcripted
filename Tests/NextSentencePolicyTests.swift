@@ -239,4 +239,17 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         assertEqual(words, ["on", "for"], "shared words stay put, regardless of case or punctuation")
         assertEqual(NextSentencePolicy.newWordRanges(from: "a a", to: "a a a").count, 1, "repeats are counted")
     }
+
+    runSuite("Holding fn and speaking tells it what the message should say") {
+        let request = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Riley", screenText: "launch date?", draft: "",
+                                                 hasScreenshot: false, sources: [], voiceExamples: [], intent: "say yes but the beta goes first")
+        let body = NextSentencePrompt.body(request, json: false)
+        assertTrue(body.contains("WHAT THEY WANT THIS MESSAGE TO SAY") && body.contains("say yes but the beta goes first"),
+                   "what they said goes to the writer, marked as what the message should say")
+        let plain = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Riley", screenText: "launch date?", draft: "",
+                                               hasScreenshot: false, sources: [], voiceExamples: [])
+        assertFalse(NextSentencePrompt.body(plain, json: false).contains("WHAT THEY WANT"), "a quick tap writes without it")
+        assertTrue(NextSentencePolicy.isFnTap(heldFor: 0.39, withOtherKey: false), "under the limit is a tap")
+        assertFalse(NextSentencePolicy.isFnTap(heldFor: 0.41, withOtherKey: false), "past it is a hold, not a tap")
+    }
 }

@@ -19,11 +19,15 @@ final class NextSentenceSynth {
     private var idleStop: DispatchWorkItem?
     private var chirp: AVAudioPCMBuffer?
     private var chord: AVAudioPCMBuffer?
+    private var heardChime: AVAudioPCMBuffer?
 
     private init() {}
 
     /// The card opened.
     func press() { play { $0.chirp } }
+
+    /// They let go of fn after saying what the message should say.
+    func heard() { play { $0.heardChime } }
 
     /// The card is waiting for words: the pad swells in. Safe to call again while it plays.
     func startLoading() {
@@ -76,6 +80,7 @@ final class NextSentenceSynth {
             engine.connect(reverb, to: engine.mainMixerNode, format: stereo)
             chirp = Self.render(Self.chirpNotes, format: mono)
             chord = Self.render(Self.chordNotes, format: mono)
+            heardChime = Self.render(Self.heardNotes, format: mono)
         }
         do { try engine.start() } catch { return false }
         return true
@@ -114,6 +119,12 @@ final class NextSentenceSynth {
 
     /// A short square-wave chirp gliding up, softened by a low-pass filter.
     static let chirpNotes = [Note(frequency: 1_800, duration: 0.05, wave: .square, gain: 0.05, glideTo: 2_600, lowpass: 5_000)]
+
+    /// Two soft bells rising a fifth (G5, D6): "got it".
+    static let heardNotes = [
+        Note(frequency: midi(79), duration: 0.9, gain: 0.035, attack: 0.004, bell: (3.5, 1.6)),
+        Note(frequency: midi(86), at: 0.09, duration: 1.1, gain: 0.03, attack: 0.004, bell: (3.5, 1.8)),
+    ]
 
     /// A soft C major add-9 startup chord, low notes on triangle, with a bell on top.
     static var chordNotes: [Note] {

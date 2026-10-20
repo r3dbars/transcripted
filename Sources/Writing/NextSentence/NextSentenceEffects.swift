@@ -48,45 +48,6 @@ enum NextSentenceDust {
     }()
 }
 
-/// A warm orb that breathes with your voice while it listens, in the mood pad's place.
-final class NextSentenceOrb: NextSentenceFlippedView {
-    private let core = CAGradientLayer()
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        wantsLayer = true
-        core.type = .radial
-        core.colors = [NSColor(srgbRed: 1, green: 0.86, blue: 0.62, alpha: 1).cgColor,
-                       NSColor(srgbRed: 1, green: 0.45, blue: 0.25, alpha: 0.9).cgColor,
-                       NSColor(srgbRed: 1, green: 0.27, blue: 0.23, alpha: 0).cgColor]
-        core.locations = [0, 0.45, 1]
-        core.startPoint = CGPoint(x: 0.5, y: 0.5)
-        core.endPoint = CGPoint(x: 1, y: 1)
-        core.shadowColor = NSColor(srgbRed: 1, green: 0.45, blue: 0.25, alpha: 1).cgColor
-        core.shadowOpacity = 0.8
-        core.shadowRadius = 10
-        core.shadowOffset = .zero
-        layer?.addSublayer(core)
-        isHidden = true
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
-
-    override func hitTest(_ point: NSPoint) -> NSView? { nil }
-
-    /// `level` is the voice's loudness, 0...1.
-    func set(level: CGFloat) {
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        let size = min(bounds.width, bounds.height) * (0.62 + 0.38 * level)
-        core.frame = CGRect(x: bounds.midX - size / 2, y: bounds.midY - size / 2, width: size, height: size)
-        core.shadowRadius = 8 + 14 * level
-        core.opacity = Float(0.75 + 0.25 * level)
-        CATransaction.commit()
-    }
-}
-
 /// Word morph: when a different version replaces the message, words it shares with the old one stay
 /// put and only the new words bloom in, one after another.
 struct NextSentenceBloom {

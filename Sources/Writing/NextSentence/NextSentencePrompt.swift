@@ -149,6 +149,8 @@ enum NextSentencePrompt {
         var steer: String = ""
         /// Who the conversation is with or about.
         var people: [String] = []
+        /// What they said they want this message to say (held fn and spoke before it wrote).
+        var intent: String = ""
     }
 
     /// Shared body. `json` asks for structured output with facts marked; otherwise plain text.
@@ -189,6 +191,12 @@ enum NextSentencePrompt {
         lines.append("Use a fact from their context ONLY if it clearly answers or helps with what's on screen. Never invent dates, numbers, names or commitments that aren't on screen or in their context.")
         if json {
             lines.append("For each reply, list the facts from their context it uses in \"facts\": \"phrase\" = the exact words in the reply that state it, \"source\" = the [S#] it came from.")
+        }
+        if !r.intent.isEmpty {
+            lines.append("")
+            lines.append("WHAT THEY WANT THIS MESSAGE TO SAY (they said it out loud, so it may be loose or rambling):")
+            lines.append("\"\(r.intent)\"")
+            lines.append("Write the message so it gets this across, worked in naturally and in their own voice. Use what's on screen and their context to fill in the details.")
         }
         if !r.steer.isEmpty { lines.append("They asked for this change: \(r.steer)") }
         lines.append("")

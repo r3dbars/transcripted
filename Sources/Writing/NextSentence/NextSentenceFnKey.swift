@@ -1,21 +1,29 @@
 import CoreGraphics
 import Foundation
 
-/// The fn (Globe) key is Next Sentence's key: a tap opens the card, the next starts listening, the next
-/// finishes. It works whether or not the card is open, so this tap is on whenever Next Sentence is.
+/// The fn (Globe) key is Next Sentence's key. A quick tap opens the card (or, with it open, starts and
+/// finishes listening). Holding fn on its own is push-to-talk: hold to speak, let go to finish.
+/// It works whether or not the card is open, so this tap is on whenever Next Sentence is.
 ///
-/// Only a tap counts: fn pressed and let go quickly with no other key in between. Holding fn with
-/// another key (fn-arrows, fn-F keys) is left alone. The events always pass through; if macOS is set
+/// fn used with another key (fn-arrows, fn-F keys) is left alone. The events always pass through; if macOS is set
 /// to do something with the Globe key too, set "Press 🌐 key to" to "Do Nothing" in Keyboard settings.
 final class NextSentenceFnKey: @unchecked Sendable {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
     private let onTap: @MainActor @Sendable () -> Void
+    private let onHoldStart: @MainActor @Sendable () -> Void
+    private let onHoldEnd: @MainActor @Sendable () -> Void
     private var downAt: Date?
     private var usedWithOtherKey = false
+    private var holding = false
+    private var press = 0
 
-    init(onTap: @escaping @MainActor @Sendable () -> Void) {
+    init(onTap: @escaping @MainActor @Sendable () -> Void,
+         onHoldStart: @escaping @MainActor @Sendable () -> Void,
+         onHoldEnd: @escaping @MainActor @Sendable () -> Void) {
         self.onTap = onTap
+        self.onHoldStart = onHoldStart
+        self.onHoldEnd = onHoldEnd
     }
 
     var isActive: Bool { tap != nil }
@@ -64,8 +72,23 @@ final class NextSentenceFnKey: @unchecked Sendable {
             if flags.contains(.maskSecondaryFn) {
                 downAt = Date()
                 usedWithOtherKey = false
+                // Still down, alone, past the tap limit: it's a hold.
+                press += 1
+                let this = press
+                DispatchQueue.main.asyncAfter(deadline: .now() + NextSentencePolicy.fnTapLimit) { [self] in
+                    guard this == self.press, self.downAt != nil, !self.usedWithOtherKey else { return }
+                    self.holding = true
+                    MainActor.assumeIsolated { self.onHoldStart() }
+                }
             } else if let down = downAt {
                 downAt = nil
+                press += 1
+                if holding {
+                    holding = false
+                    let onHoldEnd = onHoldEnd
+                    DispatchQueue.main.async { MainActor.assumeIsolated { onHoldEnd() } }
+                    return
+                }
                 guard NextSentencePolicy.isFnTap(heldFor: Date().timeIntervalSince(down), withOtherKey: usedWithOtherKey) else { return }
                 let onTap = onTap
                 DispatchQueue.main.async { MainActor.assumeIsolated { onTap() } }

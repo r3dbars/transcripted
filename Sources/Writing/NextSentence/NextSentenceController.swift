@@ -22,7 +22,9 @@ final class NextSentenceController {
     lazy var keyTap = NextSentenceKeyTap { [weak self] action, typed, keyCode in
         self?.handle(action, typed: typed, keyCode: keyCode)
     }
-    lazy var fnKey = NextSentenceFnKey { [weak self] in self?.fnTapped() }
+    lazy var fnKey = NextSentenceFnKey(onTap: { [weak self] in self?.fnTapped() },
+                                       onHoldStart: { [weak self] in self?.fnHoldBegan() },
+                                       onHoldEnd: { [weak self] in self?.fnHoldEnded() })
     private var hotKey: EventHotKeyRef?
     private var handlerInstalled = false
 
@@ -32,6 +34,12 @@ final class NextSentenceController {
     var sources: [NextSentencePrompt.Source] = []
     var voice: [String] = []
     var people: [String] = []
+    /// Opened by holding fn: what they say decides what it writes, so the first write waits for it.
+    var awaitingIntent = false
+    var intent: String?
+    var contextReady = false
+    /// fn is being held to talk (push-to-talk), as opposed to tapped on and off.
+    var heldListening = false
     /// When the context search finished, so the card can say what it found for a moment.
     var contextFoundAt: Date?
     var generation = 0
@@ -64,6 +72,19 @@ final class NextSentenceController {
     var listening = false
     var heard: String?
     var dictationWatch: AnyCancellable?
+    /// The words so far while they hold fn and talk, from dictation's live preview.
+    var liveWords = ""
+
+    func setLiveWords(_ words: String) {
+        guard listening, words != liveWords else { return }
+        liveWords = words
+        render()
+    }
+
+    /// The microphone's loudness while it listens, from Transcripted's dictation meter.
+    func setVoiceLevel(_ level: CGFloat) {
+        if listening { card.setVoiceLevel(level) }
+    }
     private var returnDownAt: Date?
     private var returnTimer: Timer?
 
@@ -140,7 +161,32 @@ final class NextSentenceController {
         if listening { finishListening() } else if heard == nil { startListening() }
     }
 
-    private func open() {
+    /// Holding fn: with no card, open one that listens first and writes what you said; with a card
+    /// open, speak a change. Let go to finish.
+    func fnHoldBegan() {
+        guard card.isVisible, !card.content.compact else { return open(listenFirst: true) }
+        guard !listening, heard == nil else { return }
+        heldListening = true
+        startListening()
+    }
+
+    func fnHoldEnded() {
+        guard heldListening else { return }
+        heldListening = false
+        finishListening()
+    }
+
+    /// What they said they want the message to say: write it now, or as soon as the context is ready.
+    func useIntent(_ said: String) {
+        awaitingIntent = false
+        intent = said.isEmpty ? nil : said
+        heard = nil
+        note = nil
+        render()
+        if contextReady { write(steer: "") }
+    }
+
+    private func open(listenFirst: Bool = false) {
         let app = NSWorkspace.shared.frontmostApplication
         if let block = NextSentenceContext.blockReason(for: app) {
             return flash(block == .excludedApp ? "Next Sentence doesn't run in password managers." : "Click into a text box first.")
@@ -153,6 +199,9 @@ final class NextSentenceController {
         sources = []
         people = []
         contextFoundAt = nil
+        intent = nil
+        contextReady = false
+        awaitingIntent = listenFirst
         voice = []
         swaps = [:]
         swapsRequested = []
@@ -161,6 +210,10 @@ final class NextSentenceController {
         snapshot = focus
         card.show(at: focus.caret, content: content())
         keyTap.start()
+        if awaitingIntent {
+            heldListening = true
+            startListening()
+        }
 
         Task { @MainActor in
             let window = await NextSentenceContext.captureWindow(into: focus)
@@ -179,15 +232,18 @@ final class NextSentenceController {
             self.people = names
             self.sources = NextSentencePrompt.mergeSources(meaning: hits.map(\.chunk), people: aboutPeople, keywords: found.sources)
             self.contextFoundAt = Date()
+            self.voice = found.voice.isEmpty
+                ? hits.filter { $0.chunk.kind != "meeting" }.prefix(3).map { String($0.chunk.text.prefix(240)) }
+                : found.voice
+            self.contextReady = true
             self.render()
             Task { @MainActor in
                 try? await Task.sleep(for: .seconds(1.45))
                 guard gen == self.generation else { return }
                 self.render()
             }
-            self.voice = found.voice.isEmpty
-                ? hits.filter { $0.chunk.kind != "meeting" }.prefix(3).map { String($0.chunk.text.prefix(240)) }
-                : found.voice
+            // Opened by holding fn: wait for what they say, then useIntent writes.
+            if self.awaitingIntent { return }
             self.write(steer: "")
         }
     }
@@ -196,7 +252,8 @@ final class NextSentenceController {
         guard let snap = snapshot else { return nil }
         return NextSentencePrompt.Request(
             appName: snap.appName, windowTitle: snap.windowTitle, screenText: snap.screenText, draft: snap.draft,
-            hasScreenshot: snap.screenshotJPEG != nil, sources: sources, voiceExamples: voice, steer: steer, people: people)
+            hasScreenshot: snap.screenshotJPEG != nil, sources: sources, voiceExamples: voice, steer: steer, people: people,
+            intent: intent ?? "")
     }
 
     /// The one reply, streamed word by word. The moment it's done, the same reply is rewritten in every
@@ -311,7 +368,7 @@ final class NextSentenceController {
             if keyCode == NextSentencePolicy.KeyCode.delete { card.deleteBackward() }
         case .returnDown: returnDown()
         case .returnUp: returnUp()
-        case .close: listening ? cancelListening() : close()
+        case .close: listening && !awaitingIntent ? cancelListening() : close()
         case .ignore, .passThrough: break
         }
     }

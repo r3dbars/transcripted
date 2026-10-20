@@ -167,37 +167,44 @@ extension NextSentenceController {
     }
 
     func startListening() {
+        // Transcripted's own dictation does the listening and transcribing.
         guard startDictation != nil, finishDictation != nil else {
-            note = "Voice changes need Transcripted's dictation."
+            note = "Voice needs Transcripted's dictation."
+            if awaitingIntent { useIntent("") }
             return render()
         }
         if card.isEditing { endEditing() }
+        liveWords = ""
+        startDictation?()
         listening = true
         heard = nil
         NextSentenceCardStyle.tick()
         NextSentenceSounds.shared.play(.listenStart)
         render()
-        startDictation?()
     }
 
     func finishListening() {
         guard listening else { return }
         listening = false
-        NextSentenceSounds.shared.play(.listenStop)
-        heard = "Got it. Rewriting…"
+        heldListening = false
+        if awaitingIntent { NextSentenceSynth.shared.heard() } else { NextSentenceSounds.shared.play(.listenStop) }
+        heard = awaitingIntent ? "Got it. Writing…" : "Got it. Rewriting…"
         render()
         let gen = generation
-        dictationWatch = finishDictation? { [weak self] said in
+        let handle: @MainActor (String) -> Void = { [weak self] said in
             guard let self, gen == self.generation else { return }
             self.dictationWatch = nil
             let said = said.trimmingCharacters(in: .whitespacesAndNewlines)
+            if self.awaitingIntent { return self.useIntent(said) }
             guard !said.isEmpty else { self.heard = nil; self.note = "Didn't catch that."; return self.render() }
             self.heard = said
             self.rewrite(instruction: said)
         }
+        dictationWatch = finishDictation? { said in handle(said) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 20) { [weak self] in
             guard let self, gen == self.generation, self.dictationWatch != nil else { return }
             self.dictationWatch = nil
+            if self.awaitingIntent { return self.useIntent("") }
             self.heard = nil
             self.note = "Didn't catch that."
             self.render()
