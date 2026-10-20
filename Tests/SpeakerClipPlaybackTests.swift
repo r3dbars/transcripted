@@ -102,6 +102,7 @@ func testSpeakerClipPlayback() async {
         )
 
         playback.play(url)
+        let quoteHeldAtPlay = playback.activeValidatedQuote
         do {
             try Data(repeating: 9, count: loaded.count + 8).write(to: url)
             try writeMatchingSpeakerClipSidecar(nextTo: url, sampleText: "Quote for a later wav.")
@@ -110,20 +111,21 @@ func testSpeakerClipPlayback() async {
             return
         }
         assertEqual(
-            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: loaded),
-            quote,
-            "the already-read bytes still match the original sidecar"
-        )
-        assertEqual(
             SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: (try? Data(contentsOf: url)) ?? Data()),
             "Quote for a later wav.",
             "a live reread after replace would see the new pair"
         )
+        assertEqual(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: loaded),
+            nil,
+            "the old bytes must not match the replacement sidecar"
+        )
         if playback.isPlaying(url) {
+            assertEqual(quoteHeldAtPlay, quote, "play must take its quote from the bytes it loaded")
             assertEqual(
                 playback.activeValidatedQuote,
                 quote,
-                "play must keep the quote from the bytes it loaded"
+                "a replace after play must not pair the new quote with the already-loaded audio"
             )
         }
     }
