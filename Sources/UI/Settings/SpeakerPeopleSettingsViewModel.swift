@@ -285,6 +285,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     func clipSampleText(for speakerId: UUID) -> String? {
         guard let url = clipURL(for: speakerId) else { return nil }
+        // Live read: play re-renders these rows, and a stale cached line
+        // must never sit on whatever wav is now at this path.
         return SpeakerClipLibrary.sampleText(nextTo: url)
     }
 

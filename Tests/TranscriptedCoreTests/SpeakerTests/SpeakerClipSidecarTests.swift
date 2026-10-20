@@ -226,6 +226,48 @@ final class SpeakerClipSidecarTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: sidecarURL.path))
     }
 
+    func testPersistWithoutSidecarDropsThePreviousQuote() throws {
+        let directory = temporaryClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let speakerId = UUID()
+        let firstTemp = try writeTempClip(named: "quoted.wav", in: directory, bytes: Data([1, 2, 3]))
+        SpeakerClipExtractor.persistClip(
+            from: firstTemp,
+            speakerId: speakerId,
+            clipsDirectory: directory,
+            sidecar: SpeakerClipSidecar(
+                channel: "system",
+                diarizerSpeakerId: "1",
+                segments: [.init(start: 1, end: 3, text: "Old words.")],
+                sampleText: "Old words."
+            )
+        )
+        let persisted = try XCTUnwrap(
+            SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: directory)
+        )
+        XCTAssertEqual(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.sampleText,
+            "Old words."
+        )
+
+        let secondTemp = try writeTempClip(named: "bare.wav", in: directory, bytes: Data([9, 8, 7, 6]))
+        SpeakerClipExtractor.persistClip(
+            from: secondTemp,
+            speakerId: speakerId,
+            clipsDirectory: directory
+        )
+
+        XCTAssertEqual(try Data(contentsOf: persisted), Data([9, 8, 7, 6]))
+        XCTAssertNil(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted),
+            "a new wav with no sidecar must not keep the previous clip's quote"
+        )
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: SpeakerClipSidecar.url(nextTo: persisted).path)
+        )
+    }
+
     func testOldClipWithoutSidecarHasNoQuote() throws {
         let directory = temporaryClipsDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -344,9 +386,9 @@ final class SpeakerClipSidecarTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: directory) }
 
         let speakerId = UUID()
+        let temp = try writeTempClip(named: "person.wav", in: directory, bytes: Data([3, 1, 4]))
         let meetingURL = directory.appendingPathComponent("Deleted_Call.md")
         try "deleted meeting".write(to: meetingURL, atomically: true, encoding: .utf8)
-        let temp = try writeTempClip(named: "person.wav", in: directory, bytes: Data([3, 1, 4]))
         SpeakerClipExtractor.persistClip(
             from: temp,
             speakerId: speakerId,

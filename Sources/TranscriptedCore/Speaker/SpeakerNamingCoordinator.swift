@@ -583,20 +583,10 @@ extension TranscriptionTaskManager {
             let key = clip.channel.speakerKey(diarizerSpeakerId: clip.diarizerSpeakerId)
             guard !excludedSpeakerKeys.contains(key) else { continue }
             let speakerId = speakerIdsByKey[key] ?? clip.id
+            // Only the sidecar next to the temp wav is the quote. If extract
+            // never wrote one, persist the wav without inventing text.
             var sidecar = SpeakerClipSidecar.load(nextTo: clip.clipURL)
             sidecar?.transcriptId = transcriptId
-            if sidecar == nil {
-                let text = clip.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty {
-                    sidecar = SpeakerClipSidecar(
-                        transcriptId: transcriptId,
-                        channel: clip.channel.rawValue,
-                        diarizerSpeakerId: clip.diarizerSpeakerId,
-                        segments: [],
-                        sampleText: text
-                    )
-                }
-            }
             SpeakerClipExtractor.persistClip(
                 from: clip.clipURL,
                 speakerId: speakerId,

@@ -21,11 +21,13 @@ struct ClipResult {
 @available(macOS 14.0, *)
 public enum SpeakerClipExtractor {
 
-    /// Extract a 5-8 second audio clip per speaker from a source WAV file.
+    /// Extract a short audio clip per speaker from a source WAV file.
     ///
-    /// For each speaker, picks the longest single utterance (capped at 8s).
-    /// If the longest utterance is under 3s, concatenates short utterances up to 8s.
-    /// Uses frame-level seeking to avoid loading the entire file into memory.
+    /// Prefers one turn that fits the 8s write cap so the whole quote can
+    /// play. If none fit, writes the longest turn cropped and stores no
+    /// quote. Short turns under 3s are glued, longest-first, then time
+    /// order. The sidecar is built from the segments that actually produced
+    /// bytes, not from turns the writer skipped.
     ///
     /// - Parameters:
     ///   - sourceAudioURL: Path to the source WAV file (mic or system audio)
@@ -76,7 +78,7 @@ public enum SpeakerClipExtractor {
             guard !written.isEmpty else { continue }
 
             // Extract audio and write to temp file
-            let clipURL = try writeClip(
+            let (clipURL, actuallyWritten) = try writeClip(
                 from: audioFile,
                 segments: written,
                 sampleRate: sampleRate,
@@ -84,14 +86,17 @@ public enum SpeakerClipExtractor {
                 channel: channel,
                 clipsDirectory: clipsDirectory
             )
+            guard !actuallyWritten.isEmpty else {
+                removeClipAndSidecar(at: clipURL, label: "empty speaker clip")
+                continue
+            }
 
-            let sampleText = SpeakerClipSamplePolicy.sampleText(from: written)
+            let sampleText = SpeakerClipSamplePolicy.sampleText(from: actuallyWritten)
             do {
                 var sidecar = SpeakerClipSamplePolicy.sidecar(
                     channel: channel.rawValue,
                     diarizerSpeakerId: String(speakerId),
-                    segments: clipSegments,
-                    sourceDuration: sourceDuration
+                    written: actuallyWritten
                 )
                 if let stamped = sidecar.stamped(withWavAt: clipURL) {
                     sidecar = stamped
@@ -184,8 +189,10 @@ public enum SpeakerClipExtractor {
                 encoder.outputFormatting = [.sortedKeys]
                 try encoder.encode(stamped).write(to: partSidecar, options: .atomic)
                 fileManager.restrictToOwnerOnly(atPath: partSidecar.path)
-                try replaceItem(at: dest, with: partWav)
+                // Sidecar first: if the wav rename then fails, the old clip
+                // stays and the new sidecar will not match it.
                 try replaceItem(at: destSidecar, with: partSidecar)
+                try replaceItem(at: dest, with: partWav)
             } else {
                 try replaceItem(at: dest, with: partWav)
                 try? fileManager.removeItem(at: destSidecar)
@@ -238,7 +245,7 @@ public enum SpeakerClipExtractor {
         speakerId: Int,
         channel: UtteranceChannel,
         clipsDirectory: URL
-    ) throws -> URL {
+    ) throws -> (url: URL, written: [SpeakerClipSamplePolicy.WrittenSegment]) {
         guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
             throw ClipError.invalidAudioFormat
         }
@@ -267,6 +274,7 @@ public enum SpeakerClipExtractor {
         let inputFormat = audioFile.processingFormat
         let maxClipFrames = AVAudioFrameCount(8.0 * sampleRate)
         var totalFramesWritten: AVAudioFrameCount = 0
+        var actuallyWritten: [SpeakerClipSamplePolicy.WrittenSegment] = []
 
         for segment in segments {
             guard totalFramesWritten < maxClipFrames else { break }
@@ -321,9 +329,12 @@ public enum SpeakerClipExtractor {
 
             try outputFile.write(from: monoBuffer)
             totalFramesWritten += monoBuffer.frameLength
+            if monoBuffer.frameLength > 0 {
+                actuallyWritten.append(segment)
+            }
         }
 
-        return clipURL
+        return (clipURL, actuallyWritten)
     }
 
     /// Mix a multi-channel buffer down to mono

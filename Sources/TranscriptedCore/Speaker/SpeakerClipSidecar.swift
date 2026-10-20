@@ -181,12 +181,10 @@ public enum SpeakerClipSamplePolicy {
     public static func sidecar(
         channel: String,
         diarizerSpeakerId: String,
-        segments: [TranscriptionUtterance],
-        transcriptId: UUID? = nil,
-        sourceDuration: Double? = nil
+        written: [WrittenSegment],
+        transcriptId: UUID? = nil
     ) -> SpeakerClipSidecar {
-        let written = writtenSegments(from: segments, sourceDuration: sourceDuration)
-        return SpeakerClipSidecar(
+        SpeakerClipSidecar(
             transcriptId: transcriptId,
             channel: channel,
             diarizerSpeakerId: diarizerSpeakerId,
@@ -198,6 +196,21 @@ public enum SpeakerClipSamplePolicy {
                 )
             },
             sampleText: sampleText(from: written)
+        )
+    }
+
+    public static func sidecar(
+        channel: String,
+        diarizerSpeakerId: String,
+        segments: [TranscriptionUtterance],
+        transcriptId: UUID? = nil,
+        sourceDuration: Double? = nil
+    ) -> SpeakerClipSidecar {
+        sidecar(
+            channel: channel,
+            diarizerSpeakerId: diarizerSpeakerId,
+            written: writtenSegments(from: segments, sourceDuration: sourceDuration),
+            transcriptId: transcriptId
         )
     }
 
