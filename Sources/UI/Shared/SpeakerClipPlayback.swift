@@ -30,7 +30,20 @@ final class SpeakerClipPlayback: ObservableObject {
     /// SHA-256 of the wav `Data` this play loaded. Same bytes as the quote
     /// and the `NSSound`. Nil when nothing is playing.
     private(set) var activeWavSHA256: String?
+    /// The wav bytes `play` loaded for the current clip. Quote and sound
+    /// both come from this `Data`. Tests replace the file after load and
+    /// still read this, not a live reread.
+    private(set) var lastLoadedPlay: LoadedPlay?
+    /// Test seam: start playback of already-loaded wav bytes. Production
+    /// leaves this nil and uses `NSSound`.
+    var playLoadedWavData: ((Data) -> Bool)?
     @Published private(set) var activeRetainedSample: SpeakerRetainedAudioSample?
+
+    struct LoadedPlay {
+        let wavData: Data
+        let quote: String?
+        let sha256: String
+    }
 
     private final class PlaybackDelegate: NSObject, NSSoundDelegate {
         func sound(_ sound: NSSound, didFinishPlaying flag: Bool) {
@@ -69,6 +82,15 @@ final class SpeakerClipPlayback: ObservableObject {
         guard let wavData = try? Data(contentsOf: url), !wavData.isEmpty else { return }
         let quote = SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: wavData)
         let digest = SpeakerClipSidecarQuote.sha256Hex(wavData)
+        lastLoadedPlay = LoadedPlay(wavData: wavData, quote: quote, sha256: digest)
+        if let playLoadedWavData {
+            guard playLoadedWavData(wavData) else { return }
+            activeURL = url
+            activeValidatedQuote = quote
+            activeWavSHA256 = digest
+            notifyStateDidChange()
+            return
+        }
         guard let sound = NSSound(data: wavData) else { return }
         sound.delegate = playbackDelegate
         activeURL = url
@@ -157,6 +179,7 @@ final class SpeakerClipPlayback: ObservableObject {
         activeURL = nil
         activeValidatedQuote = nil
         activeWavSHA256 = nil
+        lastLoadedPlay = nil
         retainedAudioStatusObserver?.invalidate()
         retainedAudioStatusObserver = nil
         retainedAudioPlayer.pause()
@@ -174,6 +197,7 @@ final class SpeakerClipPlayback: ObservableObject {
         activeURL = nil
         activeValidatedQuote = nil
         activeWavSHA256 = nil
+        lastLoadedPlay = nil
         notifyStateDidChange()
     }
 
