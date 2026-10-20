@@ -43,10 +43,16 @@ func testHomeMeetingPreviewFormatter() {
         assertNil(HomeMeetingTranscriptClock.seconds(from: "12"), "A bare number is not a clock time")
         assertNil(HomeMeetingTranscriptClock.seconds(from: ""), "An empty time is not clickable")
         assertNil(HomeMeetingTranscriptClock.seconds(from: "99999999999999999999:00"), "Oversized values must not overflow")
-        assertEqual(HomeMeetingTranscriptClock.seconds(from: "00:05.4"), 5.4, "A fractional second must seek to that offset, not the whole second")
-        assertEqual(HomeMeetingTranscriptClock.seconds(from: "1:02:03.25"), 3723.25, "H:MM:SS.frac should keep the fraction")
+        assertNil(
+            HomeMeetingTranscriptClock.seconds(from: "00:05.4"),
+            "the transcript writer stores whole seconds, so a fractional clock is not a seek offset"
+        )
+        assertNil(
+            HomeMeetingTranscriptClock.seconds(from: "1:02:03.25"),
+            "a fractional H:MM:SS clock is not something the writer emits"
+        )
         assertNil(HomeMeetingTranscriptClock.seconds(from: "00:05."), "A trailing dot is not a usable clock")
-        assertNil(HomeMeetingTranscriptClock.seconds(from: "00:05.1234"), "Fraction is capped at milliseconds")
+        assertNil(HomeMeetingTranscriptClock.seconds(from: "00:05.1234"), "A fractional clock is not a writer timestamp")
     }
 
     runSuite("HomeMeetingSpeakerNamingPolicy leads with the quote speaker review would play") {

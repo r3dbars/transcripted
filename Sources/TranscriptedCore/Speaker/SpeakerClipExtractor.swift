@@ -2,6 +2,7 @@
 // Extracts short audio clips per speaker from a source WAV file (mic or system).
 // Used by the post-meeting naming flow so users can hear each speaker's voice.
 
+import Darwin
 import Foundation
 import AVFoundation
 
@@ -67,25 +68,35 @@ public enum SpeakerClipExtractor {
 
             // Pick the best segment(s) for the clip
             let clipSegments = SpeakerClipSamplePolicy.selectClipSegments(utterances: speakerUtterances)
-            guard !clipSegments.isEmpty else { continue }
+            let sourceDuration = Double(audioFile.length) / sampleRate
+            let written = SpeakerClipSamplePolicy.writtenSegments(
+                from: clipSegments,
+                sourceDuration: sourceDuration
+            )
+            guard !written.isEmpty else { continue }
 
             // Extract audio and write to temp file
             let clipURL = try writeClip(
                 from: audioFile,
-                segments: clipSegments,
+                segments: written,
                 sampleRate: sampleRate,
                 speakerId: speakerId,
                 channel: channel,
                 clipsDirectory: clipsDirectory
             )
 
-            let sampleText = SpeakerClipSamplePolicy.sampleText(from: clipSegments)
+            let sampleText = SpeakerClipSamplePolicy.sampleText(from: written)
             do {
-                try SpeakerClipSamplePolicy.sidecar(
+                var sidecar = SpeakerClipSamplePolicy.sidecar(
                     channel: channel.rawValue,
                     diarizerSpeakerId: String(speakerId),
-                    segments: clipSegments
-                ).write(nextTo: clipURL)
+                    segments: clipSegments,
+                    sourceDuration: sourceDuration
+                )
+                if let stamped = sidecar.stamped(withWavAt: clipURL) {
+                    sidecar = stamped
+                    try sidecar.write(nextTo: clipURL)
+                }
             } catch {
                 AppLogger.pipeline.warning("Failed to write speaker clip sidecar", [
                     "speakerId": "\(speakerId)",
@@ -120,32 +131,84 @@ public enum SpeakerClipExtractor {
     }
 
     /// Copy a temporary clip to persistent storage, keyed by speaker UUID.
-    /// Overwrites any existing clip for this speaker (keeps the latest).
+    /// Writes the wav and sidecar to sibling temp names, then renames them
+    /// into place so a failed copy never deletes the previous pair.
     public static func persistClip(
         from tempClipURL: URL,
         speakerId: UUID,
         clipsDirectory: URL = defaultClipsDirectory,
         sidecar: SpeakerClipSidecar? = nil
     ) {
-        let dir = clipsDirectory
+        persistLocks.withLock(for: speakerId) {
+            persistClipLocked(
+                from: tempClipURL,
+                speakerId: speakerId,
+                clipsDirectory: clipsDirectory,
+                sidecar: sidecar
+            )
+        }
+    }
+
+    private static func persistClipLocked(
+        from tempClipURL: URL,
+        speakerId: UUID,
+        clipsDirectory: URL,
+        sidecar: SpeakerClipSidecar?
+    ) {
+        let fileManager = FileManager.default
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
         } catch {
             AppLogger.pipeline.error("Failed to create clips directory", ["error": error.localizedDescription])
             return
         }
-        let dest = dir.appendingPathComponent("\(speakerId.uuidString).wav")
-        removeClipAndSidecar(at: dest, label: "existing persisted clip")
+
+        let dest = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+        let destSidecar = SpeakerClipSidecar.url(nextTo: dest)
+        let partWav = dest.appendingPathExtension("part")
+        let partSidecar = destSidecar.appendingPathExtension("part")
+        defer {
+            try? fileManager.removeItem(at: partWav)
+            try? fileManager.removeItem(at: partSidecar)
+        }
+
         do {
-            try FileManager.default.copyItem(at: tempClipURL, to: dest)
-            FileManager.default.restrictToOwnerOnly(atPath: dest.path)
-            if let sidecar {
-                try sidecar.write(nextTo: dest)
-            } else if let existing = SpeakerClipSidecar.load(nextTo: tempClipURL) {
-                try existing.write(nextTo: dest)
+            try? fileManager.removeItem(at: partWav)
+            try? fileManager.removeItem(at: partSidecar)
+            try fileManager.copyItem(at: tempClipURL, to: partWav)
+            fileManager.restrictToOwnerOnly(atPath: partWav.path)
+
+            let incoming = sidecar ?? SpeakerClipSidecar.load(nextTo: tempClipURL)
+            if let stamped = incoming?.stamped(withWavAt: partWav) {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                try encoder.encode(stamped).write(to: partSidecar, options: .atomic)
+                fileManager.restrictToOwnerOnly(atPath: partSidecar.path)
+                try replaceItem(at: dest, with: partWav)
+                try replaceItem(at: destSidecar, with: partSidecar)
+            } else {
+                try replaceItem(at: dest, with: partWav)
+                try? fileManager.removeItem(at: destSidecar)
             }
+            fileManager.restrictToOwnerOnly(atPath: dest.path)
         } catch {
-            AppLogger.pipeline.error("Failed to persist speaker clip", ["speakerId": speakerId.uuidString, "error": error.localizedDescription])
+            AppLogger.pipeline.error("Failed to persist speaker clip", [
+                "speakerId": speakerId.uuidString,
+                "error": error.localizedDescription
+            ])
+        }
+    }
+
+    private static func replaceItem(at dest: URL, with part: URL) throws {
+        // POSIX rename in the same directory keeps `dest`'s name and, when
+        // `dest` already exists, replaces it atomically. `replaceItemAt`
+        // can keep the `.part` name instead, which would hide the clip.
+        if rename(part.path, dest.path) != 0 {
+            throw NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: "Atomic clip replace failed"]
+            )
         }
     }
 
@@ -170,7 +233,7 @@ public enum SpeakerClipExtractor {
     /// Write audio segments to a temporary mono WAV file using frame-level seeking.
     private static func writeClip(
         from audioFile: AVAudioFile,
-        segments: [TranscriptionUtterance],
+        segments: [SpeakerClipSamplePolicy.WrittenSegment],
         sampleRate: Double,
         speakerId: Int,
         channel: UtteranceChannel,
@@ -210,7 +273,7 @@ public enum SpeakerClipExtractor {
             guard segment.start.isFinite, segment.end.isFinite else { continue }
 
             let rawStartFrame = segment.start * sampleRate
-            let rawEndFrame = min(segment.end, segment.start + 8.0) * sampleRate
+            let rawEndFrame = segment.end * sampleRate
             guard rawStartFrame.isFinite,
                   rawEndFrame.isFinite,
                   rawStartFrame >= 0,
@@ -304,9 +367,14 @@ public enum SpeakerClipExtractor {
     }
 
     public static func removeClipAndSidecar(at url: URL, label: String) {
+        let sidecar = SpeakerClipSidecar.url(nextTo: url)
         removeClipFile(url, label: label)
-        removeClipFile(SpeakerClipSidecar.url(nextTo: url), label: "\(label) sidecar")
+        removeClipFile(url.appendingPathExtension("part"), label: "\(label) wav part")
+        removeClipFile(sidecar, label: "\(label) sidecar")
+        removeClipFile(sidecar.appendingPathExtension("part"), label: "\(label) sidecar part")
     }
+
+    private static let persistLocks = PersistLockTable()
 
     private static func removeClipFile(_ url: URL, label: String) {
         do {
@@ -322,6 +390,25 @@ public enum SpeakerClipExtractor {
                 "error": error.localizedDescription
             ])
         }
+    }
+}
+
+private final class PersistLockTable: @unchecked Sendable {
+    private let tableLock = NSLock()
+    private var locks: [UUID: NSLock] = [:]
+
+    func withLock(for speakerId: UUID, _ body: () -> Void) {
+        let lock: NSLock = {
+            tableLock.lock()
+            defer { tableLock.unlock() }
+            if let existing = locks[speakerId] { return existing }
+            let created = NSLock()
+            locks[speakerId] = created
+            return created
+        }()
+        lock.lock()
+        defer { lock.unlock() }
+        body()
     }
 }
 

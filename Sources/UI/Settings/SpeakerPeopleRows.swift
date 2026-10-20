@@ -43,7 +43,10 @@ struct SpeakerVoiceToNameRow: View {
     }
 
     private var clipQuote: String? {
-        let text = group.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let clipURL = group.representative.clipURL {
+            return SpeakerClipLibrary.sampleText(nextTo: clipURL)
+        }
+        let text = group.representative.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines)
         return (text?.isEmpty == false) ? text : nil
     }
 

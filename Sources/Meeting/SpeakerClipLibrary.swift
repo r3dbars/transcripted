@@ -23,18 +23,18 @@ enum SpeakerClipLibrary {
             ?? SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: legacyClipsDirectory)
     }
 
-    /// The quote stored next to a saved clip. Nil for older wavs that have
-    /// no sidecar — callers must not guess a transcript line instead.
+    /// The quote stored next to a saved clip, only when that sidecar
+    /// describes this exact wav. Nil for older wavs, a version we don't
+    /// read, or a pair whose size or hash no longer matches — callers
+    /// must not guess a transcript line instead.
+    ///
+    /// Deleting a meeting does not remove this file. The clip is the
+    /// person's voice sample, not meeting-owned media.
     nonisolated static func sampleText(nextTo clipURL: URL) -> String? {
-        struct Payload: Decodable {
-            var sampleText: String
-        }
-        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
-        guard let data = try? Data(contentsOf: url),
-              let payload = try? JSONDecoder().decode(Payload.self, from: data) else {
+        guard let sidecar = SpeakerClipSidecar.loadMatchingWav(nextTo: clipURL) else {
             return nil
         }
-        let text = payload.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = sidecar.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
         return text.isEmpty ? nil : text
     }
 

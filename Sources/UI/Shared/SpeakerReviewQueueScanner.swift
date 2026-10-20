@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -336,19 +337,34 @@ enum SpeakerReviewQueueScanner {
             meetingDuration: meetingDuration,
             isImported: document.values["imported_at"] != nil,
             speakers: pendingSpeakers.map { speaker in
-                let sample = SpeakerReviewSamplePolicy.sample(
+                let identity = (
                     persistentSpeakerID: speaker.dbId,
                     diarizerSpeakerID: speaker.id,
-                    channel: speaker.channel == .mic ? .mic : .system,
-                    in: transcriptLines,
-                    meetingDuration: meetingDurationSeconds
+                    channel: speaker.channel == .mic ? HomeMeetingSpeakerChannel.mic : .system
                 )
+                let mixedSample = SpeakerReviewSamplePolicy.sample(
+                    persistentSpeakerID: identity.persistentSpeakerID,
+                    diarizerSpeakerID: identity.diarizerSpeakerID,
+                    channel: identity.channel,
+                    in: transcriptLines,
+                    meetingDuration: meetingDurationSeconds,
+                    requiredWindow: .mixed
+                )
+                let channelSample = SpeakerReviewSamplePolicy.sample(
+                    persistentSpeakerID: identity.persistentSpeakerID,
+                    diarizerSpeakerID: identity.diarizerSpeakerID,
+                    channel: identity.channel,
+                    in: transcriptLines,
+                    meetingDuration: meetingDurationSeconds,
+                    requiredWindow: .channel
+                )
+                let quoteSample = mixedSample ?? channelSample
                 return PendingSummary.Speaker(
                     speaker: speaker,
-                    sampleText: sample.flatMap { cleanedSample($0.line.text) }
+                    sampleText: quoteSample.flatMap { cleanedSample($0.line.text) }
                         ?? sampleText(in: document.body, speakerName: speaker.name, channel: speaker.channel),
-                    mixedWindow: sampleWindow(from: sample?.mixedWindow),
-                    channelWindow: sampleWindow(from: sample?.channelWindow)
+                    mixedWindow: sampleWindow(from: mixedSample?.mixedWindow),
+                    channelWindow: sampleWindow(from: channelSample?.channelWindow)
                 )
             },
             hasLineWindows: !transcriptLines.isEmpty
@@ -426,13 +442,10 @@ enum SpeakerReviewQueueScanner {
             }
 
             let transcriptPaths = Set(groupItems.map { $0.transcriptURL.standardizedFileURL.path })
-            let sampleText = groupItems
-                .first { $0.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }?
-                .sampleText
             return SpeakerPendingVoiceGroup(
                 representative: representative,
                 meetingCount: transcriptPaths.count,
-                sampleText: sampleText
+                sampleText: representative.sampleText
             )
         }
     }
@@ -583,17 +596,31 @@ enum SpeakerReviewQueueScanner {
     }
 
     /// Reads the quote stored next to a saved clip. Decodes the sidecar
-    /// JSON by key so this module does not name the Core sidecar type.
+    /// JSON by key so this module does not name the Core sidecar type, and
+    /// only returns it when the sidecar still describes this wav.
     private static func clipSidecarSampleText(nextTo clipURL: URL) -> String? {
         struct Payload: Decodable {
             var sampleText: String
+            var formatVersion: Int
+            var wavByteCount: Int
+            var wavSHA256: String
         }
         let url = clipURL.deletingPathExtension().appendingPathExtension("json")
         guard let data = try? Data(contentsOf: url),
-              let payload = try? JSONDecoder().decode(Payload.self, from: data) else {
+              let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.formatVersion == 1,
+              payload.wavByteCount > 0,
+              !payload.wavSHA256.isEmpty,
+              let wav = try? Data(contentsOf: clipURL),
+              wav.count == payload.wavByteCount,
+              clipWavSHA256(wav) == payload.wavSHA256.lowercased() else {
             return nil
         }
         return cleanedSample(payload.sampleText)
+    }
+
+    private static func clipWavSHA256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func sampleText(

@@ -247,6 +247,10 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         let micClipURL = clipsDirectory.appendingPathComponent("mic_speaker_0.caf")
         try Data("system clip".utf8).write(to: systemClipURL)
         try Data("mic clip".utf8).write(to: micClipURL)
+        let systemSidecarURL = SpeakerClipSidecar.url(nextTo: systemClipURL)
+        let systemPartSidecarURL = systemSidecarURL.appendingPathExtension("part")
+        try Data("{\"sampleText\":\"temp\"}".utf8).write(to: systemSidecarURL)
+        try Data("{\"sampleText\":\"temp-part\"}".utf8).write(to: systemPartSidecarURL)
 
         // Cancellation at the "system clips extracted, mic clips not reached yet" checkpoint:
         // only the system-channel helper has been called so far.
@@ -255,6 +259,8 @@ final class PipelineRollbackRegistryTests: XCTestCase {
         await rollback.rollbackAll()
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemClipURL.path), "the registered channel's clip should be removed")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemSidecarURL.path), "cancel must delete the temp sidecar next to that wav")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: systemPartSidecarURL.path), "cancel must delete a leftover sidecar.part too")
         XCTAssertTrue(FileManager.default.fileExists(atPath: micClipURL.path), "a clip from a channel not yet registered must survive")
     }
 

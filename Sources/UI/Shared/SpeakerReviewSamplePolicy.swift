@@ -34,12 +34,19 @@ enum SpeakerReviewSamplePolicy {
         )
     }
 
+    enum RequiredWindow: Equatable, Sendable {
+        case any
+        case mixed
+        case channel
+    }
+
     static func sample(
         persistentSpeakerID: UUID?,
         diarizerSpeakerID: String?,
         channel: HomeMeetingSpeakerChannel?,
         in lines: [HomeMeetingTranscriptLine],
-        meetingDuration: TimeInterval?
+        meetingDuration: TimeInterval?,
+        requiredWindow: RequiredWindow = .any
     ) -> Sample? {
         let ranked = rankedLines(
             persistentSpeakerID: persistentSpeakerID,
@@ -68,20 +75,24 @@ enum SpeakerReviewSamplePolicy {
                 mixedWindow: mixed,
                 channelWindow: channelWindow
             )
-            if mixed != nil || channelWindow != nil {
+            if hasRequiredWindow(mixed, channelWindow, requiredWindow) {
                 return candidate
             }
             if quoteOnly == nil {
                 quoteOnly = candidate
             }
         }
-        return quoteOnly
+        if requiredWindow == .any {
+            return quoteOnly
+        }
+        return nil
     }
 
     /// The turn whose quote should be shown: the first ranked line that has
-    /// a playable retained-audio window, so Home "Who is this?" and Speakers
-    /// retained playback describe one segment. Rank is longest text, then
-    /// longest mixed-timeline gap to the next line, then the earlier start.
+    /// a playable mixed-audio window when that file is what Home and Speakers
+    /// play, so the words on screen are the words that play. Rank is longest
+    /// text, then longest mixed-timeline gap to the next line, then the
+    /// earlier start.
     static func representativeLine(
         matching identity: HomeMeetingSpeakerIdentity,
         in lines: [HomeMeetingTranscriptLine]
@@ -105,15 +116,22 @@ enum SpeakerReviewSamplePolicy {
             diarizerSpeakerID: diarizerSpeakerID,
             channel: channel,
             in: lines,
+            meetingDuration: nil,
+            requiredWindow: .mixed
+        )?.line ?? sample(
+            persistentSpeakerID: persistentSpeakerID,
+            diarizerSpeakerID: diarizerSpeakerID,
+            channel: channel,
+            in: lines,
             meetingDuration: nil
         )?.line
     }
 
     /// Playback range for an already-chosen line. Start is that line's Home
-    /// clock (`startSeconds`, including a fractional second when the clock
-    /// has one). Duration is min(8s, next turn on this source, meeting end).
-    /// Nil when the next clock is equal or reversed — the range would not
-    /// isolate this voice.
+    /// clock (`startSeconds`). The transcript writer stores whole seconds, so
+    /// this is a whole-second offset. Duration is min(8s, next turn on this
+    /// source, meeting end). Nil when the next clock is equal or reversed —
+    /// the range would not isolate this voice.
     static func playbackWindow(
         for line: HomeMeetingTranscriptLine,
         at index: Int,
@@ -141,6 +159,21 @@ enum SpeakerReviewSamplePolicy {
         if let meetingDuration { end = min(end, meetingDuration) }
         guard end > start else { return nil }
         return Window(startTime: start, duration: end - start, text: text)
+    }
+
+    private static func hasRequiredWindow(
+        _ mixed: Window?,
+        _ channelWindow: Window?,
+        _ requiredWindow: RequiredWindow
+    ) -> Bool {
+        switch requiredWindow {
+        case .any:
+            return mixed != nil || channelWindow != nil
+        case .mixed:
+            return mixed != nil
+        case .channel:
+            return channelWindow != nil
+        }
     }
 
     private static func rankedLines(
