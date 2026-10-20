@@ -214,11 +214,41 @@ func testSpeakerNameAutocompleteField() async {
         naming.type("Ann")
         assertTrue(naming.press(#selector(NSResponder.moveDown(_:))))
         assertEqual(naming.session.keyboardHighlightIndex, 0)
+        assertEqual(
+            naming.session.visualHighlightIndex,
+            naming.session.keyboardHighlightIndex,
+            "after an arrow the painted row is the Return target"
+        )
         naming.session.hoverEntered(index: 1)
+        assertEqual(
+            naming.session.visualHighlightIndex,
+            naming.session.keyboardHighlightIndex,
+            "hovering Anna must not cover the Ann row Return will save"
+        )
         let submitted = naming.press(#selector(NSResponder.insertNewline(_:)))
         assertTrue(submitted)
         assertEqual(naming.text, "Ann")
         assertEqual(naming.selectedID, ann.id, "Return files under the arrow row, not the hovered one")
+    }
+
+    runSuite("Hover then an arrow paints the keyboard row Return will save") {
+        let naming = SpeakerNameFieldFixture(options: [ann, anna])
+        defer { naming.close() }
+        naming.type("Ann")
+        naming.session.hoverEntered(index: 1)
+        assertEqual(naming.session.visualHighlightIndex, 1, "resting on Anna paints Anna")
+        assertTrue(naming.press(#selector(NSResponder.moveDown(_:))))
+        assertNil(naming.session.hoverHighlightIndex, "Down clears the hover so the keyboard row can paint")
+        assertEqual(naming.session.keyboardHighlightIndex, 0)
+        assertEqual(
+            naming.session.visualHighlightIndex,
+            naming.session.keyboardHighlightIndex,
+            "pointer on Anna then Down paints Ann, which Return saves"
+        )
+        let submitted = naming.press(#selector(NSResponder.insertNewline(_:)))
+        assertTrue(submitted)
+        assertEqual(naming.text, "Ann")
+        assertEqual(naming.selectedID, ann.id)
     }
 
     await runSuite("Tab and click-away always drop focus so the list cannot stick") {

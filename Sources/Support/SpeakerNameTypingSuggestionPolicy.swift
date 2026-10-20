@@ -101,6 +101,12 @@ enum SpeakerNameTypingSuggestionPolicy {
         return min(max(start + delta, 0), count - 1)
     }
 
+    /// The painted row. Arrows win over hover so the highlight matches
+    /// `returnDecision`. Hover only paints when nobody has used the arrows.
+    static func paintedHighlight(keyboard: Int?, hover: Int?) -> Int? {
+        keyboard ?? hover
+    }
+
     /// Return commits the keyboard (arrow-key) highlight only. `hoverHighlight`
     /// is visual paint and is ignored so brushing a row cannot file a voice
     /// under the wrong person.

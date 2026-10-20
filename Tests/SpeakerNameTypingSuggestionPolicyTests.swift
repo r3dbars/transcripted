@@ -190,6 +190,20 @@ func testSpeakerNameTypingSuggestionPolicy() {
             .selectIndex(0),
             "Return keeps the arrow highlight even when another row is hovered"
         )
+        assertEqual(
+            Policy.paintedHighlight(keyboard: nil, hover: 1),
+            1,
+            "with no arrows, hover is the only paint"
+        )
+        assertEqual(
+            Policy.paintedHighlight(keyboard: 0, hover: 1),
+            0,
+            "once arrows have a row, that row is painted, not the hover"
+        )
+        assertNil(
+            Policy.paintedHighlight(keyboard: nil, hover: nil),
+            "nothing is painted until hover or arrows"
+        )
     }
 
     runSuite("An exact name ranks ahead of a longer prefix match") {

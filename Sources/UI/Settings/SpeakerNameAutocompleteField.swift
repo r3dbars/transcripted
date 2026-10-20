@@ -248,19 +248,11 @@ struct SpeakerNameAutocompleteNSField: NSViewRepresentable {
             let suggestions = currentSuggestions(for: field.stringValue)
 
             if commandSelector == #selector(NSResponder.moveDown(_:)) {
-                session.keyboardHighlightIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
-                    from: session.keyboardHighlightIndex,
-                    by: 1,
-                    count: suggestions.count
-                )
+                session.moveKeyboardHighlight(by: 1, count: suggestions.count)
                 return !suggestions.isEmpty
             }
             if commandSelector == #selector(NSResponder.moveUp(_:)) {
-                session.keyboardHighlightIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
-                    from: session.keyboardHighlightIndex,
-                    by: -1,
-                    count: suggestions.count
-                )
+                session.moveKeyboardHighlight(by: -1, count: suggestions.count)
                 return !suggestions.isEmpty
             }
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
@@ -309,7 +301,21 @@ final class SpeakerNameAutocompleteSession: ObservableObject {
     @Published var isBrowsingAll = false
     weak var field: NSTextField?
 
-    var visualHighlightIndex: Int? { hoverHighlightIndex ?? keyboardHighlightIndex }
+    var visualHighlightIndex: Int? {
+        SpeakerNameTypingSuggestionPolicy.paintedHighlight(
+            keyboard: keyboardHighlightIndex,
+            hover: hoverHighlightIndex
+        )
+    }
+
+    func moveKeyboardHighlight(by delta: Int, count: Int) {
+        hoverHighlightIndex = nil
+        keyboardHighlightIndex = SpeakerNameTypingSuggestionPolicy.movedHighlight(
+            from: keyboardHighlightIndex,
+            by: delta,
+            count: count
+        )
+    }
 
     func queryChanged() {
         keyboardHighlightIndex = nil
