@@ -142,24 +142,26 @@ func testSpeakerReviewQueueScanner() {
     }
 
     runSuite("SpeakerReviewQueueScanner skips an unplayable same-second turn on mixed-only audio") {
-        withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
-            let speakerId = UUID()
-            let markdown = sameSecondOtherChannelSpeakerReviewMarkdown(speakerId: speakerId)
-            try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
-            let items = SpeakerReviewQueueScanner.pendingItems(
-                in: markdown,
-                transcriptURL: transcriptURL,
-                profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)],
-                clipURLsByProfileID: [:]
-            )
-            assertEqual(
-                items.first?.sampleText,
-                "Later usable turn.",
-                "mixed-only fallback must not quote the turn the mixed file cannot isolate"
-            )
-            assertRetainedSample(items.first?.retainedAudioSample, SpeakerRetainedAudioSample(
-                url: audioURLs[0], startTime: 8, duration: 8
-            ), "playback must seek to the later mixed-playable turn")
+        for stem in ["playback.m4a", "recording.m4a"] {
+            withRetainedReviewAudio(stems: [stem]) { transcriptURL, audioURLs in
+                let speakerId = UUID()
+                let markdown = sameSecondOtherChannelSpeakerReviewMarkdown(speakerId: speakerId)
+                try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                let items = SpeakerReviewQueueScanner.pendingItems(
+                    in: markdown,
+                    transcriptURL: transcriptURL,
+                    profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)],
+                    clipURLsByProfileID: [:]
+                )
+                assertEqual(
+                    items.first?.sampleText,
+                    "Later usable turn.",
+                    "a single mixed or imported file must not quote the turn that file cannot isolate"
+                )
+                assertRetainedSample(items.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                    url: audioURLs[0], startTime: 8, duration: 8
+                ), "playback must seek to the later mixed-playable turn")
+            }
         }
     }
 

@@ -504,7 +504,8 @@ enum SpeakerReviewQueueScanner {
             : nil
         let mixedURL = urls.first { $0.deletingPathExtension().lastPathComponent == MeetingAudioArchiveResolver.playbackStem }
         guard let url = channelURL ?? importedURL ?? mixedURL else { return nil }
-        guard let window = url == mixedURL ? entry.mixedWindow : entry.channelWindow else { return nil }
+        let usesMixedTimeline = url == importedURL || url == mixedURL
+        guard let window = usesMixedTimeline ? entry.mixedWindow : entry.channelWindow else { return nil }
         return (
             SpeakerRetainedAudioSample(url: url, startTime: window.startTime, duration: window.duration),
             window.text
