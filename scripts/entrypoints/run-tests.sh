@@ -433,6 +433,8 @@ APP_SOURCES=(
     "Sources/Support/DictationMufflePreferences.swift"
     "Sources/Support/NotchIslandPreferences.swift"
     "Sources/Support/DictationFillerCleanupPolicy.swift"
+    "Sources/Support/NextSentencePreferences.swift"
+    "Sources/Support/DeveloperPreview.swift"
     "Sources/Accessibility/AccessibilityBridge.swift"
     "Sources/Writing/NextSentence/NextSentencePolicy.swift"
     "Sources/Writing/NextSentence/NextSentencePrompt.swift"

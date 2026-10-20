@@ -50,6 +50,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows. The Writing row shows a quiet "New" badge until `WritingSidebarNewBadge.dismissedDefaultsKey` is set (key lives in `Sources/Writing/WritingSidebarNewBadge.swift`).
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected page, the ⌘F Home find-focus token, `isWindowOpen`, `requestHomeRevealMeeting`.
 - `TranscriptedSettingsGeneralControls.swift` - `SettingsCard`, label/control/toggle/action rows, the dictation overlay mode picker, `GeneralInfo` popovers.
+- `DeveloperPreviewSettingsRows.swift` - the Developer Preview card at the bottom of the settings page: one tagged row per `DeveloperPreview.all` feature, with what it sends in the ⓘ popover; turning one on asks first. No analytics for these toggles.
 - `TranscriptedSettingsComponents.swift` - `persistedSettingsBinding`, `SettingsPageIntro`, button styles, `SettingsStatusCard`, permission rows, hotkey recorder container.
 - `TranscriptedSettingsRows.swift` - rows for model choices, custom corrections, Auto Enter apps.
 - `ShortcutSettingsRows.swift` - key rows for the dictation key and meetings, and `ShortcutRecorderModel`, which records a shortcut in place (the dictation key is one key with hold/tap behavior; no Hands-Free or paste-last rows).

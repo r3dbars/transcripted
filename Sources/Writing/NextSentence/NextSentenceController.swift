@@ -6,7 +6,7 @@ import Combine
 /// your saved context. Tab moves between three different replies; ↑/↓ shorter and longer; ←/→ more
 /// direct and warmer (the mood pad does both). Highlight a word or a few for other ways to say
 /// it (scroll to roll through them), drag the end handle to cut words, type to edit. fn again listens for a spoken change. Return inserts; hold it to send.
-/// Owner-only lab feature, off unless `NextSentencePreferences.isEnabled()`. See that type for why.
+/// A Developer Preview feature, off unless turned on in Settings (`NextSentencePreferences.isEnabled()`). See that type.
 @MainActor
 final class NextSentenceController {
     /// Starts Transcripted's own dictation (injected by the app; this module can't name Dictation).
@@ -192,7 +192,7 @@ final class NextSentenceController {
     private func open(listenFirst: Bool = false) {
         let app = NSWorkspace.shared.frontmostApplication
         if let block = NextSentenceContext.blockReason(for: app) {
-            return flash(block == .excludedApp ? "Next Sentence doesn't run in password managers." : "Click into a text box first.")
+            return flash(block == .excludedApp ? "Write for Me doesn't run in password managers." : "Click into a text box first.")
         }
         guard let app else { return }
         generation += 1

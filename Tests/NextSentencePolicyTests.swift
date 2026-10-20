@@ -244,6 +244,28 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         assertTrue(NextSentencePolicy.matchedWords(from: "", to: "Hello there").isEmpty, "nothing to glide from an empty card")
     }
 
+    runSuite("Developer Preview features are off until turned on, and say what they send") {
+        let suite = "DeveloperPreviewTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { return assertTrue(false, "test defaults") }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        for feature in DeveloperPreview.all {
+            assertFalse(DeveloperPreview.isOn(feature, userDefaults: defaults), "\(feature.title) is off by default")
+            assertFalse(feature.details.isEmpty || feature.consent.isEmpty, "\(feature.title) explains itself before it's turned on")
+        }
+        let feature = DeveloperPreview.nextSentence
+        assertEqual(feature.defaultsKey, NextSentencePreferences.enabledKey, "the Settings switch is the same one Next Sentence reads")
+        assertTrue(feature.consent.contains("screenshot") && feature.consent.contains("Claude"), "the prompt says what leaves the Mac, and where to")
+        var posted: [String] = []
+        let token = NotificationCenter.default.addObserver(forName: DeveloperPreview.didChange, object: nil, queue: nil) { note in
+            if let id = note.object as? String { posted.append(id) }
+        }
+        DeveloperPreview.set(feature, on: true, userDefaults: defaults)
+        NotificationCenter.default.removeObserver(token)
+        assertTrue(DeveloperPreview.isOn(feature, userDefaults: defaults) && NextSentencePreferences.isEnabled(userDefaults: defaults),
+                   "turning it on in Settings turns Next Sentence on")
+        assertEqual(posted, [feature.id], "the app hears about it at once, so no relaunch is needed")
+    }
+
     runSuite("After typing, Esc waits a moment for a second press") {
         assertTrue(NextSentencePolicy.escapeConfirmWindow >= 1 && NextSentencePolicy.escapeConfirmWindow <= 2,
                    "long enough to press Esc twice on purpose, short enough that a later Esc warns again")

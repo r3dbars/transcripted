@@ -34,6 +34,8 @@ class TranscriptedAppState: ObservableObject {
     private var runtimeReadinessRerunRequested = false
     private var hasReportedLaunchWarmup = false
     private var modelSelectionWarmupCancellable: AnyCancellable?
+    /// Settings › Developer Preview turning Next Sentence on or off, applied at once.
+    private var developerPreviewCancellable: AnyCancellable?
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
     private var isInitialized = false
@@ -146,6 +148,16 @@ class TranscriptedAppState: ObservableObject {
                 writingController.startIfEnabled { [weak self] message in self?.logger.log(message) }
                 nextSentence.startIfEnabled()
             }
+            developerPreviewCancellable = NotificationCenter.default.publisher(for: DeveloperPreview.didChange)
+                .compactMap { $0.object as? String }
+                .filter { $0 == DeveloperPreview.nextSentence.id }
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in
+                    MainActor.assumeIsolated {
+                        guard let self else { return }
+                        if NextSentencePreferences.isEnabled() { self.nextSentence.startIfEnabled() } else { self.nextSentence.stop() }
+                    }
+                }
         }
         logger.log("APP LAUNCHED | modes: dictation + meetings")
         AnalyticsReporter.track("app_launched")

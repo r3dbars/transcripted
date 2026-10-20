@@ -3,12 +3,10 @@ import Foundation
 /// Next Sentence: a hotkey that writes the next sentence you'd type, from what's on screen and
 /// your saved meetings, dictations and writing, and pastes the one you pick.
 ///
-/// Owner-only lab feature. It's off unless the hidden default is set, has no Settings UI, and
-/// sends the focused window's screenshot, its text and matching snippets to Claude through the
-/// `claude` CLI the user is signed into. That breaks Writing's "never leaves your Mac" promise,
-/// so it must not reach other users until it has its own opt-in, copy and AGENTS.md rule update.
-///
-/// Turn it on: `defaults write com.justinbetker.draft NextSentenceEnabled -bool YES`, then relaunch.
+/// A Developer Preview feature (`DeveloperPreview.nextSentence`): off until the person turns it on in
+/// Settings › Developer Preview, which says what it sends and asks first. When used it sends the focused
+/// window's screenshot, its text and matching snippets to Claude through the `claude` CLI they're
+/// signed into, the one exception to "Local-first and private" in AGENTS.md.
 enum NextSentencePreferences {
     static let enabledKey = "NextSentenceEnabled"
     /// Full path to the `claude` CLI when it isn't in one of the usual places.
