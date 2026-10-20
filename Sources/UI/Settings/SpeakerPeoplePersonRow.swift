@@ -100,6 +100,13 @@ struct SpeakerPersonRow: View {
                                 .fixedSize()
                         }
                     }
+
+                    if let quote = model.clipSampleText(for: profile.id) {
+                        Text("“\(quote)”")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(LibraryTokens.ink2)
+                            .lineLimit(2)
+                    }
                 }
                 .help(standingExplanation ?? "Open speaker")
                 .accessibilityHint(standingExplanation ?? "")

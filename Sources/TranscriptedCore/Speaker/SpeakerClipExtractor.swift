@@ -66,7 +66,7 @@ public enum SpeakerClipExtractor {
             let similarity = firstWithId.matchSimilarity
 
             // Pick the best segment(s) for the clip
-            let clipSegments = selectClipSegments(utterances: speakerUtterances)
+            let clipSegments = SpeakerClipSamplePolicy.selectClipSegments(utterances: speakerUtterances)
             guard !clipSegments.isEmpty else { continue }
 
             // Extract audio and write to temp file
@@ -79,10 +79,20 @@ public enum SpeakerClipExtractor {
                 clipsDirectory: clipsDirectory
             )
 
-            // Pick a representative text sample (longest utterance text)
-            let sampleText = clipSegments
-                .max(by: { $0.transcript.count < $1.transcript.count })?
-                .transcript ?? ""
+            let sampleText = SpeakerClipSamplePolicy.sampleText(from: clipSegments)
+            do {
+                try SpeakerClipSamplePolicy.sidecar(
+                    channel: channel.rawValue,
+                    diarizerSpeakerId: String(speakerId),
+                    segments: clipSegments
+                ).write(nextTo: clipURL)
+            } catch {
+                AppLogger.pipeline.warning("Failed to write speaker clip sidecar", [
+                    "speakerId": "\(speakerId)",
+                    "channel": channel.rawValue,
+                    "error": error.localizedDescription
+                ])
+            }
 
             results.append(ClipResult(
                 clipURL: clipURL,
@@ -114,7 +124,8 @@ public enum SpeakerClipExtractor {
     public static func persistClip(
         from tempClipURL: URL,
         speakerId: UUID,
-        clipsDirectory: URL = defaultClipsDirectory
+        clipsDirectory: URL = defaultClipsDirectory,
+        sidecar: SpeakerClipSidecar? = nil
     ) {
         let dir = clipsDirectory
         do {
@@ -124,10 +135,15 @@ public enum SpeakerClipExtractor {
             return
         }
         let dest = dir.appendingPathComponent("\(speakerId.uuidString).wav")
-        removeClipFile(dest, label: "existing persisted clip")
+        removeClipAndSidecar(at: dest, label: "existing persisted clip")
         do {
             try FileManager.default.copyItem(at: tempClipURL, to: dest)
             FileManager.default.restrictToOwnerOnly(atPath: dest.path)
+            if let sidecar {
+                try sidecar.write(nextTo: dest)
+            } else if let existing = SpeakerClipSidecar.load(nextTo: tempClipURL) {
+                try existing.write(nextTo: dest)
+            }
         } catch {
             AppLogger.pipeline.error("Failed to persist speaker clip", ["speakerId": speakerId.uuidString, "error": error.localizedDescription])
         }
@@ -148,42 +164,7 @@ public enum SpeakerClipExtractor {
         clipsDirectory: URL = defaultClipsDirectory
     ) {
         let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
-        removeClipFile(url, label: "persisted clip")
-    }
-
-    // MARK: - Private
-
-    /// Select which utterance segments to use for the clip.
-    /// Prefers the single longest segment (cap 8s). Falls back to concatenating
-    /// short segments if the longest is under 3s.
-    private static func selectClipSegments(utterances: [TranscriptionUtterance]) -> [TranscriptionUtterance] {
-        let maxClipDuration: Double = 8.0
-        let minPreferredDuration: Double = 3.0
-
-        // Sort by duration descending
-        let sorted = utterances.sorted { ($0.end - $0.start) > ($1.end - $1.start) }
-
-        guard let longest = sorted.first else { return [] }
-        let longestDuration = longest.end - longest.start
-
-        if longestDuration >= minPreferredDuration {
-            // Single segment is long enough — use it (capped at 8s)
-            return [longest]
-        }
-
-        // Concatenate short segments until we reach target duration
-        var selected: [TranscriptionUtterance] = []
-        var totalDuration: Double = 0
-
-        for utterance in sorted {
-            let duration = utterance.end - utterance.start
-            if totalDuration + duration > maxClipDuration { break }
-            selected.append(utterance)
-            totalDuration += duration
-        }
-
-        // Sort by time for natural playback order
-        return selected.sorted { $0.start < $1.start }
+        removeClipAndSidecar(at: url, label: "persisted clip")
     }
 
     /// Write audio segments to a temporary mono WAV file using frame-level seeking.
@@ -320,6 +301,11 @@ public enum SpeakerClipExtractor {
             case .bufferCreationFailed: return "Failed to create audio buffer"
             }
         }
+    }
+
+    public static func removeClipAndSidecar(at url: URL, label: String) {
+        removeClipFile(url, label: label)
+        removeClipFile(SpeakerClipSidecar.url(nextTo: url), label: "\(label) sidecar")
     }
 
     private static func removeClipFile(_ url: URL, label: String) {

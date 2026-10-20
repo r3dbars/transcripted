@@ -22,7 +22,7 @@ Scanning and cache:
 - `RecentMeetingMetadataCache.swift` is a SQLite cache of derived meeting-row metadata keyed by transcript path and validated by mtime and size, so a warm refresh skips re-parsing every transcript.
 - `HomeCaptureRefreshObserver.swift` turns `.meetingCaptureArtifactsDidChange` into a callback so Home reloads transcript and audio URLs after background recompression or a rename.
 - `HomeMeetingPreviewFormatter.swift` builds preview content and staged speaker-correction and naming plans for the Home expansion.
-- `SpeakerReviewSamplePolicy.swift` picks one transcript turn per voice and the retained-audio range that belongs to that same turn, so Home quotes and Speakers playback describe one segment.
+- `SpeakerReviewSamplePolicy.swift` picks one transcript turn per voice and the retained-audio range that belongs to that same turn, so Home "Who is this?" quotes and Speakers retained-audio playback describe one segment. A saved profile clip plays instead when it exists; its quote is the sidecar next to the wav.
 - `SpeakerReviewQueueScanner.swift` loads queued speaker-review items for the people settings and review flows.
 
 Changing saved meetings:

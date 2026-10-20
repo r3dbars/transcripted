@@ -3,8 +3,8 @@ import Foundation
 /// One transcript turn for a voice, plus the retained-audio range that
 /// belongs to that same turn. Speakers review, Home "Who is this?" quotes,
 /// and retained-audio fallback all read this so the words on screen are the
-/// words that play. The island popup already pairs clip audio with that
-/// clip's own quote; this is the main-app equivalent from saved markdown.
+/// words that play. A saved profile clip is a different sample: its quote
+/// comes from the sidecar next to the wav, not from this policy.
 enum SpeakerReviewSamplePolicy {
     static let maxPreviewDuration: TimeInterval = 8
 
@@ -41,28 +41,47 @@ enum SpeakerReviewSamplePolicy {
         in lines: [HomeMeetingTranscriptLine],
         meetingDuration: TimeInterval?
     ) -> Sample? {
-        guard let line = representativeLine(
+        let ranked = rankedLines(
             persistentSpeakerID: persistentSpeakerID,
             diarizerSpeakerID: diarizerSpeakerID,
             channel: channel,
             in: lines
-        ) else { return nil }
-        return Sample(
-            line: line,
-            mixedWindow: playbackWindow(
-                for: line, in: lines, fromMixedAudio: true, meetingDuration: meetingDuration
-            ),
-            channelWindow: playbackWindow(
-                for: line, in: lines, fromMixedAudio: false, meetingDuration: meetingDuration
-            )
         )
+        var quoteOnly: Sample?
+        for match in ranked {
+            let mixed = playbackWindow(
+                for: match.element,
+                at: match.offset,
+                in: lines,
+                fromMixedAudio: true,
+                meetingDuration: meetingDuration
+            )
+            let channelWindow = playbackWindow(
+                for: match.element,
+                at: match.offset,
+                in: lines,
+                fromMixedAudio: false,
+                meetingDuration: meetingDuration
+            )
+            let candidate = Sample(
+                line: match.element,
+                mixedWindow: mixed,
+                channelWindow: channelWindow
+            )
+            if mixed != nil || channelWindow != nil {
+                return candidate
+            }
+            if quoteOnly == nil {
+                quoteOnly = candidate
+            }
+        }
+        return quoteOnly
     }
 
-    /// The turn whose quote should be shown: longest text, then longest
-    /// mixed-timeline gap to the next line, then the earlier start. Gaps are
-    /// not utterance durations (markdown only has start clocks), so text
-    /// length is the primary key — a one-word greeting with a long pause
-    /// must not beat a real sentence.
+    /// The turn whose quote should be shown: the first ranked line that has
+    /// a playable retained-audio window, so Home "Who is this?" and Speakers
+    /// retained playback describe one segment. Rank is longest text, then
+    /// longest mixed-timeline gap to the next line, then the earlier start.
     static func representativeLine(
         matching identity: HomeMeetingSpeakerIdentity,
         in lines: [HomeMeetingTranscriptLine]
@@ -81,36 +100,29 @@ enum SpeakerReviewSamplePolicy {
         channel: HomeMeetingSpeakerChannel?,
         in lines: [HomeMeetingTranscriptLine]
     ) -> HomeMeetingTranscriptLine? {
-        let matches = lines.enumerated().filter { _, line in
-            line.identity.persistentSpeakerID == persistentSpeakerID
-                && line.identity.diarizerSpeakerID == diarizerSpeakerID
-                && (line.identity.channel == nil || channel == nil || line.identity.channel == channel)
-                && !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                && line.startSeconds != nil
-        }
-        return matches.max { lhs, rhs in
-            let leftText = lhs.element.text.trimmingCharacters(in: .whitespacesAndNewlines).count
-            let rightText = rhs.element.text.trimmingCharacters(in: .whitespacesAndNewlines).count
-            if leftText != rightText { return leftText < rightText }
-            let leftTurn = mixedTurnLength(of: lhs.element, at: lhs.offset, in: lines)
-            let rightTurn = mixedTurnLength(of: rhs.element, at: rhs.offset, in: lines)
-            if leftTurn != rightTurn { return leftTurn < rightTurn }
-            return (lhs.element.startSeconds ?? 0) > (rhs.element.startSeconds ?? 0)
-        }?.element
+        sample(
+            persistentSpeakerID: persistentSpeakerID,
+            diarizerSpeakerID: diarizerSpeakerID,
+            channel: channel,
+            in: lines,
+            meetingDuration: nil
+        )?.line
     }
 
     /// Playback range for an already-chosen line. Start is that line's Home
-    /// clock (`startSeconds`). Duration is min(8s, next turn on this source,
-    /// meeting end). Nil when the next clock is equal or reversed — the
-    /// range would not isolate this voice.
+    /// clock (`startSeconds`, including a fractional second when the clock
+    /// has one). Duration is min(8s, next turn on this source, meeting end).
+    /// Nil when the next clock is equal or reversed — the range would not
+    /// isolate this voice.
     static func playbackWindow(
         for line: HomeMeetingTranscriptLine,
+        at index: Int,
         in lines: [HomeMeetingTranscriptLine],
         fromMixedAudio: Bool,
         meetingDuration: TimeInterval?
     ) -> Window? {
         guard let start = line.startSeconds,
-              let index = lines.firstIndex(of: line) else { return nil }
+              lines.indices.contains(index) else { return nil }
         let text = line.text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return nil }
 
@@ -129,6 +141,30 @@ enum SpeakerReviewSamplePolicy {
         if let meetingDuration { end = min(end, meetingDuration) }
         guard end > start else { return nil }
         return Window(startTime: start, duration: end - start, text: text)
+    }
+
+    private static func rankedLines(
+        persistentSpeakerID: UUID?,
+        diarizerSpeakerID: String?,
+        channel: HomeMeetingSpeakerChannel?,
+        in lines: [HomeMeetingTranscriptLine]
+    ) -> [(offset: Int, element: HomeMeetingTranscriptLine)] {
+        let matches = lines.enumerated().filter { _, line in
+            line.identity.persistentSpeakerID == persistentSpeakerID
+                && line.identity.diarizerSpeakerID == diarizerSpeakerID
+                && (line.identity.channel == nil || channel == nil || line.identity.channel == channel)
+                && !line.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && line.startSeconds != nil
+        }
+        return matches.sorted { lhs, rhs in
+            let leftText = lhs.element.text.trimmingCharacters(in: .whitespacesAndNewlines).count
+            let rightText = rhs.element.text.trimmingCharacters(in: .whitespacesAndNewlines).count
+            if leftText != rightText { return leftText > rightText }
+            let leftTurn = mixedTurnLength(of: lhs.element, at: lhs.offset, in: lines)
+            let rightTurn = mixedTurnLength(of: rhs.element, at: rhs.offset, in: lines)
+            if leftTurn != rightTurn { return leftTurn > rightTurn }
+            return (lhs.element.startSeconds ?? 0) < (rhs.element.startSeconds ?? 0)
+        }
     }
 
     private static func mixedTurnLength(

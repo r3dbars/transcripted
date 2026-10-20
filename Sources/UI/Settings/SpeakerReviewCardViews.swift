@@ -201,6 +201,12 @@ struct SpeakerReviewNamedRow: View {
                 Text(voice.name)
                     .font(.system(size: 14, weight: .semibold))
                     .lineLimit(1)
+                if let quote = model.clipSampleText(for: voice.personID) {
+                    Text("“\(quote)”")
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .lineLimit(2)
+                }
                 if let hint = SpeakerReviewCardProgress.hint(voice) {
                     Text(hint.text)
                         .font(LibraryTokens.meta.weight(.medium))

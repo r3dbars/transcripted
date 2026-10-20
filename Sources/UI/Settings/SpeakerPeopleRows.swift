@@ -42,11 +42,17 @@ struct SpeakerVoiceToNameRow: View {
         group.representative.clipURL != nil || group.representative.retainedAudioSample != nil
     }
 
+    private var clipQuote: String? {
+        let text = group.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (text?.isEmpty == false) ? text : nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             // The voice's print is the play button, like the island's review:
             // empty rings (nobody's confirmed it yet) that ripple while the
-            // clip plays. No quote; people pick a voice by ear.
+            // clip plays. The quote is only the sidecar next to that clip —
+            // never a guessed transcript line.
             HStack(alignment: .center, spacing: 14) {
                 VoicePrintRepresentable(
                     model: VoicePrintView.Model(
@@ -72,6 +78,12 @@ struct SpeakerVoiceToNameRow: View {
                         .monospacedDigit()
                         .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(2)
+                    if let quote = clipQuote {
+                        Text("“\(quote)”")
+                            .font(.system(size: 12.5))
+                            .foregroundStyle(LibraryTokens.ink2)
+                            .lineLimit(2)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
 

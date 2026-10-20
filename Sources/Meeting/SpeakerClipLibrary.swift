@@ -23,6 +23,21 @@ enum SpeakerClipLibrary {
             ?? SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: legacyClipsDirectory)
     }
 
+    /// The quote stored next to a saved clip. Nil for older wavs that have
+    /// no sidecar — callers must not guess a transcript line instead.
+    nonisolated static func sampleText(nextTo clipURL: URL) -> String? {
+        struct Payload: Decodable {
+            var sampleText: String
+        }
+        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data) else {
+            return nil
+        }
+        let text = payload.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     nonisolated static func deleteClips(
         for speakerId: UUID,
         preferredClipsDirectory: URL,

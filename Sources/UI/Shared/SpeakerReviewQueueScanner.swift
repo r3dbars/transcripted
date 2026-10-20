@@ -376,6 +376,9 @@ enum SpeakerReviewQueueScanner {
 
             let clipURL = clipURLsByProfileID[dbId]
             let fallback = clipURL == nil ? retainedSample(for: entry, audio: audio) : nil
+            let sampleText = clipURL == nil
+                ? (fallback?.text ?? entry.sampleText)
+                : clipSidecarSampleText(nextTo: clipURL)
             return SpeakerPendingReviewItem(
                 speakerId: dbId,
                 diarizerSpeakerId: speaker.id,
@@ -385,7 +388,7 @@ enum SpeakerReviewQueueScanner {
                 meetingTitle: summary.meetingTitle,
                 recordedAt: summary.recordedAt,
                 fallbackDate: fileDate,
-                sampleText: fallback?.text ?? entry.sampleText,
+                sampleText: sampleText,
                 clipURL: clipURL,
                 retainedAudioSample: fallback?.sample,
                 callCount: profile.callCount,
@@ -574,6 +577,20 @@ enum SpeakerReviewQueueScanner {
         return fallbackURL.deletingPathExtension().lastPathComponent
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
+    }
+
+    /// Reads the quote stored next to a saved clip. Decodes the sidecar
+    /// JSON by key so this module does not name the Core sidecar type.
+    private static func clipSidecarSampleText(nextTo clipURL: URL) -> String? {
+        struct Payload: Decodable {
+            var sampleText: String
+        }
+        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data) else {
+            return nil
+        }
+        return cleanedSample(payload.sampleText)
     }
 
     private static func sampleText(

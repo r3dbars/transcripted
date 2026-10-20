@@ -71,8 +71,9 @@ enum HomeMeetingSpeakerNamingPolicy {
 
     /// Builds one first-seen row per actual voice, with up to two useful quotes
     /// to make identification possible without scrubbing through the meeting.
-    /// The first quote is the same turn Speakers review would play, so Home
-    /// "Who is this?" and Speakers retained playback describe one segment.
+    /// The first quote is the same turn Speakers retained playback would
+    /// play. A saved profile clip is a different sample: Speakers show that
+    /// clip's sidecar text next to play, and this sheet has no player.
     static func drafts(from lines: [HomeMeetingTranscriptLine]) -> [HomeMeetingSpeakerNamingDraft] {
         var drafts: [HomeMeetingSpeakerNamingDraft] = []
         var indexByID: [String: Int] = [:]
@@ -669,21 +670,44 @@ struct HomeMeetingTranscriptLine: Equatable {
 }
 
 enum HomeMeetingTranscriptClock {
-    /// Parses `MM:SS` or `H:MM:SS`. Each part is capped at a few digits so a
-    /// corrupted transcript can't overflow the multiply.
+    /// Parses `MM:SS` or `H:MM:SS`, plus an optional `.frac` on the seconds.
+    /// Each whole part is capped at a few digits so a corrupted transcript
+    /// can't overflow the multiply.
     static func seconds(from value: String) -> TimeInterval? {
         let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2 || parts.count == 3,
-              parts.allSatisfy({ !$0.isEmpty && $0.count <= 4 && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }) else {
+        guard parts.count == 2 || parts.count == 3 else { return nil }
+
+        var wholeParts = Array(parts)
+        var fraction: TimeInterval = 0
+        if let dot = wholeParts[wholeParts.count - 1].firstIndex(of: ".") {
+            let last = wholeParts[wholeParts.count - 1]
+            let whole = last[..<dot]
+            let frac = last[last.index(after: dot)...]
+            guard !whole.isEmpty, !frac.isEmpty, frac.count <= 3,
+                  frac.allSatisfy(\.isASCII), frac.allSatisfy(\.isNumber),
+                  let fracInt = Int(frac) else {
+                return nil
+            }
+            var parsedFraction = TimeInterval(fracInt)
+            for _ in 0..<frac.count {
+                parsedFraction /= 10
+            }
+            fraction = parsedFraction
+            wholeParts[wholeParts.count - 1] = whole
+        }
+
+        guard wholeParts.allSatisfy({
+            !$0.isEmpty && $0.count <= 4 && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber)
+        }) else {
             return nil
         }
-        let numbers = parts.compactMap { Int($0) }
-        guard numbers.count == parts.count, numbers[numbers.count - 1] < 60 else { return nil }
+        let numbers = wholeParts.compactMap { Int($0) }
+        guard numbers.count == wholeParts.count, numbers[numbers.count - 1] < 60 else { return nil }
         if numbers.count == 3 {
             guard numbers[1] < 60 else { return nil }
-            return TimeInterval(numbers[0] * 3600 + numbers[1] * 60 + numbers[2])
+            return TimeInterval(numbers[0] * 3600 + numbers[1] * 60 + numbers[2]) + fraction
         }
-        return TimeInterval(numbers[0] * 60 + numbers[1])
+        return TimeInterval(numbers[0] * 60 + numbers[1]) + fraction
     }
 }
 
