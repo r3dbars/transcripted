@@ -22,13 +22,13 @@ enum DeveloperPreview {
     static let nextSentence = DeveloperPreviewFeature(
         id: "next-sentence",
         title: "Write for Me",
-        details: "Press fn in any text box and Claude writes your next message, from the window you're in and your meetings, "
-            + "dictations and writing. Hold fn to say what it should say. It sends that window's screenshot and text, and "
+        details: "Tap its key (fn unless you pick another) in any text box and Claude writes your next message, from the window "
+            + "you're in and your meetings, dictations and writing. Hold the key to say what it should say. It sends that window's screenshot and text, and "
             + "matching passages from your captures, to Claude through Claude Code signed in on this Mac. Needs Claude Code.",
         consentTitle: "Turn on Write for Me?",
-        consent: "When you press fn, Write for Me sends the window you're typing in (a screenshot and its text) and matching "
+        consent: "When you press its key, Write for Me sends the window you're typing in (a screenshot and its text) and matching "
             + "passages from your meetings, dictations and writing to Claude, using your own Claude Code sign-in. "
-            + "Nothing is sent until you press fn.",
+            + "Nothing is sent until you press it.",
         defaultsKey: NextSentencePreferences.enabledKey
     )
 

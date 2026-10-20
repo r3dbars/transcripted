@@ -1,12 +1,14 @@
 import CoreGraphics
 import Foundation
 
-/// The fn (Globe) key is Next Sentence's key. A quick tap opens the card (or, with it open, starts and
-/// finishes listening). Holding fn on its own is push-to-talk: hold to speak, let go to finish.
+/// Write for Me's key: fn (Globe) unless they pick another single key in Settings
+/// (`NextSentencePreferences.hotkey()`, read on every press so a change applies at once). A quick tap opens
+/// the card (or, with it open, starts and finishes listening). Holding it on its own is push-to-talk.
 /// It works whether or not the card is open, so this tap is on whenever Next Sentence is.
 ///
-/// fn used with another key (fn-arrows, fn-F keys) is left alone. The events always pass through; if macOS is set
-/// to do something with the Globe key too, set "Press 🌐 key to" to "Do Nothing" in Keyboard settings.
+/// The key used with another key (fn-arrows, ⌘-shortcuts) is left alone. A modifier key always passes
+/// through; a function key that's Write for Me's key is kept from doing its usual job. With fn, set
+/// "Press 🌐 key to" to "Do Nothing" in Keyboard settings if macOS also does something with it.
 final class NextSentenceFnKey: @unchecked Sendable {
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
@@ -32,13 +34,13 @@ final class NextSentenceFnKey: @unchecked Sendable {
     func start() -> Bool {
         guard tap == nil else { return true }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue) | CGEventMask(1 << CGEventType.keyDown.rawValue)
+            | CGEventMask(1 << CGEventType.keyUp.rawValue)
         guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .listenOnly, eventsOfInterest: mask,
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask,
             callback: { _, type, event, context in
                 guard let context else { return Unmanaged.passUnretained(event) }
                 let me = Unmanaged<NextSentenceFnKey>.fromOpaque(context).takeUnretainedValue()
-                me.handle(type: type, event: event)
-                return Unmanaged.passUnretained(event)
+                return me.handle(type: type, event: event) ? nil : Unmanaged.passUnretained(event)
             },
             userInfo: Unmanaged.passUnretained(self).toOpaque()
         ) else { return false }
@@ -57,45 +59,65 @@ final class NextSentenceFnKey: @unchecked Sendable {
         source = nil
     }
 
-    private func handle(type: CGEventType, event: CGEvent) {
+    /// Returns true to swallow the event: only a function key that is Write for Me's key, so it doesn't
+    /// also do its usual job. Modifier keys always pass through.
+    private func handle(type: CGEventType, event: CGEvent) -> Bool {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
-            return
+            return false
+        }
+        let key = NextSentencePreferences.hotkey()
+        let code = event.getIntegerValueField(.keyboardEventKeycode)
+        if !key.isModifier, code == key.keyCode, type == .keyDown || type == .keyUp {
+            // With ⌘, ⌥, ⌃ or ⇧ held it's someone else's shortcut.
+            let chord: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
+            guard downAt != nil || event.flags.intersection(chord).isEmpty else { return false }
+            if type == .keyUp {
+                released()
+            } else if downAt == nil {
+                pressed()
+            }
+            return true
         }
         if type == .keyDown {
             if downAt != nil { usedWithOtherKey = true }
-            return
+            return false
         }
-        guard type == .flagsChanged else { return }
-        let flags = event.flags
-        if event.getIntegerValueField(.keyboardEventKeycode) == NextSentencePolicy.KeyCode.fn {
-            if flags.contains(.maskSecondaryFn) {
-                downAt = Date()
-                usedWithOtherKey = false
-                // Still down, alone, past the tap limit: it's a hold.
-                press += 1
-                let this = press
-                DispatchQueue.main.asyncAfter(deadline: .now() + NextSentencePolicy.fnTapLimit) { [self] in
-                    guard this == self.press, self.downAt != nil, !self.usedWithOtherKey else { return }
-                    self.holding = true
-                    MainActor.assumeIsolated { self.onHoldStart() }
-                }
-            } else if let down = downAt {
-                downAt = nil
-                press += 1
-                if holding {
-                    holding = false
-                    let onHoldEnd = onHoldEnd
-                    DispatchQueue.main.async { MainActor.assumeIsolated { onHoldEnd() } }
-                    return
-                }
-                guard NextSentencePolicy.isFnTap(heldFor: Date().timeIntervalSince(down), withOtherKey: usedWithOtherKey) else { return }
-                let onTap = onTap
-                DispatchQueue.main.async { MainActor.assumeIsolated { onTap() } }
-            }
+        guard type == .flagsChanged else { return false }
+        if key.isModifier, code == key.keyCode, let mask = key.downMask {
+            if event.flags.rawValue & mask != 0 { pressed() } else { released() }
         } else if downAt != nil {
-            // Another modifier pressed while fn is down: that's a combination, not a tap.
+            // Another modifier pressed while the key is down: that's a combination, not a tap.
             usedWithOtherKey = true
         }
+        return false
+    }
+
+    private func pressed() {
+        downAt = Date()
+        usedWithOtherKey = false
+        // Still down, alone, past the tap limit: it's a hold.
+        press += 1
+        let this = press
+        DispatchQueue.main.asyncAfter(deadline: .now() + NextSentencePolicy.fnTapLimit) { [self] in
+            guard this == self.press, self.downAt != nil, !self.usedWithOtherKey else { return }
+            self.holding = true
+            MainActor.assumeIsolated { self.onHoldStart() }
+        }
+    }
+
+    private func released() {
+        guard let down = downAt else { return }
+        downAt = nil
+        press += 1
+        if holding {
+            holding = false
+            let onHoldEnd = onHoldEnd
+            DispatchQueue.main.async { MainActor.assumeIsolated { onHoldEnd() } }
+            return
+        }
+        guard NextSentencePolicy.isFnTap(heldFor: Date().timeIntervalSince(down), withOtherKey: usedWithOtherKey) else { return }
+        let onTap = onTap
+        DispatchQueue.main.async { MainActor.assumeIsolated { onTap() } }
     }
 }

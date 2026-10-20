@@ -635,7 +635,7 @@ final class NextSentenceCard: NSObject {
         micButton.onPress = { [weak self] in self?.onMic?() }
         remixButton.set(title: "", icon: NSImage(systemSymbolName: "arrow.clockwise", accessibilityDescription: "Remix the whole message"), color: NextSentenceCardStyle.title)
         // System tooltips don't show over another app's window, so the card draws its own.
-        micButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? "Say a change. Or tap fn." : nil, over: self?.micButton) }
+        micButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? "Say a change. Or tap \(NextSentencePreferences.hotkey().shortName)." : nil, over: self?.micButton) }
         remixButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? "Hold to remix the whole message" : nil, over: self?.remixButton) }
         insertButton.onHover = { [weak self] inside in self?.showButtonTip(inside ? self?.content.insertHelp : nil, over: self?.insertButton) }
         remixButton.holdDuration = NextSentencePolicy.holdToRemix

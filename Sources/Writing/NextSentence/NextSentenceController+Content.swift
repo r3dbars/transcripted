@@ -54,9 +54,10 @@ extension NextSentenceController {
             // What they said stays in view while it becomes the message.
             hint = "“\(Self.tail(of: intent, limit: 70))”"
         } else if listening {
+            let key = NextSentencePreferences.hotkey().shortName
             hint = heldListening
-                ? (awaitingIntent ? "Say what it should say, then let go of fn." : "Say the change, then let go of fn.")
-                : "Listening. Tap fn again to finish."
+                ? (awaitingIntent ? "Say what it should say, then let go of \(key)." : "Say the change, then let go of \(key).")
+                : "Listening. Tap \(key) again to finish."
         } else if let note {
             hint = note
         } else if failure != nil {

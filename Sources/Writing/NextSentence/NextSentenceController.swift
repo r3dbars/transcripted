@@ -26,6 +26,8 @@ final class NextSentenceController {
                                        onHoldStart: { [weak self] in self?.fnHoldBegan() },
                                        onHoldEnd: { [weak self] in self?.fnHoldEnded() })
     private var hotKey: EventHotKeyRef?
+    /// Keeps the meaning index current while it's on, so a capture saved a minute ago can be found.
+    private var indexTimer: Timer?
     private var handlerInstalled = false
 
     // What's on screen and what's been written for it.
@@ -102,6 +104,11 @@ final class NextSentenceController {
         wireCard()
         history.prewarm()
         semantic.refresh()
+        let timer = Timer(timeInterval: NextSentencePolicy.indexRefreshInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.semantic.refresh() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        indexTimer = timer
         NextSentenceSounds.shared.preload()
         DispatchQueue.global(qos: .utility).async { [claude] in claude.prewarm() }
     }
@@ -109,6 +116,8 @@ final class NextSentenceController {
     func stop() {
         if let hotKey { UnregisterEventHotKey(hotKey) }
         hotKey = nil
+        indexTimer?.invalidate()
+        indexTimer = nil
         fnKey.stop()
         close()
         history.stop()
@@ -422,6 +431,7 @@ final class NextSentenceController {
         keyTap.stop()
         if send { NextSentenceSynth.shared.sendRelease() } else { NextSentenceSounds.shared.play(.insert) }
         card.hide(exit: send ? .send : .insert)
+        refreshIndexIfOn()
         let target = DictationPasteTarget.capture(sourceApp: app)
         app.activate(options: [])
         switch paster.paste(text, target: target) {
@@ -465,6 +475,12 @@ final class NextSentenceController {
         resetDraft()
         keyTap.stop()
         card.hide(exit: .dismiss)
+        refreshIndexIfOn()
+    }
+
+    /// After the card goes away, catch up on captures saved meanwhile (only while it's turned on).
+    private func refreshIndexIfOn() {
+        if hotKey != nil { semantic.refresh() }
     }
 
     /// A short note in the card's place, then gone.

@@ -186,7 +186,7 @@ extension NextSentenceCard {
             right -= buttonWidth + 8
         }
         if listening {
-            hintLabel.stringValue = content.hint.isEmpty ? "Listening. Tap fn again to finish." : content.hint
+            hintLabel.stringValue = content.hint.isEmpty ? "Listening. Tap \(NextSentencePreferences.hotkey().shortName) again to finish." : content.hint
         } else if let said = content.heard {
             hintLabel.stringValue = "“\(said)”"
         }

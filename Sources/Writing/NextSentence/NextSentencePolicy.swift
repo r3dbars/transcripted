@@ -99,6 +99,8 @@ enum NextSentencePolicy {
     static let holdToSend: TimeInterval = 0.7
     /// After typing, how long the first Esc waits for a second one to close the card.
     static let escapeConfirmWindow: TimeInterval = 1.5
+    /// How often the meaning index looks for new captures while it's on (only new passages are embedded).
+    static let indexRefreshInterval: TimeInterval = 120
     /// Hold the remix button this long for a fresh take.
     static let holdToRemix: TimeInterval = 0.65
 

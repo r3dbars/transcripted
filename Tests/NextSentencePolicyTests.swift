@@ -266,6 +266,26 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         assertEqual(posted, [feature.id], "the app hears about it at once, so no relaunch is needed")
     }
 
+    runSuite("Write for Me's key is fn unless they pick another single key") {
+        let suite = "WriteForMeKeyTests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suite) else { return assertTrue(false, "test defaults") }
+        defer { defaults.removePersistentDomain(forName: suite) }
+        assertEqual(NextSentencePreferences.hotkey(userDefaults: defaults), .fn, "fn by default")
+        let rightCommand = NextSentenceHotkey(recorded: 54)
+        assertEqual(rightCommand?.title, "Right Command ⌘", "a right-hand modifier is its own key")
+        assertEqual(NextSentenceHotkey(recorded: 96)?.title, "F5", "function keys can be recorded")
+        assertTrue(NextSentenceHotkey(recorded: 96)?.isModifier == false && rightCommand?.downMask == 0x10, "keys know how they're detected")
+        assertNil(NextSentenceHotkey(recorded: 0), "a letter can't be the key: it would stop typing")
+        assertNil(NextSentenceHotkey(recorded: 49), "nor Space")
+        if let rightCommand { NextSentencePreferences.setHotkey(rightCommand, userDefaults: defaults) }
+        assertEqual(NextSentencePreferences.hotkey(userDefaults: defaults), rightCommand, "the choice is kept")
+        defaults.set(0, forKey: NextSentencePreferences.hotkeyKey)
+        assertEqual(NextSentencePreferences.hotkey(userDefaults: defaults), .fn, "anything not allowed falls back to fn")
+        assertTrue(NextSentencePreferences.hotkeyClashesWithDictation(NextSentenceHotkey(recorded: 61) ?? .fn, userDefaults: defaults),
+                   "dictation's default key is Right Option, so picking it is flagged")
+        assertFalse(NextSentencePreferences.hotkeyClashesWithDictation(.fn, userDefaults: defaults), "fn doesn't clash by default")
+    }
+
     runSuite("After typing, Esc waits a moment for a second press") {
         assertTrue(NextSentencePolicy.escapeConfirmWindow >= 1 && NextSentencePolicy.escapeConfirmWindow <= 2,
                    "long enough to press Esc twice on purpose, short enough that a later Esc warns again")
