@@ -94,6 +94,12 @@ public struct SpeakerClipSidecar: Codable, Equatable, Sendable {
         return sidecar.matches(wavData: data) ? sidecar : nil
     }
 
+    /// Hash the file's current bytes. Never the display identity cache.
+    public static func uncachedWavSHA256(of clipURL: URL) -> String? {
+        guard let data = try? Data(contentsOf: clipURL), !data.isEmpty else { return nil }
+        return sha256Hex(data)
+    }
+
     /// Hash the file's current bytes. Used on the save path so a same-size
     /// same-mtime replace cannot recertify an old quote.
     public func stamped(withWavAt clipURL: URL) -> SpeakerClipSidecar? {

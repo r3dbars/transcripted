@@ -583,12 +583,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
                 ofItemAtPath: directory.path
             )
         }
-        XCTAssertFalse(
+        XCTAssertEqual(
             SpeakerClipExtractor.transferOnMerge(
                 from: sourceId,
                 to: targetId,
                 clipsDirectory: directory
             ),
+            .failed,
             "a silent persist failure must not report success"
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: sourceClip.path))

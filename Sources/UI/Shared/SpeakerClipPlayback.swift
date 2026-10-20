@@ -27,6 +27,9 @@ final class SpeakerClipPlayback: ObservableObject {
     /// Quote validated against the same wav bytes that started playing.
     /// Nil when the sidecar does not describe those bytes, or nothing is playing.
     @Published private(set) var activeValidatedQuote: String?
+    /// SHA-256 of the wav `Data` this play loaded. Same bytes as the quote
+    /// and the `NSSound`. Nil when nothing is playing.
+    private(set) var activeWavSHA256: String?
     @Published private(set) var activeRetainedSample: SpeakerRetainedAudioSample?
 
     private final class PlaybackDelegate: NSObject, NSSoundDelegate {
@@ -65,10 +68,12 @@ final class SpeakerClipPlayback: ObservableObject {
         stop()
         guard let wavData = try? Data(contentsOf: url), !wavData.isEmpty else { return }
         let quote = SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: wavData)
+        let digest = SpeakerClipSidecarQuote.sha256Hex(wavData)
         guard let sound = NSSound(data: wavData) else { return }
         sound.delegate = playbackDelegate
         activeURL = url
         activeValidatedQuote = quote
+        activeWavSHA256 = digest
         activeSound = sound
         if sound.play() {
             notifyStateDidChange()
@@ -151,6 +156,7 @@ final class SpeakerClipPlayback: ObservableObject {
         activeSound = nil
         activeURL = nil
         activeValidatedQuote = nil
+        activeWavSHA256 = nil
         retainedAudioStatusObserver?.invalidate()
         retainedAudioStatusObserver = nil
         retainedAudioPlayer.pause()
@@ -167,6 +173,7 @@ final class SpeakerClipPlayback: ObservableObject {
         activeSound = nil
         activeURL = nil
         activeValidatedQuote = nil
+        activeWavSHA256 = nil
         notifyStateDidChange()
     }
 
@@ -203,7 +210,7 @@ enum SpeakerClipSidecarQuote {
         return text.isEmpty ? nil : text
     }
 
-    private static func sha256Hex(_ data: Data) -> String {
+    static func sha256Hex(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

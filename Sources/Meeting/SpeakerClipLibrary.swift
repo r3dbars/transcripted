@@ -59,12 +59,27 @@ enum SpeakerClipLibrary {
         to targetId: UUID,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL
-    ) -> Bool {
+    ) -> SpeakerClipMergeTransfer {
         SpeakerClipExtractor.transferOnMerge(
             from: sourceId,
             to: targetId,
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory
+        )
+    }
+
+    /// Undo a merge copy when the people merge then fails. Deletes the
+    /// kept person's clip only if it still hashes to the bytes that were
+    /// copied. Transfer writes only the preferred folder.
+    nonisolated static func rollbackCopiedClip(
+        for speakerId: UUID,
+        copiedWavSHA256: String,
+        preferredClipsDirectory: URL
+    ) {
+        SpeakerClipExtractor.rollbackCopiedClip(
+            for: speakerId,
+            copiedWavSHA256: copiedWavSHA256,
+            clipsDirectory: preferredClipsDirectory
         )
     }
 }

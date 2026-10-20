@@ -135,7 +135,8 @@ final class SpeakerSettingsStore: Sendable {
                 diarizerSpeakerId: $0.diarizerSpeakerId, channel: $0.channel)
         }
 
-        guard transferClipOnMerge(from: sourceId, to: targetId) else { return false }
+        let transfer = transferClipOnMerge(from: sourceId, to: targetId)
+        guard transfer.succeeded else { return false }
 
         var didMerge = false
         do {
@@ -170,7 +171,11 @@ final class SpeakerSettingsStore: Sendable {
         } catch {
             Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
         }
-        return didMerge
+        return finishMerge(
+            targetId: targetId,
+            copiedWavSHA256: transfer.copiedWavSHA256,
+            didMerge: didMerge
+        )
     }
 
     func rename(profileId: UUID, trimmed: String) -> Bool {
@@ -204,10 +209,13 @@ final class SpeakerSettingsStore: Sendable {
         // scan. The service snapshots and rewrites transcripts first, commits the DB
         // merge inside a real transaction, rolls transcripts back if that transaction
         // throws, and only then deletes the source clip. The clip copy runs first so a
-        // failed copy never orphans the source under a deleted profile. Same-id merges
+        // failed copy never orphans the source under a deleted profile. A
+        // failed people merge then deletes the copied target clip only if
+        // that wav still hashes to the bytes that were copied. Same-id merges
         // are rejected by the service itself now (MutationError.sameSourceAndTarget), so
         // the `source.id != target.id` guard above is defense in depth, not the only guard.
-        guard transferClipOnMerge(from: sourceId, to: targetId) else { return false }
+        let transfer = transferClipOnMerge(from: sourceId, to: targetId)
+        guard transfer.succeeded else { return false }
 
         var didMerge = false
         do {
@@ -237,17 +245,21 @@ final class SpeakerSettingsStore: Sendable {
         } catch {
             Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
         }
-        return didMerge
+        return finishMerge(
+            targetId: targetId,
+            copiedWavSHA256: transfer.copiedWavSHA256,
+            didMerge: didMerge
+        )
     }
 
-    private func transferClipOnMerge(from sourceId: UUID, to targetId: UUID) -> Bool {
-        let copied = SpeakerClipLibrary.transferOnMerge(
+    private func transferClipOnMerge(from sourceId: UUID, to targetId: UUID) -> SpeakerClipMergeTransfer {
+        let transfer = SpeakerClipLibrary.transferOnMerge(
             from: sourceId,
             to: targetId,
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory
         )
-        if !copied {
+        if !transfer.succeeded {
             AppLogger.speakers.error(
                 "Speaker merge left the source in place after a failed clip copy",
                 [
@@ -256,7 +268,24 @@ final class SpeakerSettingsStore: Sendable {
                 ]
             )
         }
-        return copied
+        return transfer
+    }
+
+    /// When the people merge fails after a copy, drop the kept person's
+    /// inherited clip only if it still is that exact copy.
+    private func finishMerge(
+        targetId: UUID,
+        copiedWavSHA256: String?,
+        didMerge: Bool
+    ) -> Bool {
+        if !didMerge, let copiedWavSHA256 {
+            SpeakerClipLibrary.rollbackCopiedClip(
+                for: targetId,
+                copiedWavSHA256: copiedWavSHA256,
+                preferredClipsDirectory: preferredClipsDirectory
+            )
+        }
+        return didMerge
     }
 
     /// Surfaces a `SpeakerIdentityMutationService.MutationError` beyond the local log —

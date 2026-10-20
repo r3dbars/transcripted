@@ -12,11 +12,12 @@ name: Swift CI
 #
 #   checks      — build-independent (no prebuilt deps, no app bundle): source-list
 #                 contracts, fast tests, E2E smoke.
-#   spm-tests   — Core package tests (`swift test`) + integration smoke, which
-#                 need the prebuilt native deps but NOT the app bundle, plus the
-#                 Tools package tests (build-independent, parked here to balance
-#                 wall-clock against `checks`). Restores the shared deps cache and
-#                 runs in parallel with the app build.
+#   spm-tests   — Core package tests (`swift test`) + integration smoke + the
+#                 Speakers model/store smoke, which need the prebuilt native
+#                 deps but NOT the app bundle, plus the Tools package tests
+#                 (build-independent, parked here to balance wall-clock against
+#                 `checks`). Restores the shared deps cache and runs in parallel
+#                 with the app build.
 #   app-build   — the only job that runs the full app build: build the native
 #                 deps (populating the shared cache), build the app bundle, then
 #                 the app-dependent Premium performance budget.
@@ -301,6 +302,12 @@ jobs:
       - name: Integration smoke
         shell: bash
         run: bash run-integration-smoke.sh
+
+      # Real SpeakerSettingsStore + ViewModel against the prebuilt Core archive.
+      # Includes merge-copy rollback after a failed people merge.
+      - name: Speaker settings model smoke
+        shell: bash
+        run: bash scripts/dev/test-speaker-settings-model.sh
 
       # The Tools packages each resolve their own remote SwiftPM dependencies.
       # Cache the shared clone/checkout store so every push and PR doesn't

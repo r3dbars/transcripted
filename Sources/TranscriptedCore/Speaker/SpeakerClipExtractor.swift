@@ -18,6 +18,19 @@ struct ClipResult {
     let callCount: Int            // how many times this speaker has been seen
 }
 
+/// Outcome of copying a voice-sample clip onto the kept person during a merge.
+public struct SpeakerClipMergeTransfer: Equatable, Sendable {
+    public let succeeded: Bool
+    public let copiedWavSHA256: String?
+
+    public static let skipped = SpeakerClipMergeTransfer(succeeded: true, copiedWavSHA256: nil)
+    public static let failed = SpeakerClipMergeTransfer(succeeded: false, copiedWavSHA256: nil)
+
+    public static func copied(wavSHA256: String) -> SpeakerClipMergeTransfer {
+        SpeakerClipMergeTransfer(succeeded: true, copiedWavSHA256: wavSHA256)
+    }
+}
+
 @available(macOS 14.0, *)
 public enum SpeakerClipExtractor {
 
@@ -40,7 +53,8 @@ public enum SpeakerClipExtractor {
         utterances: [TranscriptionUtterance],
         channel: UtteranceChannel,
         speakerDB: any SpeakerStore,
-        clipsDirectory: URL = defaultClipsDirectory
+        clipsDirectory: URL = defaultClipsDirectory,
+        readClipFrames: ((AVAudioFile, AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void)? = nil
     ) throws -> [ClipResult] {
 
         let audioFile = try AVAudioFile(forReading: sourceAudioURL)
@@ -84,7 +98,8 @@ public enum SpeakerClipExtractor {
                 sampleRate: sampleRate,
                 speakerId: speakerId,
                 channel: channel,
-                clipsDirectory: clipsDirectory
+                clipsDirectory: clipsDirectory,
+                readClipFrames: readClipFrames
             )
             guard !actuallyWritten.isEmpty else {
                 removeClipAndSidecar(at: clipURL, label: "empty speaker clip")
@@ -157,16 +172,18 @@ public enum SpeakerClipExtractor {
         }
     }
 
-    /// Copy the source profile's clip onto the kept profile. Returns false
-    /// when that copy fails so the caller can leave the source in place.
-    /// The target-has-clip check and the copy share one ordered lock pair
-    /// so a clip that lands on the target cannot be overwritten.
+    /// Copy the source profile's clip onto the kept profile. Returns
+    /// `.failed` when that copy fails so the caller can leave the source
+    /// in place. A successful copy reports the dest wav hash so a later
+    /// failed people-merge can delete only that exact copy. The
+    /// target-has-clip check and the copy share one ordered lock pair so
+    /// a clip that lands on the target cannot be overwritten.
     @discardableResult
     public static func transferOnMerge(
         from sourceId: UUID,
         to targetId: UUID,
         clipsDirectory: URL
-    ) -> Bool {
+    ) -> SpeakerClipMergeTransfer {
         transferOnMerge(
             from: sourceId,
             to: targetId,
@@ -181,11 +198,11 @@ public enum SpeakerClipExtractor {
         to targetId: UUID,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL
-    ) -> Bool {
+    ) -> SpeakerClipMergeTransfer {
         withOrderedPersistLocks(sourceId, targetId) {
             if persistentClipURL(for: targetId, clipsDirectory: preferredClipsDirectory) != nil
                 || persistentClipURL(for: targetId, clipsDirectory: legacyClipsDirectory) != nil {
-                return true
+                return .skipped
             }
             let sourceDirectory: URL
             if persistentClipURL(for: sourceId, clipsDirectory: preferredClipsDirectory) != nil {
@@ -193,15 +210,42 @@ public enum SpeakerClipExtractor {
             } else if persistentClipURL(for: sourceId, clipsDirectory: legacyClipsDirectory) != nil {
                 sourceDirectory = legacyClipsDirectory
             } else {
-                return true
+                return .skipped
             }
             let sourceClip = sourceDirectory.appendingPathComponent("\(sourceId.uuidString).wav")
-            return persistClipLocked(
+            guard persistClipLocked(
                 from: sourceClip,
                 speakerId: targetId,
                 clipsDirectory: preferredClipsDirectory,
                 sidecar: nil
-            )
+            ) else {
+                return .failed
+            }
+            let dest = preferredClipsDirectory.appendingPathComponent("\(targetId.uuidString).wav")
+            guard let hash = SpeakerClipSidecar.uncachedWavSHA256(of: dest) else {
+                removeClipAndSidecar(at: dest, label: "unhashed merge copy")
+                return .failed
+            }
+            return .copied(wavSHA256: hash)
+        }
+    }
+
+    /// Delete the kept person's inherited clip only when it still hashes
+    /// to the copy this merge wrote. A later writer that replaced those
+    /// bytes keeps their clip.
+    public static func rollbackCopiedClip(
+        for speakerId: UUID,
+        copiedWavSHA256: String,
+        clipsDirectory: URL
+    ) {
+        persistLocks.withLock(for: speakerId) {
+            let dest = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+            guard FileManager.default.fileExists(atPath: dest.path),
+                  let current = SpeakerClipSidecar.uncachedWavSHA256(of: dest),
+                  current.lowercased() == copiedWavSHA256.lowercased() else {
+                return
+            }
+            removeClipAndSidecar(at: dest, label: "rolled-back merge copy")
         }
     }
 
@@ -326,7 +370,8 @@ public enum SpeakerClipExtractor {
         sampleRate: Double,
         speakerId: Int,
         channel: UtteranceChannel,
-        clipsDirectory: URL
+        clipsDirectory: URL,
+        readClipFrames: ((AVAudioFile, AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void)? = nil
     ) throws -> (url: URL, written: [SpeakerClipSamplePolicy.WrittenSegment]) {
         guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
             throw ClipError.invalidAudioFormat
@@ -396,7 +441,11 @@ public enum SpeakerClipExtractor {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: framesToRead) else {
                 continue
             }
-            try audioFile.read(into: buffer, frameCount: framesToRead)
+            if let readClipFrames {
+                try readClipFrames(audioFile, buffer, framesToRead)
+            } else {
+                try audioFile.read(into: buffer, frameCount: framesToRead)
+            }
 
             // Convert to mono if needed
             let monoBuffer: AVAudioPCMBuffer

@@ -128,6 +128,59 @@ func testSpeakerClipPlayback() async {
         )
     }
 
+    await runSuite("SpeakerClipPlayback holds the loaded quote against the same play Data") {
+        let playback = SpeakerClipPlayback()
+        defer { playback.stop() }
+        let quote = "Words from these bytes."
+        do {
+            try writeMatchingSpeakerClipSidecar(nextTo: url, sampleText: quote)
+        } catch {
+            assertTrue(false, "could not write matching sidecar: \(error)")
+            return
+        }
+
+        playback.play(url)
+        let heldQuote = playback.activeValidatedQuote
+        let heldHash = playback.activeWavSHA256
+        assertEqual(heldQuote, quote, "the shown quote must come from the Data play loaded")
+        assertTrue(playback.isPlaying(url), "the clip that loaded those bytes must be the one playing")
+        assertTrue(
+            heldHash != nil && !(heldHash ?? "").isEmpty,
+            "play must record the hash of the same Data it handed to NSSound"
+        )
+
+        do {
+            let loadedCount = (try? Data(contentsOf: url))?.count ?? 0
+            try Data(repeating: 9, count: max(loadedCount, 8) + 8).write(to: url)
+            try writeMatchingSpeakerClipSidecar(nextTo: url, sampleText: "Quote for a later wav.")
+        } catch {
+            assertTrue(false, "could not replace the clip after play loaded it: \(error)")
+            return
+        }
+
+        assertEqual(
+            playback.activeValidatedQuote,
+            heldQuote,
+            "replacing the file must not change the quote that belongs to the playing Data"
+        )
+        assertEqual(
+            playback.activeWavSHA256,
+            heldHash,
+            "the playing audio must still be the Data that was loaded with that quote"
+        )
+        assertTrue(playback.isPlaying(url), "playback must keep holding the loaded clip")
+        let disk = (try? Data(contentsOf: url)) ?? Data()
+        assertEqual(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: disk),
+            "Quote for a later wav.",
+            "a live reread after replace would see the new pair"
+        )
+        assertTrue(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: disk) != heldQuote,
+            "the shown quote must not be a reread of the replaced sidecar"
+        )
+    }
+
     await runSuite("SpeakerClipPlayback clears failed retained-audio startup") {
         let brokenURL = url.deletingPathExtension().appendingPathExtension("m4a")
         try? Data([0, 1, 2]).write(to: brokenURL)

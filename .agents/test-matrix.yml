@@ -147,6 +147,8 @@ rules:
   - paths:
       - "Sources/UI/Settings/SpeakerPeopleSettingsViewModel*.swift"
       - "Sources/UI/Settings/SpeakerReviewSession.swift"
+      - "Sources/Meeting/SpeakerSettingsStore.swift"
+      - "Sources/Meeting/SpeakerClipLibrary.swift"
       - "Tests/Integration/SpeakerSettingsModel*.swift"
       - "scripts/dev/test-speaker-settings-model.sh"
     checks:

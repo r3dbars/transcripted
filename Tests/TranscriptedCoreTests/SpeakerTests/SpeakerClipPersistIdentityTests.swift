@@ -113,6 +113,111 @@ final class SpeakerClipPersistIdentityTests: XCTestCase {
         )
     }
 
+    func testExtractClipsDropsTheQuoteWhenAnInjectedReaderReturnsShort() throws {
+        let directory = temporaryIdentityClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let db = SpeakerDatabase(path: directory.appendingPathComponent("speakers.sqlite").path)
+        let profile = db.addOrUpdateSpeaker(embedding: [1, 0], existingId: nil)
+        let sourceURL = directory.appendingPathComponent("long-source.wav")
+        let sampleRate = 16_000.0
+        try writeIdentitySilentWav(to: sourceURL, seconds: 4, sampleRate: sampleRate)
+
+        let utterance = TranscriptionUtterance(
+            start: 0,
+            end: 4,
+            channel: 1,
+            speakerId: 1,
+            persistentSpeakerId: profile.id,
+            matchSimilarity: nil,
+            transcript: "Full turn that the reader only partly wrote."
+        )
+        let planned = SpeakerClipSamplePolicy.writtenSegments(
+            from: [utterance],
+            sourceDuration: 4
+        )
+        XCTAssertEqual(planned.count, 1)
+        XCTAssertFalse(
+            planned[0].wasCropped,
+            "the 4s file is long enough that only a short read can drop the quote"
+        )
+        XCTAssertEqual(planned[0].end - planned[0].start, 4, accuracy: 0.001)
+
+        let shortFrames = AVAudioFrameCount(0.5 * sampleRate)
+        let results = try SpeakerClipExtractor.extractClips(
+            sourceAudioURL: sourceURL,
+            utterances: [utterance],
+            channel: .system,
+            speakerDB: db,
+            clipsDirectory: directory,
+            readClipFrames: { file, buffer, requested in
+                try file.read(into: buffer, frameCount: min(requested, shortFrames))
+            }
+        )
+
+        XCTAssertEqual(results.count, 1)
+        XCTAssertEqual(
+            results[0].sampleText,
+            "",
+            "only the recorded-frames crop can drop the quote when the file is long enough"
+        )
+        XCTAssertEqual(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: results[0].clipURL)?.sampleText,
+            ""
+        )
+        XCTAssertFalse(
+            (SpeakerClipSidecar.loadMatchingWav(nextTo: results[0].clipURL)?.sampleText ?? "")
+                .contains("Full turn that the reader only partly wrote.")
+        )
+    }
+
+    func testRollbackCopiedClipRemovesOnlyTheMatchingHash() throws {
+        let directory = temporaryIdentityClipsDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let speakerId = UUID()
+        let firstTemp = try writeIdentityTempClip(named: "copied.wav", in: directory, bytes: Data([1, 2, 3, 4]))
+        XCTAssertTrue(
+            SpeakerClipExtractor.persistClip(
+                from: firstTemp,
+                speakerId: speakerId,
+                clipsDirectory: directory,
+                sidecar: try stampedIdentitySidecar(nextTo: firstTemp, text: "Copied quote.")
+            )
+        )
+        let persisted = try XCTUnwrap(
+            SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: directory)
+        )
+        let copiedHash = try XCTUnwrap(SpeakerClipSidecar.uncachedWavSHA256(of: persisted))
+        XCTAssertEqual(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.sampleText,
+            "Copied quote."
+        )
+
+        SpeakerClipExtractor.rollbackCopiedClip(
+            for: speakerId,
+            copiedWavSHA256: "not-the-copied-hash",
+            clipsDirectory: directory
+        )
+        XCTAssertEqual(try Data(contentsOf: persisted), Data([1, 2, 3, 4]))
+        XCTAssertEqual(
+            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.sampleText,
+            "Copied quote.",
+            "a different hash must leave the current clip and quote"
+        )
+
+        SpeakerClipExtractor.rollbackCopiedClip(
+            for: speakerId,
+            copiedWavSHA256: copiedHash,
+            clipsDirectory: directory
+        )
+        XCTAssertNil(SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: directory))
+        XCTAssertFalse(
+            FileManager.default.fileExists(atPath: SpeakerClipSidecar.url(nextTo: persisted).path),
+            "matching-hash rollback must delete the sidecar too"
+        )
+    }
+
     func testExtractClipsDropsTheQuoteWhenTheWriterReadsShort() throws {
         let directory = temporaryIdentityClipsDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -241,7 +346,7 @@ final class SpeakerClipPersistIdentityTests: XCTestCase {
                     to: targetId,
                     clipsDirectory: directory
                 )
-                transferResult.set(copied)
+                transferResult.set(copied.succeeded)
                 transferFinished.signal()
             }
             XCTAssertEqual(
