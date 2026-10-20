@@ -51,11 +51,13 @@ class ContextCaptureEngine: ObservableObject {
     var pushToTalkPressStoppedTake = false
     private let physicalShortcutDetector = PhysicalShortcutDetector()
     private var physicalTriggerError: String?
-    private var secureKeyboardEntryMonitor: SecureKeyboardEntryMonitor?
-    private var secureKeyboardEntryPollTask: Task<Void, Never>?
-    private var secureKeyboardEntryActivationObserver: NSObjectProtocol?
-    private var secureKeyboardEntryFlagsMonitor: Any?
-    private var secureKeyboardEntryFlagsCheckPending = false
+    /// Watch state for the Secure Keyboard Entry notice. Internal so
+    /// `ContextCaptureEngine+SecureKeyboardEntry.swift` can own the poll.
+    var secureKeyboardEntryMonitor: SecureKeyboardEntryMonitor?
+    var secureKeyboardEntryPollTask: Task<Void, Never>?
+    var secureKeyboardEntryActivationObserver: NSObjectProtocol?
+    var secureKeyboardEntryFlagsMonitor: Any?
+    var secureKeyboardEntryFlagsCheckPending = false
 
     /// Human-readable display strings for current shortcuts (drives MenuBarPanel pills + overlay hints)
     @Published var dictationShortcutDisplay: String = ContextCaptureEngine.currentDictationShortcutDisplay()
