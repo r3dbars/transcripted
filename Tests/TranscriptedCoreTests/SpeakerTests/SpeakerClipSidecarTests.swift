@@ -573,13 +573,21 @@ final class SpeakerClipSidecarTests: XCTestCase {
             SpeakerClipExtractor.persistentClipURL(for: sourceId, clipsDirectory: directory)
         )
 
-        let notADirectory = directory.appendingPathComponent("not-a-directory")
-        try Data([1]).write(to: notADirectory)
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555],
+            ofItemAtPath: directory.path
+        )
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: directory.path
+            )
+        }
         XCTAssertFalse(
             SpeakerClipExtractor.transferOnMerge(
                 from: sourceId,
                 to: targetId,
-                clipsDirectory: notADirectory
+                clipsDirectory: directory
             ),
             "a silent persist failure must not report success"
         )

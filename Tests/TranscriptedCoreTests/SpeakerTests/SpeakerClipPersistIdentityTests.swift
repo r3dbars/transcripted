@@ -44,7 +44,12 @@ final class SpeakerClipPersistIdentityTests: XCTestCase {
         )
         let restored = try FileManager.default.attributesOfItem(atPath: persisted.path)
         XCTAssertEqual((restored[.size] as? NSNumber)?.intValue, firstBytes.count)
-        XCTAssertEqual(restored[.modificationDate] as? Date, originalMtime)
+        let restoredMtime = try XCTUnwrap(restored[.modificationDate] as? Date)
+        XCTAssertEqual(
+            Int(restoredMtime.timeIntervalSince1970),
+            Int(originalMtime.timeIntervalSince1970),
+            "the replace must keep the original modification second so a size+mtime cache would still hit"
+        )
 
         XCTAssertNil(
             SpeakerClipSidecar.acceptedIncoming(
