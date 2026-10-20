@@ -47,6 +47,13 @@ enum NextSentencePreferences {
         userDefaults.string(forKey: backgroundModelKey).flatMap { $0.isEmpty ? nil : $0 } ?? "sonnet"
     }
 
+    /// How hard Claude thinks before writing: low (default, fastest), medium or high.
+    static let effortKey = "NextSentenceEffort"
+
+    static func effort(userDefaults: UserDefaults = .standard) -> String {
+        userDefaults.string(forKey: effortKey).flatMap { $0.isEmpty ? nil : $0 } ?? "low"
+    }
+
     /// The card's sounds. On unless set to NO.
     static let soundsKey = "NextSentenceSounds"
 
