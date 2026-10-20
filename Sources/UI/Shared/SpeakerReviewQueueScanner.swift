@@ -230,8 +230,7 @@ enum SpeakerReviewQueueScanner {
 
             guard let summary = pendingSummary(
                 in: markdown,
-                transcriptURL: url,
-                clipURLsByProfileID: clipURLsByProfileID
+                transcriptURL: url
             ) else {
                 return []
             }
@@ -274,8 +273,7 @@ enum SpeakerReviewQueueScanner {
     ) -> [SpeakerPendingReviewItem] {
         guard let summary = pendingSummary(
             in: markdown,
-            transcriptURL: transcriptURL,
-            clipURLsByProfileID: clipURLsByProfileID
+            transcriptURL: transcriptURL
         ) else { return [] }
         return pendingItems(
             from: summary,
@@ -294,7 +292,8 @@ enum SpeakerReviewQueueScanner {
             let sampleText: String?
             /// The retained-audio preview window when the voice plays from
             /// the mixed recording, and when it plays from its own channel.
-            /// Nil when the summary was made without transcript lines.
+            /// Both windows and `sampleText` come from the same transcript
+            /// turn (`SpeakerReviewSamplePolicy`).
             let mixedWindow: SampleWindow?
             let channelWindow: SampleWindow?
         }
@@ -321,17 +320,14 @@ enum SpeakerReviewQueueScanner {
 
     private static func pendingSummary(
         in markdown: String,
-        transcriptURL: URL,
-        clipURLsByProfileID: [UUID: URL]
+        transcriptURL: URL
     ) -> PendingSummary? {
         guard let document = TranscriptFrontmatter.document(in: markdown) else { return nil }
 
         let meetingDuration = TranscriptFrontmatter.durationSeconds(from: document.values["duration"])
         let pendingSpeakers = frontmatterSpeakers(from: document.lines).filter { $0.source == "db_pending" }
-        let needsAudioFallback = pendingSpeakers.contains {
-            $0.dbId.map { clipURLsByProfileID[$0] == nil } == true
-        }
-        let transcriptLines = needsAudioFallback ? HomeMeetingPreviewContent.make(from: markdown).transcriptLines : []
+        let transcriptLines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        let meetingDurationSeconds = meetingDuration.map(TimeInterval.init)
 
         return PendingSummary(
             meetingTitle: normalizedTitle(document.values["title"], fallbackURL: transcriptURL),
@@ -340,18 +336,22 @@ enum SpeakerReviewQueueScanner {
             meetingDuration: meetingDuration,
             isImported: document.values["imported_at"] != nil,
             speakers: pendingSpeakers.map { speaker in
-                PendingSummary.Speaker(
+                let sample = SpeakerReviewSamplePolicy.sample(
+                    persistentSpeakerID: speaker.dbId,
+                    diarizerSpeakerID: speaker.id,
+                    channel: speaker.channel == .mic ? .mic : .system,
+                    in: transcriptLines,
+                    meetingDuration: meetingDurationSeconds
+                )
+                return PendingSummary.Speaker(
                     speaker: speaker,
-                    sampleText: sampleText(in: document.body, speakerName: speaker.name, channel: speaker.channel),
-                    mixedWindow: needsAudioFallback ? sampleWindow(
-                        for: speaker, lines: transcriptLines, fromMixedAudio: true, meetingDuration: meetingDuration
-                    ) : nil,
-                    channelWindow: needsAudioFallback ? sampleWindow(
-                        for: speaker, lines: transcriptLines, fromMixedAudio: false, meetingDuration: meetingDuration
-                    ) : nil
+                    sampleText: sample.flatMap { cleanedSample($0.line.text) }
+                        ?? sampleText(in: document.body, speakerName: speaker.name, channel: speaker.channel),
+                    mixedWindow: sampleWindow(from: sample?.mixedWindow),
+                    channelWindow: sampleWindow(from: sample?.channelWindow)
                 )
             },
-            hasLineWindows: needsAudioFallback
+            hasLineWindows: !transcriptLines.isEmpty
         )
     }
 
@@ -492,47 +492,13 @@ enum SpeakerReviewQueueScanner {
         )
     }
 
-    /// The first utterance of `speaker` that makes a usable preview, as a
-    /// time window plus its text. From the mixed recording any next turn ends
-    /// the window; from a channel file only the next turn on that channel does.
-    private static func sampleWindow(
-        for speaker: FrontmatterSpeaker,
-        lines: [HomeMeetingTranscriptLine],
-        fromMixedAudio: Bool,
-        meetingDuration: Int?
-    ) -> SampleWindow? {
-        for (index, line) in lines.enumerated() {
-            // Styled transcripts omit the channel prefix. The existing parser
-            // resolves their identity only when the frontmatter match is unique.
-            guard line.identity.persistentSpeakerID == speaker.dbId,
-                  line.identity.diarizerSpeakerID == speaker.id,
-                  line.identity.channel == nil || line.identity.channel?.rawValue == speaker.channel.rawValue,
-                  let start = timestampSeconds(line.time) else { continue }
-            var end = start + 8
-            if let next = lines.dropFirst(index + 1).first(where: {
-                fromMixedAudio || $0.identity.channel == nil
-                    || $0.identity.channel?.rawValue == speaker.channel.rawValue
-            }) {
-                // Never preview across the next turn on this source. Equal or
-                // reversed timestamps are ambiguous, so try another utterance.
-                guard let nextStart = timestampSeconds(next.time), nextStart > start else { continue }
-                end = min(end, nextStart)
-            }
-            if let meetingDuration { end = min(end, TimeInterval(meetingDuration)) }
-            guard end > start else { continue }
-            return SampleWindow(startTime: start, duration: end - start, text: cleanedSample(line.text))
-        }
-        return nil
-    }
-
-    private static func timestampSeconds(_ value: String) -> TimeInterval? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2 || parts.count == 3,
-              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
-              let seconds = Int(parts[parts.count - 1]), seconds < 60,
-              parts.count != 3 || (Int(parts[1]).map { $0 < 60 } == true),
-              let total = TranscriptFrontmatter.durationSeconds(from: value) else { return nil }
-        return TimeInterval(total)
+    private static func sampleWindow(from window: SpeakerReviewSamplePolicy.Window?) -> SampleWindow? {
+        guard let window else { return nil }
+        return SampleWindow(
+            startTime: window.startTime,
+            duration: window.duration,
+            text: cleanedSample(window.text)
+        )
     }
 
     private static func frontmatterSpeakers(from lines: [String]) -> [FrontmatterSpeaker] {

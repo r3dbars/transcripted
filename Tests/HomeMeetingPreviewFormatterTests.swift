@@ -45,6 +45,48 @@ func testHomeMeetingPreviewFormatter() {
         assertNil(HomeMeetingTranscriptClock.seconds(from: "99999999999999999999:00"), "Oversized values must not overflow")
     }
 
+    runSuite("HomeMeetingSpeakerNamingPolicy leads with the quote speaker review would play") {
+        let speakerId = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let markdown = """
+        ---
+        capture_type: meeting
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(speakerId.uuidString)"
+            name: "Speaker 1"
+            source: db_pending
+        ---
+
+        ## Transcript
+
+        **00:01** [System/Speaker 1]
+        Hi.
+
+        **00:20** [System/Speaker 1]
+        We should finish the pricing memo.
+
+        **00:32** [System/Someone else]
+        Thanks for joining.
+        """
+        let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        let drafts = HomeMeetingSpeakerNamingPolicy.drafts(from: lines)
+        guard let draft = drafts.first(where: { $0.identity.persistentSpeakerID == speakerId }) else {
+            assertionFailure("fixture should produce a naming draft for the pending voice")
+            return
+        }
+        assertEqual(
+            draft.sampleTexts,
+            ["We should finish the pricing memo.", "Hi."],
+            "Who is this? must show the played sentence first, not the greeting that happens to be first in the file"
+        )
+        let sample = SpeakerReviewSamplePolicy.sample(
+            matching: draft.identity, in: lines, meetingDuration: 120
+        )
+        assertEqual(sample?.mixedWindow?.text, draft.sampleTexts.first)
+        assertEqual(sample?.mixedWindow?.startTime, 20)
+    }
+
     runSuite("Home meeting rows retain hour clocks and legacy playback offsets") {
         let clocks: [(String, Double)] = [
             ("59:59", 3599), ("60:00", 3600), ("1:00:00", 3600),
@@ -72,6 +114,11 @@ func testHomeMeetingPreviewFormatter() {
             $0.identity.channel == .mic && $0.identity.diarizerSpeakerID == "0"
         }
         assertEqual(micLinus?.sampleTexts.count, 2, "A voice should carry up to two first-seen quotes")
+        assertEqual(
+            micLinus?.sampleTexts.first,
+            "Yeah. It actually is and it took us a bit long to get to Or if we have",
+            "the longer first-seen line is already the representative quote"
+        )
 
         let selectedProfileID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         guard var selectedDraft = drafts.first else {

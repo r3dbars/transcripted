@@ -1,6 +1,72 @@
 import Foundation
 
 func testSpeakerReviewQueueScanner() {
+    runSuite("SpeakerReviewSamplePolicy maps one transcript turn to both the quote and the play range") {
+        let speakerId = UUID()
+        let markdown = twoTurnSpeakerReviewMarkdown(speakerId: speakerId)
+        let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        assertEqual(lines.map(\.text), [
+            "Hi.",
+            "We should finish the pricing memo.",
+            "Thanks for joining."
+        ], "fixture should keep the greeting, the real sentence, and the other voice")
+
+        let sample = SpeakerReviewSamplePolicy.sample(
+            persistentSpeakerID: speakerId,
+            diarizerSpeakerID: "1",
+            channel: .system,
+            in: lines,
+            meetingDuration: 120
+        )
+        assertEqual(sample?.line.text, "We should finish the pricing memo.")
+        assertEqual(sample?.line.startSeconds, 20)
+        assertEqual(sample?.mixedWindow?.text, "We should finish the pricing memo.")
+        assertEqual(sample?.mixedWindow?.startTime, 20)
+        assertEqual(sample?.mixedWindow?.duration, 8)
+        assertEqual(
+            sample?.mixedWindow?.startTime,
+            sample?.line.startSeconds,
+            "playback must start at the shown turn's Home clock, not an earlier greeting"
+        )
+        assertEqual(
+            sample?.mixedWindow?.text,
+            sample?.line.text,
+            "the played range and the shown quote must be the same turn"
+        )
+    }
+
+    runSuite("SpeakerReviewQueueScanner plays the shown quote's turn, even when a profile clip exists") {
+        withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
+            let speakerId = UUID()
+            let markdown = twoTurnSpeakerReviewMarkdown(speakerId: speakerId)
+            try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let profiles = [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)]
+
+            let retained = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: profiles, clipURLsByProfileID: [:]
+            )
+            assertEqual(retained.first?.sampleText, "We should finish the pricing memo.")
+            assertRetainedSample(retained.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[0], startTime: 20, duration: 8
+            ), "retained playback must seek to the shown sentence, not the earlier greeting")
+
+            let clipURL = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(speakerId.uuidString).wav")
+            try? Data([7, 8, 9]).write(to: clipURL)
+            let withClip = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL]
+            )
+            assertEqual(withClip.first?.clipURL, clipURL)
+            assertEqual(withClip.first?.retainedAudioSample, nil, "a saved clip still plays instead of retained audio")
+            assertEqual(
+                withClip.first?.sampleText,
+                "We should finish the pricing memo.",
+                "the quote next to a saved clip must still be that clip's sentence, not the first greeting"
+            )
+        }
+    }
+
     runSuite("SpeakerReviewQueueScanner recovers system-only samples without changing profile clips") {
         withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
             let speakerId = UUID()
@@ -779,6 +845,36 @@ private func withUntouchedPendingTranscript(sampleText: String, _ body: (URL, UU
         return
     }
     body(directory, speakerId, transcriptId)
+}
+
+/// Greeting at 00:01, the real sentence at 00:20, another voice at 00:32.
+/// The first line is the wrong quote if review still picks "first utterance".
+private func twoTurnSpeakerReviewMarkdown(speakerId: UUID) -> String {
+    """
+    ---
+    capture_type: meeting
+    duration: "02:00"
+    speakers:
+      - id: "1"
+        channel: system
+        db_id: "\(speakerId.uuidString)"
+        name: "Speaker 1"
+        source: db_pending
+    ---
+
+    # Budget review
+
+    ## Transcript
+
+    **00:01** [System/Speaker 1]
+    Hi.
+
+    **00:20** [System/Speaker 1]
+    We should finish the pricing memo.
+
+    **00:32** [System/Someone else]
+    Thanks for joining.
+    """
 }
 
 private func deferredMarkdown(

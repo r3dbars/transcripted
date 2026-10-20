@@ -71,6 +71,8 @@ enum HomeMeetingSpeakerNamingPolicy {
 
     /// Builds one first-seen row per actual voice, with up to two useful quotes
     /// to make identification possible without scrubbing through the meeting.
+    /// The first quote is the same turn Speakers review would play, so Home
+    /// "Who is this?" and Speakers retained playback describe one segment.
     static func drafts(from lines: [HomeMeetingTranscriptLine]) -> [HomeMeetingSpeakerNamingDraft] {
         var drafts: [HomeMeetingSpeakerNamingDraft] = []
         var indexByID: [String: Int] = [:]
@@ -101,7 +103,22 @@ enum HomeMeetingSpeakerNamingPolicy {
             ))
         }
 
-        return drafts
+        return drafts.map { draft in
+            guard let quote = SpeakerReviewSamplePolicy.representativeLine(
+                matching: draft.identity, in: lines
+            )?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !quote.isEmpty else {
+                return draft
+            }
+            var texts = draft.sampleTexts.filter { $0 != quote }
+            texts.insert(quote, at: 0)
+            return HomeMeetingSpeakerNamingDraft(
+                identity: draft.identity,
+                sampleTexts: Array(texts.prefix(sampleLimit)),
+                name: draft.name,
+                selectedProfileID: draft.selectedProfileID
+            )
+        }
     }
 
     static func assignment(from draft: HomeMeetingSpeakerNamingDraft) -> HomeMeetingSpeakerAssignment? {
