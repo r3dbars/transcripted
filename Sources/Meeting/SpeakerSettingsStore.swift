@@ -135,6 +135,8 @@ final class SpeakerSettingsStore: Sendable {
                 diarizerSpeakerId: $0.diarizerSpeakerId, channel: $0.channel)
         }
 
+        guard transferClipOnMerge(from: sourceId, to: targetId) else { return false }
+
         var didMerge = false
         do {
             let outcome = try SpeakerIdentityMutationService.apply(
@@ -147,13 +149,7 @@ final class SpeakerSettingsStore: Sendable {
                 speakerDB: speakerDatabase,
                 directory: transcriptDirectory,
                 clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, targetId in
-                        guard SpeakerClipLibrary.transferOnMerge(
-                            from: sourceId,
-                            to: targetId,
-                            preferredClipsDirectory: preferredClipsDirectory,
-                            legacyClipsDirectory: legacyClipsDirectory
-                        ) else { return }
+                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, _ in
                         SpeakerClipLibrary.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
@@ -207,9 +203,12 @@ final class SpeakerSettingsStore: Sendable {
         // rollback) plus a separate un-rolled-back TranscriptSaver.retroactivelyMergeSpeaker
         // scan. The service snapshots and rewrites transcripts first, commits the DB
         // merge inside a real transaction, rolls transcripts back if that transaction
-        // throws, and only then runs clip promotion/deletion. Same-id merges are
-        // rejected by the service itself now (MutationError.sameSourceAndTarget), so the
-        // `source.id != target.id` guard above is defense in depth, not the only guard.
+        // throws, and only then deletes the source clip. The clip copy runs first so a
+        // failed copy never orphans the source under a deleted profile. Same-id merges
+        // are rejected by the service itself now (MutationError.sameSourceAndTarget), so
+        // the `source.id != target.id` guard above is defense in depth, not the only guard.
+        guard transferClipOnMerge(from: sourceId, to: targetId) else { return false }
+
         var didMerge = false
         do {
             let outcome = try SpeakerIdentityMutationService.apply(
@@ -217,13 +216,7 @@ final class SpeakerSettingsStore: Sendable {
                 speakerDB: speakerDatabase,
                 directory: transcriptDirectory,
                 clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, targetId in
-                        guard SpeakerClipLibrary.transferOnMerge(
-                            from: sourceId,
-                            to: targetId,
-                            preferredClipsDirectory: preferredClipsDirectory,
-                            legacyClipsDirectory: legacyClipsDirectory
-                        ) else { return }
+                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, _ in
                         SpeakerClipLibrary.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
@@ -246,6 +239,26 @@ final class SpeakerSettingsStore: Sendable {
         }
         return didMerge
     }
+
+    private func transferClipOnMerge(from sourceId: UUID, to targetId: UUID) -> Bool {
+        let copied = SpeakerClipLibrary.transferOnMerge(
+            from: sourceId,
+            to: targetId,
+            preferredClipsDirectory: preferredClipsDirectory,
+            legacyClipsDirectory: legacyClipsDirectory
+        )
+        if !copied {
+            AppLogger.speakers.error(
+                "Speaker merge left the source in place after a failed clip copy",
+                [
+                    "sourceId": sourceId.uuidString,
+                    "targetId": targetId.uuidString,
+                ]
+            )
+        }
+        return copied
+    }
+
     /// Surfaces a `SpeakerIdentityMutationService.MutationError` beyond the local log —
     /// specifically `.transcriptRestoreFailed`, where the DB and a saved transcript may now
     /// permanently disagree and a caller that only checked `outcome.succeeded` would never

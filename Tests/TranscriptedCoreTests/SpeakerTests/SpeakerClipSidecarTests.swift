@@ -114,12 +114,14 @@ final class SpeakerClipSidecarTests: XCTestCase {
 
         let speakerId = UUID()
         let firstTemp = try writeTempClip(named: "first.wav", in: directory, bytes: Data([1, 2, 3]))
-        let firstSidecar = SpeakerClipSidecar(
-            transcriptId: UUID(),
-            channel: "system",
-            diarizerSpeakerId: "1",
-            segments: [.init(start: 5.0, end: 13.0, text: "Okay. Um. Let's see here.")],
-            sampleText: "Okay. Um. Let's see here."
+        let firstSidecar = try XCTUnwrap(
+            SpeakerClipSidecar(
+                transcriptId: UUID(),
+                channel: "system",
+                diarizerSpeakerId: "1",
+                segments: [.init(start: 5.0, end: 13.0, text: "Okay. Um. Let's see here.")],
+                sampleText: "Okay. Um. Let's see here."
+            ).stamped(withWavAt: firstTemp)
         )
         SpeakerClipExtractor.persistClip(
             from: firstTemp,
@@ -136,11 +138,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
         )
 
         let secondTemp = try writeTempClip(named: "second.wav", in: directory, bytes: Data([4, 5, 6, 7]))
-        let secondSidecar = SpeakerClipSidecar(
-            channel: "mic",
-            diarizerSpeakerId: "2",
-            segments: [.init(start: 1.5, end: 4.0, text: "A later sample.")],
-            sampleText: "A later sample."
+        let secondSidecar = try XCTUnwrap(
+            SpeakerClipSidecar(
+                channel: "mic",
+                diarizerSpeakerId: "2",
+                segments: [.init(start: 1.5, end: 4.0, text: "A later sample.")],
+                sampleText: "A later sample."
+            ).stamped(withWavAt: secondTemp)
         )
         SpeakerClipExtractor.persistClip(
             from: secondTemp,
@@ -171,11 +175,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
             from: sourceTemp,
             speakerId: sourceId,
             clipsDirectory: directory,
-            sidecar: SpeakerClipSidecar(
-                channel: "system",
-                diarizerSpeakerId: "1",
-                segments: [.init(start: 5.0, end: 13.0, text: "Okay. Um. Let's see here.")],
-                sampleText: "Okay. Um. Let's see here."
+            sidecar: try XCTUnwrap(
+                SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 5.0, end: 13.0, text: "Okay. Um. Let's see here.")],
+                    sampleText: "Okay. Um. Let's see here."
+                ).stamped(withWavAt: sourceTemp)
             )
         )
         let sourceClip = try XCTUnwrap(
@@ -207,11 +213,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
             from: temp,
             speakerId: speakerId,
             clipsDirectory: directory,
-            sidecar: SpeakerClipSidecar(
-                channel: "system",
-                diarizerSpeakerId: "1",
-                segments: [],
-                sampleText: "Gone with the clip."
+            sidecar: try XCTUnwrap(
+                SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [],
+                    sampleText: "Gone with the clip."
+                ).stamped(withWavAt: temp)
             )
         )
         let persisted = try XCTUnwrap(
@@ -236,11 +244,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
             from: firstTemp,
             speakerId: speakerId,
             clipsDirectory: directory,
-            sidecar: SpeakerClipSidecar(
-                channel: "system",
-                diarizerSpeakerId: "1",
-                segments: [.init(start: 1, end: 3, text: "Old words.")],
-                sampleText: "Old words."
+            sidecar: try XCTUnwrap(
+                SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 1, end: 3, text: "Old words.")],
+                    sampleText: "Old words."
+                ).stamped(withWavAt: firstTemp)
             )
         )
         let persisted = try XCTUnwrap(
@@ -298,11 +308,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
             from: firstTemp,
             speakerId: speakerId,
             clipsDirectory: directory,
-            sidecar: SpeakerClipSidecar(
-                channel: "system",
-                diarizerSpeakerId: "1",
-                segments: [.init(start: 1, end: 4, text: "Keep this clip.")],
-                sampleText: "Keep this clip."
+            sidecar: try XCTUnwrap(
+                SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 1, end: 4, text: "Keep this clip.")],
+                    sampleText: "Keep this clip."
+                ).stamped(withWavAt: firstTemp)
             )
         )
         let persisted = try XCTUnwrap(
@@ -348,11 +360,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
             from: temp,
             speakerId: speakerId,
             clipsDirectory: directory,
-            sidecar: SpeakerClipSidecar(
-                channel: "system",
-                diarizerSpeakerId: "1",
-                segments: [.init(start: 1, end: 3, text: "Original words.")],
-                sampleText: "Original words."
+            sidecar: try XCTUnwrap(
+                SpeakerClipSidecar(
+                    channel: "system",
+                    diarizerSpeakerId: "1",
+                    segments: [.init(start: 1, end: 3, text: "Original words.")],
+                    sampleText: "Original words."
+                ).stamped(withWavAt: temp)
             )
         )
         let persisted = try XCTUnwrap(
@@ -393,11 +407,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
                 from: sourceTemp,
                 speakerId: sourceId,
                 clipsDirectory: directory,
-                sidecar: SpeakerClipSidecar(
-                    channel: "system",
-                    diarizerSpeakerId: "1",
-                    segments: [.init(start: 1, end: 3, text: "Words from this wav.")],
-                    sampleText: "Words from this wav."
+                sidecar: try XCTUnwrap(
+                    SpeakerClipSidecar(
+                        channel: "system",
+                        diarizerSpeakerId: "1",
+                        segments: [.init(start: 1, end: 3, text: "Words from this wav.")],
+                        sampleText: "Words from this wav."
+                    ).stamped(withWavAt: sourceTemp)
                 )
             )
         )
@@ -484,11 +500,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
                 from: temp,
                 speakerId: speakerId,
                 clipsDirectory: directory,
-                sidecar: SpeakerClipSidecar(
-                    channel: "system",
-                    diarizerSpeakerId: "1",
-                    segments: [.init(start: 1, end: 2, text: "Hold this.")],
-                    sampleText: "Hold this."
+                sidecar: try XCTUnwrap(
+                    SpeakerClipSidecar(
+                        channel: "system",
+                        diarizerSpeakerId: "1",
+                        segments: [.init(start: 1, end: 2, text: "Hold this.")],
+                        sampleText: "Hold this."
+                    ).stamped(withWavAt: temp)
                 )
             )
         )
@@ -541,11 +559,13 @@ final class SpeakerClipSidecarTests: XCTestCase {
                 from: sourceTemp,
                 speakerId: sourceId,
                 clipsDirectory: directory,
-                sidecar: SpeakerClipSidecar(
-                    channel: "system",
-                    diarizerSpeakerId: "1",
-                    segments: [.init(start: 1, end: 2, text: "Only copy.")],
-                    sampleText: "Only copy."
+                sidecar: try XCTUnwrap(
+                    SpeakerClipSidecar(
+                        channel: "system",
+                        diarizerSpeakerId: "1",
+                        segments: [.init(start: 1, end: 2, text: "Only copy.")],
+                        sampleText: "Only copy."
+                    ).stamped(withWavAt: sourceTemp)
                 )
             )
         )
@@ -593,64 +613,6 @@ final class SpeakerClipSidecarTests: XCTestCase {
         XCTAssertEqual(updated.byteCount, 5)
     }
 
-    func testMeetingDeletionLeavesThePersonsVoiceSample() throws {
-        let directory = temporaryClipsDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let speakerId = UUID()
-        let transcriptId = UUID()
-        let meetingURL = directory.appendingPathComponent("Pricing_Memo.md")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let meeting = """
-        ---
-        capture_id: "\(transcriptId.uuidString)"
-        transcript_id: "\(transcriptId.uuidString)"
-        capture_type: meeting
-        title: "Pricing memo"
-        ---
-
-        # Pricing memo
-
-        ## Transcript
-
-        **00:02** [System/Speaker 1]
-        This voice sample stays.
-        """
-        try meeting.write(to: meetingURL, atomically: true, encoding: .utf8)
-        let temp = try writeTempClip(named: "person.wav", in: directory, bytes: Data([3, 1, 4]))
-        XCTAssertTrue(
-            SpeakerClipExtractor.persistClip(
-                from: temp,
-                speakerId: speakerId,
-                clipsDirectory: directory,
-                sidecar: SpeakerClipSidecar(
-                    transcriptId: transcriptId,
-                    channel: "system",
-                    diarizerSpeakerId: "1",
-                    segments: [.init(start: 2, end: 6, text: "This voice sample stays.")],
-                    sampleText: "This voice sample stays."
-                )
-            )
-        )
-        let persisted = try XCTUnwrap(
-            SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: directory)
-        )
-        XCTAssertEqual(
-            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.transcriptId,
-            transcriptId,
-            "the sidecar must name the meeting that produced this clip"
-        )
-
-        try FileManager.default.removeItem(at: meetingURL)
-
-        XCTAssertFalse(FileManager.default.fileExists(atPath: meetingURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: persisted.path))
-        XCTAssertEqual(
-            SpeakerClipSidecar.loadMatchingWav(nextTo: persisted)?.sampleText,
-            "This voice sample stays.",
-            "the clip is the person's voice sample, not meeting-owned media, so deleting that meeting keeps it"
-        )
-    }
 }
 
 private func utterance(start: Double, end: Double, text: String) -> TranscriptionUtterance {

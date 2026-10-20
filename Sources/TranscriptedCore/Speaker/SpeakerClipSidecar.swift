@@ -1,4 +1,5 @@
 import CryptoKit
+import Darwin
 import Foundation
 
 /// Metadata stored next to a persisted speaker clip (`<uuid>.wav` + `<uuid>.json`).
@@ -78,45 +79,67 @@ public struct SpeakerClipSidecar: Codable, Equatable, Sendable {
         return matches(byteCount: wavData.count, sha256: Self.sha256Hex(wavData))
     }
 
-    /// Accept a sidecar only when it is unbound (this write's own quote) or
-    /// already describes `sourceURL`. A crash-window json stamped for a wav
-    /// that never landed must not be restamped onto a different file.
+    /// Accept a sidecar only when it already describes the current bytes at
+    /// `sourceURL`. Unbound metadata (no size or hash) is not a quote.
+    /// A crash-window json stamped for a wav that never landed must not be
+    /// restamped onto a different file. Reads the real bytes; never the
+    /// display identity cache.
     public static func acceptedIncoming(
         _ sidecar: SpeakerClipSidecar?,
         matchingSourceAt sourceURL: URL
     ) -> SpeakerClipSidecar? {
         guard let sidecar, sidecar.formatVersion == currentFormatVersion else { return nil }
-        if sidecar.wavByteCount == 0, sidecar.wavSHA256.isEmpty {
-            return sidecar
-        }
-        return sidecar.matchesWav(at: sourceURL) ? sidecar : nil
+        guard sidecar.wavByteCount > 0, !sidecar.wavSHA256.isEmpty else { return nil }
+        guard let data = try? Data(contentsOf: sourceURL) else { return nil }
+        return sidecar.matches(wavData: data) ? sidecar : nil
     }
 
+    /// Hash the file's current bytes. Used on the save path so a same-size
+    /// same-mtime replace cannot recertify an old quote.
     public func stamped(withWavAt clipURL: URL) -> SpeakerClipSidecar? {
-        guard let identity = Self.wavIdentity(of: clipURL) else { return nil }
+        guard let data = try? Data(contentsOf: clipURL) else { return nil }
+        return stamped(withWavData: data)
+    }
+
+    public func stamped(withWavData data: Data) -> SpeakerClipSidecar? {
+        guard !data.isEmpty else { return nil }
         var copy = self
         copy.formatVersion = Self.currentFormatVersion
-        copy.wavByteCount = identity.byteCount
-        copy.wavSHA256 = identity.sha256
+        copy.wavByteCount = data.count
+        copy.wavSHA256 = Self.sha256Hex(data)
         return copy
     }
 
     public static func wavIdentity(of clipURL: URL) -> (byteCount: Int, sha256: String)? {
         let path = clipURL.standardizedFileURL.path
-        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
-        let size = (attrs?[.size] as? NSNumber)?.intValue
-        let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970
+        guard let stamp = fileStamp(of: path) else { return nil }
 
-        if let size, let mtime, let cached = WavIdentityCache.entry(path: path, size: size, mtime: mtime) {
+        if let cached = WavIdentityCache.entry(path: path, stamp: stamp) {
             return (cached.byteCount, cached.sha256)
         }
 
         guard let data = try? Data(contentsOf: clipURL), !data.isEmpty else { return nil }
         let digest = sha256Hex(data)
-        if let size, let mtime {
-            WavIdentityCache.store(path: path, size: size, mtime: mtime, byteCount: data.count, sha256: digest)
-        }
+        WavIdentityCache.store(path: path, stamp: stamp, byteCount: data.count, sha256: digest)
         return (data.count, digest)
+    }
+
+    private static func fileStamp(of path: String) -> WavIdentityCache.Stamp? {
+        let attrs = try? FileManager.default.attributesOfItem(atPath: path)
+        guard let size = (attrs?[.size] as? NSNumber)?.intValue,
+              let mtime = (attrs?[.modificationDate] as? Date)?.timeIntervalSince1970 else {
+            return nil
+        }
+        var st = stat()
+        guard lstat(path, &st) == 0 else { return nil }
+        let ctime = TimeInterval(st.st_ctimespec.tv_sec)
+            + TimeInterval(st.st_ctimespec.tv_nsec) / 1_000_000_000
+        return WavIdentityCache.Stamp(
+            size: size,
+            mtime: mtime,
+            inode: UInt64(st.st_ino),
+            ctime: ctime
+        )
     }
 
     private func matches(byteCount: Int, sha256: String) -> Bool {
@@ -294,29 +317,57 @@ public enum SpeakerClipSamplePolicy {
     }
 }
 
-private enum WavIdentityCache {
-    struct Entry {
+enum WavIdentityCache {
+    static let limit = 64
+
+    struct Stamp: Equatable {
         let size: Int
         let mtime: TimeInterval
+        let inode: UInt64
+        let ctime: TimeInterval
+    }
+
+    struct Entry {
+        let stamp: Stamp
         let byteCount: Int
         let sha256: String
     }
 
     private static let lock = NSLock()
     private static var entries: [String: Entry] = [:]
+    private static var order: [String] = []
 
-    static func entry(path: String, size: Int, mtime: TimeInterval) -> Entry? {
+    static var cachedPathCount: Int {
         lock.lock()
         defer { lock.unlock() }
-        guard let cached = entries[path], cached.size == size, cached.mtime == mtime else {
+        return entries.count
+    }
+
+    static func entry(path: String, stamp: Stamp) -> Entry? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let cached = entries[path], cached.stamp == stamp else {
             return nil
         }
+        touchLocked(path)
         return cached
     }
 
-    static func store(path: String, size: Int, mtime: TimeInterval, byteCount: Int, sha256: String) {
+    static func store(path: String, stamp: Stamp, byteCount: Int, sha256: String) {
         lock.lock()
         defer { lock.unlock() }
-        entries[path] = Entry(size: size, mtime: mtime, byteCount: byteCount, sha256: sha256)
+        if entries[path] == nil {
+            while entries.count >= limit, let oldest = order.first {
+                order.removeFirst()
+                entries.removeValue(forKey: oldest)
+            }
+        }
+        entries[path] = Entry(stamp: stamp, byteCount: byteCount, sha256: sha256)
+        touchLocked(path)
+    }
+
+    private static func touchLocked(_ path: String) {
+        order.removeAll { $0 == path }
+        order.append(path)
     }
 }

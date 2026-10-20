@@ -51,7 +51,8 @@ enum SpeakerClipLibrary {
 
     /// After a merge, the kept person inherits the merged-away person's clip if
     /// they have none of their own. Returns false when that copy fails so the
-    /// caller can leave the source clip in place.
+    /// caller can leave the source clip in place. The has-clip check and copy
+    /// share the same persist locks.
     @discardableResult
     nonisolated static func transferOnMerge(
         from sourceId: UUID,
@@ -59,24 +60,11 @@ enum SpeakerClipLibrary {
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL
     ) -> Bool {
-        if clipURL(
-            for: targetId,
+        SpeakerClipExtractor.transferOnMerge(
+            from: sourceId,
+            to: targetId,
             preferredClipsDirectory: preferredClipsDirectory,
             legacyClipsDirectory: legacyClipsDirectory
-        ) != nil {
-            return true
-        }
-        guard let sourceClip = clipURL(
-            for: sourceId,
-            preferredClipsDirectory: preferredClipsDirectory,
-            legacyClipsDirectory: legacyClipsDirectory
-        ) else {
-            return true
-        }
-        return SpeakerClipExtractor.persistClip(
-            from: sourceClip,
-            speakerId: targetId,
-            clipsDirectory: preferredClipsDirectory
         )
     }
 }

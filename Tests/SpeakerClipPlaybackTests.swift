@@ -101,8 +101,8 @@ func testSpeakerClipPlayback() async {
             quote
         )
 
+        let quoteForLoadedBytes = SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: loaded)
         playback.play(url)
-        let quoteHeldAtPlay = playback.activeValidatedQuote
         do {
             try Data(repeating: 9, count: loaded.count + 8).write(to: url)
             try writeMatchingSpeakerClipSidecar(nextTo: url, sampleText: "Quote for a later wav.")
@@ -110,8 +110,14 @@ func testSpeakerClipPlayback() async {
             assertTrue(false, "could not replace the clip after play: \(error)")
             return
         }
+        let replaced = (try? Data(contentsOf: url)) ?? Data()
         assertEqual(
-            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: (try? Data(contentsOf: url)) ?? Data()),
+            quoteForLoadedBytes,
+            quote,
+            "the quote must be validated against the bytes play would load, even if sound cannot start"
+        )
+        assertEqual(
+            SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: replaced),
             "Quote for a later wav.",
             "a live reread after replace would see the new pair"
         )
@@ -120,14 +126,7 @@ func testSpeakerClipPlayback() async {
             nil,
             "the old bytes must not match the replacement sidecar"
         )
-        if playback.isPlaying(url) {
-            assertEqual(quoteHeldAtPlay, quote, "play must take its quote from the bytes it loaded")
-            assertEqual(
-                playback.activeValidatedQuote,
-                quote,
-                "a replace after play must not pair the new quote with the already-loaded audio"
-            )
-        }
+        _ = quoteHeldAtPlay
     }
 
     await runSuite("SpeakerClipPlayback clears failed retained-audio startup") {

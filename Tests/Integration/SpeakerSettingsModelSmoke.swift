@@ -250,6 +250,58 @@ import TranscriptedCore
         check(FileManager.default.fileExists(atPath: clip.path), "a rejected delete keeps the voice clip")
     }
 
+    @MainActor static func failedMergeKeepsSourceProfileAndClip() async throws {
+        let fixture = try Fixture()
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: fixture.clips.path
+            )
+            try? fixture.close()
+        }
+        let source = try fixture.voice(name: "Alex")
+        let target = try fixture.voice(name: "Blake", embedding: [0, 1])
+        let sourceClip = fixture.clips.appendingPathComponent("\(source.id.uuidString).wav")
+        let targetClip = fixture.clips.appendingPathComponent("\(target.id.uuidString).wav")
+        try FileManager.default.removeItem(at: targetClip)
+        check(FileManager.default.fileExists(atPath: sourceClip.path), "source starts with a clip")
+        check(!FileManager.default.fileExists(atPath: targetClip.path), "kept person has no clip to inherit")
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555],
+            ofItemAtPath: fixture.clips.path
+        )
+        let model = await fixture.load()
+        let sourceRow = model.profiles.first { $0.id == source.id }
+        let targetRow = model.profiles.first { $0.id == target.id }
+        check(sourceRow != nil && targetRow != nil, "both people are in the Speakers snapshot")
+        let didMerge = await withCheckedContinuation { continuation in
+            model.merge(source: sourceRow!, into: targetRow!) { continuation.resume(returning: $0) }
+        }
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: fixture.clips.path
+        )
+        check(!didMerge, "a failed clip copy must not merge the people")
+        check(
+            fixture.database.getSpeaker(id: source.id) != nil,
+            "the source person stays when the clip cannot move"
+        )
+        check(
+            FileManager.default.fileExists(atPath: sourceClip.path),
+            "the source clip stays with the source person"
+        )
+        check(
+            !FileManager.default.fileExists(atPath: targetClip.path),
+            "a failed copy must not leave a partial clip on the kept person"
+        )
+        check(
+            model.profiles.contains { $0.id == source.id },
+            "the refreshed snapshot still lists the source person"
+        )
+    }
+
     @MainActor static func main() async throws {
         guard ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1" else {
             fatalError("Smoke requires file logging disabled")
@@ -260,6 +312,7 @@ import TranscriptedCore
         try await databaseRejectionRestoresWrittenMeetings()
         try await thisIsMeJoinsExistingOwnerBeforeCompletion()
         try await failedDeleteKeepsVoiceClip()
+        try await failedMergeKeepsSourceProfileAndClip()
         print("Speaker settings model smoke: \(assertions) assertions passed")
     }
 }

@@ -138,8 +138,8 @@ public enum SpeakerClipExtractor {
     /// Copy a temporary clip to persistent storage, keyed by speaker UUID.
     /// Writes the wav and sidecar to sibling temp names, then renames them
     /// into place so a failed copy never deletes the previous pair. The
-    /// incoming sidecar is kept only when it already matches the source wav
-    /// (or is still unbound); otherwise the quote is dropped.
+    /// incoming sidecar is kept only when it already matches the source wav;
+    /// an unbound sidecar is dropped.
     @discardableResult
     public static func persistClip(
         from tempClipURL: URL,
@@ -159,17 +159,50 @@ public enum SpeakerClipExtractor {
 
     /// Copy the source profile's clip onto the kept profile. Returns false
     /// when that copy fails so the caller can leave the source in place.
+    /// The target-has-clip check and the copy share one ordered lock pair
+    /// so a clip that lands on the target cannot be overwritten.
     @discardableResult
     public static func transferOnMerge(
         from sourceId: UUID,
         to targetId: UUID,
         clipsDirectory: URL
     ) -> Bool {
-        if persistentClipURL(for: targetId, clipsDirectory: clipsDirectory) != nil {
-            return true
+        transferOnMerge(
+            from: sourceId,
+            to: targetId,
+            preferredClipsDirectory: clipsDirectory,
+            legacyClipsDirectory: clipsDirectory
+        )
+    }
+
+    @discardableResult
+    public static func transferOnMerge(
+        from sourceId: UUID,
+        to targetId: UUID,
+        preferredClipsDirectory: URL,
+        legacyClipsDirectory: URL
+    ) -> Bool {
+        withOrderedPersistLocks(sourceId, targetId) {
+            if persistentClipURL(for: targetId, clipsDirectory: preferredClipsDirectory) != nil
+                || persistentClipURL(for: targetId, clipsDirectory: legacyClipsDirectory) != nil {
+                return true
+            }
+            let sourceDirectory: URL
+            if persistentClipURL(for: sourceId, clipsDirectory: preferredClipsDirectory) != nil {
+                sourceDirectory = preferredClipsDirectory
+            } else if persistentClipURL(for: sourceId, clipsDirectory: legacyClipsDirectory) != nil {
+                sourceDirectory = legacyClipsDirectory
+            } else {
+                return true
+            }
+            let sourceClip = sourceDirectory.appendingPathComponent("\(sourceId.uuidString).wav")
+            return persistClipLocked(
+                from: sourceClip,
+                speakerId: targetId,
+                clipsDirectory: preferredClipsDirectory,
+                sidecar: nil
+            )
         }
-        let sourceClip = clipsDirectory.appendingPathComponent("\(sourceId.uuidString).wav")
-        return persistClip(from: sourceClip, speakerId: targetId, clipsDirectory: clipsDirectory)
     }
 
     public static var persistLockWillAcquire: ((UUID) -> Void)? {
@@ -179,6 +212,21 @@ public enum SpeakerClipExtractor {
 
     public static func withPersistLock(for speakerId: UUID, _ body: () -> Void) {
         persistLocks.withLock(for: speakerId, body)
+    }
+
+    private static func withOrderedPersistLocks<T>(
+        _ firstId: UUID,
+        _ secondId: UUID,
+        _ body: () -> T
+    ) -> T {
+        if firstId == secondId {
+            return persistLocks.withLock(for: firstId, body)
+        }
+        let leading = firstId.uuidString < secondId.uuidString ? firstId : secondId
+        let trailing = leading == firstId ? secondId : firstId
+        return persistLocks.withLock(for: leading) {
+            persistLocks.withLock(for: trailing, body)
+        }
     }
 
     private static func persistClipLocked(
