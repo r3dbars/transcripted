@@ -63,8 +63,12 @@ extension NextSentenceCard {
             placedAbove = NextSentencePolicy.place(card: CGSize(width: width, height: Self.fullHeight), under: anchor, in: visible).above
             needsPlacement = false
         }
-        let x = min(max(anchor.minX - 14, visible.minX + 4), visible.maxX - width - 4)
-        let y = min(max(placedAbove ? anchor.maxY + 6 : anchor.minY - 6 - height, visible.minY + 4), visible.maxY - height - 4)
+        // Beside the caret, plus wherever they've moved it with the top tab, kept on screen.
+        let baseX = anchor.minX - 14, baseY = placedAbove ? anchor.maxY + 6 : anchor.minY - 6 - height
+        let x = min(max(baseX + moveOffset.x, visible.minX + 4), visible.maxX - width - 4)
+        let y = min(max(baseY + moveOffset.y, visible.minY + 4), visible.maxY - height - 4)
+        // Pushed against the screen's edge, it stops there, so moving back answers at once.
+        moveOffset = CGPoint(x: x - baseX, y: y - baseY)
         let card = CGRect(x: x, y: y, width: width, height: height)
         let m = Self.margin
         let exact = CGRect(x: card.minX - m, y: card.minY - m, width: width + 2 * m, height: Self.headroom + height + m)
@@ -117,6 +121,8 @@ extension NextSentenceCard {
         put(chargeRim, rect.insetBy(dx: -NextSentenceChargeRim.reach, dy: -NextSentenceChargeRim.reach), animated)
         let size = NextSentenceStretchBar.size
         put(stretchBar, CGRect(x: rect.midX - size.width / 2, y: rect.maxY - size.height / 2, width: size.width, height: size.height), animated)
+        let tab = NextSentenceMoveTab.size
+        put(moveTab, CGRect(x: rect.midX - tab.width / 2, y: rect.minY + 1, width: tab.width, height: tab.height), animated)
         guard let layer = front.layer else { return }
         let path = CGPath(roundedRect: CGRect(origin: .zero, size: rect.size), cornerWidth: 16, cornerHeight: 16, transform: nil)
         if animated {
@@ -148,6 +154,8 @@ extension NextSentenceCard {
         // The text box only shows a status when something went wrong; waiting shows the aurora instead.
         placeholder.isHidden = compact || !content.text.isEmpty || isEditing || content.busy
         let box = textBoxHeight
+        moveTab.isHidden = compact
+        for backdrop in [glass, tint] { put(backdrop, NSRect(x: 0, y: 0, width: width, height: cardHeight), animated) }
         put(aurora, NSRect(x: 0, y: 0, width: width, height: cardHeight), animated)
         aurora.textFrame = NSRect(x: inset, y: Self.textTop, width: pad.frame.minX - inset - 14, height: box)
         put(placeholder, NSRect(x: inset, y: Self.textTop + 2, width: placeholderWidth, height: box), animated)

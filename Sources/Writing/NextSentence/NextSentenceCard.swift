@@ -81,6 +81,13 @@ final class NextSentenceCard: NSObject {
     let scroll = NSScrollView()
     let textView = NextSentenceTextView(width: NextSentenceCardStyle.width - 28)
     let stretchBar = NextSentenceStretchBar(frame: .zero)
+    /// The tab on the top edge that moves the card, and how far it's been moved from beside the caret.
+    let moveTab = NextSentenceMoveTab(frame: .zero)
+    var moveOffset = CGPoint.zero
+    var moveStart: (mouse: NSPoint, offset: CGPoint)?
+    /// A little of what's behind the card shows through: frosted glass under a dark tint.
+    let glass = NSVisualEffectView()
+    let tint = NSView()
     let gripHint = NextSentenceCardStyle.label(.systemFont(ofSize: 10.5, weight: .semibold), NextSentenceCardStyle.title)
     let hintLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.hintFont, NextSentenceCardStyle.faint)
     let aurora = NextSentenceAurora(frame: .zero)
@@ -161,6 +168,7 @@ final class NextSentenceCard: NSObject {
         shownText = ""
         ink.reset()
         needsPlacement = true
+        moveOffset = .zero
         front.frame = .zero
         update(content)
         panel.alphaValue = 1
@@ -531,7 +539,19 @@ final class NextSentenceCard: NSObject {
         root.onMouseMoved = { [weak self] point in self?.rootMoved(point) }
         root.onMouseExited = { [weak self] in self?.textView.hover(at: nil) }
         front.wantsLayer = true
-        front.layer?.backgroundColor = NextSentenceCardStyle.background.cgColor
+        front.layer?.backgroundColor = NSColor.clear.cgColor
+        glass.material = .hudWindow
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.appearance = NSAppearance(named: .darkAqua)
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NextSentenceCardStyle.background.withAlphaComponent(0.8).cgColor
+        for layer in [glass, tint] {
+            layer.wantsLayer = true
+            layer.layer?.cornerRadius = NextSentenceCardStyle.cornerRadius
+            layer.layer?.cornerCurve = .continuous
+            layer.layer?.masksToBounds = true
+        }
         front.layer?.cornerRadius = NextSentenceCardStyle.cornerRadius
         front.layer?.cornerCurve = .continuous
         front.layer?.borderWidth = 1
@@ -630,6 +650,8 @@ final class NextSentenceCard: NSObject {
         insertButton.onHeld = { [weak self] in self?.onInsert?(true) }
 
         front.addSubview(aurora, positioned: .below, relativeTo: nil)
+        front.addSubview(glass, positioned: .below, relativeTo: nil)
+        front.addSubview(tint, positioned: .above, relativeTo: glass)
         for view in [busyDot, statusLabel, scroll, placeholder, pad, hintLabel, statusLine, waveform, micButton, remixButton, insertButton] as [NSView] {
             front.addSubview(view)
         }
@@ -640,6 +662,18 @@ final class NextSentenceCard: NSObject {
         float.isHidden = true
         tip.isHidden = true
         root.addSubview(stretchBar)
+        root.addSubview(moveTab)
+        moveTab.onDragStart = { [weak self] point in
+            guard let self else { return }
+            self.closeFloats()
+            self.moveStart = (point, self.moveOffset)
+        }
+        moveTab.onDrag = { [weak self] point in
+            guard let self, let start = self.moveStart else { return }
+            self.moveOffset = CGPoint(x: start.offset.x + point.x - start.mouse.x, y: start.offset.y + point.y - start.mouse.y)
+            self.layout(animated: false)
+        }
+        moveTab.onDragEnd = { [weak self] in self?.moveStart = nil }
         root.addSubview(gripHint)
         root.addSubview(float)
         root.addSubview(tip)
