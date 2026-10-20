@@ -166,6 +166,7 @@ extension CoreAudioSystemAudioCapture {
         releasedForSleep = false
         silenceWatch = nil
         removeDefaultOutputListener()
+        stopTelemetry()
         clearRebuildRetryState()
         AppLogger.audioSystem.warning("System audio capture ended", ["reason": message])
         destroyHardware()

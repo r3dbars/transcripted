@@ -52,6 +52,9 @@ extension Audio {
         }
         lastBufferTime = CACurrentMediaTime()
         let rawPeak = linearPeak(buffer: buffer)
+        if let window = micCaptureTelemetry.record(buffer, arrival: CACurrentMediaTime()) {
+            AppLogger.audioMic.info("Mic capture window", window)
+        }
 
         // Meter + silence detection see the RAW signal so the user's
         // visible level reflects their actual mic input, and the
