@@ -281,9 +281,21 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         assertEqual(NextSentencePreferences.hotkey(userDefaults: defaults), rightCommand, "the choice is kept")
         defaults.set(0, forKey: NextSentencePreferences.hotkeyKey)
         assertEqual(NextSentencePreferences.hotkey(userDefaults: defaults), .fn, "anything not allowed falls back to fn")
-        assertTrue(NextSentencePreferences.hotkeyClashesWithDictation(NextSentenceHotkey(recorded: 61) ?? .fn, userDefaults: defaults),
-                   "dictation's default key is Right Option, so picking it is flagged")
-        assertFalse(NextSentencePreferences.hotkeyClashesWithDictation(.fn, userDefaults: defaults), "fn doesn't clash by default")
+        assertEqual(NextSentencePreferences.hotkeyClash(NextSentenceHotkey(recorded: 61) ?? .fn, userDefaults: defaults), "Dictation",
+                    "dictation's default key is Right Option, so picking it is flagged")
+        assertNil(NextSentencePreferences.hotkeyClash(.fn, userDefaults: defaults), "fn doesn't clash by default")
+
+        // Combinations: ⌥D (D is key code 2).
+        let optionD = NextSentenceHotkey(recorded: 2, modifiers: NextSentenceHotkey.option, label: "d")
+        assertEqual(optionD?.title, "⌥D", "a combination reads as its symbols and key")
+        assertNil(NextSentenceHotkey(recorded: 2, modifiers: NextSentenceHotkey.shift, label: "D"), "⇧ alone just types a capital, so it's not a shortcut")
+        assertNil(NextSentenceHotkey(recorded: 58, modifiers: NextSentenceHotkey.command, label: ""), "a modifier key isn't the key of a combination")
+        assertTrue(optionD?.isCombination == true && optionD?.isModifier == false && optionD?.downMask == nil, "a combination is detected by its key")
+        if let optionD { NextSentencePreferences.setHotkey(optionD, userDefaults: defaults) }
+        assertEqual(NextSentencePreferences.hotkey(userDefaults: defaults), optionD, "a combination is kept, label and all")
+        assertNil(NextSentencePreferences.hotkeyClash(optionD ?? .fn, userDefaults: defaults), "⌥D is free by default")
+        let optionM = NextSentenceHotkey(recorded: 46, modifiers: NextSentenceHotkey.option, label: "m") ?? .fn
+        assertEqual(NextSentencePreferences.hotkeyClash(optionM, userDefaults: defaults), "Meetings", "⌥M starts a meeting by default, so it's flagged")
     }
 
     runSuite("After typing, Esc waits a moment for a second press") {

@@ -74,13 +74,16 @@ private struct DeveloperPreviewRow: View {
 }
 
 /// Which key opens Write for Me, shown once it's on: a few quick choices, or Record… to press any other
-/// modifier key (either side) or function key. It says so when dictation already uses the same key.
+/// modifier key (either side), a function key, or a combination like ⌥D. It says so when dictation or
+/// meetings already use the same key.
 private struct WriteForMeKeyRow: View {
     let showsDivider: Bool
     @State private var key = NextSentencePreferences.hotkey()
     @State private var recording = false
     @State private var rejected = false
     @State private var monitor: Any?
+    /// A modifier key that went down while recording: it's the key if it comes back up on its own.
+    @State private var pendingModifier: Int64?
 
     private var choices: [NextSentenceHotkey] {
         NextSentenceHotkey.presets.contains(key) ? NextSentenceHotkey.presets : NextSentenceHotkey.presets + [key]
@@ -93,12 +96,12 @@ private struct WriteForMeKeyRow: View {
                     title: "Write for Me key",
                     message: "Tap it in any text box to open Write for Me, or hold it and say what the message should say. "
                         + "Only the key on its own counts: pressed with another key, it does what it always does. "
-                        + "Record… takes any modifier key, left or right, or an F key (on a MacBook, F keys work when "
-                        + "they're set to act as standard function keys)."
+                        + "Record… takes a combination like ⌥D, any modifier key on its own (left or right), or an "
+                        + "F key (on a MacBook, F keys work when they're set to act as standard function keys)."
                 ))
                 Spacer(minLength: 10)
                 if recording {
-                    Text(rejected ? "Use a modifier or an F key" : "Press a key…")
+                    Text(rejected ? "Add ⌘, ⌥ or ⌃, or use one modifier key" : "Press a key or a combination…")
                         .font(.subheadline)
                         .foregroundStyle(rejected ? Color.orange : Color.secondary)
                     Button("Cancel") { stopRecording() }
@@ -116,8 +119,8 @@ private struct WriteForMeKeyRow: View {
                         .accessibilityIdentifier("transcripted.settings.developer-preview.next-sentence.record-key")
                 }
             }
-            if NextSentencePreferences.hotkeyClashesWithDictation(key) {
-                Text("Dictation uses this key too. Pick another one here, or change the dictation key above.")
+            if let other = NextSentencePreferences.hotkeyClash(key) {
+                Text("\(other) uses this key too. Pick another one here, or change the \(other.lowercased()) key above.")
                     .font(.caption)
                     .foregroundStyle(Color.orange)
             }
@@ -146,28 +149,39 @@ private struct WriteForMeKeyRow: View {
             let isFlags = event.type == .flagsChanged
             let code = Int64(event.keyCode)
             let flags = UInt64(event.modifierFlags.rawValue)
-            let swallow = MainActor.assumeIsolated { recorded(isFlags: isFlags, code: code, flags: flags) }
+            let label = isFlags ? "" : (event.charactersIgnoringModifiers ?? "")
+            let swallow = MainActor.assumeIsolated { recorded(isFlags: isFlags, code: code, flags: flags, label: label) }
             return swallow ? nil : event
         }
     }
 
     /// Returns whether the press was used up by recording.
-    private func recorded(isFlags: Bool, code: Int64, flags: UInt64) -> Bool {
-        if !isFlags && code == 53 {
+    private func recorded(isFlags: Bool, code: Int64, flags: UInt64, label: String) -> Bool {
+        if isFlags {
+            // A modifier counts once it comes back up with nothing pressed in between: going down, it might
+            // be the start of a combination.
+            guard let single = NextSentenceHotkey(recorded: code), let mask = single.downMask else { return false }
+            if flags & mask != 0 {
+                pendingModifier = code
+            } else if pendingModifier == code {
+                choose(single)
+                stopRecording()
+            }
+            return false
+        }
+        pendingModifier = nil
+        if code == 53 && flags & NextSentenceHotkey.chordMask == 0 {
             stopRecording()
             return true
         }
-        guard let candidate = NextSentenceHotkey(recorded: code) else {
-            if !isFlags { rejected = true }
-            return !isFlags
+        if let combination = NextSentenceHotkey(recorded: code, modifiers: flags, label: label) {
+            choose(combination)
+        } else if let single = NextSentenceHotkey(recorded: code) {
+            choose(single)
+        } else {
+            rejected = true
+            return true
         }
-        if isFlags {
-            // A modifier counts when it goes down, not when it's let go.
-            guard let mask = candidate.downMask, flags & mask != 0 else { return false }
-        } else if candidate.isModifier {
-            return false
-        }
-        choose(candidate)
         stopRecording()
         return true
     }
@@ -175,6 +189,7 @@ private struct WriteForMeKeyRow: View {
     private func stopRecording() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+        pendingModifier = nil
         recording = false
     }
 }

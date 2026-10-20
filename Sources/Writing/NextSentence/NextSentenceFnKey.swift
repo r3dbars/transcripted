@@ -35,21 +35,28 @@ final class NextSentenceFnKey: @unchecked Sendable {
         guard tap == nil else { return true }
         let mask = CGEventMask(1 << CGEventType.flagsChanged.rawValue) | CGEventMask(1 << CGEventType.keyDown.rawValue)
             | CGEventMask(1 << CGEventType.keyUp.rawValue)
-        guard let tap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap, place: .headInsertEventTap, options: .defaultTap, eventsOfInterest: mask,
-            callback: { _, type, event, context in
-                guard let context else { return Unmanaged.passUnretained(event) }
-                let me = Unmanaged<NextSentenceFnKey>.fromOpaque(context).takeUnretainedValue()
-                return me.handle(type: type, event: event) ? nil : Unmanaged.passUnretained(event)
-            },
-            userInfo: Unmanaged.passUnretained(self).toOpaque()
-        ) else { return false }
+        // An active tap can keep a function key or combination from also doing its usual job. Without the
+        // permission for that, listen only: the key still opens the card.
+        guard let tap = Self.makeTap(options: .defaultTap, mask: mask, owner: self)
+                ?? Self.makeTap(options: .listenOnly, mask: mask, owner: self) else { return false }
         let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
         self.tap = tap
         self.source = source
         return true
+    }
+
+    private static func makeTap(options: CGEventTapOptions, mask: CGEventMask, owner: NextSentenceFnKey) -> CFMachPort? {
+        CGEvent.tapCreate(
+            tap: .cgSessionEventTap, place: .headInsertEventTap, options: options, eventsOfInterest: mask,
+            callback: { _, type, event, context in
+                guard let context else { return Unmanaged.passUnretained(event) }
+                let me = Unmanaged<NextSentenceFnKey>.fromOpaque(context).takeUnretainedValue()
+                return me.handle(type: type, event: event) ? nil : Unmanaged.passUnretained(event)
+            },
+            userInfo: Unmanaged.passUnretained(owner).toOpaque()
+        )
     }
 
     func stop() {
@@ -69,9 +76,10 @@ final class NextSentenceFnKey: @unchecked Sendable {
         let key = NextSentencePreferences.hotkey()
         let code = event.getIntegerValueField(.keyboardEventKeycode)
         if !key.isModifier, code == key.keyCode, type == .keyDown || type == .keyUp {
-            // With ⌘, ⌥, ⌃ or ⇧ held it's someone else's shortcut.
-            let chord: CGEventFlags = [.maskCommand, .maskAlternate, .maskControl, .maskShift]
-            guard downAt != nil || event.flags.intersection(chord).isEmpty else { return false }
+            // Its modifiers held exactly (none for a function key on its own); anything else is another shortcut.
+            // Letting go counts however the modifiers were released.
+            let held = event.flags.rawValue & NextSentenceHotkey.chordMask
+            guard downAt != nil || held == key.modifiers else { return false }
             if type == .keyUp {
                 released()
             } else if downAt == nil {
@@ -86,7 +94,7 @@ final class NextSentenceFnKey: @unchecked Sendable {
         guard type == .flagsChanged else { return false }
         if key.isModifier, code == key.keyCode, let mask = key.downMask {
             if event.flags.rawValue & mask != 0 { pressed() } else { released() }
-        } else if downAt != nil {
+        } else if downAt != nil && !key.isCombination {
             // Another modifier pressed while the key is down: that's a combination, not a tap.
             usedWithOtherKey = true
         }
