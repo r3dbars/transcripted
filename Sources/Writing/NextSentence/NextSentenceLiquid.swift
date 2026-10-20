@@ -102,12 +102,11 @@ enum NextSentenceLiquid {
     }
 
     /// A small bright pulse right where the caret is, before anything else moves.
-    static func flash(in root: NSView, at caret: CGPoint) {
+    static func flash(in root: NSView, at caret: CGPoint, color: NSColor = NextSentenceCardStyle.accent) {
         let size: CGFloat = 30
         let glow = CAGradientLayer()
         glow.type = .radial
-        glow.colors = [NSColor.white.cgColor, NextSentenceCardStyle.accent.withAlphaComponent(0.55).cgColor,
-                       NextSentenceCardStyle.accent.withAlphaComponent(0).cgColor]
+        glow.colors = [NSColor.white.cgColor, color.withAlphaComponent(0.55).cgColor, color.withAlphaComponent(0).cgColor]
         glow.locations = [0, 0.3, 1]
         glow.startPoint = CGPoint(x: 0.5, y: 0.5)
         glow.endPoint = CGPoint(x: 1, y: 1)

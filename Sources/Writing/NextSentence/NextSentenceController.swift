@@ -414,7 +414,7 @@ final class NextSentenceController {
         guard !text.isEmpty, !listening, let app = targetApp else { return }
         generation += 1 // ignore anything still on its way
         keyTap.stop()
-        NextSentenceSounds.shared.play(send ? .send : .insert)
+        if send { NextSentenceSynth.shared.sendRelease() } else { NextSentenceSounds.shared.play(.insert) }
         card.hide(exit: send ? .send : .insert)
         let target = DictationPasteTarget.capture(sourceApp: app)
         app.activate(options: [])

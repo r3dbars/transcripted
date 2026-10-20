@@ -62,10 +62,11 @@ final class NextSentenceVoiceGlow: NextSentenceFlippedView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     /// Blue, warm and mint around the rim, dimmer between them so the colors read as drifting lights.
+    /// The warm is held back and the gaps are neutral, so orange is one light among three, not the wash.
     private static var aurora: [CGColor] {
         let colors = NextSentenceCardStyle.toneColors
-        let blue = colors[0], warm = colors[2], mint = NextSentenceCardStyle.factColors[0]
-        let between = NSColor(srgbRed: 1, green: 0.62, blue: 0.4, alpha: 0.35)
+        let blue = colors[0], warm = colors[2].withAlphaComponent(0.6), mint = NextSentenceCardStyle.factColors[0]
+        let between = NSColor(white: 1, alpha: 0.16)
         return [blue, between, warm, between, mint, between, blue].map(\.cgColor)
     }
 

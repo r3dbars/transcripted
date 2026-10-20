@@ -83,7 +83,9 @@ final class NextSentenceCard: NSObject {
     let gripHint = NextSentenceCardStyle.label(.systemFont(ofSize: 10.5, weight: .semibold), NextSentenceCardStyle.title)
     let hintLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.hintFont, NextSentenceCardStyle.faint)
     let aurora = NextSentenceAurora(frame: .zero)
-    let warp = NextSentenceWarp(frame: .zero)
+    /// Hold-to-send's line of light around the edge.
+    let chargeRim = NextSentenceChargeRim(frame: .zero)
+    var charging = false
     let statusLine = NextSentenceStatusLine(frame: .zero)
     var ink = NextSentenceInk()
     var inkTimer: Timer?
@@ -152,8 +154,10 @@ final class NextSentenceCard: NSObject {
         ink.reset()
         update(content)
         panel.alphaValue = 1
+        panel.ignoresMouseEvents = false
         shownCount += 1
         front.layer?.removeAnimation(forKey: "leave")
+        front.layer?.removeAnimation(forKey: "squeeze")
         panel.orderFrontRegardless()
         animateIn()
         if !content.compact { NextSentenceSynth.shared.press() }
@@ -201,18 +205,31 @@ final class NextSentenceCard: NSObject {
         aurora.set(active: false)
         statusLine.set(running: false)
         NextSentenceSynth.shared.stopLoading(ready: false)
-        guard let exit, isVisible, let layer = front.layer else { warp.reset(); return panel.orderOut(nil) }
+        setCharge(0)
+        guard let exit, isVisible, let layer = front.layer else { return panel.orderOut(nil) }
         let shown = shownCount
         let caret = caretInRoot
-        if exit == .send { warp.jump() }
-        ring.set(charge: 0)
+        // Nothing under the card catches a click while it leaves and lands.
+        panel.ignoresMouseEvents = true
         let local = CGPoint(x: caret.x - front.frame.minX, y: caret.y - front.frame.minY)
         NextSentenceMotion.exit(exit, layer, caret: local) { [weak self] in
             guard let self, shown == self.shownCount else { return }
-            if exit == .insert { NextSentenceLiquid.flash(in: self.root, at: caret) }
-            self.panel.orderOut(nil)
-            self.front.layer?.removeAnimation(forKey: "leave")
-            self.warp.reset()
+            // It lands in the text box: a flash at the caret, and for a send, a green ripple.
+            var landing = 0.0
+            if exit == .insert {
+                NextSentenceLiquid.flash(in: self.root, at: caret)
+                landing = 0.42
+            } else if exit == .send {
+                NextSentenceLiquid.flash(in: self.root, at: caret, color: NextSentenceCardStyle.send)
+                NextSentenceMotion.sentRipple(in: self.root, at: caret)
+                landing = 0.62
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + landing) { [weak self] in
+                guard let self, shown == self.shownCount else { return }
+                self.panel.orderOut(nil)
+                self.front.layer?.removeAnimation(forKey: "leave")
+                self.front.layer?.removeAnimation(forKey: "squeeze")
+            }
         }
     }
 
@@ -310,10 +327,42 @@ final class NextSentenceCard: NSObject {
         return NSRange(location: range.location, length: (text as NSString).length)
     }
 
-    /// Hold-to-send's charge, 0...1: the spark ring around the edge and stars streaking in.
+    /// Hold-to-send's charge, 0...1: a line of light fills the edge, the riser climbs with it, and the
+    /// card gives a little like a key going down. 0 lets it all go.
     func setCharge(_ progress: Double) {
-        ring.set(charge: progress)
-        warp.set(charge: progress)
+        chargeRim.set(charge: progress)
+        if progress > 0 && !charging {
+            charging = true
+            NextSentenceSynth.shared.startCharge()
+        } else if progress <= 0 && charging {
+            charging = false
+            NextSentenceSynth.shared.stopCharge()
+        }
+        squeeze(progress)
+    }
+
+    private func squeeze(_ progress: Double) {
+        guard let layer = front.layer, !NextSentenceMotion.reduced else { return }
+        let center = CGPoint(x: layer.bounds.midX, y: layer.bounds.midY)
+        if progress > 0 {
+            let held = NSValue(caTransform3D: NextSentenceMotion.scale(1 - 0.018 * CGFloat(min(1, progress)), about: center))
+            let hold = CABasicAnimation(keyPath: "transform")
+            hold.fromValue = held
+            hold.toValue = held
+            hold.duration = 3_600
+            hold.fillMode = .forwards
+            hold.isRemovedOnCompletion = false
+            layer.add(hold, forKey: "squeeze")
+        } else if layer.animation(forKey: "squeeze") != nil {
+            // Let go early: it springs back to full size.
+            let back = CASpringAnimation(keyPath: "transform")
+            back.fromValue = NSValue(caTransform3D: layer.presentation()?.transform ?? CATransform3DIdentity)
+            back.toValue = NSValue(caTransform3D: CATransform3DIdentity)
+            back.stiffness = 380
+            back.damping = 18
+            back.duration = back.settlingDuration
+            layer.add(back, forKey: "squeeze")
+        }
     }
 
     /// Return or Insert held long enough to send.
@@ -322,8 +371,8 @@ final class NextSentenceCard: NSObject {
         insertHeldFull = armed
         if armed {
             NextSentenceCardStyle.tick()
-            NextSentenceSounds.shared.play(.armed)
-            ring.ignite()
+            NextSentenceSynth.shared.chargeLocked()
+            chargeRim.arm()
         }
         insertButton.set(title: armed ? "Release to send" : "Insert", icon: nil)
         layoutFoot()
@@ -478,6 +527,7 @@ final class NextSentenceCard: NSObject {
         root.addSubview(front)
         root.addSubview(ring)
         root.addSubview(voiceGlow)
+        root.addSubview(chargeRim)
 
         busyDot.wantsLayer = true
         busyDot.layer?.backgroundColor = NextSentenceCardStyle.accent.cgColor
@@ -563,7 +613,6 @@ final class NextSentenceCard: NSObject {
         insertButton.onHeld = { [weak self] in self?.onInsert?(true) }
 
         front.addSubview(aurora, positioned: .below, relativeTo: nil)
-        front.addSubview(warp, positioned: .above, relativeTo: aurora)
         for view in [busyDot, statusLabel, scroll, placeholder, pad, hintLabel, statusLine, waveform, micButton, remixButton, insertButton] as [NSView] {
             front.addSubview(view)
         }
@@ -605,6 +654,7 @@ final class NextSentenceCard: NSObject {
         front.layer?.shadowPath = CGPath(roundedRect: front.bounds, cornerWidth: 16, cornerHeight: 16, transform: nil)
         ring.frame = front.frame.insetBy(dx: -3, dy: -3)
         voiceGlow.frame = front.frame.insetBy(dx: -NextSentenceVoiceGlow.reach, dy: -NextSentenceVoiceGlow.reach)
+        chargeRim.frame = front.frame.insetBy(dx: -NextSentenceChargeRim.reach, dy: -NextSentenceChargeRim.reach)
         layoutFront()
     }
 
@@ -627,7 +677,6 @@ final class NextSentenceCard: NSObject {
         // The text box only shows a status when something went wrong; waiting shows the aurora instead.
         placeholder.isHidden = compact || !content.text.isEmpty || isEditing || content.busy
         aurora.frame = front.bounds
-        warp.frame = front.bounds
         aurora.textFrame = NSRect(x: inset, y: Self.textTop, width: pad.frame.minX - inset - 14, height: Self.textHeight)
         placeholder.frame = NSRect(x: inset, y: Self.textTop + 2, width: pad.frame.minX - inset - 12, height: Self.textHeight)
 

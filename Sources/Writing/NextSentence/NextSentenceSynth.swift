@@ -13,6 +13,9 @@ final class NextSentenceSynth {
     /// Mono voices meet here; it hands the reverb the stereo it needs.
     private let bus = AVAudioMixerNode()
     private let player = AVAudioPlayerNode()
+    /// Hold-to-send's riser plays here, so it can fade on its own when they let go early.
+    private let chargePlayer = AVAudioPlayerNode()
+    private var chargeFade = 0
     private var pad: AVAudioSourceNode?
     private let voice = NextSentencePadVoice()
     private var format: AVAudioFormat?
@@ -20,6 +23,9 @@ final class NextSentenceSynth {
     private var chirp: AVAudioPCMBuffer?
     private var chord: AVAudioPCMBuffer?
     private var heardChime: AVAudioPCMBuffer?
+    private var riser: AVAudioPCMBuffer?
+    private var lock: AVAudioPCMBuffer?
+    private var sent: AVAudioPCMBuffer?
 
     private init() {}
 
@@ -28,6 +34,38 @@ final class NextSentenceSynth {
 
     /// They let go of fn after saying what the message should say.
     func heard() { play { $0.heardChime } }
+
+    /// Return or Insert went down: a soft riser climbs an octave over exactly the hold.
+    func startCharge() {
+        guard NextSentencePreferences.soundsEnabled(), start(), let riser,
+              !engine.outputConnectionPoints(for: chargePlayer, outputBus: 0).isEmpty else { return }
+        chargeFade += 1
+        chargePlayer.stop()
+        chargePlayer.volume = 1
+        chargePlayer.scheduleBuffer(riser, at: nil, options: [])
+        chargePlayer.play()
+        scheduleIdleStop()
+    }
+
+    /// Let go: the riser fades out over 50ms instead of cutting off with a click.
+    func stopCharge() {
+        guard chargePlayer.isPlaying else { return }
+        chargeFade += 1
+        let fade = chargeFade
+        for step in 1...6 {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.008 * Double(step)) { [weak self] in
+                guard let self, fade == self.chargeFade else { return }
+                self.chargePlayer.volume = Float(6 - step) / 6
+                if step == 6 { self.chargePlayer.stop() }
+            }
+        }
+    }
+
+    /// Fully charged: the riser lands on a soft bell.
+    func chargeLocked() { play { $0.lock } }
+
+    /// Sent: a breath of air as the card pours into the text box, then two bells as it lands.
+    func sendRelease() { play { $0.sent } }
 
     /// The card is waiting for words: the pad swells in. Safe to call again while it plays.
     func startLoading() {
@@ -64,6 +102,7 @@ final class NextSentenceSynth {
             engine.attach(reverb)
             engine.attach(bus)
             engine.attach(player)
+            engine.attach(chargePlayer)
             let voice = voice
             voice.sampleRate = mono.sampleRate
             let pad = AVAudioSourceNode(format: mono) { _, _, frames, list in
@@ -76,11 +115,15 @@ final class NextSentenceSynth {
             guard let stereo = AVAudioFormat(standardFormatWithSampleRate: mono.sampleRate, channels: 2) else { return false }
             engine.connect(player, to: bus, fromBus: 0, toBus: 0, format: mono)
             engine.connect(pad, to: bus, fromBus: 0, toBus: 1, format: mono)
+            engine.connect(chargePlayer, to: bus, fromBus: 0, toBus: 2, format: mono)
             engine.connect(bus, to: reverb, format: stereo)
             engine.connect(reverb, to: engine.mainMixerNode, format: stereo)
             chirp = Self.render(Self.chirpNotes, format: mono)
             chord = Self.render(Self.chordNotes, format: mono)
             heardChime = Self.render(Self.heardNotes, format: mono)
+            riser = Self.render(Self.riserNotes, format: mono)
+            lock = Self.render(Self.lockNotes, format: mono)
+            sent = Self.render(Self.sentNotes, format: mono)
         }
         do { try engine.start() } catch { return false }
         return true
@@ -93,6 +136,7 @@ final class NextSentenceSynth {
             guard let self else { return }
             if self.voice.isPlaying { return self.scheduleIdleStop() }
             self.player.stop()
+            self.chargePlayer.stop()
             self.engine.stop()
         }
         idleStop = work
@@ -102,7 +146,7 @@ final class NextSentenceSynth {
     // MARK: The sounds
 
     struct Note {
-        enum Wave { case sine, triangle, square }
+        enum Wave { case sine, triangle, square, noise }
         var frequency: Double
         var at: Double = 0
         var duration: Double
@@ -113,6 +157,8 @@ final class NextSentenceSynth {
         var lowpass: Double?
         /// FM bell: modulator ratio and starting index.
         var bell: (ratio: Double, index: Double)?
+        /// Grows louder all the way to the end (a riser), instead of fading after the attack.
+        var swell = false
     }
 
     nonisolated static func midi(_ note: Double) -> Double { 440 * pow(2, (note - 69) / 12) }
@@ -125,6 +171,24 @@ final class NextSentenceSynth {
         Note(frequency: midi(79), duration: 0.9, gain: 0.035, attack: 0.004, bell: (3.5, 1.6)),
         Note(frequency: midi(86), at: 0.09, duration: 1.1, gain: 0.03, attack: 0.004, bell: (3.5, 1.8)),
     ]
+
+    /// Hold-to-send's charge: a soft fifth rising an octave over exactly the hold, swelling as it climbs,
+    /// with a faint high octave on top.
+    static var riserNotes: [Note] {
+        let hold = NextSentencePolicy.holdToSend
+        return [Note(frequency: midi(60), duration: hold, wave: .triangle, gain: 0.03, glideTo: midi(72), lowpass: 1_600, swell: true),
+                Note(frequency: midi(67), duration: hold, gain: 0.016, glideTo: midi(79), swell: true),
+                Note(frequency: midi(84), duration: hold, gain: 0.005, glideTo: midi(96), swell: true)]
+    }
+
+    /// Full charge: the riser resolves into a soft bell on its top note, with a fifth above.
+    static let lockNotes = [Note(frequency: midi(84), duration: 0.6, gain: 0.03, bell: (3.5, 1.4)),
+                            Note(frequency: midi(91), at: 0.05, duration: 0.7, gain: 0.018, bell: (3.5, 1.4))]
+
+    /// Sent: a soft breath of air while the card pours into the text box, then two bells as it lands.
+    static let sentNotes = [Note(frequency: 1, duration: 0.32, wave: .noise, gain: 0.022, attack: 0.1, lowpass: 2_200),
+                            Note(frequency: midi(84), at: 0.38, duration: 0.8, gain: 0.03, bell: (3.5, 1.8)),
+                            Note(frequency: midi(91), at: 0.46, duration: 1.0, gain: 0.025, bell: (3.5, 2))]
 
     /// A soft C major add-9 startup chord, low notes on triangle, with a bell on top.
     static var chordNotes: [Note] {
@@ -164,12 +228,15 @@ final class NextSentenceSynth {
                     case .sine: sample = sin(2 * .pi * phase)
                     case .triangle: sample = 2 * abs(2 * (phase - floor(phase + 0.5))) - 1
                     case .square: sample = phase.truncatingRemainder(dividingBy: 1) < 0.5 ? 1 : -1
+                    case .noise: sample = Double.random(in: -1...1)
                     }
                 }
                 phase += frequency / rate
                 low += alpha * (sample - low)
                 let rise = min(1, t / note.attack)
-                let fade = t < note.attack ? 1 : exp(-6.9 * (t - note.attack) / max(0.001, note.duration - note.attack))
+                let fade = note.swell
+                    ? pow(t / note.duration, 1.6) * min(1, (note.duration - t) / 0.015)
+                    : t < note.attack ? 1 : exp(-6.9 * (t - note.attack) / max(0.001, note.duration - note.attack))
                 out[start + offset] += Float(low * rise * fade * note.gain)
             }
         }
