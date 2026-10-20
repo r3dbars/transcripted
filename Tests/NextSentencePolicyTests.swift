@@ -137,7 +137,7 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         ]])
         assertEqual(swaps["pushed"], ["moved", "slid"], "keyed by the lowercased word, without the word itself")
         assertTrue(swaps["two words"] == nil && swaps["week"] == nil, "phrases and words with no options are dropped")
-        let request = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Sam", screenText: "launch date?", draft: "",
+        let request = NextSentencePrompt.Request(appName: "Messages", windowTitle: "Riley", screenText: "launch date?", draft: "",
                                                  hasScreenshot: false, sources: [], voiceExamples: [])
         let fresh = NextSentencePrompt.rewritePrompt(request, current: "Nov 3.", instruction: "")
         assertTrue(fresh.contains("fresh take") && fresh.contains("Nov 3."), "no instruction asks for a fresh take of the card's message")
