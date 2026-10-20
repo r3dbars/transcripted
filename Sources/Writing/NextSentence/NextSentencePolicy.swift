@@ -150,25 +150,56 @@ enum NextSentencePolicy {
     }
 
 
-    // MARK: Word morph
+    // MARK: Changing versions and length
 
-    /// The ranges in `new` of words that weren't in `old`. Pure, so tests pin it.
-    static func newWordRanges(from old: String, to new: String) -> [NSRange] {
-        var pool: [String: Int] = [:]
-        for word in old.lowercased().split(whereSeparator: \.isWhitespace) { pool[String(word), default: 0] += 1 }
+    /// The words of `text`, in order.
+    static func wordRanges(in text: String) -> [NSRange] {
+        let ns = text as NSString
         var ranges: [NSRange] = []
-        let ns = new as NSString
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { word, range, _, _ in
-            guard let word else { return }
-            let key = word.lowercased()
-            if let count = pool[key], count > 0 {
-                pool[key] = count - 1
-            } else if let alt = pool.keys.first(where: { $0.trimmingCharacters(in: .punctuationCharacters) == key }), let count = pool[alt], count > 0 {
-                pool[alt] = count - 1
-            } else {
-                ranges.append(range)
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { _, range, _, _ in ranges.append(range) }
+        return ranges
+    }
+
+    /// Words that are the same in both versions, in the same order (case aside): each pair's range in
+    /// `old` and in `new`. These glide to their new place; the rest of `new` is new. Pure, so tests pin it.
+    static func matchedWords(from old: String, to new: String) -> [(old: NSRange, new: NSRange)] {
+        let oldRanges = wordRanges(in: old), newRanges = wordRanges(in: new)
+        let a = oldRanges.map { (old as NSString).substring(with: $0).lowercased() }
+        let b = newRanges.map { (new as NSString).substring(with: $0).lowercased() }
+        guard !a.isEmpty, !b.isEmpty else { return [] }
+        // Longest common subsequence, filled from the end so the walk below reads front to back.
+        var table = [[Int]](repeating: [Int](repeating: 0, count: b.count + 1), count: a.count + 1)
+        for i in stride(from: a.count - 1, through: 0, by: -1) {
+            for j in stride(from: b.count - 1, through: 0, by: -1) {
+                table[i][j] = a[i] == b[j] ? table[i + 1][j + 1] + 1 : max(table[i + 1][j], table[i][j + 1])
             }
         }
-        return ranges
+        var pairs: [(old: NSRange, new: NSRange)] = []
+        var i = 0, j = 0
+        while i < a.count && j < b.count {
+            if a[i] == b[j] {
+                pairs.append((oldRanges[i], newRanges[j]))
+                i += 1
+                j += 1
+            } else if table[i + 1][j] >= table[i][j + 1] {
+                i += 1
+            } else {
+                j += 1
+            }
+        }
+        return pairs
+    }
+
+    /// Where each sentence of `text` ends (after its punctuation), in order. The last is the end of the text.
+    static func sentenceEnds(in text: String) -> [Int] {
+        let ns = text as NSString
+        var ends: [Int] = []
+        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: [.bySentences, .substringNotRequired]) { _, range, _, _ in
+            var end = NSMaxRange(range)
+            while end > range.location, let scalar = Unicode.Scalar(ns.character(at: end - 1)),
+                  CharacterSet.whitespacesAndNewlines.contains(scalar) { end -= 1 }
+            if end > range.location { ends.append(end) }
+        }
+        return ends
     }
 }

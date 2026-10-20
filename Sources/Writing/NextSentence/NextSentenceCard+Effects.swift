@@ -22,27 +22,104 @@ extension NextSentenceCard {
         voiceGlow.stop(flare: flare)
     }
 
-    // MARK: Tone change: words morph, and the new tone's glow washes around the edge
+    // MARK: A different version: shared words glide into place, new ones fade in marked
 
-    /// After a different version replaced the text: shared words stay, new ones bloom in.
-    func morph(from old: String) {
-        let old = old.replacingOccurrences(of: " ▍", with: "")
-        guard !old.isEmpty, !NextSentenceMotion.reduced else {
-            return NextSentenceMotion.textChanged(textView.layer, direction: 0)
+    typealias WordShot = (range: NSRange, rect: NSRect, image: NSImage)
+
+    /// Pictures of the words on the card and where each one sits, taken just before the text changes.
+    /// One picture of the text, cut up, so it costs the same however long the message is.
+    func captureWords() -> [WordShot] {
+        finishGlide()
+        let bounds = textView.bounds
+        guard !textView.string.isEmpty, bounds.width > 0, bounds.height > 0,
+              let rep = textView.bitmapImageRepForCachingDisplay(in: bounds) else { return [] }
+        textView.cacheDisplay(in: bounds, to: rep)
+        guard let picture = rep.cgImage else { return [] }
+        let scale = CGFloat(picture.width) / bounds.width
+        return NextSentencePolicy.wordRanges(in: textView.string).compactMap { range in
+            let rect = Self.shotRect(textView.rect(for: range)).intersection(bounds)
+            guard rect.width > 0, rect.height > 0,
+                  let piece = picture.cropping(to: CGRect(x: rect.minX * scale, y: rect.minY * scale,
+                                                          width: rect.width * scale, height: rect.height * scale)) else { return nil }
+            return (range, rect, NSImage(cgImage: piece, size: rect.size))
         }
-        bloom.start(from: old, to: textView.string)
-        applyBloom()
     }
 
-    func applyBloom() {
-        guard let storage = textView.textStorage, bloom.isActive else { bloomTimer?.invalidate(); bloomTimer = nil; return }
-        bloom.apply(to: storage) { [content] location in
+    /// A word's picture: its rect with a point to spare each side, on whole points.
+    private static func shotRect(_ word: NSRect) -> NSRect { word.insetBy(dx: -1, dy: 0).integral }
+
+    /// After a different version replaced `old`: words the two share glide from where they were to where
+    /// they are now, words it dropped fade where they were, and new words fade in warm, then cool.
+    func glide(from old: String, shots: [WordShot]) {
+        let new = textView.string
+        let pairs = NextSentencePolicy.matchedWords(from: old, to: new)
+        let shared = Set(pairs.map { $0.new.location })
+        mark.start(NextSentencePolicy.wordRanges(in: new).filter { !shared.contains($0.location) })
+        applyMark()
+        guard !shots.isEmpty, let layoutManager = textView.layoutManager else { return }
+        glideView.frame = textView.bounds
+        glideGeneration += 1
+        let generation = glideGeneration
+        let byLocation = Dictionary(shots.map { ($0.range.location, $0) }, uniquingKeysWith: { first, _ in first })
+        var moving: [(NSView, NSPoint)] = []
+        var kept = Set<Int>()
+        for pair in pairs {
+            guard let shot = byLocation[pair.old.location] else { continue }
+            let to = Self.shotRect(textView.rect(for: pair.new))
+            guard to.width > 0 else { continue }
+            kept.insert(pair.old.location)
+            // The real word hides until its picture lands on it.
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor.clear, forCharacterRange: pair.new)
+            glideHidden.append(pair.new)
+            moving.append((piece(shot), to.origin))
+        }
+        let leaving = shots.filter { !kept.contains($0.range.location) }.map(piece)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.26
+            context.timingFunction = CAMediaTimingFunction(controlPoints: 0.2, 0.8, 0.25, 1)
+            context.allowsImplicitAnimation = true
+            for (view, origin) in moving { view.animator().setFrameOrigin(origin) }
+        }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.16
+            for view in leaving { view.animator().alphaValue = 0 }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, generation == self.glideGeneration else { return }
+            self.finishGlide()
+        }
+    }
+
+    private func piece(_ shot: WordShot) -> NSView {
+        let view = NSImageView(frame: shot.rect)
+        view.image = shot.image
+        view.imageScaling = .scaleAxesIndependently
+        view.wantsLayer = true
+        glideView.addSubview(view)
+        return view
+    }
+
+    /// Ends a glide at once: the pictures go and the real words show where they belong.
+    func finishGlide() {
+        glideGeneration += 1
+        glideView.subviews.forEach { $0.removeFromSuperview() }
+        let length = (textView.string as NSString).length
+        for range in glideHidden where NSMaxRange(range) <= length {
+            textView.layoutManager?.removeTemporaryAttribute(.foregroundColor, forCharacterRange: range)
+        }
+        glideHidden.removeAll()
+    }
+
+    /// Recolors the new words every frame until they've settled.
+    func applyMark() {
+        guard let storage = textView.textStorage, mark.isActive else { markTimer?.invalidate(); markTimer = nil; return }
+        mark.apply(to: storage) { [content] location in
             content.marks.first { NSLocationInRange(location, $0.range) }?.color ?? NextSentenceCardStyle.body
         }
-        guard bloomTimer == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.applyBloom() } }
+        guard markTimer == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.applyMark() } }
         RunLoop.main.add(timer, forMode: .common)
-        bloomTimer = timer
+        markTimer = timer
     }
 
     func washTone(_ tone: Int) {

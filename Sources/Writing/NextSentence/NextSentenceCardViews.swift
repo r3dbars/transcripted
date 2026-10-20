@@ -267,25 +267,25 @@ final class NextSentenceMoodPad: NextSentenceFlippedView {
 
 // MARK: Length handle
 
-/// A small bar at the very end of the message. Drag it left to cut words one at a time, right to
-/// bring them back and then for a longer message. Shows a left-right cursor and its own tooltip.
-final class NextSentenceLengthGrip: NextSentenceFlippedView {
-    static let size = CGSize(width: 18, height: 22)
+/// The handle on the card's bottom edge: drag down for more of the message (past it, a longer one),
+/// up for less. A short pill on the edge with an up-down cursor and its own tooltip. It reports points
+/// on screen, because the card's window moves while it stretches.
+final class NextSentenceStretchBar: NextSentenceFlippedView {
+    static let size = CGSize(width: 64, height: 16)
     var onHover: ((Bool) -> Void)?
-    var onDragStart: (() -> Void)?
-    /// Where the pointer is, in window coordinates.
+    var onDragStart: ((NSPoint) -> Void)?
     var onDrag: ((NSPoint) -> Void)?
     var onDragEnd: (() -> Void)?
     private let bar = NSView()
-    private var startX: CGFloat?
+    private var dragging = false
     private var hovering = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: NSRect(origin: frameRect.origin, size: Self.size))
         wantsLayer = true
-        layer?.cornerRadius = 5
+        // Barely there, but solid enough that a click on it lands here, not in the app behind the card.
+        layer?.backgroundColor = NSColor(white: 1, alpha: 0.01).cgColor
         bar.wantsLayer = true
-        bar.layer?.cornerRadius = 1.5
         addSubview(bar)
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.activeAlways, .mouseEnteredAndExited, .mouseMoved, .cursorUpdate, .inVisibleRect],
                                        owner: self))
@@ -297,46 +297,50 @@ final class NextSentenceLengthGrip: NextSentenceFlippedView {
 
     override func mouseEntered(with event: NSEvent) {
         hovering = true
-        NSCursor.resizeLeftRight.set()
+        NSCursor.resizeUpDown.set()
         paint()
         onHover?(true)
     }
 
     override func mouseExited(with event: NSEvent) {
         hovering = false
-        if startX == nil { NSCursor.arrow.set() }
+        if !dragging { NSCursor.arrow.set() }
         paint()
         onHover?(false)
     }
 
-    override func mouseMoved(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
-    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeLeftRight.set() }
+    override func mouseMoved(with event: NSEvent) { NSCursor.resizeUpDown.set() }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.resizeUpDown.set() }
 
     override func mouseDown(with event: NSEvent) {
-        startX = event.locationInWindow.x
+        dragging = true
         paint()
-        onDragStart?()
+        onDragStart?(NSEvent.mouseLocation)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        NSCursor.resizeLeftRight.set()
-        guard startX != nil else { return }
-        onDrag?(event.locationInWindow)
+        NSCursor.resizeUpDown.set()
+        guard dragging else { return }
+        onDrag?(NSEvent.mouseLocation)
     }
 
     override func mouseUp(with event: NSEvent) {
-        startX = nil
+        dragging = false
         if !hovering { NSCursor.arrow.set() }
         paint()
         onDragEnd?()
     }
 
     private func paint() {
-        let active = hovering || startX != nil
-        let height: CGFloat = active ? 18 : 15
-        bar.frame = NSRect(x: (Self.size.width - 3) / 2, y: (Self.size.height - height) / 2, width: 3, height: height)
-        bar.layer?.backgroundColor = (active ? NextSentenceCardStyle.accent : NSColor(white: 1, alpha: 0.35)).cgColor
-        layer?.backgroundColor = (active ? NSColor(white: 1, alpha: 0.08) : .clear).cgColor
+        let active = hovering || dragging
+        let size = CGSize(width: active ? 46 : 36, height: active ? 5 : 4)
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.15
+            context.allowsImplicitAnimation = true
+            bar.frame = NSRect(x: (Self.size.width - size.width) / 2, y: (Self.size.height - size.height) / 2, width: size.width, height: size.height)
+            bar.layer?.cornerRadius = size.height / 2
+            bar.layer?.backgroundColor = (active ? NextSentenceCardStyle.accent : NSColor(white: 1, alpha: 0.32)).cgColor
+        }
     }
 }
 

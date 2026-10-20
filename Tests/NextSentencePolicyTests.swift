@@ -233,11 +233,26 @@ assertEqual(NextSentencePolicy.wordsKept(before: 10, in: "Yes, Nov 3 still on"),
         assertTrue(NextSentencePrompt.body(request, json: false).contains("PEOPLE IN THIS CONVERSATION: Riley"), "the writer is told who's involved")
     }
 
-    runSuite("A new version keeps the words it shares and only the new ones bloom") {
-        let ranges = NextSentencePolicy.newWordRanges(from: "Yes, still Nov 3.", to: "Yes! Still on for Nov 3.")
-        let words = ranges.map { ("Yes! Still on for Nov 3." as NSString).substring(with: $0) }
-        assertEqual(words, ["on", "for"], "shared words stay put, regardless of case or punctuation")
-        assertEqual(NextSentencePolicy.newWordRanges(from: "a a", to: "a a a").count, 1, "repeats are counted")
+    runSuite("A new version glides the words it shares, in order, and marks the rest as new") {
+        let new = "Yes! Still on for Nov 3."
+        let pairs = NextSentencePolicy.matchedWords(from: "Yes, still Nov 3.", to: new)
+        let shared = pairs.map { (new as NSString).substring(with: $0.new) }
+        assertEqual(shared, ["Yes", "Still", "Nov", "3"], "shared words match regardless of case or punctuation")
+        let fresh = NextSentencePolicy.wordRanges(in: new).filter { range in !pairs.contains { $0.new == range } }
+        assertEqual(fresh.map { (new as NSString).substring(with: $0) }, ["on", "for"], "only the new words are new")
+        assertEqual(NextSentencePolicy.matchedWords(from: "a b c", to: "c b a").count, 1, "words that swapped order don't all glide")
+        assertTrue(NextSentencePolicy.matchedWords(from: "", to: "Hello there").isEmpty, "nothing to glide from an empty card")
+    }
+
+    runSuite("Stretching the card keeps whole sentences") {
+        let text = "Thanks for the call. Can you send it by Thursday? That way we ship next week!  "
+        let ends = NextSentencePolicy.sentenceEnds(in: text)
+        assertEqual(ends.map { (text as NSString).substring(to: $0) },
+                    ["Thanks for the call.", "Thanks for the call. Can you send it by Thursday?",
+                     "Thanks for the call. Can you send it by Thursday? That way we ship next week!"],
+                    "each end is just after a sentence's punctuation, without trailing spaces")
+        assertEqual(NextSentencePolicy.sentenceEnds(in: "no punctuation here").count, 1, "an unpunctuated message is one sentence")
+        assertTrue(NextSentencePolicy.sentenceEnds(in: "").isEmpty, "an empty message has no sentences")
     }
 
     runSuite("Holding fn and speaking tells it what the message should say") {

@@ -342,6 +342,7 @@ final class NextSentenceController {
     }
 
     private func changedVersion() {
+        if card.isEditing { endEditing() }
         custom = nil
         trimSource = nil
         rewriteGeneration += 1

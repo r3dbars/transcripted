@@ -1,9 +1,10 @@
 import AppKit
 
 /// The Next Sentence card: one message, written for them. A mood pad in the corner sets tone and
-/// length; a handle at the end of the message stretches it.
+/// length; dragging the card's bottom edge stretches the message a sentence at a time.
 /// Hovering a word offers others (scroll to roll one in); words from their history are shaded and
-/// say where they came from. The card is one fixed size, so nothing jumps while they play with it.
+/// say where they came from. The card is as tall as its message, and the text is always editable:
+/// clicking in types, and every tool keeps working while they do.
 @MainActor
 final class NextSentenceCard: NSObject {
     struct Mark {
@@ -79,7 +80,7 @@ final class NextSentenceCard: NSObject {
     let pad = NextSentenceMoodPad(frame: .zero)
     let scroll = NSScrollView()
     let textView = NextSentenceTextView(width: NextSentenceCardStyle.width - 28)
-    let grip = NextSentenceLengthGrip(frame: .zero)
+    let stretchBar = NextSentenceStretchBar(frame: .zero)
     let gripHint = NextSentenceCardStyle.label(.systemFont(ofSize: 10.5, weight: .semibold), NextSentenceCardStyle.title)
     let hintLabel = NextSentenceCardStyle.label(NextSentenceCardStyle.hintFont, NextSentenceCardStyle.faint)
     let aurora = NextSentenceAurora(frame: .zero)
@@ -107,15 +108,22 @@ final class NextSentenceCard: NSObject {
     var padActive = false
     /// Bumped on every show, so a leave animation that finishes late can't hide the new card.
     var shownCount = 0
-    /// While the end handle is dragged: the whole message, how many words stay, and whether they've
-    /// pulled past the end for a longer version.
-    var gripDrag: (whole: String, kept: Int, longer: Bool)?
+    /// While the bottom edge is dragged (NextSentenceCard+Grip.swift), and the text box height it holds.
+    var stretchDrag: NextSentenceStretch?
+    var stretchHeight: CGFloat?
+    /// Set on each show, so the card picks above or below the caret once and keeps it while it's open.
+    var needsPlacement = true
+    var layoutGeneration = 0
     // Effects (NextSentenceCard+Effects.swift).
     /// While it listens, the card's edge glows with your voice.
     let voiceGlow = NextSentenceVoiceGlow(frame: .zero)
     let meltOverlay = NextSentenceCardStyle.label(NextSentenceCardStyle.bodyFont, NextSentenceCardStyle.body)
-    var bloom = NextSentenceBloom()
-    var bloomTimer: Timer?
+    var mark = NextSentenceMark()
+    var markTimer: Timer?
+    /// Pictures of words gliding to their new places when the version changes.
+    let glideView = NextSentenceFlippedView()
+    var glideHidden: [NSRange] = []
+    var glideGeneration = 0
     var hoveredMark: NSRange?
 
     override init() {
@@ -152,9 +160,10 @@ final class NextSentenceCard: NSObject {
         shownSignature = ""
         shownText = ""
         ink.reset()
+        needsPlacement = true
+        front.frame = .zero
         update(content)
         panel.alphaValue = 1
-        panel.ignoresMouseEvents = false
         shownCount += 1
         front.layer?.removeAnimation(forKey: "leave")
         front.layer?.removeAnimation(forKey: "squeeze")
@@ -209,8 +218,6 @@ final class NextSentenceCard: NSObject {
         guard let exit, isVisible, let layer = front.layer else { return panel.orderOut(nil) }
         let shown = shownCount
         let caret = caretInRoot
-        // Nothing under the card catches a click while it leaves and lands.
-        panel.ignoresMouseEvents = true
         let local = CGPoint(x: caret.x - front.frame.minX, y: caret.y - front.frame.minY)
         NextSentenceMotion.exit(exit, layer, caret: local) { [weak self] in
             guard let self, shown == self.shownCount else { return }
@@ -265,14 +272,20 @@ final class NextSentenceCard: NSObject {
             // Streamed words glow blue and cool; a different version replaces the text without it.
             let grew = new.text.hasPrefix(shownText) && (new.streaming || ink.isActive)
             if grew { ink.noteGrowth(from: (shownText as NSString).length, to: (new.text as NSString).length) } else { ink.reset() }
-            let previousText = shownText
+            // A different version: pictures of the words now, so the ones it keeps can glide.
+            let changing = new.fade && !new.streaming && !currentText.isEmpty
+            let previousText = currentText
+            let shots = changing && !NextSentenceMotion.reduced ? captureWords() : []
+            if !changing {
+                finishGlide()
+                mark.reset()
+            }
             shownText = new.text
             hoveredMark = nil
             textView.textStorage?.setAttributedString(attributed(new))
             shownSignature = signature
             applyInk()
-            // A different version: the words it shares stay, the new ones bloom in.
-            if new.fade && !new.streaming { morph(from: previousText) }
+            if changing { glide(from: previousText, shots: shots) }
             aurora.melt(lines: new.text.isEmpty ? 0 : Int(ceil(textView.neededHeight / NextSentenceCardStyle.lineHeight)))
             textView.scrollToBeginningOfDocument(nil)
             if optionsRange != nil { closeOptions() }
@@ -301,7 +314,6 @@ final class NextSentenceCard: NSObject {
         panel.makeFirstResponder(textView)
         textView.setSelectedRange(NSRange(location: (plain as NSString).length, length: 0))
         if let typing, !typing.isEmpty { textView.insertText(typing, replacementRange: textView.selectedRange()) }
-        grip.isHidden = true
     }
 
     func endEditing() {
@@ -323,7 +335,6 @@ final class NextSentenceCard: NSObject {
         let attributes = storage.attributes(at: range.location, effectiveRange: nil)
         storage.replaceCharacters(in: range, with: NSAttributedString(string: text, attributes: attributes))
         shownSignature = "edited"
-        placeGrip()
         return NSRange(location: range.location, length: (text as NSString).length)
     }
 
@@ -439,7 +450,7 @@ final class NextSentenceCard: NSObject {
 
     /// Hovering only explains: a tinted phrase says where it came from.
     private func hover(_ hit: (NSRange, NSRect)?) {
-        guard !isEditing, let (range, _) = hit,
+        guard let (range, _) = hit,
               let mark = content.marks.first(where: { NSIntersectionRange($0.range, range).length > 0 }) else {
             tip.isHidden = true
             settleSource()
@@ -564,7 +575,8 @@ final class NextSentenceCard: NSObject {
         textView.onBeginEditing = { [weak self] in self?.onBeginEditing?() }
         textView.onReturnDown = { [weak self] in self?.onReturnDown?() }
         textView.onReturnUp = { [weak self] in self?.onReturnUp?() }
-        textView.onEscape = { [weak self] in self?.onEndEditing?() }
+        // No editing mode to leave: Esc closes the card, as it does before they type.
+        textView.onEscape = { [weak self] in self?.onClose?() }
         textView.onTextChange = { [weak self] in self?.onTextEdited?() }
         textView.onPickSelection = { [weak self] range in self?.onPickSelection?(range) }
         textView.onHoverWord = { [weak self] hit in self?.hover(hit) }
@@ -579,14 +591,19 @@ final class NextSentenceCard: NSObject {
             self.onWordRoll?(range, step)
         }
         textView.onSelectionCleared = { [weak self] in self?.onSelectionCleared?() }
-        textView.addSubview(grip)
-        grip.onHover = { [weak self] inside in
+        glideView.wantsLayer = true
+        textView.addSubview(glideView)
+        stretchBar.onHover = { [weak self] inside in
             guard let self, self.gripHint.isHidden else { return }
-            self.showButtonTip(inside ? "Drag left to cut words. Drag right to make it longer." : nil, over: self.grip)
+            self.showButtonTip(inside ? "Drag up for less. Drag down for more." : nil, over: self.stretchBar)
         }
-        grip.onDragStart = { [weak self] in self?.gripBegan() }
-        grip.onDrag = { [weak self] point in self?.gripMoved(to: point) }
-        grip.onDragEnd = { [weak self] in self?.gripEnded() }
+        stretchBar.onDragStart = { [weak self] point in self?.stretchBegan(at: point) }
+        stretchBar.onDrag = { [weak self] point in self?.stretchMoved(to: point) }
+        stretchBar.onDragEnd = { [weak self] in self?.stretchEnded() }
+        // A click on the card outside the text hands the keyboard back to the arrow keys.
+        let click = NSClickGestureRecognizer(target: self, action: #selector(cardClicked(_:)))
+        click.delaysPrimaryMouseButtonEvents = false
+        front.addGestureRecognizer(click)
         gripHint.wantsLayer = true
         gripHint.drawsBackground = true
         gripHint.backgroundColor = NSColor(white: 0.11, alpha: 1)
@@ -622,6 +639,7 @@ final class NextSentenceCard: NSObject {
         textView.addSubview(meltOverlay)
         float.isHidden = true
         tip.isHidden = true
+        root.addSubview(stretchBar)
         root.addSubview(gripHint)
         root.addSubview(float)
         root.addSubview(tip)
@@ -636,91 +654,9 @@ final class NextSentenceCard: NSObject {
         buttonTip.isHidden = false
     }
 
-    // MARK: Layout
-
-    func layout() {
-        let cardHeight = content.compact ? Self.compactHeight : Self.fullHeight
-        let size = CGSize(width: width, height: cardHeight)
-        let screen = NSScreen.screens.first { $0.frame.intersects(anchor) } ?? NSScreen.main
-        let visible = screen?.visibleFrame ?? CGRect(x: 0, y: 0, width: 1_440, height: 900)
-        let placement = NextSentencePolicy.place(card: size, under: anchor, in: visible)
-        placedAbove = placement.above
-        let m = Self.margin
-        let frame = CGRect(x: placement.origin.x - m, y: placement.origin.y - m,
-                           width: width + 2 * m, height: Self.headroom + cardHeight + m)
-        if panel.frame != frame { panel.setFrame(frame, display: true) }
-        root.frame = CGRect(origin: .zero, size: frame.size)
-        front.frame = CGRect(x: m, y: Self.headroom, width: width, height: cardHeight)
-        front.layer?.shadowPath = CGPath(roundedRect: front.bounds, cornerWidth: 16, cornerHeight: 16, transform: nil)
-        ring.frame = front.frame.insetBy(dx: -3, dy: -3)
-        voiceGlow.frame = front.frame.insetBy(dx: -NextSentenceVoiceGlow.reach, dy: -NextSentenceVoiceGlow.reach)
-        chargeRim.frame = front.frame.insetBy(dx: -NextSentenceChargeRim.reach, dy: -NextSentenceChargeRim.reach)
-        layoutFront()
-    }
-
-    private func layoutFront() {
-        let compact = content.compact
-        for view in [pad, scroll, hintLabel, micButton, remixButton, insertButton] as [NSView] {
-            view.isHidden = compact
-        }
-        // While it listens the edge glows, so the mood pad steps aside to keep the corner quiet.
-        pad.isHidden = compact || content.listening
-        // The status line only exists for short notes; otherwise status shows faintly in the text box.
-        statusLabel.isHidden = !compact
-        busyDot.isHidden = !compact || !content.busy
-        let inset: CGFloat = 16
-        let x: CGFloat = content.busy ? inset + 12 : inset
-        busyDot.frame = NSRect(x: inset, y: 17, width: 6, height: 6)
-        statusLabel.frame = NSRect(x: x, y: 12, width: width - inset - x, height: 16)
-        pad.frame = NSRect(x: width - inset - NextSentenceMoodPad.size.width, y: 12, width: NextSentenceMoodPad.size.width,
-                           height: NextSentenceMoodPad.size.height)
-        // The text box only shows a status when something went wrong; waiting shows the aurora instead.
-        placeholder.isHidden = compact || !content.text.isEmpty || isEditing || content.busy
-        aurora.frame = front.bounds
-        aurora.textFrame = NSRect(x: inset, y: Self.textTop, width: pad.frame.minX - inset - 14, height: Self.textHeight)
-        placeholder.frame = NSRect(x: inset, y: Self.textTop + 2, width: pad.frame.minX - inset - 12, height: Self.textHeight)
-
-        scroll.frame = NSRect(x: inset, y: Self.textTop, width: width - 2 * inset, height: Self.textHeight)
-        textView.frame.size.width = width - 2 * inset
-        // The text wraps around the pad's lower edge.
-        let padOverlap = pad.frame.maxY - Self.textTop + 4
-        textView.textContainer?.exclusionPaths = padOverlap > 0
-            ? [NSBezierPath(rect: NSRect(x: pad.frame.minX - inset - 8, y: 0, width: 90, height: padOverlap))] : []
-        textView.isHidden = compact
-        placeGrip()
-        layoutFoot()
-    }
-
-    private func layoutFoot() {
-        let y = Self.textTop + Self.textHeight + 10
-        let listening = content.listening && !content.compact
-        let heard = content.heard != nil && !content.compact
-        micButton.isHidden = content.compact || listening || heard || !content.showsButtons
-        remixButton.isHidden = micButton.isHidden
-        insertButton.isHidden = micButton.isHidden
-        waveform.isHidden = true // the edge glow is the listening signal
-        let waiting = aurora.active && !content.compact
-        hintLabel.isHidden = content.compact || waiting
-        statusLine.isHidden = !waiting
-        statusLine.frame = NSRect(x: 16, y: y + 5, width: width - 32, height: 18)
-
-        var right = width - 16
-        for button in [insertButton, remixButton, micButton] where !button.isHidden {
-            let buttonWidth = button.fittingWidth
-            button.frame = NSRect(x: right - buttonWidth, y: y, width: buttonWidth, height: 28)
-            right -= buttonWidth + 8
-        }
-        let hintX: CGFloat
-        if listening {
-            hintX = 16
-            hintLabel.stringValue = content.hint.isEmpty ? "Listening. Tap fn again to finish." : content.hint
-        } else if let said = content.heard {
-            hintX = 16
-            hintLabel.stringValue = "“\(said)”"
-        } else {
-            hintX = 16
-        }
-        hintLabel.frame = NSRect(x: hintX, y: y + 7, width: max(0, right - hintX - 4), height: 15)
+    @objc private func cardClicked(_ recognizer: NSClickGestureRecognizer) {
+        guard isEditing, !scroll.frame.contains(recognizer.location(in: front)) else { return }
+        onEndEditing?()
     }
 
     private func rootMoved(_ point: NSPoint) {

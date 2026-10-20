@@ -1,97 +1,96 @@
 import AppKit
 
-/// The end handle: drag it to cut words off the end (they fade, and dissolve to dust as they go),
-/// drag back to bring them back, or past the end for a longer version.
+/// A drag on the card's bottom edge: the whole message, where each sentence ends, how tall the text box
+/// is for each number of sentences, and how far it's been pulled.
+struct NextSentenceStretch {
+    let whole: String
+    let ends: [Int]
+    let heights: [CGFloat]
+    let startY: CGFloat
+    let startBox: CGFloat
+    var kept: Int
+    var longer = false
+}
+
+/// Stretching the card: drag its bottom edge up and the message keeps fewer sentences (the card is
+/// only as tall as what's kept), down to bring them back, and past the whole message for a longer one.
 extension NextSentenceCard {
-    /// Shows the whole message, with the words currently cut faded, so dragging back can bring them back.
-    func gripBegan() {
+    func stretchBegan(at screenPoint: NSPoint) {
         buttonTip.isHidden = true
         closeOptions()
-        let current = currentText
-        let whole = onGripStart?() ?? current
-        let kept = NextSentencePolicy.wordCount(current)
-        textView.textStorage?.setAttributedString(NSAttributedString(string: whole, attributes: bodyAttributes))
-        shownSignature = "grip"
-        gripDrag = (whole, kept, false)
-        showCut()
+        if isEditing { onEndEditing?() }
+        let whole = (onGripStart?() ?? currentText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !whole.isEmpty, let storage = textView.textStorage else { return }
+        finishGlide()
+        mark.reset()
+        let ends = NextSentencePolicy.sentenceEnds(in: whole)
+        // How tall the text box is with each number of sentences kept.
+        let heights = ends.map { end -> CGFloat in
+            storage.setAttributedString(NSAttributedString(string: (whole as NSString).substring(to: end), attributes: bodyAttributes))
+            return boxHeight(fitting: textView.neededHeight)
+        }
+        storage.setAttributedString(NSAttributedString(string: whole, attributes: bodyAttributes))
+        shownSignature = "stretch"
+        let box = textBoxHeight
+        stretchDrag = NextSentenceStretch(whole: whole, ends: ends, heights: heights, startY: screenPoint.y, startBox: box,
+                                          kept: heights.lastIndex { $0 <= box + 0.5 }.map { $0 + 1 } ?? ends.count)
+        stretchHeight = box
+        showStretch()
     }
 
-    /// The end follows the pointer to the nearest word; past the end of the whole message means longer.
-    func gripMoved(to windowPoint: NSPoint) {
-        guard var drag = gripDrag, let layoutManager = textView.layoutManager, let container = textView.textContainer else { return }
-        let point = textView.convert(windowPoint, from: nil)
-        let inContainer = NSPoint(x: point.x - textView.textContainerOrigin.x, y: point.y - textView.textContainerOrigin.y)
-        let length = (drag.whole as NSString).length
-        let last = textView.rect(for: NSRange(location: max(0, length - 1), length: 1))
-        let pastEnd = (point.y > last.maxY + 4) || (point.y >= last.minY - 4 && point.x > last.maxX + 28)
-        let index = layoutManager.characterIndex(for: inContainer, in: container, fractionOfDistanceBetweenInsertionPoints: nil)
-        let kept = pastEnd ? NextSentencePolicy.wordCount(drag.whole) : NextSentencePolicy.wordsKept(before: index, in: drag.whole)
-        guard kept != drag.kept || pastEnd != drag.longer else { return }
-        let total = max(1, NextSentencePolicy.wordCount(drag.whole))
-        NextSentenceSounds.shared.play(pastEnd ? .armed : .trim(kept: Double(kept) / Double(total)))
-        if kept < drag.kept { dust(words: kept..<drag.kept, of: drag.whole) }
+    func stretchMoved(to screenPoint: NSPoint) {
+        guard var drag = stretchDrag, !drag.ends.isEmpty else { return }
+        let line = NextSentenceCardStyle.lineHeight
+        let full = drag.heights.last ?? drag.startBox
+        // Screen y grows upward, so pulling the edge down makes the card taller.
+        let box = min(max(drag.startBox + drag.startY - screenPoint.y, boxHeight(fitting: 0)), full + 3 * line, maxLines * line + 2)
+        let longer = box > full + 1.4 * line
+        let kept = drag.heights.lastIndex { $0 <= box + 0.5 }.map { $0 + 1 } ?? 1
+        if kept != drag.kept || longer != drag.longer {
+            NextSentenceSounds.shared.play(longer ? .armed : .trim(kept: Double(kept) / Double(drag.ends.count)))
+            NextSentenceCardStyle.tick()
+        }
         drag.kept = kept
-        drag.longer = pastEnd
-        gripDrag = drag
-        NextSentenceCardStyle.tick()
-        showCut()
+        drag.longer = longer
+        stretchDrag = drag
+        stretchHeight = box
+        showStretch()
+        layout(animated: false)
     }
 
-    func gripEnded() {
+    func stretchEnded() {
         gripHint.isHidden = true
-        guard let drag = gripDrag else { return }
-        gripDrag = nil
+        guard let drag = stretchDrag else { return }
+        stretchDrag = nil
+        stretchHeight = nil
+        textView.layoutManager?.removeTemporaryAttribute(.foregroundColor, forCharacterRange: NSRange(location: 0, length: (textView.string as NSString).length))
         shownSignature = ""
-        let total = NextSentencePolicy.wordCount(drag.whole)
-        onGripEnd?(drag.longer ? nil : NextSentencePolicy.trimWords(drag.whole, dropping: total - drag.kept), drag.whole)
+        let kept = drag.kept < drag.ends.count ? (drag.whole as NSString).substring(to: drag.ends[max(0, drag.kept - 1)]) : drag.whole
+        onGripEnd?(drag.longer ? nil : kept, drag.whole)
+        layout()
     }
 
-    func showCut() {
-        guard let drag = gripDrag, let layoutManager = textView.layoutManager else { return }
-        let ns = drag.whole as NSString
-        let total = NextSentencePolicy.wordCount(drag.whole)
-        let cutAt = (NextSentencePolicy.trimWords(drag.whole, dropping: total - drag.kept) as NSString).length
-        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: NSRange(location: 0, length: ns.length))
-        if cutAt < ns.length {
-            layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor(white: 1, alpha: 0.14),
-                                                forCharacterRange: NSRange(location: cutAt, length: ns.length - cutAt))
+    /// Sentences past the kept ones are hidden (not just dimmed), so the card reads as the shorter message.
+    private func showStretch() {
+        guard let drag = stretchDrag, let layoutManager = textView.layoutManager else { return }
+        let length = (drag.whole as NSString).length
+        layoutManager.removeTemporaryAttribute(.foregroundColor, forCharacterRange: NSRange(location: 0, length: length))
+        let cutAt = drag.longer || drag.kept >= drag.ends.count ? length : drag.ends[max(0, drag.kept - 1)]
+        if cutAt < length {
+            layoutManager.addTemporaryAttribute(.foregroundColor, value: NSColor.clear, forCharacterRange: NSRange(location: cutAt, length: length - cutAt))
         }
-        // The handle sits right after the last word kept.
-        let end = textView.rect(for: NSRange(location: max(0, cutAt - 1), length: 1))
-        let size = NextSentenceLengthGrip.size
-        grip.frame = NSRect(x: end.maxX + 3, y: end.minY + (NextSentenceCardStyle.lineHeight - size.height) / 2, width: size.width, height: size.height)
+        let count = drag.ends.count
         showGripHint(drag.longer ? "Let go for a longer version"
-                     : drag.kept == total ? "All \(total) words · drag left to cut" : "\(drag.kept) of \(total) words")
+                     : count == 1 ? "Pull down for a longer version"
+                     : "\(drag.kept) of \(count) sentences")
     }
 
-    /// Words just cut dissolve into dust (their faint ghosts stay, so dragging back restores them).
-    func dust(words: Range<Int>, of whole: String) {
-        let ns = whole as NSString
-        var ranges: [NSRange] = []
-        ns.enumerateSubstrings(in: NSRange(location: 0, length: ns.length), options: .byWords) { _, range, _, _ in ranges.append(range) }
-        let rects = words.filter { ranges.indices.contains($0) }.map { textView.convert(textView.rect(for: ranges[$0]), to: front) }
-        NextSentenceDust.burst(in: front, rects: rects, color: NextSentenceCardStyle.body)
-    }
-
-    func placeGrip() {
-        guard gripDrag == nil else { return }
-        let showGrip = !content.compact && !isEditing && !content.streaming && !content.text.isEmpty && !content.listening
-        grip.isHidden = !showGrip
-        guard showGrip else { return }
-        var end = textView.endPoint
-        let size = NextSentenceLengthGrip.size
-        if end.x + 3 + size.width > textView.bounds.width {
-            end = NSPoint(x: -3, y: end.y + NextSentenceCardStyle.lineHeight)
-        }
-        grip.frame = NSRect(x: end.x + 3, y: end.y + (NextSentenceCardStyle.lineHeight - size.height) / 2, width: size.width, height: size.height)
-    }
-
+    /// A small label just under the bottom edge's handle.
     func showGripHint(_ text: String) {
         gripHint.stringValue = text
         gripHint.isHidden = text.isEmpty
-        let gripInRoot = grip.convert(grip.bounds, to: root)
+        let bar = stretchBar.frame
         let hintWidth = ceil(gripHint.intrinsicContentSize.width) + 14
-        gripHint.frame = NSRect(x: gripInRoot.midX - hintWidth / 2, y: gripInRoot.minY - 22, width: hintWidth, height: 18)
+        gripHint.frame = NSRect(x: bar.midX - hintWidth / 2, y: bar.maxY + 1, width: hintWidth, height: 18)
     }
-
 }

@@ -48,35 +48,39 @@ enum NextSentenceDust {
     }()
 }
 
-/// Word morph: when a different version replaces the message, words it shares with the old one stay
-/// put and only the new words bloom in, one after another.
-struct NextSentenceBloom {
-    static let duration: TimeInterval = 0.34
-    private var arrivals: [(range: NSRange, at: Date)] = []
+/// Swap and mark: when a different version replaces the message, the words it didn't have fade in
+/// with a warm glow that cools to their settled color, so what changed is easy to see.
+struct NextSentenceMark {
+    static let duration: TimeInterval = 1.1
+    private var ranges: [NSRange] = []
+    private var started = Date.distantPast
 
-    var isActive: Bool { arrivals.contains { Date().timeIntervalSince($0.at) < Self.duration } }
+    var isActive: Bool { !ranges.isEmpty }
 
-    /// Starts a bloom for every word in `new` that `old` didn't have (counting repeats).
-    mutating func start(from old: String, to new: String) {
-        arrivals = NextSentencePolicy.newWordRanges(from: old, to: new).enumerated().map { index, range in
-            (range, Date().addingTimeInterval(Double(index) * 0.025))
-        }
+    mutating func start(_ ranges: [NSRange]) {
+        self.ranges = ranges
+        started = Date()
     }
 
-    mutating func reset() { arrivals.removeAll() }
+    mutating func reset() { ranges.removeAll() }
 
-    /// Fades each new word in from clear to its settled color.
+    /// Fades the new words in over a quarter second, warm, then cools them to their settled color.
     mutating func apply(to storage: NSTextStorage, settled: (Int) -> NSColor) {
-        let now = Date()
+        let t = Date().timeIntervalSince(started)
+        let appear = Self.ease(min(1, max(0, (t - 0.06) / 0.22)))
+        let cool = Self.ease(min(1, max(0, (t - 0.3) / 0.8)))
+        let warm = NSColor(srgbRed: 1, green: 0.82, blue: 0.61, alpha: 1)
         storage.beginEditing()
-        for arrival in arrivals where NSMaxRange(arrival.range) <= storage.length {
-            let raw = max(0, min(1, now.timeIntervalSince(arrival.at) / Self.duration))
-            let eased = 1 - pow(1 - raw, 3)
-            storage.addAttribute(.foregroundColor, value: settled(arrival.range.location).withAlphaComponent(CGFloat(eased)), range: arrival.range)
+        for range in ranges where NSMaxRange(range) <= storage.length {
+            let rest = settled(range.location)
+            let color = warm.blended(withFraction: CGFloat(cool), of: rest) ?? rest
+            storage.addAttribute(.foregroundColor, value: color.withAlphaComponent(CGFloat(appear) * rest.alphaComponent), range: range)
         }
         storage.endEditing()
-        arrivals.removeAll { now.timeIntervalSince($0.at) >= Self.duration + 0.05 }
+        if t >= Self.duration { ranges.removeAll() }
     }
+
+    private static func ease(_ x: Double) -> Double { 1 - pow(1 - x, 3) }
 }
 
 extension NextSentenceRing {

@@ -10,7 +10,8 @@ extension NextSentenceController {
         keyTap.stop() // the text view has the keyboard now
         card.beginEditing(typing: typing)
         custom = card.currentText
-        note = "Editing · Return inserts · Esc stops editing"
+        // No editing mode: nothing to announce or leave. The tools keep working, and using one ends the typing.
+        note = nil
         render()
     }
 
@@ -73,7 +74,7 @@ extension NextSentenceController {
     /// Asks once for the words in a settled message worth swapping, so picking one is instant.
     func fetchSwapsIfNeeded(for text: String) {
         swapWork?.cancel()
-        guard !text.isEmpty, !swapsRequested.contains(text), !rewriting, !card.isEditing else { return }
+        guard !text.isEmpty, !swapsRequested.contains(text), !rewriting else { return }
         let words = Set(text.lowercased().split { !($0.isLetter || $0 == "'" || $0 == "’") }.map(String.init))
         guard words.filter({ swaps[$0] != nil }).count < 2 else { return }
         let gen = generation
@@ -88,14 +89,16 @@ extension NextSentenceController {
             }
         }
         swapWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+        // While they type, wait for a real pause so each keystroke doesn't ask for new swaps.
+        DispatchQueue.main.asyncAfter(deadline: .now() + (card.isEditing ? 1.5 : 0.5), execute: work)
     }
 
-    // MARK: The end handle
+    // MARK: Stretching the card
 
-    /// The whole message the handle cuts from: the one before any words were cut.
+    /// The whole message the bottom edge cuts from: the one before any sentences were cut.
     func gripStarted() -> String {
-        trimSource ?? card.currentText.nextSentenceCollapsedWhitespace
+        if card.isEditing { endEditing() }
+        return trimSource ?? card.currentText.nextSentenceCollapsedWhitespace
     }
 
     /// Let go: keep the shorter message, or (pulled past the end) show the next longer version.
