@@ -92,8 +92,9 @@ unavailable recovery store refuses new closed-entry admission rather than droppi
 old entries. Save errors stay visible until every pending entry is resolved.
 Consent changes, scope narrowing, opt-out and Delete all discard pending writing
 intentionally. Raw open entries and scrubber context are never journaled; a
-crash/force quit can still lose unfinished writing. Graceful Quit refuses while
-the final open entry cannot be closed into durable ownership.
+crash/force quit can still lose unfinished writing. When the final open entry
+can't be closed into durable ownership, graceful Quit asks first (Keep Open /
+Quit Anyway); logout, restart and shutdown go ahead and lose that entry.
 
 ## Meetings
 

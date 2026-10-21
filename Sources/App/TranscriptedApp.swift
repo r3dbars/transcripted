@@ -612,6 +612,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             await AppTerminationSequence.run(AppTerminationSequence.Steps(
                 finishDictationForTermination: { await self.sessionController.finishDictationForTermination() },
                 finishWritingForTermination: { await self.appState.writingController.finishWritingForTermination() },
+                confirmQuitWithoutSavingWriting: {
+                    // Logout, restart and shutdown don't wait on a library
+                    // that may never come back.
+                    guard WritingController.terminationIsSystemInitiated
+                        || self.confirmQuitWithUnsavedWriting() else { return false }
+                    self.appState.writingController.abandonUnsavedWritingForTermination()
+                    return true
+                },
                 resetCleanupAdmission: {
                     self.terminationCleanupStarted = false
                     // A refused Quit lets dictation start again.
