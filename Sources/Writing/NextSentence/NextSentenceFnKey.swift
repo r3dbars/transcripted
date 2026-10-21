@@ -4,10 +4,12 @@ import Foundation
 /// Write for Me's key: fn (Globe) unless they pick another single key in Settings
 /// (`NextSentencePreferences.hotkey()`, read on every press so a change applies at once). A quick tap opens
 /// the card (or, with it open, starts and finishes listening). Holding it on its own is push-to-talk.
-/// It works whether or not the card is open, so this tap is on whenever Next Sentence is.
+/// It works whether or not the card is open, so this tap is on whenever Next Sentence is. What each
+/// press means is `NextSentenceKeyGesture`; this only feeds it events.
 ///
-/// The key used with another key (fn-arrows, ⌘-shortcuts) is left alone. A modifier key always passes
-/// through; a function key that's Write for Me's key is kept from doing its usual job. With fn, set
+/// The key used with another key (fn-arrows, ⌘-shortcuts) is left alone, and another key during a hold
+/// cancels it. A modifier key always passes through; a function key that's Write for Me's key is kept
+/// from doing its usual job. If dictation or meetings use the same key, it does nothing here. With fn, set
 /// "Press 🌐 key to" to "Do Nothing" in Keyboard settings if macOS also does something with it.
 final class NextSentenceFnKey: @unchecked Sendable {
     private var tap: CFMachPort?
@@ -15,17 +17,18 @@ final class NextSentenceFnKey: @unchecked Sendable {
     private let onTap: @MainActor @Sendable () -> Void
     private let onHoldStart: @MainActor @Sendable () -> Void
     private let onHoldEnd: @MainActor @Sendable () -> Void
-    private var downAt: Date?
-    private var usedWithOtherKey = false
-    private var holding = false
-    private var press = 0
+    private let onHoldCancel: @MainActor @Sendable () -> Void
+    /// Only touched on the main thread: the tap's run loop source and the hold timer both run there.
+    private var gesture = NextSentenceKeyGesture()
 
     init(onTap: @escaping @MainActor @Sendable () -> Void,
          onHoldStart: @escaping @MainActor @Sendable () -> Void,
-         onHoldEnd: @escaping @MainActor @Sendable () -> Void) {
+         onHoldEnd: @escaping @MainActor @Sendable () -> Void,
+         onHoldCancel: @escaping @MainActor @Sendable () -> Void) {
         self.onTap = onTap
         self.onHoldStart = onHoldStart
         self.onHoldEnd = onHoldEnd
+        self.onHoldCancel = onHoldCancel
     }
 
     var isActive: Bool { tap != nil }
@@ -73,59 +76,47 @@ final class NextSentenceFnKey: @unchecked Sendable {
             if let tap { CGEvent.tapEnable(tap: tap, enable: true) }
             return false
         }
-        let key = NextSentencePreferences.hotkey()
         let code = event.getIntegerValueField(.keyboardEventKeycode)
-        if !key.isModifier, code == key.keyCode, type == .keyDown || type == .keyUp {
-            // Its modifiers held exactly (none for a function key on its own); anything else is another shortcut.
-            // Letting go counts however the modifiers were released.
-            let held = event.flags.rawValue & NextSentenceHotkey.chordMask
-            guard downAt != nil || held == key.modifiers else { return false }
-            if type == .keyUp {
-                released()
-            } else if downAt == nil {
-                pressed()
+        let flags = event.flags.rawValue
+        let input: NextSentenceKeyGesture.Input
+        switch type {
+        case .keyDown: input = .keyDown(keyCode: code, flags: flags)
+        case .keyUp: input = .keyUp(keyCode: code, flags: flags)
+        case .flagsChanged: input = .flagsChanged(keyCode: code, flags: flags)
+        default: return false
+        }
+        let key = NextSentencePreferences.hotkey()
+        // Only a press of the key itself reads the dictation and meeting keys.
+        let blocked = gesture.downAt == nil && code == key.keyCode && NextSentencePreferences.hotkeyClash(key) != nil
+        let outcome = gesture.handle(input, key: key, blocked: blocked, now: Date())
+        if let token = outcome.holdCheck {
+            DispatchQueue.main.asyncAfter(deadline: .now() + NextSentencePolicy.fnTapLimit) { [self] in
+                deliver(gesture.holdTimerFired(token))
             }
-            return true
         }
-        if type == .keyDown {
-            if downAt != nil { usedWithOtherKey = true }
-            return false
-        }
-        guard type == .flagsChanged else { return false }
-        if key.isModifier, code == key.keyCode, let mask = key.downMask {
-            if event.flags.rawValue & mask != 0 { pressed() } else { released() }
-        } else if downAt != nil && !key.isCombination {
-            // Another modifier pressed while the key is down: that's a combination, not a tap.
-            usedWithOtherKey = true
-        }
-        return false
+        deliver(outcome.event)
+        return outcome.swallow
     }
 
-    private func pressed() {
-        downAt = Date()
-        usedWithOtherKey = false
-        // Still down, alone, past the tap limit: it's a hold.
-        press += 1
-        let this = press
-        DispatchQueue.main.asyncAfter(deadline: .now() + NextSentencePolicy.fnTapLimit) { [self] in
-            guard this == self.press, self.downAt != nil, !self.usedWithOtherKey else { return }
-            self.holding = true
-            MainActor.assumeIsolated { self.onHoldStart() }
-        }
+    /// The open card's key tap took a key, so this tap never saw it. True when it counts as a shortcut:
+    /// Write for Me's key was down and this is another key.
+    @discardableResult
+    func otherKeyWentDown(keyCode: Int64) -> Bool {
+        let key = NextSentencePreferences.hotkey()
+        guard gesture.downAt != nil, keyCode != key.keyCode else { return false }
+        deliver(gesture.otherKeyWentDown(keyCode: keyCode, key: key))
+        return true
     }
 
-    private func released() {
-        guard let down = downAt else { return }
-        downAt = nil
-        press += 1
-        if holding {
-            holding = false
-            let onHoldEnd = onHoldEnd
-            DispatchQueue.main.async { MainActor.assumeIsolated { onHoldEnd() } }
-            return
+    private func deliver(_ event: NextSentenceKeyGesture.Event?) {
+        guard let event else { return }
+        let callback: @MainActor @Sendable () -> Void
+        switch event {
+        case .tap: callback = onTap
+        case .holdStart: callback = onHoldStart
+        case .holdEnd: callback = onHoldEnd
+        case .holdCancel: callback = onHoldCancel
         }
-        guard NextSentencePolicy.isFnTap(heldFor: Date().timeIntervalSince(down), withOtherKey: usedWithOtherKey) else { return }
-        let onTap = onTap
-        DispatchQueue.main.async { MainActor.assumeIsolated { onTap() } }
+        DispatchQueue.main.async { MainActor.assumeIsolated { callback() } }
     }
 }

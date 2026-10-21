@@ -74,8 +74,8 @@ private struct DeveloperPreviewRow: View {
 }
 
 /// Which key opens Write for Me, shown once it's on: a few quick choices, or Record… to press any other
-/// modifier key (either side), a function key, or a combination like ⌥D. It says so when dictation or
-/// meetings already use the same key.
+/// modifier key (either side), a function key, or a combination like ⌥D. When dictation or meetings
+/// already use the same key, it says so, and the key keeps doing only that (`NextSentenceKeyGesture`).
 private struct WriteForMeKeyRow: View {
     let showsDivider: Bool
     @State private var key = NextSentencePreferences.hotkey()
@@ -120,7 +120,7 @@ private struct WriteForMeKeyRow: View {
                 }
             }
             if let other = NextSentencePreferences.hotkeyClash(key) {
-                Text("\(other) uses this key too. Pick another one here, or change the \(other.lowercased()) key above.")
+                Text("\(other) uses this key too, so it won't open Write for Me. Pick another one here, or change the \(other.lowercased()) key above.")
                     .font(.caption)
                     .foregroundStyle(Color.orange)
             }

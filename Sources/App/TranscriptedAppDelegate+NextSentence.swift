@@ -4,13 +4,12 @@ import Combine
 extension TranscriptedAppDelegate {
     /// Next Sentence's voice (holding fn, or saying a change) runs on Transcripted's own dictation.
     func wireNextSentenceVoice() {
-        // Next Sentence's voice changes: Transcripted's own dictation, stopped without pasting
-        // anywhere. The card takes what was said once it's transcribed.
-        // The card is the listening UI, so this dictation's notch stays hidden; it still saves to Dictations.
+        // Next Sentence's voice changes: a hand-off take on Transcripted's own dictation, which gives the
+        // words back instead of pasting them and finishes quietly. It never starts over or stops the
+        // person's own dictation. The card is the listening UI, so the notch stays hidden; the words
+        // still save to Dictations.
         appState.nextSentence.startDictation = { [weak self] in
-            guard let self else { return }
-            self.overlayController.quiet = true
-            self.sessionController.startDictation(sourceApp: NSWorkspace.shared.frontmostApplication, trigger: .menu)
+            self?.sessionController.startHandOffDictation(sourceApp: NSWorkspace.shared.frontmostApplication) ?? false
         }
         // The card's edge glow follows the microphone (RMS is small, so lift quiet speech into view).
         appState.sttRouter.audioLevels.readings
@@ -27,14 +26,30 @@ extension TranscriptedAppDelegate {
             .store(in: &statusItemSubscriptions)
         appState.nextSentence.finishDictation = { [weak self] deliver in
             guard let self else { return nil }
-            let watch = self.sessionController.$lastCompletedText
+            let session = self.sessionController
+            // Already over (the dictation key or the session cap stopped it): hand the words over now.
+            if let text = session.claimHandOffText() {
+                deliver(text)
+                return nil
+            }
+            let watch = session.$handOffText
                 .dropFirst()
                 .compactMap { $0 }
                 .first()
                 .receive(on: DispatchQueue.main)
-                .sink { text in MainActor.assumeIsolated { deliver(text) } }
-            self.sessionController.stopDictationAndPaste(trigger: .menu, autoPaste: false)
+                .sink { _ in MainActor.assumeIsolated { session.claimHandOffText().map(deliver) } }
+            session.stopHandOffDictation()
             return watch
         }
+        appState.nextSentence.cancelDictation = { [weak self] in
+            self?.sessionController.cancelHandOffDictation()
+        }
+        // A take that ended without the card asking: the card finishes listening as if they'd let go.
+        sessionController.$handOffText
+            .dropFirst()
+            .compactMap { $0 }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in MainActor.assumeIsolated { self?.appState.nextSentence.dictationEndedElsewhere() } }
+            .store(in: &statusItemSubscriptions)
     }
 }

@@ -1,8 +1,7 @@
 import AppKit
-import Carbon.HIToolbox
 import Combine
 
-/// Next Sentence: a tap of fn (or ⌃⌥Space) writes the next thing you'd type, from what's on screen and
+/// Next Sentence: a tap of fn (or the key picked in Settings) writes the next thing you'd type, from what's on screen and
 /// your saved context. Tab moves between three different replies; ↑/↓ shorter and longer; ←/→ more
 /// direct and warmer (the mood pad does both). Highlight a word or a few for other ways to say
 /// it (scroll to roll through them), drag the end handle to cut words, type to edit. fn again listens for a spoken change. Return inserts; hold it to send.
@@ -10,9 +9,12 @@ import Combine
 @MainActor
 final class NextSentenceController {
     /// Starts Transcripted's own dictation (injected by the app; this module can't name Dictation).
-    var startDictation: (() -> Void)?
+    /// False when it couldn't, like when the person is already dictating: that take is left alone.
+    var startDictation: (() -> Bool)?
     /// Stops it without pasting anywhere and hands back what was said, once it's transcribed.
     var finishDictation: ((@escaping @MainActor (String) -> Void) -> AnyCancellable?)?
+    /// Stops it and throws away what was said.
+    var cancelDictation: (() -> Void)?
 
     let card = NextSentenceCard()
     let history = NextSentenceHistory()
@@ -24,11 +26,12 @@ final class NextSentenceController {
     }
     lazy var fnKey = NextSentenceFnKey(onTap: { [weak self] in self?.fnTapped() },
                                        onHoldStart: { [weak self] in self?.fnHoldBegan() },
-                                       onHoldEnd: { [weak self] in self?.fnHoldEnded() })
-    private var hotKey: EventHotKeyRef?
+                                       onHoldEnd: { [weak self] in self?.fnHoldEnded() },
+                                       onHoldCancel: { [weak self] in self?.fnHoldCancelled() })
+    /// Turned on in Settings and started. Its key (fn unless they pick another) is the only way in.
+    private(set) var isRunning = false
     /// Keeps the meaning index current while it's on, so a capture saved a minute ago can be found.
     private var indexTimer: Timer?
-    private var handlerInstalled = false
 
     // What's on screen and what's been written for it.
     var targetApp: NSRunningApplication?
@@ -96,26 +99,23 @@ final class NextSentenceController {
     // MARK: Lifecycle
 
     func startIfEnabled() {
-        guard NextSentencePreferences.isEnabled(), hotKey == nil else { return }
-        installHotKeyHandler()
-        let id = EventHotKeyID(signature: OSType(0x4E58_5354), id: 1) // "NXST"
-        RegisterEventHotKey(UInt32(kVK_Space), UInt32(controlKey | optionKey), id, GetApplicationEventTarget(), 0, &hotKey)
+        guard NextSentencePreferences.isEnabled(), !isRunning else { return }
+        isRunning = true
         fnKey.start()
         wireCard()
         history.prewarm()
-        semantic.refresh()
+        semantic.start()
         let timer = Timer(timeInterval: NextSentencePolicy.indexRefreshInterval, repeats: true) { [weak self] _ in
             MainActor.assumeIsolated { self?.semantic.refresh() }
         }
         RunLoop.main.add(timer, forMode: .common)
         indexTimer = timer
         NextSentenceSounds.shared.preload()
-        DispatchQueue.global(qos: .utility).async { [claude] in claude.prewarm() }
+        // No `claude` process starts until the key is pressed: the first press warms them (see `open`).
     }
 
     func stop() {
-        if let hotKey { UnregisterEventHotKey(hotKey) }
-        hotKey = nil
+        isRunning = false
         indexTimer?.invalidate()
         indexTimer = nil
         fnKey.stop()
@@ -123,22 +123,6 @@ final class NextSentenceController {
         history.stop()
         semantic.stop()
         claude.stop()
-    }
-
-    private func installHotKeyHandler() {
-        guard !handlerInstalled else { return }
-        handlerInstalled = true
-        var spec = EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed))
-        InstallEventHandler(GetApplicationEventTarget(), { _, event, context in
-            guard let event, let context else { return OSStatus(eventNotHandledErr) }
-            var id = EventHotKeyID()
-            GetEventParameter(event, EventParamName(kEventParamDirectObject), EventParamType(typeEventHotKeyID),
-                              nil, MemoryLayout<EventHotKeyID>.size, nil, &id)
-            guard id.signature == OSType(0x4E58_5354) else { return OSStatus(eventNotHandledErr) }
-            let controller = Unmanaged<NextSentenceController>.fromOpaque(context).takeUnretainedValue()
-            DispatchQueue.main.async { MainActor.assumeIsolated { controller.toggle() } }
-            return noErr
-        }, 1, &spec, Unmanaged.passUnretained(self).toOpaque(), nil)
     }
 
     private func wireCard() {
@@ -163,10 +147,6 @@ final class NextSentenceController {
 
     // MARK: Open and write
 
-    func toggle() {
-        card.isVisible && !card.content.compact ? close() : open()
-    }
-
     /// fn: closed, it opens the card; open, it starts listening; listening, it finishes.
     func fnTapped() {
         guard card.isVisible, !card.content.compact else { return open() }
@@ -188,6 +168,14 @@ final class NextSentenceController {
         finishListening()
     }
 
+    /// Another key went down while the key was held: it was a shortcut (fn-arrow, fn-Delete), not a
+    /// request. A card the hold opened closes before anything is sent; a spoken change is dropped.
+    func fnHoldCancelled() {
+        guard heldListening else { return }
+        heldListening = false
+        if awaitingIntent { close() } else { cancelListening() }
+    }
+
     /// What they said they want the message to say: write it now, or as soon as the context is ready.
     func useIntent(_ said: String) {
         awaitingIntent = false
@@ -201,11 +189,13 @@ final class NextSentenceController {
     private func open(listenFirst: Bool = false) {
         let app = NSWorkspace.shared.frontmostApplication
         if let block = NextSentenceContext.blockReason(for: app) {
-            return flash(block == .excludedApp ? "Write for Me doesn't run in password managers." : "Click into a text box first.")
+            return flash(NextSentencePrivacy.message(for: block))
         }
-        guard let app else { return }
+        guard let app, isRunning else { return }
         generation += 1
         let gen = generation
+        // The key was pressed: start Claude now, while the window and context are read.
+        DispatchQueue.global(qos: .userInitiated).async { [claude] in claude.prewarm() }
         targetApp = app
         resetDraft()
         sources = []
@@ -369,6 +359,9 @@ final class NextSentenceController {
     // MARK: Keys
 
     private func handle(_ action: NextSentencePolicy.KeyAction, typed: String, keyCode: Int64) {
+        // This tap sees keys before the fn key's tap does. With that key down, another key makes it a
+        // shortcut (fn-arrow), not a request: no tap, and a hold is cancelled.
+        if action != .returnUp, fnKey.otherKeyWentDown(keyCode: keyCode) { return }
         guard card.isVisible, !card.isEditing, !card.content.compact else { return }
         switch action {
         case .nextReply: pickReply(guessIndex + 1)
@@ -480,7 +473,7 @@ final class NextSentenceController {
 
     /// After the card goes away, catch up on captures saved meanwhile (only while it's turned on).
     private func refreshIndexIfOn() {
-        if hotKey != nil { semantic.refresh() }
+        if isRunning { semantic.refresh() }
     }
 
     /// A short note in the card's place, then gone.

@@ -3,8 +3,9 @@ import Foundation
 /// Writes with Claude through the `claude` CLI the user is signed into (their own subscription).
 /// Owner-only: this sends the prompt, the window screenshot and context snippets to Anthropic.
 ///
-/// The CLI takes ~5s to start, so one process per kind of request is started ahead of time and
-/// waits on stdin. Each answers one prompt (fresh context every time), then a new one starts.
+/// The CLI takes ~5s to start, so after the first press one process per kind of request is kept
+/// ready, waiting on stdin (`NextSentenceWarmPool`). None start before the key is pressed. Each
+/// answers one prompt (fresh context every time), then a new one starts. `stop()` ends them all.
 final class NextSentenceClaude: @unchecked Sendable {
     enum Failure: LocalizedError {
         case noCLI
@@ -40,9 +41,7 @@ final class NextSentenceClaude: @unchecked Sendable {
         kind == .stream ? NextSentencePreferences.replyModel() : NextSentencePreferences.backgroundModel()
     }
 
-    private let lock = NSLock()
-    private var warm: [Kind: NextSentenceLineProcess] = [:]
-    private let schemaJSON: [Kind: String]
+    private let pool: NextSentenceWarmPool<Kind, NextSentenceLineProcess>
 
     init() {
         var json: [Kind: String] = [:]
@@ -51,7 +50,8 @@ final class NextSentenceClaude: @unchecked Sendable {
                   let data = try? JSONSerialization.data(withJSONObject: schema, options: [.sortedKeys]) else { continue }
             json[kind] = String(decoding: data, as: UTF8.self)
         }
-        schemaJSON = json
+        let schemas = json
+        pool = NextSentenceWarmPool(spawn: { Self.spawn($0, schema: schemas[$0]) })
     }
 
     static func binary(userDefaults: UserDefaults = .standard) -> URL? {
@@ -63,33 +63,23 @@ final class NextSentenceClaude: @unchecked Sendable {
     }
 
     func prewarm() {
-        for kind in Kind.allCases {
-            lock.lock()
-            let missing = warm[kind] == nil
-            lock.unlock()
-            guard missing, let process = spawn(kind) else { continue }
-            lock.lock()
-            if warm[kind] == nil { warm[kind] = process } else { process.terminate() }
-            lock.unlock()
-        }
+        pool.prewarm(Kind.allCases)
     }
 
     func stop() {
-        lock.lock(); defer { lock.unlock() }
-        warm.values.forEach { $0.terminate() }
-        warm.removeAll()
+        pool.stop()
     }
 
     /// One reply, word by word. `onText` and `completion` run on a background queue.
     func stream(prompt: String, image: Data?, onText: @escaping (String) -> Void,
                 completion: @escaping (Result<String, Error>) -> Void) {
-        guard let process = take(.stream) else { return completion(.failure(Failure.noCLI)) }
+        guard let process = pool.take(.stream) else { return completion(.failure(Failure.noCLI)) }
         var text = ""
         let once = NextSentenceOnce()
         let finish: (Result<String, Error>) -> Void = { result in
             guard once.claim() else { return }
             process.onLine(nil)
-            process.terminate()
+            self.pool.finished(process)
             completion(result)
         }
         process.onLine { line in
@@ -115,12 +105,12 @@ final class NextSentenceClaude: @unchecked Sendable {
     /// A JSON answer matching `kind`'s schema. `completion` runs on a background queue.
     func structured(_ kind: Kind, prompt: String, image: Data?, timeout: TimeInterval = 90,
                     completion: @escaping (Result<[String: Any], Error>) -> Void) {
-        guard kind != .stream, let process = take(kind) else { return completion(.failure(Failure.noCLI)) }
+        guard kind != .stream, let process = pool.take(kind) else { return completion(.failure(Failure.noCLI)) }
         let once = NextSentenceOnce()
         let finish: (Result<[String: Any], Error>) -> Void = { result in
             guard once.claim() else { return }
             process.onLine(nil)
-            process.terminate()
+            self.pool.finished(process)
             completion(result)
         }
         process.onLine { line in
@@ -142,28 +132,12 @@ final class NextSentenceClaude: @unchecked Sendable {
 
     // MARK: Processes
 
-    private func take(_ kind: Kind) -> NextSentenceLineProcess? {
-        lock.lock()
-        var process = warm.removeValue(forKey: kind)
-        lock.unlock()
-        if process == nil || process?.isRunning == false { process = spawn(kind) }
-        // Start the next one now, so it's ready by the next press.
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            guard let self, let next = self.spawn(kind) else { return }
-            self.lock.lock()
-            self.warm[kind]?.terminate()
-            self.warm[kind] = next
-            self.lock.unlock()
-        }
-        return process
-    }
-
-    private func spawn(_ kind: Kind) -> NextSentenceLineProcess? {
+    private static func spawn(_ kind: Kind, schema: String?) -> NextSentenceLineProcess? {
         guard let binary = Self.binary() else { return nil }
         var arguments = ["-p", "--model", Self.model(for: kind), "--effort", NextSentencePreferences.effort(),
                          "--no-session-persistence", "--tools", "", "--strict-mcp-config", "--setting-sources", "",
                          "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
-        if let schema = schemaJSON[kind] { arguments += ["--json-schema", schema] } else { arguments += ["--include-partial-messages"] }
+        if let schema { arguments += ["--json-schema", schema] } else { arguments += ["--include-partial-messages"] }
         let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("transcripted-next-sentence", isDirectory: true)
         try? FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let process = NextSentenceLineProcess(
@@ -199,6 +173,8 @@ final class NextSentenceClaude: @unchecked Sendable {
         return .failed(String(message.prefix(300)))
     }
 }
+
+extension NextSentenceLineProcess: NextSentenceWarmProcess {}
 
 /// Carries a callback across queues. Safe because every callback here is guarded by `NextSentenceOnce`.
 final class NextSentenceCallbackBox: @unchecked Sendable {

@@ -176,7 +176,8 @@ class FloatingOverlayController {
 
     // MARK: - State → Island Push
 
-    /// Next Sentence's card is the listening UI for its dictations, so the notch stays hidden. Cleared on hide.
+    /// Next Sentence's card is the listening UI for its dictations, so the notch stays hidden. Cleared on
+    /// hide, and set again by every dictation start (only a hand-off take keeps it).
     var quiet = false { didSet { pushStateToIsland() } }
 
     private func pushStateToIsland() {

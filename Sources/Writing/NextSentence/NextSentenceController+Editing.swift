@@ -180,7 +180,13 @@ extension NextSentenceController {
         }
         if card.isEditing { endEditing() }
         liveWords = ""
-        startDictation?()
+        guard startDictation?() == true else {
+            // Their own dictation is running (or couldn't start): leave it alone.
+            heldListening = false
+            note = "Dictation is busy. Try again in a moment."
+            if awaitingIntent { useIntent("") }
+            return render()
+        }
         listening = true
         heard = nil
         NextSentenceCardStyle.tick()
@@ -216,11 +222,18 @@ extension NextSentenceController {
         }
     }
 
-    /// Esc while listening: stop, and ignore what was said.
+    /// The take ended without the card asking (the dictation key or the session cap stopped it, or it
+    /// heard nothing): finish as if they'd let go, so the card doesn't sit listening.
+    func dictationEndedElsewhere() {
+        guard listening, dictationWatch == nil else { return }
+        finishListening()
+    }
+
+    /// Esc while listening: stop, and throw away what was said (it isn't saved).
     func cancelListening() {
         guard listening else { return }
         listening = false
-        dictationWatch = finishDictation? { _ in }
+        cancelDictation?()
         dictationWatch = nil
         heard = nil
         render()

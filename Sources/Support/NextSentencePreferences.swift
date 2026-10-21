@@ -20,15 +20,28 @@ enum NextSentencePreferences {
     static let embeddingModelKey = "NextSentenceEmbeddingModel"
     static let defaultEmbeddingURL = "http://127.0.0.1:8811"
 
+    /// The index sends it passages from every capture, with no key press, so only a server on this Mac
+    /// counts: a URL to any other host is ignored (nil), and nothing is embedded.
     static func embeddingURL(userDefaults: UserDefaults = .standard) -> URL? {
-        URL(string: userDefaults.string(forKey: embeddingURLKey).flatMap { $0.isEmpty ? nil : $0 } ?? defaultEmbeddingURL)
+        let raw = userDefaults.string(forKey: embeddingURLKey).flatMap { $0.isEmpty ? nil : $0 } ?? defaultEmbeddingURL
+        guard let url = URL(string: raw), isLoopback(url) else { return nil }
+        return url
     }
 
-    /// The server binary and model, when both are set.
+    /// Plain http(s) to 127.0.0.1, ::1 or localhost, with no user name or password in it.
+    static func isLoopback(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https",
+              url.user == nil, url.password == nil, let host = url.host?.lowercased() else { return false }
+        return ["127.0.0.1", "::1", "localhost"].contains(host)
+    }
+
+    /// The server binary and model, when both are set and the server is a `llama-server` this user
+    /// controls (`NextSentenceExecutable.trusted`): it runs with Transcripted's permissions.
     static func embeddingLaunch(userDefaults: UserDefaults = .standard) -> (server: String, model: String)? {
-        guard let server = userDefaults.string(forKey: embeddingServerKey), !server.isEmpty,
-              let model = userDefaults.string(forKey: embeddingModelKey), !model.isEmpty else { return nil }
-        return (server, model)
+        guard let server = userDefaults.string(forKey: embeddingServerKey),
+              let trusted = NextSentenceExecutable.trusted(server, named: "llama-server"),
+              let model = userDefaults.string(forKey: embeddingModelKey), model.hasPrefix("/") else { return nil }
+        return (trusted.path, model)
     }
 
     /// Which Claude model writes. The reply you read first uses `replyModelKey` (Opus by default);
@@ -63,9 +76,11 @@ enum NextSentencePreferences {
         userDefaults.bool(forKey: enabledKey)
     }
 
+    /// Only a `claude` this user controls (`NextSentenceExecutable.trusted`): it runs with Transcripted's
+    /// permissions. Anything else is ignored and the usual places are searched.
     static func claudePathOverride(userDefaults: UserDefaults = .standard) -> String? {
-        guard let path = userDefaults.string(forKey: claudePathKey), !path.isEmpty else { return nil }
-        return path
+        guard let path = userDefaults.string(forKey: claudePathKey) else { return nil }
+        return NextSentenceExecutable.trusted(path, named: "claude")?.path
     }
 }
 
@@ -165,6 +180,8 @@ extension NextSentencePreferences {
     }
 
     /// What else in Transcripted already uses this key ("Dictation", "Meetings"), or nil if nothing does.
+    /// While something does, the key opens only that, never Write for Me, so a press can't both start
+    /// dictation and end it unpasted.
     static func hotkeyClash(_ key: NextSentenceHotkey, userDefaults: UserDefaults = .standard) -> String? {
         let uses = [("Dictation", PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)),
                     ("Meetings", PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults))]

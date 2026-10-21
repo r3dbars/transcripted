@@ -312,6 +312,10 @@ extension DictationSessionController {
             }
             stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
+                // A hand-off take that heard nothing still answers its card, so the card doesn't wait.
+                if DictationHandOffPolicy.handsOff(sessionID: taskSessionID, handOffSessionID: self.handOffSessionID) {
+                    self.publishHandOff("", sessionID: taskSessionID)
+                }
                 let emptyReason = appState.sttRouter.lastEmptyTranscriptionReason ?? .noSpeech
                 // finishEmptyTake (DictationSessionPipeline.swift) runs
                 // DictationEmptyTranscriptPolicy and the matching message.
@@ -323,6 +327,8 @@ extension DictationSessionController {
                         sessionStartedAt: sessionStartTime,
                         heldBackText: { appState.sttRouter.heldBackDictationText },
                         report: { emptyDecision in
+                            // A hand-off take that heard nothing is reported nowhere (its card says so).
+                            guard self.sendsDictationAnalytics else { return }
                             appState.logger.log("DICTATION | no transcription (\(emptyReason.rawValue)), cancelling")
                             EventReporter.shared.capture(
                                 level: .warning,
@@ -390,6 +396,17 @@ extension DictationSessionController {
             guard !Task.isCancelled else { return }
             if (cleanupResult?.removedCount ?? 0) > 0 {
                 appState.logger.log("DICTATION | filler cleanup removed \(cleanupResult?.removedCount ?? 0) items")
+            }
+
+            if DictationHandOffPolicy.handsOff(sessionID: taskSessionID, handOffSessionID: self.handOffSessionID) {
+                // Write for Me's voice: the words go back to its card, quietly. Whatever stopped it.
+                await self.finalizeHandOff(
+                    text: text,
+                    appState: appState,
+                    overlayController: overlayController,
+                    sessionID: taskSessionID
+                )
+                return
             }
 
             if !autoPaste {

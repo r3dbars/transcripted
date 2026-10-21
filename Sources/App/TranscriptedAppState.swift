@@ -19,7 +19,7 @@ class TranscriptedAppState: ObservableObject {
     let runtimeDiagnostics = RuntimeDiagnostics()
     /// Writing's autocomplete runtime. Idle until `initialize()` starts it.
     let writingController = WritingController()
-    /// Owner-only lab: ⌃⌥Space writes your next sentence. Off unless NextSentenceEnabled is set.
+    /// Write for Me (Developer Preview): its key writes your next message. Off unless turned on in Settings.
     let nextSentence = NextSentenceController()
 
     /// Meeting-mode pipeline (Lane B). Lazily instantiated so unit tests that

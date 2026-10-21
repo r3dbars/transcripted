@@ -74,6 +74,13 @@ enum NextSentencePolicy {
         }
     }
 
+    /// The open card's key tap leaves Write for Me's own key alone when it's a function key, so its tap
+    /// still sees it: tapping it starts and finishes listening, and holding it auto-repeats. (A modifier
+    /// key never reaches the card's tap, and a combination like ⌥D already passes through for its ⌥.)
+    static func cardPassesThrough(keyCode: Int64, hotkey: NextSentenceHotkey) -> Bool {
+        !hotkey.isModifier && !hotkey.isCombination && keyCode == hotkey.keyCode
+    }
+
     /// Key-up only matters for Return, which decides between insert and send.
     static func releaseAction(keyCode: Int64) -> KeyAction {
         isReturn(keyCode) ? .returnUp : .passThrough
@@ -101,6 +108,13 @@ enum NextSentencePolicy {
     static let escapeConfirmWindow: TimeInterval = 1.5
     /// How often the meaning index looks for new captures while it's on (only new passages are embedded).
     static let indexRefreshInterval: TimeInterval = 120
+    /// After the embedding server fails to start, how long before it's tried again.
+    static let embeddingRetryInterval: TimeInterval = 600
+
+    static func mayLaunchEmbeddingServer(lastFailure: Date?, now: Date) -> Bool {
+        guard let lastFailure else { return true }
+        return now.timeIntervalSince(lastFailure) >= embeddingRetryInterval
+    }
     /// Hold the remix button this long for a fresh take.
     static let holdToRemix: TimeInterval = 0.65
 

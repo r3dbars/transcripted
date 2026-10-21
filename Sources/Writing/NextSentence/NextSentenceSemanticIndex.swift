@@ -4,7 +4,9 @@ import Foundation
 /// Finds passages from the user's meetings, dictations and writing by meaning, not just matching
 /// words, with EmbeddingGemma running locally (llama.cpp's server). The passages and their vectors
 /// stay on this Mac: the vectors are cached in Application Support, keyed by each passage's hash,
-/// so only new captures are embedded. Owner-only, with the rest of Next Sentence.
+/// so only new captures are embedded. The server must be on this Mac (`NextSentencePreferences.embeddingURL`
+/// refuses any other host), and one this index starts is tethered to the app, so it never outlives it.
+/// Part of Write for Me (Developer Preview), with the rest of Next Sentence.
 final class NextSentenceSemanticIndex: @unchecked Sendable {
     struct Hit: Sendable {
         let chunk: NextSentenceChunker.Chunk
@@ -22,15 +24,34 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     private var files: [String: (modified: Date, chunks: [NextSentenceChunker.Chunk])] = [:]
     private var cache: [String: [Float]] = [:]
     private var cacheLoaded = false
-    private var server: Process?
+    /// The server this index started, and whether it's on. Behind `serverLock`, not `queue`, so `stop()`
+    /// ends it at once even while the queue waits on the server.
+    private let serverLock = NSLock()
+    private var server: NextSentenceTetheredProcess?
+    private var active = false
+    /// When starting the server last failed. It isn't tried again for `NextSentencePolicy.embeddingRetryInterval`,
+    /// so a broken setup (a missing model, a taken port) never holds up a press. Only touched on `queue`.
+    private var lastLaunchFailure: Date?
 
-    /// Brings the index up to date in the background, so the first press is quick.
+    /// Turns the index on and brings it up to date in the background, so the first press is quick.
+    func start() {
+        serverLock.lock(); active = true; serverLock.unlock()
+        refresh()
+    }
+
+    /// Brings the index up to date in the background (only while it's on).
     func refresh() {
         queue.async { self.refreshNow() }
     }
 
+    /// Turns the index off and ends the server it started, right away.
     func stop() {
-        queue.async { self.server?.terminate(); self.server = nil }
+        serverLock.lock()
+        active = false
+        let running = server
+        server = nil
+        serverLock.unlock()
+        running?.stop()
     }
 
     /// The passages most related to `text`, best first, leaving out any that are just what's on screen.
@@ -99,7 +120,7 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     // MARK: Indexing
 
     private func refreshNow() {
-        guard ensureServer() else { return }
+        guard isActive, ensureServer() else { return }
         if !cacheLoaded { loadCache() }
         let manager = FileManager.default
         var current: [String: (modified: Date, chunks: [NextSentenceChunker.Chunk])] = [:]
@@ -133,18 +154,14 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
         SHA256.hash(data: Data((chunk.title + "\n" + chunk.text).utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Where Transcripted saves captures: from its MCP directories file, or the default library.
-    static func captureDirectories() -> [(kind: String, url: URL)] {
-        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Transcripted", isDirectory: true)
-        let configured = (try? Data(contentsOf: support.appendingPathComponent("mcp-directories.json")))
-            .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
-        let library = support.appendingPathComponent("captures", isDirectory: true)
-        return [("meeting", "meetingsDirectory", "meetings"), ("dictation", "dictationsDirectory", "dictations"),
-                ("writing", "writingDirectory", "writing")].map { kind, key, folder in
-            let path = configured[key] as? String
-            return (kind, path.map { URL(fileURLWithPath: $0, isDirectory: true) } ?? library.appendingPathComponent(folder, isDirectory: true))
-        }
+    /// Where Transcripted saves captures right now: the capture library they picked in Settings
+    /// (`transcriptSaveLocation`), or the default one.
+    static func captureDirectories(userDefaults: UserDefaults = .standard,
+                                   fileManager: FileManager = .default) -> [(kind: String, url: URL)] {
+        let library = TranscriptedStoragePreferences.captureLibraryURL(userDefaults: userDefaults, fileManager: fileManager)
+        return [("meeting", FileManager.meetingsDirectory(in: library)),
+                ("dictation", FileManager.dictationsDirectory(in: library)),
+                ("writing", FileManager.writingDirectory(in: library))]
     }
 
     // MARK: The embedding server
@@ -169,24 +186,50 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
         }
     }
 
+    private var isActive: Bool {
+        serverLock.lock(); defer { serverLock.unlock() }
+        return active
+    }
+
     private func ensureServer() -> Bool {
         guard let base = NextSentencePreferences.embeddingURL() else { return false }
         let health = URLRequest(url: base.appendingPathComponent("health"), timeoutInterval: 1.5)
         if Self.fetch(health) != nil { return true }
-        guard server?.isRunning != true, let launch = NextSentencePreferences.embeddingLaunch() else { return false }
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: launch.server)
-        process.arguments = ["-m", launch.model, "--embedding", "--host", "127.0.0.1", "--port", "\(base.port ?? 8811)",
-                             "-ngl", "0", "-c", "8192", "-b", "2048", "-ub", "2048", "-np", "4", "--no-webui"]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        do { try process.run() } catch { return false }
-        server = process
+        guard let launch = NextSentencePreferences.embeddingLaunch(),
+              NextSentencePolicy.mayLaunchEmbeddingServer(lastFailure: lastLaunchFailure, now: Date()) else { return false }
+        // Ours isn't answering (it exited, or never came up): end its watchdog before starting another.
+        serverLock.lock()
+        let stale = server
+        server = nil
+        serverLock.unlock()
+        stale?.stop()
+        let process = NextSentenceTetheredProcess(
+            executable: URL(fileURLWithPath: launch.server),
+            arguments: ["-m", launch.model, "--embedding", "--host", "127.0.0.1", "--port", "\(base.port ?? 8811)",
+                        "-ngl", "0", "-c", "8192", "-b", "2048", "-ub", "2048", "-np", "4", "--no-webui"]
+        )
+        do { try process.start() } catch {
+            lastLaunchFailure = Date()
+            return false
+        }
+        serverLock.lock()
+        let keep = active
+        if keep { server = process }
+        serverLock.unlock()
+        guard keep else {
+            process.stop()
+            return false
+        }
         for _ in 0..<120 {
             Thread.sleep(forTimeInterval: 0.5)
-            if Self.fetch(health) != nil { return true }
-            if !process.isRunning { return false }
+            guard isActive else { return false }
+            if Self.fetch(health) != nil {
+                lastLaunchFailure = nil
+                return true
+            }
+            if !process.isRunning { break }
         }
+        lastLaunchFailure = Date()
         return false
     }
 

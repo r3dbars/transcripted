@@ -52,6 +52,9 @@ final class NextSentenceKeyTap: @unchecked Sendable {
         guard type == .keyDown || type == .keyUp else { return Unmanaged.passUnretained(event) }
         let flags = event.flags
         let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+        if NextSentencePolicy.cardPassesThrough(keyCode: keyCode, hotkey: NextSentencePreferences.hotkey()) {
+            return Unmanaged.passUnretained(event)
+        }
         let action = type == .keyUp
             ? NextSentencePolicy.releaseAction(keyCode: keyCode)
             : NextSentencePolicy.action(

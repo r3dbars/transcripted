@@ -33,6 +33,12 @@ The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/Transcri
 - `WritingSetupPresentation.swift` — the tab's words and small rules from the approved design (`docs/writing-plan.md`). Foundation plus two WritingCore value types, so the fast tests compile it.
 - `WritingPausableIngest.swift` — wraps Personal History ingest so "Pause for 1 hour" drops typed text (acknowledged, never kept) as well as suggestions.
 - `WritingSidebarNewBadge.swift` — the defaults key the Writing tab sets when setup finishes, which drops the sidebar's "New" badge.
+- `NextSentence/` — Write for Me (Developer Preview, off by default; the one exception to "Writing never sends text"). `NextSentenceController` is owned by `TranscriptedAppState`. Its guards, each with a fast test in `Tests/NextSentenceGuardsTests.swift`:
+  - Only its own key opens it (`NextSentenceKeyGesture`; there's no second shortcut). Another key during a hold cancels the hold, and the key does nothing while dictation or meetings use it too.
+  - `NextSentencePrivacy` refuses secure input, password managers and the Screen Memory exclusion list, and scrubs the draft, window text and title with `WritingSecretScrubber` before anything is sent.
+  - No `claude` process starts before the first press; `NextSentenceWarmPool.stop()` ends every one, including a respawn still starting.
+  - The meaning index only talks to a loopback embedding server, reads the current capture library, and runs a `llama-server` it starts under `NextSentenceTetheredProcess`, so it can't outlive the app.
+  - Its voice is a hand-off take on dictation (`DictationHandOffPolicy`, `Tests/DictationHandOffTests.swift`): words go back to the card, never pasted, with no completion telemetry or notice, and it never starts over or stops the person's own dictation.
 
 ## Rules
 

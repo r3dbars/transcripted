@@ -2,7 +2,7 @@ import Foundation
 
 /// Searches the user's saved meetings, dictations and writing through the bundled
 /// `transcripted-mcp` helper (the app has no in-process index). Kept running between presses.
-/// Everything stays on this Mac; results are memory-only.
+/// Everything stays on this Mac; results are memory-only, and the helper sends no analytics for them.
 final class NextSentenceHistory: @unchecked Sendable {
     private let queue = DispatchQueue(label: "transcripted.next-sentence.history")
     private var helper: NextSentenceLineProcess?
@@ -51,7 +51,9 @@ final class NextSentenceHistory: @unchecked Sendable {
             throw CocoaError(.fileNoSuchFile)
         }
         let helper = NextSentenceLineProcess(executable: binary, arguments: [],
-                                             environment: ["TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"], label: "mcp")
+                                             environment: ["TRANSCRIPTED_DISABLE_FILE_LOGGER": "1",
+                                                           // Write for Me's searches aren't an agent's queries: none reach analytics.
+                                                           "TRANSCRIPTED_MCP_DISABLE_ANALYTICS": "1"], label: "mcp")
         try helper.start()
         self.helper = helper
         _ = try call(helper, method: "initialize", params: [

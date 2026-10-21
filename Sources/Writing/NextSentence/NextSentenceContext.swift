@@ -1,18 +1,19 @@
 import TranscriptedWritingCore
 
 import AppKit
+import Carbon.HIToolbox
 import ScreenCaptureKit
 
 /// What Next Sentence knows about the moment the hotkey was pressed. Memory-only: nothing here is
-/// written to disk or logged; the owner-only Claude mode sends it to Claude (see NextSentencePreferences).
+/// written to disk or logged; it's sent to Claude when the key is pressed (see NextSentencePreferences).
 struct NextSentenceSnapshot: Sendable {
     var appName: String
     var bundleIdentifier: String?
     var processIdentifier: pid_t
     var windowTitle: String
-    /// What's already typed in the focused field.
+    /// What's already typed in the focused field, scrubbed of secrets (`NextSentencePrivacy.scrub`).
     var draft: String
-    /// The focused window's text, read the way Screen Memory reads it.
+    /// The focused window's text, read the way Screen Memory reads it, scrubbed the same way.
     var screenText: String
     /// The focused window only, scaled down, JPEG.
     var screenshotJPEG: Data?
@@ -20,20 +21,16 @@ struct NextSentenceSnapshot: Sendable {
     var caret: CGRect?
 }
 
-enum NextSentenceCaptureBlock: Equatable {
-    case noFrontmostApp
-    case ownApp
-    case excludedApp
-}
-
 @MainActor
 enum NextSentenceContext {
-    /// Same refusals as Screen Memory: never Transcripted itself, never a password manager.
-    static func blockReason(for app: NSRunningApplication?) -> NextSentenceCaptureBlock? {
-        guard let app else { return .noFrontmostApp }
-        if app.processIdentifier == ProcessInfo.processInfo.processIdentifier { return .ownApp }
-        if let bundle = app.bundleIdentifier, DefaultExcludedApps.isAlwaysExcluded(bundle) { return .excludedApp }
-        return nil
+    /// Same refusals as Screen Memory (see `NextSentencePrivacy.blockReason`), with the live app, secure
+    /// input and their Screen Memory exclusion list.
+    static func blockReason(for app: NSRunningApplication?) -> NextSentencePrivacy.Block? {
+        NextSentencePrivacy.blockReason(
+            processIdentifier: app?.processIdentifier, bundleIdentifier: app?.bundleIdentifier,
+            ownProcessIdentifier: ProcessInfo.processInfo.processIdentifier,
+            secureInput: IsSecureEventInputEnabled(), excludedApps: TildeSettings().personalHistoryExcludedApps
+        )
     }
 
     /// The quick part, on the main actor: field text and cursor. Enough to place the card at once.
@@ -43,7 +40,8 @@ enum NextSentenceContext {
             bundleIdentifier: app.bundleIdentifier,
             processIdentifier: app.processIdentifier,
             windowTitle: "",
-            draft: String((AccessibilityBridge.focusedText(for: app) ?? "").suffix(4_000)),
+            draft: NextSentencePrivacy.scrub(String((AccessibilityBridge.focusedText(for: app) ?? "").suffix(4_000)),
+                                             appBundleIdentifier: app.bundleIdentifier),
             screenText: "",
             screenshotJPEG: nil,
             caret: AccessibilityBridge.focusedCaretRect(for: app)
@@ -55,8 +53,8 @@ enum NextSentenceContext {
         var snapshot = snapshot
         let window = await NextSentenceWindowCapture.capture(pid: snapshot.processIdentifier)
         snapshot.screenshotJPEG = window?.jpeg
-        snapshot.screenText = window?.text ?? ""
-        snapshot.windowTitle = window?.title ?? ""
+        snapshot.screenText = NextSentencePrivacy.scrub(window?.text ?? "", appBundleIdentifier: snapshot.bundleIdentifier)
+        snapshot.windowTitle = NextSentencePrivacy.scrub(window?.title ?? "", appBundleIdentifier: snapshot.bundleIdentifier)
         return snapshot
     }
 }
