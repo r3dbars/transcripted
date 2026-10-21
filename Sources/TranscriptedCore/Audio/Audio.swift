@@ -168,6 +168,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Lock-free mirror of `pinnedMicrophoneCapture != nil` for main-thread
     /// readers; the graph lock can be held across slow HAL calls.
     let pinnedMicrophoneRecording = Atomic<Bool>(false)
+    /// Off-by-default per-second mic statistics (`CaptureTelemetry.swift`).
+    let micCaptureTelemetry = LockedCaptureSignalTelemetry()
     /// Record the meeting mic through a Core Audio IOProc on the selected
     /// device instead of an `AVAudioEngine` input node, which opens the macOS
     /// default input (AirPods) first. Ignored when Apple voice processing is
