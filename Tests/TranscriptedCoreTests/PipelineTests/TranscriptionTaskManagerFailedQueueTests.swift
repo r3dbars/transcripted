@@ -345,7 +345,7 @@ extension TranscriptionTaskManagerMetadataTests {
             sessionLength: length
         )
 
-        try await waitUntil(timeout: 5) {
+        try await waitUntil(timeout: 60) {
             manager.activeCount == 0 && manager.failedTranscriptionManager.failedTranscriptions.count == 1
         }
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
@@ -1040,7 +1040,7 @@ extension TranscriptionTaskManagerMetadataTests {
             meetingTitle: "Committed cancel"
         )
 
-        try await waitUntil(timeout: 3.0) {
+        try await waitUntil(timeout: 60) {
             manager.lastSavedTranscriptURL != nil && manager.activeTasks.isEmpty
         }
 

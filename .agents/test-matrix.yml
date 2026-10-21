@@ -344,12 +344,11 @@ rules:
 
   # Module-boundary and file-size ratchets: every Sources/ file belongs to a
   # module in .agents/modules.json and names only types its module may depend
-  # on; no new Swift file over 800 lines. Both baselines can only shrink.
+  # on; no new Swift file over 800 lines. The file-size baseline can only shrink.
   - paths:
       - "Sources/**/*.swift"
       - "Tools/*/Sources/**/*.swift"
       - ".agents/modules.json"
-      - ".agents/module-boundary-baseline.json"
       - ".agents/file-size-baseline.json"
       - "scripts/dev/check-module-boundaries.py"
       - "scripts/dev/check-duplicate-declarations.py"

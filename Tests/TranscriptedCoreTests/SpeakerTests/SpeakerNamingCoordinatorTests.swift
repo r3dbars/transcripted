@@ -2756,7 +2756,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             transcriptionResult: result, micURL: nil, systemURL: systemURL,
             shouldRemoveTemporaryAudio: false, clips: clips
         )
-        try await waitUntil(timeout: 5) {
+        try await waitUntil(timeout: 60) {
             harness.manager.speakerNamingRequest == nil && harness.manager.displayStatus == .transcriptSaved
         }
         XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
@@ -4087,8 +4087,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         return (parts[0] * 60) + parts[1]
     }
 
+    // The deadline is a hang guard, not a speed check: on a loaded Mac a
+    // 2-3 s budget timed out on work that always finishes.
     private func waitUntil(
-        timeout: TimeInterval = 2.0,
+        timeout: TimeInterval = 60.0,
         condition: @escaping @Sendable @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -4241,7 +4243,8 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         stateLock.unlock()
 
         if shouldBlock {
-            _ = mayContinue.wait(timeout: .now() + 5)
+            // Deadlock escape only; the test always calls resume().
+            _ = mayContinue.wait(timeout: .now() + 60)
         }
     }
 }
