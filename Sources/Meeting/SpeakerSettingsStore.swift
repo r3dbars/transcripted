@@ -135,6 +135,9 @@ final class SpeakerSettingsStore: Sendable {
                 diarizerSpeakerId: $0.diarizerSpeakerId, channel: $0.channel)
         }
 
+        let transfer = transferClipOnMerge(from: sourceId, to: targetId)
+        guard transfer.succeeded else { return false }
+
         var didMerge = false
         do {
             let outcome = try SpeakerIdentityMutationService.apply(
@@ -147,13 +150,7 @@ final class SpeakerSettingsStore: Sendable {
                 speakerDB: speakerDatabase,
                 directory: transcriptDirectory,
                 clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, targetId in
-                        SpeakerClipLibrary.promoteClipIfNeeded(
-                            from: sourceId,
-                            to: targetId,
-                            preferredClipsDirectory: preferredClipsDirectory,
-                            legacyClipsDirectory: legacyClipsDirectory
-                        )
+                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, _ in
                         SpeakerClipLibrary.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
@@ -174,7 +171,11 @@ final class SpeakerSettingsStore: Sendable {
         } catch {
             Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
         }
-        return didMerge
+        return finishMerge(
+            targetId: targetId,
+            copiedWavSHA256: transfer.copiedWavSHA256,
+            didMerge: didMerge
+        )
     }
 
     func rename(profileId: UUID, trimmed: String) -> Bool {
@@ -207,9 +208,15 @@ final class SpeakerSettingsStore: Sendable {
         // rollback) plus a separate un-rolled-back TranscriptSaver.retroactivelyMergeSpeaker
         // scan. The service snapshots and rewrites transcripts first, commits the DB
         // merge inside a real transaction, rolls transcripts back if that transaction
-        // throws, and only then runs clip promotion/deletion. Same-id merges are
-        // rejected by the service itself now (MutationError.sameSourceAndTarget), so the
-        // `source.id != target.id` guard above is defense in depth, not the only guard.
+        // throws, and only then deletes the source clip. The clip copy runs first so a
+        // failed copy never orphans the source under a deleted profile. A
+        // failed people merge then deletes the copied target clip only if
+        // that wav still hashes to the bytes that were copied. Same-id merges
+        // are rejected by the service itself now (MutationError.sameSourceAndTarget), so
+        // the `source.id != target.id` guard above is defense in depth, not the only guard.
+        let transfer = transferClipOnMerge(from: sourceId, to: targetId)
+        guard transfer.succeeded else { return false }
+
         var didMerge = false
         do {
             let outcome = try SpeakerIdentityMutationService.apply(
@@ -217,13 +224,7 @@ final class SpeakerSettingsStore: Sendable {
                 speakerDB: speakerDatabase,
                 directory: transcriptDirectory,
                 clipSideEffects: SpeakerIdentityMutationService.ClipSideEffects(
-                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, targetId in
-                        SpeakerClipLibrary.promoteClipIfNeeded(
-                            from: sourceId,
-                            to: targetId,
-                            preferredClipsDirectory: preferredClipsDirectory,
-                            legacyClipsDirectory: legacyClipsDirectory
-                        )
+                    onMergeCommitted: { [preferredClipsDirectory, legacyClipsDirectory] sourceId, _ in
                         SpeakerClipLibrary.deleteClips(
                             for: sourceId,
                             preferredClipsDirectory: preferredClipsDirectory,
@@ -244,8 +245,49 @@ final class SpeakerSettingsStore: Sendable {
         } catch {
             Self.reportMutationFailure(error, engine: "speakers", profileId: sourceId)
         }
+        return finishMerge(
+            targetId: targetId,
+            copiedWavSHA256: transfer.copiedWavSHA256,
+            didMerge: didMerge
+        )
+    }
+
+    private func transferClipOnMerge(from sourceId: UUID, to targetId: UUID) -> SpeakerClipMergeTransfer {
+        let transfer = SpeakerClipLibrary.transferOnMerge(
+            from: sourceId,
+            to: targetId,
+            preferredClipsDirectory: preferredClipsDirectory,
+            legacyClipsDirectory: legacyClipsDirectory
+        )
+        if !transfer.succeeded {
+            AppLogger.speakers.error(
+                "Speaker merge left the source in place after a failed clip copy",
+                [
+                    "sourceId": sourceId.uuidString,
+                    "targetId": targetId.uuidString,
+                ]
+            )
+        }
+        return transfer
+    }
+
+    /// When the people merge fails after a copy, drop the kept person's
+    /// inherited clip only if it still is that exact copy.
+    private func finishMerge(
+        targetId: UUID,
+        copiedWavSHA256: String?,
+        didMerge: Bool
+    ) -> Bool {
+        if !didMerge, let copiedWavSHA256 {
+            SpeakerClipLibrary.rollbackCopiedClip(
+                for: targetId,
+                copiedWavSHA256: copiedWavSHA256,
+                preferredClipsDirectory: preferredClipsDirectory
+            )
+        }
         return didMerge
     }
+
     /// Surfaces a `SpeakerIdentityMutationService.MutationError` beyond the local log —
     /// specifically `.transcriptRestoreFailed`, where the DB and a saved transcript may now
     /// permanently disagree and a caller that only checked `outcome.succeeded` would never
