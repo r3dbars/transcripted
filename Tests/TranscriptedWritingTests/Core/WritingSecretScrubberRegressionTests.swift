@@ -329,4 +329,20 @@ struct WritingSecretScrubberRegressionTests {
         #expect(result.clean.hasSuffix("\ndocker"))
         #expect(result.kinds == [.password])
     }
+
+    @Test("A retyped command-word password after a sudo typo is redacted", arguments: [("pyhton", "python"), ("dockr", "docker")])
+    func retypedCommandWordPasswordIsRedacted(typo: String, password: String) {
+        let result = WritingSecretScrubber.scrub("sudo apt install foo\n\(typo)\n\(password)", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.contains(typo))
+        #expect(!result.clean.hasSuffix(password))
+        #expect(result.kinds == [.password, .password])
+    }
+
+    @Test("A shell keyword after a sudo line in an editor stays", arguments: ["else", "done", "then", "esac"])
+    func shellKeywordAfterSudoLineInEditorIsKept(keyword: String) {
+        let text = "  sudo apt-get install -y foo\n" + keyword
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.microsoft.VSCode")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
 }

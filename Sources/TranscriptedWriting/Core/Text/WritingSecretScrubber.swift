@@ -56,7 +56,7 @@ public enum WritingSecretScrubber {
 
     /// Bumped whenever the rules change in a way worth re-running over files
     /// already on disk.
-    public static let rulesVersion = 4
+    public static let rulesVersion = 5
 
     private static let tokenPattern = regex(#"\x{27E8}redacted:([a-z-]+)\x{27E9}"#)
     static let tokenOpen = "\u{27E8}redacted:"
@@ -385,6 +385,10 @@ public enum WritingSecretScrubber {
         guard !line.hasPrefix(tokenOpen) else { return false }
         // The same answer again: a new password or passphrase confirmed.
         if let first = state.firstAnswer, line == first { return true }
+        // A near miss of the first answer (`sunshien`, then `sunshine`) is
+        // the password typed again, even when it's a command word (`dockr`,
+        // then `docker`).
+        if let first = state.firstAnswer, isRetypeOf(first, line) { return true }
         let firstWord = line.split(whereSeparator: \.isWhitespace).first.map(String.init) ?? line
         if isNextCommand(line, firstWord: firstWord, answered: state.answered, looseAnswers: state.looseAnswers) { return false }
         if line.contains(where: \.isWhitespace) {
@@ -393,12 +397,9 @@ public enum WritingSecretScrubber {
         }
         if terminal == .editor, looksLikeCode(line) { return false }
         // Past the answers the prompt surely asks for (sudo's retry after a
-        // wrong password), the line has to look like a password by itself,
-        // or be a near miss of the first answer (`sunshien`, then
-        // `sunshine`): `pytest` or `lazygit` after sudo had cached
-        // credentials stays.
+        // wrong password), the line has to look like a password by itself:
+        // `pytest` or `lazygit` after sudo had cached credentials stays.
         if state.answered >= state.looseAnswers {
-            if let first = state.firstAnswer, isRetypeOf(first, line) { return true }
             return standalonePasswordKind(line, app: .terminal) != nil
         }
         return true
