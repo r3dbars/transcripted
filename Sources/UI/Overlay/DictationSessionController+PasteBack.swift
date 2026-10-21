@@ -51,6 +51,18 @@ extension DictationSessionController {
         }
     }
 
+    /// Electron apps hide their text fields from Accessibility until asked,
+    /// and Auto Enter needs a paste proven there. Asked at the start of the
+    /// take only, so the tree is built before paste-back reads the focus.
+    /// Once per process, and only for apps on the Auto Enter allow-list.
+    func primeAutoEnterTargetAccessibility() {
+        accessibilityPrimer.prime(
+            sessionPasteTarget,
+            autoEnterEnabled: DictationAutoSendPreferences.isEnabled(),
+            allowedBundleIDs: DictationAutoSendPreferences.allowedBundleIDs()
+        )
+    }
+
     func pasteWithClipboardRestore(
         _ text: String,
         followCurrentFocus: Bool = true

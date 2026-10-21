@@ -275,6 +275,19 @@ struct DictationAutoSendTelemetry: Equatable {
     }
 }
 
+extension DictationAutoSendTelemetry {
+    /// What the local delivery and stop logs record beside `delivery`, which
+    /// counts a likely paste as pasted. Without these a take Auto Enter held
+    /// back for an unproven paste read as `delivery: pasted, auto_send: disabled`.
+    func localDiagnosticContext(
+        targetConfirmationMode: DictationTargetConfirmationMode
+    ) -> [String: String] {
+        analyticsProperties.merging(
+            ["target_confirmation_mode": targetConfirmationMode.rawValue]
+        ) { _, new in new }
+    }
+}
+
 @MainActor
 final class DictationAutoSender {
     func send(_ key: DictationAutoSendKey, target: DictationPasteTarget? = nil) -> DictationAutoSendOutcome {

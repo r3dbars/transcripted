@@ -186,6 +186,18 @@ extension DictationSessionController {
         if let copyReason = pasteOutcome.copyReason?.diagnosticName {
             localContext["copy_reason"] = copyReason
         }
+        let autoSendTelemetry = DictationAutoSendTelemetry.snapshot(
+            request: autoSendRequestDecision,
+            pasteOutcome: pasteOutcome,
+            sendOutcome: autoSendOutcome
+        )
+        let targetConfirmationMode = DictationTargetConfirmationMode.resolve(
+            outcome: pasteOutcome,
+            diagnostic: textPaster.lastConfirmationDiagnostic
+        )
+        localContext.merge(
+            autoSendTelemetry.localDiagnosticContext(targetConfirmationMode: targetConfirmationMode)
+        ) { _, new in new }
         for (key, value) in measurements {
             localContext[key] = "\(value)"
         }
@@ -217,16 +229,8 @@ extension DictationSessionController {
         if let copyReason = pasteOutcome.copyReason?.diagnosticName {
             analyticsProperties["copy_reason"] = copyReason
         }
-        let autoSendTelemetry = DictationAutoSendTelemetry.snapshot(
-            request: autoSendRequestDecision,
-            pasteOutcome: pasteOutcome,
-            sendOutcome: autoSendOutcome
-        )
         analyticsProperties.merge(autoSendTelemetry.analyticsProperties) { _, new in new }
-        analyticsProperties["target_confirmation_mode"] = DictationTargetConfirmationMode.resolve(
-            outcome: pasteOutcome,
-            diagnostic: textPaster.lastConfirmationDiagnostic
-        ).rawValue
+        analyticsProperties["target_confirmation_mode"] = targetConfirmationMode.rawValue
         let timingBuckets: [(metric: String, bucket: String)] = [
             ("stop_to_mic_stop_ms", "mic_stop_bucket"),
             ("snapshot_resample_ms", "resample_bucket"),

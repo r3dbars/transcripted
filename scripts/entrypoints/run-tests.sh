@@ -427,6 +427,7 @@ APP_SOURCES=(
     "Sources/Support/SingleInstanceReopenPolicy.swift"
     "Sources/Support/AppLaunchSteps.swift"
     "Sources/Support/DictationAutoSendPreferences.swift"
+    "Sources/Support/DictationTargetAccessibilityPrimer.swift"
     "Sources/Support/DictationPersistentInputPreferences.swift"
     "Sources/Support/MicrophoneChoicePreferences.swift"
     "Sources/Support/DictationCleanupPreferences.swift"

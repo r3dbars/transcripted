@@ -36,6 +36,7 @@ class DictationSessionController: ObservableObject {
     private var muffleSubscription: AnyCancellable?
     let textPaster = ClipboardRestoringTextPaster()
     let autoSender = DictationAutoSender()
+    let accessibilityPrimer = DictationTargetAccessibilityPrimer()
     /// Owns the engine-facing half of a dictation session: the recovery
     /// wait-loop state machine and the other STTRouter control-flow
     /// decisions. See Sources/Speech/DictationSession.swift.
@@ -249,6 +250,7 @@ class DictationSessionController: ObservableObject {
         stoppedAudioCheckpointSignal = nil
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
+        primeAutoEnterTargetAccessibility()
         sessionAnchorRect = anchorRect
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger

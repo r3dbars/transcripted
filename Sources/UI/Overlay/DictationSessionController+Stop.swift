@@ -475,6 +475,20 @@ extension DictationSessionController {
                 "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))",
             ]
             deliveryContext.merge(pasteOutcome.deliveryProperties) { _, delivery in delivery }
+            // `delivery` counts a likely paste as pasted, so say why Auto
+            // Enter held back and how the paste was confirmed.
+            let autoSendTelemetry = DictationAutoSendTelemetry.snapshot(
+                request: self.autoSendRequestDecision,
+                pasteOutcome: pasteOutcome,
+                sendOutcome: autoSendOutcome
+            )
+            let targetConfirmationMode = DictationTargetConfirmationMode.resolve(
+                outcome: pasteOutcome,
+                diagnostic: self.textPaster.lastConfirmationDiagnostic
+            )
+            deliveryContext.merge(
+                autoSendTelemetry.localDiagnosticContext(targetConfirmationMode: targetConfirmationMode)
+            ) { _, new in new }
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: pasteOutcome.diagnosticLevel,
@@ -534,15 +548,6 @@ extension DictationSessionController {
             if case .failed(let failure) = autoSendOutcome {
                 appState.logger.log("DICTATION | auto enter failed: \(failure.message)")
             }
-            let autoSendTelemetry = DictationAutoSendTelemetry.snapshot(
-                request: self.autoSendRequestDecision,
-                pasteOutcome: pasteOutcome,
-                sendOutcome: autoSendOutcome
-            )
-            let targetConfirmationMode = DictationTargetConfirmationMode.resolve(
-                outcome: pasteOutcome,
-                diagnostic: self.textPaster.lastConfirmationDiagnostic
-            )
             var dictationCompletedExtra: [String: String] = [
                 "auto_send": autoSendOutcome.diagnosticName,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
