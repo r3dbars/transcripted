@@ -27,6 +27,7 @@ Module `Support` in `.agents/modules.json` (also `Sources/Accessibility/` and `S
 - **`CustomDictionaryPreferences` and `DictationAutoSendPreferences`** back the Settings General and Dictation pages. Change a parsing rule or threshold and update their tests. `CustomDictionaryTextProcessor.matcher(for:)` is also what `Sources/UI/Shared/DictionaryPastMeetingFix.swift` uses, so past and new fixes match the same way.
 
 - `DictationInputDeviceSelectionReason.swift` holds the shared raw-value reasons used by Speech and Observability; neither module owns this vocabulary.
+- `DeveloperPreview.swift` lists the Developer Preview features (today only Write for Me, which is Next Sentence in code): what each does and sends, its consent prompt, and its defaults key. Every one is off until turned on in Settings, and a change posts `DeveloperPreview.didChange` so the app applies it at once. A new feature that sends anything off the Mac must say so in its `details` and `consent`, and needs the exception in the root `AGENTS.md` updated.
 
 ## Paste-back details (`ClipboardRestoringTextPaster`)
 
