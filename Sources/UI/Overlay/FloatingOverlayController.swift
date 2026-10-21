@@ -158,7 +158,7 @@ class FloatingOverlayController {
         // no second hop, so the island never gets them in bunches.
         sttRouter.audioLevels.readings
             .sink { [weak self] reading in
-                guard let self, self.isIslandMode else { return }
+                guard let self, self.isIslandMode, !self.quiet else { return }
                 self.island?.updateDictationLevel(DictationMeterPolicy.presentation(
                     isListening: self.state == .listening, sttIsRecording: sttRouter.isRecording, reading: reading
                 ))
@@ -176,9 +176,12 @@ class FloatingOverlayController {
 
     // MARK: - State → Island Push
 
+    /// Next Sentence's card is the listening UI for its dictations, so the notch stays hidden. Cleared on hide.
+    var quiet = false { didSet { pushStateToIsland() } }
+
     private func pushStateToIsland() {
         guard let island else { return }
-        guard isIslandMode, isVisible else {
+        guard isIslandMode, isVisible, !quiet else {
             island.updateDictation(nil, targetApp: nil)
             return
         }
@@ -637,7 +640,7 @@ class FloatingOverlayController {
         messageTone = .error
         discardActionableMessageIfNeeded()
         successTitle = title
-        if isIslandMode {
+        if isIslandMode && !quiet {
             island?.noteDictationInserted(title: title)
         }
         state = .success
@@ -676,7 +679,7 @@ class FloatingOverlayController {
         listeningNotice = ""
         loadingPresentation = .initial
         islandSourceApp = nil
-        pushStateToIsland()
+        quiet = false
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh

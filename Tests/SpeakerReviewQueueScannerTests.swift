@@ -1,6 +1,268 @@
+import CryptoKit
 import Foundation
 
 func testSpeakerReviewQueueScanner() {
+    runSuite("SpeakerReviewSamplePolicy maps one transcript turn to both the quote and the play range") {
+        let speakerId = UUID()
+        let markdown = twoTurnSpeakerReviewMarkdown(speakerId: speakerId)
+        let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        assertEqual(lines.map(\.text), [
+            "Hi.",
+            "We should finish the pricing memo.",
+            "Thanks for joining."
+        ], "fixture should keep the greeting, the real sentence, and the other voice")
+
+        let sample = SpeakerReviewSamplePolicy.sample(
+            persistentSpeakerID: speakerId,
+            diarizerSpeakerID: "1",
+            channel: .system,
+            in: lines,
+            meetingDuration: 120
+        )
+        assertEqual(sample?.line.text, "We should finish the pricing memo.")
+        assertEqual(sample?.line.startSeconds, 20)
+        assertEqual(sample?.mixedWindow?.text, "We should finish the pricing memo.")
+        assertEqual(sample?.mixedWindow?.startTime, 20)
+        assertEqual(sample?.mixedWindow?.duration, 8)
+        assertEqual(
+            sample?.mixedWindow?.startTime,
+            sample?.line.startSeconds,
+            "playback must start at the shown turn's Home clock, not an earlier greeting"
+        )
+        assertEqual(
+            sample?.mixedWindow?.text,
+            sample?.line.text,
+            "the played range and the shown quote must be the same turn"
+        )
+    }
+
+    runSuite("SpeakerReviewSamplePolicy falls back when the longest line shares a whole-second clock") {
+        let speakerId = UUID()
+        let markdown = sameSecondSpeakerReviewMarkdown(speakerId: speakerId)
+        let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        assertEqual(lines.map(\.text), [
+            "This is the longest quote so the old policy would pick it first.",
+            "Same-second other voice.",
+            "Later usable turn."
+        ])
+
+        let sample = SpeakerReviewSamplePolicy.sample(
+            persistentSpeakerID: speakerId,
+            diarizerSpeakerID: "1",
+            channel: .system,
+            in: lines,
+            meetingDuration: 120
+        )
+        assertEqual(
+            sample?.line.text,
+            "Later usable turn.",
+            "a same-second next turn must not leave review with no playable range"
+        )
+        assertEqual(sample?.mixedWindow?.text, "Later usable turn.")
+        assertEqual(sample?.mixedWindow?.startTime, 8)
+        assertEqual(sample?.channelWindow?.startTime, 8)
+        assertEqual(
+            SpeakerReviewSamplePolicy.representativeLine(
+                persistentSpeakerID: speakerId,
+                diarizerSpeakerID: "1",
+                channel: .system,
+                in: lines
+            )?.text,
+            "Later usable turn.",
+            "Home's first quote must be the same fallback turn Speakers would play"
+        )
+    }
+
+    runSuite("SpeakerReviewSamplePolicy skips a mixed-unplayable turn when only the mixed recording is kept") {
+        let speakerId = UUID()
+        let markdown = sameSecondOtherChannelSpeakerReviewMarkdown(speakerId: speakerId)
+        let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        assertEqual(lines.map(\.text), [
+            "This is the longest quote so the old policy would pick it first.",
+            "Same-second other channel.",
+            "Later usable turn."
+        ])
+
+        let anyWindow = SpeakerReviewSamplePolicy.sample(
+            persistentSpeakerID: speakerId,
+            diarizerSpeakerID: "1",
+            channel: .system,
+            in: lines,
+            meetingDuration: 120
+        )
+        assertEqual(
+            anyWindow?.channelWindow?.text,
+            "This is the longest quote so the old policy would pick it first.",
+            "the channel file can still isolate the longest turn from a mic collision"
+        )
+        assertEqual(anyWindow?.mixedWindow, nil, "the mixed timeline cannot isolate that same-second turn")
+
+        let mixedOnly = SpeakerReviewSamplePolicy.sample(
+            persistentSpeakerID: speakerId,
+            diarizerSpeakerID: "1",
+            channel: .system,
+            in: lines,
+            meetingDuration: 120,
+            requiredWindow: .mixed
+        )
+        assertEqual(
+            mixedOnly?.line.text,
+            "Later usable turn.",
+            "when only the mixed recording is kept, skip the turn that recording cannot play"
+        )
+        assertEqual(mixedOnly?.mixedWindow?.startTime, 8)
+        assertEqual(
+            SpeakerReviewSamplePolicy.representativeLine(
+                persistentSpeakerID: speakerId,
+                diarizerSpeakerID: "1",
+                channel: .system,
+                in: lines
+            )?.text,
+            "Later usable turn.",
+            "Home plays the mixed file, so its quote must be the mixed-playable fallback"
+        )
+    }
+
+    runSuite("SpeakerReviewQueueScanner plays the fallback turn after a same-second collision") {
+        withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
+            let speakerId = UUID()
+            let markdown = sameSecondSpeakerReviewMarkdown(speakerId: speakerId)
+            try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown,
+                transcriptURL: transcriptURL,
+                profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)],
+                clipURLsByProfileID: [:]
+            )
+            assertEqual(items.first?.sampleText, "Later usable turn.")
+            assertRetainedSample(items.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[0], startTime: 8, duration: 8
+            ), "retained playback must use the later isolated turn, not skip preview")
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner skips an unplayable same-second turn on mixed-only audio") {
+        for stem in ["playback.m4a", "recording.m4a"] {
+            withRetainedReviewAudio(stems: [stem]) { transcriptURL, audioURLs in
+                let speakerId = UUID()
+                let markdown = sameSecondOtherChannelSpeakerReviewMarkdown(speakerId: speakerId)
+                try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+                let items = SpeakerReviewQueueScanner.pendingItems(
+                    in: markdown,
+                    transcriptURL: transcriptURL,
+                    profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)],
+                    clipURLsByProfileID: [:]
+                )
+                assertEqual(
+                    items.first?.sampleText,
+                    "Later usable turn.",
+                    "a single mixed or imported file must not quote the turn that file cannot isolate"
+                )
+                assertRetainedSample(items.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                    url: audioURLs[0], startTime: 8, duration: 8
+                ), "playback must seek to the later mixed-playable turn")
+            }
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner plays the shown quote's turn, even when a profile clip exists") {
+        withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
+            let speakerId = UUID()
+            let markdown = durationVersusCharacterSpeakerReviewMarkdown(speakerId: speakerId)
+            try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let profiles = [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)]
+
+            let retained = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: profiles, clipURLsByProfileID: [:]
+            )
+            assertEqual(
+                retained.first?.sampleText,
+                "We should finish the pricing memo before Friday and send it to legal.",
+                "without a clip, the quote is still the longest transcript line"
+            )
+            assertRetainedSample(retained.first?.retainedAudioSample, SpeakerRetainedAudioSample(
+                url: audioURLs[0], startTime: 40, duration: 8
+            ), "retained playback must seek to the shown sentence")
+
+            let clipURL = transcriptURL.deletingLastPathComponent().appendingPathComponent("\(speakerId.uuidString).wav")
+            try? Data([7, 8, 9]).write(to: clipURL)
+            let oldClip = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL]
+            )
+            assertEqual(oldClip.first?.clipURL, clipURL)
+            assertEqual(oldClip.first?.retainedAudioSample, nil, "a saved clip still plays instead of retained audio")
+            assertEqual(
+                oldClip.first?.sampleText,
+                nil,
+                "an old clip without a sidecar must not guess a transcript quote"
+            )
+
+            writeSpeakerClipSidecar(
+                nextTo: clipURL,
+                sampleText: "Okay. Um. Let's see here.",
+                segments: [(5.0, 15.0, "Okay. Um. Let's see here.")]
+            )
+            let withSidecar = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL]
+            )
+            assertEqual(
+                withSidecar.first?.sampleText,
+                "Okay. Um. Let's see here.",
+                "the quote next to a saved clip must be that clip's own text, not the longer sentence"
+            )
+            assertEqual(withSidecar.first?.retainedAudioSample, nil)
+
+            try? Data([1, 1, 1]).write(to: clipURL)
+            let stalePair = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: transcriptURL,
+                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL]
+            )
+            assertEqual(
+                stalePair.first?.sampleText,
+                nil,
+                "a sidecar that no longer matches the wav at that path must show no quote"
+            )
+        }
+    }
+
+    runSuite("SpeakerReviewQueueScanner keeps a merged clip's sidecar quote") {
+        withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, _ in
+            let sourceId = UUID()
+            let keptId = UUID()
+            let markdown = durationVersusCharacterSpeakerReviewMarkdown(speakerId: keptId)
+            try? markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+            let directory = transcriptURL.deletingLastPathComponent()
+            let sourceClip = directory.appendingPathComponent("\(sourceId.uuidString).wav")
+            try? Data([1, 2, 3]).write(to: sourceClip)
+            writeSpeakerClipSidecar(
+                nextTo: sourceClip,
+                sampleText: "Okay. Um. Let's see here.",
+                segments: [(5.0, 15.0, "Okay. Um. Let's see here.")]
+            )
+            let keptClip = directory.appendingPathComponent("\(keptId.uuidString).wav")
+            try? FileManager.default.copyItem(at: sourceClip, to: keptClip)
+            try? FileManager.default.copyItem(
+                at: speakerClipSidecarURL(nextTo: sourceClip),
+                to: speakerClipSidecarURL(nextTo: keptClip)
+            )
+
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown,
+                transcriptURL: transcriptURL,
+                profilesById: [keptId: makeReviewQueueProfile(id: keptId, name: nil)],
+                clipURLsByProfileID: [keptId: keptClip]
+            )
+            assertEqual(
+                items.first?.sampleText,
+                "Okay. Um. Let's see here.",
+                "after a merge, the kept person still shows the inherited clip's own text"
+            )
+        }
+    }
+
     runSuite("SpeakerReviewQueueScanner recovers system-only samples without changing profile clips") {
         withRetainedReviewAudio(stems: ["recording.m4a"]) { transcriptURL, audioURLs in
             let speakerId = UUID()
@@ -156,7 +418,11 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(items.count, 1, "one db_pending speaker should become one review queue item")
         assertEqual(items.first?.meetingTitle, "Customer Sync", "queue item should keep the meeting title")
         assertEqual(items.first?.transcriptId, transcriptId, "queue item should keep the stable transcript identity")
-        assertEqual(items.first?.sampleText, "We should finish the pricing memo.", "queue item should include a useful sample line")
+        assertEqual(
+            items.first?.sampleText,
+            nil,
+            "a clip URL with no sidecar must not guess a transcript quote"
+        )
         assertEqual(items.first?.clipURL, clipURL, "queue item should carry the persisted speaker clip")
         assertEqual(items.first?.callCount, 3, "queue item should keep the profile's call count")
         assertEqual(items.first?.speakerLabel, "System/Speaker 1", "queue item should identify the original speaker label")
@@ -403,6 +669,11 @@ func testSpeakerReviewQueueScanner() {
             )
             assertEqual(withClip.count, 1)
             assertEqual(withClip.first?.clipURL, clipURL, "the first scan carries the profile's clip")
+            assertEqual(
+                withClip.first?.sampleText,
+                nil,
+                "a clip without a sidecar must not keep showing the meeting's transcript line"
+            )
 
             let withoutClip = SpeakerReviewQueueScanner.loadPendingItems(
                 transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [:]
@@ -413,11 +684,16 @@ func testSpeakerReviewQueueScanner() {
             assertEqual(withoutClip.first?.retainedAudioSample, nil, "no retained audio exists in this fixture")
 
             // And back again, still without touching the transcript.
+            writeSpeakerClipSidecar(nextTo: clipURL, sampleText: "The clip's own words.")
             let clipAgain = SpeakerReviewQueueScanner.loadPendingItems(
                 transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [speakerId: clipURL]
             )
             assertEqual(clipAgain.first?.clipURL, clipURL, "a clip added since the last scan shows up on the row")
-            assertEqual(clipAgain.first?.sampleText, "Clips come and go.")
+            assertEqual(
+                clipAgain.first?.sampleText,
+                "The clip's own words.",
+                "when the sidecar arrives, the row shows that text instead of the meeting line"
+            )
             let clipGoneAgain = SpeakerReviewQueueScanner.loadPendingItems(
                 transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [:]
             )
@@ -659,15 +935,15 @@ func testSpeakerReviewQueueScanner() {
         assertEqual(SpeakerReviewSkippedCalls.load(defaults: defaults), [key], "skipping twice stores it once, and it survives a reload")
     }
 
-    runSuite("SpeakerReviewQueueScanner voice groups fall back to any usable sample text") {
+    runSuite("SpeakerReviewQueueScanner voice groups keep the newest meeting's own quote") {
         let speakerId = UUID()
-        let noSample = SpeakerReviewQueueScanner.pendingItems(
+        let newestSilent = SpeakerReviewQueueScanner.pendingItems(
             in: deferredMarkdownWithoutSample(speakerId: speakerId, title: "Silent Call", speakerName: "Speaker 1"),
             transcriptURL: URL(fileURLWithPath: "/tmp/Silent_Call.md"),
             profilesById: [speakerId: makeReviewQueueProfile(id: speakerId, name: nil)],
             clipURLsByProfileID: [:]
         )
-        let withSample = SpeakerReviewQueueScanner.pendingItems(
+        let olderQuoted = SpeakerReviewQueueScanner.pendingItems(
             in: deferredMarkdown(
                 speakerId: speakerId,
                 title: "Chatty Call",
@@ -680,10 +956,16 @@ func testSpeakerReviewQueueScanner() {
             clipURLsByProfileID: [:]
         )
 
-        let groups = SpeakerReviewQueueScanner.groupedByVoice(noSample + withSample)
+        let groups = SpeakerReviewQueueScanner.groupedByVoice(newestSilent + olderQuoted)
 
         assertEqual(groups.count, 1, "the same voice across meetings should make one group")
-        assertEqual(groups.first?.sampleText, "A usable quote.", "the group should borrow a sample from an older meeting when the newest has none")
+        assertEqual(groups.first?.representative.meetingTitle, "Silent Call")
+        assertEqual(
+            groups.first?.sampleText,
+            nil,
+            "the group must not pair an older meeting's quote with the newest meeting's audio"
+        )
+        assertEqual(groups.first?.representative.sampleText, nil)
     }
 
     runSuite("SpeakerReviewQueueScanner tolerates UTF-8 split at preview limit") {
@@ -779,6 +1061,178 @@ private func withUntouchedPendingTranscript(sampleText: String, _ body: (URL, UU
         return
     }
     body(directory, speakerId, transcriptId)
+}
+
+/// Slow 10 s turn with few words, then a faster sentence with many more.
+/// Duration wins for a saved clip; character count wins for the no-clip quote.
+private func durationVersusCharacterSpeakerReviewMarkdown(speakerId: UUID) -> String {
+    """
+    ---
+    capture_type: meeting
+    duration: "02:00"
+    speakers:
+      - id: "1"
+        channel: system
+        db_id: "\(speakerId.uuidString)"
+        name: "Speaker 1"
+        source: db_pending
+    ---
+
+    # Budget review
+
+    ## Transcript
+
+    **00:05** [System/Speaker 1]
+    Okay. Um. Let's see here.
+
+    **00:40** [System/Speaker 1]
+    We should finish the pricing memo before Friday and send it to legal.
+
+    **00:50** [System/Someone else]
+    Thanks for joining.
+    """
+}
+
+/// Longest-text line shares its whole-second clock with another *channel*,
+/// so the mixed file cannot isolate it even though a channel file could.
+private func sameSecondOtherChannelSpeakerReviewMarkdown(speakerId: UUID) -> String {
+    """
+    ---
+    capture_type: meeting
+    duration: "02:00"
+    speakers:
+      - id: "1"
+        channel: system
+        db_id: "\(speakerId.uuidString)"
+        name: "Speaker 1"
+        source: db_pending
+    ---
+
+    # Overlap
+
+    ## Transcript
+
+    **00:01** [System/Speaker 1]
+    This is the longest quote so the old policy would pick it first.
+
+    **00:01** [Mic/Someone else]
+    Same-second other channel.
+
+    **00:08** [System/Speaker 1]
+    Later usable turn.
+    """
+}
+
+/// Longest-text line shares its whole-second clock with another voice, so
+/// that range cannot play. A later shorter turn is still usable.
+private func sameSecondSpeakerReviewMarkdown(speakerId: UUID) -> String {
+    """
+    ---
+    capture_type: meeting
+    duration: "02:00"
+    speakers:
+      - id: "1"
+        channel: system
+        db_id: "\(speakerId.uuidString)"
+        name: "Speaker 1"
+        source: db_pending
+    ---
+
+    # Overlap
+
+    ## Transcript
+
+    **00:01** [System/Speaker 1]
+    This is the longest quote so the old policy would pick it first.
+
+    **00:01** [System/Someone else]
+    Same-second other voice.
+
+    **00:08** [System/Speaker 1]
+    Later usable turn.
+    """
+}
+
+private func speakerClipSidecarURL(nextTo clipURL: URL) -> URL {
+    clipURL.deletingPathExtension().appendingPathExtension("json")
+}
+
+private func wavSHA256Hex(_ data: Data) -> String {
+    SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+}
+
+private func writeSpeakerClipSidecar(
+    nextTo clipURL: URL,
+    sampleText: String,
+    channel: String = "system",
+    diarizerSpeakerId: String = "1",
+    transcriptId: UUID? = nil,
+    segments: [(Double, Double, String)] = []
+) {
+    struct Payload: Encodable {
+        var transcriptId: UUID?
+        var channel: String
+        var diarizerSpeakerId: String
+        var segments: [Segment]
+        var sampleText: String
+        var formatVersion: Int
+        var wavByteCount: Int
+        var wavSHA256: String
+
+        struct Segment: Encodable {
+            var start: Double
+            var end: Double
+            var text: String
+        }
+    }
+
+    let wav = (try? Data(contentsOf: clipURL)) ?? Data()
+    let digest = wavSHA256Hex(wav)
+    let payload = Payload(
+        transcriptId: transcriptId,
+        channel: channel,
+        diarizerSpeakerId: diarizerSpeakerId,
+        segments: segments.map { Payload.Segment(start: $0.0, end: $0.1, text: $0.2) },
+        sampleText: sampleText,
+        formatVersion: 1,
+        wavByteCount: wav.count,
+        wavSHA256: digest
+    )
+    do {
+        try JSONEncoder().encode(payload).write(to: speakerClipSidecarURL(nextTo: clipURL))
+    } catch {
+        assertTrue(false, "could not write clip sidecar: \(error)")
+    }
+}
+
+/// Greeting at 00:01, the real sentence at 00:20, another voice at 00:32.
+/// The first line is the wrong quote if review still picks "first utterance".
+private func twoTurnSpeakerReviewMarkdown(speakerId: UUID) -> String {
+    """
+    ---
+    capture_type: meeting
+    duration: "02:00"
+    speakers:
+      - id: "1"
+        channel: system
+        db_id: "\(speakerId.uuidString)"
+        name: "Speaker 1"
+        source: db_pending
+    ---
+
+    # Budget review
+
+    ## Transcript
+
+    **00:01** [System/Speaker 1]
+    Hi.
+
+    **00:20** [System/Speaker 1]
+    We should finish the pricing memo.
+
+    **00:32** [System/Someone else]
+    Thanks for joining.
+    """
 }
 
 private func deferredMarkdown(

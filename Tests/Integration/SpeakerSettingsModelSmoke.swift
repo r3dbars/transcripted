@@ -49,6 +49,29 @@ import TranscriptedCore
             return database.getSpeaker(id: profile.id)!
         }
 
+        func writeQuotedClip(for id: UUID, quote: String, bytes: Data = Data([1, 2, 3, 4, 5])) throws {
+            let wav = clips.appendingPathComponent("\(id.uuidString).wav")
+            try bytes.write(to: wav)
+            let sidecar = SpeakerClipSidecar(
+                channel: "system",
+                diarizerSpeakerId: "1",
+                segments: [.init(start: 0, end: 1, text: quote)],
+                sampleText: quote
+            )
+            guard let stamped = sidecar.stamped(withWavAt: wav) else {
+                fatalError("quoted clip must stamp against its wav")
+            }
+            try stamped.write(nextTo: wav)
+        }
+
+        func clipURL(for id: UUID) -> URL {
+            clips.appendingPathComponent("\(id.uuidString).wav")
+        }
+
+        func sidecarURL(for id: UUID) -> URL {
+            SpeakerClipSidecar.url(nextTo: clipURL(for: id))
+        }
+
         func meeting(voice: SpeakerProfile, id: UUID = UUID(), filename: String, rows: Int = 1) throws -> URL {
             let url = transcripts.appendingPathComponent(filename).appendingPathExtension("md")
             let speakers = (1...rows).map { index in
@@ -250,6 +273,114 @@ import TranscriptedCore
         check(FileManager.default.fileExists(atPath: clip.path), "a rejected delete keeps the voice clip")
     }
 
+    @MainActor static func failedMergeKeepsSourceProfileAndClip() async throws {
+        let fixture = try Fixture()
+        defer {
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o755],
+                ofItemAtPath: fixture.clips.path
+            )
+            try? fixture.close()
+        }
+        let source = try fixture.voice(name: "Alex")
+        let target = try fixture.voice(name: "Blake", embedding: [0, 1])
+        let sourceClip = fixture.clips.appendingPathComponent("\(source.id.uuidString).wav")
+        let targetClip = fixture.clips.appendingPathComponent("\(target.id.uuidString).wav")
+        try FileManager.default.removeItem(at: targetClip)
+        check(FileManager.default.fileExists(atPath: sourceClip.path), "source starts with a clip")
+        check(!FileManager.default.fileExists(atPath: targetClip.path), "kept person has no clip to inherit")
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o555],
+            ofItemAtPath: fixture.clips.path
+        )
+        let model = await fixture.load()
+        let sourceRow = model.profiles.first { $0.id == source.id }
+        let targetRow = model.profiles.first { $0.id == target.id }
+        check(sourceRow != nil && targetRow != nil, "both people are in the Speakers snapshot")
+        let didMerge = await withCheckedContinuation { continuation in
+            model.merge(source: sourceRow!, into: targetRow!) { continuation.resume(returning: $0) }
+        }
+
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o755],
+            ofItemAtPath: fixture.clips.path
+        )
+        check(!didMerge, "a failed clip copy must not merge the people")
+        check(
+            fixture.database.getSpeaker(id: source.id) != nil,
+            "the source person stays when the clip cannot move"
+        )
+        check(
+            FileManager.default.fileExists(atPath: sourceClip.path),
+            "the source clip stays with the source person"
+        )
+        check(
+            !FileManager.default.fileExists(atPath: targetClip.path),
+            "a failed copy must not leave a partial clip on the kept person"
+        )
+        check(
+            model.profiles.contains { $0.id == source.id },
+            "the refreshed snapshot still lists the source person"
+        )
+    }
+
+    @MainActor static func failedDatabaseMergeRollsBackACopiedClip() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let source = try fixture.voice(name: "Alex")
+        let target = try fixture.voice(name: "Blake", embedding: [0, 1])
+        let sourceQuote = "Words from the source clip."
+        try fixture.writeQuotedClip(for: source.id, quote: sourceQuote)
+        try FileManager.default.removeItem(at: fixture.clipURL(for: target.id))
+        try? FileManager.default.removeItem(at: fixture.sidecarURL(for: target.id))
+        check(
+            SpeakerClipLibrary.sampleText(nextTo: fixture.clipURL(for: source.id)) == sourceQuote,
+            "source starts with a matching clip and quote"
+        )
+        check(
+            SpeakerClipExtractor.persistentClipURL(for: target.id, clipsDirectory: fixture.clips) == nil,
+            "kept person has no clip to inherit"
+        )
+
+        var connection: OpaquePointer?
+        let opened = sqlite3_open(fixture.root.appendingPathComponent("speakers.sqlite").path, &connection)
+        check(opened == SQLITE_OK, "failure injection opens only the temporary database")
+        defer { sqlite3_close(connection) }
+        let trigger = sqlite3_exec(connection, """
+            CREATE TRIGGER reject_test_merge BEFORE DELETE ON speakers
+            BEGIN SELECT RAISE(ABORT, 'synthetic merge rejection'); END;
+            """, nil, nil, nil)
+        check(trigger == SQLITE_OK, "synthetic merge rejection is installed")
+
+        let store = SpeakerSettingsStore(
+            speakerDatabase: fixture.database,
+            transcriptDirectory: fixture.transcripts,
+            preferredClipsDirectory: fixture.clips,
+            legacyClipsDirectory: fixture.clips
+        )
+        let didMerge = store.merge(sourceId: source.id, targetId: target.id)
+
+        check(!didMerge, "a rejected people merge must report failure")
+        check(
+            fixture.database.getSpeaker(id: source.id) != nil
+                && fixture.database.getSpeaker(id: target.id) != nil,
+            "both people stay separate when the database merge fails"
+        )
+        check(
+            FileManager.default.fileExists(atPath: fixture.clipURL(for: source.id).path)
+                && SpeakerClipLibrary.sampleText(nextTo: fixture.clipURL(for: source.id)) == sourceQuote,
+            "the source still has its clip and quote"
+        )
+        check(
+            SpeakerClipExtractor.persistentClipURL(for: target.id, clipsDirectory: fixture.clips) == nil
+                && !FileManager.default.fileExists(atPath: fixture.sidecarURL(for: target.id).path)
+                && SpeakerClipLibrary.sampleText(nextTo: fixture.clipURL(for: target.id)) == nil,
+            "the kept person must not play or quote the copied clip after a failed merge"
+        )
+        print("failedDatabaseMergeRollsBackACopiedClip: source kept clip and quote; target has neither")
+    }
+
     @MainActor static func main() async throws {
         guard ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1" else {
             fatalError("Smoke requires file logging disabled")
@@ -260,6 +391,8 @@ import TranscriptedCore
         try await databaseRejectionRestoresWrittenMeetings()
         try await thisIsMeJoinsExistingOwnerBeforeCompletion()
         try await failedDeleteKeepsVoiceClip()
+        try await failedMergeKeepsSourceProfileAndClip()
+        try await failedDatabaseMergeRollsBackACopiedClip()
         print("Speaker settings model smoke: \(assertions) assertions passed")
     }
 }

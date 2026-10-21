@@ -18,6 +18,9 @@ struct TranscriptedApp: App {
         // Set this before app startup creates logs, scratch files, or atomic-write
         // temp files so new app-owned files default to owner-only permissions.
         umask(0o077)
+        // A write to a dead child's stdin raises SIGPIPE; ignore it so write()
+        // returns EPIPE instead of killing the app (possibly mid-recording).
+        ProcessSignals.ignoreSIGPIPE()
     }
 
     var body: some Scene {
@@ -197,6 +200,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] in
             self?.pasteLastDictationFromSettings()
         }
+        wireNextSentenceVoice()
         notchIsland.prewarm()
         AppLaunchSteps.runAfterOverlaySetup(dictation: sessionController)
 
