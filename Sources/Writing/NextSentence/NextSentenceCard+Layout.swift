@@ -64,7 +64,7 @@ extension NextSentenceCard {
             placedAbove = NextSentencePolicy.place(card: CGSize(width: width, height: Self.fullHeight), under: anchor, in: visible).above
             // The top edge is set once. Above the caret it leaves room for a five-line card, so a usual
             // message ends above the caret; a longer one grows down past it.
-            pinnedTop = placedAbove ? anchor.maxY + 6 + max(height, Self.fullHeight) : anchor.minY - 6
+            pinnedTop = placedAbove ? anchor.maxY + 6 + max(height, content.compact ? 0 : Self.fullHeight) : anchor.minY - 6
             needsPlacement = false
         }
         // Beside the caret, plus wherever they've moved it with the top tab, kept on screen. Only at the
@@ -72,8 +72,10 @@ extension NextSentenceCard {
         let baseX = anchor.minX - 14, baseTop = pinnedTop
         let x = min(max(baseX + moveOffset.x, visible.minX + 4), visible.maxX - width - 4)
         let top = min(max(baseTop + moveOffset.y, visible.minY + 4 + height), visible.maxY - 4)
-        // Pushed against the screen's edge, it stops there, so moving back answers at once.
-        moveOffset = CGPoint(x: x - baseX, y: top - baseTop)
+        // Pushed against the screen's edge, it stops there, so moving back answers at once. Only the top
+        // and side edges are remembered: a push from the bottom lasts while the card is that tall, so a
+        // card that shrinks again (or a stretch pulled back up) returns to its own top edge.
+        moveOffset = CGPoint(x: x - baseX, y: min(baseTop + moveOffset.y, visible.maxY - 4) - baseTop)
         let y = top - height
         let card = CGRect(x: x, y: y, width: width, height: height)
         let m = Self.margin
