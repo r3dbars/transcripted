@@ -30,6 +30,9 @@ final class NextSentenceCard: NSObject {
         var hint = ""
         /// "Insert into Messages. Hold to send.", for the Insert button's tooltip.
         var insertHelp = "Insert. Hold to send."
+        /// The app the message goes into, named on the Insert button with its icon.
+        var insertApp = ""
+        var insertIcon: NSImage?
         var showsButtons = false
         var listening = false
         /// What they said, shown while it rewrites.
@@ -112,6 +115,8 @@ final class NextSentenceCard: NSObject {
     var shownSignature = ""
     var insertHeldFull = false
     var placedAbove = false
+    /// The card's top edge in screen points, set when it's placed (NextSentenceCard+Layout.swift).
+    var pinnedTop: CGFloat = 0
     var padActive = false
     /// Bumped on every show, so a leave animation that finishes late can't hide the new card.
     var shownCount = 0
@@ -298,7 +303,7 @@ final class NextSentenceCard: NSObject {
             textView.scrollToBeginningOfDocument(nil)
             if optionsRange != nil { closeOptions() }
         }
-        insertButton.set(title: insertHeldFull ? "Release to send" : "Insert", icon: nil)
+        setInsertTitle()
         if new.listening != wasListening {
             waveform.set(animating: new.listening)
             new.listening ? startListeningEffects() : stopListeningEffects(flare: true)
@@ -393,9 +398,21 @@ final class NextSentenceCard: NSObject {
             NextSentenceSynth.shared.chargeLocked()
             chargeRim.arm()
         }
-        insertButton.set(title: armed ? "Release to send" : "Insert", icon: nil)
+        setInsertTitle()
         layoutFoot()
     }
+
+    /// "Insert into Messages" with the app's icon, so it's clear where the message goes. A long app
+    /// name keeps just the icon, so the button fits beside the others.
+    private func setInsertTitle() {
+        let app = content.insertApp
+        let title = insertHeldFull ? "Release to send"
+            : app.isEmpty ? "Insert"
+            : app.count <= Self.insertNameLimit ? "Insert into \(app)" : "Insert"
+        insertButton.set(title: title, icon: content.insertIcon)
+    }
+
+    private static let insertNameLimit = 14
 
     // MARK: Options for a picked word or part
 

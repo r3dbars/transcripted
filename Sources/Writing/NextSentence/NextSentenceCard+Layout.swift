@@ -1,8 +1,9 @@
 import AppKit
 
 /// The card's size and where it sits. The card is as tall as its message (two lines up to most of the
-/// screen), so the whole message is always in view. It grows and shrinks smoothly from the edge away
-/// from the caret; while its bottom edge is dragged it follows the pointer instead.
+/// screen), so the whole message is always in view. Its top edge stays put and it grows and shrinks
+/// downward, so the mood pad in its top corner never moves under the pointer and the bottom edge
+/// follows a stretch drag.
 extension NextSentenceCard {
     static let footHeight: CGFloat = 10 + 28 + 12
     static let minLines: CGFloat = 2
@@ -61,14 +62,19 @@ extension NextSentenceCard {
         if needsPlacement {
             // Under the caret if a five-line card fits there, otherwise above it; kept while it's open.
             placedAbove = NextSentencePolicy.place(card: CGSize(width: width, height: Self.fullHeight), under: anchor, in: visible).above
+            // The top edge is set once. Above the caret it leaves room for a five-line card, so a usual
+            // message ends above the caret; a longer one grows down past it.
+            pinnedTop = placedAbove ? anchor.maxY + 6 + max(height, Self.fullHeight) : anchor.minY - 6
             needsPlacement = false
         }
-        // Beside the caret, plus wherever they've moved it with the top tab, kept on screen.
-        let baseX = anchor.minX - 14, baseY = placedAbove ? anchor.maxY + 6 : anchor.minY - 6 - height
+        // Beside the caret, plus wherever they've moved it with the top tab, kept on screen. Only at the
+        // screen's bottom edge does a growing card push its top up.
+        let baseX = anchor.minX - 14, baseTop = pinnedTop
         let x = min(max(baseX + moveOffset.x, visible.minX + 4), visible.maxX - width - 4)
-        let y = min(max(baseY + moveOffset.y, visible.minY + 4), visible.maxY - height - 4)
+        let top = min(max(baseTop + moveOffset.y, visible.minY + 4 + height), visible.maxY - 4)
         // Pushed against the screen's edge, it stops there, so moving back answers at once.
-        moveOffset = CGPoint(x: x - baseX, y: y - baseY)
+        moveOffset = CGPoint(x: x - baseX, y: top - baseTop)
+        let y = top - height
         let card = CGRect(x: x, y: y, width: width, height: height)
         let m = Self.margin
         let exact = CGRect(x: card.minX - m, y: card.minY - m, width: width + 2 * m, height: Self.headroom + height + m)

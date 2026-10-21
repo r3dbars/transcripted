@@ -83,6 +83,7 @@ extension NextSentenceController {
             status: shown.text.isEmpty || failure != nil ? status : "", busy: busy, text: shown.text, marks: marks,
             streaming: streaming, fade: fadeNext, tone: toneIndex, length: length, hint: hint,
             insertHelp: app.isEmpty ? "Insert. Hold to send." : "Insert into \(app). Hold to send.",
+            insertApp: app, insertIcon: targetApp?.icon,
             showsButtons: failure == nil && !shown.text.isEmpty,
             listening: listening, heard: heard)
     }
