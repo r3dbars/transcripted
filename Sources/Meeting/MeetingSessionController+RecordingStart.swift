@@ -15,10 +15,20 @@ extension MeetingSessionController {
         capture.setSharedDictationMicHandler { [weak dictationEngine] buffer in
             dictationEngine?.appendSharedMeetingMicBuffer(buffer)
         }
+        // Dictated words stay out of this meeting's mic track while borrowed.
+        // Start ungated: any claim on file now belongs to an earlier meeting,
+        // since claims are only minted once this recording is live.
+        let capture = self.capture
+        capture.setMicGatedForBorrowedDictation(false)
+        dictationEngine.onSharedMeetingMicBorrowChanged = { [weak capture] borrowing in
+            capture?.setMicGatedForBorrowedDictation(borrowing)
+        }
     }
 
     func clearSharedDictationMicRelay() {
         capture.setSharedDictationMicHandler(nil)
+        sttRouter.parakeetEngine.onSharedMeetingMicBorrowChanged = nil
+        capture.setMicGatedForBorrowedDictation(false)
     }
 
     func resolveStartRecordingPermissionDecision(
