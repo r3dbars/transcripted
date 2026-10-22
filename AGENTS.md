@@ -13,6 +13,8 @@ Transcripted is a macOS 26+, Apple Silicon menubar app: dictation with paste-bac
 
 A fresh worktree has no prebuilt deps (`deps-libs/`, `deps-modules/`). Run `bash build-deps.sh` once before `build.sh` or `swift test`; `bash check.sh` adds that step when they're missing.
 
+Reuse matching deps before you rebuild them. `build-deps.sh` re-downloads every package (10+ minutes), so first look for another worktree whose deps were built from the same inputs. This worktree's fingerprint is `bash -c 'source scripts/entrypoints/lib/deps-staleness.sh; dependency_input_digest'`; another worktree's is the `dependency_inputs_sha256=` line in its `deps-libs/.build-deps-stamp` (`git worktree list` names them). If they're equal, copy that worktree's `deps-libs/` and `deps-modules/` here and `touch deps-libs/.build-deps-stamp`. Only build when nothing matches, and never copy from a worktree whose `build-deps.sh` is still running.
+
 When sources disagree: current code wins for runtime behavior, this file and `.agents/test-matrix.yml` win for workflow.
 
 ## Rules that always apply
