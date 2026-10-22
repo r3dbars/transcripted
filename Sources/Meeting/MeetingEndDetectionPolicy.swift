@@ -23,7 +23,9 @@ struct MeetingCallActivitySnapshot: Equatable {
                 ? ["com.apple.WebKit", "com.apple.Safari"] : families
         }
         let families = provider.activeBundleIdentifiers
-        guard inputUsers.union(outputUsers).contains(where: { id in
+        // Same rule as late binding: output alone can be a chat chime
+        // before anyone joins. The microphone stream is what arms.
+        guard inputUsers.contains(where: { id in
             families.contains { id.matchesBundleFamily($0) }
         }) else { return nil }
         return families
@@ -61,10 +63,34 @@ struct MeetingCallActivitySnapshot: Equatable {
 
     func activity(in families: Set<String>, cameraInUse: Bool?) -> MeetingEndDetectionPolicy.Activity {
         guard isReliable else { return .unknown }
-        if cameraInUse == true || inputUsers.union(outputUsers).contains(where: { id in
-            families.contains { id.matchesBundleFamily($0) }
-        }) { return .active }
+        if cameraInUse == true
+            || usesAudio(in: families)
+            || otherCallAppIsUsingAudio(boundFamilies: families) {
+            return .active
+        }
         return cameraInUse == nil ? .unknown : .inactive
+    }
+
+    /// Bound-family streams, or another conferencing app that started using
+    /// audio after this recording's source went quiet. A new Teams call
+    /// must cancel a Zoom-end countdown so recording A is not stopped
+    /// while call B is live. Browser playback alone does not count:
+    /// YouTube in Chrome is not a call.
+    func otherCallAppIsUsingAudio(boundFamilies: Set<String>) -> Bool {
+        if inputUsers.contains(where: { id in
+            !boundFamilies.contains { id.matchesBundleFamily($0) }
+                && MeetingPromptProvider.micInputProvider(forBundleID: id) != nil
+        }) { return true }
+        return outputUsers.contains(where: { id in
+            !boundFamilies.contains { id.matchesBundleFamily($0) }
+                && MeetingPromptProvider.audioOutputProvider(forBundleID: id) != nil
+        })
+    }
+
+    private func usesAudio(in families: Set<String>) -> Bool {
+        inputUsers.union(outputUsers).contains { id in
+            families.contains { id.matchesBundleFamily($0) }
+        }
     }
 }
 

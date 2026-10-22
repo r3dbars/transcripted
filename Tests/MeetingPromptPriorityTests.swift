@@ -384,12 +384,12 @@ func testMeetingPromptPriority() {
 
     runSuite("Inactivity countdown expiry — waveform silence keeps its own deadline") {
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: true),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: true, promptVisible: true),
             .stop,
             "a silence warning stops at its deadline without waiting for call-end evidence"
         )
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: false),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: false, promptVisible: true),
             .noAutomaticStop,
             "a degraded route never auto-stops, even when its countdown expires"
         )
@@ -397,14 +397,55 @@ func testMeetingPromptPriority() {
 
     runSuite("Inactivity countdown expiry — a call-ended warning confirms at zero, never waits for a poll") {
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: true),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: true, promptVisible: true),
             .confirmCallEndedThenStop,
             "at zero the session takes a fresh reading and stops then, with no Checking call gap"
         )
         assertEqual(
-            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: false),
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: false, promptVisible: true),
             .noAutomaticStop,
             "a held call-end warning (room audio, unconfirmed read) never stops on its own"
+        )
+    }
+
+    runSuite("Inactivity countdown expiry — a hidden Keep-recording prompt never auto-stops") {
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: true, promptVisible: false),
+            .noAutomaticStop,
+            "a call-end countdown covered by a dictation must not stop the recording"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(isCallEnded: false, automaticStopAllowed: true, promptVisible: false),
+            .noAutomaticStop,
+            "a silence countdown covered by a dictation must not stop the recording"
+        )
+    }
+
+    runSuite("Inactivity countdown visibility — hidden ticks hold and a reveal restarts the window") {
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(wasVisible: true, isVisible: true, fullSeconds: 30),
+            .decrement,
+            "an on-screen prompt spends one second of the countdown"
+        )
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(wasVisible: true, isVisible: false, fullSeconds: 30),
+            .hold,
+            "a dictation covering the drop pauses the countdown"
+        )
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(wasVisible: false, isVisible: false, fullSeconds: 30),
+            .hold,
+            "it stays paused for as long as the drop is covered"
+        )
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(wasVisible: false, isVisible: true, fullSeconds: 30),
+            .restart(seconds: 30),
+            "coming back on screen gives a full Keep-recording window"
+        )
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(wasVisible: false, isVisible: true, fullSeconds: 0),
+            .restart(seconds: 1),
+            "a zero-length restart still shows at least one visible second"
         )
     }
 }

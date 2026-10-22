@@ -108,9 +108,26 @@ enum MeetingInactivityCountdownExpiry: Equatable {
 
     static func resolve(
         isCallEnded: Bool,
-        automaticStopAllowed: Bool
+        automaticStopAllowed: Bool,
+        promptVisible: Bool
     ) -> Self {
-        guard automaticStopAllowed else { return .noAutomaticStop }
+        guard automaticStopAllowed, promptVisible else { return .noAutomaticStop }
         return isCallEnded ? .confirmCallEndedThenStop : .stop
+    }
+}
+
+/// Whether the audio-inactivity / call-end countdown may tick. A dictation
+/// message or an in-progress take covers the meeting drop, and auto-stop
+/// must not fire while Keep recording is off screen. Coming back on screen
+/// restarts the full window so the person actually sees it.
+enum MeetingInactivityCountdownVisibility: Equatable {
+    case hold
+    case decrement
+    case restart(seconds: Int)
+
+    static func step(wasVisible: Bool, isVisible: Bool, fullSeconds: Int) -> Self {
+        guard isVisible else { return .hold }
+        if !wasVisible { return .restart(seconds: max(1, fullSeconds)) }
+        return .decrement
     }
 }
