@@ -96,10 +96,12 @@ extension MeetingOverlayController {
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard !Task.isCancelled else { return }
                 let visible = self.meetingPromptIsCurrentlyVisible()
+                let pauseWhileHidden = self.meetingSession?.audioInactivityWarning?.kind == .callEnded
                 switch MeetingInactivityCountdownVisibility.step(
                     wasVisible: wasVisible,
                     isVisible: visible,
-                    fullSeconds: fullSeconds
+                    fullSeconds: fullSeconds,
+                    pauseWhileHidden: pauseWhileHidden
                 ) {
                 case .hold:
                     break
@@ -171,9 +173,12 @@ extension MeetingOverlayController {
                 promptVisible: meetingPromptIsCurrentlyVisible()
             ) {
             case .noAutomaticStop:
-                // Covered at zero: keep the task alive and give a full
-                // Keep-recording window once the drop is visible again.
-                if warning.automaticStopAllowed, !meetingPromptIsCurrentlyVisible() {
+                // Covered Meeting ended? at zero: keep that 30 s window
+                // alive until the drop is visible again. The five-minute
+                // No sound stop does not come through here.
+                if warning.kind == .callEnded,
+                   warning.automaticStopAllowed,
+                   !meetingPromptIsCurrentlyVisible() {
                     promptSecondsRemaining = max(1, warning.countdownSeconds)
                     schedulePromptCountdown()
                 }

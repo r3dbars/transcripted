@@ -53,6 +53,39 @@ func testMeetingEndDetectionPolicy() {
             "with no silence warning yet, the held prompt stays up"
         )
     }
+    runSuite("Meeting end detection — silence latched before hold is re-raised after hold") {
+        var detector = MeetingAudioInactivityDetector()
+        _ = detector.startRecording()
+        _ = detector.tick(at: 300)
+        let silence = detector.warning
+        let live = MeetingAudioInactivityWarning(inactiveDuration: 10, countdownSeconds: 30, kind: .callEnded)
+        assertEqual(
+            MeetingRecordingWarningOwner.displayed(callEnd: live, silence: silence),
+            live,
+            "a live Meeting ended? countdown still covers an already-latched silence warning"
+        )
+        assertEqual(
+            detector.tick(at: 400),
+            .none,
+            "the silence detector will not emit again while its warning is still latched"
+        )
+        let held = MeetingAudioInactivityWarning(
+            inactiveDuration: 10,
+            countdownSeconds: 30,
+            kind: .callEnded,
+            automaticStopAllowed: false
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.afterCallEndHeld(held: held, pendingSilence: detector.warning),
+            silence!,
+            "hold must re-raise the already-latched silence warning; tick will not"
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.afterCallEndHeld(held: held, pendingSilence: nil),
+            held,
+            "with nothing latched, hold stays a Continue / Stop prompt"
+        )
+    }
     runSuite("Meeting end detection — room speech clears only the hidden silence warning") {
         var detector = MeetingAudioInactivityDetector()
         _ = detector.startRecording()

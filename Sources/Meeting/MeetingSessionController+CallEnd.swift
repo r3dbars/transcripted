@@ -109,12 +109,16 @@ extension MeetingSessionController {
             return
         }
         let heardAudio = callEndTracking?.heardAudioDuringWarning == true
-        audioInactivityWarning = MeetingAudioInactivityWarning(
+        let held = MeetingAudioInactivityWarning(
             inactiveDuration: warning.inactiveDuration,
             countdownSeconds: warning.countdownSeconds,
             kind: .callEnded,
             automaticStopAllowed: false,
             recordingIdentity: warning.recordingIdentity
+        )
+        audioInactivityWarning = MeetingRecordingWarningOwner.afterCallEndHeld(
+            held: held,
+            pendingSilence: audioInactivityDetector.warning
         )
         recordCallEndDiagnostic("meeting_call_end_auto_stop_held",
                                 "Call-end countdown expired; left for the user to decide",

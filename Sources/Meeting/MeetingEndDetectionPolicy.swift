@@ -25,6 +25,8 @@ struct MeetingCallActivitySnapshot: Equatable {
         let families = provider.activeBundleIdentifiers
         // Same rule as late binding: output alone can be a chat chime
         // before anyone joins. The microphone stream is what arms.
+        // Listen-only / hard-muted joins that never take the mic stay
+        // unarmed and fall back to the five-minute No sound stop.
         guard inputUsers.contains(where: { id in
             families.contains { id.matchesBundleFamily($0) }
         }) else { return nil }
