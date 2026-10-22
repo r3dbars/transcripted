@@ -380,6 +380,12 @@ extension TranscriptedSettingsView {
                 assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
+            meetingVoicesToName: { item in
+                speakerPeopleModel.hasLoadedProfiles ? speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) : 0
+            },
+            onWhoSpoke: { item in
+                openHomeSpeakerReview(actionName: "review_meeting_speakers_pill", transcriptURL: item.transcriptURL)
+            },
             onRetryFailedMeeting: { failedMeeting in
                 trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
                 retryFailedMeeting(failedMeeting)
@@ -578,8 +584,11 @@ extension TranscriptedSettingsView {
         }
     }
 
-    func openHomeSpeakerReview(actionName: String) {
+    /// Opens Speakers at its "Who spoke?" cards; with a meeting, that
+    /// meeting's card goes on top.
+    func openHomeSpeakerReview(actionName: String, transcriptURL: URL? = nil) {
         trackSettingsAction(actionName, page: navigation.selectedPage)
+        speakerPeopleModel.focusMeeting(transcriptURL: transcriptURL)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
         navigation.select(.people, source: .settingsAction)

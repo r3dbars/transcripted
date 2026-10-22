@@ -24,6 +24,7 @@ swiftc -parse-as-library -target arm64-apple-macos26.0 -O \
     -framework Accelerate -framework Network -framework UserNotifications -lc++ \
     Sources/Support/CoalescedRefreshState.swift \
     Sources/Support/SpeakerNameSelectionPolicy.swift \
+    Sources/Support/SpeakerReviewUpdate.swift \
     Sources/Meeting/SpeakerReviewChannel.swift \
     Sources/Meeting/SpeakerNamingStanding.swift \
     Sources/Meeting/SpeakerPeopleReviewPolicy.swift \
@@ -40,10 +41,11 @@ swiftc -parse-as-library -target arm64-apple-macos26.0 -O \
     Sources/UI/Settings/SpeakerMergeTargets.swift \
     Sources/UI/Settings/SpeakerReviewCardProgress.swift \
     Sources/UI/Settings/SpeakerReviewStack.swift \
-    Sources/UI/Settings/SpeakerReviewSession.swift \
+    Sources/UI/Settings/SpeakerMeetingReviewPolicy.swift \
     Sources/UI/Settings/SpeakerPeopleSettingsViewModel.swift \
     Sources/UI/Settings/SpeakerPeopleSettingsViewModel+Review.swift \
     Sources/UI/Settings/SpeakerPeopleSettingsViewModel+Duplicates.swift \
+    Sources/UI/Settings/SpeakerPeopleSettingsViewModel+MeetingReview.swift \
     Tests/Integration/SpeakerSettingsModelScaffold.swift \
     Tests/Integration/SpeakerSettingsModelSmoke.swift \
     -o "$OUT_DIR/model-smoke" 2>&1 | tee "$OUT_DIR/compile.log"

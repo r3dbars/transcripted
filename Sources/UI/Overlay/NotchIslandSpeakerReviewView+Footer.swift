@@ -73,7 +73,7 @@ extension NotchIslandSpeakerReviewView {
         row.spacing = NotchIslandVoiceRowView.printGap
         row.edgeInsets = NSEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         row.translatesAutoresizingMaskIntoConstraints = false
-        row.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        row.widthAnchor.constraint(equalToConstant: width).isActive = true
         row.setAccessibilityElement(true)
         row.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.rowAccessibilityLabel(.recognized, name: name, hint: nil))
         return row
