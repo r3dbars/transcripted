@@ -35,4 +35,19 @@ struct MenuBarShortcutWarningPresentation: Equatable {
         }
         return MenuBarShortcutWarningPresentation(text: hotkeyError, action: nil)
     }
+
+    /// Registration warnings occupy the header first. When those are absent,
+    /// a Secure Keyboard Entry notice can use the same row. The Fn conflict
+    /// is already filtered by `resolve(hotkeyError:...)`, so a nil
+    /// `hotkeyWarning` here still lets the secure-input copy through.
+    static func resolve(
+        hotkeyWarning: MenuBarShortcutWarningPresentation?,
+        secureKeyboardEntryNotice: String?
+    ) -> MenuBarShortcutWarningPresentation? {
+        if let hotkeyWarning { return hotkeyWarning }
+        guard let secureKeyboardEntryNotice, !secureKeyboardEntryNotice.isEmpty else {
+            return nil
+        }
+        return MenuBarShortcutWarningPresentation(text: secureKeyboardEntryNotice, action: nil)
+    }
 }

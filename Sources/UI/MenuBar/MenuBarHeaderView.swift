@@ -69,7 +69,7 @@ final class MenuBarHeaderView: NSView {
 
         warningLabel.font = MenuTokens.Font.headerDetail
         warningLabel.textColor = MenuTokens.textSecondaryNS
-        warningLabel.maximumNumberOfLines = 2
+        warningLabel.maximumNumberOfLines = 4
         addSubview(warningLabel)
 
         warningButton.isBordered = false
