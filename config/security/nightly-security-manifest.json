@@ -94,8 +94,9 @@
   ],
   "expected_info_plist": {
     "LSMinimumSystemVersion": "26.0",
-    "SUFeedURL": "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",
+    "SUFeedURL": "https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml",
     "SUPublicEDKey": "Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=",
+    "SUVerifyUpdateBeforeExtraction": true,
     "SUEnableAutomaticChecks": true,
     "SUAllowsAutomaticUpdates": true,
     "SUAutomaticallyUpdate": true,
@@ -146,6 +147,11 @@
       "codesign -dvvv --entitlements - \"$APP_BUNDLE\""
     ],
     "scripts/entrypoints/build-beta.sh": [
+      "lib/release-package.sh",
+      "sign_app_bundle \"$SIGNING_IDENTITY\"",
+      "validate_signed_app"
+    ],
+    "scripts/entrypoints/lib/release-package.sh": [
       "config/entitlements/beta.plist",
       "codesign -dvvv --entitlements - \"$APP_BUNDLE\""
     ]

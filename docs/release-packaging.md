@@ -56,7 +56,8 @@ Transcripted's Sparkle update plumbing is documented in `docs/sparkle-updates.md
 Releases also ship Sparkle delta updates (`Transcripted<new>-<old>.delta`, about
 1-3 MB each instead of the ~510 MB DMG). Upload every file in the Release
 Candidate artifact's `build/sparkle-deltas/` to the GitHub release with the DMG
-before the appcast lands on main; see "Delta updates" in that doc.
+and the signed `appcast.xml`; see "Delta updates" in that doc. The Sparkle feed
+is that `appcast.xml` release asset, not a file on main.
 `build-deps.sh` now downloads the pinned Sparkle framework and release tools,
 plus the pinned Sentry framework, into `deps-frameworks/` and
 `deps-tools/sparkle/`.
@@ -202,29 +203,51 @@ python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact
 
 This does not create a GitHub release, update Sparkle, rewrite the Homebrew
 cask, register Sentry, or deploy the website. It compares the intended release
-against the exact GitHub asset URL, committed appcast, Homebrew cask, live
-download routes, live appcast, crawler-facing text, and optional local DMG
-evidence. Missing post-publish surfaces are `PENDING` or `UNKNOWN`, not green.
+against the exact GitHub asset URL, the generated appcast (`--appcast
+build/appcast.xml`; without it the frozen legacy `docs/appcast.xml`), Homebrew
+cask, live download routes, live appcast, crawler-facing text, and optional
+local DMG evidence. Missing post-publish surfaces are `PENDING` or `UNKNOWN`, not green.
 Use it again after publishing, appcast/cask updates, and website deployment to
 catch any surface that still points at the older release.
 
 Rollback planning should use the same surfaces. Before changing release
-metadata, note the previously live GitHub release tag, `docs/appcast.xml`
-latest item, `Casks/transcripted.rb` version/sha, website `/download` target,
-and live appcast target. A rollback is not just deleting a bad artifact; it
-means restoring and pushing the appcast/cask/download surfaces, redeploying the
-website when needed, then rerunning the post-DMG audit and strict live-surface
-gate against the restored version.
+metadata, note the previously live GitHub release tag, its `appcast.xml`
+asset (download a copy), `Casks/transcripted.rb` version/sha, website
+`/download` target, and live appcast target. The feed is whatever
+`releases/latest` carries, so a rollback is not just deleting a bad artifact: it
+means making the previous release the latest again (or re-uploading its
+`appcast.xml` to the one that is), restoring the cask/download surfaces,
+redeploying the website when needed, then rerunning the post-DMG audit and
+strict live-surface gate against the restored version.
 
 ## Release Flow
 
 Shipping builds come from the Release Candidate workflow
-(`.github/workflows/release-candidate.yml`), not from a local Mac. It checks out
-`source_ref`, builds deps, signs, notarizes and staples the DMG, builds the
-Sparkle appcast item and delta updates, updates the cask, runs the packaged-app
-smoke, and uploads all of it as the `Transcripted-<version>-release-candidate`
-artifact. The owner's Mac has no notarytool profile, so a local `build-beta.sh`
-only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
+(`.github/workflows/release-candidate.yml`), not from a local Mac. It runs three
+jobs so the code that compiles never holds a secret:
+
+1. `build-unsigned` (no environment, no secrets) checks out `source_ref`, builds
+   deps, and runs `build-beta.sh` with `TRANSCRIPTED_UNSIGNED_APP_ONLY=1`, which
+   stops after the app and dSYM. It uploads the unsigned app.
+2. `sign-and-notarize` (the main-only `release` environment, the owner approves)
+   checks out main, not the prep branch, and runs only
+   `scripts/release/sign-release.sh`, notarytool, `fetch-sparkle-tools.sh`,
+   `generate-sparkle-appcast.sh`, `sign-appcast.sh` and the cask edit. It never
+   runs `build.sh`, `build-beta.sh`, `build-deps.sh` or `swift`. It signs the
+   app, builds and signs the DMG, notarizes and staples it, builds the appcast
+   item and delta updates, merges them into the feed published with the previous
+   release, and signs the feed with the Sparkle EdDSA key.
+3. `verify-candidate` (no environment, no secrets) opens the signed DMG and runs
+   the packaged-app smoke, the privacy sweep and the post-DMG audit against the
+   generated `appcast.xml`. Only if it passes does the
+   `Transcripted-<version>-release-candidate` artifact exist.
+
+`build-beta.sh` and `sign-release.sh` share `scripts/entrypoints/lib/release-package.sh`
+for signing and the DMG, so a local build and a shipped one are signed by the
+same functions. A contract test (`Tests/CIWorkflowContractTests.swift`) fails if
+the build or verify job gains a secret or environment, or if the signing job
+starts running a build script. The owner's Mac has no notarytool profile, so a
+local `build-beta.sh` only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
 
 1. Branch off `origin/main` and run
    `python3 scripts/release/bump-release-version.py --version <version>`. The
@@ -234,11 +257,24 @@ only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
    then approve the `release` environment deployment. Always dispatch with
    `--ref main`: the signing secrets live in the main-only `release`
    environment, and the workflow file that runs is the one on the dispatch ref.
-3. Download the artifact, publish GitHub release `v<version>` with the DMG and
-   any `.delta` files, and tag `source_ref` (not the run's head SHA).
-4. Land the appcast, the cask and a new
-   `Tests/Fixtures/release-health-github-release-<version>.json` on main in one
-   PR (#1863 is the example).
+3. Download the artifact and publish GitHub release `v<version>` with the DMG,
+   any `.delta` files and `build/appcast.xml`, and tag `source_ref` (not the
+   run's head SHA). Create it as a draft, then flip it, so `releases/latest`
+   never points at a release that has no feed:
+   `gh release create v<version> --draft --target <source_ref sha> <dmg> build/appcast.xml $(find build/sparkle-deltas -name '*.delta')`
+   then `gh release edit v<version> --draft=false --latest`. Never mark a
+   shipping release as a prerelease: `releases/latest` skips prereleases, so
+   installs would keep reading the previous feed.
+4. Run `bash scripts/release/verify-sparkle-release.sh <version>` (it fetches
+   the live feed through the same redirect Sparkle follows). For the first
+   release on the new feed only, also run
+   `scripts/release/freeze-legacy-appcast.py` ("Legacy feed" in
+   `docs/sparkle-updates.md`). Land the cask, a new
+   `Tests/Fixtures/release-health-github-release-<version>.json` and (first
+   new-feed release only) the freeze's two files on main in one change (#1863
+   is the example). Until the freeze lands, installs older than this release
+   keep reading `docs/appcast.xml` and see no update. No release step commits an appcast to main any
+   more.
 5. Sync and deploy the website. It's the separate repo
    `r3dbars/transcripted-webapp` (clone at `~/transcripted-webapp`, Cloudflare
    Pages project `transcripted-web`); its README has the sync and deploy
@@ -259,9 +295,9 @@ Before you publish a user-facing release note, sanity-check the release state:
 - run `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.62.json --write-report build/nightly-security-report.json` (use the fixture that matches `CFBundleShortVersionString` in `Info.plist`; an older fixture fails the gate on purpose, and `.agents/test-matrix.yml` names the current one) before a preparatory version bump so bundle version fields, the latest appcast item, and the Homebrew cask cannot silently drift
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
-- if `docs/appcast.xml` still points at the older release, say plainly that existing installs will not discover the new build in-app yet
-- run `python3 scripts/release/mark-appcast-critical.py --check`: builds 1.1.22-1.1.62 only show an update window when the newest appcast item is marked critical for them (see `docs/sparkle-updates.md`, "Reaching people on old versions")
-- verify live release truth separately from source truth: live `/appcast.xml`, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
+- if the latest release has no `appcast.xml` asset, or its feed still lists the older release, say plainly that existing installs will not discover the new build in-app yet
+- check the critical marker: builds 1.1.22-1.1.62 only show an update window when the newest appcast item is marked critical for them. The workflow input `mark_critical_for_old_builds` marks it before the feed is signed, and the run warns when the previous item was marked and this one is not (see `docs/sparkle-updates.md`, "Reaching people on old versions")
+- verify live release truth separately from source truth: the live feed (`releases/latest/download/appcast.xml`), the website's `/appcast.xml` route, live `/download`, live `/download/latest.dmg`, crawler-facing release text, and Cloudflare Pages deployment status should all match the intended release before launch or outreach claims
 - run `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json` before publishing release notes or PR text that summarize QA, support, or observability work
 - if you want a clean starting point, use `docs/release-notes-template.md`
 
@@ -273,8 +309,12 @@ python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
 ```
 
-The live surface gate compares the committed appcast against the live appcast,
+The live surface gate compares the latest appcast item against the live appcast,
 download routes, GitHub release asset size/digest, and Homebrew cask checksum.
+It still reads the latest item from `docs/appcast.xml`, which the legacy-feed
+freeze turns into a fixed final entry, so it needs to read the release-asset feed
+before the second release on the new feed (see "Not done yet" in
+`docs/sparkle-updates.md`).
 
 After a packaging build, add local dSYM verification:
 
@@ -394,7 +434,7 @@ That smoke checks local app/package evidence only: app version/config parity,
 Sparkle feed URL/public key/update flags, signing, bundled helper/framework
 presence, dSYM UUID match, versioned DMG readability, optional menu bar UI, and
 local log privacy patterns. It does not notarize, publish, register Sentry
-releases, update `docs/appcast.xml`, or update the Homebrew cask. If the UI
+releases, upload an appcast, or update the Homebrew cask. If the UI
 portion is blocked by Accessibility/TCC, the result is incomplete/yellow rather
 than green.
 
@@ -407,7 +447,7 @@ than green.
 - `codesign --verify --deep --strict` passes for the `.app`
 - the DMG is signed when a Developer ID identity is available
 - notarized runs staple a ticket, pass `spctl` checks for the app, and pass `xcrun stapler validate` for the DMG
-- the release process updates `docs/appcast.xml` if users should receive the build through Sparkle
+- the release process uploads the signed `appcast.xml` as an asset of the GitHub release if users should receive the build through Sparkle
 
 Some local `spctl -t open` checks against a stapled DMG can still report
 `source=Insufficient Context`. Treat a successful `xcrun stapler validate` on

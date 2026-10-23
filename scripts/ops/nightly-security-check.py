@@ -1047,12 +1047,21 @@ def first_header_value(headers: str, name: str) -> str:
     return match.group(1).strip() if match else ""
 
 
-def live_appcast_urls(manifest: dict) -> list[str]:
+RELEASE_ASSET_FEED_SUFFIX = "/releases/latest/download/appcast.xml"
+
+
+def live_appcast_urls(manifest: dict, root: Path | None = None) -> list[str]:
+    """Feed URLs installed apps use. The release-asset feed only exists once the
+    first release on it is out, which scripts/release/freeze-legacy-appcast.py
+    records; before that, fetching it would only report a 404."""
+    feed_is_live = root is not None and (root / "config/release/legacy-appcast-freeze.json").is_file()
     urls: list[str] = []
     for candidate in (
         manifest["expected_info_plist"].get("SUFeedURL", ""),
         manifest["live_release_surfaces"].get("appcast", ""),
     ):
+        if candidate.endswith(RELEASE_ASSET_FEED_SUFFIX) and not feed_is_live:
+            continue
         if candidate and candidate not in urls:
             urls.append(candidate)
     return urls
@@ -1076,7 +1085,7 @@ def check_live_release_surfaces(root: Path, manifest: dict, enabled: bool) -> li
         ]
 
     findings: list[dict] = []
-    for live_appcast_url in live_appcast_urls(manifest):
+    for live_appcast_url in live_appcast_urls(manifest, root):
         result = curl_stdout(root, ["-fsSL", live_appcast_url])
         if result.returncode != 0:
             findings.append(

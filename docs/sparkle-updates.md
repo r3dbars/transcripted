@@ -8,14 +8,18 @@ generated appcast entry for that release should advertise the same 26+ floor.
 Future agents should treat this as a release requirement:
 
 - if a build is meant to reach existing users through the app's updater, the
-  release is not done until `docs/appcast.xml` has been updated and pushed to
-  the branch that serves the live feed
+  release is not done until its signed `appcast.xml` is an asset of the GitHub
+  release that is marked latest. Nothing commits an appcast to main any more;
+  `docs/appcast.xml` is the frozen legacy feed ("Legacy feed" below)
 - uploading a DMG to GitHub Releases by itself is not enough for current
   installs to discover the update
 
 ## What is configured in the app
 
-- `Info.plist` points Sparkle at `https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml`
+- `Info.plist` points Sparkle at `https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml`
+  (see "Feed hosting" below)
+- `SUVerifyUpdateBeforeExtraction` is on, so Sparkle checks an update archive's
+  EdDSA signature before it unpacks anything
 - `SUEnableAutomaticChecks` is enabled by default
 - `SUScheduledCheckInterval` is set to 4 hours so automatic checks happen
   more often than Sparkle's default daily cadence
@@ -142,9 +146,149 @@ the output directory. It does not contact the live feed, download an update,
 verify a signature, install, relaunch, publish, update Homebrew, or prove an
 existing installed app can upgrade.
 
+## Feed hosting
+
+The feed installed apps read is the `appcast.xml` asset of the latest GitHub
+release. GitHub answers `releases/latest/download/appcast.xml` with a 302 to
+`releases/download/v<latest>/appcast.xml`, which answers with another 302 to its
+asset host (`release-assets.githubusercontent.com` as of 2026-10-17; checked
+with `curl -sIL` against the 1.1.72 DMG). Sparkle fetches feeds and archives
+through `URLSession`, whose default is to follow redirects, and the app sets
+nothing that turns that off. Every shipped update already downloads its DMG or
+delta from a `releases/download/...` URL through that second redirect, so that
+hop is proven for Sparkle's download path; the feed fetch and the extra
+`latest` hop are the new part.
+`verify-sparkle-release.sh` fetches the feed with `curl -L`, which follows it the
+same way. No Sparkle build has fetched this feed URL yet: the first real upgrade
+(see "Not done yet") is the proof.
+
+Why not main: a feed on main is edited by a normal commit, so anyone who can
+land a commit there can redirect every install to a different archive. A release
+asset only changes when someone with release permissions uploads one, and the
+file is signed.
+
+What the release flow does with it:
+
+- the Release Candidate workflow downloads the `appcast.xml` of the current
+  latest release (the first release on this feed starts from the legacy
+  `docs/appcast.xml` instead), merges the new item into it with
+  `generate-sparkle-appcast.sh`, optionally marks it critical, signs it with
+  `sign-appcast.sh`, and uploads it in the candidate artifact as
+  `build/appcast.xml`
+- the owner uploads it to the release with the DMG and deltas, as a draft that
+  is flipped to published and latest afterwards, so `releases/latest` never
+  holds a release with no feed
+- every release carries the full history, so the latest release's file is the
+  whole feed. Items are never edited after publishing; a bad item is fixed by a
+  new release
+
+Prereleases and betas: `releases/latest` skips prereleases and drafts, so a
+build published as a prerelease is invisible to this feed. Transcripted has no
+separate Sparkle beta channel (no `allowedChannels`, no channel tags in the
+feed), so there is nothing to lose today. Do not publish a shipping release as a
+prerelease. If a beta channel is wanted later, put it in the same feed with
+`<sparkle:channel>` on the beta items and set `allowedChannels` in the app's
+updater delegate for opted-in users; that keeps one URL and needs no second
+feed.
+
+## Signed feed
+
+`sign-appcast.sh` runs `sign_update` on the finished `appcast.xml`, which embeds
+an EdDSA signature as a trailing `<!-- sparkle-signatures: ... -->` comment (and
+a warning comment), then reads it back with the same key. Any edit after that,
+including `mark-appcast-critical.py`, invalidates it, so signing is the last
+step. The signature is made with the same key whose public half is
+`SUPublicEDKey`.
+
+Sparkle 2.9.1 is the pinned version (`build-deps.sh`). What it does and does not
+give us:
+
+- the framework has both `SUVerifyUpdateBeforeExtraction` (Sparkle 2.7.3+) and
+  `SURequireSignedFeed` (Sparkle 2.9+), plus `SUSignedFeedFailureExpirationInterval`
+  (found in the vendored binary's strings; its headers are not shipped in
+  `deps-frameworks/`, and Sparkle's customization docs describe all three)
+- `SUVerifyUpdateBeforeExtraction` is on. `SURequireSignedFeed` is **not** on
+  yet, on purpose. Sparkle's docs say that with it on, external release notes
+  must be signed too, and every item's `sparkle:releaseNotesLink` points at a
+  GitHub release page (`releases/tag/v<version>`), which is HTML GitHub renders
+  and nobody can sign. How Sparkle 2.9.1 treats an unsigned release-notes link
+  under that key is not documented, so turning it on today could break the
+  update window on the first build that has it. To turn it on: switch new items
+  to embedded release notes (`<description>`) or a static, signed notes file,
+  add the key to `Info.plist`, and prove it with the staged upgrade test
+  (`docs/staged-sparkle-update-test.md`) before the release ships. The key only
+  affects builds that carry it, so it can land in any later release.
+- with `SURequireSignedFeed` off, nothing here proves Sparkle checks the
+  embedded feed signature, or refuses an unsigned or stripped feed. Don't claim
+  either. The signature still pays off: `sign-appcast.sh` and
+  `verify-sparkle-release.sh` check it, and it is in place for the day the key
+  is on. Sparkle's docs also say that once the key is on, a feed that keeps
+  failing validation shows updates again after 20 days
+  (`SUSignedFeedFailureExpirationInterval`), as a failsafe for a lost key
+- archives and deltas are already EdDSA-signed in the feed; with
+  `SUVerifyUpdateBeforeExtraction` on, that check happens before the archive is
+  unpacked
+- builds before the one that introduces this `Info.plist` keep the old behavior,
+  and they read the legacy feed, which is why it is frozen and not deleted
+
+## Legacy feed
+
+Installs older than the first build with the new `SUFeedURL` still read
+`https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml`.
+They need one last hop. When the first release on the new feed ships:
+
+1. publish it as above, with its signed `appcast.xml`
+2. run, once, from a checkout whose `Info.plist` is that release's:
+
+```bash
+python3 scripts/release/freeze-legacy-appcast.py \
+    --new-appcast build/appcast.xml --info-plist Info.plist [--mark-critical]
+```
+
+   It copies the release's feed item to the top of `docs/appcast.xml`, optionally
+   marks it critical for 1.1.22-1.1.62 (same owner decision as "Reaching people
+   on old versions"), and writes `config/release/legacy-appcast-freeze.*`
+   with the file's sha256. It refuses unless the item is the version in that
+   `Info.plist`, that `Info.plist` has the new `SUFeedURL`, the item is signed,
+   and the freeze file does not exist yet. `--dry-run` shows the plan.
+3. commit both files and land them on main in the same change as that release's
+   `Info.plist` version bump and cask (release step 4 in
+   `docs/release-packaging.md`); `ReleaseMetadataContractTests` expect the
+   legacy feed's newest item to match `Info.plist` until the freeze record
+   exists. That push is publishing and needs the owner's explicit go. Old installs see the new item on their next check,
+   update to the build that reads the new feed, and never read the legacy file
+   again.
+
+After that nothing may edit `docs/appcast.xml`. `scripts/dev/check-known-traps.py`
+(`legacy-appcast`) fails if its hash no longer matches the freeze file or if the
+freeze file differs from `origin/main`. `generate-sparkle-appcast.sh` and
+`sign-appcast.sh` refuse to write to it. Deleting the file would strand every
+install that has not updated yet, so it stays.
+
+Nothing is frozen yet: the first new-feed release does not exist, and the freeze
+entry cannot be written before it. Until then `docs/appcast.xml` is still the
+live feed for every shipped build.
+
+## Not done yet
+
+- no release has shipped on the new feed, and no old install has been taken
+  through the hop. The real proof is an RC, a staged upgrade from an old build
+  against the published feed, and a check that the signed feed and redirect work
+  from a clean machine. None was run here.
+- `scripts/ops/nightly-security-check.py` (live release surfaces),
+  `scripts/ops/release-health-card.py` and `scripts/ops/release-watch.py` still
+  read "latest release" from `docs/appcast.xml`. Once it is frozen they report
+  the frozen entry. They need to read the release-asset feed before the second
+  release on the new feed. Until the freeze exists the nightly check skips the
+  new feed URL, since it would only 404.
+- the website's `/appcast.xml` route (in `r3dbars/transcripted-webapp`) should
+  point at the release-asset feed after the first release.
+
 ## Release flow
 
-1. Build a signed/notarized Transcripted archive, typically with `build-beta.sh`.
+1. Build a signed/notarized Transcripted archive with the Release Candidate
+   workflow (`docs/release-packaging.md`). A local `build-beta.sh` only makes
+   un-notarized test DMGs.
 2. Before publishing, run the local packaged app smoke:
 
 ```bash
@@ -153,54 +297,60 @@ swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke
 
 This checks the built app's Sparkle feed URL, public key, automatic update
 flags, dSYM, DMG, optional menu bar launch, and local log privacy without
-uploading or modifying `docs/appcast.xml`.
+uploading an appcast.
 3. Run the read-only post-DMG audit so the expected GitHub asset URL, appcast,
    Homebrew cask, website/download routes, and release-health follow-ups are
    visible before anything is published:
 
 ```bash
-python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
+python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg --appcast build/appcast.xml
 ```
 
 Pre-publish GitHub, appcast, Homebrew, Sentry, and website rows may be
 `PENDING`. That is the point: they stay explicit until the release surface is
 actually live.
-4. Put the release archive in a local updates folder, plus the DMGs of the
-   last few releases (see "Delta updates" below).
-5. Run:
+4. The workflow's signing job puts the release archive and the DMGs of the
+   last few releases (see "Delta updates" below) in an updates folder.
+5. It runs, against a scratch copy of the current feed:
 
 ```bash
-bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
+REPO_APPCAST_PATH=/path/to/feed-copy/appcast.xml INFO_PLIST_PATH=<shipped Info.plist> \
+    bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder
 ```
 
 6. The script keeps the current feed history, takes the newest generated item,
    checks it is the version in `Info.plist`, rewrites its enclosure and delta
    URLs to the matching GitHub release assets, aligns the minimum macOS version
-   with `Info.plist`, and then writes the merged result back to
-   `docs/appcast.xml`. It lists the delta files to upload in
-   `<updates-folder>/sparkle-deltas.txt`.
+   with `Info.plist`, points the feed's self link at the release-asset URL, and
+   then writes the merged result back to the scratch copy. It has no default
+   feed path and refuses `docs/appcast.xml` once that is frozen. It lists the
+   delta files to upload in `<updates-folder>/sparkle-deltas.txt`.
    - If the owner said yes to reaching old versions (see "Reaching people on old
-     versions" below), run `python3 scripts/release/mark-appcast-critical.py`. The
-     tool's only change is one `<sparkle:criticalUpdate ... />` line in the new item.
-     Either way, run `python3 scripts/release/mark-appcast-critical.py --check`: it
-     fails if the previous release was marked and this one isn't.
-7. Upload the release archive and every delta file to the same GitHub release.
-   The Release Candidate workflow artifact holds the deltas under
-   `build/sparkle-deltas/`; in the local flow they sit in the updates folder,
-   named in `sparkle-deltas.txt`. From the downloaded artifact folder:
-   `gh release create v<version> build/Transcripted-<version>.dmg $(find build/sparkle-deltas -name '*.delta')`
-   (the `find` keeps the command working in bash and zsh when there are no
-   deltas). Any publish helper script must upload the deltas too; a DMG-only
-   upload leaves every delta URL a 404, so every client silently downloads the
-   full DMG again.
-8. Verify the published update path:
+     versions" below), dispatch with `mark_critical_for_old_builds=true`; the
+     workflow runs `python3 scripts/release/mark-appcast-critical.py --appcast <feed>`.
+     Either way it runs `--check` and warns if the previous release was marked
+     and this one is not.
+   - `scripts/release/sign-appcast.sh <feed>` signs the feed last.
+7. Upload the release archive, every delta file and the signed feed to the same
+   GitHub release. The Release Candidate workflow artifact holds the deltas under
+   `build/sparkle-deltas/` and the feed at `build/appcast.xml`. From the
+   downloaded artifact folder, create the release as a draft, then publish it:
+   `gh release create v<version> --draft build/Transcripted-<version>.dmg build/appcast.xml $(find build/sparkle-deltas -name '*.delta')`
+   then `gh release edit v<version> --draft=false --latest` (the `find` keeps the
+   command working in bash and zsh when there are no deltas). Any publish helper
+   script must upload the deltas and the feed too; a DMG-only upload leaves
+   every delta URL a 404 and the feed on the previous release.
+8. Verify the published update path (it fetches the live feed through the
+   redirect; `VERIFY_APPCAST_FILE=build/appcast.xml` checks the artifact copy
+   before publishing):
 
 ```bash
 bash scripts/release/verify-sparkle-release.sh <version>
 ```
 
-9. Commit and push the updated `docs/appcast.xml`.
-10. After the final appcast push and any expected Homebrew/Sentry release
+9. For the first release on the new feed only, freeze the legacy feed ("Legacy
+   feed" above).
+10. After the release is published and any expected Homebrew/Sentry release
    surfaces are live, run the strict live-surface gate:
 
 ```bash
@@ -209,12 +359,12 @@ python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
 ```
 
 That live gate also checks the GitHub release asset size/digest against the
-committed appcast and Homebrew cask.
+feed and Homebrew cask.
 
-If the final push has not happened yet, Sparkle clients will keep seeing the old
-version.
+If the release is not the latest one, or has no `appcast.xml` asset, Sparkle
+clients keep seeing the previous version.
 
-Do not replace `docs/appcast.xml` wholesale with Sparkle's raw generated output.
+Do not replace the feed wholesale with Sparkle's raw generated output.
 That can drop older feed history and leave the latest item pointing at the wrong
 URL shape instead of the real GitHub release asset.
 
@@ -232,7 +382,7 @@ can mark the newest item critical for anything older:
 
 ```bash
 python3 scripts/release/mark-appcast-critical.py --dry-run   # show what it would do
-python3 scripts/release/mark-appcast-critical.py             # write docs/appcast.xml
+python3 scripts/release/mark-appcast-critical.py             # write docs/appcast.xml (frozen legacy feed only; releases use --appcast <feed>)
 python3 scripts/release/mark-appcast-critical.py --check     # state; fails if the previous release is marked and the newest isn't
 python3 scripts/release/mark-appcast-critical.py --remove    # undo
 ```

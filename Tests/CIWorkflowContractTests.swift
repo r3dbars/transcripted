@@ -209,6 +209,77 @@ func testCIWorkflowContract() {
         assertEqual(occurrences(of: timingGuard, in: clipboardTests), expectedTimingProofs.count, "each timing proof has exactly one skip guard")
         assertEqual(occurrences(of: "    SKIPPED: wall-clock timing proof", in: clipboardTests), expectedTimingProofs.count, "each timing proof reports its skip")
     }
+
+    // release-candidate.yml: the job that compiles repository code never holds
+    // signing, notarization or Sparkle secrets, and the job that holds them
+    // never runs a build script.
+    let releaseText = (try? String(contentsOf: repoFixtureURL(".github/workflows/release-candidate.yml"), encoding: .utf8)) ?? ""
+    let release = WorkflowNode.parse(releaseText)
+
+    runSuite("CI workflow contract - release candidate splits build from signing") {
+        assertEqual(
+            release.child("jobs")?.children.map(\.key) ?? [],
+            ["build-unsigned", "sign-and-notarize", "verify-candidate"],
+            "the release candidate should build unsigned, sign in the release environment, then verify"
+        )
+        assertEqual(release.child("permissions")?.child("contents")?.scalar, "read", "the workflow token should stay read-only")
+
+        for name in ["build-unsigned", "verify-candidate"] {
+            let job = release.job(name)
+            assertNotNil(job, "\(name) should exist")
+            assertNil(job?.child("environment"), "\(name) runs repository code and must not use the release environment")
+            assertFalse(job.map(workflowMentionsSecret) ?? true, "\(name) must not reference any secret")
+        }
+
+        let sign = release.job("sign-and-notarize")
+        assertEqual(sign?.child("environment")?.scalar, "release", "signing happens only in the release environment")
+        assertEqual(sign?.child("needs")?.scalar, "build-unsigned", "signing consumes the unsigned build")
+        let signCommands = (sign?.commands ?? []).joined(separator: "\n")
+        for forbidden in ["build.sh", "build-beta.sh", "build-deps.sh", "swift build", "swift run", "swift test", "swiftc"] {
+            assertFalse(signCommands.contains(forbidden), "the signing job must not run \(forbidden)")
+        }
+        for required in ["sign-release.sh", "notarytool", "generate-sparkle-appcast.sh", "sign-appcast.sh", "fetch-sparkle-tools.sh"] {
+            assertTrue(signCommands.contains(required), "the signing job should run \(required)")
+        }
+        assertTrue(
+            signCommands.contains("config/release/legacy-appcast-freeze.json"),
+            "once the legacy feed is frozen, a latest release without appcast.xml must fail the run instead of restarting from docs/appcast.xml"
+        )
+
+        let build = release.job("build-unsigned")
+        let buildCommands = (build?.commands ?? []).joined(separator: "\n")
+        assertTrue(buildCommands.contains("build-beta.sh"), "the build job should run build-beta.sh")
+        let buildEnv = build?.descendants(named: "env").flatMap(\.children) ?? []
+        assertEqual(
+            buildEnv.first { $0.key == "TRANSCRIPTED_UNSIGNED_APP_ONLY" }?.scalar,
+            "1",
+            "build-beta.sh must stop before signing in the build job"
+        )
+        for forbidden in ["sign-release.sh", "notarytool", "sign-appcast.sh", "security import", "security create-keychain"] {
+            assertFalse(buildCommands.contains(forbidden), "the build job must not sign or notarize (\(forbidden))")
+        }
+    }
+
+    runSuite("CI workflow contract - release candidate never publishes or commits the feed") {
+        let allCommands = (release.child("jobs")?.children ?? []).flatMap(\.commands).joined(separator: "\n")
+        for forbidden in ["gh release create", "gh release upload", "gh release edit", "git push", "git commit", "gh workflow run"] {
+            assertFalse(allCommands.contains(forbidden), "the release candidate workflow must not run \(forbidden)")
+        }
+        let uploads = release.descendants(named: "path").compactMap(\.scalar) + release.descendants(named: "path").flatMap(\.block)
+        assertTrue(
+            uploads.contains { $0.contains("build/appcast.xml") },
+            "the generated appcast.xml should travel in the candidate artifact"
+        )
+        assertFalse(
+            uploads.contains { $0.contains("docs/appcast.xml") },
+            "docs/appcast.xml is the frozen legacy feed and must not be part of a candidate"
+        )
+    }
+}
+
+private func workflowMentionsSecret(_ node: WorkflowNode) -> Bool {
+    if (node.scalar ?? "").contains("secrets.") || node.block.contains(where: { $0.contains("secrets.") }) { return true }
+    return node.children.contains(where: workflowMentionsSecret)
 }
 
 /// A deliberately small indentation-based reader for the YAML subset swift-ci.yml

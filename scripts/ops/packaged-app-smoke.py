@@ -441,12 +441,24 @@ def build_checks(args: argparse.Namespace) -> tuple[list[Check], dict[str, Any]]
         appcast = appcast_metadata(appcast_path)
         add(checks, "appcast-parse", "PASS", "Local appcast is parseable", normalize_path(appcast_path, root), "Latest item loaded.")
         feed_url = str(app_info.get("SUFeedURL", "")).strip()
-        if appcast["self_url"] == feed_url:
+        # Since the feed moved to a release asset, docs/appcast.xml is the frozen
+        # legacy feed for old installs. When that legacy file is the one being
+        # read, its self link and version no longer have to match the packaged
+        # app. The release workflow's generated appcast.xml carries the new self
+        # link, so passing it still gets the full self-link and version checks.
+        feed_is_release_asset = (
+            feed_url.endswith("/releases/latest/download/appcast.xml") and appcast["self_url"] != feed_url
+        )
+        if feed_is_release_asset:
+            add(checks, "appcast-feed-url", "PASS", "Packaged SUFeedURL is the latest release's appcast.xml asset", feed_url, "The appcast read here is the legacy feed (docs/appcast.xml), so it is not compared; pass the generated appcast.xml to compare it.")
+        elif appcast["self_url"] == feed_url:
             add(checks, "appcast-feed-url", "PASS", "Appcast self link matches packaged SUFeedURL", appcast["self_url"], "Feed URL is coherent.")
         else:
             add(checks, "appcast-feed-url", "FAIL", "Appcast self link matches packaged SUFeedURL", appcast["self_url"] or "missing", "Sparkle clients may read a different feed than the committed appcast.")
 
-        if appcast["version"] == version:
+        if feed_is_release_asset:
+            pass
+        elif appcast["version"] == version:
             add(checks, "appcast-version", "PASS", "Latest appcast version matches packaged app", appcast["version"], "Existing installs can discover this version once the feed is pushed live.")
         else:
             add(checks, "appcast-version", "WARN", "Latest appcast version matches packaged app", appcast["version"] or "missing", f"Packaged app is {version}; existing installs will not discover it in-app until docs/appcast.xml is updated.")
@@ -593,7 +605,7 @@ def render_markdown(payload: dict[str, Any]) -> str:
             "## Manual Leftovers",
             "",
             "- A non-notarized or unstapled DMG is expected yellow for SKIP_NOTARIZATION=1.",
-            "- Existing installs will not discover a new version in-app until docs/appcast.xml is updated and pushed live.",
+            "- Existing installs will not discover a new version in-app until the release is published with its signed appcast.xml asset.",
             "- Real install/upgrade proof still needs mounting/copying the DMG, Sparkle check/install on an existing app, and Homebrew install/upgrade when publishing.",
             "",
             "## Checks",
