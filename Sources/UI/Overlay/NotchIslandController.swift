@@ -45,6 +45,12 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
 
     var dictation: NotchIslandDictationContent?
     var meeting: NotchIslandMeetingContent?
+    /// The meeting warning drop is the one on screen, not waiting behind a
+    /// dictation message or an in-progress take. The overlay's auto-stop
+    /// countdown only ticks while this is true.
+    var isMeetingPromptOnScreen: Bool {
+        NotchIslandPresentation.meetingPromptIsOnScreen(dictation: dictation, meeting: meeting)
+    }
     private var callPrompt: NotchIslandCallPromptContent?
     private var speakerReview: NotchIslandSpeakerReviewContent?
     private var reportedSpeakerReviewVisible: Bool?

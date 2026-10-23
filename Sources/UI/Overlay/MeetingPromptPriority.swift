@@ -108,9 +108,40 @@ enum MeetingInactivityCountdownExpiry: Equatable {
 
     static func resolve(
         isCallEnded: Bool,
-        automaticStopAllowed: Bool
+        automaticStopAllowed: Bool,
+        promptVisible: Bool
     ) -> Self {
         guard automaticStopAllowed else { return .noAutomaticStop }
-        return isCallEnded ? .confirmCallEndedThenStop : .stop
+        // Only the 30 s Meeting ended? countdown requires a visible prompt.
+        // The five-minute No sound stop is the forgotten-recording backstop
+        // and still fires while a dictation covers the drop.
+        if isCallEnded {
+            return promptVisible ? .confirmCallEndedThenStop : .noAutomaticStop
+        }
+        return .stop
+    }
+}
+
+/// Whether the audio-inactivity / call-end countdown may tick.
+///
+/// The 30 s Meeting ended? countdown pauses while a dictation covers the
+/// drop and restarts when it comes back, so Keep recording is actually
+/// seen. The five-minute No sound stop does not pause: it is the cap
+/// for a covered prompt, not a second hold timer.
+enum MeetingInactivityCountdownVisibility: Equatable {
+    case hold
+    case decrement
+    case restart(seconds: Int)
+
+    static func step(
+        wasVisible: Bool,
+        isVisible: Bool,
+        fullSeconds: Int,
+        pauseWhileHidden: Bool
+    ) -> Self {
+        guard pauseWhileHidden else { return .decrement }
+        guard isVisible else { return .hold }
+        if !wasVisible { return .restart(seconds: max(1, fullSeconds)) }
+        return .decrement
     }
 }
