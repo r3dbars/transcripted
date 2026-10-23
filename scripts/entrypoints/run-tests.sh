@@ -676,6 +676,7 @@ APP_SOURCES=(
     "Sources/Meeting/SpeakerPeopleReviewPolicy.swift"
     "Sources/TranscriptedCore/Storage/TranscriptFormatOptions.swift"
     "Sources/Support/SpeakerNameSelectionPolicy.swift"
+    "Sources/Support/SpeakerNameTypingSuggestionPolicy.swift"
     "Sources/Support/SpeakerReviewUpdate.swift"
     "Sources/Meeting/SpeakerReviewBridge.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerReviewPrioritizer.swift"
