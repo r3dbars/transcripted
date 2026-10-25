@@ -165,7 +165,8 @@ final class ClipboardRestoringTextPaster {
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait,
         endWaitOnLikelyPaste: Bool = false,
-        onLateConfirmation: (@MainActor (ClipboardPasteConfirmationDiagnostic) -> Void)? = nil
+        onLateConfirmation: (@MainActor (ClipboardPasteConfirmationDiagnostic) -> Void)? = nil,
+        snapshotRead: ClipboardSnapshotReadContext = .production()
     ) -> TextPasteOutcome {
         let operation = operationEpoch.begin()
         latestStartedOperation = operation
@@ -255,19 +256,11 @@ final class ClipboardRestoringTextPaster {
         let accessibilityConfirmation = confirmationSource?() ?? FocusedTextPasteConfirmation.capture()
         accessibilityCaptureMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - accessibilityStartedAt) * 1_000).rounded()))
         guard isCurrentOperation() else { return cancelledOutcome }
-        let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
-        let snapshotChangeCount = pasteboard.changeCount
-        let savedItems = snapshotPasteboardItems(from: pasteboard)
-        clipboardSnapshotMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - snapshotStartedAt) * 1_000).rounded()))
-        // Lazy clipboard providers can run while materializing a snapshot. Do
-        // not overwrite a newer clipboard with an older restore snapshot.
+        let snapshot = snapshotClipboardForPaste(from: pasteboard, read: snapshotRead)
+        clipboardSnapshotMS = snapshot.snapshotMS
         guard isCurrentOperation() else { return cancelledOutcome }
-        guard savedItems.isComplete, pasteboard.changeCount == snapshotChangeCount else {
-            return .failed(
-                "Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.",
-                reason: .clipboardSnapshotIncomplete
-            )
-        }
+        if let refusal = snapshot.refusal { return refusal }
+        let savedItems = snapshot.savedItems
         let pasteToken = pasteEpoch.begin()
         var temporaryChangeCount = 0
         var restoreInstalled = false

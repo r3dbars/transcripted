@@ -282,6 +282,13 @@ enum TranscriptedConstants {
     /// to a dictation stop regardless of how many items and types it holds.
     static let clipboardSnapshotMaxTotalBytes: Int = 64 * 1024 * 1024
 
+    /// How long paste-back will wait for one clipboard snapshot, including
+    /// a promised or lazy representation. A stalled provider must not hang
+    /// delivery; past this the snapshot is incomplete with cause `timeout`
+    /// and the user's clipboard is left untouched. Working reads finish in
+    /// milliseconds; this stays well under Sentry's 5 s hang threshold.
+    static let clipboardSnapshotReadTimeout: TimeInterval = 1.0
+
     // MARK: - Dictation Auto Enter
 
     /// Pause after a proven paste before pressing Enter. Auto Enter only runs

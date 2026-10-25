@@ -6,6 +6,96 @@
 import AppKit
 import Foundation
 
+/// One representation from a clipboard snapshot: the bytes, or a timeout
+/// before they arrived. Tests inject a reader; production bounds the wait.
+enum ClipboardSnapshotTypeRead: Equatable {
+    case value(Data?)
+    case timedOut
+}
+
+/// Clock and reader used while snapshotting the user's clipboard. Tests
+/// inject both so a stalled promised item can be simulated without sleeping.
+struct ClipboardSnapshotReadContext {
+    var timeout: TimeInterval
+    var now: () -> TimeInterval
+    var readType: (NSPasteboardItem, NSPasteboard.PasteboardType, TimeInterval) -> ClipboardSnapshotTypeRead
+
+    static func production() -> ClipboardSnapshotReadContext {
+        ClipboardSnapshotReadContext(
+            timeout: TranscriptedConstants.clipboardSnapshotReadTimeout,
+            now: { ProcessInfo.processInfo.systemUptime },
+            readType: ClipboardSnapshotReader.readPasteboardType
+        )
+    }
+}
+
+enum ClipboardSnapshotReader {
+    /// Wait up to `remaining` for `fetch`. A wait that never finishes is a
+    /// timeout; the fetch is not treated as a nil read. Tests inject `wait`.
+    static func read(
+        remaining: TimeInterval,
+        wait: (TimeInterval, @escaping () -> Void) -> Bool = waitOnSnapshotQueue,
+        fetch: @escaping () -> Data?
+    ) -> ClipboardSnapshotTypeRead {
+        guard remaining > 0 else { return .timedOut }
+        let box = ClipboardSnapshotFetchBox(fetch)
+        let finished = wait(remaining, box.run)
+        return finished ? .value(box.result) : .timedOut
+    }
+
+    static func readPasteboardType(
+        _ item: NSPasteboardItem,
+        type: NSPasteboard.PasteboardType,
+        remaining: TimeInterval
+    ) -> ClipboardSnapshotTypeRead {
+        read(remaining: remaining) { item.data(forType: type) }
+    }
+
+    /// Runs the fetch off the calling thread so a stalled promised item
+    /// cannot hold the main actor past the bound. The caller still waits
+    /// at most `remaining`, then treats the snapshot as incomplete.
+    static func waitOnSnapshotQueue(_ remaining: TimeInterval, work: @escaping () -> Void) -> Bool {
+        let group = DispatchGroup()
+        group.enter()
+        snapshotReadQueue.async {
+            work()
+            group.leave()
+        }
+        return group.wait(timeout: .now() + remaining) == .success
+    }
+}
+
+/// `@unchecked Sendable`: the fetch and its result stay on this box; the
+/// snapshot queue only calls `run`.
+private final class ClipboardSnapshotFetchBox: @unchecked Sendable {
+    private let fetch: () -> Data?
+    private let lock = NSLock()
+    private var fetched: Data??
+
+    var result: Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        return fetched ?? nil
+    }
+
+    init(_ fetch: @escaping () -> Data?) {
+        self.fetch = fetch
+    }
+
+    func run() {
+        let value = fetch()
+        lock.lock()
+        fetched = value
+        lock.unlock()
+    }
+}
+
+private let snapshotReadQueue = DispatchQueue(
+    label: "com.transcripted.clipboard-snapshot-read",
+    qos: .userInitiated,
+    attributes: .concurrent
+)
+
 extension ClipboardRestoringTextPaster {
     struct PasteboardSnapshot {
         let items: [[NSPasteboard.PasteboardType: Data]]
@@ -15,6 +105,14 @@ extension ClipboardRestoringTextPaster {
         /// item). Such a clipboard is restored right after a paste as before,
         /// but never held on to for later.
         var containsPrivacyMarker = false
+        /// Why an incomplete snapshot cannot be restored. Nil when complete.
+        var incompleteCause: ClipboardSnapshotCause? = nil
+    }
+
+    struct ClipboardSnapshotAttempt {
+        let savedItems: PasteboardSnapshot
+        let snapshotMS: Int
+        let refusal: TextPasteOutcome?
     }
 
     /// nspasteboard.org markers that say "don't keep this". Apps usually write
@@ -40,18 +138,35 @@ extension ClipboardRestoringTextPaster {
 
     func snapshotPasteboardItems(
         from pasteboard: any ClipboardPasteboard,
-        readData: (NSPasteboardItem, NSPasteboard.PasteboardType) -> Data? = { $0.data(forType: $1) }
+        timeout: TimeInterval = TranscriptedConstants.clipboardSnapshotReadTimeout,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        readType: @escaping (NSPasteboardItem, NSPasteboard.PasteboardType, TimeInterval) -> ClipboardSnapshotTypeRead
+            = ClipboardSnapshotReader.readPasteboardType
     ) -> PasteboardSnapshot {
         var isComplete = true
+        var incompleteCause: ClipboardSnapshotCause?
         // This runs synchronously on the stop-to-paste path, so bound the whole
         // snapshot as well as each representation: one pathological clipboard
-        // must not turn the stop into a multi-hundred-megabyte copy.
+        // must not turn the stop into a multi-hundred-megabyte copy, and a
+        // stalled promised item must not hang delivery.
         var totalBytes = 0
         var containsPrivacyMarker = false
-        let items: [[NSPasteboard.PasteboardType: Data]] = pasteboard.pasteboardItems?.map { item in
+        var timedOut = false
+        let started = now()
+        var items: [[NSPasteboard.PasteboardType: Data]] = []
+        for item in pasteboard.pasteboardItems ?? [] {
+            if timedOut { break }
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             var skippedTypes = 0
+            var itemCause: ClipboardSnapshotCause?
             for type in item.types {
+                let remaining = timeout - (now() - started)
+                if remaining <= 0 {
+                    timedOut = true
+                    skippedTypes += 1
+                    itemCause = ClipboardSnapshotCause.preferring(itemCause, .timeout)
+                    break
+                }
                 if Self.privacyMarkerTypes.contains(type) {
                     // Checked from the type list, before any data read, so a
                     // marker with no readable data still counts.
@@ -60,19 +175,34 @@ extension ClipboardRestoringTextPaster {
                 // Once full, avoid asking additional lazy providers to allocate
                 // data that cannot be retained. Individual provider fetches can
                 // still exceed the budget; NSPasteboard has no size preflight.
-                guard totalBytes < TranscriptedConstants.clipboardSnapshotMaxTotalBytes,
-                      let data = readData(item, type),
-                      data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
-                      totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
+                if totalBytes >= TranscriptedConstants.clipboardSnapshotMaxTotalBytes {
                     skippedTypes += 1
+                    itemCause = ClipboardSnapshotCause.preferring(itemCause, .tooLarge)
                     continue
                 }
-                // Keep empty privacy markers so a restored password stays
-                // marked as concealed for clipboard managers.
-                if !data.isEmpty || Self.privacyMarkerTypes.contains(type) {
-                    typeData[type] = data
-                    totalBytes += data.count
+                switch readType(item, type, remaining) {
+                case .timedOut:
+                    timedOut = true
+                    skippedTypes += 1
+                    itemCause = ClipboardSnapshotCause.preferring(itemCause, .timeout)
+                case .value(nil):
+                    skippedTypes += 1
+                    itemCause = ClipboardSnapshotCause.preferring(itemCause, .unreadable)
+                case .value(let data?):
+                    guard data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
+                          totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
+                        skippedTypes += 1
+                        itemCause = ClipboardSnapshotCause.preferring(itemCause, .tooLarge)
+                        continue
+                    }
+                    // Keep empty privacy markers so a restored password stays
+                    // marked as concealed for clipboard managers.
+                    if !data.isEmpty || Self.privacyMarkerTypes.contains(type) {
+                        typeData[type] = data
+                        totalBytes += data.count
+                    }
                 }
+                if timedOut { break }
             }
             // Dropping one heavy or unreadable representation (a screenshot's
             // TIFF next to its PNG) still restores the item, so it does not
@@ -81,14 +211,53 @@ extension ClipboardRestoringTextPaster {
             // user's clipboard, and that is the case paste-back refuses.
             if typeData.isEmpty, skippedTypes > 0 {
                 isComplete = false
+                incompleteCause = ClipboardSnapshotCause.preferring(incompleteCause, itemCause ?? .unreadable)
             }
-            return typeData
-        } ?? []
+            items.append(typeData)
+            if timedOut {
+                // A partial snapshot must not be restored: later items were
+                // never read, and writing it back would drop them.
+                isComplete = false
+                incompleteCause = .timeout
+                break
+            }
+        }
         return PasteboardSnapshot(
             items: items,
             isComplete: isComplete,
-            containsPrivacyMarker: containsPrivacyMarker
+            containsPrivacyMarker: containsPrivacyMarker,
+            incompleteCause: isComplete ? nil : incompleteCause
         )
+    }
+
+    /// Snapshot the pasteboard and refuse paste-back when it cannot be put
+    /// back later. Never clears or writes when the snapshot is incomplete.
+    func snapshotClipboardForPaste(
+        from pasteboard: any ClipboardPasteboard,
+        read: ClipboardSnapshotReadContext = .production()
+    ) -> ClipboardSnapshotAttempt {
+        let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
+        let snapshotChangeCount = pasteboard.changeCount
+        let savedItems = snapshotPasteboardItems(
+            from: pasteboard,
+            timeout: read.timeout,
+            now: read.now,
+            readType: read.readType
+        )
+        let snapshotMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - snapshotStartedAt) * 1_000).rounded()))
+        let refusal: TextPasteOutcome?
+        if !savedItems.isComplete {
+            let cause = savedItems.incompleteCause ?? .unreadable
+            refusal = .failed(cause.refusalMessage, reason: .clipboardSnapshotIncomplete(cause))
+        } else if pasteboard.changeCount != snapshotChangeCount {
+            refusal = .failed(
+                ClipboardSnapshotCause.changed.refusalMessage,
+                reason: .clipboardSnapshotIncomplete(.changed)
+            )
+        } else {
+            refusal = nil
+        }
+        return ClipboardSnapshotAttempt(savedItems: savedItems, snapshotMS: snapshotMS, refusal: refusal)
     }
 
     func restorePasteboardItems(
