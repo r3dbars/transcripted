@@ -85,28 +85,48 @@ extension ClipboardRestoringTextPaster {
 
     /// Copies text for a manual ⌘V on a path that never borrowed the clipboard
     /// (focus moved first, or Accessibility is off), saving the user's clipboard
-    /// first so the next paste can put it back. When the clipboard can't be
-    /// saved safely it still copies the text: recovery beats restore here.
+    /// first so the next paste can put it back. An incomplete or timed-out
+    /// snapshot refuses here too: the user's clipboard stays put, and the
+    /// words stay available through Copy and Dictations.
     func copyTextForManualPaste(
         _ text: String,
         to pasteboard: any ClipboardPasteboard,
-        isCurrentOperation: () -> Bool
-    ) -> Bool {
-        let snapshotChangeCount = pasteboard.changeCount
-        let savedItems = snapshotPasteboardItems(from: pasteboard)
-        // Materializing a lazy clipboard can run other code; a cancelled or
-        // changed clipboard is not the user's to overwrite on our behalf.
-        guard isCurrentOperation() else { return false }
-        let snapshotIsCurrent = pasteboard.changeCount == snapshotChangeCount
-        guard copyTextToClipboard(text, to: pasteboard) else { return false }
-        if snapshotIsCurrent {
-            saveClipboardForNextPaste(
-                savedItems,
-                fallbackText: text,
-                fallbackChangeCount: pasteboard.changeCount,
-                pasteboard: pasteboard
-            )
+        isCurrentOperation: () -> Bool,
+        snapshotRead: ClipboardSnapshotReadContext = .production()
+    ) -> ClipboardManualCopyResult {
+        let snapshot = snapshotClipboardForPaste(from: pasteboard, read: snapshotRead)
+        if let refusal = snapshot.refusal {
+            return .refused(refusal)
         }
-        return true
+        guard isCurrentOperation() else {
+            return .refused(.failed("Paste was cancelled.", reason: .cancelled))
+        }
+        guard copyTextToClipboard(text, to: pasteboard) else { return .writeFailed }
+        saveClipboardForNextPaste(
+            snapshot.savedItems,
+            fallbackText: text,
+            fallbackChangeCount: pasteboard.changeCount,
+            pasteboard: pasteboard
+        )
+        return .copied
+    }
+
+    func outcomeForManualCopy(
+        _ result: ClipboardManualCopyResult,
+        isCurrentOperation: () -> Bool,
+        copied: TextPasteOutcome,
+        writeFailed: TextPasteOutcome
+    ) -> TextPasteOutcome {
+        guard isCurrentOperation() else {
+            return .failed("Paste was cancelled.", reason: .cancelled)
+        }
+        switch result {
+        case .copied:
+            return copied
+        case .writeFailed:
+            return writeFailed
+        case .refused(let outcome):
+            return outcome
+        }
     }
 }

@@ -1706,6 +1706,70 @@ func testClipboardRestoringTextPaster() async {
         }
     }
 
+    await runSuite("A focus-moved fallback refuses a timed-out snapshot and leaves the clipboard") {
+        await MainActor.run {
+            assertClipboardSnapshotCauseMaps(
+                .timeout,
+                from: pasteClipboardSnapshotCause(
+                    target: DictationPasteTarget(
+                        processIdentifier: Int32.max,
+                        bundleIdentifier: "com.example.NotFrontmost"
+                    ),
+                    activationWait: 0
+                ) { _, _, _ in .timedOut }
+            )
+        }
+    }
+
+    await runSuite("An Accessibility-off fallback refuses a timed-out snapshot and leaves the clipboard") {
+        await MainActor.run {
+            assertClipboardSnapshotCauseMaps(
+                .timeout,
+                from: pasteClipboardSnapshotCause(accessibilityTrusted: { false }) { _, _, _ in .timedOut }
+            )
+        }
+    }
+
+    await runSuite("A later clipboard item that times out makes the whole snapshot incomplete") {
+        await MainActor.run {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let first = NSPasteboardItem()
+            first.setString("keep first", forType: .string)
+            let second = NSPasteboardItem()
+            second.setString("second string", forType: .string)
+            second.setData(Data([1]), forType: .html)
+            assertTrue(board.writePasteboardItems([first, second]), "partial-timeout fixture must install two items")
+            var secondReads = 0
+            let readType: (NSPasteboardItem, NSPasteboard.PasteboardType, TimeInterval) -> ClipboardSnapshotTypeRead = { item, _, _ in
+                if item === first {
+                    return .value("ok".data(using: .utf8) ?? Data())
+                }
+                secondReads += 1
+                if secondReads == 1 { return .value("ok".data(using: .utf8) ?? Data()) }
+                return .timedOut
+            }
+            let snapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(
+                from: board,
+                now: { 0 },
+                readType: readType
+            )
+            assertTrue(secondReads >= 2, "item 2 must read one type, then time out on the next")
+            assertFalse(snapshot.isComplete, "a later-item timeout must mark the whole snapshot incomplete")
+            assertEqual(snapshot.incompleteCause, .timeout, "the incomplete cause is timeout, not a partial save")
+            assertTrue(
+                snapshot.items.first?.isEmpty == false,
+                "item 1 was readable; the snapshot must not pretend nothing was read"
+            )
+            secondReads = 0
+            board.resetMutationCounts()
+            assertClipboardSnapshotCauseMaps(
+                .timeout,
+                from: pasteClipboardSnapshotCause(original: "keep first", board: board, readType: readType),
+                expectedClipboard: "keep first"
+            )
+        }
+    }
+
     await runSuite("An unreadable clipboard item uses the unreadable hint and tags unreadable") {
         await MainActor.run {
             assertClipboardSnapshotCauseMaps(
@@ -1735,7 +1799,8 @@ func testClipboardRestoringTextPaster() async {
             assertClipboardSnapshotCauseMaps(
                 .changed,
                 from: ClipboardSnapshotCausePasteResult(outcome: outcome, dispatched: dispatched, board: board),
-                expectedClipboard: "new external copy"
+                expectedClipboard: "new external copy",
+                expectedSetStringCount: 1
             )
         }
     }
@@ -3334,15 +3399,21 @@ private struct ClipboardSnapshotCausePasteResult {
 @MainActor
 private func pasteClipboardSnapshotCause(
     original: String = "keep the user's clipboard",
+    accessibilityTrusted: @escaping () -> Bool = { true },
+    target: DictationPasteTarget? = nil,
+    activationWait: TimeInterval = TranscriptedConstants.clipboardTargetActivationWait,
+    board: FakeClipboardPasteboard? = nil,
     readType: @escaping (NSPasteboardItem, NSPasteboard.PasteboardType, TimeInterval) -> ClipboardSnapshotTypeRead
 ) -> ClipboardSnapshotCausePasteResult {
-    let board = FakeClipboardPasteboard(initialString: original)
+    let board = board ?? FakeClipboardPasteboard(initialString: original)
     let paster = ClipboardRestoringTextPaster()
     var dispatched = false
     let outcome = paster.paste(
         "dictation",
+        target: target,
+        activationWait: activationWait,
         pasteboard: board,
-        accessibilityTrusted: { true },
+        accessibilityTrusted: accessibilityTrusted,
         requestAccessibilityTrust: {},
         pasteDispatcher: { dispatched = true; return true },
         pasteConfirmed: { true },
@@ -3359,7 +3430,8 @@ private func pasteClipboardSnapshotCause(
 private func assertClipboardSnapshotCauseMaps(
     _ cause: ClipboardSnapshotCause,
     from result: ClipboardSnapshotCausePasteResult,
-    expectedClipboard: String = "keep the user's clipboard"
+    expectedClipboard: String = "keep the user's clipboard",
+    expectedSetStringCount: Int = 0
 ) {
     assertEqual(
         result.outcome.failureReason,
@@ -3372,6 +3444,9 @@ private func assertClipboardSnapshotCauseMaps(
         "the Copy offer stays; only the cause changes"
     )
     assertFalse(result.dispatched, "an incomplete snapshot must not send Cmd+V")
+    assertEqual(result.board.clearContentsCount, 0, "an incomplete snapshot must not call clearContents")
+    assertEqual(result.board.setStringCount, expectedSetStringCount, "an incomplete snapshot must not write the clipboard")
+    assertEqual(result.board.writePasteboardItemsCount, 0, "an incomplete snapshot must not write pasteboard items")
     assertEqual(
         result.board.string(forType: .string),
         expectedClipboard,
@@ -3411,6 +3486,15 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
     var onStringRead: (() -> Void)?
     var onStringWritten: (() -> Void)?
     var onPasteboardItemsRead: (() -> Void)?
+    private(set) var clearContentsCount = 0
+    private(set) var setStringCount = 0
+    private(set) var writePasteboardItemsCount = 0
+
+    func resetMutationCounts() {
+        clearContentsCount = 0
+        setStringCount = 0
+        writePasteboardItemsCount = 0
+    }
 
     init(
         initialString: String?,
@@ -3442,6 +3526,7 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
 
     @discardableResult
     func clearContents() -> Int {
+        clearContentsCount += 1
         changeCount += 1
         if clearContentsClears {
             storedString = nil
@@ -3452,6 +3537,7 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
 
     @discardableResult
     func setString(_ string: String, forType dataType: NSPasteboard.PasteboardType) -> Bool {
+        setStringCount += 1
         if var setStringResults,
            !setStringResults.isEmpty {
             let nextResult = setStringResults.removeFirst()
@@ -3485,6 +3571,7 @@ private final class FakeClipboardPasteboard: ClipboardPasteboard {
 
     @discardableResult
     func writePasteboardItems(_ items: [NSPasteboardItem]) -> Bool {
+        writePasteboardItemsCount += 1
         guard writePasteboardItemsSucceeds else { return false }
         changeCount += 1
         storedString = nil

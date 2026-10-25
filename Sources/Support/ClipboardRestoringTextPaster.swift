@@ -216,18 +216,19 @@ final class ClipboardRestoringTextPaster {
            !target.matchesCurrentFrontmostApp(),
            !waitForTargetActivation(target, timeout: activationWait, isCurrentOperation: isCurrentOperation) {
             guard isCurrentOperation() else { return cancelledOutcome }
-            let copied = copyTextForManualPaste(text, to: pasteboard, isCurrentOperation: isCurrentOperation)
-            guard isCurrentOperation() else { return cancelledOutcome }
-            guard copied else {
-                return .failed(
+            return outcomeForManualCopy(
+                copyTextForManualPaste(
+                    text, to: pasteboard, isCurrentOperation: isCurrentOperation, snapshotRead: snapshotRead
+                ),
+                isCurrentOperation: isCurrentOperation,
+                copied: .copied(
+                    "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
+                    reason: .focusChanged
+                ),
+                writeFailed: .failed(
                     "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .focusChangeClipboardWriteFailed
                 )
-            }
-            guard isCurrentOperation() else { return cancelledOutcome }
-            return .copied(
-                "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
-                reason: .focusChanged
             )
         }
 
@@ -237,18 +238,19 @@ final class ClipboardRestoringTextPaster {
         guard trusted else {
             requestAccessibilityTrust()
             guard isCurrentOperation() else { return cancelledOutcome }
-            let copied = copyTextForManualPaste(text, to: pasteboard, isCurrentOperation: isCurrentOperation)
-            guard isCurrentOperation() else { return cancelledOutcome }
-            guard copied else {
-                return .failed(
+            return outcomeForManualCopy(
+                copyTextForManualPaste(
+                    text, to: pasteboard, isCurrentOperation: isCurrentOperation, snapshotRead: snapshotRead
+                ),
+                isCurrentOperation: isCurrentOperation,
+                copied: .copied(
+                    "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
+                    reason: .accessibilityMissing
+                ),
+                writeFailed: .failed(
                     "Accessibility is off, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .accessibilityFallbackClipboardWriteFailed
                 )
-            }
-            guard isCurrentOperation() else { return cancelledOutcome }
-            return .copied(
-                "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
-                reason: .accessibilityMissing
             )
         }
 

@@ -181,6 +181,14 @@ enum TextPasteOutcome: Equatable {
     }
 }
 
+/// Result of copying dictation text after a focus-moved or Accessibility-off
+/// fallback. Incomplete snapshots refuse instead of overwriting the clipboard.
+enum ClipboardManualCopyResult: Equatable {
+    case copied
+    case writeFailed
+    case refused(TextPasteOutcome)
+}
+
 struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let event: String
     let context: [String: String]
