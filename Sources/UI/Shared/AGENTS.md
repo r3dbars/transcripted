@@ -44,6 +44,7 @@ Presentation, tokens and support:
 - `MeetingPillFinishPresentation.swift` is the copy and timing for how a meeting finishes (transcribing percent, "N more waiting", saved dwell, when the error state offers Open). `FirstRunExperience.swift` is first-run menu and onboarding state and CTA copy.
 - `AgentConnectionGuide.swift` is the starter prompt, folder paths, Codex inbox and portable meeting bundle copy for agent connect. `SystemAudioPermissionRevalidator.swift` is the single owner of System Audio Recording revalidation for the Settings shell and onboarding, with an in-flight guard so they can't overlap.
 - `FeedbackIssueBuilder.swift` builds sanitized support payloads. `SupportEmailDispatcher.swift` hands off to Mail with an explicit failure fallback; callers keep the draft on failure, and the support address is copied only on request.
+- `FeedbackSubmissionClient.swift` sends an explicitly reviewed support report to the fixed HTTPS endpoint; `FeedbackAttachment.swift` bounds selected images and re-encodes them without original metadata. User-selected support content never enters telemetry or logs. See the root's owner-approved support exception.
 
 ## Tests
 
