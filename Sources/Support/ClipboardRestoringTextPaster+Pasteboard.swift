@@ -34,12 +34,12 @@ enum ClipboardSnapshotReader {
     /// timeout; the fetch is not treated as a nil read. Tests inject `wait`.
     static func read(
         remaining: TimeInterval,
-        wait: (TimeInterval, @escaping () -> Void) -> Bool = waitOnSnapshotQueue,
+        wait: (TimeInterval, @escaping @Sendable () -> Void) -> Bool = waitOnSnapshotQueue,
         fetch: @escaping () -> Data?
     ) -> ClipboardSnapshotTypeRead {
         guard remaining > 0 else { return .timedOut }
         let box = ClipboardSnapshotFetchBox(fetch)
-        let finished = wait(remaining, box.run)
+        let finished = wait(remaining) { box.run() }
         return finished ? .value(box.result) : .timedOut
     }
 
@@ -54,7 +54,7 @@ enum ClipboardSnapshotReader {
     /// Runs the fetch off the calling thread so a stalled promised item
     /// cannot hold the main actor past the bound. The caller still waits
     /// at most `remaining`, then treats the snapshot as incomplete.
-    static func waitOnSnapshotQueue(_ remaining: TimeInterval, work: @escaping () -> Void) -> Bool {
+    static func waitOnSnapshotQueue(_ remaining: TimeInterval, work: @escaping @Sendable () -> Void) -> Bool {
         let group = DispatchGroup()
         group.enter()
         snapshotReadQueue.async {
