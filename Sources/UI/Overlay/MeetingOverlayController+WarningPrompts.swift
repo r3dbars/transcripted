@@ -85,35 +85,28 @@ extension MeetingOverlayController {
         promptCountdownTask?.cancel()
         promptCountdownTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            var wasVisible = self.meetingPromptIsCurrentlyVisible()
-            let fullSeconds = self.meetingSession?.audioInactivityWarning?.countdownSeconds
-                ?? self.promptSecondsRemaining
+            var run = MeetingInactivityCountdownRun(
+                remaining: self.promptSecondsRemaining,
+                wasVisible: self.meetingPromptIsCurrentlyVisible(),
+                pauseWhileHidden: self.meetingSession?.audioInactivityWarning?.kind == .callEnded
+            )
 
-            while self.promptSecondsRemaining > 0 {
+            while run.remaining > 0 {
                 self.refreshPromptCountdownDisplay()
                 self.pushToView()
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
                 guard !Task.isCancelled else { return }
-                let visible = self.meetingPromptIsCurrentlyVisible()
-                let pauseWhileHidden = self.meetingSession?.audioInactivityWarning?.kind == .callEnded
-                switch MeetingInactivityCountdownVisibility.step(
-                    wasVisible: wasVisible,
-                    isVisible: visible,
-                    fullSeconds: fullSeconds,
-                    pauseWhileHidden: pauseWhileHidden
-                ) {
-                case .hold:
-                    break
-                case .decrement:
-                    self.promptSecondsRemaining -= 1
-                case .restart(let seconds):
-                    self.promptSecondsRemaining = seconds
-                }
-                wasVisible = visible
+                let warning = self.meetingSession?.audioInactivityWarning
+                _ = run.tick(
+                    isVisible: self.meetingPromptIsCurrentlyVisible(),
+                    pauseWhileHidden: warning?.kind == .callEnded,
+                    fullSeconds: warning?.countdownSeconds ?? run.remaining
+                )
+                self.promptSecondsRemaining = run.remaining
             }
 
-            self.handlePromptCountdownExpired()
+            self.handlePromptCountdownExpired(coveredSeconds: run.coveredSeconds)
         }
     }
 
@@ -155,7 +148,7 @@ extension MeetingOverlayController {
         }
     }
 
-    private func handlePromptCountdownExpired() {
+    private func handlePromptCountdownExpired(coveredSeconds: Int = 0) {
         switch promptKind {
         case .systemAudio:
             return
@@ -170,15 +163,17 @@ extension MeetingOverlayController {
             switch MeetingInactivityCountdownExpiry.resolve(
                 isCallEnded: warning.kind == .callEnded,
                 automaticStopAllowed: warning.automaticStopAllowed,
-                promptVisible: meetingPromptIsCurrentlyVisible()
+                promptVisible: meetingPromptIsCurrentlyVisible(),
+                coveredSeconds: coveredSeconds
             ) {
             case .noAutomaticStop:
-                // Covered Meeting ended? at zero: keep that 30 s window
-                // alive until the drop is visible again. The five-minute
-                // No sound stop does not come through here.
+                // Covered Meeting ended? at zero, still inside the hold
+                // cap: keep that 30 s window alive until the drop is
+                // visible again. Past the cap, resolve stops instead.
                 if warning.kind == .callEnded,
                    warning.automaticStopAllowed,
-                   !meetingPromptIsCurrentlyVisible() {
+                   !meetingPromptIsCurrentlyVisible(),
+                   coveredSeconds < MeetingInactivityCountdownVisibility.coveredHoldCapSeconds {
                     promptSecondsRemaining = max(1, warning.countdownSeconds)
                     schedulePromptCountdown()
                 }

@@ -109,14 +109,16 @@ enum MeetingInactivityCountdownExpiry: Equatable {
     static func resolve(
         isCallEnded: Bool,
         automaticStopAllowed: Bool,
-        promptVisible: Bool
+        promptVisible: Bool,
+        coveredSeconds: Int = 0
     ) -> Self {
         guard automaticStopAllowed else { return .noAutomaticStop }
-        // Only the 30 s Meeting ended? countdown requires a visible prompt.
-        // The five-minute No sound stop is the forgotten-recording backstop
-        // and still fires while a dictation covers the drop.
+        // Meeting ended? waits for a visible drop unless this cover stretch
+        // has already used its cap. No sound never waits on visibility.
         if isCallEnded {
-            return promptVisible ? .confirmCallEndedThenStop : .noAutomaticStop
+            let uncovered = promptVisible
+                || coveredSeconds >= MeetingInactivityCountdownVisibility.coveredHoldCapSeconds
+            return uncovered ? .confirmCallEndedThenStop : .noAutomaticStop
         }
         return .stop
     }
@@ -124,24 +126,83 @@ enum MeetingInactivityCountdownExpiry: Equatable {
 
 /// Whether the audio-inactivity / call-end countdown may tick.
 ///
-/// The 30 s Meeting ended? countdown pauses while a dictation covers the
-/// drop and restarts when it comes back, so Keep recording is actually
-/// seen. The five-minute No sound stop does not pause: it is the cap
-/// for a covered prompt, not a second hold timer.
+/// Meeting ended? pauses while a dictation covers the drop and restarts
+/// when it comes back, so Keep recording is actually seen. One cover
+/// stretch may pause only up to `coveredHoldCapSeconds`; after that the
+/// countdown proceeds (and can auto-stop) even if still covered. No sound
+/// never pauses.
 enum MeetingInactivityCountdownVisibility: Equatable {
     case hold
     case decrement
     case restart(seconds: Int)
 
+    /// How long one covered Meeting ended? stretch may stay paused.
+    static let coveredHoldCapSeconds = 5 * 60
+
     static func step(
         wasVisible: Bool,
         isVisible: Bool,
         fullSeconds: Int,
-        pauseWhileHidden: Bool
+        pauseWhileHidden: Bool,
+        coveredSeconds: Int = 0,
+        kindChanged: Bool = false
     ) -> Self {
-        guard pauseWhileHidden else { return .decrement }
+        if kindChanged {
+            // Silence that takes over mid-countdown gets its own window,
+            // not leftover Meeting ended? seconds from this same task.
+            if !pauseWhileHidden {
+                return .restart(seconds: max(1, fullSeconds))
+            }
+            return isVisible ? .restart(seconds: max(1, fullSeconds)) : .hold
+        }
+        let pause = pauseWhileHidden
+            && coveredSeconds < coveredHoldCapSeconds
+        guard pause else { return .decrement }
         guard isVisible else { return .hold }
         if !wasVisible { return .restart(seconds: max(1, fullSeconds)) }
         return .decrement
+    }
+}
+
+/// One running inactivity / call-end countdown. The overlay Task and the
+/// tests share this so a cover-cap tick or a call-end → silence hand-off
+/// cannot drift from the loop.
+struct MeetingInactivityCountdownRun: Equatable {
+    var remaining: Int
+    var wasVisible: Bool
+    var pauseWhileHidden: Bool
+    var coveredSeconds: Int = 0
+
+    @discardableResult
+    mutating func tick(
+        isVisible: Bool,
+        pauseWhileHidden: Bool,
+        fullSeconds: Int
+    ) -> MeetingInactivityCountdownVisibility {
+        if isVisible {
+            coveredSeconds = 0
+        } else {
+            coveredSeconds += 1
+        }
+        let kindChanged = self.pauseWhileHidden != pauseWhileHidden
+        let action = MeetingInactivityCountdownVisibility.step(
+            wasVisible: wasVisible,
+            isVisible: isVisible,
+            fullSeconds: fullSeconds,
+            pauseWhileHidden: pauseWhileHidden,
+            coveredSeconds: coveredSeconds,
+            kindChanged: kindChanged
+        )
+        switch action {
+        case .hold:
+            break
+        case .decrement:
+            remaining = max(0, remaining - 1)
+        case .restart(let seconds):
+            remaining = seconds
+        }
+        wasVisible = isVisible
+        self.pauseWhileHidden = pauseWhileHidden
+        return action
     }
 }

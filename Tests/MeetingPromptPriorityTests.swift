@@ -408,11 +408,41 @@ func testMeetingPromptPriority() {
         )
     }
 
-    runSuite("Inactivity countdown expiry — a hidden Meeting ended? prompt never auto-stops") {
+    runSuite("Inactivity countdown expiry — a hidden Meeting ended? prompt pauses until the cover cap") {
         assertEqual(
             MeetingInactivityCountdownExpiry.resolve(isCallEnded: true, automaticStopAllowed: true, promptVisible: false),
             .noAutomaticStop,
-            "a call-end countdown covered by a dictation must not stop the recording"
+            "a call-end countdown covered by a dictation must not stop the recording yet"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: true,
+                automaticStopAllowed: true,
+                promptVisible: false,
+                coveredSeconds: MeetingInactivityCountdownVisibility.coveredHoldCapSeconds - 1
+            ),
+            .noAutomaticStop,
+            "covered for less than five minutes still pauses Meeting ended?"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: true,
+                automaticStopAllowed: true,
+                promptVisible: false,
+                coveredSeconds: MeetingInactivityCountdownVisibility.coveredHoldCapSeconds
+            ),
+            .confirmCallEndedThenStop,
+            "covered for five minutes lets Meeting ended? auto-stop proceed"
+        )
+        assertEqual(
+            MeetingInactivityCountdownExpiry.resolve(
+                isCallEnded: true,
+                automaticStopAllowed: false,
+                promptVisible: false,
+                coveredSeconds: MeetingInactivityCountdownVisibility.coveredHoldCapSeconds
+            ),
+            .noAutomaticStop,
+            "a held Continue / Stop prompt still never auto-stops after the cap"
         )
     }
 
@@ -480,7 +510,7 @@ func testMeetingPromptPriority() {
                 wasVisible: false, isVisible: false, fullSeconds: 30, pauseWhileHidden: false
             ),
             .decrement,
-            "it does not restart or hold; the five-minute stop is the cap"
+            "it does not restart or hold; No sound never waits on the drop"
         )
         assertEqual(
             MeetingInactivityCountdownVisibility.step(
@@ -489,5 +519,71 @@ func testMeetingPromptPriority() {
             .decrement,
             "revealing No sound does not restart its remaining time"
         )
+    }
+
+    runSuite("Inactivity countdown visibility — Meeting ended? pauses only until the five-minute cover cap") {
+        let cap = MeetingInactivityCountdownVisibility.coveredHoldCapSeconds
+        assertEqual(cap, 5 * 60, "the named cover cap is five minutes")
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(
+                wasVisible: false, isVisible: false, fullSeconds: 30, pauseWhileHidden: true,
+                coveredSeconds: cap - 1
+            ),
+            .hold,
+            "covered for less than five minutes still pauses Meeting ended?"
+        )
+        assertEqual(
+            MeetingInactivityCountdownVisibility.step(
+                wasVisible: false, isVisible: false, fullSeconds: 30, pauseWhileHidden: true,
+                coveredSeconds: cap
+            ),
+            .decrement,
+            "covered for five minutes stops pausing so the countdown can finish"
+        )
+        var underCap = MeetingInactivityCountdownRun(
+            remaining: 30,
+            wasVisible: false,
+            pauseWhileHidden: true,
+            coveredSeconds: cap - 2
+        )
+        assertEqual(
+            underCap.tick(isVisible: false, pauseWhileHidden: true, fullSeconds: 30),
+            .hold
+        )
+        assertEqual(underCap.remaining, 30, "one more hidden second under the cap still holds")
+        assertEqual(underCap.coveredSeconds, cap - 1)
+        assertEqual(
+            underCap.tick(isVisible: false, pauseWhileHidden: true, fullSeconds: 30),
+            .decrement
+        )
+        assertEqual(underCap.remaining, 29, "crossing the cap lets the leftover countdown proceed")
+        assertEqual(underCap.coveredSeconds, cap)
+    }
+
+    runSuite("Inactivity countdown visibility — silence that takes over mid-countdown gets its own window") {
+        var run = MeetingInactivityCountdownRun(
+            remaining: 8,
+            wasVisible: false,
+            pauseWhileHidden: true,
+            coveredSeconds: 4
+        )
+        assertEqual(
+            run.tick(isVisible: false, pauseWhileHidden: true, fullSeconds: 30),
+            .hold,
+            "the live Meeting ended? task is still holding"
+        )
+        assertEqual(run.remaining, 8, "leftover Meeting ended? seconds stay put while covered")
+        assertEqual(
+            run.tick(isVisible: false, pauseWhileHidden: false, fullSeconds: 30),
+            .restart(seconds: 30),
+            "afterCallEndHeld silence must not inherit the leftover 8 s"
+        )
+        assertEqual(run.remaining, 30, "silence starts its own Keep-recording window")
+        assertEqual(
+            run.tick(isVisible: false, pauseWhileHidden: false, fullSeconds: 30),
+            .decrement,
+            "the new No sound countdown keeps ticking while still covered"
+        )
+        assertEqual(run.remaining, 29)
     }
 }
