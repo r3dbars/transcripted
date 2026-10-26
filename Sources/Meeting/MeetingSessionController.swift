@@ -1,6 +1,7 @@
 // MeetingSessionController.swift
-// The meeting recording lifecycle: startRecording, stopRecording, the unexpected
-// capture stop, the stop snapshot, and system-audio signal verification.
+// The meeting recording lifecycle: startRecording, stopRecording, and the
+// unexpected capture stop. The stop snapshot and system-audio signal
+// verification live in MeetingSessionController+StopSnapshot.swift.
 // The class itself (stored state, init, the single state writers) is declared
 // in MeetingSessionController+State.swift; the other +*.swift files hold the rest.
 
@@ -321,7 +322,7 @@ extension MeetingSessionController {
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
         finishAutoStartedRecording(stopReason: reason)
-        clearActiveRecordingIdentity()
+        clearActiveRecordingIdentity(keepingForStopTeardown: true)
 
         DiagnosticsTrail.record(
             engine: "meeting",
@@ -356,6 +357,7 @@ extension MeetingSessionController {
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
+        stoppingRecordingIdentity = nil
         // "Record Just My Mic" never builds the system tap. Stand in the silent
         // track the old always-on tap left, so speaker review, re-transcribe
         // and retries still see a two-track meeting.
@@ -735,93 +737,4 @@ extension MeetingSessionController {
 
     // preserveQueuedTranscriptionJobsForShutdown moved to
     // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
-
-    func makeRecordingStopSnapshot() -> RecordingStopSnapshot {
-        let evidence = MeetingCaptureHealthTelemetry.stopSnapshotEvidence(
-            liveStatus: capture.systemAudioStatus,
-            unknown: .unknown,
-            liveWarning: systemAudioDegradationWarning,
-            liveUnheardWarningStartedAt: unheardPlaybackWarningStartedAt,
-            atCaptureStop: unexpectedCaptureStopEvidence,
-            now: Date()
-        )
-        let systemAudioStatus = evidence.systemAudioStatus
-        let durationSeconds = recordingDuration
-        var baseHealthInfo = capture.healthInfo(overrideSystemAudioStatus: systemAudioStatus)
-        let accessConfirmedByMacOS = systemAudioAccessConfirmedAtStop()
-        if let signalEvidence = MeetingMicOnlyRecordingPolicy.systemAudioSignalEvidence(
-            observed: capture.hasObservedSystemAudioSignal, micOnlyByChoice: activeRecordingIsMicOnlyByChoice,
-            accessConfirmedByMacOS: accessConfirmedByMacOS
-        ) {
-            baseHealthInfo = baseHealthInfo.markingSystemAudioSignalVerified(signalEvidence)
-        }
-        // Only an interruption or failure warning latches degraded metadata.
-        // A silence warning is legitimate (the remote side went quiet, or the
-        // call ended before Stop was pressed) and used to stamp most saved
-        // meetings degraded even when system audio finished healthy.
-        let healthInfo: RecordingHealthInfo
-        if MeetingSystemAudioDegradationPolicy.degradesSavedCaptureAtStop(
-            evidence.degradationWarning,
-            didLosePlayback: capture.systemAudioDidLosePlayback,
-            unheardSeconds: evidence.unheardSeconds
-        ) {
-            healthInfo = baseHealthInfo.markingSystemAudioDegraded()
-        } else {
-            healthInfo = baseHealthInfo
-        }
-        return RecordingStopSnapshot(
-            telemetryIdentity: activeRecordingIdentity,
-            trigger: activeRecordingTrigger,
-            systemAudioStatus: systemAudioStatus,
-            durationSeconds: durationSeconds,
-            healthInfo: healthInfo,
-            pipelineSnapshot: capture.pipelineDiagnosticsSnapshot(
-                overrideSystemAudioStatus: systemAudioStatus
-            ),
-            suggestedTitle: activeRecordingSuggestedTitle,
-            recordingStartedAt: activeRecordingStartedAt,
-            languageSelection: recordingLanguageSelection,
-            sttModel: recordingSTTModel,
-            isMicOnlyByChoice: activeRecordingIsMicOnlyByChoice,
-            skippedSystemAudioTap: !capture.currentRecordingCapturesSystemAudio,
-            systemAudioAccessConfirmedByMacOS: accessConfirmedByMacOS
-        )
-    }
-
-    /// Snapshot capture health before the stop call, since the system-audio
-    /// backend can clean up buffer counters before file-close completion resumes.
-    func refreshSystemAudioSignalVerification(shouldWarn: Bool) {
-        // Mic-only was the user's call at start; system-audio banners would
-        // only repeat what they already chose.
-        if activeRecordingIsMicOnlyByChoice {
-            if systemAudioDegradationWarning != nil { systemAudioDegradationWarning = nil }
-            return
-        }
-        let signalVerified = MeetingCaptureHealthEvidence.make(capture: capture).systemAudioSignalVerified
-        let verified = MeetingSystemAudioDegradationPolicy.reconcilingSignalVerification(
-            current: systemAudioDegradationWarning,
-            signalVerified: signalVerified,
-            shouldWarn: shouldWarn && !signalVerified && !systemAudioAccessConfirmedByMacOS(),
-            isRecording: state == .recording
-        )
-        let updated = MeetingSystemAudioDegradationPolicy.reconcilingUnheardPlayback(
-            current: verified,
-            notHearingPlayback: capture.systemAudioNotHearingPlayback,
-            playbackLossConfirmed: capture.systemAudioDidLosePlayback,
-            isRecording: state == .recording
-        )
-        if updated != systemAudioDegradationWarning {
-            let isUnheard = updated?.cause == .unheardPlayback && updated?.phase != .recovered
-            let wasUnheard = systemAudioDegradationWarning?.cause == .unheardPlayback
-                && systemAudioDegradationWarning?.phase != .recovered
-            if isUnheard, !wasUnheard {
-                // The report comes after about a minute of hearing nothing.
-                unheardPlaybackWarningStartedAt = Date().addingTimeInterval(-MeetingCaptureBridge.systemAudioUnheardReportSeconds)
-                recordUnheardPlaybackWarning()
-            } else if !isUnheard {
-                unheardPlaybackWarningStartedAt = nil
-            }
-            systemAudioDegradationWarning = updated
-        }
-    }
 }

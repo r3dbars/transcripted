@@ -100,6 +100,16 @@ extension ParakeetTimedAudioEngineWorkLimiter {
                 continuation.resume(with: result)
             }
 
+            // The resource and its callbacks are handed to `queue`, which is
+            // their confinement; the compiler can't see that.
+            let job = ParakeetGraphConfined((
+                resource: resource,
+                work: work,
+                isWorkCurrent: isWorkCurrent,
+                cleanupAfterCancellation: cleanupAfterCancellation,
+                cleanupAfterLateCompletion: cleanupAfterLateCompletion
+            ))
+
             queue.async { [workerLease] in
                 // A timed-out caller may have moved on to a replacement queue.
                 // Keep this lease until the old queue block itself returns; if
@@ -107,6 +117,7 @@ extension ParakeetTimedAudioEngineWorkLimiter {
                 // occupied and later work fails closed instead of spawning more
                 // blocked queues and native graphs.
                 defer { workerLease.release() }
+                let (resource, work, isWorkCurrent, cleanupAfterCancellation, cleanupAfterLateCompletion) = job.value
                 guard !resumeGate.hasResumed else { return }
                 guard isWorkCurrent?() != false else {
                     resumeOnce(.failure(CancellationError()))

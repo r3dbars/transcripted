@@ -85,8 +85,8 @@ public class DiarizationService: ObservableObject {
 
     /// Provider that resolves bundled model directories. Embedders can swap this to
     /// redirect lookups (e.g. a shared cache in Application Support). Returning `nil`
-    /// from the provider falls through to HuggingFace download via `ModelDownloadService`
-    /// only when `allowDownload` is true.
+    /// from the provider falls through to FluidAudio's HuggingFace download only when
+    /// `allowDownload` is true.
     private let bundleProvider: ModelBundleProvider
     /// When false, pyannote and Nemotron load only from a local directory.
     /// A Nemotron load failure then cannot call `prepareModels()` / download,

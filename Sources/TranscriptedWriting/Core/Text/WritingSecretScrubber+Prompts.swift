@@ -36,9 +36,27 @@ extension WritingSecretScrubber {
         }
     }
 
+    /// The line is the next command, not an answer to the prompt. A lone
+    /// command word inside the loose-answer window is more likely the
+    /// password (`docker`, `python`) than a command: owner call on #2165.
+    /// Multi-word commands (`docker ps`), paths and shell keywords (`else`,
+    /// `done` in a script) stay kept.
+    static func isNextCommand(_ line: String, firstWord: String, answered: Int, looseAnswers: Int) -> Bool {
+        let word = firstWord.lowercased()
+        let known = knownShellWords.contains(word)
+        if known, !shellKeywords.contains(word), answered < looseAnswers, !line.contains(where: \.isWhitespace) {
+            return false
+        }
+        return known || isPathLike(firstWord)
+    }
+
+    /// Shell grammar words, never a password, so a lone one stays the next line.
+    static let shellKeywords: Set<String> = ["fi", "done", "esac", "then", "else", "elif", "do", "end", "true", "false"]
+
     /// Commands and shell keywords a line after a prompt can start with when
     /// it's the next command, not a password (sudo had cached credentials, or
-    /// the prompt never came).
+    /// the prompt never came). A lone one inside the loose-answer window still
+    /// counts as the answer; see `isNextCommand`.
     static let knownShellWords: Set<String> = [
         "ls", "ll", "la", "cd", "pwd", "clear", "cls", "exit", "logout", "whoami", "history", "top", "htop",
         "btop", "vim", "vi", "nvim", "nano", "emacs", "code", "cursor", "git", "gh", "brew", "npm", "npx",

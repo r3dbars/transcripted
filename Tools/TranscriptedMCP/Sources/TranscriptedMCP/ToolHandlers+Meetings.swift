@@ -78,7 +78,8 @@ func handleReadMeeting(params: CallTool.Parameters, meetingDirs: [URL]) throws -
         return invalidAgentCaptureQueryInputResult("Invalid filename: \(filename)")
     }
 
-    guard let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
+    guard CaptureMarkdown.captureKind(of: mdURL) == .meeting,
+          let content = CaptureMarkdown.readBoundedContents(of: mdURL) else {
         return emptyOrMissingAgentCaptureQueryResult(
             "Meeting not found: \(filename). Use list_meetings to see available meetings.",
             isError: true

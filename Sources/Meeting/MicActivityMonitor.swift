@@ -78,17 +78,17 @@ final class MicActivityMonitor: @unchecked Sendable {
     /// holding the mic input. An empty set is the explicit "inactive" edge (the
     /// last mic user stopped). Assign before calling `start()` and do not mutate
     /// while running.
-    var onChange: ((Set<String>) -> Void)?
+    var onChange: (@MainActor @Sendable (Set<String>) -> Void)?
     /// Delivered on the main actor with the set of native conferencing bundle IDs
     /// confirmed to be playing audio output (the listen-only call signal). An
     /// empty set is the explicit "inactive" edge. Assign before calling `start()`
     /// and do not mutate while running.
-    var onOutputChange: ((Set<String>) -> Void)?
+    var onOutputChange: (@MainActor @Sendable (Set<String>) -> Void)?
     /// Delivered on the main actor with the browser processes playing audio
     /// while their browser family also holds the mic. Corroboration for the
     /// browser-call evidence rules only; never a prompt by itself. Assign
     /// before calling `start()` and do not mutate while running.
-    var onBrowserOutputChange: ((Set<String>) -> Void)?
+    var onBrowserOutputChange: (@MainActor @Sendable (Set<String>) -> Void)?
     /// Injected accessor for the shared `DefaultInputDeviceMonitor` facade
     /// (start/addObserver/removeObserver over the single
     /// `kAudioHardwarePropertyDefaultInputDevice` registration — see that
@@ -480,7 +480,7 @@ final class MicActivityMonitor: @unchecked Sendable {
             guard let self else { return }
             monitor.start()
             let token = monitor.addObserver { [weak self] _ in
-                self?.queue.async {
+                self?.queue.async { [weak self] in
                     self?.reattachDeviceListener()
                     self?.scheduleDebouncedScan()
                 }

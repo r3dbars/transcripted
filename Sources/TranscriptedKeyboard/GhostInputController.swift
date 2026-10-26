@@ -146,7 +146,9 @@ final class GhostInputController: IMKInputController {
     var state = InlineSuggestionState()
     var typedFallback = ""
     var fallbackOwner: FallbackOwner?
-    var historyOwner: FallbackOwner?
+    /// Transcripted: where the keyboard's own text in this segment chain
+    /// ends, judged from carets that some hosts don't keep current.
+    var historyContinuity = PersonalHistoryCaretContinuity()
     var scheduleRevision = 0
     var contextTailSampler = GhostContextTailSampler(limit: GhostInputController.contextLimit)
     var revealTask: Task<Void, Never>?
@@ -671,7 +673,7 @@ final class GhostInputController: IMKInputController {
         secureInput: Bool,
         observation: InsertionObservation?
     ) {
-        guard let owner = historyOwner, historyDeletions.hasTrackedText else {
+        guard historyContinuity.isTracking, historyDeletions.hasTrackedText else {
             breakHistorySegment()
             return
         }
@@ -679,9 +681,9 @@ final class GhostInputController: IMKInputController {
             bundle: client.bundleIdentifier() ?? "",
             selection: client.selectedRange()
         )
-        guard observed.owner == owner,
+        guard historyContinuity.isAtOwnTextEnd(bundle: observed.bundle, selection: observed.selection),
               let permit = PersonalHistoryCapture.shared.permit(
-                appBundleIdentifier: owner.bundle,
+                appBundleIdentifier: observed.bundle,
                 secureInput: secureInput
               ),
               let backspace = historyDeletions.backspace() else {
@@ -695,10 +697,7 @@ final class GhostInputController: IMKInputController {
                 of: historySegmentIdentifier
             )
         }
-        historyOwner = FallbackOwner(
-            bundle: owner.bundle,
-            caret: max(0, owner.caret - backspace.utf16Length)
-        )
+        historyContinuity.backspaced(utf16Length: backspace.utf16Length, caret: observed.selection.location)
         PersonalHistoryCapture.shared.recordDeletion(
             utf16Length: backspace.utf16Length,
             sessionIdentifier: historySegmentIdentifier,

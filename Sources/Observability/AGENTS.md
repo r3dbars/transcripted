@@ -66,10 +66,10 @@ Emit with a literal name (`AnalyticsReporter.track("event_name", ...)`) so `pyth
 
 - Local logs and events: `AppLogSink` (`debug.log` plus in-app debug panel; how it differs from `TranscriptedCore`'s `AppLogger` is in `docs/observability.md`), `EventReporter`, `EventFileWriter` (actor; info events batch briefly, warnings and errors flush at once, per `EventFileWritePolicy`), `ObservabilityLogRotation` (rename-based, one rotated generation), `ObservabilityTextRedactor` (adapter over Core's `PrivacyTextRedactor`), `ObservabilityEvent`, `LockedFileAppender`, `DiagnosticsTrail`.
 - Sanitizers: `PayloadSanitizationCore` (shared `shouldDrop(key:)` and `redactAndCap`), `SentryPayloadSanitizer`, `AnalyticsPayloadSanitizer`, `LocalObservabilityPayloadSanitizer`. Policies: `SentryEventPolicy`, `AnalyticsEventPolicy`.
-- Reporters: `CrashReporter`, `CrashReportingPreferences`, `AnalyticsReporter`, `SentryRuntimeConfiguration`.
+- Reporters: `CrashReporter`, `CrashReportingPreferences`, `AnalyticsReporter` (its retry buffer is `AnalyticsDeliveryBufferStore`, its config `AnalyticsRuntimeConfiguration`), `SentryRuntimeConfiguration`.
 - Support and runtime state: `SupportDiagnosticsBundle` (privacy-safe summary for feedback emails and manual diagnostic events, with coarse recent reliability packets), `ReliabilityPacketRecorder`, `RuntimeDiagnostics*`.
 - Telemetry helpers: `ActivationTelemetry`, `AgentSetupLifecycleTelemetry`, `FeatureDiscoveryTelemetry` (`settingsFeatureDiscovered.` prefix), `ProductUsageTelemetry`, `RetentionTelemetry`, `SpeakerRecognitionTelemetry` (buckets aligned with the matcher's thresholds), `DictationPasteRetryTelemetry`, `WorkflowRecoveryTelemetry` (takes a `track` closure so tests record), `UsageHealthModels`.
-- Updates: `SparkleUpdaterController`, `UpdateFailureKind`, `UpdateActionSafetyPolicy`, `UpdateInstallDetection`.
+- Updates: `SparkleUpdaterController` (plus `+UpdateStatus`, `+Telemetry`, `+SparkleDelegates`), `UpdateFailureKind`, `UpdateActionSafetyPolicy`, `UpdateInstallDetection`.
 
 ## Verification
 

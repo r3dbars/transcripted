@@ -2,7 +2,7 @@ import XCTest
 @testable import TranscriptedCore
 
 /// Pins the bounded meeting-start fallback decision for the "Apple voice
-/// processing was requested but did not become active" state (the Bentley
+/// processing was requested but did not become active" state (the reported
 /// 2026-08-03 start failure: built-in mic, permissions granted, VPIO
 /// requested/inactive, `recovery_attempt_count=0`, classified
 /// `mic_unavailable`).

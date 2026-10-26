@@ -67,17 +67,6 @@ public class Transcription: ObservableObject {
         )
     }
 
-    /// Initialize local models. Call once at app startup.
-    public func initializeModels() async {
-        do {
-            try await ensureModelsReadyForPipeline()
-        } catch {
-            AppLogger.transcription.error("Model initialization finished without ready models", [
-                "error": error.localizedDescription
-            ])
-        }
-    }
-
     func ensureModelsReadyForPipeline() async throws {
         let readyStart = ProcessInfo.processInfo.systemUptime
         defer {

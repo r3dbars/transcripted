@@ -196,10 +196,21 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
     /// graph rebuild, format renegotiation), not just the CoreAudio round
     /// trip, so collapsing it into this 500ms window would not be behavior
     /// preserving.
-    func setDefaultInputDevice(_ deviceID: AudioDeviceID) throws {
+    ///
+    /// The marker is armed on main, then the HAL write runs on `coordinator`
+    /// off main, timed. A timeout or open circuit throws like a failed write.
+    func setDefaultInputDevice(
+        _ deviceID: AudioDeviceID,
+        on coordinator: ParakeetReplaceableSystemInputWorkCoordinator
+    ) async throws {
         selfWriteTracker.beginWrite(deviceID: deviceID, now: CFAbsoluteTimeGetCurrent())
         do {
-            try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(deviceID)
+            try await coordinator.run(
+                operation: "persistent_input_write",
+                timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
+            ) {
+                Result { try CoreAudioInputDeviceLookup.setDefaultInputDeviceID(deviceID) }
+            }.get()
         } catch {
             selfWriteTracker.cancelPendingWrite()
             throw error

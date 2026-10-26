@@ -155,7 +155,10 @@ extension SpeakerDatabase {
             sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to delete exemplars", ["sqlite_error": dbErrorMessage(), "profileId": profileId.uuidString])
+                recordMutationFailure(operation: "delete speaker exemplars", code: sqlite3_errcode(db))
             }
+        } else {
+            recordMutationFailure(operation: "prepare delete speaker exemplars", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }

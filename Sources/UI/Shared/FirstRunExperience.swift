@@ -81,13 +81,6 @@ enum FirstRunExperience {
         model.isAppleSpeech ? "Downloading from Apple." : "Downloading from huggingface.co."
     }
 
-    static func hasRequiredDictationSetup(
-        microphoneGranted: Bool,
-        accessibilityGranted: Bool
-    ) -> Bool {
-        microphoneGranted && accessibilityGranted
-    }
-
     static func hasRequiredMeetingSetup(
         microphoneGranted: Bool
     ) -> Bool {

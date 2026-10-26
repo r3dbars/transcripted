@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -30,6 +31,9 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     var meetingDurationSeconds: Int? = nil
     /// Imported recordings have no calendar slot, so no invitees.
     var isImported = false
+    /// Remote voices this meeting named on its own, for the glowing dots in
+    /// the footer of its "Who spoke?" card.
+    var recognizedNames: [String] = []
 
     var id: String {
         [
@@ -74,6 +78,8 @@ struct SpeakerPendingMeetingGroup: Identifiable, Sendable {
     let durationSeconds: Int?
     let isImported: Bool
     let voices: [SpeakerPendingVoiceGroup]
+    /// Remote voices this meeting named on its own.
+    var recognizedNames: [String] = []
 
     var id: String { SpeakerReviewSkippedCalls.key(transcriptId: transcriptId, transcriptURL: transcriptURL) }
 }
@@ -230,8 +236,7 @@ enum SpeakerReviewQueueScanner {
 
             guard let summary = pendingSummary(
                 in: markdown,
-                transcriptURL: url,
-                clipURLsByProfileID: clipURLsByProfileID
+                transcriptURL: url
             ) else {
                 return []
             }
@@ -274,8 +279,7 @@ enum SpeakerReviewQueueScanner {
     ) -> [SpeakerPendingReviewItem] {
         guard let summary = pendingSummary(
             in: markdown,
-            transcriptURL: transcriptURL,
-            clipURLsByProfileID: clipURLsByProfileID
+            transcriptURL: transcriptURL
         ) else { return [] }
         return pendingItems(
             from: summary,
@@ -294,7 +298,8 @@ enum SpeakerReviewQueueScanner {
             let sampleText: String?
             /// The retained-audio preview window when the voice plays from
             /// the mixed recording, and when it plays from its own channel.
-            /// Nil when the summary was made without transcript lines.
+            /// Both windows and `sampleText` come from the same transcript
+            /// turn (`SpeakerReviewSamplePolicy`).
             let mixedWindow: SampleWindow?
             let channelWindow: SampleWindow?
         }
@@ -306,6 +311,8 @@ enum SpeakerReviewQueueScanner {
         let isImported: Bool
         /// Only the `db_pending` speakers, in frontmatter order.
         let speakers: [Speaker]
+        /// Remote voices named on their own (`db`), in frontmatter order.
+        let recognizedNames: [String]
         let hasLineWindows: Bool
 
         func needsAudioFallback(clipURLsByProfileID: [UUID: URL]) -> Bool {
@@ -321,17 +328,14 @@ enum SpeakerReviewQueueScanner {
 
     private static func pendingSummary(
         in markdown: String,
-        transcriptURL: URL,
-        clipURLsByProfileID: [UUID: URL]
+        transcriptURL: URL
     ) -> PendingSummary? {
         guard let document = TranscriptFrontmatter.document(in: markdown) else { return nil }
 
         let meetingDuration = TranscriptFrontmatter.durationSeconds(from: document.values["duration"])
         let pendingSpeakers = frontmatterSpeakers(from: document.lines).filter { $0.source == "db_pending" }
-        let needsAudioFallback = pendingSpeakers.contains {
-            $0.dbId.map { clipURLsByProfileID[$0] == nil } == true
-        }
-        let transcriptLines = needsAudioFallback ? HomeMeetingPreviewContent.make(from: markdown).transcriptLines : []
+        let transcriptLines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
+        let meetingDurationSeconds = meetingDuration.map(TimeInterval.init)
 
         return PendingSummary(
             meetingTitle: normalizedTitle(document.values["title"], fallbackURL: transcriptURL),
@@ -340,18 +344,38 @@ enum SpeakerReviewQueueScanner {
             meetingDuration: meetingDuration,
             isImported: document.values["imported_at"] != nil,
             speakers: pendingSpeakers.map { speaker in
-                PendingSummary.Speaker(
+                let identity = (
+                    persistentSpeakerID: speaker.dbId,
+                    diarizerSpeakerID: speaker.id,
+                    channel: speaker.channel == .mic ? HomeMeetingSpeakerChannel.mic : .system
+                )
+                let mixedSample = SpeakerReviewSamplePolicy.sample(
+                    persistentSpeakerID: identity.persistentSpeakerID,
+                    diarizerSpeakerID: identity.diarizerSpeakerID,
+                    channel: identity.channel,
+                    in: transcriptLines,
+                    meetingDuration: meetingDurationSeconds,
+                    requiredWindow: .mixed
+                )
+                let channelSample = SpeakerReviewSamplePolicy.sample(
+                    persistentSpeakerID: identity.persistentSpeakerID,
+                    diarizerSpeakerID: identity.diarizerSpeakerID,
+                    channel: identity.channel,
+                    in: transcriptLines,
+                    meetingDuration: meetingDurationSeconds,
+                    requiredWindow: .channel
+                )
+                let quoteSample = mixedSample ?? channelSample
+                return PendingSummary.Speaker(
                     speaker: speaker,
-                    sampleText: sampleText(in: document.body, speakerName: speaker.name, channel: speaker.channel),
-                    mixedWindow: needsAudioFallback ? sampleWindow(
-                        for: speaker, lines: transcriptLines, fromMixedAudio: true, meetingDuration: meetingDuration
-                    ) : nil,
-                    channelWindow: needsAudioFallback ? sampleWindow(
-                        for: speaker, lines: transcriptLines, fromMixedAudio: false, meetingDuration: meetingDuration
-                    ) : nil
+                    sampleText: quoteSample.flatMap { cleanedSample($0.line.text) }
+                        ?? sampleText(in: document.body, speakerName: speaker.name, channel: speaker.channel),
+                    mixedWindow: sampleWindow(from: mixedSample?.mixedWindow),
+                    channelWindow: sampleWindow(from: channelSample?.channelWindow)
                 )
             },
-            hasLineWindows: needsAudioFallback
+            recognizedNames: recognizedNames(in: document.lines),
+            hasLineWindows: !transcriptLines.isEmpty
         )
     }
 
@@ -376,6 +400,12 @@ enum SpeakerReviewQueueScanner {
 
             let clipURL = clipURLsByProfileID[dbId]
             let fallback = clipURL == nil ? retainedSample(for: entry, audio: audio) : nil
+            let sampleText: String?
+            if let clipURL {
+                sampleText = clipSidecarSampleText(nextTo: clipURL)
+            } else {
+                sampleText = fallback?.text ?? entry.sampleText
+            }
             return SpeakerPendingReviewItem(
                 speakerId: dbId,
                 diarizerSpeakerId: speaker.id,
@@ -385,14 +415,15 @@ enum SpeakerReviewQueueScanner {
                 meetingTitle: summary.meetingTitle,
                 recordedAt: summary.recordedAt,
                 fallbackDate: fileDate,
-                sampleText: fallback?.text ?? entry.sampleText,
+                sampleText: sampleText,
                 clipURL: clipURL,
                 retainedAudioSample: fallback?.sample,
                 callCount: profile.callCount,
                 profile: profile,
                 sourceName: speaker.name,
                 meetingDurationSeconds: summary.meetingDuration,
-                isImported: summary.isImported
+                isImported: summary.isImported,
+                recognizedNames: summary.recognizedNames
             )
         }
 
@@ -420,13 +451,10 @@ enum SpeakerReviewQueueScanner {
             }
 
             let transcriptPaths = Set(groupItems.map { $0.transcriptURL.standardizedFileURL.path })
-            let sampleText = groupItems
-                .first { $0.sampleText?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == false }?
-                .sampleText
             return SpeakerPendingVoiceGroup(
                 representative: representative,
                 meetingCount: transcriptPaths.count,
-                sampleText: sampleText
+                sampleText: representative.sampleText
             )
         }
     }
@@ -452,7 +480,8 @@ enum SpeakerReviewQueueScanner {
                 fallbackDate: item.fallbackDate,
                 durationSeconds: item.meetingDurationSeconds,
                 isImported: item.isImported,
-                voices: groupVoices
+                voices: groupVoices,
+                recognizedNames: item.recognizedNames
             )
         }
     }
@@ -460,6 +489,18 @@ enum SpeakerReviewQueueScanner {
     private static func deduplicatedPendingItems(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingReviewItem] {
         var seen = Set<String>()
         return items.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Remote voices the meeting named on its own: `db` speakers with a name,
+    /// each name once.
+    static func recognizedNames(in frontmatterLines: [String]) -> [String] {
+        var seen = Set<String>()
+        return frontmatterSpeakers(from: frontmatterLines).compactMap { speaker in
+            let name = speaker.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard speaker.source == "db", speaker.channel == .system, !name.isEmpty,
+                  seen.insert(name.lowercased()).inserted else { return nil }
+            return name
+        }
     }
 
     fileprivate struct FrontmatterSpeaker: Sendable {
@@ -485,54 +526,21 @@ enum SpeakerReviewQueueScanner {
             : nil
         let mixedURL = urls.first { $0.deletingPathExtension().lastPathComponent == MeetingAudioArchiveResolver.playbackStem }
         guard let url = channelURL ?? importedURL ?? mixedURL else { return nil }
-        guard let window = url == mixedURL ? entry.mixedWindow : entry.channelWindow else { return nil }
+        let usesMixedTimeline = url == importedURL || url == mixedURL
+        guard let window = usesMixedTimeline ? entry.mixedWindow : entry.channelWindow else { return nil }
         return (
             SpeakerRetainedAudioSample(url: url, startTime: window.startTime, duration: window.duration),
             window.text
         )
     }
 
-    /// The first utterance of `speaker` that makes a usable preview, as a
-    /// time window plus its text. From the mixed recording any next turn ends
-    /// the window; from a channel file only the next turn on that channel does.
-    private static func sampleWindow(
-        for speaker: FrontmatterSpeaker,
-        lines: [HomeMeetingTranscriptLine],
-        fromMixedAudio: Bool,
-        meetingDuration: Int?
-    ) -> SampleWindow? {
-        for (index, line) in lines.enumerated() {
-            // Styled transcripts omit the channel prefix. The existing parser
-            // resolves their identity only when the frontmatter match is unique.
-            guard line.identity.persistentSpeakerID == speaker.dbId,
-                  line.identity.diarizerSpeakerID == speaker.id,
-                  line.identity.channel == nil || line.identity.channel?.rawValue == speaker.channel.rawValue,
-                  let start = timestampSeconds(line.time) else { continue }
-            var end = start + 8
-            if let next = lines.dropFirst(index + 1).first(where: {
-                fromMixedAudio || $0.identity.channel == nil
-                    || $0.identity.channel?.rawValue == speaker.channel.rawValue
-            }) {
-                // Never preview across the next turn on this source. Equal or
-                // reversed timestamps are ambiguous, so try another utterance.
-                guard let nextStart = timestampSeconds(next.time), nextStart > start else { continue }
-                end = min(end, nextStart)
-            }
-            if let meetingDuration { end = min(end, TimeInterval(meetingDuration)) }
-            guard end > start else { continue }
-            return SampleWindow(startTime: start, duration: end - start, text: cleanedSample(line.text))
-        }
-        return nil
-    }
-
-    private static func timestampSeconds(_ value: String) -> TimeInterval? {
-        let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2 || parts.count == 3,
-              parts.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) }),
-              let seconds = Int(parts[parts.count - 1]), seconds < 60,
-              parts.count != 3 || (Int(parts[1]).map { $0 < 60 } == true),
-              let total = TranscriptFrontmatter.durationSeconds(from: value) else { return nil }
-        return TimeInterval(total)
+    private static func sampleWindow(from window: SpeakerReviewSamplePolicy.Window?) -> SampleWindow? {
+        guard let window else { return nil }
+        return SampleWindow(
+            startTime: window.startTime,
+            duration: window.duration,
+            text: cleanedSample(window.text)
+        )
     }
 
     private static func frontmatterSpeakers(from lines: [String]) -> [FrontmatterSpeaker] {
@@ -608,6 +616,34 @@ enum SpeakerReviewQueueScanner {
         return fallbackURL.deletingPathExtension().lastPathComponent
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
+    }
+
+    /// Reads the quote stored next to a saved clip. Decodes the sidecar
+    /// JSON by key so this module does not name the Core sidecar type, and
+    /// only returns it when the sidecar still describes this wav.
+    private static func clipSidecarSampleText(nextTo clipURL: URL) -> String? {
+        struct Payload: Decodable {
+            var sampleText: String
+            var formatVersion: Int
+            var wavByteCount: Int
+            var wavSHA256: String
+        }
+        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.formatVersion == 1,
+              payload.wavByteCount > 0,
+              !payload.wavSHA256.isEmpty,
+              let wav = try? Data(contentsOf: clipURL),
+              wav.count == payload.wavByteCount,
+              clipWavSHA256(wav) == payload.wavSHA256.lowercased() else {
+            return nil
+        }
+        return cleanedSample(payload.sampleText)
+    }
+
+    private static func clipWavSHA256(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func sampleText(

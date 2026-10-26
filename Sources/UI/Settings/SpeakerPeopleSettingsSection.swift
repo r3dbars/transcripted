@@ -3,14 +3,8 @@ import AppKit
 import Combine
 import TranscriptedCore
 
-enum SpeakerPeopleSettingsPolishContract {
-    static let minimumHitTarget: CGFloat = 40
-    /// Glyph point size for the quiet inline play/pause control. The old
-    /// 36pt filled accent circle is gone — playing state reads through the
-    /// pause glyph, accent ink, and the sweep under the sample it belongs to.
-    static let quietPlayGlyphPointSize: CGFloat = 14
-    static let compactIconVisibleDiameter: CGFloat = 28
-}
+// SpeakerPeopleSettingsPolishContract and SpeakerPeopleEmptyState live in
+// SpeakerPeopleSettingsConstants.swift so fast tests can check them by value.
 
 struct SpeakerCompactIconLabel: View {
     let systemName: String
@@ -82,7 +76,6 @@ struct SpeakerPeopleSettingsSection: View {
         VStack(alignment: .leading, spacing: 24) {
             // Evaluated once per render: the directory properties sort and
             // filter every profile on each access.
-            let meetingGroups = model.reviewStack.calls
             let directoryCount = model.directoryCount
             let directoryProfiles = model.directoryProfiles
 
@@ -95,74 +88,11 @@ struct SpeakerPeopleSettingsSection: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            let current = model.reviewSession.currentCall(in: meetingGroups)
-            let total = model.reviewSession.callCount(in: meetingGroups)
-            let visitToken = model.reviewSession.visitToken
-
-            if let current, !model.reviewSession.isOpen {
-                // Closed: one line about what's waiting, and Review.
-                SpeakerReviewSummaryCard(calls: meetingGroups.isEmpty ? [current] : meetingGroups) {
-                    withAnimation(.snappy(duration: 0.24)) { model.openReview() }
-                }
+            // "Who spoke?", one meeting at a time, like the island after a
+            // meeting: the headline, "Meeting 1 of 8", and the top card.
+            SpeakerWhoSpokeSection(model: model)
                 .id(ScrollTarget.reviewQueue)
                 .accessibilityIdentifier("transcripted.speakers.inbox")
-            } else if let current {
-                VStack(alignment: .leading, spacing: 12) {
-                    VStack(alignment: .leading, spacing: 4) {
-                        HStack(alignment: .firstTextBaseline) {
-                            LibrarySectionLabel(
-                                text: "Review and name these people",
-                                trailing: total == 1 ? "1 call left" : "\(total) calls left"
-                            )
-                            SpeakerQuietLinkButton(title: "Close") {
-                                withAnimation(.snappy(duration: 0.24)) { model.closeReview() }
-                            }
-                            .accessibilityIdentifier("transcripted.speakers.review.close")
-                        }
-
-                        Text("One call at a time. Play a clip, then tap a name from the invite or type one. It updates every meeting they're in.")
-                            .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-
-                    // A stack of work: only the top call is open; the edges
-                    // of the next ones peek out underneath. When the top
-                    // call's voices are all named it drops out of the queue
-                    // and the next card springs up.
-                    VStack(spacing: 0) {
-                        SpeakerCallReviewCard(
-                            group: current,
-                            pendingVoices: model.reviewSession.pendingVoices(on: current, in: meetingGroups),
-                            named: model.reviewSession.namedVoices(on: current),
-                            model: model,
-                            position: 1,
-                            total: total,
-                            onNamed: { voice in
-                                model.recordReviewName(voice, on: current, visitToken: visitToken)
-                            },
-                            onNext: { withAnimation(.snappy(duration: 0.3)) { model.finishReview(current, total: total) } }
-                        )
-                        .id(current.id)
-                        .transition(.asymmetric(
-                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                            removal: .move(edge: .top).combined(with: .opacity)
-                        ))
-                        .zIndex(2)
-
-                        if total > 1 {
-                            stackEdge(inset: 12, opacity: 1)
-                                .zIndex(1)
-                        }
-                        if total > 2 {
-                            stackEdge(inset: 24, opacity: 0.6)
-                        }
-                    }
-                    .animation(.spring(response: 0.34, dampingFraction: 0.74), value: current.id)
-                }
-                .id(ScrollTarget.reviewQueue)
-                .accessibilityIdentifier("transcripted.speakers.inbox")
-            }
 
             // Voices on the open card above are left out of Everyone; voices
             // on cards further down stay listed, badged, so they can be
@@ -180,6 +110,10 @@ struct SpeakerPeopleSettingsSection: View {
                 // Everyone else, by voice print: "Named automatically",
                 // "Still learning", then unnamed voices outside the open card.
                 VStack(alignment: .leading, spacing: 16) {
+                    LibrarySectionLabel(
+                        text: SpeakerMeetingReviewPolicy.directoryTitle,
+                        trailing: "\(model.knownPeopleCount)"
+                    )
                     SpeakerSearchRow(model: model)
 
                     if directoryProfiles.isEmpty {
@@ -208,7 +142,8 @@ struct SpeakerPeopleSettingsSection: View {
         .onDisappear {
             expandedPersonID = nil
             SpeakerClipPlayback.stop()
-            model.closeReview()
+            // A card finished just before leaving saves now, not in a moment.
+            model.saveFinishedMeetingNow()
         }
     }
 
@@ -235,20 +170,7 @@ struct SpeakerPeopleSettingsSection: View {
     }
 }
 
-// MARK: - Empty state copy + teaching view
-
-/// Foundation-pure copy for the Speakers surface's empty states. Kept as
-/// constants so the teaching first-run copy can be pinned by fast tests and can
-/// never regress to bare gray placeholder text. Plain words, no exclamation
-/// marks, per the repo voice convention.
-enum SpeakerPeopleEmptyState {
-    static let symbolName = "person.2"
-    static let title = "No speakers yet"
-    static let message = "Transcripted learns each voice as you record. After your first meeting, the people in it show up here, so you can name them. Once you’ve confirmed someone in a few meetings, Transcripted names them on its own."
-    static let actionTitle = "Record a meeting"
-    static let actionAutomationIdentifier = "transcripted.speakers.empty.start-meeting"
-    static let noSearchMatches = "No speakers match your search."
-}
+// MARK: - Empty state teaching view
 
 /// First-run teaching empty state for the all-speakers list: it explains what
 /// the screen will fill with and offers the one action that fills it.
@@ -288,130 +210,6 @@ private struct SpeakersEmptyStateView: View {
         .padding(.vertical, 40)
         .padding(.horizontal, 16)
     }
-}
-
-// MARK: - Voices to name
-
-/// One call in "Name these people": its name, day and length, then each
-/// voice still waiting for a name, with the call's invitees as one-tap names.
-private struct SpeakerCallReviewCard: View {
-    let group: SpeakerPendingMeetingGroup
-    /// Voices on this card still waiting for a name.
-    let pendingVoices: [SpeakerPendingVoiceGroup]
-    /// Voices named on this card this visit; they stay, lit up.
-    let named: [SpeakerReviewNamedVoice]
-    @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    var position = 1
-    var total = 1
-    let onNamed: (SpeakerReviewNamedVoice) -> Void
-    let onNext: () -> Void
-
-    private var isDone: Bool { pendingVoices.isEmpty }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(alignment: .firstTextBaseline, spacing: 10) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(group.meetingTitle)
-                        .font(LibraryTokens.rowTitle)
-                        .lineLimit(1)
-                    Text(metaLine)
-                        .font(LibraryTokens.meta)
-                        .monospacedDigit()
-                        .foregroundStyle(LibraryTokens.ink2)
-                }
-                Spacer(minLength: 0)
-                if total > 1 {
-                    Text("\(position) of \(total)")
-                        .font(LibraryTokens.meta)
-                        .monospacedDigit()
-                        .foregroundStyle(LibraryTokens.ink3)
-                }
-                if total > 1, !isDone {
-                    SpeakerQuietLinkButton(title: "Later") {
-                        model.sendCallToBack(group)
-                    }
-                    .help("Put this call at the back of the stack.")
-                    .accessibilityIdentifier("transcripted.speakers.call-review.later")
-                }
-                if !isDone {
-                    SpeakerQuietLinkButton(title: "Skip this call") {
-                        model.skipCall(group)
-                    }
-                    .help("Stop asking about this call. Its voices stay under Not named yet.")
-                    .accessibilityIdentifier("transcripted.speakers.call-review.skip")
-                }
-            }
-            ForEach(pendingVoices) { voice in
-                SpeakerVoiceToNameRow(
-                    group: voice,
-                    model: model,
-                    showsMeeting: false,
-                    invitees: model.inviteesByCallKey[group.id] ?? [],
-                    onNamed: onNamed
-                )
-            }
-            ForEach(named) { voice in
-                SpeakerReviewNamedRow(voice: voice, model: model)
-                    .transition(.opacity)
-            }
-            if isDone {
-                SpeakerReviewDoneFooter(
-                    callTitle: group.meetingTitle,
-                    namedCount: named.count,
-                    callsAfterThis: total - 1,
-                    onNext: onNext
-                )
-            }
-        }
-        .animation(.snappy(duration: 0.28), value: named.map(\.id))
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .fill(LibraryTokens.raisedFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
-        )
-        .onAppear { model.loadInvitees(for: group) }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(group.meetingTitle), \(pendingVoices.count == 1 ? "1 voice" : "\(pendingVoices.count) voices") to name")
-    }
-
-    private var metaLine: String {
-        var parts: [String] = []
-        let date = group.recordedAt ?? group.fallbackDate
-        if date != .distantPast {
-            parts.append(Self.dateFormatter.string(from: date))
-        }
-        if let seconds = group.durationSeconds, seconds > 0 {
-            parts.append(Self.durationText(seconds))
-        }
-        switch pendingVoices.count {
-        case 0: break
-        case 1: parts.append("1 person to name")
-        default: parts.append("\(pendingVoices.count) people to name")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    static func durationText(_ seconds: Int) -> String {
-        let minutes = Int((Double(seconds) / 60).rounded())
-        if minutes < 1 { return "under a minute" }
-        if minutes < 60 { return "\(minutes) min" }
-        let hours = minutes / 60
-        let rest = minutes % 60
-        return rest == 0 ? "\(hours) h" : "\(hours) h \(rest) min"
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .none
-        return formatter
-    }()
 }
 
 /// Quiet inline play/pause control — a bare glyph, no filled circle. Ink at

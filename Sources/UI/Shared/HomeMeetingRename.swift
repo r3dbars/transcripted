@@ -454,7 +454,8 @@ enum HomeMeetingRename {
     /// Replace the `title:` frontmatter value and the first body `# ` heading. If the
     /// frontmatter has no `title:` line, one is inserted right after the opening `---`.
     static func rewriteTitle(in raw: String, to title: String) -> String {
-        let escapedTitle = title.replacingOccurrences(of: "\"", with: "'")
+        // Quoted the way TranscriptFrontmatter reads it back, so a backslash survives.
+        let titleLine = "title: \(TranscriptFrontmatter.quotedYAMLScalar(title))"
         var lines = raw.components(separatedBy: "\n")
 
         var openingFenceIndex: Int?
@@ -479,7 +480,7 @@ enum HomeMeetingRename {
 
             if inFrontmatter {
                 if !didReplaceTitle, trimmed.hasPrefix("title:") {
-                    lines[index] = "title: \"\(escapedTitle)\""
+                    lines[index] = titleLine
                     didReplaceTitle = true
                 }
             } else if frontmatterClosed, !didReplaceHeading, trimmed.hasPrefix("# ") {
@@ -489,7 +490,7 @@ enum HomeMeetingRename {
         }
 
         if !didReplaceTitle, let openingFenceIndex {
-            lines.insert("title: \"\(escapedTitle)\"", at: openingFenceIndex + 1)
+            lines.insert(titleLine, at: openingFenceIndex + 1)
         }
 
         return lines.joined(separator: "\n")

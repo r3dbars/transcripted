@@ -88,7 +88,7 @@ public enum TranscriptFrontmatter {
             let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
             guard parts.count == 2 else { continue }
 
-            values[parts[0].trimmingCharacters(in: .whitespaces)] = normalizeValue(parts[1])
+            values[parts[0].trimmingCharacters(in: .whitespaces)] = unquoteYAMLScalar(parts[1])
         }
 
         return values
@@ -217,9 +217,64 @@ public enum TranscriptFrontmatter {
         return date(values: values)
     }
 
-    private static func normalizeValue(_ value: String) -> String {
-        value
-            .trimmingCharacters(in: .whitespaces)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+    /// Wrap a value as a YAML double-quoted scalar. `unquoteYAMLScalar`
+    /// reverses it.
+    public static func quotedYAMLScalar(_ value: String) -> String {
+        "\"\(escapeYAML(value))\""
+    }
+
+    /// Escape special characters for safe YAML string interpolation.
+    /// Security: YAML double-quoted scalars prohibit raw newlines/tabs — an unescaped \n
+    /// ends the scalar value, letting subsequent text be parsed as additional YAML keys.
+    static func escapeYAML(_ s: String) -> String {
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+         .replacingOccurrences(of: "\"", with: "\\\"")
+         .replacingOccurrences(of: "\n", with: "\\n")
+         .replacingOccurrences(of: "\r", with: "\\r")
+         .replacingOccurrences(of: "\t", with: "\\t")
+    }
+
+    /// Decode a YAML double-quoted scalar (`\"`, `\\`, `\n`, `\r`, `\t`).
+    /// Anything that isn't one whole quoted scalar comes back trimmed and
+    /// otherwise unchanged.
+    public static func unquoteYAMLScalar(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard trimmed.first == "\"",
+              let decoded = decodeYAMLQuoted(trimmed, from: trimmed.index(after: trimmed.startIndex)),
+              decoded.end == trimmed.endIndex else {
+            return trimmed
+        }
+        return decoded.value
+    }
+
+    /// Decode a double-quoted scalar whose opening quote sits just before
+    /// `start`. Returns the value and the index after the closing quote, or
+    /// nil when the closing quote is missing.
+    static func decodeYAMLQuoted(_ text: String, from start: String.Index) -> (value: String, end: String.Index)? {
+        var index = start
+        var result = ""
+        while index < text.endIndex {
+            let c = text[index]
+            index = text.index(after: index)
+            if c == "\\" && index < text.endIndex {
+                let next = text[index]
+                index = text.index(after: index)
+                switch next {
+                case "\"": result.append("\"")
+                case "\\": result.append("\\")
+                case "n":  result.append("\n")
+                case "r":  result.append("\r")
+                case "t":  result.append("\t")
+                default:
+                    result.append("\\")
+                    result.append(next)
+                }
+            } else if c == "\"" {
+                return (result, index)
+            } else {
+                result.append(c)
+            }
+        }
+        return nil
     }
 }

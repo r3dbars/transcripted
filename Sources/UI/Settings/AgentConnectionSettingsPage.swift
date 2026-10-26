@@ -524,8 +524,9 @@ struct AgentConnectionSettingsPage: View {
                 )
                 trackConnect(agent, priorStatus: priorStatus, result: .success)
             } catch {
-                rowPhases[agent] = .failed(AgentSetupFailureCopy.connect(agentName: agent.displayName))
-                rowFailureDetails[agent] = error.localizedDescription
+                let failure = AgentSetupFailureCopy.connectFailure(agentName: agent.displayName, error: error)
+                rowPhases[agent] = .failed(failure.message)
+                rowFailureDetails[agent] = failure.details
                 AgentSetupLifecycleTelemetry.track(
                     agentTarget: lifecycleTarget,
                     setupKind: lifecycleSetupKind,
@@ -625,8 +626,9 @@ struct AgentConnectionSettingsPage: View {
                 )
             }
         } catch {
-            codexInboxSetupError = AgentSetupFailureCopy.codexInbox
-            codexInboxSetupErrorDetails = error.localizedDescription
+            let failure = AgentSetupFailureCopy.codexInboxFailure(error: error)
+            codexInboxSetupError = failure.message
+            codexInboxSetupErrorDetails = failure.details
             ActivationTelemetry.trackAgentSetupCTA(
                 setupKind: .codexInbox,
                 agentTarget: .codex,

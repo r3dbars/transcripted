@@ -18,15 +18,16 @@ struct PersistentDictationInputSystem {
     var userDefaults: UserDefaults
     var defaultInputMonitor: any DefaultInputDeviceSubscribing
     /// The Mac-wide default-input write. Live: `DefaultInputDeviceMonitor.shared.setDefaultInputDevice(_:)`.
-    var setDefaultInput: (AudioDeviceID) throws -> Void
+    /// The HAL calls here and below run off main, timed; a timeout throws.
+    var setDefaultInput: @MainActor (AudioDeviceID) async throws -> Void
     /// Registers `handler` for `kAudioHardwarePropertyDevices` changes. Returns
     /// the registration to remove later, or nil when the HAL refused it.
     var addDeviceListListener: (_ handler: @escaping @MainActor () -> Void) -> AudioObjectPropertyListenerBlock?
     var removeDeviceListListener: (@escaping AudioObjectPropertyListenerBlock) -> Void
     /// The current default input plus the faster-start (built-in over Bluetooth) recommendation.
-    var recommendedSelection: () throws -> DictationInputDeviceSelection
-    var availableInputs: () throws -> [DictationAudioDevice]
-    var currentDefaultInputID: () throws -> AudioDeviceID
+    var recommendedSelection: @MainActor () async throws -> DictationInputDeviceSelection
+    var availableInputs: @MainActor () async throws -> [DictationAudioDevice]
+    var currentDefaultInputID: @MainActor () async throws -> AudioDeviceID
     /// May block in a driver; always called off the main actor.
     var hasExternalInputActivity: @Sendable () throws -> Bool
     var report: (Report) -> Void
@@ -76,6 +77,9 @@ final class PersistentDictationInputController {
     /// `stopMonitoring()` is undone instead of adopted.
     private var deviceListRegistrationGeneration: UInt64 = 0
     private var externalInputActivityTask: Task<Bool?, Never>?
+    /// Bumped by every reconcile and stop. A pass that wakes from a HAL read
+    /// to a newer number stops before deciding anything; the newer pass owns it.
+    private var reconcileGeneration: UInt64 = 0
     private var runtimeOwnershipRelinquished = false
     private var lastMaintainedInput: AudioDeviceID?
     private let isDictationActive: () -> Bool
@@ -90,7 +94,7 @@ final class PersistentDictationInputController {
         readExternalInputActivity: { [weak self] in await self?.readExternalInputActivity() },
         delay: { [system] in await system.refreshDelay() },
         reconcile: { [weak self] defaultInputChanged, deviceListChanged in
-            self?.reconcileCurrentPreference(
+            await self?.reconcileCurrentPreference(
                 defaultInputChanged: defaultInputChanged,
                 deviceListChanged: deviceListChanged
             )
@@ -145,12 +149,13 @@ final class PersistentDictationInputController {
             activeOverride = nil
             return
         }
-        restoreIfStillOwned(operation: "app_termination")
+        await restoreIfStillOwned(operation: "app_termination")
         runtimeOwnershipRelinquished = false
         lastMaintainedInput = nil
     }
 
     func stopMonitoring() {
+        reconcileGeneration &+= 1
         if let preferenceObserver {
             NotificationCenter.default.removeObserver(preferenceObserver)
             self.preferenceObserver = nil
@@ -274,20 +279,25 @@ final class PersistentDictationInputController {
     private func reconcileCurrentPreference(
         defaultInputChanged: Bool = false,
         deviceListChanged: Bool = false
-    ) {
-        recoverPersistedOwnership()
-        applyCurrentPreference(
+    ) async {
+        reconcileGeneration &+= 1
+        let generation = reconcileGeneration
+        await recoverPersistedOwnership(generation: generation)
+        guard generation == reconcileGeneration else { return }
+        await applyCurrentPreference(
             defaultInputChanged: defaultInputChanged,
-            deviceListChanged: deviceListChanged
+            deviceListChanged: deviceListChanged,
+            generation: generation
         )
     }
 
     private func applyCurrentPreference(
         defaultInputChanged: Bool,
-        deviceListChanged: Bool
-    ) {
+        deviceListChanged: Bool,
+        generation: UInt64
+    ) async {
         if !DictationPersistentInputPreferences.isEnabled(userDefaults: system.userDefaults) {
-            restoreIfStillOwned(operation: "preference_disabled")
+            await restoreIfStillOwned(operation: "preference_disabled")
             runtimeOwnershipRelinquished = false
             lastMaintainedInput = nil
             return
@@ -296,8 +306,11 @@ final class PersistentDictationInputController {
         guard !runtimeOwnershipRelinquished else { return }
 
         do {
-            let selection = try system.recommendedSelection()
-            let availableInputs = try system.availableInputs()
+            let selection = try await system.recommendedSelection()
+            let availableInputs = try await system.availableInputs()
+            // State may have moved while the reads were suspended.
+            guard generation == reconcileGeneration,
+                  DictationPersistentInputPreferences.isEnabled(userDefaults: system.userDefaults) else { return }
             if activeOverride == nil,
                let marker = DictationPersistentInputPreferences.recoveryMarker(userDefaults: system.userDefaults),
                selection.defaultInput.uid == marker.selectedUID {
@@ -377,9 +390,16 @@ final class PersistentDictationInputController {
             }
             DictationPersistentInputPreferences.setRecoveryMarker(recoveryMarker, userDefaults: system.userDefaults)
             do {
-                try system.setDefaultInput(selectedInput.id)
+                try await setDefaultInputWhileIdle(
+                    selectedInput.id,
+                    defaultInputChanged: defaultInputChanged,
+                    deviceListChanged: deviceListChanged
+                )
             } catch {
-                DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+                // A timed-out write may still land; the kept marker lets the next pass adopt or clear it.
+                if (error as? ParakeetSystemInputWorkError)?.isTimedOut != true {
+                    DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
+                }
                 throw error
             }
             activeOverride = ActiveOverride(
@@ -409,11 +429,11 @@ final class PersistentDictationInputController {
         }
     }
 
-    private func restoreIfStillOwned(operation: String) {
+    private func restoreIfStillOwned(operation: String) async {
         guard let activeOverride else { return }
         self.activeOverride = nil
         do {
-            let currentInput = try system.currentDefaultInputID()
+            let currentInput = try await system.currentDefaultInputID()
             guard DictationPersistentInputRestorePolicy.shouldRestorePrevious(
                 currentInput: currentInput,
                 ownedSelectedInput: activeOverride.selectedInput
@@ -427,7 +447,7 @@ final class PersistentDictationInputController {
                 )
                 return
             }
-            try system.setDefaultInput(activeOverride.previousInput)
+            try await setDefaultInputWhileIdle(activeOverride.previousInput)
             DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             report(
                 .info,
@@ -445,11 +465,12 @@ final class PersistentDictationInputController {
         }
     }
 
-    private func recoverPersistedOwnership() {
+    private func recoverPersistedOwnership(generation: UInt64) async {
         guard let marker = DictationPersistentInputPreferences.recoveryMarker(userDefaults: system.userDefaults) else { return }
         do {
-            let availableInputs = try system.availableInputs()
-            let currentInputID = try system.currentDefaultInputID()
+            let availableInputs = try await system.availableInputs()
+            let currentInputID = try await system.currentDefaultInputID()
+            guard generation == reconcileGeneration else { return }
             let currentUID = availableInputs.first(where: { $0.id == currentInputID })?.uid
             let availableByUID = Dictionary(
                 availableInputs.compactMap { device in
@@ -491,7 +512,7 @@ final class PersistentDictationInputController {
                     DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
                     return
                 }
-                try system.setDefaultInput(previous.id)
+                try await setDefaultInputWhileIdle(previous.id)
                 DictationPersistentInputPreferences.setRecoveryMarker(nil, userDefaults: system.userDefaults)
             case .preserve:
                 return
@@ -505,6 +526,22 @@ final class PersistentDictationInputController {
                 message: "Could not reconcile microphone ownership after an unclean app exit"
             )
         }
+    }
+
+    private struct CaptureBecameActive: Error {}
+
+    /// HAL reads suspend, so a recording can start after the scheduler's idle
+    /// check. Never switch the Mac-wide input under it: throw and retry later.
+    private func setDefaultInputWhileIdle(
+        _ deviceID: AudioDeviceID,
+        defaultInputChanged: Bool = false,
+        deviceListChanged: Bool = false
+    ) async throws {
+        guard !isDictationActive(), !isMeetingCaptureActive() else {
+            scheduleTopologyRefresh(defaultInputChanged: defaultInputChanged, deviceListChanged: deviceListChanged)
+            throw CaptureBecameActive()
+        }
+        try await system.setDefaultInput(deviceID)
     }
 
     private func report(

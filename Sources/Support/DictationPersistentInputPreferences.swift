@@ -234,7 +234,7 @@ final class DictationPersistentInputRefreshScheduler {
     private let isMeetingCaptureActive: () -> Bool
     private let readExternalInputActivity: () async -> Bool?
     private let delay: () async -> Void
-    private let reconcile: (_ defaultInputChanged: Bool, _ deviceListChanged: Bool) -> Void
+    private let reconcile: (_ defaultInputChanged: Bool, _ deviceListChanged: Bool) async -> Void
 
     init(
         isMonitoring: @escaping () -> Bool,
@@ -244,7 +244,7 @@ final class DictationPersistentInputRefreshScheduler {
         isMeetingCaptureActive: @escaping () -> Bool,
         readExternalInputActivity: @escaping () async -> Bool?,
         delay: @escaping () async -> Void,
-        reconcile: @escaping (_ defaultInputChanged: Bool, _ deviceListChanged: Bool) -> Void
+        reconcile: @escaping (_ defaultInputChanged: Bool, _ deviceListChanged: Bool) async -> Void
     ) {
         self.isMonitoring = isMonitoring
         self.preferenceEnabled = preferenceEnabled
@@ -296,7 +296,7 @@ final class DictationPersistentInputRefreshScheduler {
             let deviceListChanged = self.pendingDeviceListChange
             self.pendingDefaultInputChange = false
             self.pendingDeviceListChange = false
-            self.reconcile(defaultInputChanged, deviceListChanged)
+            await self.reconcile(defaultInputChanged, deviceListChanged)
         }
     }
 

@@ -24,6 +24,9 @@ ISSUE_500_DOC = "docs/qa-issue-500-meeting-audio.md"
 QA_BENCH = "scripts/ops/transcripted-qa-bench.sh"
 E2E_SCRIPT = "scripts/entrypoints/run-e2e-smoke.sh"
 SHARED_SOURCES = "scripts/entrypoints/lib/shared-smoke-sources.sh"
+QA_BENCH_DOC = "docs/qa-test-bench.md"
+DAILY_DOC = "docs/audio-reliability-daily-check.md"
+QA_GATES = ".agents/qa-gates.yml"
 
 SYNTHETIC_ROWS = [
     "synthetic-dictation-pasteback-lifecycle",
@@ -61,6 +64,13 @@ BLUETOOTH_TOKENS = [
     "audio_route_not_settled",
     "hfp_suspected",
 ]
+# The QA report, its docs and the gates say mocked Bluetooth route tests are not
+# hardware proof (was a suite in Tests/BluetoothRouteContractTests.swift).
+MOCKED_BLUETOOTH_BOUNDARY = [
+    "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof.",
+    "Real connected AirPods/Bluetooth hardware remains manual proof.",
+]
+MOCKED_BLUETOOTH_BOUNDARY_FILES = [QA_BENCH, QA_BENCH_DOC, DAILY_DOC, QA_GATES]
 MANUAL_PROOF_LANES = ["Safari Meet", "Firefox Meet", "Chrome Meet", "Zoom", "AirPods/Bluetooth"]
 QA_BENCH_MARKERS = [
     "Use `docs/qa-issue-500-meeting-audio.md`",
@@ -95,6 +105,8 @@ def check(files: dict[str, str]) -> list[str]:
     need(DAILY_SCRIPT, MANUAL_PROOF_LANES, "synthetic report names manual proof lanes")
     need(ISSUE_500_DOC, MANUAL_PROOF_LANES, "issue 500 QA matrix keeps every manual lane")
     need(QA_BENCH, QA_BENCH_MARKERS, "QA bench keeps route proof in the manual scenario packet")
+    for path in MOCKED_BLUETOOTH_BOUNDARY_FILES:
+        need(path, MOCKED_BLUETOOTH_BOUNDARY, "mocked Bluetooth route proof is not hardware proof")
 
     e2e = files.get(E2E_SCRIPT, "")
     shared = files.get(SHARED_SOURCES, "")
@@ -110,7 +122,7 @@ def check(files: dict[str, str]) -> list[str]:
 
 
 def load() -> dict[str, str]:
-    paths = [DAILY_SCRIPT, ISSUE_500_DOC, QA_BENCH, E2E_SCRIPT, SHARED_SOURCES]
+    paths = [DAILY_SCRIPT, ISSUE_500_DOC, QA_BENCH, E2E_SCRIPT, SHARED_SOURCES, QA_BENCH_DOC, DAILY_DOC, QA_GATES]
     return {
         p: (REPO_ROOT / p).read_text(encoding="utf-8") if (REPO_ROOT / p).exists() else ""
         for p in paths
@@ -123,7 +135,10 @@ def self_test() -> int:
             SYNTHETIC_ROWS + REPORT_MARKERS + RESTART_MARKERS + BLUETOOTH_TOKENS + MANUAL_PROOF_LANES
         ),
         ISSUE_500_DOC: "\n".join(MANUAL_PROOF_LANES),
-        QA_BENCH: "\n".join(QA_BENCH_MARKERS),
+        QA_BENCH: "\n".join(QA_BENCH_MARKERS + MOCKED_BLUETOOTH_BOUNDARY),
+        QA_BENCH_DOC: "\n".join(MOCKED_BLUETOOTH_BOUNDARY),
+        DAILY_DOC: "\n".join(MOCKED_BLUETOOTH_BOUNDARY),
+        QA_GATES: " ".join(MOCKED_BLUETOOTH_BOUNDARY),
         E2E_SCRIPT: 'run "${SHARED_TEST_STORAGE_SOURCES[@]}"',
         SHARED_SOURCES: (
             'OTHER=(\n  "Sources/Meeting/MeetingTranscriptStyler.swift"\n)\n'
@@ -134,6 +149,11 @@ def self_test() -> int:
     broken = dict(good)
     broken[DAILY_SCRIPT] = good[DAILY_SCRIPT].replace("hfp_suspected", "")
     assert any("hfp_suspected" in p for p in check(broken))
+    for path in MOCKED_BLUETOOTH_BOUNDARY_FILES:
+        for line in MOCKED_BLUETOOTH_BOUNDARY:
+            no_boundary = dict(good)
+            no_boundary[path] = good[path].replace(line, "")
+            assert any(path in p and "hardware proof" in p for p in check(no_boundary)), (path, line)
     wrong_array = dict(good)
     wrong_array[SHARED_SOURCES] = (
         'SHARED_TEST_STORAGE_SOURCES=(\n  "Sources/Other.swift"\n)\n'

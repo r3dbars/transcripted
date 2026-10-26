@@ -48,7 +48,8 @@ func handleReadDictation(params: CallTool.Parameters, dictationDirs: [URL]) thro
         return invalidAgentCaptureQueryInputResult("Invalid filename: \(filename)")
     }
 
-    guard let (day, content) = TranscriptLoader.loadDictationDayWithContent(markdownURL) else {
+    guard CaptureMarkdown.captureKind(of: markdownURL) == .dictationDay,
+          let (day, content) = TranscriptLoader.loadDictationDayWithContent(markdownURL) else {
         return emptyOrMissingAgentCaptureQueryResult(
             "Dictation not found: \(filename). Use list_dictations to see available days.",
             isError: true

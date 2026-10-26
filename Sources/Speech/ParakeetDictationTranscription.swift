@@ -243,18 +243,6 @@ extension ParakeetEngine {
     func transcribe(preparedRecording: RecordedSpeechSamples? = nil) async -> String? {
         guard !Task.isCancelled else { return nil }
         lastEmptyTranscriptionReason = nil
-        guard !isTranscribing else {
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "transcription_already_active",
-                message: "transcribe() called while transcription already in progress")
-            return nil
-        }
-        drainPendingSamplesIntoTimeline()
-        guard preparedRecording != nil || !recoveredRecordingTimeline.isEmpty else {
-            lastEmptyTranscriptionReason = .recordingTooShort
-            EventReporter.shared.capture(level: .warning, engine: "parakeet", event: "no_audio_samples",
-                message: "No audio samples in buffer when transcribe() called")
-            return nil
-        }
         guard let manager = asrManager, asrManagerReady else {
             AppLogger.transcription.error("PARAKEET | ASR manager not available")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "asr_manager_unavailable",
@@ -262,46 +250,14 @@ extension ParakeetEngine {
             return nil
         }
 
-        guard let transcriptionLease = beginRecordedTranscription() else { return nil }
         let startTime = CFAbsoluteTimeGetCurrent()
-
-        let recorded = await consumeRecordedSamples(preparedRecording: preparedRecording)
-        if Task.isCancelled {
-            finishTranscription(ownedBy: transcriptionLease, clearSamples: recorded != nil)
-            return nil
-        }
-        guard ownsRecordedTranscription(transcriptionLease) else { return nil }
-        guard let recorded else {
-            lastEmptyTranscriptionReason = DictationEmptyInferencePolicy.reasonAfterEmptyConversion(
-                current: lastEmptyTranscriptionReason,
-                retainsNativeAudio: !recoveredRecordingTimeline.isEmpty
-            )
-            finishTranscription(ownedBy: transcriptionLease, clearSamples: false)
-            return nil
-        }
+        guard let recorded = await drainRecordedSamplesForExternalTranscription(
+            engineName: "parakeet",
+            preparedRecording: preparedRecording
+        ), let transcriptionLease = currentRecordedTranscriptionLease else { return nil }
         let consumedRevision = recordedSamplesRevision
         let nativeCount = recorded.nativeSampleCount
         let resampled = recorded.samples16k
-        AppLogger.transcription.info("PARAKEET | resampled \(nativeCount) → \(resampled.count) samples")
-
-        let shortAudioDecision = ParakeetShortAudioGate.dictation(
-            nativeSampleCount: nativeCount,
-            resampledSampleCount: resampled.count
-        )
-        guard shortAudioDecision.shouldTranscribe else {
-            lastEmptyTranscriptionReason = .recordingTooShort
-            let audioDuration = shortAudioDecision.context["audio_duration_s"] ?? "0.00"
-            AppLogger.transcription.warning("PARAKEET | skipping transcription for short audio (\(audioDuration)s)")
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: "parakeet",
-                event: shortAudioDecision.event ?? "recording_too_short",
-                message: shortAudioDecision.message ?? "Dictation audio too short for transcription",
-                context: shortAudioDecision.context
-            )
-            finishTranscription(ownedBy: transcriptionLease)
-            return nil
-        }
 
         do {
             let resultText = try await runASRInference(
@@ -445,25 +401,6 @@ extension ParakeetEngine {
                 return nil
             }
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            if let fallbackDecision = ParakeetShortAudioGate.dictationFallback(
-                nativeSampleCount: nativeCount,
-                resampledSampleCount: resampled.count,
-                errorMessage: error.localizedDescription
-            ) {
-                var fallbackContext = fallbackDecision.context
-                fallbackContext["elapsed"] = String(format: "%.2f", elapsed)
-                EventReporter.shared.capture(
-                    level: .warning,
-                    engine: "parakeet",
-                    event: fallbackDecision.event ?? "recording_too_short",
-                    message: fallbackDecision.message ?? "Dictation audio too short for transcription",
-                    context: fallbackContext
-                )
-                lastEmptyTranscriptionReason = .recordingTooShort
-                finishTranscription(ownedBy: transcriptionLease)
-                return nil
-            }
-
             AppLogger.transcription.error("PARAKEET | transcription failed: \(error.localizedDescription)")
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "transcription_failed",
                 message: error.localizedDescription,

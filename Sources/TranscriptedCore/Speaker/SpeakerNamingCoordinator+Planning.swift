@@ -479,7 +479,7 @@ extension TranscriptionTaskManager {
         var mutations: [PlannedSpeakerMutation] = []
         if let rejectedProfile {
             if state.willExist(rejectedProfile.id) {
-                mutations.append(.restoreProfile(rejectedProfile))
+                mutations.append(.revertMatchContribution(rejectedProfile))
                 mutations.append(.incrementDisputeCount(rejectedProfile.id))
                 // The rejected embedding becomes a negative exemplar against the wrongly-suggested
                 // profile: "this voice is explicitly not this person", used to veto future matches.

@@ -89,31 +89,6 @@ extension DictationSessionController {
         )
     }
 
-    /// The synchronous save: writes the transcript, retires (or keeps) the
-    /// take's audio, then publishes. Same keep rule as the async save.
-    @discardableResult
-    func persistDictationTranscript(
-        text: String,
-        delivery: DictationDelivery,
-        recovery: DictationStoppedAudioRecovery?,
-        context: [String: String]
-    ) -> DictationTranscriptPersistenceResult {
-        let sourceAppName = sessionSourceApp?.localizedName ?? "Unknown"
-        let sourceBundleID = sessionSourceApp?.bundleIdentifier
-        let result = DictationStoppedAudioRecoveryStore.saveTranscriptAndRetire(
-            recovery: recovery,
-            keepWindow: AudioStoragePreferences.dictationAudioKeepWindow(),
-            currentKeepWindow: { AudioStoragePreferences.dictationAudioKeepWindow() }
-        ) { audioRelativePath in
-            try DictationTranscriptWriter.save(
-                text: text, sourceAppName: sourceAppName, sourceBundleID: sourceBundleID,
-                delivery: delivery, audioRelativePath: audioRelativePath
-            )
-        }
-        publishDictationTranscriptPersistence(result, delivery: delivery, context: context)
-        return result
-    }
-
     func discardStoppedAudioRecovery(
         transcriptPersisted: Bool = false,
         explicitDiscard: Bool = false

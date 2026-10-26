@@ -230,10 +230,6 @@ struct SpeakerLifelineOutcome {
     var isReviewVerdict: Bool {
         ["confirmed", "corrected", "named", "merged"].contains(kind)
     }
-    /// Verdicts on a suggested match, the precision numerator/denominator.
-    var isSuggestionVerdict: Bool {
-        kind == "confirmed" || kind == "corrected"
-    }
 }
 
 struct SpeakerLifelineConfirmation {

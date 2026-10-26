@@ -111,6 +111,10 @@ struct QuietMeetingRow: View {
     let onCopy: () -> Void
     let menuItems: [HomeRowMenuItem]
     var showsMicBoostHint: Bool = false
+    /// Voices this meeting still has to name: the "2 to name" pill, which
+    /// opens its "Who spoke?" card on Speakers.
+    var voicesToName: Int = 0
+    var onWhoSpoke: (() -> Void)? = nil
 
     @State private var isHovering = false
 
@@ -154,6 +158,10 @@ struct QuietMeetingRow: View {
             .allowsHitTesting(isHovering)
             .accessibilityHidden(!isHovering)
 
+            if let pill = SpeakerMeetingReviewPolicy.rowPill(voicesToName: voicesToName), let onWhoSpoke {
+                HomeWhoSpokePill(title: pill, action: onWhoSpoke)
+            }
+
             if let durationString {
                 Text(durationString)
                     .font(LibraryTokens.meta)
@@ -187,6 +195,38 @@ struct QuietMeetingRow: View {
         let hours = minutes / 60
         let rest = minutes % 60
         return rest == 0 ? "\(hours) hr" : "\(hours) hr \(rest) min"
+    }
+}
+
+/// "2 to name" on a meeting row: a dot in the attention color and the count.
+private struct HomeWhoSpokePill: View {
+    let title: String
+    let action: () -> Void
+
+    @State private var isHovering = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(LibraryTokens.attention)
+                    .frame(width: 6, height: 6)
+                Text(title)
+                    .font(LibraryTokens.meta)
+                    .monospacedDigit()
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(Capsule().fill(isHovering ? LibraryTokens.rowHover : Color.clear))
+            .overlay(Capsule().stroke(LibraryTokens.hairline.opacity(2), lineWidth: 1))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(LibraryTokens.ink2)
+        .onHover { isHovering = $0 }
+        .help("Name who spoke in this meeting")
+        .accessibilityLabel("Who spoke? \(title)")
+        .accessibilityIdentifier("transcripted.home.meeting.who-spoke")
     }
 }
 

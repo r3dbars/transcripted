@@ -71,6 +71,9 @@ enum HomeMeetingSpeakerNamingPolicy {
 
     /// Builds one first-seen row per actual voice, with up to two useful quotes
     /// to make identification possible without scrubbing through the meeting.
+    /// The first quote is the same turn Speakers retained playback would
+    /// play. A saved profile clip is a different sample: Speakers show that
+    /// clip's sidecar text next to play, and this sheet has no player.
     static func drafts(from lines: [HomeMeetingTranscriptLine]) -> [HomeMeetingSpeakerNamingDraft] {
         var drafts: [HomeMeetingSpeakerNamingDraft] = []
         var indexByID: [String: Int] = [:]
@@ -101,7 +104,22 @@ enum HomeMeetingSpeakerNamingPolicy {
             ))
         }
 
-        return drafts
+        return drafts.map { draft in
+            guard let quote = SpeakerReviewSamplePolicy.representativeLine(
+                matching: draft.identity, in: lines
+            )?.text.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !quote.isEmpty else {
+                return draft
+            }
+            var texts = draft.sampleTexts.filter { $0 != quote }
+            texts.insert(quote, at: 0)
+            return HomeMeetingSpeakerNamingDraft(
+                identity: draft.identity,
+                sampleTexts: Array(texts.prefix(sampleLimit)),
+                name: draft.name,
+                selectedProfileID: draft.selectedProfileID
+            )
+        }
     }
 
     static func assignment(from draft: HomeMeetingSpeakerNamingDraft) -> HomeMeetingSpeakerAssignment? {
@@ -652,12 +670,18 @@ struct HomeMeetingTranscriptLine: Equatable {
 }
 
 enum HomeMeetingTranscriptClock {
-    /// Parses `MM:SS` or `H:MM:SS`. Each part is capped at a few digits so a
-    /// corrupted transcript can't overflow the multiply.
+    /// Parses `MM:SS` or `H:MM:SS`. The transcript writer truncates to whole
+    /// seconds, so a fractional clock is not a seek offset.
+    /// Each whole part is capped at a few digits so a corrupted transcript
+    /// can't overflow the multiply.
     static func seconds(from value: String) -> TimeInterval? {
+        if value.contains(".") { return nil }
         let parts = value.split(separator: ":", omittingEmptySubsequences: false)
-        guard parts.count == 2 || parts.count == 3,
-              parts.allSatisfy({ !$0.isEmpty && $0.count <= 4 && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber) }) else {
+        guard parts.count == 2 || parts.count == 3 else { return nil }
+
+        guard parts.allSatisfy({
+            !$0.isEmpty && $0.count <= 4 && $0.allSatisfy(\.isASCII) && $0.allSatisfy(\.isNumber)
+        }) else {
             return nil
         }
         let numbers = parts.compactMap { Int($0) }

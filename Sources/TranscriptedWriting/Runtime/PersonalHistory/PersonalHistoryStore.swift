@@ -138,43 +138,6 @@ final class EncryptedPersonalHistoryStore: PersonalHistoryStore, @unchecked Send
         try await perform { try self.saveTrainedModelSynchronously(model) }
     }
 
-    /// Status reads authenticate only the newest record and decode only its
-    /// aggregate checkpoint. They never replay or return the record's events.
-    func loadLatestCheckpoint() throws -> PersonalNextWordStoredCheckpoint? {
-        let handle: FileHandle
-        switch SecureLocalStorage.openExistingOwnerOnlyFileForReadOnlyStatus(at: location) {
-        case let .opened(opened): handle = opened
-        case .missing: return nil
-        case .rejected:
-            throw PersonalHistoryStorageError.corruptStore
-        }
-        defer { try? handle.close() }
-        let size = try handle.seekToEnd()
-        let effectiveSize: UInt64
-        let legacyFormat: Bool
-        switch try validateHeaderAndTail(handle: handle, size: size) {
-        case let .clean(legacy):
-            effectiveSize = size
-            legacyFormat = legacy
-        case let .torn(validPrefixLength):
-            effectiveSize = validPrefixLength
-            legacyFormat = false
-        }
-        let bodyStart = UInt64(Self.header.count)
-        guard effectiveSize > bodyStart else { return nil }
-        guard !legacyFormat else { return nil }
-        let keyData = try keyProvider.loadExistingKey()
-        guard keyData.count == 32 else { throw PersonalHistoryStorageError.invalidKey }
-        let plaintext = try decryptLastRecord(handle: handle, size: effectiveSize, keyData: keyData)
-        guard let record = try? JSONDecoder().decode(
-            StoredCheckpointRecord.self, from: plaintext
-        ) else {
-            throw PersonalHistoryStorageError.corruptStore
-        }
-        guard record.isValid else { throw PersonalHistoryStorageError.corruptStore }
-        return record.checkpoint
-    }
-
     func deleteAll() async throws {
         try await perform {
             // Everything the trained model knows was learned from this
@@ -324,24 +287,6 @@ final class EncryptedPersonalHistoryStore: PersonalHistoryStore, @unchecked Send
         let line = try encryptedLine(handle: handle, size: size)
         let replay = try Self.decode(line + Data([0x0A]), keyData: keyData)
         return (replay.checkpoint, replay.records.last?.sequence ?? 0)
-    }
-
-    private func decryptLastRecord(
-        handle: FileHandle,
-        size: UInt64,
-        keyData: Data
-    ) throws -> Data {
-        let line = try encryptedLine(handle: handle, size: size)
-        guard let combined = Data(base64Encoded: line),
-              let box = try? AES.GCM.SealedBox(combined: combined),
-              let plaintext = try? AES.GCM.open(
-                box,
-                using: SymmetricKey(data: keyData),
-                authenticating: Self.authenticatedData
-              ) else {
-            throw PersonalHistoryStorageError.corruptStore
-        }
-        return plaintext
     }
 
     private func encryptedLine(handle: FileHandle, size: UInt64) throws -> Data {
@@ -579,32 +524,6 @@ final class EncryptedPersonalHistoryStore: PersonalHistoryStore, @unchecked Send
                 && PersonalHistoryEvent.validBatch(events)
                 && (checkpoint?.hasValidEnvelope ?? true)
                 && (sequence.map { $0 > 0 } ?? true)
-        }
-    }
-
-    private struct StoredCheckpointRecord: Decodable {
-        let v: Int
-        let checkpoint: PersonalNextWordStoredCheckpoint?
-
-        private enum CodingKeys: String, CodingKey {
-            case v, events, checkpoint
-        }
-
-        init(from decoder: Decoder) throws {
-            let container = try decoder.container(keyedBy: CodingKeys.self)
-            v = try container.decode(Int.self, forKey: .v)
-            guard container.contains(.events) else {
-                throw PersonalHistoryStorageError.corruptStore
-            }
-            _ = try container.superDecoder(forKey: .events).unkeyedContainer()
-            checkpoint = try container.decodeIfPresent(
-                PersonalNextWordStoredCheckpoint.self,
-                forKey: .checkpoint
-            )
-        }
-
-        var isValid: Bool {
-            v == 1 && (checkpoint?.hasValidEnvelope ?? true)
         }
     }
 

@@ -89,7 +89,8 @@ extension TranscriptedSettingsView {
                 }
             },
             permissionsEditor: { generalPermissionsEditor },
-            reportingEditor: { generalReportingEditor }
+            reportingEditor: { generalReportingEditor },
+            developerPreviewEditor: { DeveloperPreviewSettingsRows() }
         )
         .confirmationDialog(
             AutoRecordDetectedCallsConsentPolicy.title,

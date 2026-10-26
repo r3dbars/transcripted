@@ -24,79 +24,6 @@
 import Foundation
 import SQLite3
 
-/// User-facing record of a merge that can be undone.
-public struct SpeakerMergeRecord: Identifiable, Sendable {
-    public let id: UUID
-    public let sourceId: UUID
-    public let targetId: UUID
-    public let sourceName: String?
-    public let targetName: String?
-    public let kind: String          // SpeakerMergeKind.rawValue
-    public let mergedAt: Date
-    public let isUndone: Bool
-
-    public init(
-        id: UUID,
-        sourceId: UUID,
-        targetId: UUID,
-        sourceName: String?,
-        targetName: String?,
-        kind: String,
-        mergedAt: Date,
-        isUndone: Bool
-    ) {
-        self.id = id
-        self.sourceId = sourceId
-        self.targetId = targetId
-        self.sourceName = sourceName
-        self.targetName = targetName
-        self.kind = kind
-        self.mergedAt = mergedAt
-        self.isUndone = isUndone
-    }
-}
-
-/// Audit record of a single contribution (clip/recording mean embedding, or a merge
-/// fusion marker) that built a profile.
-public struct SpeakerContribution: Identifiable, Sendable {
-    public let id: UUID
-    public let profileId: UUID
-    public let kind: String          // SpeakerProvenanceKind.rawValue
-    public let sourceProfileId: UUID? // set for `merge` fusion markers
-    public let recordedAt: Date
-    public let hasEmbedding: Bool
-
-    public init(
-        id: UUID,
-        profileId: UUID,
-        kind: String,
-        sourceProfileId: UUID?,
-        recordedAt: Date,
-        hasEmbedding: Bool
-    ) {
-        self.id = id
-        self.profileId = profileId
-        self.kind = kind
-        self.sourceProfileId = sourceProfileId
-        self.recordedAt = recordedAt
-        self.hasEmbedding = hasEmbedding
-    }
-}
-
-/// Where a provenance row came from.
-public enum SpeakerProvenanceKind {
-    public static let seed = "seed"                 // first embedding that created the profile
-    public static let contribution = "contribution" // a later recording's mean embedding
-    public static let merge = "merge"               // marker: an absorbed profile fused in here
-}
-
-/// What kind of merge produced a merge event.
-public enum SpeakerMergeKind {
-    public static let explicit = "explicit"   // user/coordinator merged two profiles
-    public static let duplicate = "duplicate" // auto duplicate-merge after a recording
-    public static let byName = "by_name"      // same-display-name fuse
-}
-
 @available(macOS 14.0, *)
 extension SpeakerDatabase {
 
@@ -804,22 +731,6 @@ extension SpeakerDatabase {
         return ok
     }
 
-    /// Prepare/bind/step a write with text params. Best-effort; logs on failure.
-    private func execBind(_ sql: String, _ params: [String], label: String) {
-        var statement: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            for (offset, value) in params.enumerated() {
-                sqlite3_bind_text(statement, Int32(offset + 1), (value as NSString).utf8String, -1, SQLITE_TRANSIENT)
-            }
-            if sqlite3_step(statement) != SQLITE_DONE {
-                AppLogger.speakers.error("SQL write failed", ["label": label, "sqlite_error": dbErrorMessage()])
-            }
-        } else {
-            AppLogger.speakers.error("SQL prepare failed", ["label": label, "sqlite_error": dbErrorMessage()])
-        }
-        sqlite3_finalize(statement)
-    }
-
     private func execBindOrThrow(
         _ sql: String,
         _ params: [String],
@@ -842,41 +753,5 @@ extension SpeakerDatabase {
             operation: "step \(label)",
             expectedChanges: expectedChanges
         )
-    }
-
-    // MARK: - Snapshot coding
-
-    struct ProfileSnapshot: Codable {
-        let id: UUID
-        let displayName: String?
-        let nameSource: String?
-        let embedding: [Float]
-        let firstSeen: String
-        let lastSeen: String
-        let callCount: Int
-        let confidence: Double
-        let disputeCount: Int
-    }
-
-    static func encodeProfileSnapshot(_ profile: SpeakerProfile) -> String? {
-        let isoFormatter = ISO8601DateFormatter()
-        let snapshot = ProfileSnapshot(
-            id: profile.id,
-            displayName: profile.displayName,
-            nameSource: profile.nameSource,
-            embedding: profile.embedding,
-            firstSeen: isoFormatter.string(from: profile.firstSeen),
-            lastSeen: isoFormatter.string(from: profile.lastSeen),
-            callCount: profile.callCount,
-            confidence: profile.confidence,
-            disputeCount: profile.disputeCount
-        )
-        guard let data = try? JSONEncoder().encode(snapshot) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    static func decodeProfileSnapshot(_ json: String) -> ProfileSnapshot? {
-        guard let data = json.data(using: .utf8) else { return nil }
-        return try? JSONDecoder().decode(ProfileSnapshot.self, from: data)
     }
 }

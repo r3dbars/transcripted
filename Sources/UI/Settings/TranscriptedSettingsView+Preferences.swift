@@ -222,14 +222,20 @@ extension TranscriptedSettingsView {
         preferenceURL: URL?,
         destinationKind: CaptureLibraryDestinationKind
     ) {
+        let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
+        let isSameFolder = destination.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
+        if !isSameFolder, destinationKind == .custom,
+           CaptureLibraryMigrationPlanner().libraryHasCaptures(at: destination),
+           !confirmCaptureLibraryWithExistingMarkdown() {
+            return
+        }
+
         guard TranscriptedStoragePreferences.prepareCaptureLibraryURL(destination) else {
             refreshStoragePaths()
             showCaptureLibrarySelectionError()
             return
         }
 
-        let currentLibrary = FileManager.default.transcriptedCaptureLibraryDir
-        let isSameFolder = destination.standardizedFileURL.path == currentLibrary.standardizedFileURL.path
         if !isSameFolder, CaptureLibraryMigrationPlanner().libraryHasCaptures(at: currentLibrary) {
             pendingCaptureLibraryChoice = PendingCaptureLibraryChoice(
                 currentLibrary: currentLibrary,
@@ -361,6 +367,18 @@ extension TranscriptedSettingsView {
             ]
         )
         return true
+    }
+
+    /// A later Move copies that folder's Markdown and sends the originals to
+    /// the Trash, so say so before the user's own notes become captures.
+    private func confirmCaptureLibraryWithExistingMarkdown() -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "This folder already has Markdown files."
+        alert.informativeText = "Its meetings, dictations, or writing folder already holds Markdown. Transcripted will treat those files as captures, and moving the capture library later will move them too."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Use This Folder")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func showCaptureLibrarySelectionError() {

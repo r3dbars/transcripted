@@ -12,15 +12,96 @@ enum TextPasteCopyReason: Equatable {
     case pasteNotConfirmed
 }
 
-enum TextPasteFailureReason: String, Equatable {
-    case cancelled = "cancelled"
-    case clipboardSnapshotIncomplete = "clipboard_snapshot_incomplete"
-    case focusChangeClipboardWriteFailed = "focus_change_clipboard_write_failed"
-    case accessibilityFallbackClipboardWriteFailed = "accessibility_fallback_clipboard_write_failed"
-    case temporaryClipboardWriteFailed = "temporary_clipboard_write_failed"
-    case pasteDispatchClipboardRecoveryFailed = "paste_dispatch_clipboard_recovery_failed"
-    case fallbackClipboardRecoveryUnverified = "fallback_clipboard_recovery_unverified"
+/// Why a clipboard snapshot could not be set aside before paste-back.
+/// `failure_kind` stays `clipboard_snapshot_incomplete`; this is the
+/// cause next to it (`clipboard_snapshot_cause`) and the island hint.
+enum ClipboardSnapshotCause: String, Equatable {
+    case tooLarge = "too_large"
+    case timeout = "timeout"
+    case unreadable = "unreadable"
+    case changed = "changed"
+
+    /// Prefer the cause that best explains a refused snapshot. A stall
+    /// beats a size cap, and a size cap beats an unreadable type.
+    static func preferring(_ existing: ClipboardSnapshotCause?, _ next: ClipboardSnapshotCause) -> ClipboardSnapshotCause {
+        guard let existing else { return next }
+        return next.rank > existing.rank ? next : existing
+    }
+
+    private var rank: Int {
+        switch self {
+        case .timeout: return 3
+        case .tooLarge: return 2
+        case .unreadable: return 1
+        case .changed: return 0
+        }
+    }
+
+    /// Island "Not pasted" hint. Short, plain, no clipboard contents.
+    var notPastedHint: String {
+        switch self {
+        case .tooLarge:
+            return "Your clipboard holds something too big to set aside."
+        case .timeout:
+            return "Your clipboard took too long to read."
+        case .unreadable:
+            return "Something on your clipboard couldn't be read."
+        case .changed:
+            return "Your clipboard changed before it could be set aside."
+        }
+    }
+
+    /// Non-island fallback. The words were saved; paste-back did not run.
+    var refusalMessage: String {
+        switch self {
+        case .tooLarge:
+            return "Couldn't paste automatically without risking your current clipboard. It holds something too big to set aside. The dictation was saved."
+        case .timeout:
+            return "Couldn't paste automatically without risking your current clipboard. It took too long to read. The dictation was saved."
+        case .unreadable:
+            return "Couldn't paste automatically without risking your current clipboard. Something on it couldn't be read. The dictation was saved."
+        case .changed:
+            return "Couldn't paste automatically without risking your current clipboard. It changed before it could be set aside. The dictation was saved."
+        }
+    }
+}
+
+enum TextPasteFailureReason: Equatable {
+    case cancelled
+    case clipboardSnapshotIncomplete(ClipboardSnapshotCause)
+    case focusChangeClipboardWriteFailed
+    case accessibilityFallbackClipboardWriteFailed
+    case temporaryClipboardWriteFailed
+    case pasteDispatchClipboardRecoveryFailed
+    case fallbackClipboardRecoveryUnverified
     case unknown
+
+    /// Stable `failure_kind`. Snapshot causes do not change this string.
+    var rawValue: String {
+        switch self {
+        case .cancelled:
+            return "cancelled"
+        case .clipboardSnapshotIncomplete:
+            return "clipboard_snapshot_incomplete"
+        case .focusChangeClipboardWriteFailed:
+            return "focus_change_clipboard_write_failed"
+        case .accessibilityFallbackClipboardWriteFailed:
+            return "accessibility_fallback_clipboard_write_failed"
+        case .temporaryClipboardWriteFailed:
+            return "temporary_clipboard_write_failed"
+        case .pasteDispatchClipboardRecoveryFailed:
+            return "paste_dispatch_clipboard_recovery_failed"
+        case .fallbackClipboardRecoveryUnverified:
+            return "fallback_clipboard_recovery_unverified"
+        case .unknown:
+            return "unknown"
+        }
+    }
+
+    var clipboardSnapshotCause: ClipboardSnapshotCause? {
+        if case .clipboardSnapshotIncomplete(let cause) = self { return cause }
+        return nil
+    }
 }
 
 /// How a dictation that didn't paste is handed back to the user.
@@ -28,8 +109,8 @@ enum DictationNotPastedOffer: Equatable {
     /// The words are on the clipboard: paste them where they go.
     case onClipboard
     /// The clipboard held something paste-back couldn't set aside, so the
-    /// words never went on it: offer to copy them.
-    case clipboardBusy
+    /// words never went on it: offer to copy them. The cause picks the hint.
+    case clipboardBusy(ClipboardSnapshotCause)
 }
 
 extension TextPasteOutcome {
@@ -37,8 +118,8 @@ extension TextPasteOutcome {
         switch self {
         case .copied:
             return .onClipboard
-        case .failed(_, reason: .clipboardSnapshotIncomplete):
-            return .clipboardBusy
+        case .failed(_, reason: .clipboardSnapshotIncomplete(let cause)):
+            return .clipboardBusy(cause)
         case .pasted, .likelyPasted, .failed:
             return nil
         }
@@ -98,6 +179,14 @@ enum TextPasteOutcome: Equatable {
             return nil
         }
     }
+}
+
+/// Result of copying dictation text after a focus-moved or Accessibility-off
+/// fallback. Incomplete snapshots refuse instead of overwriting the clipboard.
+enum ClipboardManualCopyResult: Equatable {
+    case copied
+    case writeFailed
+    case refused(TextPasteOutcome)
 }
 
 struct ClipboardPasteConfirmationDiagnostic: Equatable {

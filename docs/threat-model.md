@@ -17,7 +17,7 @@ In order of harm if it leaks or breaks:
 | Boundary | What crosses it | Control |
 |---|---|---|
 | Mac → Sentry, PostHog | crash and usage events | Explicit diagnostics and PostHog events are allowlisted (`SentryEventPolicy`, key-name drop list in `check-telemetry-keys.py`). Sentry also auto-captures crashes, uncaught exceptions and hangs (`CrashReporter.swift`); those are not allowlisted, only gated by the user switch and sanitized in `beforeSend`, so an unknown payload shape is forwarded after sanitizing, not dropped. Contract: `docs/privacy-first-observability.md` |
-| Mac → Hugging Face | model downloads | huggingface.co over TLS. Parakeet (`AsrModels.download`), Whisper (`WhisperKit.download`) and the diarizers download through their SDKs with no digest check (`ParakeetModelLifecycle.swift` says so). `ModelDownloadService`'s SHA-256 helpers exist but no production path calls them (known gap) |
+| Mac → Hugging Face | model downloads | huggingface.co over TLS. Parakeet (`AsrModels.download`), Whisper (`WhisperKit.download`) and the diarizers download through their SDKs with no digest check (`ParakeetModelLifecycle.swift` says so; known gap) |
 | Mac ← GitHub (Sparkle) | app updates | EdDSA signature against the key embedded in the app |
 | Other local apps → MCP server | saved captures, meeting controls | `Tools/TranscriptedMCP` is stdio with no per-caller auth: launching it grants read access to every capture. Its companion tools (`CompanionTools.swift`) can also `start_meeting`, `stop_meeting` and `set_live_context_sharing` through the app, but only when the user has turned on companion meeting control or live sharing in Transcripted |
 | ChatGPT companion → app | context, meeting controls, live text | Unix socket in a `0700` directory, socket and connection file `0600`, rotating token never logged or returned by a tool. Off until enabled; controls and live sharing are separate permissions; live text needs a per-meeting switch. Known gap: the token is a same-user bearer secret. `CompanionSocketServer` writes it to `connection.json` beside the socket and accepts any peer whose UID matches, so any unsandboxed process running as the user can read it and use whichever companion permissions are on, including starting capture under Transcripted's TCC grants |
@@ -31,6 +31,7 @@ In order of harm if it leaks or breaks:
 - The app is not sandboxed and has library validation off, because the ML stack ships dylibs with mixed signing. User-level malware that writes into the app bundle inherits its permissions. Don't widen this.
 - The MCP server has no caller authentication. Its only write tools are the companion meeting controls, gated by the app's companion permissions. Don't add others without adding auth.
 - Speech and diarization model downloads aren't hash-pinned. Trust rests on TLS to huggingface.co. Writing verifies downloaded weights against the SHA-256 digest in its bundled model descriptor (`ModelManager.swift`).
+- The live meeting helper keeps rough transcripts in `~/Library/Application Support/TranscriptedLive/meetings/` for up to 24 h, outside the capture library, so deleting a meeting in the app doesn't remove them (`docs/storage-paths.md`).
 
 ## What a reviewer should flag as high severity
 

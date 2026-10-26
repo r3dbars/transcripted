@@ -12,14 +12,14 @@ func testDictationTranscriptPersistence() async {
         let pending = DictationDeliveryPresentation.pendingAudioNotice
         let presentations: [DictationDeliveryPresentation] = [
             .notPasted(message: "Paste these words", unconfirmed: true),
-            .clipboardBusy(message: "Copy these words"),
+            .clipboardBusy(message: "Copy these words", hint: "Your clipboard holds something too big to set aside."),
             .clipboardNotice("Press Return"), .error("Auto Enter failed")
         ]
         for presentation in presentations {
             assertFalse(presentation.canOfferAudioRetentionRetry, "audio retry must not replace delivery recovery")
         }
         assertEqual(presentations[0].addingPendingAudioNotice(true), .notPasted(message: "Paste these words \(pending)", unconfirmed: true))
-        assertEqual(presentations[1].addingPendingAudioNotice(true), .clipboardBusy(message: "Copy these words \(pending)"))
+        assertEqual(presentations[1].addingPendingAudioNotice(true), .clipboardBusy(message: "Copy these words \(pending)", hint: "Your clipboard holds something too big to set aside."))
         assertEqual(presentations[2].addingPendingAudioNotice(true), .clipboardNotice("Press Return \(pending)"))
         assertEqual(presentations[3].addingPendingAudioNotice(true), .error("Auto Enter failed \(pending)"))
         assertTrue(DictationDeliveryPresentation.success(title: "Pasted").canOfferAudioRetentionRetry)
@@ -89,7 +89,6 @@ func testDictationTranscriptPersistence() async {
             let output = folder.appendingPathComponent("synthetic.md")
             let task = Task { @MainActor in
                 let result: DictationStopFinalizationResult<Bool, DictationTranscriptPersistenceResult> = await DictationStopFinalizer.finalize(
-                    order: .saveBeforeAutoEnter,
                     startSaving: {
                         Task.detached {
                             started.continuation.yield(())
@@ -103,7 +102,6 @@ func testDictationTranscriptPersistence() async {
                         }
                     },
                     finishSaving: { await $0.value },
-                    saveSynchronously: { fatalError("Wrong finalization order") },
                     performAutoEnter: { false }
                 )
                 if DictationSessionCompletionPolicy.canPublish(

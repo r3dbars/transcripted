@@ -195,6 +195,10 @@ else
     check "source pins (Swift text contracts)" "python3 scripts/dev/check-source-pins.py"
 fi
 check "source pin count (.agents/source-pin-baseline.json; only shrinks)" "python3 scripts/dev/check-source-pins.py --count-baseline"
+check "banned calls self-test" "python3 scripts/dev/check-banned-calls.py --self-test"
+check "banned calls (no Mac-wide default-input writes from dictation, no NSException FileHandle APIs in log writers, silent feedback)" "python3 scripts/dev/check-banned-calls.py"
+check "keyboard identity self-test" "python3 scripts/dev/check-keyboard-identity.py --self-test"
+check "keyboard identity (keyboard Info.plist matches the production profile)" "python3 scripts/dev/check-keyboard-identity.py"
 check "QA harness contract self-test" "python3 scripts/dev/check-qa-harness-contract.py --self-test"
 check "QA harness contract (permission-state stays INCOMPLETE, not green)" "python3 scripts/dev/check-qa-harness-contract.py"
 check "debug control release self-test" "python3 scripts/dev/check-debug-control-release.py --self-test"
@@ -205,7 +209,7 @@ check "synced copies (CaptureLibraryPathSafety stays byte-identical)" "python3 s
 check "test shape self-test" "python3 scripts/dev/check-test-shape.py --self-test"
 check "test shape (no new source-text or wall-clock tests)" "python3 scripts/dev/check-test-shape.py"
 check "module boundaries self-test" "python3 scripts/dev/check-module-boundaries.py --self-test"
-check "module boundaries (.agents/modules.json; baseline only shrinks)" "python3 scripts/dev/check-module-boundaries.py"
+check "module boundaries (.agents/modules.json; no baseline, any crossing fails)" "python3 scripts/dev/check-module-boundaries.py"
 check "file size self-test" "python3 scripts/dev/check-file-size.py --self-test"
 check "file size (no new Swift file over 800 lines)" "python3 scripts/dev/check-file-size.py"
 check "missing-source explainer self-test" "python3 scripts/dev/explain-missing-sources.py --self-test"
@@ -216,6 +220,11 @@ check "known traps self-test" "python3 scripts/dev/check-known-traps.py --self-t
 check "known traps (Tools CI wiring, root commands documented, AGENTS.md-only agent docs)" "python3 scripts/dev/check-known-traps.py"
 check "window inventory self-test" "python3 scripts/dev/check-window-inventory.py --self-test"
 check "window inventory (every NSWindow/NSPanel has a screen-sharing policy)" "python3 scripts/dev/check-window-inventory.py"
+check "lint runner self-test (rule fixtures + proofs)" "python3 scripts/dev/lint.py --self-test"
+check "lint (scripts/dev/lint_rules; .agents/lint-baseline.json only shrinks)" "python3 scripts/dev/lint.py --all"
+check "rule registry self-test" "python3 scripts/dev/check-rule-registry.py --self-test"
+check "rule registry (every check registered; docs/rules.md current)" "python3 scripts/dev/check-rule-registry.py"
+check "public repo guard self-test" "python3 .githooks/public-repo-guard.py --self-test"
 
 # ---------------------------------------------------------------- telemetry/privacy
 check "analytics emitters" "python3 scripts/dev/check-analytics-emitters.py"
@@ -322,6 +331,7 @@ SELF_TEST_SCRIPTS=(
     scripts/release/sentry-release-dry-run.py
     scripts/dev/mutation-probe.py
     scripts/dev/bench-compare.py
+    scripts/dev/check-commit-credit.py
 )
 PY_TEST_SUITES=(
     scripts/ops/test-native-smoke-isolation.py

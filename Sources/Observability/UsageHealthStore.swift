@@ -1,7 +1,8 @@
 import Foundation
 
 /// Bounded metadata ledger, populated from event enums only. Never scans a capture or a log.
-final class UsageHealthStore {
+/// `@unchecked Sendable`: `state` is only read or written under `lock`; `defaults` is thread-safe.
+final class UsageHealthStore: @unchecked Sendable {
     static let shared = UsageHealthStore()
     static let didChange = Notification.Name("TranscriptedUsageHealthDidChange")
     static let storageKey = "observability-usage-health-v1"

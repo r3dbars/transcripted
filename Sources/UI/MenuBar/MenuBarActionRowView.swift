@@ -286,15 +286,12 @@ final class MenuBarActionRowView: NSControl {
         let textX = symbolWellView.frame.maxX + gap
         let available = max(0, bounds.width - textX - padX)
         let titleWidth = Self.drawnWidth(of: titleLabel)
-        // The shortcut shows when it fits beside the title. A pair like
-        // "Fn / Right ⌥" falls back to its first key ("Fn"); if even that
-        // doesn't fit, the full shortcut stays in the Settings editor.
-        trailingLabel.stringValue = ""
-        var trailingWidth: CGFloat = 0
-        for candidate in MenuBarShortcutLabel.candidates(for: fullTrailingText) {
-            trailingLabel.stringValue = candidate
-            trailingWidth = Self.drawnWidth(of: trailingLabel)
-            if titleWidth + gap + trailingWidth <= available { break }
+        // The shortcut shows only when it fits beside the title; otherwise
+        // it stays in the Settings editor.
+        let trimmed = fullTrailingText.trimmingCharacters(in: .whitespaces)
+        trailingLabel.stringValue = trimmed
+        let trailingWidth = Self.drawnWidth(of: trailingLabel)
+        if trimmed.isEmpty || titleWidth + gap + trailingWidth > available {
             trailingLabel.stringValue = ""
         }
         let showsTrailing = !trailingLabel.stringValue.isEmpty

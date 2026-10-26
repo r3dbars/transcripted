@@ -34,7 +34,9 @@ protocol AppCueAudioPlayer: AnyObject {
 
 extension AVAudioPlayer: AppCueAudioPlayer {}
 
-final class AppSoundPlayer {
+// `@unchecked Sendable`: mutable state (`players`, `attemptedCues`,
+// `didAttemptPreload`, `warningReporter`) is only touched on `queue`.
+final class AppSoundPlayer: @unchecked Sendable {
     typealias WarningReporter = @Sendable (_ cue: Cue) -> Void
 
     enum Cue: CaseIterable {

@@ -105,8 +105,11 @@ def run(log_text: str, mode: str, baseline_path: Path, allow_up_to: dict[str, in
         if grew or new_folders:
             print("Refusing to shrink while these folders went up: " + ", ".join(grew + new_folders))
             return 1
+        # A folder that reaches zero keeps its entry: a 0 still fails check if a
+        # warning comes back, and dropping every entry would leave an empty
+        # baseline, which check treats as "no baseline" and lets anything through.
         merged = {f: min(current.get(f, 0), baseline[f]) for f in baseline}
-        save(baseline_path, {f: n for f, n in merged.items() if n > 0})
+        save(baseline_path, merged)
         print(f"Baseline updated: {baseline_path.relative_to(REPO_ROOT) if baseline_path.is_relative_to(REPO_ROOT) else baseline_path}")
         return 0
     if mode == "check":
@@ -147,6 +150,11 @@ def self_test() -> None:
         save(base, {"Sources/Speech": 5})
         assert run(log, "shrink", base) == 1
         assert load(base) == {"Sources/Speech": 5}
+        # A folder shrunk to zero stays in the baseline, so a warning coming back still fails check.
+        save(base, {"Sources/Speech": 2, "Sources/UI": 1, "Sources/Capture": 3})
+        assert run(log, "shrink", base) == 0
+        assert load(base) == {"Sources/Capture": 0, "Sources/Speech": 2, "Sources/UI": 1}
+        assert run("/r/Sources/Capture/E.swift:1:1: warning: non-Sendable thing\n" + log, "check", base) == 1
         # Shrink never creates a baseline from scratch.
         missing = Path(tmp) / "missing.json"
         assert run(log, "shrink", missing) == 1

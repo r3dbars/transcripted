@@ -96,8 +96,6 @@ struct DictationStopFinalizationGate {
 struct DictationStartAvailabilityPolicy {
     // Also shown while a meeting is still starting, so it can't say "saving".
     static let meetingFinishingMessage = "The meeting is starting or stopping. Try dictation again in a moment."
-    static let speakerReviewMessage = "Speaker review can wait. Dictation is available."
-
     static func unavailableReason(
         hasActiveMeetingCapture: Bool,
         canShareMeetingMic: Bool,

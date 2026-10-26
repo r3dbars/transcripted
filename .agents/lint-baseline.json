@@ -1,0 +1,68 @@
+{
+  "blocking-system-api-outside-owner": {
+    "Sources/Support/CallAppMicrophoneSharingMonitor.swift": 1,
+    "Sources/Support/SingleInstanceGuard.swift": 1,
+    "Sources/TranscriptedWriting/Runtime/KeyboardInstaller.swift": 1,
+    "Sources/UI/Settings/TranscriptedSettingsRows.swift": 1
+  },
+  "coreaudio-default-input-owner": {
+    "Sources/Meeting/MicActivityMonitor.swift": 1
+  },
+  "harness-delete-outside-owned-root": {
+    "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/MeetingLab.swift": 1,
+    "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/GenerateFixtures.swift": 1,
+    "scripts/ci/mac-runner.sh": 3,
+    "scripts/dev/bench-all.sh": 2,
+    "scripts/hillclimb/benches/speaker_autoeval.py": 1,
+    "scripts/ops/daily-audio-reliability-check.sh": 1,
+    "scripts/ops/dictation-stop-autoeval.sh": 1,
+    "scripts/release/provision-release-models.sh": 1,
+    "scripts/stt-shootout/engines/py_engines.py": 1,
+    "scripts/stt-shootout/shootout.py": 4,
+    "scripts/vm/transcripted-vm.sh": 1,
+    "scripts/voiceprint/convert/pipeline.py": 1,
+    "scripts/voiceprint/convert_coreml.py": 3
+  },
+  "main-actor-blocking-io": {
+    "Sources/App/DebugControlChannel.swift": 1,
+    "Sources/App/LabControlChannel.swift": 1,
+    "Sources/App/TranscriptedAppDelegate+LaunchReports.swift": 7,
+    "Sources/App/TranscriptedAppDelegate+SettingsActions.swift": 1,
+    "Sources/Dictation/DictationStopBenchmarkRunner.swift": 7,
+    "Sources/Meeting/MeetingSessionController+TranscriptionRequests.swift": 3,
+    "Sources/Meeting/TranscriptionQueueCoordinator.swift": 2,
+    "Sources/UI/Settings/DictationPlaybackController.swift": 2,
+    "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": 2,
+    "Sources/UI/Settings/TranscriptedSettingsView.swift": 2,
+    "Sources/UI/Shared/MeetingAudioPlayback.swift": 1,
+    "Sources/UI/Shared/SpeakerClipPlayback.swift": 2
+  },
+  "native-launch-without-isolation-guard": {
+    "scripts/dev/transcripted-debug.py": 1,
+    "scripts/hillclimb/benches/dictation_stop.py": 1,
+    "scripts/hillclimb/lab_control.py": 1,
+    "scripts/ops/daily-audio-reliability-check.sh": 1,
+    "scripts/ops/dictation-stop-autoeval.sh": 1
+  },
+  "test-fixed-sleep-sync": {
+    "Tests/AnalyticsReporterTests.swift": 1,
+    "Tests/Benchmarks/HomeRecentCaptureBenchmark.swift": 1,
+    "Tests/ClipboardRestoringTextPasterTests.swift": 7,
+    "Tests/DefaultInputDeviceMonitorTests.swift": 1,
+    "Tests/E2E/SlowPastebackSmoke.swift": 3,
+    "Tests/Integration/ParakeetLifecycle/ExecutorSmoke.swift": 1,
+    "Tests/MeetingCaptureAttemptTests.swift": 1,
+    "Tests/MeetingPromptDetectorTests.swift": 1,
+    "Tests/ParakeetRecoveryStateTests.swift": 2,
+    "Tests/SpeakerClipPlaybackTests.swift": 1,
+    "Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift": 1,
+    "Tests/TranscriptedCoreTests/AudioTests/SCKAudioCaptureInterleavingTests.swift": 4,
+    "Tests/TranscriptedCoreTests/AudioTests/SystemAudioRecoveryParityTests.swift": 6,
+    "Tests/TranscriptedCoreTests/PipelineTests/TranscriptionTaskLifecycleStateTests.swift": 1,
+    "Tests/TranscriptedCoreTests/PipelineTests/TranscriptionTaskManagerFailedQueueTests.swift": 1,
+    "Tests/TranscriptedCoreTests/SpeakerTests/SpeakerNamingCoordinatorTests.swift": 1,
+    "Tests/WakeRecoveryCoordinatorTests.swift": 3,
+    "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/EmbeddingCacheTests.swift": 1,
+    "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/TranscriptIndexTests.swift": 1
+  }
+}

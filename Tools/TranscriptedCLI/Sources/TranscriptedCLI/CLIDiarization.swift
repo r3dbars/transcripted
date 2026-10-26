@@ -35,11 +35,6 @@ enum CLIDiarization {
                 stepRatio: segmentationStepRatio
             )
         }
-
-        func nemotronWindowCount(audioDurationSeconds: Double) -> Int {
-            guard nemotronSliceSeconds > 0, audioDurationSeconds > 0 else { return 0 }
-            return Int(ceil(audioDurationSeconds / nemotronSliceSeconds))
-        }
     }
 
     /// App-tuned pyannote knobs (`FluidAudioCompatibility.tunedOfflineDiarizerConfig`

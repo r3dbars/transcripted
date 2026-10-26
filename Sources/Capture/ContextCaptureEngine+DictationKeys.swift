@@ -112,7 +112,7 @@ extension ContextCaptureEngine {
 
     func routeHandsFreeToggle(sourceApp: NSRunningApplication?) {
         let trigger = DictationTrigger.physicalKey
-        guard isHotkeyRoutingActive, let session = sessionController else { return }
+        guard let session = sessionController else { return }
         DiagnosticsTrail.record(
             logger: session.appState?.logger,
             engine: "capture",

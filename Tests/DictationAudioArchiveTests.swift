@@ -132,7 +132,7 @@ func testDictationAudioArchive() async {
         assertNil(entries.last?.audioRelativePath ?? nil, "an entry saved without audio has no path")
 
         if let withAudio = entries.first {
-            assertTrue((try? DictationTranscriptStore.deleteEntry(withAudio)) != nil, "an entry with an Audio line can still be deleted")
+            assertTrue((try? DictationTranscriptStore.deleteEntryReversibly(withAudio)) != nil, "an entry with an Audio line can still be deleted")
             let left = DictationTranscriptStore.recentSavedDictations(limit: 5, directory: root)
             assertEqual(left.map(\.text), ["older entry without audio"], "deleting it leaves the other entry")
         }

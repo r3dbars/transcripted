@@ -156,7 +156,7 @@ func testPhysicalShortcutMatcher() {
         )
     }
 
-    runSuite("PhysicalShortcutMatcher — delayed modifier press requires current ownership and a held key") {
+    runSuite("PhysicalShortcutMatcher — delayed modifier press requires current ownership") {
         let current = DelayedModifierShortcutPress(
             generation: 2,
             keyCode: UInt32(kVK_RightOption),
@@ -171,35 +171,16 @@ func testPhysicalShortcutMatcher() {
         assertTrue(
             PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                 current: current,
-                expected: current,
-                isPhysicallyDown: true
+                expected: current
             ),
-            "the current delayed press may activate while its modifier is still held"
+            "the current delayed press may activate"
         )
         assertFalse(
             PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                 current: current,
-                expected: stale,
-                isPhysicallyDown: true
+                expected: stale
             ),
             "a cancelled or superseded work item must not consume the current pending press"
-        )
-        assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: current,
-                expected: current,
-                isPhysicallyDown: false
-            ),
-            "a modifier released at the debounce deadline must not start push-to-talk"
-        )
-        let physicallyDownKeyCodes: Set<UInt32> = [UInt32(kVK_Option)]
-        assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: current,
-                expected: current,
-                isPhysicallyDown: physicallyDownKeyCodes.contains(current.keyCode)
-            ),
-            "left Option staying down must not activate a released right-side bound key"
         )
     }
 
@@ -341,5 +322,72 @@ func testPhysicalShortcutMatcher() {
         tracker.firedOnPress(keyCode: rightOption, sharesModifier: true)
         tracker.reset()
         assertFalse(tracker.keyDown(), "the release may have been missed while the tap was off")
+    }
+
+    runSuite("PhysicalShortcutMatcher — a saved F8 fires with or without the Fn flag") {
+        let shortcuts = [
+            binding(.dictationPushToTalk, keyCode: kVK_F8),
+            binding(.meeting, keyCode: kVK_ANSI_M, modifiers: option),
+        ]
+
+        let withoutFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts, keyCode: UInt32(kVK_F8), modifiers: 0
+        )
+        assertEqual(
+            withoutFn?.action,
+            .dictationPushToTalk,
+            "F8 with no Fn flag must still resolve to the saved F8 dictation key"
+        )
+
+        let withFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts, keyCode: UInt32(kVK_F8), modifiers: function
+        )
+        assertEqual(
+            withFn?.action,
+            .dictationPushToTalk,
+            "F8 with the implicit Fn flag must still resolve to the saved F8 dictation key"
+        )
+
+        let withCommand = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_F8),
+            modifiers: PhysicalDictationTriggerModifiers.command
+        )
+        assertTrue(withCommand == nil, "Cmd+F8 must not fire a bare F8 dictation key")
+    }
+
+    runSuite("PhysicalShortcutMatcher — Fn+arrow still needs an exact match") {
+        let control = PhysicalDictationTriggerModifiers.control
+        let shortcuts = [
+            binding(.dictationPushToTalk, keyCode: kVK_LeftArrow, modifiers: control | function),
+        ]
+
+        let withFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_LeftArrow),
+            modifiers: control | function
+        )
+        assertEqual(
+            withFn?.action,
+            .dictationPushToTalk,
+            "Control+Left with the Fn flag macOS sets on arrows must resolve"
+        )
+
+        let withoutFn = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_LeftArrow),
+            modifiers: control
+        )
+        assertTrue(
+            withoutFn == nil,
+            "Control+Left without Fn must not match a Control+Fn+Left shortcut"
+        )
+
+        let fnOnly = PhysicalShortcutMatcher.matchingKeyDownShortcut(
+            shortcuts,
+            keyCode: UInt32(kVK_LeftArrow),
+            modifiers: function
+        )
+        assertTrue(fnOnly == nil, "bare Fn+Left must not fire Control+Left")
     }
 }

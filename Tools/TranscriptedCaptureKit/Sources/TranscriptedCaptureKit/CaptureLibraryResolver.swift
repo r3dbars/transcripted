@@ -137,12 +137,12 @@ public enum CaptureLibraryResolver {
             homeDirectory: home,
             fileManager: fileManager
         )
-        let meetingsOverride = meetingsDir.map(URL.init(fileURLWithPath:))
-            ?? environment["TRANSCRIPTED_MEETINGS_DIR"].map(URL.init(fileURLWithPath:))
-        let dictationsOverride = dictationsDir.map(URL.init(fileURLWithPath:))
-            ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].map(URL.init(fileURLWithPath:))
         // Empty values are ignored (as for TRANSCRIPTED_DATA_DIR) so an exported
         // but blank variable can't resolve to the process working directory.
+        let meetingsOverride = meetingsDir.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+            ?? environment["TRANSCRIPTED_MEETINGS_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+        let dictationsOverride = dictationsDir.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
+            ?? environment["TRANSCRIPTED_DICTATIONS_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
         let writingOverride = writingDir.flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
             ?? environment["TRANSCRIPTED_WRITING_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
 

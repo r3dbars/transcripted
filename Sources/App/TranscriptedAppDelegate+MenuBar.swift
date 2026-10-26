@@ -197,7 +197,6 @@ extension TranscriptedAppDelegate {
                 "entrypoint": entrypoint,
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
                 "model_state": modelState,
-                "paste_available": "unknown",
                 "recent_meetings_available": "unknown",
                 "update_state": updateState,
             ]

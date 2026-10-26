@@ -204,8 +204,8 @@ func testDictationTerminationCheckpoint() async {
         assertTrue(acceptedQuit, "saved dictation audio admits Quit")
         assertEqual(
             accepted.events,
-            ["finishDictation", "meetingPrepare", "appStateShutdown", "restoreInput", "flushEvents", "markFinished", "reply:true"],
-            "meeting prep, shutdown, input restore, and the event flush all finish before AppKit hears true"
+            ["finishDictation", "meetingPrepare", "speakerSaves", "appStateShutdown", "restoreInput", "flushEvents", "markFinished", "reply:true"],
+            "meeting prep, Speakers' pending names, shutdown, input restore, and the event flush all finish before AppKit hears true"
         )
     }
 
@@ -218,6 +218,35 @@ func testDictationTerminationCheckpoint() async {
                     "no teardown may discard Writing after a refused final flush")
         steps.finishWritingForTermination = { true }
         assertTrue(await AppTerminationSequence.run(steps), "a later durable flush admits Quit")
+    }
+
+    await runSuite("App Quit with unsaved Writing asks, and Quit Anyway still shuts everything down in order") { @MainActor in
+        let declined = AppTerminationRecorder(dictationAdmits: true)
+        var declinedSteps = declined.steps()
+        declinedSteps.finishWritingForTermination = { false }
+        declinedSteps.confirmQuitWithoutSavingWriting = { declined.events.append("askWriting"); return false }
+        assertFalse(await AppTerminationSequence.run(declinedSteps), "Keep Open leaves the app running")
+        assertEqual(declined.events, ["finishDictation", "askWriting", "resetAdmission", "reply:false"],
+                    "Keep Open shuts nothing down")
+
+        let confirmed = AppTerminationRecorder(dictationAdmits: true)
+        var confirmedSteps = confirmed.steps()
+        confirmedSteps.finishWritingForTermination = { false }
+        confirmedSteps.confirmQuitWithoutSavingWriting = { confirmed.events.append("askWriting"); return true }
+        assertTrue(await AppTerminationSequence.run(confirmedSteps),
+                   "a Writing flush that keeps failing can't block Quit, logout or an update forever")
+        assertEqual(
+            confirmed.events,
+            ["finishDictation", "askWriting", "meetingPrepare", "speakerSaves", "appStateShutdown", "restoreInput",
+             "flushEvents", "markFinished", "reply:true"],
+            "Quit Anyway still prepares the meeting and restores input before AppKit hears true"
+        )
+
+        let saved = AppTerminationRecorder(dictationAdmits: true)
+        var savedSteps = saved.steps()
+        savedSteps.confirmQuitWithoutSavingWriting = { saved.events.append("askWriting"); return false }
+        assertTrue(await AppTerminationSequence.run(savedSteps), "saved Writing never asks")
+        assertFalse(saved.events.contains("askWriting"))
     }
 }
 
@@ -242,6 +271,7 @@ private final class AppTerminationRecorder {
             finishDictationForTermination: { await self.record("finishDictation"); return self.dictationAdmits },
             resetCleanupAdmission: { self.events.append("resetAdmission") },
             prepareMeetingForTermination: { await self.record("meetingPrepare") },
+            finishSpeakerReviewSaves: { await self.record("speakerSaves") },
             shutDownAppState: { self.events.append("appStateShutdown") },
             stopAndRestorePersistentInput: { await self.record("restoreInput") },
             flushLocalEvents: { await self.record("flushEvents") },

@@ -164,7 +164,7 @@ func testDictationAutoSendPreferences() {
 
     runSuite("DictationAutoSendPolicy sends only after an eligible paste dispatch with text") {
         assertTrue(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .pasted,
                 text: "Send this",
@@ -176,7 +176,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: false,
                 pasteOutcome: .pasted,
                 text: "Send this",
@@ -188,7 +188,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .likelyPasted,
                 text: "Send this",
@@ -200,7 +200,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .copied(
                     "Paste dispatched without a target read",
@@ -215,7 +215,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .copied("Focus changed", reason: .focusChanged),
                 text: "Send this",
@@ -227,7 +227,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .pasted,
                 text: "   \n",
@@ -239,7 +239,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .pasted,
                 text: "Too fast",
@@ -251,7 +251,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .pasted,
                 text: "Send this",
@@ -263,7 +263,7 @@ func testDictationAutoSendPreferences() {
         )
 
         assertFalse(
-            DictationAutoSendPolicy.shouldSend(
+            autoEnterEligible(
                 isEnabled: true,
                 pasteOutcome: .pasted,
                 text: "Send this",
@@ -274,6 +274,25 @@ func testDictationAutoSendPreferences() {
             "unknown source apps should not send"
         )
     }
+}
+
+// The same two gates performAutoEnterIfNeeded checks before pressing the key.
+private func autoEnterEligible(
+    isEnabled: Bool,
+    pasteOutcome: TextPasteOutcome,
+    text: String,
+    duration: TimeInterval,
+    sourceBundleID: String?,
+    allowedBundleIDs: Set<String>
+) -> Bool {
+    DictationAutoSendPolicy.requestDecision(
+        isEnabled: isEnabled,
+        key: .enter,
+        text: text,
+        duration: duration,
+        sourceBundleID: sourceBundleID,
+        allowedBundleIDs: allowedBundleIDs
+    ).expected && pasteOutcome.allowsAutoSend
 }
 
 private func makeAutoSendDefaults() -> (UserDefaults, String) {

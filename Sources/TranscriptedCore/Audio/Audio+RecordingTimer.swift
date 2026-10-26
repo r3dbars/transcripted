@@ -40,7 +40,9 @@ extension Audio {
                    let freeSpace = attrs[FileAttributeKey.systemFreeSize] as? Int64 {
                     if freeSpace < 50_000_000 { // 50MB
                         AppLogger.audio.error("Disk space critically low during recording, stopping", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
+                        let generation = self.recordingSessionGeneration
                         DispatchQueue.main.async {
+                            guard self.recordingSessionGeneration == generation, self.isRecording else { return }
                             self.error = "Recording stopped — disk space critically low (\(freeSpace / 1_000_000)MB free)"
                             self.stop()
                         }

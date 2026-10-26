@@ -45,7 +45,7 @@ private enum SystemAudioCaptureTCCSymbols {
         @escaping @convention(block) (Bool) -> Void
     ) -> Void
 
-    private static let service = "kTCCServiceAudioCapture" as CFString
+    nonisolated(unsafe) private static let service = "kTCCServiceAudioCapture" as CFString // immutable constant
     private static let symbols: (preflight: PreflightFunction?, request: RequestFunction?) = {
         guard let handle = dlopen("/System/Library/PrivateFrameworks/TCC.framework/Versions/A/TCC", RTLD_NOW) else {
             return (nil, nil)

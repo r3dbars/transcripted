@@ -64,3 +64,49 @@ enum TranscriptedMenuCommandCatalog {
 
     static var all: [Item] { [settings] + capture + go }
 }
+
+/// What the app does for each menu action. `TranscriptedAppDelegate` is the
+/// real host; each requirement is a thin hop to an entry point users already
+/// have through the popover, the sidebar, or a recordable trigger.
+@MainActor
+protocol TranscriptedMenuCommandHost: AnyObject {
+    func closeMenuBarPopover()
+    func openSettingsWindow(page: TranscriptedSettingsPage, source: String)
+    func startDictationFromMenu()
+    func toggleMeetingRecordingFromMenu()
+    func importAudioFromMenu()
+    func focusHomeFindFromMenu(source: String)
+    func focusSpeakerSearchFromMenu(source: String)
+}
+
+extension TranscriptedMenuCommandCatalog {
+    /// The navigation source the app-menu Settings item (⌘, and the Settings
+    /// scene's fallback button) reports.
+    static let appMenuSource = "app_menu"
+    /// The navigation source every other menu command reports.
+    static let menuCommandSource = "menu_command"
+
+    /// Routes one menu action to the host. ⌘, closes the menu bar popover
+    /// first, then opens the real Settings window on General; it never shows
+    /// SwiftUI's own Settings scene.
+    @MainActor
+    static func perform(_ action: Action, on host: TranscriptedMenuCommandHost) {
+        switch action {
+        case .openSettings:
+            host.closeMenuBarPopover()
+            host.openSettingsWindow(page: .general, source: appMenuSource)
+        case .startDictation:
+            host.startDictationFromMenu()
+        case .toggleMeetingRecording:
+            host.toggleMeetingRecordingFromMenu()
+        case .importAudio:
+            host.importAudioFromMenu()
+        case let .openPage(page):
+            host.openSettingsWindow(page: page, source: menuCommandSource)
+        case .findCaptures:
+            host.focusHomeFindFromMenu(source: menuCommandSource)
+        case .findSpeaker:
+            host.focusSpeakerSearchFromMenu(source: menuCommandSource)
+        }
+    }
+}

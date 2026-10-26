@@ -23,11 +23,6 @@ public struct SpeakerMapping: Sendable {
         return "Speaker \(speakerId)"
     }
 
-    public var suggestedName: String? {
-        guard !isConfirmedIdentity else { return nil }
-        return identifiedName
-    }
-
     public init(
         speakerId: String,
         identifiedName: String? = nil,

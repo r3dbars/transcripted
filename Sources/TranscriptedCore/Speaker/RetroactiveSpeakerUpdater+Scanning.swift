@@ -146,31 +146,7 @@ extension TranscriptSaver {
     static func extractYAMLQuotedString(from line: String, prefix: String) -> String? {
         let fullPrefix = prefix + "\""
         guard let prefixRange = line.range(of: fullPrefix) else { return nil }
-        var index = prefixRange.upperBound
-        var result = ""
-        while index < line.endIndex {
-            let c = line[index]
-            index = line.index(after: index)
-            if c == "\\" && index < line.endIndex {
-                let next = line[index]
-                index = line.index(after: index)
-                switch next {
-                case "\"": result.append("\"")
-                case "\\": result.append("\\")
-                case "n":  result.append("\n")
-                case "r":  result.append("\r")
-                case "t":  result.append("\t")
-                default:
-                    result.append("\\")
-                    result.append(next)
-                }
-            } else if c == "\"" {
-                return result
-            } else {
-                result.append(c)
-            }
-        }
-        return nil
+        return TranscriptFrontmatter.decodeYAMLQuoted(line, from: prefixRange.upperBound)?.value
     }
 
 }

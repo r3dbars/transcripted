@@ -264,7 +264,7 @@ enum OutcomeLedgerReader {
     /// Twelve mebibytes is read off the main thread, at most once per
     /// refresh interval; when even that is not enough, `truncated` says so
     /// and every surface labels its totals partial.
-    static let maximumTailBytes = 12 * 1_048_576
+    static let maximumTailBytes = TextFreeOnlineEventFile.retainedTailBytes
 
     struct Tail: Equatable, Sendable {
         let lines: [Data]

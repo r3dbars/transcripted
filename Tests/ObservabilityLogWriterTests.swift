@@ -6,9 +6,9 @@
 // EventReporter drags in CrashReporter/Sentry, so this runner doesn't compile it; its shutdown
 // flush order lives in LocalEventShutdownFlush, which is tested here.
 //
-// One suite still reads source as text (grandfathered):
-// - "avoid legacy FileHandle APIs" is an absence-of-API sweep across both the app and the
-//   TranscriptedCore package (FileLogger, RetroactiveSpeakerUpdater), which has no runtime signal.
+// Nothing here reads source as text. The "avoid legacy FileHandle APIs" absence-of-API sweep
+// across the app and the TranscriptedCore package (FileLogger, RetroactiveSpeakerUpdater) has no
+// runtime signal, so it is a rule in scripts/dev/check-banned-calls.py.
 
 import Foundation
 
@@ -388,36 +388,10 @@ func testObservabilityLogWriter() async {
         assertTrue(contents.isEmpty, "a failed append should be a no-op on disk, not a crash")
     }
 
-    runSuite("Diagnostic file writers avoid the NSException-throwing legacy FileHandle APIs") {
-        // Guards every shipped logging site the 1.1.49 stability pass converted. The
-        // legacy seekToEndOfFile()/write(_:)/readData(ofLength:) raise uncatchable
-        // ObjC NSExceptions on I/O failure; a revert to any of them re-arms the crash.
-        let crashProneAPIs = [
-            "seekToEndOfFile()",
-            "readData(ofLength:",
-            ".write(data)",
-            "synchronizeFile()",
-            "closeFile()",
-        ]
-        let sites = [
-            "Sources/Observability/LockedFileAppender.swift",
-            "Sources/Observability/EventReporter.swift",
-            "Sources/Observability/ReliabilityPacketRecorder.swift",
-            "Sources/Observability/AppLogSink.swift",
-            "Sources/TranscriptedCore/Logging/FileLogger.swift",
-            "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift",
-        ]
-        for site in sites {
-            let source = strippedOfComments(readObservabilityTestRepoTextFile(site))
-            assertFalse(source.isEmpty, "expected to read \(site)")
-            for api in crashProneAPIs {
-                assertFalse(
-                    source.contains(api),
-                    "\(site) must not call the NSException-throwing \(api) outside comments"
-                )
-            }
-        }
-    }
+    // "Diagnostic file writers avoid the NSException-throwing legacy FileHandle
+    // APIs" is a banned-call rule in scripts/dev/check-banned-calls.py. The
+    // behavior it protects (a failed write is swallowed, not a crash) is the
+    // "LockedFileAppender swallows write failures" suite above.
 
     runSuite("LockedFileAppender keeps concurrent log records line-delimited") {
         let fm = FileManager.default
@@ -473,25 +447,4 @@ private func observabilityTestEvent(level: String, event: String) -> Observabili
         appVersion: "1.2.3",
         osVersion: "Version 26.0"
     )
-}
-
-private func readObservabilityTestRepoTextFile(_ relativePath: String) -> String {
-    let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
-        .appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-}
-
-// Drop `//` line comments so a contract check for a crash-prone API name does not
-// trip on the explanatory comments that intentionally reference it. Coarse (it does
-// not model strings), which is fine for the diagnostic-logging sources it scans.
-private func strippedOfComments(_ source: String) -> String {
-    source
-        .split(separator: "\n", omittingEmptySubsequences: false)
-        .map { line -> Substring in
-            if let range = line.range(of: "//") {
-                return line[line.startIndex..<range.lowerBound]
-            }
-            return line
-        }
-        .joined(separator: "\n")
 }

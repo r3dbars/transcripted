@@ -338,7 +338,8 @@ enum AgentMCPConnector {
         paths: AgentMCPConnectorPaths,
         fileManager: FileManager
     ) throws {
-        let configURL = paths.codexConfigURL
+        // Write through a dotfiles symlink instead of replacing it with a plain file.
+        let configURL = paths.codexConfigURL.resolvingSymlinksInPath()
         try fileManager.createDirectory(
             at: configURL.deletingLastPathComponent(),
             withIntermediateDirectories: true

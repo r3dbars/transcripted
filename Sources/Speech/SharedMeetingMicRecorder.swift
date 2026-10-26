@@ -1,5 +1,8 @@
 @preconcurrency import AVFoundation
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 /// Thread-safe storage for dictation samples borrowed from an active meeting.
 /// MeetingCaptureBridge delivers buffers on its relay queue, never on the
@@ -24,7 +27,7 @@ final class SharedMeetingMicRecorder: @unchecked Sendable {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        guard let monoSamples = Self.extractMonoSamples(from: buffer), !monoSamples.isEmpty else { return }
+        guard let monoSamples = MicrophoneDownmix.monoSamples(from: buffer), !monoSamples.isEmpty else { return }
         let sampleRate = ParakeetTapSampleRatePolicy.effectiveSampleRate(
             bufferSampleRate: buffer.format.sampleRate
         )
@@ -68,36 +71,6 @@ final class SharedMeetingMicRecorder: @unchecked Sendable {
         return meter.levels(for: buffer)
     }
 
-    private static func extractMonoSamples(from buffer: AVAudioPCMBuffer) -> [Float]? {
-        let frameCount = Int(buffer.frameLength)
-        let channelCount = Int(buffer.format.channelCount)
-        guard frameCount > 0, channelCount > 0 else { return [] }
-
-        if channelCount == 1 {
-            guard let channelData = buffer.floatChannelData?[0] else { return nil }
-            return Array(UnsafeBufferPointer(start: channelData, count: frameCount))
-        }
-
-        var mono = Array<Float>(repeating: 0, count: frameCount)
-        if buffer.format.isInterleaved {
-            guard let interleaved = buffer.floatChannelData?[0] else { return nil }
-            for frame in 0..<frameCount {
-                let base = frame * channelCount
-                var sum: Float = 0
-                for channel in 0..<channelCount { sum += interleaved[base + channel] }
-                mono[frame] = sum / Float(channelCount)
-            }
-            return mono
-        }
-
-        guard let channels = buffer.floatChannelData else { return nil }
-        for frame in 0..<frameCount {
-            var sum: Float = 0
-            for channel in 0..<channelCount { sum += channels[channel][frame] }
-            mono[frame] = sum / Float(channelCount)
-        }
-        return mono
-    }
 }
 
 /// Main-actor generation guard for the only suspending shared-mic transition:

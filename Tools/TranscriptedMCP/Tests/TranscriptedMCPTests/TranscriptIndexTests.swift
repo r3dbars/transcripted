@@ -24,7 +24,7 @@ final class TranscriptIndexTests: XCTestCase {
     }
 
     func testEmptyIndexListsNoMeetings() throws {
-        let meetings = try index.listRecentMeetings(count: 10)
+        let meetings = try index.listMeetings(count: 10)
         XCTAssertTrue(meetings.isEmpty)
     }
 
@@ -88,12 +88,12 @@ final class TranscriptIndexTests: XCTestCase {
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
 
         try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md"))
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 0)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 0)
     }
 
     func testFileWatcherSignalsDeletes() throws {
@@ -118,7 +118,7 @@ final class TranscriptIndexTests: XCTestCase {
         try "not markdown".write(to: tempDir.appendingPathComponent("Call_2026-03-29_10-00-00.md"), atomically: true, encoding: .utf8)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        let results = try index.listRecentMeetings(count: 10)
+        let results = try index.listMeetings(count: 10)
         XCTAssertTrue(results.isEmpty)
     }
 
@@ -149,7 +149,7 @@ final class TranscriptIndexTests: XCTestCase {
 
         try index.reconcile(meetingDirs: [symlinkRoot], dictationDirs: [])
 
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
         XCTAssertEqual(
             try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.count,
             1
@@ -189,7 +189,7 @@ final class TranscriptIndexTests: XCTestCase {
     }
 
     func testListRecentMeetingsClampsTo50() throws {
-        let meetings = try index.listRecentMeetings(count: 999)
+        let meetings = try index.listMeetings(count: 999)
         XCTAssertTrue(meetings.isEmpty) // Empty but didn't crash
     }
 
@@ -198,7 +198,7 @@ final class TranscriptIndexTests: XCTestCase {
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        let meetings = try index.listRecentMeetings(count: 10)
+        let meetings = try index.listMeetings(count: 10)
         XCTAssertEqual(meetings.count, 1)
         XCTAssertFalse(meetings[0].speakers.isEmpty)
     }
@@ -466,13 +466,13 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
 
         // The transaction must roll back: no half-indexed meeting marked indexed.
-        XCTAssertTrue(try index.listRecentMeetings(count: 10).isEmpty)
+        XCTAssertTrue(try index.listMeetings(count: 10).isEmpty)
 
         // The meeting is retried because json_modified_at was never committed.
         try allowInserts(into: "utterances")
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
         let results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
         XCTAssertEqual(results.results.count, 1)
     }
@@ -494,14 +494,14 @@ final class TranscriptIndexTests: XCTestCase {
         XCTAssertThrowsError(try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir))
 
         // The delete rolled back with the failed insert: the old version is intact.
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
         XCTAssertEqual(try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
         XCTAssertTrue(try index.searchUtterances(query: "rewritten", speaker: nil, dateFrom: nil, dateTo: nil).results.isEmpty)
 
         // Its old mtime is still stored, so the next pass retries the new version.
         try allowInserts(into: "utterances")
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
         XCTAssertEqual(try index.searchUtterances(query: "rewritten", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
         XCTAssertTrue(try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil).results.isEmpty)
     }
@@ -561,7 +561,7 @@ final class TranscriptIndexTests: XCTestCase {
         let readDone = DispatchSemaphore(value: 0)
         let readCount = ReadCountBox()
         DispatchQueue.global(qos: .userInitiated).async {
-            readCount.value = (try? index.listRecentMeetings(count: 10).count) ?? -1
+            readCount.value = (try? index.listMeetings(count: 10).count) ?? -1
             readDone.signal()
         }
         XCTAssertEqual(
@@ -574,7 +574,7 @@ final class TranscriptIndexTests: XCTestCase {
         flock(lockFD, LOCK_UN)
         released = true
         wait(for: [reconcileDone], timeout: 10)
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 2)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 2)
     }
 
     func testStartupKeepsGoingWhenOneFileFailsToIndex() throws {
@@ -593,14 +593,14 @@ final class TranscriptIndexTests: XCTestCase {
             meetingDirs: [tempDir],
             dictationDirs: [tempDir]
         ))
-        let meetings = try index.listRecentMeetings(count: 10)
+        let meetings = try index.listMeetings(count: 10)
         XCTAssertEqual(meetings.map(\.filename), ["Call_2026-03-29_10-00-00"])
     }
 
     func testFailedRemovalRollsBackAndKeepsMeetingSearchable() throws {
         try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
 
         // Sabotage removal mid-transaction: the utterances delete succeeds, then
         // the meeting_speakers delete fails. The whole removal must roll back.

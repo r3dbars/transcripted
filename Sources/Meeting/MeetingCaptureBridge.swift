@@ -352,13 +352,19 @@ final class MeetingCaptureBridge: ObservableObject {
             let stopTimeout = TranscriptedConstants.meetingStopTimeout(
                 forRecordingDuration: max(recordingDuration, audio.recordingDuration)
             )
+            // Core may already be stopping this capture itself (disk full, a
+            // write failure) with its isRecording reset still queued on main.
+            // Wait for that stop's completion instead of stopping again.
+            let coreStopGeneration = audio.inFlightStopGeneration
             // Ask the epoch for the next session's generation instead of
             // hand-predicting with `current &+ 1`, which the SupersessionEpoch
             // docs call out as racy against a concurrent begin().
-            let stopGeneration = audio.predictedNextRecordingSessionGeneration()
+            let stopGeneration = coreStopGeneration ?? audio.predictedNextRecordingSessionGeneration()
             expectedStopGeneration = stopGeneration
             let attemptID = completionAttempt.begin(continuation)
-            audio.stop()
+            if coreStopGeneration == nil {
+                audio.stop()
+            }
 
             completionAttempt.setTimeoutTask(Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: stopTimeout)

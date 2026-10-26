@@ -293,11 +293,39 @@ public enum TextFreeCandidateSource: String, Codable, CaseIterable, Sendable {
     }
 }
 
-/// Path computation only. Callers own create/append/delete.
+/// Path computation and the size bound. Callers own create/append/delete.
 /// Lives in its own 0700 directory so App delete can unlink it safely.
 public enum TextFreeOnlineEventFile {
     public static let directoryName = "Outcome Ledger"
     public static let fileName = "events.jsonl"
+    /// The newest bytes readers look at and compaction keeps; sized to hold
+    /// the seven-day window (see `OutcomeLedgerReader.maximumTailBytes`).
+    public static let retainedTailBytes = 12 * 1_048_576
+    public static let compactionThresholdBytes = 24 * 1_048_576
+
+    /// Once `url` passes `threshold`, atomically replaces it with its last
+    /// `keeping` bytes, starting at a whole line, as a 0600 file. The caller
+    /// serializes this with its appends.
+    public static func compactIfNeeded(
+        at url: URL,
+        threshold: Int = compactionThresholdBytes,
+        keeping: Int = retainedTailBytes
+    ) {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return }
+        defer { try? handle.close() }
+        guard let end = try? handle.seekToEnd(), end > UInt64(threshold), end > UInt64(keeping),
+              (try? handle.seek(toOffset: end - UInt64(keeping))) != nil,
+              let data = try? handle.read(upToCount: keeping),
+              let newline = data.firstIndex(of: 0x0A) else { return }
+        let temp = url.deletingLastPathComponent().appendingPathComponent(".\(fileName).compacting")
+        try? FileManager.default.removeItem(at: temp)
+        guard FileManager.default.createFile(
+            atPath: temp.path,
+            contents: Data(data[data.index(after: newline)...]),
+            attributes: [.posixPermissions: 0o600]
+        ) else { return }
+        if rename(temp.path, url.path) != 0 { try? FileManager.default.removeItem(at: temp) }
+    }
 
     public static func url(homeDirectory: URL, supportDirectoryName: String) -> URL {
         homeDirectory

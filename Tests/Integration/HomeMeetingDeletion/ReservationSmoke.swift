@@ -7,7 +7,17 @@ import Foundation
 // does not claim Home scanning or UI coverage.
 struct RecentMeetingItem {
     let transcriptURL: URL
+
+    init(transcriptURL: URL) { self.transcriptURL = transcriptURL }
+
+    // Matches the memberwise call the review-deletion path makes.
+    init(
+        title: String, date: Date, startDate: Date?, endDate: Date?,
+        transcriptURL: URL, audio: MeetingAudioAttachment?, speakerStatus: RecentMeetingSpeakerStatus
+    ) { self.transcriptURL = transcriptURL }
 }
+
+enum RecentMeetingSpeakerStatus { case ready }
 
 private enum SmokeFailure: Error, CustomStringConvertible {
     case failed(String)
@@ -171,24 +181,9 @@ private func exerciseReservation(
                       "the real Core reservation must be active before deletion attempts")
 
     try expectHomeReservationError(checks) {
-        _ = try HomeMeetingDeletion.delete(item, fileManager: fileManager)
-    }
-    try fixture.expectUnchanged(checks, label: "reserved delete")
-
-    try expectHomeReservationError(checks) {
         _ = try HomeMeetingDeletion.trash(item, fileManager: fileManager)
     }
     try fixture.expectUnchanged(checks, label: "reserved Trash")
-
-    // A precomputed plan also has a guard; this overload intentionally exposes
-    // the adapter error, while the item-based calls above translate it for UI.
-    do {
-        _ = try HomeMeetingDeletion.delete(plan, fileManager: fileManager)
-        throw SmokeFailure.failed("a precomputed plan must not bypass the Core reservation")
-    } catch MeetingTranscriptFileUpdateError.replacementInProgress {
-        try checks.expect(true, "the precomputed-plan overload must preserve the guard")
-    }
-    try fixture.expectUnchanged(checks, label: "reserved planned delete")
     try checks.expect(fileManager.trashCalls == 0, "denied operations must not enter Trash mechanics")
     try checks.expect(fileManager.removalCalls == 0, "denied operations must not start partial removal")
 }
@@ -228,15 +223,6 @@ private func runSmoke() throws -> Int {
                       "Undo must return every moved fixture out of the synthetic Trash")
     HomeMeetingDeletion.restore(payload, fileManager: fileManager)
     try fixture.expectUnchanged(checks, label: "repeated Undo")
-
-    let deleted = try HomeMeetingDeletion.delete(item, fileManager: fileManager)
-    try checks.expect(Set(deleted.removedTranscriptURLs + deleted.removedSummaryURLs + deleted.removedAudioDirectoryURLs) == fixture.ownedRoots,
-                      "permanent delete must work after reservation release and Undo")
-    for url in fixture.ownedRoots {
-        try checks.expect(!fm.fileExists(atPath: url.path), "released permanent delete must remove every owned root")
-    }
-    try checks.expect(try Data(contentsOf: fixture.unrelatedURL) == fixture.originalBytes[fixture.unrelatedURL],
-                      "unrelated fixture bytes must survive every operation")
     return checks.count
 }
 
@@ -245,7 +231,7 @@ private enum ReservationSmoke {
     static func main() {
         do {
             let count = try runSmoke()
-            print("PASS \(count) assertions: real Core replacement reservation blocks Home delete/Trash; release permits deletion and byte-preserving Undo")
+            print("PASS \(count) assertions: real Core replacement reservation blocks Home Trash; release permits Trash and byte-preserving Undo")
         } catch {
             fputs("FAIL: \(error)\n", stderr)
             exit(1)

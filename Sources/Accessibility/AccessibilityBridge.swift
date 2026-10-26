@@ -1,5 +1,5 @@
 // AccessibilityBridge.swift
-// AXUIElement queries for text field position, value, and element lookup
+// AXUIElement queries for focused text field position and element lookup
 
 import AppKit
 import ApplicationServices
@@ -51,14 +51,6 @@ struct AccessibilityBridge {
 
     nonisolated static func acceptsFocusedTextRole(_ role: String, subrole: String?) -> Bool {
         AccessibilityFocusedTextPolicy.accepts(role: role, subrole: subrole)
-    }
-
-    /// Read the text value of an AX element (kAXValueAttribute).
-    static func textValue(of element: AXUIElement) -> String? {
-        var valueRef: AnyObject?
-        let result = AXUIElementCopyAttributeValue(element, kAXValueAttribute as CFString, &valueRef)
-        guard result == .success else { return nil }
-        return valueRef as? String
     }
 
     /// Find the screen rect of the focused text field in the given app.

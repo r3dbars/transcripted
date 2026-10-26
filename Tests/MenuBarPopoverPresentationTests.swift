@@ -76,6 +76,55 @@ func testMenuBarPopoverPresentation() async {
         assertTrue(fixture.fallbackPanels.isEmpty, "a successful status-button presentation needs no fallback window")
     }
 
+    runSuite("The menu window may join another app's full-screen Space without following the user") {
+        let cases: [(NSWindow.CollectionBehavior, NSWindow.CollectionBehavior)] = [
+            ([], [.fullScreenAuxiliary]),
+            ([.ignoresCycle], [.ignoresCycle, .fullScreenAuxiliary]),
+            ([.fullScreenAuxiliary, .transient], [.fullScreenAuxiliary, .transient])
+        ]
+        for (existing, expected) in cases {
+            let behavior = MenuBarPopoverPresentation.popoverWindowCollectionBehavior(existing)
+            assertEqual(behavior, expected, "add full-screen auxiliary and keep AppKit's own bits: \(existing.rawValue)")
+            assertFalse(behavior.contains(.canJoinAllSpaces), "an open menu must not follow the user to other Spaces")
+            assertFalse(behavior.contains(.moveToActiveSpace), "the menu window keeps AppKit's Space placement otherwise")
+        }
+    }
+
+    runSuite("A status-button menu is allowed onto another app's full-screen Space before it is ordered in") {
+        // The reporter's case: Show in Dock on, so Transcripted is a regular app and
+        // AppKit leaves the popover window without full-screen auxiliary behavior.
+        let fixture = MenuBarPopoverPresentationFixture()
+        fixture.window.collectionBehavior = [.ignoresCycle]
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+
+        assertTrue(presented, "the status-button menu opens")
+        assertTrue(fixture.window.collectionBehavior.contains(.fullScreenAuxiliary), "the shown menu window can appear over a full-screen app")
+        assertTrue(fixture.window.collectionBehavior.contains(.ignoresCycle), "AppKit's popover window behavior is preserved")
+        assertTrue(fixture.fallbackPanels.isEmpty, "the full-screen case needs no fallback anchor")
+    }
+
+    runSuite("A menu opened from the fallback anchor is also allowed onto the full-screen Space") {
+        let fixture = MenuBarPopoverPresentationFixture()
+        fixture.popover.showResults = [false, true]
+        let presented = fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+
+        assertTrue(presented, "the fallback retry opens the menu")
+        assertEqual(fixture.popover.presentations.count, 2, "the first show was refused, so the retry presented it")
+        assertTrue(fixture.window.collectionBehavior.contains(.fullScreenAuxiliary), "the retried menu window can appear over a full-screen app")
+    }
+
+    runSuite("Another popover opening does not change this menu's window") {
+        let fixture = MenuBarPopoverPresentationFixture()
+        fixture.popover.showResults = [false]
+        fixture.presentation.show(fixture.popover, relativeTo: fixture.anchor)
+        fixture.window.contentView = fixture.content.view
+        fixture.window.collectionBehavior = []
+        NotificationCenter.default.post(name: NSPopover.willShowNotification, object: MenuBarRecordingPopover())
+        NotificationCenter.default.post(name: NSPopover.willShowNotification, object: fixture.popover)
+
+        assertEqual(fixture.window.collectionBehavior, [], "after a refused show, late notifications leave the window alone")
+    }
+
     runSuite("A menu that cannot show does not focus a retained popover window") {
         let fixture = MenuBarPopoverPresentationFixture()
         // A previous presentation can leave the content attached to its
@@ -461,6 +510,8 @@ private final class MenuBarPopoverPresentationFixture {
             self.events.append("show")
             if self.popover.isShown, self.popover.attachWindow {
                 self.window.contentView = self.content.view
+                // AppKit posts this once the popover window exists, before it is ordered in.
+                NotificationCenter.default.post(name: NSPopover.willShowNotification, object: self.popover)
             }
             self.onShow?(self.popover.presentations.count)
         }
