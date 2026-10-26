@@ -227,6 +227,8 @@ extension MeetingOverlayController {
         )
     }
 
+    /// Quiet for a few seconds after an opt-in auto-start. Yields to the
+    /// call-audio ask so that prompt still owns the island.
     var autoRecordNoteVisible: Bool {
         MeetingAutoRecordNoteCopy.isVisible(
             duration: currentDuration,
