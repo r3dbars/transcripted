@@ -161,6 +161,12 @@ enum SpeakerMeetingReviewPolicy {
         }
     }
 
+    /// When a `.join` target is gone from People, name the voice only if this
+    /// is still a real name. Nil leaves the voice unresolved.
+    static func fallbackNameAfterMissingJoin(_ name: String) -> String? {
+        name
+    }
+
     /// The island's answers as the page's saves, one per voice, in order.
     static func steps(for updates: [SpeakerReviewUpdate]) -> [Step] {
         var seen = Set<UUID>()

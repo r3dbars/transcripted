@@ -90,6 +90,39 @@ func testSpeakerMeetingReview() {
         assertEqual(steps.compactMap(\.savedName), ["Rosa Diaz", "Dana Holt", "You", "Sam Ortiz", "You"])
     }
 
+    runSuite("Merging a voice never saves a blank or whitespace-only name") {
+        let voice = UUID()
+        let other = UUID()
+
+        let namedJoin = Policy.steps(for: [update(voice, "Dana Holt", .merged(targetProfileId: other))])
+        assertEqual(namedJoin, [.join(voiceID: voice, personID: other, name: "Dana Holt")], "a real name still joins that person")
+        let namedSelf = Policy.steps(for: [update(voice, "Rosa Diaz", .merged(targetProfileId: voice))])
+        assertEqual(namedSelf, [.name(voiceID: voice, name: "Rosa Diaz")], "a real name on a self-merge still names the voice")
+        let paddedJoin = Policy.steps(for: [update(voice, "  Dana Holt  ", .merged(targetProfileId: other))])
+        assertEqual(paddedJoin, [.join(voiceID: voice, personID: other, name: "Dana Holt")], "the typed name is trimmed before it saves")
+
+        let emptyIntoOther = Policy.steps(for: [update(voice, "", .merged(targetProfileId: other))])
+        assertMergeLeavesNoBlankName(emptyIntoOther, voice: voice, target: other, "empty name into another person")
+
+        let spacesIntoOther = Policy.steps(for: [update(voice, "   ", .merged(targetProfileId: other))])
+        assertMergeLeavesNoBlankName(spacesIntoOther, voice: voice, target: other, "whitespace-only name into another person")
+
+        let emptyIntoSelf = Policy.steps(for: [update(voice, "", .merged(targetProfileId: voice))])
+        assertMergeLeavesNoBlankName(emptyIntoSelf, voice: voice, target: voice, "empty name into the same voice")
+        assertEqual(emptyIntoSelf, [], "an empty self-merge needs a name instead of saving \"\"")
+
+        let spacesIntoSelf = Policy.steps(for: [update(voice, "   ", .merged(targetProfileId: voice))])
+        assertMergeLeavesNoBlankName(spacesIntoSelf, voice: voice, target: voice, "whitespace-only name into the same voice")
+        assertEqual(spacesIntoSelf, [], "a whitespace-only self-merge needs a name instead of saving blank")
+    }
+
+    runSuite("A missing merge target leaves the voice unresolved instead of saving a blank name") {
+        assertNil(Policy.fallbackNameAfterMissingJoin(""), "empty name: leave unresolved")
+        assertNil(Policy.fallbackNameAfterMissingJoin("   "), "whitespace-only name: leave unresolved")
+        assertEqual(Policy.fallbackNameAfterMissingJoin("Dana Holt"), "Dana Holt", "a real name still names the voice")
+        assertEqual(Policy.fallbackNameAfterMissingJoin("  Dana Holt  "), "Dana Holt", "trim before saving")
+    }
+
     runSuite("Done holds a card for Undo, the next Done saves it, and Undo puts it back on top") {
         var state = SpeakerMeetingReviewState()
         let weekly = finished("weekly")
@@ -170,6 +203,49 @@ private func finished(_ key: String) -> SpeakerMeetingReviewState.Finished {
 
 private func update(_ id: UUID, _ name: String, _ action: SpeakerReviewUpdate.NamingAction) -> SpeakerReviewUpdate {
     SpeakerReviewUpdate(persistentSpeakerId: id, diarizerSpeakerId: "1", newName: name, action: action)
+}
+
+private func assertMergeLeavesNoBlankName(
+    _ steps: [SpeakerMeetingReviewPolicy.Step],
+    voice: UUID,
+    target: UUID,
+    _ message: String,
+    file: String = #file,
+    line: Int = #line
+) {
+    let blanks = steps.compactMap(\.savedName).filter {
+        $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    assertTrue(blanks.isEmpty, "\(message): outcome kept a blank name", file: file, line: line)
+
+    if target == voice {
+        for step in steps {
+            if case .name(_, let name) = step {
+                assertTrue(
+                    !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                    "\(message): self-merge must not rename to blank",
+                    file: file,
+                    line: line
+                )
+            }
+        }
+        return
+    }
+
+    assertTrue(steps.count <= 1, "\(message): at most one save", file: file, line: line)
+    guard let step = steps.first else { return }
+    if case .join(let voiceID, let personID, let name) = step {
+        assertEqual(voiceID, voice, "\(message): join the voice that was answered", file: file, line: line)
+        assertEqual(personID, target, "\(message): join the chosen person", file: file, line: line)
+        assertTrue(
+            !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            "\(message): joining another person must use their name or leave the voice unresolved",
+            file: file,
+            line: line
+        )
+    } else {
+        assertTrue(false, "\(message): expected a join or no-op, got \(step)", file: file, line: line)
+    }
 }
 
 private func makeReviewProfile(name: String?) -> SpeakerProfile {
