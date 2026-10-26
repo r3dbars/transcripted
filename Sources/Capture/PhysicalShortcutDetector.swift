@@ -1,6 +1,8 @@
 // PhysicalShortcutDetector.swift
-// The CGEventTap engine behind ContextCaptureEngine's physical shortcuts.
-// Moved out of ContextCaptureEngine.swift.
+// The CGEvent tap that turns physical keys into dictation and meeting
+// shortcuts. Chord matching lives in PhysicalShortcutMatcher; Fn/media-key
+// diagnostics live in PhysicalShortcutTapPolicy. Keep tap callbacks small
+// and hop logging onto the main actor through `onLog`.
 
 import AppKit
 @preconcurrency import CoreFoundation
@@ -33,12 +35,16 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
     /// Transcripted main-thread work cannot delay global keyboard delivery.
     private var shortcutBindings: [PhysicalShortcutBinding] = []
     var onShortcut: ((PhysicalShortcutAction, PhysicalShortcutPhase) -> Void)?
+    /// Event name, message, context. The engine hops this onto the main
+    /// actor before `EventReporter` — the tap thread never logs directly.
+    var onLog: ((String, String, [String: String]) -> Void)?
 
     private let stateLock = NSRecursiveLock()
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
     private var tapThread: Thread?
+    private var diagnosticRateLimiter = PhysicalShortcutDiagnosticRateLimiter()
     private var activePushToTalkKeyCode: UInt32? {
         didSet {
             guard activePushToTalkKeyCode != nil, activePushToTalkKeyCode != oldValue else { return }
@@ -69,7 +75,8 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         let workItem: DispatchWorkItem?
     }
 
-    private static let modifierChordDelay: TimeInterval = 0.14
+    /// Hill-climb knob `dictation.hotkey.chord_delay_s`.
+    static let modifierChordDelay: TimeInterval = 0.14
 
     private static let callback: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else { return Unmanaged.passUnretained(event) }
@@ -94,10 +101,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
     func install() -> String? {
         remove()
 
-        let eventMask =
-            (CGEventMask(1) << CGEventType.keyDown.rawValue) |
-            (CGEventMask(1) << CGEventType.keyUp.rawValue) |
-            (CGEventMask(1) << CGEventType.flagsChanged.rawValue)
+        let eventMask = PhysicalShortcutTapPolicy.eventsOfInterestMask()
 
         let userInfo = Unmanaged.passUnretained(self).toOpaque()
         guard let tap = CGEvent.tapCreate(
@@ -201,9 +205,27 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
 
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reconcileActivePushToTalkAfterTapDisabled()
+            var reenabled = false
             if let eventTap {
                 CGEvent.tapEnable(tap: eventTap, enable: true)
+                reenabled = CGEvent.tapIsEnabled(tap: eventTap)
             }
+            if let reason = PhysicalShortcutTapPolicy.tapDisabledReason(for: type) {
+                emitLog(
+                    event: PhysicalShortcutDiagnosticEvent.tapDisabled,
+                    message: "Physical shortcut tap was disabled",
+                    context: PhysicalShortcutTapPolicy.tapDisabledContext(
+                        reason: reason,
+                        reenabled: reenabled
+                    ),
+                    rateLimited: false
+                )
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
+        if PhysicalShortcutTapPolicy.mustPassThrough(eventTypeRawValue: type.rawValue) {
+            handleSystemDefined(event)
             return Unmanaged.passUnretained(event)
         }
 
@@ -236,47 +258,61 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
                 pushToTalkTap.otherKeyWentDown()
             }
             lastTypedKeyDownUptime = ProcessInfo.processInfo.systemUptime
-            if isRepeat, consumedKeyCodes.contains(keyCode) {
-                return nil
-            }
-
-            guard !isRepeat else {
-                return Unmanaged.passUnretained(event)
-            }
-
-            guard let shortcut = PhysicalShortcutMatcher.matchingKeyDownShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
+            if !isRepeat {
+                // Any real keyDown drops a pending chord (Option then M).
                 cancelPendingModifierShortcut()
+            }
+            let matched = isRepeat
+                ? nil
+                : PhysicalShortcutMatcher.matchingKeyDownShortcut(
+                    shortcutBindings, keyCode: keyCode, modifiers: modifiers
+                )
+            var sequenceState = PhysicalShortcutKeySequencePolicy.State(
+                consumedKeyCodes: consumedKeyCodes,
+                activePushToTalkKeyCode: activePushToTalkKeyCode
+            )
+            let decision = PhysicalShortcutKeySequencePolicy.keyDown(
+                keyCode: keyCode,
+                isRepeat: isRepeat,
+                matched: matched,
+                state: &sequenceState
+            )
+            consumedKeyCodes = sequenceState.consumedKeyCodes
+            activePushToTalkKeyCode = sequenceState.activePushToTalkKeyCode
+            switch decision {
+            case .firePress(let action):
+                cancelPendingModifierShortcut()
+                onShortcut?(action, .press)
+                return nil
+            case .swallow:
+                return nil
+            case .passThrough:
+                return Unmanaged.passUnretained(event)
+            case .passThroughAndLogMismatch:
+                cancelPendingModifierShortcut()
+                logModifierMismatchIfNeeded(keyCode: keyCode, modifiers: modifiers, bindings: shortcutBindings)
+                return Unmanaged.passUnretained(event)
+            case .firePushToTalkRelease:
                 return Unmanaged.passUnretained(event)
             }
-
-            cancelPendingModifierShortcut()
-            consumedKeyCodes.insert(keyCode)
-
-            switch shortcut.action {
-            case .dictationPushToTalk:
-                guard activePushToTalkKeyCode == nil else { return nil }
-                activePushToTalkKeyCode = keyCode
-                onShortcut?(.dictationPushToTalk, .press)
-            case .dictationHandsFree:
-                onShortcut?(.dictationHandsFree, .press)
-            case .meeting:
-                onShortcut?(.meeting, .press)
-            }
-            return nil
 
         case .keyUp:
-            if activePushToTalkKeyCode == keyCode {
-                activePushToTalkKeyCode = nil
-                consumedKeyCodes.remove(keyCode)
+            var sequenceState = PhysicalShortcutKeySequencePolicy.State(
+                consumedKeyCodes: consumedKeyCodes,
+                activePushToTalkKeyCode: activePushToTalkKeyCode
+            )
+            let decision = PhysicalShortcutKeySequencePolicy.keyUp(keyCode: keyCode, state: &sequenceState)
+            consumedKeyCodes = sequenceState.consumedKeyCodes
+            activePushToTalkKeyCode = sequenceState.activePushToTalkKeyCode
+            switch decision {
+            case .firePushToTalkRelease:
                 onShortcut?(.dictationPushToTalk, pushToTalkReleasePhase())
                 return nil
-            }
-
-            if consumedKeyCodes.remove(keyCode) != nil {
+            case .swallow:
                 return nil
+            case .passThrough, .passThroughAndLogMismatch, .firePress:
+                return Unmanaged.passUnretained(event)
             }
-
-            return Unmanaged.passUnretained(event)
 
         case .flagsChanged:
             if let activePushToTalkKeyCode, activePushToTalkKeyCode != keyCode {
@@ -285,19 +321,25 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
             pushToTalkComboWindow.flagsChanged(
                 keyCode: keyCode,
                 modifiers: modifiers,
-                isPushToTalkRelease: PhysicalShortcutMatcher.matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers)
+                isPushToTalkRelease: PhysicalShortcutMatcher.matchesRelease(
+                    for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers
+                )
             )
             if handsFreeComboTracker.flagsChanged(
                 keyCode: keyCode,
                 modifiers: modifiers,
-                isHandsFreeRelease: PhysicalShortcutMatcher.matchesRelease(for: .dictationHandsFree, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers)
+                isHandsFreeRelease: PhysicalShortcutMatcher.matchesRelease(
+                    for: .dictationHandsFree, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers
+                )
             ) {
                 return nil
             }
 
             if pendingModifierShortcut?.press.keyCode == keyCode,
                let pending = pendingModifierShortcut,
-               PhysicalShortcutMatcher.matchesRelease(for: pending.press.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
+               PhysicalShortcutMatcher.matchesRelease(
+                for: pending.press.action, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers
+               ) {
                 cancelPendingModifierShortcut()
                 if pending.press.action == .dictationPushToTalk {
                     // Let go inside the chord delay with no other key: a tap.
@@ -310,20 +352,26 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
             }
 
             if activePushToTalkKeyCode == keyCode,
-               PhysicalShortcutMatcher.matchesRelease(for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers) {
+               PhysicalShortcutMatcher.matchesRelease(
+                for: .dictationPushToTalk, in: shortcutBindings, keyCode: keyCode, modifiers: modifiers
+               ) {
                 activePushToTalkKeyCode = nil
                 onShortcut?(.dictationPushToTalk, pushToTalkReleasePhase())
                 return nil
             }
 
-            guard let shortcut = PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut(shortcutBindings, keyCode: keyCode, modifiers: modifiers) else {
+            guard let shortcut = PhysicalShortcutMatcher.matchingFlagsChangedPressShortcut(
+                shortcutBindings, keyCode: keyCode, modifiers: modifiers
+            ) else {
                 return Unmanaged.passUnretained(event)
             }
 
             switch shortcut.action {
             case .dictationPushToTalk:
                 guard activePushToTalkKeyCode == nil else { return nil }
-                let sharesModifier = PhysicalShortcutMatcher.hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action)
+                let sharesModifier = PhysicalShortcutMatcher.hasChordUsingModifier(
+                    keyCode, in: shortcutBindings, excluding: shortcut.action
+                )
                 if sharesModifier, PhysicalShortcutMatcher.firesSharedModifierOnPress(
                     secondsSinceLastTypedKey: ProcessInfo.processInfo.systemUptime - lastTypedKeyDownUptime,
                     isDictating: isDictating
@@ -350,7 +398,9 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
                 // A modifier other shortcuts share used to wait for release,
                 // which added the whole hold to every start. It now fires on
                 // press unless a key was just typed.
-                let sharesModifier = PhysicalShortcutMatcher.hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action)
+                let sharesModifier = PhysicalShortcutMatcher.hasChordUsingModifier(
+                    keyCode, in: shortcutBindings, excluding: shortcut.action
+                )
                 if sharesModifier, !PhysicalShortcutMatcher.firesSharedModifierOnPress(
                     secondsSinceLastTypedKey: ProcessInfo.processInfo.systemUptime - lastTypedKeyDownUptime,
                     isDictating: isDictating
@@ -366,7 +416,9 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
                     onShortcut?(.dictationHandsFree, .press)
                 }
             case .meeting:
-                if PhysicalShortcutMatcher.hasChordUsingModifier(keyCode, in: shortcutBindings, excluding: shortcut.action) {
+                if PhysicalShortcutMatcher.hasChordUsingModifier(
+                    keyCode, in: shortcutBindings, excluding: shortcut.action
+                ) {
                     schedulePendingModifierShortcut(keyCode: keyCode, action: .meeting)
                 } else {
                     cancelPendingModifierShortcut()
@@ -378,6 +430,70 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         default:
             return Unmanaged.passUnretained(event)
         }
+    }
+
+    private func handleSystemDefined(_ event: CGEvent) {
+        let dictation = shortcutBindings.first { $0.action != .meeting }
+        guard PhysicalShortcutMediaKeyPolicy.shouldInspectSystemDefined(
+            dictationBinding: dictation?.binding
+        ) else {
+            return
+        }
+        guard let nsEvent = NSEvent(cgEvent: event),
+              let parsed = PhysicalShortcutMediaKeyPolicy.parseAuxControl(
+                subtype: Int(nsEvent.subtype.rawValue),
+                data1: nsEvent.data1
+              ) else {
+            return
+        }
+        guard PhysicalShortcutMediaKeyPolicy.dictationFunctionKeyArrivedAsMediaKey(
+            nxKeyType: parsed.nxKeyType,
+            dictationBinding: dictation?.binding
+        ) else {
+            return
+        }
+        emitLog(
+            event: PhysicalShortcutDiagnosticEvent.mediaKey,
+            message: "Configured dictation F-key arrived as a media key",
+            context: PhysicalShortcutMediaKeyPolicy.mediaKeyContext(nxKeyType: parsed.nxKeyType),
+            rateLimited: true
+        )
+    }
+
+    private func logModifierMismatchIfNeeded(
+        keyCode: UInt32,
+        modifiers: UInt32,
+        bindings: [PhysicalShortcutBinding]
+    ) {
+        guard let saved = bindings.first(where: {
+            PhysicalShortcutModifierMismatchPolicy.shouldLog(
+                action: $0.action,
+                saved: $0.binding,
+                keyCode: keyCode,
+                modifiers: modifiers
+            )
+        }) else {
+            return
+        }
+        emitLog(
+            event: PhysicalShortcutDiagnosticEvent.modifierMismatch,
+            message: "Saved shortcut key pressed with different modifiers",
+            context: PhysicalShortcutModifierMismatchPolicy.context(keyCode: saved.binding.keyCode),
+            rateLimited: true
+        )
+    }
+
+    private func emitLog(
+        event: String,
+        message: String,
+        context: [String: String],
+        rateLimited: Bool
+    ) {
+        if rateLimited {
+            let now = ProcessInfo.processInfo.systemUptime
+            guard diagnosticRateLimiter.shouldEmit(event, now: now) else { return }
+        }
+        onLog?(event, message, context)
     }
 
     private func schedulePendingModifierShortcut(keyCode: UInt32, action: PhysicalShortcutAction) {

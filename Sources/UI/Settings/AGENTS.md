@@ -53,7 +53,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `DeveloperPreviewSettingsRows.swift` - the Developer Preview card at the bottom of the settings page: one tagged row per `DeveloperPreview.all` feature, with what it sends in the ⓘ popover; turning one on asks first. No analytics for these toggles.
 - `TranscriptedSettingsComponents.swift` - `persistedSettingsBinding`, `SettingsPageIntro`, button styles, `SettingsStatusCard`, permission rows, hotkey recorder container.
 - `TranscriptedSettingsRows.swift` - rows for model choices, custom corrections, Auto Enter apps.
-- `ShortcutSettingsRows.swift` - key rows for the dictation key and meetings, and `ShortcutRecorderModel`, which records a shortcut in place (the dictation key is one key with hold/tap behavior; no Hands-Free or paste-last rows).
+- `ShortcutSettingsRows.swift` - key rows for the dictation key and meetings, and `ShortcutRecorderModel`, which records a shortcut in place (the dictation key is one key with hold/tap behavior; no Hands-Free or paste-last rows). A stored F8 vs Fn+F8 clash shows under the meeting row even while idle, so it isn't left silently dead.
 - `MeetingLanguageSettingRow.swift` / `MeetingMicrophoneSettingRow.swift` / `MicrophoneSettingsPolicy.swift` - meeting language picker, Mac-selected-mic toggle, and which mic rows General shows (Foundation-pure).
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the shell (start dictation/meeting, import audio, feedback, diagnostics).
 - `TranscriptedSettingsWindowController.swift` / `TranscriptedOnboardingWindowController.swift` - AppKit windows. The settings controller owns `TodayViewModel`.
