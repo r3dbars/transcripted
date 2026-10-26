@@ -45,9 +45,9 @@ func testHomeRowControls() {
         assertEqual(entries.filter(\.isDestructive), [.deleteMeeting], "only Delete meeting should be destructive")
     }
 
-    runSuite("A meeting with voices to name offers Review speakers from its row menu") {
-        assertTrue(meetingTitles(review: true).contains("Review speakers"), "pending speaker review should add Review speakers")
-        assertFalse(meetingTitles(review: false).contains("Review speakers"), "a meeting with nothing to review should not offer it")
+    runSuite("A meeting with voices to name offers Who spoke? from its row menu") {
+        assertTrue(meetingTitles(review: true).contains("Who spoke?"), "pending speaker review should add Who spoke?")
+        assertFalse(meetingTitles(review: false).contains("Who spoke?"), "a meeting with nothing to review should not offer it")
     }
 
     runSuite("Re-transcribe and Show audio need retained audio with a Finder target") {
