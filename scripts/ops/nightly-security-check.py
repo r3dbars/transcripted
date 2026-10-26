@@ -1051,16 +1051,24 @@ RELEASE_ASSET_FEED_SUFFIX = "/releases/latest/download/appcast.xml"
 
 
 def live_appcast_urls(manifest: dict, root: Path | None = None) -> list[str]:
-    """Feed URLs installed apps use. The release-asset feed only exists once the
-    first release on it is out, which scripts/release/freeze-legacy-appcast.py
-    records; before that, fetching it would only report a 404."""
-    feed_is_live = root is not None and (root / "config/release/legacy-appcast-freeze.json").is_file()
+    """Feed URLs installed apps use.
+
+    With no checkout (the default), return every candidate the app and the
+    live-surface list name, including the release-asset SUFeedURL. When a
+    checkout is passed, skip that URL until scripts/release/freeze-legacy-appcast.py
+    has written the freeze record: the asset does not exist yet, and fetching
+    it would only report a 404.
+    """
+    skip_unpublished_release_asset = (
+        root is not None
+        and not (root / "config/release/legacy-appcast-freeze.json").is_file()
+    )
     urls: list[str] = []
     for candidate in (
         manifest["expected_info_plist"].get("SUFeedURL", ""),
         manifest["live_release_surfaces"].get("appcast", ""),
     ):
-        if candidate.endswith(RELEASE_ASSET_FEED_SUFFIX) and not feed_is_live:
+        if candidate.endswith(RELEASE_ASSET_FEED_SUFFIX) and skip_unpublished_release_asset:
             continue
         if candidate and candidate not in urls:
             urls.append(candidate)
