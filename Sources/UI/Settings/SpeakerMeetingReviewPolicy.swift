@@ -161,29 +161,47 @@ enum SpeakerMeetingReviewPolicy {
         }
     }
 
+    /// Trimmed, or nil when the string is empty or whitespace-only.
+    static func usableName(_ raw: String?) -> String? {
+        guard let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else {
+            return nil
+        }
+        return trimmed
+    }
+
     /// When a `.join` target is gone from People, name the voice only if this
     /// is still a real name. Nil leaves the voice unresolved.
     static func fallbackNameAfterMissingJoin(_ name: String) -> String? {
-        name
+        usableName(name)
     }
 
     /// The island's answers as the page's saves, one per voice, in order.
-    static func steps(for updates: [SpeakerReviewUpdate]) -> [Step] {
+    /// `existingNames` is saved people (id → display name) so a merge into
+    /// someone already in People can keep their name when the typed field is blank.
+    static func steps(for updates: [SpeakerReviewUpdate], existingNames: [UUID: String] = [:]) -> [Step] {
         var seen = Set<UUID>()
         return updates.compactMap { update in
             let voiceID = update.persistentSpeakerId
             guard seen.insert(voiceID).inserted else { return nil }
-            let name = update.newName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let typed = usableName(update.newName)
             switch update.action {
             case .merged(let target):
-                return target == voiceID ? .name(voiceID: voiceID, name: name) : .join(voiceID: voiceID, personID: target, name: name)
+                if target == voiceID {
+                    guard let typed else { return nil }
+                    return .name(voiceID: voiceID, name: typed)
+                }
+                if let typed {
+                    return .join(voiceID: voiceID, personID: target, name: typed)
+                }
+                guard let targetName = usableName(existingNames[target]) else { return nil }
+                return .join(voiceID: voiceID, personID: target, name: targetName)
             case .collapsedToMe:
                 return .markAsMe(voiceID: voiceID)
             case .discardedFromDatabase:
                 return .notAPerson(voiceID: voiceID)
             case .named, .confirmed, .corrected:
-                guard !name.isEmpty else { return nil }
-                return SpeakerNameSelectionPolicy.isOwnerLabel(name) ? .markAsMe(voiceID: voiceID) : .name(voiceID: voiceID, name: name)
+                guard let typed else { return nil }
+                return SpeakerNameSelectionPolicy.isOwnerLabel(typed) ? .markAsMe(voiceID: voiceID) : .name(voiceID: voiceID, name: typed)
             }
         }
     }

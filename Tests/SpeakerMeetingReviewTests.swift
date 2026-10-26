@@ -103,9 +103,11 @@ func testSpeakerMeetingReview() {
 
         let emptyIntoOther = Policy.steps(for: [update(voice, "", .merged(targetProfileId: other))])
         assertMergeLeavesNoBlankName(emptyIntoOther, voice: voice, target: other, "empty name into another person")
+        assertEqual(emptyIntoOther, [], "an empty merge into someone else needs their saved name, or it stays unresolved")
 
         let spacesIntoOther = Policy.steps(for: [update(voice, "   ", .merged(targetProfileId: other))])
         assertMergeLeavesNoBlankName(spacesIntoOther, voice: voice, target: other, "whitespace-only name into another person")
+        assertEqual(spacesIntoOther, [], "a whitespace-only merge into someone else needs their saved name, or it stays unresolved")
 
         let emptyIntoSelf = Policy.steps(for: [update(voice, "", .merged(targetProfileId: voice))])
         assertMergeLeavesNoBlankName(emptyIntoSelf, voice: voice, target: voice, "empty name into the same voice")
@@ -114,6 +116,30 @@ func testSpeakerMeetingReview() {
         let spacesIntoSelf = Policy.steps(for: [update(voice, "   ", .merged(targetProfileId: voice))])
         assertMergeLeavesNoBlankName(spacesIntoSelf, voice: voice, target: voice, "whitespace-only name into the same voice")
         assertEqual(spacesIntoSelf, [], "a whitespace-only self-merge needs a name instead of saving blank")
+
+        let underTarget = Policy.steps(
+            for: [update(voice, "", .merged(targetProfileId: other))],
+            existingNames: [other: "Dana Holt"]
+        )
+        assertEqual(
+            underTarget,
+            [.join(voiceID: voice, personID: other, name: "Dana Holt")],
+            "a blank typed field still joins under the target's saved name"
+        )
+        let spacesUnderTarget = Policy.steps(
+            for: [update(voice, "   ", .merged(targetProfileId: other))],
+            existingNames: [other: "  Dana Holt  "]
+        )
+        assertEqual(
+            spacesUnderTarget,
+            [.join(voiceID: voice, personID: other, name: "Dana Holt")],
+            "the target's saved name is trimmed"
+        )
+        let blankTarget = Policy.steps(
+            for: [update(voice, "", .merged(targetProfileId: other))],
+            existingNames: [other: "   "]
+        )
+        assertEqual(blankTarget, [], "a blank target name is not usable")
     }
 
     runSuite("A missing merge target leaves the voice unresolved instead of saving a blank name") {
