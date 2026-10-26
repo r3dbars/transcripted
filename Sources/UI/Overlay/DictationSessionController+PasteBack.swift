@@ -4,11 +4,16 @@
 import AppKit
 
 extension DictationSessionController {
-    /// A clipboard too big to set aside kept paste-back from running. Copy
+    /// A clipboard paste-back couldn't set aside kept it from running. Copy
     /// replaces it with the words, at the user's request, and then the usual
     /// "Not pasted" notice takes over (Paste, or ⌘V where they go).
-    func showClipboardBusy(_ text: String, message: String, overlayController: FloatingOverlayController) {
-        overlayController.showClipboardBusyNotice(text, fallbackMessage: message) { [weak self, weak overlayController] in
+    func showClipboardBusy(
+        _ text: String,
+        message: String,
+        hint: String,
+        overlayController: FloatingOverlayController
+    ) {
+        overlayController.showClipboardBusyNotice(text, fallbackMessage: message, hint: hint) { [weak self, weak overlayController] in
             guard let self, let overlayController else { return }
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()

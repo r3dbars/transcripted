@@ -555,7 +555,7 @@ extension DictationSessionController {
                         )
                     },
                     // The words never went on the clipboard; offer them back.
-                    showClipboardBusy: { self.showClipboardBusy(text, message: $0, overlayController: overlayController) },
+                    showClipboardBusy: { self.showClipboardBusy(text, message: $0, hint: $1, overlayController: overlayController) },
                     showError: { overlayController.showError($0) }
                 )
             )

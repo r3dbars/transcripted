@@ -423,7 +423,7 @@ class FloatingOverlayController {
     /// set aside, so the words were never put on it. The island shows them
     /// with a Copy button (the one step that replaces what's on the
     /// clipboard, only when asked). Without an island it shows the error.
-    func showClipboardBusyNotice(_ text: String, fallbackMessage: String, copy: @escaping () -> Void) {
+    func showClipboardBusyNotice(_ text: String, fallbackMessage: String, hint: String, copy: @escaping () -> Void) {
         guard isIslandMode else {
             showError(fallbackMessage)
             return
@@ -431,7 +431,7 @@ class FloatingOverlayController {
         showMessage("Not pasted", tone: .notice, kind: .other, notPasted: NotPastedNotice(
             text: text,
             actionTitle: "Copy",
-            hint: "Your clipboard holds something too big to set aside.",
+            hint: hint,
             watchesForManualPaste: false,
             action: copy
         ))

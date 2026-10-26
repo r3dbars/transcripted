@@ -73,6 +73,9 @@ extension TextPasteOutcome {
         if let failureReason {
             properties["failure_kind"] = failureReason.rawValue
         }
+        if let cause = failureReason?.clipboardSnapshotCause {
+            properties["clipboard_snapshot_cause"] = cause.rawValue
+        }
         return properties
     }
 }
@@ -85,7 +88,7 @@ enum DictationDeliveryPresentation: Equatable {
     /// The words are on the clipboard; the notice offers Paste where they go.
     case notPasted(message: String, unconfirmed: Bool)
     /// The words never reached the clipboard; the notice offers to copy them.
-    case clipboardBusy(message: String)
+    case clipboardBusy(message: String, hint: String)
     case error(String)
 
     static let likelyPastedAutoSendNotice = "Pasted. Press Return to send it."
@@ -104,7 +107,8 @@ enum DictationDeliveryPresentation: Equatable {
         case .success: return self
         case .clipboardNotice(let message): return .clipboardNotice("\(message) \(Self.pendingAudioNotice)")
         case .notPasted(let message, let unconfirmed): return .notPasted(message: "\(message) \(Self.pendingAudioNotice)", unconfirmed: unconfirmed)
-        case .clipboardBusy(let message): return .clipboardBusy(message: "\(message) \(Self.pendingAudioNotice)")
+        case .clipboardBusy(let message, let hint):
+            return .clipboardBusy(message: "\(message) \(Self.pendingAudioNotice)", hint: hint)
         case .error(let message): return .error("\(message) \(Self.pendingAudioNotice)")
         }
     }
@@ -144,8 +148,8 @@ enum DictationDeliveryPresentation: Equatable {
             return .notPasted(message: message, unconfirmed: reason == .pasteNotConfirmed)
         case .failed(let message, reason: _):
             let combined = saveFailureMessage.map { "\(message) \($0)" } ?? message
-            if saveFailureMessage == nil, outcome.notPastedOffer == .clipboardBusy {
-                return .clipboardBusy(message: combined)
+            if saveFailureMessage == nil, case .clipboardBusy(let cause) = outcome.notPastedOffer {
+                return .clipboardBusy(message: combined, hint: cause.notPastedHint)
             }
             return .error(combined)
         }
