@@ -277,7 +277,7 @@ extension TranscriptedSettingsView {
     private var homePage: some View {
         HomeSettingsPage(
             homeViewModel: homeViewModel,
-            capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+            capturesToday: homeViewModel.todayMeetingCount,
             attentionTitle: homeAttentionIssues.first?.title,
             meetingDaySections: homeMeetingDaySections,
             homeCopiedRowID: homeCopiedRowID,

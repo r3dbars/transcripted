@@ -215,7 +215,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
     func testMergeAppliesClipSideEffectsOnlyAfterDatabaseCommit() throws {
         let source = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
         let target = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
-        speakerDatabase.setDisplayName(id: target.id, name: "Sarah", source: NameSource.userManual)
+        speakerDatabase.setDisplayName(id: target.id, name: "Sadie", source: NameSource.userManual)
         speakerDatabase.incrementDisputeCount(id: target.id)
         let transcriptURL = try writeTranscript(named: "merge.md", speakerId: source.id, speakerName: "Speaker 0")
 
@@ -232,18 +232,18 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         )
 
         XCTAssertTrue(outcome.succeeded)
-        XCTAssertEqual(outcome.resolvedDisplayName, "Sarah")
+        XCTAssertEqual(outcome.resolvedDisplayName, "Sadie")
         XCTAssertEqual(sideEffectCalls.count, 1)
         XCTAssertEqual(sideEffectCalls.first?.0, source.id)
         XCTAssertEqual(sideEffectCalls.first?.1, target.id)
 
         XCTAssertNil(speakerDatabase.getSpeaker(id: source.id))
-        XCTAssertEqual(speakerDatabase.getSpeaker(id: target.id)?.displayName, "Sarah")
+        XCTAssertEqual(speakerDatabase.getSpeaker(id: target.id)?.displayName, "Sadie")
         XCTAssertEqual(speakerDatabase.getSpeaker(id: target.id)?.disputeCount, 0)
 
         let updated = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(updated.contains(#"db_id: "\#(target.id.uuidString)""#))
-        XCTAssertTrue(updated.contains("[System/Sarah]"))
+        XCTAssertTrue(updated.contains("[System/Sadie]"))
     }
 
     // MARK: - Merge a queued voice into a saved person
@@ -258,16 +258,16 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
 
     func testNamingAQueuedVoiceAfterASavedPersonMergesNamesTheRowAndConfirmsThePerson() throws {
         let voice = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
-        let sarah = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
-        speakerDatabase.setDisplayName(id: sarah.id, name: "Sarah", source: NameSource.userManual)
-        let confirmationsBefore = speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount ?? 0
+        let sadie = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
+        speakerDatabase.setDisplayName(id: sadie.id, name: "Sadie", source: NameSource.userManual)
+        let confirmationsBefore = speakerDatabase.getSpeaker(id: sadie.id)?.confirmedMeetingCount ?? 0
         let firstURL = try writeQueuedVoiceTranscript(named: "first.md", speakerId: voice.id)
         let secondURL = try writeQueuedVoiceTranscript(named: "second.md", speakerId: voice.id)
 
         let outcome = try SpeakerIdentityMutationService.apply(
             .mergeReviewedVoice(
                 sourceId: voice.id,
-                targetId: sarah.id,
+                targetId: sadie.id,
                 reviewedRows: [firstURL, secondURL].map {
                     TranscriptSaver.DeferredSpeakerNameUpdate(
                         transcriptURL: $0,
@@ -283,34 +283,34 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         )
 
         XCTAssertTrue(outcome.succeeded)
-        XCTAssertNil(speakerDatabase.getSpeaker(id: voice.id), "the voice joined Sarah")
+        XCTAssertNil(speakerDatabase.getSpeaker(id: voice.id), "the voice joined Sadie")
         XCTAssertEqual(
-            speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount,
+            speakerDatabase.getSpeaker(id: sadie.id)?.confirmedMeetingCount,
             confirmationsBefore + 2,
-            "each reviewed meeting confirms Sarah, like a merged answer in the island"
+            "each reviewed meeting confirms Sadie, like a merged answer in the island"
         )
         for url in [firstURL, secondURL] {
             let updated = try String(contentsOf: url, encoding: .utf8)
-            XCTAssertTrue(updated.contains(#"db_id: "\#(sarah.id.uuidString)""#))
-            XCTAssertTrue(updated.contains(#"name: "Sarah""#))
+            XCTAssertTrue(updated.contains(#"db_id: "\#(sadie.id.uuidString)""#))
+            XCTAssertTrue(updated.contains(#"name: "Sadie""#))
             XCTAssertTrue(updated.contains("source: \(NameSource.userManual)"), "a named row is no longer pending review")
             XCTAssertFalse(updated.contains("db_pending"))
-            XCTAssertTrue(updated.contains("[System/Sarah]"))
+            XCTAssertTrue(updated.contains("[System/Sadie]"))
         }
     }
 
     func testAQueuedVoiceMergeWithAStaleRowChangesNothing() throws {
         let voice = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.2, count: 256), existingId: nil)
-        let sarah = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
-        speakerDatabase.setDisplayName(id: sarah.id, name: "Sarah", source: NameSource.userManual)
-        let confirmationsBefore = speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount ?? 0
+        let sadie = speakerDatabase.addOrUpdateSpeaker(embedding: [Float](repeating: 0.21, count: 256), existingId: nil)
+        speakerDatabase.setDisplayName(id: sadie.id, name: "Sadie", source: NameSource.userManual)
+        let confirmationsBefore = speakerDatabase.getSpeaker(id: sadie.id)?.confirmedMeetingCount ?? 0
         let url = try writeQueuedVoiceTranscript(named: "stale.md", speakerId: voice.id)
         let original = try String(contentsOf: url, encoding: .utf8)
 
         let outcome = try SpeakerIdentityMutationService.apply(
             .mergeReviewedVoice(
                 sourceId: voice.id,
-                targetId: sarah.id,
+                targetId: sadie.id,
                 reviewedRows: [
                     TranscriptSaver.DeferredSpeakerNameUpdate(
                         transcriptURL: url,
@@ -327,7 +327,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
 
         XCTAssertFalse(outcome.succeeded)
         XCTAssertNotNil(speakerDatabase.getSpeaker(id: voice.id), "the voice is still its own")
-        XCTAssertEqual(speakerDatabase.getSpeaker(id: sarah.id)?.confirmedMeetingCount, confirmationsBefore)
+        XCTAssertEqual(speakerDatabase.getSpeaker(id: sadie.id)?.confirmedMeetingCount, confirmationsBefore)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original)
     }
 
@@ -337,7 +337,7 @@ final class SpeakerIdentityMutationServiceTests: XCTestCase {
         let original = try String(contentsOf: url, encoding: .utf8)
         // The kept person has vanished, so the database merge throws; the voice
         // itself carries the name so the row naming runs first.
-        speakerDatabase.setDisplayName(id: voice.id, name: "Sarah", source: NameSource.userManual)
+        speakerDatabase.setDisplayName(id: voice.id, name: "Sadie", source: NameSource.userManual)
 
         let outcome = try SpeakerIdentityMutationService.apply(
             .mergeReviewedVoice(

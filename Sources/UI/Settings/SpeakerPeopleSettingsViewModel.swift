@@ -67,6 +67,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
     private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
+    private var clipQuotesByProfileID: [UUID: String] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord] = [:]
     private var namingStandingsByProfileID: [UUID: SpeakerNamingStanding] = [:]
     private var snapshotPublication = RefreshPublicationOrder()
@@ -81,6 +82,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let duplicateCountsByProfileID: [UUID: Int]
         let mergeTargetIndex: SpeakerMergeTargetIndex
         let clipURLsByProfileID: [UUID: URL]
+        let clipQuotesByProfileID: [UUID: String]
         let reviewQueueItems: [SpeakerPendingReviewItem]
         let undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord]
         let namingStandingsByProfileID: [UUID: SpeakerNamingStanding]
@@ -275,6 +277,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     func clipURL(for speakerId: UUID) -> URL? {
         clipURLsByProfileID[speakerId]
+    }
+
+    func clipSampleText(for speakerId: UUID) -> String? {
+        clipQuotesByProfileID[speakerId]
     }
 
     func playSample(for speakerId: UUID) {
@@ -558,6 +564,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
         mergeTargetIndex = snapshot.mergeTargetIndex
         clipURLsByProfileID = snapshot.clipURLsByProfileID
+        clipQuotesByProfileID = snapshot.clipQuotesByProfileID
         reviewQueueItems = snapshot.reviewQueueItems
         undoableMergesByTargetID = snapshot.undoableMergesByTargetID
         namingStandingsByProfileID = snapshot.namingStandingsByProfileID
@@ -621,6 +628,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         )
 
         var clipURLsByProfileID: [UUID: URL] = [:]
+        var clipQuotesByProfileID: [UUID: String] = [:]
         for profile in profiles {
             if let url = SpeakerClipLibrary.clipURL(
                 for: profile.id,
@@ -628,6 +636,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 legacyClipsDirectory: legacyClipsDirectory
             ) {
                 clipURLsByProfileID[profile.id] = url
+                if let quote = SpeakerClipLibrary.sampleText(nextTo: url) {
+                    clipQuotesByProfileID[profile.id] = quote
+                }
             }
         }
 
@@ -644,6 +655,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             duplicateCountsByProfileID: duplicateCountsByProfileID,
             mergeTargetIndex: mergeTargetIndex,
             clipURLsByProfileID: clipURLsByProfileID,
+            clipQuotesByProfileID: clipQuotesByProfileID,
             reviewQueueItems: reviewQueueItems,
             undoableMergesByTargetID: undoableMergesByTargetID,
             namingStandingsByProfileID: namingStandingsByProfileID

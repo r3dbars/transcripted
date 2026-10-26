@@ -351,6 +351,35 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertNil(disabled)
     }
 
+    func testConfigurationIsOffWhenTheCallerTurnsAnalyticsOff() throws {
+        let appSupport = makeTempDir()
+        defer { removeTempDir(appSupport) }
+        let suiteName = "AgentCaptureQueryTelemetryTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let configured = [
+            "POSTHOG_API_KEY": "phc_env",
+            "POSTHOG_HOST": "https://us.i.posthog.com",
+        ]
+
+        XCTAssertNotNil(
+            AgentCaptureQueryTelemetryConfiguration.resolve(
+                environment: configured, userDefaults: defaults, appUserDefaults: nil,
+                appSupportDirectory: appSupport, bundleInfo: [:]
+            ),
+            "an agent's queries are counted when analytics is configured"
+        )
+        var disabled = configured
+        disabled[AgentCaptureQueryTelemetryConfiguration.disableEnvironmentKey] = "1"
+        XCTAssertNil(
+            AgentCaptureQueryTelemetryConfiguration.resolve(
+                environment: disabled, userDefaults: defaults, appUserDefaults: nil,
+                appSupportDirectory: appSupport, bundleInfo: [:]
+            ),
+            "Write for Me's searches through the helper send no analytics"
+        )
+    }
+
     func testConfigurationUsesInstalledHelperObservabilityConfig() throws {
         let appSupport = makeTempDir()
         defer { removeTempDir(appSupport) }

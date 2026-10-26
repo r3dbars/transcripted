@@ -135,6 +135,24 @@ extension TranscriptedAppDelegate {
         }
     }
 
+    /// Writing's last entry couldn't be saved. Keep Open is the safe default.
+    func confirmQuitWithUnsavedWriting() -> Bool {
+        closePopover()
+        NSApp.activate(ignoringOtherApps: true)
+
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Your latest writing isn't saved"
+        alert.informativeText = "Transcripted couldn't save what you typed in the last few minutes. "
+            + "Check that your capture library's drive is connected, then try again. "
+            + "If you quit now, that writing is lost."
+        alert.addButton(withTitle: "Keep Open")
+        alert.addButton(withTitle: "Quit Anyway")
+        alert.buttons.first?.keyEquivalent = "\r"
+        alert.buttons.last?.keyEquivalent = ""
+        return runQuitAlertMappingEscapeToFirstButton(alert) == .alertSecondButtonReturn
+    }
+
     /// NSAlert only maps Esc to a button titled "Cancel", so Esc in the quit
     /// dialogs did nothing. Map it to the first button (Keep Recording / Keep
     /// Open), the same safe choice Return picks.

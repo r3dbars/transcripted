@@ -23,6 +23,21 @@ enum SpeakerClipLibrary {
             ?? SpeakerClipExtractor.persistentClipURL(for: speakerId, clipsDirectory: legacyClipsDirectory)
     }
 
+    /// The quote stored next to a saved clip, only when that sidecar
+    /// describes this exact wav. Nil for older wavs, a version we don't
+    /// read, or a pair whose size or hash no longer matches — callers
+    /// must not guess a transcript line instead.
+    ///
+    /// Deleting a meeting does not remove this file. The clip is the
+    /// person's voice sample, not meeting-owned media.
+    nonisolated static func sampleText(nextTo clipURL: URL) -> String? {
+        guard let sidecar = SpeakerClipSidecar.loadMatchingWav(nextTo: clipURL) else {
+            return nil
+        }
+        let text = sidecar.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
     nonisolated static func deleteClips(
         for speakerId: UUID,
         preferredClipsDirectory: URL,
@@ -35,26 +50,35 @@ enum SpeakerClipLibrary {
     }
 
     /// After a merge, the kept person inherits the merged-away person's clip if
-    /// they have none of their own.
-    nonisolated static func promoteClipIfNeeded(
+    /// they have none of their own. Returns false when that copy fails so the
+    /// caller can leave the source clip in place. The has-clip check and copy
+    /// share the same persist locks.
+    @discardableResult
+    nonisolated static func transferOnMerge(
         from sourceId: UUID,
         to targetId: UUID,
         preferredClipsDirectory: URL,
         legacyClipsDirectory: URL
+    ) -> SpeakerClipMergeTransfer {
+        SpeakerClipExtractor.transferOnMerge(
+            from: sourceId,
+            to: targetId,
+            preferredClipsDirectory: preferredClipsDirectory,
+            legacyClipsDirectory: legacyClipsDirectory
+        )
+    }
+
+    /// Undo a merge copy when the people merge then fails. Deletes the
+    /// kept person's clip only if it still hashes to the bytes that were
+    /// copied. Transfer writes only the preferred folder.
+    nonisolated static func rollbackCopiedClip(
+        for speakerId: UUID,
+        copiedWavSHA256: String,
+        preferredClipsDirectory: URL
     ) {
-        guard clipURL(
-            for: targetId,
-            preferredClipsDirectory: preferredClipsDirectory,
-            legacyClipsDirectory: legacyClipsDirectory
-        ) == nil,
-        let sourceClip = clipURL(
-            for: sourceId,
-            preferredClipsDirectory: preferredClipsDirectory,
-            legacyClipsDirectory: legacyClipsDirectory
-        ) else { return }
-        SpeakerClipExtractor.persistClip(
-            from: sourceClip,
-            speakerId: targetId,
+        SpeakerClipExtractor.rollbackCopiedClip(
+            for: speakerId,
+            copiedWavSHA256: copiedWavSHA256,
             clipsDirectory: preferredClipsDirectory
         )
     }

@@ -12,6 +12,7 @@ Writing's IMKit input method, ported from Tilde's InlineGhostIME. It shows autoc
 - **Ghosts are IMKit marked text only.** No Accessibility inserts, overlays, or fake paste. Suggestions stop under Secure Event Input.
 - **Keys behave like Tilde.** The table is "Keyboard behavior" in `docs/writing-plan.md`. In Electron hosts a stray Tab moves focus out of the field, so a Tab that lands mid-chain is held, but only while the caret is still at the growing edge; if the user clicked back into earlier text, the stale chain is cancelled and the host gets the Tab.
 - **Key callbacks stay cheap.** Sampling and capture run after the callback returns; `PersonalHistoryCapture` only snapshots consent and enqueues.
+- **A segment chain survives a host's stale caret.** Save my writing's chain breaks on a caret jump, judged by `PersonalHistoryCaretContinuity` (Core): any caret from the one reported for the previous key up to where the keyboard's own text ends, or where that end was within the last 3 keys, continues it. Ghostty reports `{0, 0}` with nothing selected and Chromium fields can report a late caret; an exact-caret check broke the chain on every key there, and the app saved one character per line.
 - **Core imports stay behind `#if canImport(TranscriptedWritingCore)`**, because the bundle script compiles Core into the same module as these files.
 - Interaction behavior comes from the app's served configuration, not from this bundle.
 

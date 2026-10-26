@@ -32,6 +32,13 @@ extension MeetingCaptureBridge {
         micPCMRelay.setDictationHandler(handler)
     }
 
+    /// While dictation borrows the meeting mic, the saved mic track and live
+    /// preview get silence instead of the dictated words. Dictation still gets
+    /// the real samples, and system audio is untouched.
+    func setMicGatedForBorrowedDictation(_ gated: Bool) {
+        audio.isMicGatedForBorrowedDictation = gated
+    }
+
     /// Drain Core's single bounded host FIFO before Speech finalizes borrowed
     /// dictation. The relay itself is only a synchronous handler switch, so
     /// this barrier covers every already-admitted PCM buffer without a second

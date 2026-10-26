@@ -416,7 +416,9 @@ Details:
   unescaped.
 - An entry is one app's continuous writing. A new entry starts on an app
   switch, after 2 minutes idle, or on a caret jump or segment break the
-  keyboard reports. A scrap under 3 words (a quick "sounds good") doesn't end
+  keyboard reports. A caret the host reports late, or never moves (some
+  terminals report it at 0), isn't a jump: a word typed in one go is saved
+  as that word. A scrap under 3 words (a quick "sounds good") doesn't end
   at a segment break when the same app's next segment starts within a
   minute: it folds into that entry, each segment on its own line. Box
   fragments (one character, or up to 5 characters with no letters, like a

@@ -225,6 +225,12 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         }
     }
 
+    /// Quit goes on without a durable flush. Later batches are refused, so the
+    /// keyboard keeps them; nothing waits on a library that may be stuck.
+    func sealWithoutFlush() {
+        queue.async { self.accepting = false }
+    }
+
     /// Delete all writing: drops the open entry and anything unwritten, then
     /// removes every `Writing_*.md` in the writing folder.
     @discardableResult

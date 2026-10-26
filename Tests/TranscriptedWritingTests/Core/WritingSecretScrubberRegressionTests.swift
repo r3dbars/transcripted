@@ -298,4 +298,51 @@ struct WritingSecretScrubberRegressionTests {
         #expect(WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal").clean == text)
     }
 
+    @Test("A lone command word right after a sudo prompt is redacted as the password", arguments: ["docker", "python", "htop"])
+    func loneCommandWordAfterSudoPromptIsRedacted(word: String) {
+        let result = WritingSecretScrubber.scrub("sudo apt install foo\n" + word, appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix(word))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("A multi-word command after a cached sudo is kept")
+    func multiWordCommandAfterCachedSudoIsKept() {
+        let text = "sudo -v\ndocker ps"
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
+
+    // The trade-off the owner accepted on #2165: a real one-word command after
+    // a cached sudo or a key-based ssh now reads as the password too.
+    @Test("A lone command word after a cached sudo or a key-based ssh is redacted", arguments: ["sudo -v\nhtop", "ssh host\nhtop"])
+    func loneCommandWordInsideLooseWindowIsRedacted(text: String) {
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.hasSuffix("htop"))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("A lone command word after sudo's first answer is kept as the next command")
+    func loneCommandWordPastLooseWindowIsKept() {
+        let result = WritingSecretScrubber.scrub("sudo apt install foo\nsunshine\ndocker", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.contains("sunshine"))
+        #expect(result.clean.hasSuffix("\ndocker"))
+        #expect(result.kinds == [.password])
+    }
+
+    @Test("A retyped command-word password after a sudo typo is redacted", arguments: [("pyhton", "python"), ("dockr", "docker")])
+    func retypedCommandWordPasswordIsRedacted(typo: String, password: String) {
+        let result = WritingSecretScrubber.scrub("sudo apt install foo\n\(typo)\n\(password)", appBundleIdentifier: "com.apple.Terminal")
+        #expect(!result.clean.contains(typo))
+        #expect(!result.clean.hasSuffix(password))
+        #expect(result.kinds == [.password, .password])
+    }
+
+    @Test("A shell keyword after a sudo line in an editor stays", arguments: ["else", "done", "then", "esac"])
+    func shellKeywordAfterSudoLineInEditorIsKept(keyword: String) {
+        let text = "  sudo apt-get install -y foo\n" + keyword
+        let result = WritingSecretScrubber.scrub(text, appBundleIdentifier: "com.microsoft.VSCode")
+        #expect(result.clean == text)
+        #expect(result.kinds.isEmpty)
+    }
 }

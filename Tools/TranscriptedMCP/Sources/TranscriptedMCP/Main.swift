@@ -143,6 +143,7 @@ struct TranscriptedMCP {
       TRANSCRIPTED_DICTATIONS_DIR   Dictation directory override.
       TRANSCRIPTED_WRITING_DIR      Writing directory override.
       TRANSCRIPTED_INDEX_DIR        SQLite index directory override.
+      TRANSCRIPTED_MCP_DISABLE_ANALYTICS  Set to 1 to send no anonymous query analytics.
     """
 
     private static func runSelfTest() throws {

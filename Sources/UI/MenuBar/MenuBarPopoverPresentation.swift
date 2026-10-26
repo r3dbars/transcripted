@@ -6,8 +6,9 @@ enum MenuBarPopoverWindowVisibility {
     case unknown
 }
 
-/// Keeps focus local to the menu, including when AppKit refuses its status-item
-/// anchor or reports the popover shown while its window is on another Space.
+/// Keeps focus local to the menu and lets it open over another app's full-screen
+/// Space, including when AppKit refuses its status-item anchor or reports the
+/// popover shown while its window is on another Space.
 /// The temporary anchor is only used after one of those failures. It does not
 /// retry a popover that was shown and then dismissed.
 @MainActor
@@ -61,6 +62,9 @@ final class MenuBarPopoverPresentation: NSObject {
         let screenRect = anchorScreenRect(for: button)
         dismissedDuringPresentation = false
         presentedPopover = popover
+        NotificationCenter.default.addObserver(
+            self, selector: #selector(popoverWillShow(_:)), name: NSPopover.willShowNotification, object: popover
+        )
         NotificationCenter.default.addObserver(
             self, selector: #selector(popoverWillClose(_:)), name: NSPopover.willCloseNotification, object: popover
         )
@@ -163,6 +167,22 @@ final class MenuBarPopoverPresentation: NSObject {
         return rect
     }
 
+    /// AppKit gives a status popover's window no Space behavior. A `.regular`
+    /// app (Show in Dock, or any capture) then has it placed on its own Space,
+    /// so over another app's full-screen Space it is "shown" but never visible.
+    /// The window exists by willShow and is ordered in after it.
+    static func popoverWindowCollectionBehavior(
+        _ behavior: NSWindow.CollectionBehavior
+    ) -> NSWindow.CollectionBehavior {
+        behavior.union(.fullScreenAuxiliary)
+    }
+
+    @objc private func popoverWillShow(_ notification: Notification) {
+        guard let popover = notification.object as? NSPopover, popover === presentedPopover,
+              let window = popover.contentViewController?.view.window else { return }
+        window.collectionBehavior = Self.popoverWindowCollectionBehavior(window.collectionBehavior)
+    }
+
     @objc private func popoverDidClose(_ notification: Notification) {
         guard let popover = notification.object as? NSPopover,
               popover === presentedPopover, !popover.isShown else { return }
@@ -212,6 +232,7 @@ final class MenuBarPopoverPresentation: NSObject {
     }
 
     private func releaseAnchor() {
+        NotificationCenter.default.removeObserver(self, name: NSPopover.willShowNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: NSPopover.didCloseNotification, object: nil)
         NotificationCenter.default.removeObserver(self, name: NSPopover.willCloseNotification, object: nil)
         spaceNotifications.removeObserver(self, name: NSWorkspace.activeSpaceDidChangeNotification, object: nil)

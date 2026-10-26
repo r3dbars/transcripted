@@ -176,12 +176,22 @@ struct SystemAudioSignalTracker: Equatable {
 }
 
 extension CoreAudioSystemAudioCapture {
+    /// Peak below this is not call audio: about -120 dBFS, under the 24-bit
+    /// LSB's neighbourhood and some 40 dB below the quietest real pauses seen
+    /// in a call (#1916 measured them near -78 dBFS). Denormals, float
+    /// residue and 24-bit dither on a dead tap read as silence instead of
+    /// keeping the watch from ever arming. Audible hiss stays signal on
+    /// purpose: a floor near real pauses would rebuild quiet calls.
+    static let signalFloor: Float = 1e-6
+
     static func containsSignal(_ buffer: AVAudioPCMBuffer) -> Bool {
         guard buffer.format.commonFormat == .pcmFormatFloat32 else { return true }
         for item in UnsafeMutableAudioBufferListPointer(buffer.mutableAudioBufferList) {
             guard let data = item.mData else { continue }
             let samples = data.assumingMemoryBound(to: Float.self)
-            for index in 0..<(Int(item.mDataByteSize) / MemoryLayout<Float>.size) where samples[index] != 0 {
+            // `!(x < floor)` keeps NaN counting as signal, as before.
+            for index in 0..<(Int(item.mDataByteSize) / MemoryLayout<Float>.size)
+            where !(abs(samples[index]) < signalFloor) {
                 return true
             }
         }

@@ -298,6 +298,9 @@ struct AgentCaptureQueryTelemetryConfiguration {
     static let apiKeyInfoKey = "TranscriptedPostHogAPIKey"
     static let hostInfoKey = "TranscriptedPostHogHost"
     static let appDefaultsSuiteName = "com.justinbetker.draft"
+    /// Set to "1" by a caller inside Transcripted (Write for Me's context search) whose queries aren't an
+    /// agent's and must never reach analytics.
+    static let disableEnvironmentKey = "TRANSCRIPTED_MCP_DISABLE_ANALYTICS"
     static let mcpObservabilityFileName = "mcp-observability.plist"
     private static let localOverridesFileName = "observability-overrides.plist"
     private static let analyticsEnabledKey = "observability-anonymous-analytics-enabled"
@@ -310,7 +313,8 @@ struct AgentCaptureQueryTelemetryConfiguration {
         appSupportDirectory: URL? = nil,
         bundleInfo: [String: Any]? = Bundle.main.infoDictionary
     ) -> AgentCaptureQueryTelemetryConfiguration? {
-        guard analyticsEnabled(userDefaults: userDefaults, appUserDefaults: appUserDefaults),
+        guard environment[disableEnvironmentKey] != "1",
+              analyticsEnabled(userDefaults: userDefaults, appUserDefaults: appUserDefaults),
               let apiKey = firstNonEmpty(
                 environment["POSTHOG_API_KEY"],
                 localConfigurationValue(forKey: apiKeyInfoKey, appSupportDirectory: appSupportDirectory),

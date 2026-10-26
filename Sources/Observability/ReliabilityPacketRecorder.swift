@@ -333,6 +333,9 @@ enum ReliabilityPacketRecorder {
     private static let reliabilityContextAllowedKeys: Set<String> = [
         "attenuation_kind",
         "auto_send",
+        "auto_send_block_reason",
+        "auto_send_expected",
+        "auto_send_key",
         "build_version",
         "build_channel",
         "build_revision",
@@ -419,6 +422,7 @@ enum ReliabilityPacketRecorder {
         "system_output_rate_hz",
         "system_rate_hz",
         "system_status",
+        "target_confirmation_mode",
         "trigger",
         "voice_processing",
         "voice_processing_active",

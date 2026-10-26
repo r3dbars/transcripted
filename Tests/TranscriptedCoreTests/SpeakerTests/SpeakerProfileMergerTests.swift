@@ -50,8 +50,8 @@ final class SpeakerProfileMergerTests: XCTestCase {
             existingId: nil
         )
 
-        database.setDisplayName(id: first.id, name: "Matt Vlasach", source: NameSource.userManual)
-        database.setDisplayName(id: second.id, name: "Sarah Graham", source: NameSource.userManual)
+        database.setDisplayName(id: first.id, name: "Milo Vasquez", source: NameSource.userManual)
+        database.setDisplayName(id: second.id, name: "Sadie Greene", source: NameSource.userManual)
         database.mergeDuplicates(threshold: 0.6)
 
         XCTAssertNotNil(database.getSpeaker(id: first.id))

@@ -23,7 +23,7 @@ func testSpeakerNameSelectionPolicy() {
     runSuite("SpeakerNameSelectionPolicy suggests the only prefix match") {
         let people = [
             makeSpeakerIdentityOption(name: "Taylor Wolfe", calls: 9),
-            makeSpeakerIdentityOption(name: "Matt Bentley", calls: 4),
+            makeSpeakerIdentityOption(name: "Milo Bennett", calls: 4),
         ]
         let labels = SpeakerNameSelectionPolicy.makeIdentityLabels(for: people, id: { $0.id }, displayName: { $0.displayName }, callCount: { $0.callCount })
 
