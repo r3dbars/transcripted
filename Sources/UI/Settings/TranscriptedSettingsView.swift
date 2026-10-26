@@ -17,7 +17,6 @@ struct TranscriptedSettingsView: View {
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
 
     let actions: TranscriptedSettingsActions
-    private let appLogger: AppLogSink
     let writingController: WritingController
 
     @State var dictationTriggerSystemWarning = PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
@@ -90,7 +89,12 @@ struct TranscriptedSettingsView: View {
     @State var homeCopiedRowID: String?
     @State var homeDeleteConfirmation: HomeDeleteConfirmation?
     @State var homeDeleteFailure: HomeDeleteFailure?
-    @State private var homeFeedbackTarget: HomeFeedbackTarget?
+    @StateObject var feedbackComposer = FeedbackComposerModel(logsProvider: {
+        UsageHealthStore.shared.snapshot().failures.prefix(3).map {
+            FeedbackLogEntry(kind: $0.kind, stage: $0.stage, version: $0.version)
+        }
+    })
+    @State var feedbackIsPresented = false
     @State var homeFindIsVisible = false
     /// True while a footer-initiated update check is in flight or its
     /// "You're up to date" answer is lingering.
@@ -123,7 +127,6 @@ struct TranscriptedSettingsView: View {
         self.speakerPeopleModel = speakerPeopleModel
         self.todayViewModel = todayViewModel
         self.actions = actions
-        self.appLogger = appState.logger
         self.writingController = appState.writingController
         _sttRouter = ObservedObject(wrappedValue: appState.sttRouter)
         let meetingSession = appState.meetingSession
@@ -150,17 +153,6 @@ struct TranscriptedSettingsView: View {
         .frame(minWidth: 880, minHeight: 640)
         .background(LibraryTokens.contentBackground.ignoresSafeArea())
         .environment(recordingClock)
-        .sheet(item: $homeFeedbackTarget) { target in
-            HomeFeedbackSheet(
-                target: target,
-                onCancel: {
-                    homeFeedbackTarget = nil
-                },
-                onSubmit: { submission in
-                    submitHomeFeedback(submission)
-                }
-            )
-        }
         // One Home alert modifier, not two. Stacking multiple legacy `.alert(item:)`
         // on the same view shadows all but the last — which silently killed the
         // meeting-delete confirmation. `rootAlertBinding` routes
@@ -454,37 +446,9 @@ struct TranscriptedSettingsView: View {
         }.value
     }
 
-    private func submitHomeFeedback(_ submission: HomeFeedbackSubmission) {
-        trackSettingsAction("submit_home_feedback", page: .home)
-        EventReporter.shared.capture(
-            level: .info,
-            engine: "feedback",
-            event: "capture_feedback_prepared",
-            message: "User prepared capture feedback",
-            context: [
-                "source_kind": submission.target.sourceKind,
-                "issue_kind": submission.issueKind.rawValue,
-                "include_diagnostics": submission.includeDiagnostics ? "true" : "false",
-            ]
-        )
-
-        let report = FeedbackReport(
-            sourceKind: submission.target.sourceKind,
-            referenceID: submission.target.referenceID,
-            occurredAt: submission.target.createdAt,
-            issueKind: submission.issueKind.label,
-            userNotes: submission.notes,
-            appVersion: TranscriptedAppVersion.description,
-            includeDiagnostics: submission.includeDiagnostics
-        )
-
-        let url = FeedbackIssueBuilder.emailURL(
-            report: report,
-            rawLogLines: submission.includeDiagnostics ? appLogger.entries : nil
-        )
-        if SupportEmailDispatcher.open(url) {
-            homeFeedbackTarget = nil
-        }
+    private func submitHomeFeedback() {
+        feedbackComposer.open(area: "meetings")
+        feedbackIsPresented = true
     }
 
     private func flashCopied(rowID: String) {
@@ -571,7 +535,7 @@ struct TranscriptedSettingsView: View {
             case .reportIssue:
                 return HomeRowMenuItem(title: title, symbolName: symbolName) {
                     trackSettingsAction("flag_meeting", page: .home)
-                    homeFeedbackTarget = HomeFeedbackTarget.meeting(item)
+                    submitHomeFeedback()
                 }
             case .showTranscript:
                 return HomeRowMenuItem(title: title, symbolName: symbolName) {
