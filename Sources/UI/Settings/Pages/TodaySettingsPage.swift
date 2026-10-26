@@ -8,7 +8,6 @@ import SwiftUI
 /// injected by the settings shell.
 struct TodaySettingsPage: View {
     @ObservedObject var todayViewModel: TodayViewModel
-    let now: Date
     let onOpenRecentItem: (TodayRecentItem) -> Void
     let onShowMeetings: () -> Void
     let onShowDictations: () -> Void
@@ -28,8 +27,8 @@ struct TodaySettingsPage: View {
         snapshot.tapeDays.first { $0.id == selectedDayID } ?? snapshot.tapeDays.last
     }
 
-    /// The region settings the cards' copy depends on, beyond `now` and the
-    /// data: a locale or time zone change re-renders on the next pass, as before.
+    /// The region settings the cards' copy depends on, beyond the data: a
+    /// locale or time zone change re-renders on the next pass, as before.
     private var formatKey: String {
         Locale.current.identifier + "|" + TimeZone.current.identifier + "|" + "\(Calendar.current.identifier)"
     }
@@ -47,10 +46,9 @@ struct TodaySettingsPage: View {
             } else if let selectedDay {
                 // Equatable: the shell publishes up to 20 times a second
                 // during a capture, and the card only changes with its day,
-                // the picked mark, the minute, or the region.
+                // the picked mark, or the region — not the clock.
                 TodayDayCard(
                     day: selectedDay,
-                    now: now,
                     pickedMarkID: pickedMarkID,
                     onPick: { pickedMarkID = $0 },
                     onOpen: onOpenRecentItem,
@@ -67,6 +65,12 @@ struct TodaySettingsPage: View {
         .onChange(of: selectedDay?.id) { _, _ in
             pickedMarkID = nil
             openSessionID = nil
+        }
+        .overlay(alignment: .topLeading) {
+            TodayDayRollover {
+                todayViewModel.refresh(force: true)
+            }
+            .allowsHitTesting(false)
         }
         .accessibilityIdentifier("transcripted.today.page")
     }
@@ -85,10 +89,10 @@ struct TodaySettingsPage: View {
         return VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .bottom, spacing: 24) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(TodayCopy.dateLine(for: day?.day ?? now))
+                    Text(TodayCopy.dateLine(for: day?.day ?? Date()))
                         .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
-                    Text(isToday ? "Today" : TodayCopy.weekdayLong(for: day?.day ?? now))
+                    Text(isToday ? "Today" : TodayCopy.weekdayLong(for: day?.day ?? Date()))
                         .font(LibraryTokens.title)
                         .contentTransition(.opacity)
                 }
@@ -143,6 +147,7 @@ struct TodaySettingsPage: View {
                     },
                     onOpen: onOpenRecentItem
                 )
+                .equatable()
             }
         }
         .onChange(of: pickedMarkID) { _, picked in
@@ -271,7 +276,6 @@ private struct TodaySentence: View {
 /// the lanes shows what it was. Prev and Next step through the day.
 private struct TodayDayCard: View, Equatable {
     let day: TodayTapeDay
-    let now: Date
     /// Owned by the page so a session click can pick a mark; it clears it
     /// when the day changes.
     let pickedMarkID: String?
@@ -287,10 +291,15 @@ private struct TodayDayCard: View, Equatable {
     /// Closures and hover state stay out: hover is the card's own state and
     /// re-renders it by itself.
     nonisolated static func == (lhs: TodayDayCard, rhs: TodayDayCard) -> Bool {
-        lhs.day == rhs.day
-            && lhs.pickedMarkID == rhs.pickedMarkID
-            && TodayCopy.minuteKey(lhs.now) == TodayCopy.minuteKey(rhs.now)
-            && lhs.formatKey == rhs.formatKey
+        TodayClockPolicy.dayCardIdentity(
+            day: lhs.day,
+            pickedMarkID: lhs.pickedMarkID,
+            formatKey: lhs.formatKey
+        ) == TodayClockPolicy.dayCardIdentity(
+            day: rhs.day,
+            pickedMarkID: rhs.pickedMarkID,
+            formatKey: rhs.formatKey
+        )
     }
 
     var body: some View {
@@ -305,9 +314,7 @@ private struct TodayDayCard: View, Equatable {
                     .foregroundStyle(LibraryTokens.ink3)
                 Spacer()
                 if day.isToday {
-                    Text("Now \(TodayCopy.rowWhen(for: now, now: now))")
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryTokens.ink3)
+                    TodayNowLabel()
                 } else {
                     Text(TodayCopy.dateLine(for: day.day))
                         .font(.system(size: 11))
@@ -373,11 +380,7 @@ private struct TodayDayCard: View, Equatable {
                         markView(mark, color: kind.streamColor, width: geo.size.width, isPicked: mark.id == shownID)
                     }
                     if day.isToday {
-                        Rectangle()
-                            .fill(LibraryTokens.accent)
-                            .frame(width: 2, height: 22)
-                            .offset(x: geo.size.width * TodayTapeBuilder.fraction(of: now, onDayStarting: day.day) - 1)
-                            .allowsHitTesting(false)
+                        TodayNowMarker(dayStart: day.day, width: geo.size.width)
                     }
                 }
                 .frame(height: 20)
@@ -436,7 +439,7 @@ private struct TodayDayCard: View, Equatable {
                     Text(item.title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    Text(TodayPreviewCopy.meta(for: item, now: now))
+                    Text(TodayPreviewCopy.meta(for: item))
                         .font(.system(size: 11))
                         .foregroundStyle(LibraryTokens.ink3)
                         .lineLimit(1)
@@ -516,7 +519,7 @@ private struct TodayArrowButton: View {
 
 /// Meta line and body for the preview card.
 private enum TodayPreviewCopy {
-    static func meta(for item: TodayRecentItem, now: Date) -> String {
+    static func meta(for item: TodayRecentItem, now: Date = Date()) -> String {
         var parts: [String] = []
         switch item.kind {
         case .meeting:
@@ -617,13 +620,17 @@ private struct TodayWeekCell: View, Equatable {
 
 /// One session: start time, a rule-made title, and a dot per stream. Open,
 /// it lists what's inside; clicking one of those opens it where it lives.
-private struct TodaySessionRow: View {
+private struct TodaySessionRow: View, Equatable {
     let session: TodaySession
     let isOpen: Bool
     let onToggle: () -> Void
     let onOpen: (TodayRecentItem) -> Void
 
     @State private var isHovering = false
+
+    nonisolated static func == (lhs: TodaySessionRow, rhs: TodaySessionRow) -> Bool {
+        lhs.session == rhs.session && lhs.isOpen == rhs.isOpen
+    }
 
     /// Fits "11:15 AM – 12:31 PM".
     private static let timeWidth: CGFloat = 124
