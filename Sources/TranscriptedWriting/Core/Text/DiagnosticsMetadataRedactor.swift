@@ -53,12 +53,10 @@ public enum DiagnosticsMetadataRedactor {
         // text. `display` is the retired full-display path, kept so older
         // log lines still read.
         "window", "display", "ax",
-        // `screen-capture-completed`'s `ocrScope` field (incremental OCR,
-        // `ScreenCaptureService.performWindowCapture`, backed by
-        // `CaptureChangeDetector`) — how much of the frame the OCR
-        // pass actually covered this capture: the whole frame, a bounded
-        // region, or none at all because nothing changed. Never any
-        // captured text or the region's coordinates.
+        // `screen-capture-completed`'s `ocrScope` field
+        // (`ScreenCaptureService`): `full` for window OCR, `skipped` for
+        // the Accessibility read. `region` is the retired incremental-OCR
+        // value, kept so older log lines still read. Never any captured text.
         "full", "region", "skipped",
         // "P99 at every section": `GhostBrainServerHost.awaitPersonalPrediction`'s
         // outcome vocabulary, logged as the `outcome` field on

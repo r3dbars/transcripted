@@ -83,7 +83,7 @@ final class TranscriptSaverDefaultSaveDirectoryTests: XCTestCase {
         )
     }
 
-    func testTargetURLReplacementPreservesOriginalFileDates() throws {
+    func testTargetURLReplacementKeepsCreationDateAndUpdatesModificationDate() throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptSaverReplacementDates-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -145,10 +145,10 @@ final class TranscriptSaverDefaultSaveDirectoryTests: XCTestCase {
             expectedCreationDate.timeIntervalSince1970,
             accuracy: 1.0
         )
-        XCTAssertEqual(
+        // New text must get a new mtime so mtime-keyed indexes re-read it.
+        XCTAssertGreaterThan(
             afterModificationDate.timeIntervalSince1970,
-            expectedModificationDate.timeIntervalSince1970,
-            accuracy: 1.0
+            expectedModificationDate.timeIntervalSince1970 + 1
         )
     }
 }

@@ -39,17 +39,7 @@ func testSupportDiagnosticsBundle() {
             speakerReviewPending: true,
             queuedMeetingCount: 1,
             meetingShortcut: "⌥C",
-            reliabilityPackets: [
-                "2026-05-03T01:15:11Z meeting.stop recovered event=meeting_recording_stopped route_change_count_bucket=2_3 path=/Users/redbars/private.txt"
-            ],
-            recentLogLines: [
-                "Private content without an obvious sensitive prefix",
-                "Opened /Users/redbars/Library/Application Support/Transcripted/logs/app.jsonl",
-                "DIAG | capture.dictation_toggle_requested | source_app_bundle_id=com.openai.codex source_app_name=Codex trigger=physical_key",
-                "DIAG | dictation.dictation_started | audio_device=MacBook Pro Microphone route_shape=built_in_input_to_built_in_output",
-                "DICTATION | started after 120ms wait (parakeet, MacBook Pro Microphone)",
-                "Email person@example.com should not leak",
-            ]
+            reliabilityPacketCount: 1
         )
 
         let text = SupportDiagnosticsBundle.text(
@@ -57,7 +47,6 @@ func testSupportDiagnosticsBundle() {
             now: Date(timeIntervalSince1970: 100)
         )
 
-        assertFalse(text.contains("Private content"), "arbitrary log content is never copied")
         assertTrue(text.contains("Version: 1.2.3"), "diagnostics should include app version")
         assertTrue(text.contains("input_device_class: bluetooth"), "diagnostics should include coarse route facts")
         assertTrue(text.contains("session_stage: recording"), "diagnostics should include runtime session stage")
@@ -66,13 +55,8 @@ func testSupportDiagnosticsBundle() {
         assertTrue(text.contains("Speaker review pending: true"), "diagnostics should include pending speaker review state")
         assertTrue(text.contains("Queued meetings: 1"), "diagnostics should include queued meeting count")
         assertTrue(text.contains("Meeting shortcut: ⌥C"), "diagnostics should include the active meeting shortcut")
-        assertFalse(text.contains("meeting.stop recovered"), "diagnostics must not copy raw reliability packet blobs")
         assertFalse(text.contains("/Users/redbars"), "diagnostics should redact home paths")
-        assertFalse(text.contains("person@example.com"), "diagnostics should redact emails")
-        assertFalse(text.contains("Application Support/Transcripted"), "diagnostics should redact app support paths")
-        assertFalse(text.contains("com.openai.codex"), "diagnostics should redact source app bundle IDs from recent logs")
-        assertFalse(text.contains("source_app_name=Codex"), "diagnostics should redact source app names from recent logs")
-        assertFalse(text.contains("MacBook Pro Microphone"), "diagnostics should redact raw device names from recent logs")
+        assertFalse(text.contains("MacBook Pro Microphone"), "diagnostics should redact raw route device names")
         assertFalse(text.contains("https://meet.example.com/private-room"), "diagnostics should redact raw route URLs")
         assertFalse(text.contains("private-runtime.json"), "diagnostics should redact runtime file paths")
         assertFalse(text.contains("Private Customer Call"), "diagnostics should redact runtime transcript titles")
@@ -101,10 +85,7 @@ func testSupportDiagnosticsBundle() {
             speakerReviewPending: false,
             queuedMeetingCount: 2,
             meetingShortcut: "⌥M",
-            reliabilityPackets: [
-                "2026-05-03T01:15:11Z meeting.stop recovered event=meeting_recording_stopped"
-            ],
-            recentLogLines: []
+            reliabilityPacketCount: 1
         )
 
         let context = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)
@@ -159,12 +140,7 @@ func testSupportDiagnosticsBundle() {
             speakerReviewPending: false,
             queuedMeetingCount: 2,
             meetingShortcut: "⌥M",
-            // The latest reliability packet is a free-text blob with a path — it
-            // must never ride to Sentry as `latest_reliability_packet`.
-            reliabilityPackets: [
-                "2026-05-03T01:15:11Z meeting.stop recovered path=/Users/redbars/private.txt"
-            ],
-            recentLogLines: []
+            reliabilityPacketCount: 1
         )
 
         let rawContext = SupportDiagnosticsBundle.sentryContext(snapshot: snapshot)

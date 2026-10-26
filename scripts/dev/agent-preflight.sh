@@ -79,6 +79,9 @@ echo ""
 echo "Branch: ${branch:-detached HEAD}"
 echo "HEAD: $head_sha"
 echo "Base: $base_ref"
+if [ -z "$(git config --get core.hooksPath 2>/dev/null)" ]; then
+    echo "Hint: git hooks are off for this clone; run bash scripts/dev/install-git-hooks.sh to lint before push."
+fi
 echo ""
 
 # Catch wasted "repair PR" work: if this looks like a repair/redo branch, the

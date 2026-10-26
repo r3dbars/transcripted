@@ -83,6 +83,8 @@ protocol DictationSessionPipelineHost: AnyObject {
         delivery: DictationDelivery,
         context: [String: String]
     )
+    /// Offers Retry Saving Audio when the text saved but its audio didn't move.
+    func showPendingAudioRetention(_ result: DictationTranscriptPersistenceResult)
     func dictationContext(extra: [String: String]) -> [String: String]
 }
 
@@ -102,6 +104,8 @@ extension DictationSessionPipelineHost {
         shortcutMode: DictationShortcutMode?,
         isRetry: Bool
     ) -> Bool {
+        // Quit is under way: a new take would open the mic during shutdown.
+        guard !queuedStartGate.isTerminating else { return false }
         let admission = DictationStartAdmission.decide(
             DictationStartAdmission.Steps(
                 isDictating: { self.isDictating },
@@ -507,7 +511,8 @@ extension DictationSessionPipelineHost {
 
     /// Paste Anyway on held-back text: paste it, then save it like any
     /// finished take (dictation history, Paste Last Dictation, and the kept
-    /// audio cleaned up once the save lands).
+    /// audio cleaned up once the save lands), and show the result once the
+    /// save is in.
     func pasteHeldBackTextAction(
         _ heldText: String,
         recovery: DictationStoppedAudioRecovery?,
@@ -527,19 +532,32 @@ extension DictationSessionPipelineHost {
             )
             Task { @MainActor [weak self] in
                 let result = await saveTask.value
-                self?.publishDictationTranscriptPersistence(
+                guard let self else { return }
+                self.publishDictationTranscriptPersistence(
                     result,
                     delivery: outcome.delivery,
                     context: saveContext
                 )
-            }
-            // Pasting pumps the run loop; a take started meanwhile owns the pill.
-            guard self.currentDictationSessionID == taskSessionID, !self.isDictating else { return }
-            switch outcome {
-            case .pasted, .likelyPasted:
-                showPasted()
-            case .copied(let message, reason: _), .failed(let message, reason: _):
-                showError(message)
+                if result.saved != nil, self.stoppedAudioRecovery == recovery {
+                    self.stoppedAudioRecovery = nil
+                }
+                // Pasting and saving both yield; a take started meanwhile owns the pill.
+                guard self.currentDictationSessionID == taskSessionID, !self.isDictating else { return }
+                // Same pill rules as a normal stop, so a failed save isn't shown as Pasted.
+                let presentation = DictationDeliveryPresentation.resolve(
+                    outcome: outcome,
+                    saveFailureMessage: result.failureMessage,
+                    autoSend: .disabled,
+                    autoSendExpected: false
+                ).addingPendingAudioNotice(result.pendingAudioRetention != nil)
+                switch presentation {
+                case .success:
+                    showPasted()
+                case .clipboardNotice(let message), .notPasted(message: let message, unconfirmed: _),
+                     .clipboardBusy(message: let message, hint: _), .error(let message):
+                    showError(message)
+                }
+                if presentation.canOfferAudioRetentionRetry { self.showPendingAudioRetention(result) }
             }
         }
     }

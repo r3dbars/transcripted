@@ -144,54 +144,10 @@ enum DictationAutoSendPolicy {
             blockReason: blockReason
         )
     }
-
-    static func isRequested(
-        isEnabled: Bool,
-        text: String,
-        duration: TimeInterval,
-        sourceBundleID: String?,
-        allowedBundleIDs: Set<String>
-    ) -> Bool {
-        requestDecision(
-            isEnabled: isEnabled,
-            key: .enter,
-            text: text,
-            duration: duration,
-            sourceBundleID: sourceBundleID,
-            allowedBundleIDs: allowedBundleIDs
-        ).expected
-    }
-
-    static func shouldSend(
-        isEnabled: Bool,
-        pasteOutcome: TextPasteOutcome,
-        text: String,
-        duration: TimeInterval,
-        sourceBundleID: String?,
-        allowedBundleIDs: Set<String>
-    ) -> Bool {
-        guard pasteOutcome.allowsAutoSend else { return false }
-        return isRequested(
-            isEnabled: isEnabled,
-            text: text,
-            duration: duration,
-            sourceBundleID: sourceBundleID,
-            allowedBundleIDs: allowedBundleIDs
-        )
-    }
 }
 
 extension TextPasteOutcome {
     var allowsAutoSend: Bool {
-        switch self {
-        case .pasted:
-            return true
-        case .likelyPasted, .copied, .failed:
-            return false
-        }
-    }
-
-    var requiresClipboardReadinessBeforeAutoSend: Bool {
         switch self {
         case .pasted:
             return true
@@ -319,6 +275,19 @@ struct DictationAutoSendTelemetry: Equatable {
     }
 }
 
+extension DictationAutoSendTelemetry {
+    /// What the local delivery and stop logs record beside `delivery`, which
+    /// counts a likely paste as pasted. Without these a take Auto Enter held
+    /// back for an unproven paste read as `delivery: pasted, auto_send: disabled`.
+    func localDiagnosticContext(
+        targetConfirmationMode: DictationTargetConfirmationMode
+    ) -> [String: String] {
+        analyticsProperties.merging(
+            ["target_confirmation_mode": targetConfirmationMode.rawValue]
+        ) { _, new in new }
+    }
+}
+
 @MainActor
 final class DictationAutoSender {
     func send(_ key: DictationAutoSendKey, target: DictationPasteTarget? = nil) -> DictationAutoSendOutcome {
@@ -326,7 +295,8 @@ final class DictationAutoSender {
             return .failed(.accessibilityMissing)
         }
 
-        guard target?.matchesCurrentFrontmostApp() != false else {
+        guard target?.matchesCurrentFrontmostApp() != false,
+              target?.ownsCurrentFocusedElement() != false else {
             return .failed(.targetChanged)
         }
 

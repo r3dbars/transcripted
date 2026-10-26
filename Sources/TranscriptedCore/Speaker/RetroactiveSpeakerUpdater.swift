@@ -241,6 +241,65 @@ extension TranscriptSaver {
         }
     }
 
+    /// Names one queued voice's row in a transcript: the row must still match
+    /// (same diarizer id, channel, and profile), gets the new name with a
+    /// `user_manual` source (dropping any `name_source:`), and its body labels
+    /// follow. Shared with `SpeakerIdentityMutationService`'s reviewed-voice
+    /// merge.
+    ///
+    /// Body labels are `[System/<name>]` / `[Mic/<name>]`, so when another row
+    /// on the same channel shows the same old name, the body can't tell the
+    /// two voices apart: only the row is renamed and the body is left alone
+    /// rather than renaming the other voice too.
+    static func applyDeferredSpeakerName(
+        in content: inout String,
+        update: DeferredSpeakerNameUpdate,
+        newName: String
+    ) -> Bool {
+        guard let oldName = currentSpeakerName(
+            in: content,
+            diarizerSpeakerId: update.diarizerSpeakerId,
+            channel: update.channel,
+            matchingDbId: update.dbId
+        ) else {
+            AppLogger.pipeline.warning("Deferred speaker metadata no longer matches queued row", [
+                "path": update.transcriptURL.lastPathComponent,
+                "dbId": update.dbId.uuidString,
+                "diarizerSpeakerId": update.diarizerSpeakerId,
+                "channel": update.channel.rawValue
+            ])
+            return false
+        }
+        let rowsSharingOldName = parseFrontmatterSpeakerRows(in: content.components(separatedBy: "\n")).filter {
+            $0.name == oldName && ($0.channel ?? .system) == update.channel
+        }
+
+        writeFrontmatterSpeakerMetadata(
+            in: &content,
+            diarizerSpeakerId: update.diarizerSpeakerId,
+            channel: update.channel,
+            persistentSpeakerId: update.dbId,
+            name: newName,
+            source: NameSource.userManual
+        )
+        if rowsSharingOldName.count > 1 {
+            AppLogger.pipeline.warning("Deferred speaker name hit a shared display name; body left as is", [
+                "path": update.transcriptURL.lastPathComponent,
+                "channel": update.channel.rawValue,
+                "rowsSharingName": "\(rowsSharingOldName.count)"
+            ])
+        } else {
+            applyScopedNameReplacement(
+                in: &content,
+                oldName: oldName,
+                newName: newName,
+                channel: update.channel
+            )
+        }
+        content = SpeakerBreakdownConsolidator.consolidate(content)
+        return true
+    }
+
     /// Restore every file already written by a deferred batch. A failure is
     /// retried once and then surfaced, so callers cannot mistake a partial
     /// on-disk update for an ordinary clean rejection.
@@ -342,8 +401,101 @@ extension TranscriptSaver {
     // extraction (extractYAMLQuotedString) live in
     // RetroactiveSpeakerUpdater+Scanning.swift (audit 2026-07-08 wave 2).
 
-    // applyDeferredSpeakerName / applyRetroactiveRename moved to
-    // RetroactiveSpeakerUpdater+RowRename.swift.
+    /// Rename one person (by db_id) inside a single transcript without bleeding into
+    /// other speakers who share the old display name.
+    ///
+    /// - YAML `name:` lines are rewritten row-targeted, only for rows matching `dbId`,
+    ///   and those rows lose any `name_source:` marker: the name is now the
+    ///   person's confirmed name, not a call-app hint.
+    /// - When the old name is unique to this db_id in the file, the historical full
+    ///   replacement (labels, wiki links, breakdown, speaker tag) is unambiguous and
+    ///   applies as before.
+    /// - When another speaker row shares the old name, body labels are rewritten only
+    ///   on channels free of the same-name conflict; wiki links and tags are left
+    ///   untouched and the skip is logged. Fails closed rather than corrupting.
+    ///
+    /// Returns true when the content was modified.
+    ///
+    /// Internal (not `private`) so `SpeakerIdentityMutationService` — the canonical
+    /// entry point for rename/merge/discard — can reuse this as the one shared
+    /// library-scan rename engine instead of reimplementing it.
+    @discardableResult
+    static func applyRetroactiveRename(
+        in content: inout String,
+        dbId: UUID,
+        newName: String,
+        fileName: String
+    ) -> Bool {
+        var lines = content.components(separatedBy: "\n")
+        let rows = parseFrontmatterSpeakerRows(in: lines)
+        let targetRows = rows.filter { $0.dbId == dbId && $0.name != nil && $0.name != hedgedName(newName, replacing: $0.name) }
+        guard !targetRows.isEmpty else { return false }
+
+        var changed = false
+
+        // 1) Row-targeted YAML rename for the matching speaker rows only.
+        for row in targetRows {
+            guard let index = row.nameLineIndex else { continue }
+            let indent = lines[index].prefix(while: { $0 == " " })
+            lines[index] = "\(indent)name: \"\(escapeYAML(hedgedName(newName, replacing: row.name)))\""
+            changed = true
+        }
+        // A renamed row's name no longer came from the call app. Remove from
+        // the bottom up so earlier indices stay valid.
+        for index in targetRows.compactMap(\.nameSourceLineIndex).sorted(by: >) {
+            lines.remove(at: index)
+            changed = true
+        }
+        content = lines.joined(separator: "\n")
+
+        // 2) Body labels, guarded against shared-name bleed.
+        let targetRowsByName = Dictionary(grouping: targetRows, by: { $0.name ?? "" })
+        for (oldName, rowsForName) in targetRowsByName {
+            let conflictChannels = Set(
+                rows.filter { $0.dbId != dbId && $0.name == oldName }.compactMap { $0.channel }
+            )
+            let hasAnyConflict = rows.contains { $0.dbId != dbId && $0.name == oldName }
+
+            if !hasAnyConflict {
+                applyNameReplacement(in: &content, oldName: oldName, newName: hedgedName(newName, replacing: oldName), updateSpeakerTag: true)
+                changed = true
+                continue
+            }
+
+            let rowChannels = Set(rowsForName.compactMap { $0.channel })
+            var skippedChannels: [String] = []
+            var renamedChannels: [String] = []
+
+            if rowChannels.isEmpty {
+                // Channel-less legacy rows with a same-name conflict: nothing in the
+                // body can be attributed safely.
+                skippedChannels.append("unknown")
+            } else {
+                for channel in rowChannels {
+                    if conflictChannels.contains(channel) {
+                        skippedChannels.append(channel.rawValue)
+                        continue
+                    }
+                    applyScopedNameReplacement(
+                        in: &content,
+                        oldName: oldName,
+                        newName: hedgedName(newName, replacing: oldName),
+                        channel: channel
+                    )
+                    renamedChannels.append(channel.rawValue)
+                    changed = true
+                }
+            }
+
+            AppLogger.pipeline.warning("Speaker rename hit a shared display name; scoped body rewrite", [
+                "file": fileName,
+                "renamedChannels": renamedChannels.joined(separator: ","),
+                "skippedChannels": skippedChannels.joined(separator: ",")
+            ])
+        }
+
+        return changed
+    }
 
     // MARK: - Speaker Name Updating (Post-Naming Flow)
 
@@ -516,653 +668,8 @@ extension TranscriptSaver {
         }
     }
 
-    private static let micLabelRegex = try? NSRegularExpression(pattern: #"\[Mic/[^\]]*\]"#)
-    private static let localSpeakerBreakdownRegex = try? NSRegularExpression(
-        pattern: #"(?s)\n#### Local Speaker Breakdown\n.*?\n\n"#
-    )
-    private static let speakersDetectedLineRegex = try? NSRegularExpression(
-        pattern: #"\n- \*\*Speakers Detected:\*\* \d+\n"#
-    )
-
-    /// Collapse mic speakers back to "You" after the user clicked "Keep as You" in the
-    /// naming sheet. Rewrites the saved transcript to:
-    ///   - Replace every `[Mic/Speaker N]` (or named) label with `[Mic/You]` in the body
-    ///   - Remove the "Local Speaker Breakdown" section if present
-    ///   - Change the mic section header back to "Microphone (You)"
-    ///   - Strip the per-mic-speaker entries from the YAML frontmatter
-    ///
-    /// Does not touch system speakers or Obsidian wiki links for mic speakers (the
-    /// label pattern `[Mic/...]` is the only place mic speakers appear by name in the
-    /// body today; Obsidian wiki links only wrap system-speaker names in the Full
-    /// Transcript section at render time).
-    @discardableResult
-    static func collapseMicSpeakersToYou(
-        transcriptURL: URL,
-        collapsedUpdates: [SpeakerNameUpdate]
-    ) -> Bool {
-        guard !collapsedUpdates.isEmpty else { return true }
-
-        return serializeTranscriptFileUpdate {
-            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for mic collapse", ["path": transcriptURL.path])
-                return false
-            }
-
-            // 1) Rewrite body mic labels. Replace `[Mic/<anything>]` with `[Mic/You]`.
-            if let regex = micLabelRegex {
-                let range = NSRange(content.startIndex..., in: content)
-                content = regex.stringByReplacingMatches(
-                    in: content, options: [], range: range, withTemplate: "[Mic/You]"
-                )
-            }
-
-            // 2) Mic section header: "Microphone (People in the Room)" -> "Microphone (You)"
-            content = content.replacingOccurrences(
-                of: "### Microphone (People in the Room)",
-                with: "### Microphone (You)"
-            )
-
-            // 3) Remove the "Local Speaker Breakdown" subsection entirely.
-            if let regex = localSpeakerBreakdownRegex {
-                let range = NSRange(content.startIndex..., in: content)
-                content = regex.stringByReplacingMatches(
-                    in: content, options: [], range: range, withTemplate: "\n"
-                )
-            }
-
-            // 4) Strip mic speakers from the YAML frontmatter `speakers:` block.
-            content = stripYAMLSpeakerEntries(in: content, channel: "mic")
-
-            // 5) "Speakers Detected: N" line inside the mic stats block — drop it.
-            //    Only remove inside the mic section so the remote stats line is untouched.
-            if let regex = speakersDetectedLineRegex,
-               let micHeaderRange = content.range(of: "### Microphone (You)") {
-                let micSectionEnd = content.range(of: "\n\n### ", range: micHeaderRange.upperBound..<content.endIndex)?.lowerBound ?? content.endIndex
-                let micSectionRange = NSRange(micHeaderRange.upperBound..<micSectionEnd, in: content)
-                content = regex.stringByReplacingMatches(
-                    in: content, options: [], range: micSectionRange, withTemplate: "\n"
-                )
-            }
-
-            do {
-                try TranscriptFileRewrite.write(content, to: transcriptURL)
-                restrictTranscriptToOwnerOnly(transcriptURL)
-            } catch {
-                AppLogger.pipeline.error("Failed to write collapsed transcript", ["error": error.localizedDescription])
-                return false
-            }
-
-            AppLogger.pipeline.info("Collapsed mic speakers to 'You'", [
-                "path": transcriptURL.lastPathComponent,
-                "collapsed": "\(collapsedUpdates.count)"
-            ])
-            return true
-        }
-    }
-
-    /// Remove database identity links for speakers the user explicitly discarded during
-    /// review. The transcript stays readable with its current generic/suggested labels,
-    /// but it no longer points at a profile that was deleted or restored.
-    @discardableResult
-    static func discardSpeakerDatabaseLinks(
-        transcriptURL: URL,
-        discardedUpdates: [SpeakerNameUpdate]
-    ) -> Bool {
-        guard !discardedUpdates.isEmpty else { return true }
-
-        return serializeTranscriptFileUpdate {
-            guard var content = try? String(contentsOf: transcriptURL, encoding: .utf8) else {
-                AppLogger.pipeline.error("Failed to read transcript for speaker discard", ["path": transcriptURL.path])
-                return false
-            }
-
-            for update in discardedUpdates {
-                removeSpeakerDatabaseLinkFromFrontmatter(in: &content, update: update)
-            }
-
-            do {
-                try TranscriptFileRewrite.write(content, to: transcriptURL)
-                restrictTranscriptToOwnerOnly(transcriptURL)
-            } catch {
-                AppLogger.pipeline.error("Failed to write discarded speaker metadata", ["error": error.localizedDescription])
-                return false
-            }
-
-            AppLogger.pipeline.info("Removed discarded speaker database links", [
-                "path": transcriptURL.lastPathComponent,
-                "discarded": "\(discardedUpdates.count)"
-            ])
-            return true
-        }
-    }
-
-    /// Remove database identity links for every frontmatter row matching `dbId`, regardless
-    /// of channel. Used by `SpeakerIdentityMutationService`'s library-wide discard intent,
-    /// which — unlike `discardSpeakerDatabaseLinks` above (scoped to a diarizer id + channel
-    /// from one just-finalized transcript, used by the naming-flow discard action) — only
-    /// knows the persistent speaker id and must find every row across saved transcripts that
-    /// still points at it.
-    @discardableResult
-    static func discardSpeakerDatabaseLink(in content: inout String, dbId: UUID) -> Bool {
-        guard let frontmatterRange = frontmatterContentRange(in: content) else { return false }
-
-        var lines = String(content[frontmatterRange]).components(separatedBy: "\n")
-        let targetDbIdLine = #"db_id: "\#(dbId.uuidString)""#
-        var changed = false
-        var index = 0
-
-        while index < lines.count {
-            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("- ") else {
-                index += 1
-                continue
-            }
-
-            var nextEntryIndex = index + 1
-            while nextEntryIndex < lines.count,
-                  !lines[nextEntryIndex].trimmingCharacters(in: .whitespaces).hasPrefix("- ") {
-                nextEntryIndex += 1
-            }
-
-            var dbIdIndex: Int?
-            var confidenceIndex: Int?
-            var sourceIndex: Int?
-            for lineIndex in (index + 1)..<nextEntryIndex {
-                let candidate = lines[lineIndex].trimmingCharacters(in: .whitespaces)
-                if candidate == targetDbIdLine {
-                    dbIdIndex = lineIndex
-                } else if candidate.hasPrefix("confidence:") {
-                    confidenceIndex = lineIndex
-                } else if candidate.hasPrefix("source:") {
-                    sourceIndex = lineIndex
-                }
-            }
-
-            guard let removeIndex = dbIdIndex else {
-                index = nextEntryIndex
-                continue
-            }
-
-            lines.remove(at: removeIndex)
-            nextEntryIndex -= 1
-            if let idx = confidenceIndex, idx > removeIndex { confidenceIndex = idx - 1 }
-            if let idx = sourceIndex, idx > removeIndex { sourceIndex = idx - 1 }
-
-            if let confidenceIndex {
-                lines[confidenceIndex] = "    confidence: unknown"
-            }
-            if let sourceIndex {
-                lines[sourceIndex] = "    source: unknown"
-            } else {
-                lines.insert("    source: unknown", at: min(nextEntryIndex, lines.count))
-                nextEntryIndex += 1
-            }
-
-            changed = true
-            index = nextEntryIndex
-        }
-
-        guard changed else { return false }
-        content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))
-        return true
-    }
-
-    private static func restrictTranscriptToOwnerOnly(_ transcriptURL: URL) {
+    static func restrictTranscriptToOwnerOnly(_ transcriptURL: URL) {
         FileManager.default.restrictToOwnerOnly(atPath: transcriptURL.path)
-    }
-
-    /// Remove speaker YAML entries whose `channel:` line matches `channel`.
-    /// Speaker entries have the structure:
-    ///   - id: "X"
-    ///     channel: mic|system
-    ///     db_id: "UUID"     (optional)
-    ///     name: "Foo"
-    ///     confidence: xxx
-    ///     source: xxx
-    /// We scan line-by-line and drop contiguous blocks that start with `  - id:` and
-    /// contain a matching `channel:` line before the next `  - id:` or block end.
-    private static func stripYAMLSpeakerEntries(in content: String, channel: String) -> String {
-        var lines = content.components(separatedBy: "\n")
-        var i = 0
-        while i < lines.count {
-            let line = lines[i]
-            if line.hasPrefix("  - id:") {
-                // Collect the block — lines that follow indented with 4 spaces until
-                // the next `  - id:` / end-of-speakers-block marker.
-                var blockEnd = i + 1
-                while blockEnd < lines.count {
-                    let next = lines[blockEnd]
-                    if next.hasPrefix("  - id:") { break }
-                    if !next.hasPrefix("    ") { break }
-                    blockEnd += 1
-                }
-                let block = lines[i..<blockEnd]
-                let hasMatchingChannel = block.contains(where: { $0.trimmingCharacters(in: .whitespaces) == "channel: \(channel)" })
-                if hasMatchingChannel {
-                    lines.removeSubrange(i..<blockEnd)
-                    continue  // don't advance i; next entry is now at i
-                }
-                i = blockEnd
-            } else {
-                i += 1
-            }
-        }
-        return lines.joined(separator: "\n")
-    }
-
-    private static func removeSpeakerDatabaseLinkFromFrontmatter(
-        in content: inout String,
-        update: SpeakerNameUpdate
-    ) {
-        guard let frontmatterRange = frontmatterContentRange(in: content) else { return }
-
-        var lines = String(content[frontmatterRange])
-            .components(separatedBy: "\n")
-
-        let targetIdLine = #"id: "\#(update.diarizerSpeakerId)""#
-        var lineIndex = 0
-
-        while lineIndex < lines.count {
-            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("- "),
-                  trimmed.contains(targetIdLine) else {
-                lineIndex += 1
-                continue
-            }
-
-            var nextEntryIndex: Int
-            if lineIndex + 1 < lines.count {
-                nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: { candidate in
-                    candidate.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
-                }) ?? lines.count
-            } else {
-                nextEntryIndex = lines.count
-            }
-
-            var dbIdIndex: Int?
-            var confidenceIndex: Int?
-            var sourceIndex: Int?
-
-            if lineIndex + 1 < nextEntryIndex {
-                for index in (lineIndex + 1)..<nextEntryIndex {
-                    let candidate = lines[index].trimmingCharacters(in: .whitespaces)
-                    if candidate.hasPrefix("db_id:") {
-                        dbIdIndex = index
-                    } else if candidate.hasPrefix("confidence:") {
-                        confidenceIndex = index
-                    } else if candidate.hasPrefix("source:") {
-                        sourceIndex = index
-                    }
-                }
-            }
-
-            let block = lines[lineIndex..<nextEntryIndex]
-            guard speakerBlockMatchesChannel(block, channel: update.channel) else {
-                lineIndex = nextEntryIndex
-                continue
-            }
-
-            if let dbIdIndex {
-                lines.remove(at: dbIdIndex)
-                nextEntryIndex -= 1
-                if let index = confidenceIndex, index > dbIdIndex {
-                    confidenceIndex = index - 1
-                }
-                if let index = sourceIndex, index > dbIdIndex {
-                    sourceIndex = index - 1
-                }
-            }
-
-            if let confidenceIndex {
-                lines[confidenceIndex] = "    confidence: unknown"
-            }
-
-            if let sourceIndex {
-                lines[sourceIndex] = "    source: unknown"
-            } else {
-                lines.insert("    source: unknown", at: min(nextEntryIndex, lines.count))
-            }
-
-            content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))
-            return
-        }
-    }
-
-    /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
-    /// Uses the canonical stable-identity resolver shared with recovery flows.
-    static func resolveTranscriptURL(_ url: URL, transcriptId: UUID) -> URL? {
-        if let frontmatter = try? TranscriptFrontmatter.readValues(from: url),
-           TranscriptFrontmatter.captureID(in: frontmatter) == transcriptId {
-            return url
-        }
-
-        let dir = url.deletingLastPathComponent()
-        guard let resolvedURL = existingTranscriptURL(in: dir, transcriptId: transcriptId) else {
-            AppLogger.pipeline.error("Failed to resolve transcript by stable id", [
-                "expected": url.lastPathComponent,
-                "transcriptId": transcriptId.uuidString
-            ])
-            return nil
-        }
-
-        let logicalResolvedURL = dir.appendingPathComponent(resolvedURL.lastPathComponent)
-        if logicalResolvedURL.standardizedFileURL != url.standardizedFileURL {
-            AppLogger.pipeline.info("Resolved renamed transcript", [
-                "from": url.lastPathComponent,
-                "to": logicalResolvedURL.lastPathComponent
-            ])
-        }
-        return logicalResolvedURL
-    }
-
-    /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.
-    /// Handles YAML frontmatter, body labels, wiki links, and speaker breakdown.
-    /// Pass `updateSpeakerTag: true` when the old name also has an Obsidian tag to rename.
-    static func applyNameReplacement(in content: inout String, oldName: String, newName: String, updateSpeakerTag: Bool) {
-        // Security: YAML-escape both names before matching and replacing double-quoted scalars.
-        let yamlSafeOldName = escapeYAML(oldName)
-        let yamlSafeName = escapeYAML(newName)
-        content = content.replacingOccurrences(of: "name: \"\(yamlSafeOldName)\"", with: "name: \"\(yamlSafeName)\"")
-        content = content.replacingOccurrences(of: "[System/\(oldName)]", with: "[System/\(newName)]")
-        content = content.replacingOccurrences(of: "[Mic/\(oldName)]", with: "[Mic/\(newName)]")
-        content = content.replacingOccurrences(of: "[[\(oldName)]]", with: "[[\(newName)]]")
-        content = content.replacingOccurrences(of: "**\(oldName):**", with: "**\(newName):**")
-
-        if updateSpeakerTag {
-            let oldTag = "speaker/\(oldName.replacingOccurrences(of: " ", with: "-").lowercased())"
-            let newTag = "speaker/\(newName.replacingOccurrences(of: " ", with: "-").lowercased())"
-            content = content.replacingOccurrences(of: oldTag, with: newTag)
-        }
-    }
-
-    static func applyScopedNameReplacement(
-        in content: inout String,
-        oldName: String,
-        newName: String,
-        channel: UtteranceChannel
-    ) {
-        let prefix = channel == .mic ? "Mic" : "System"
-        replaceTranscriptSpeakerLabels(
-            in: &content,
-            prefix: prefix,
-            oldName: oldName,
-            newName: newName
-        )
-        replaceSpeakerBreakdownName(
-            in: &content,
-            oldName: oldName,
-            newName: newName,
-            channel: channel
-        )
-    }
-
-    // replaceTranscriptSpeakerLabels / countTranscriptSpeakerLabels / isTranscriptLabelPrefix
-    // moved to RetroactiveSpeakerUpdater+TranscriptRewrite.swift.
-    // replaceSpeakerBreakdownName / countSpeakerBreakdownRows / speakerBreakdownContentRange
-    // moved to RetroactiveSpeakerUpdater+BreakdownRewrite.swift. (audit 2026-07-08 wave 2)
-
-    private static func makeSpeakerNameChangesByChannelKey(
-        updates: [SpeakerNameUpdate],
-        content: String
-    ) -> [String: (oldName: String, newName: String)] {
-        var changes: [String: (oldName: String, newName: String)] = [:]
-        for update in updates {
-            let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
-            changes[key] = (
-                oldName: currentSpeakerName(
-                    in: content,
-                    diarizerSpeakerId: update.diarizerSpeakerId,
-                    channel: update.channel
-                )
-                    ?? "Speaker \(update.diarizerSpeakerId)",
-                newName: update.newName
-            )
-        }
-        return changes
-    }
-
-    /// Shared engine behind `applyScopedTranscriptLabelReplacements` (transcript
-    /// body labels) and `applyScopedBreakdownNameReplacements` (speaker breakdown
-    /// rows): both are used as a fallback when a full-section rewrite can't prove
-    /// itself unambiguous. Each builds a plan of pending speaker-name swaps gated on
-    /// an exact occurrence-count match (so a rename is skipped rather than partially
-    /// applied when the document's counts don't line up with what's expected), then
-    /// stages the swaps behind placeholder tokens before resolving them to the real
-    /// new names, so overlapping old/new names can't collide mid-pass.
-    ///
-    /// The two callers differ in:
-    /// - whether a key with no resolvable channel/diarizer target is a hard failure
-    ///   (transcript) or a soft skip (breakdown, which is already scoped to specific
-    ///   `channels` and expects unrelated keys to be skipped);
-    /// - whether the occurrence count is checked while building the plan (transcript,
-    ///   against the expected utterance count) or deferred to a second pass over the
-    ///   built plans (breakdown, always requiring exactly one row); and
-    /// - how "occurrences" are counted/replaced (transcript labels vs. breakdown rows)
-    ///   and what a valid replaced-count looks like (`> 0` vs. `== 1`).
-    ///
-    /// Deduped from two ~80-line near-identical copies (audit 2026-07-08 wave 2).
-    static func applyScopedReplacements(
-        in content: inout String,
-        updatesByChannelKey: [String: (oldName: String, newName: String)],
-        result: TranscriptionResult,
-        channelFilter: Set<UtteranceChannel>?,
-        missingTargetFails: Bool,
-        tokenKind: String,
-        gateCountAtPlanTime: Bool,
-        countOccurrences: (String, String, String, UtteranceChannel) -> Int,
-        performReplace: (inout String, String, String, String, UtteranceChannel) -> Int,
-        replacedCountIsValid: (Int) -> Bool
-    ) -> Bool {
-        var replacementPlans: [(prefix: String, oldName: String, newName: String, channel: UtteranceChannel)] = []
-
-        for key in updatesByChannelKey.keys.sorted() {
-            guard let update = updatesByChannelKey[key] else { continue }
-            guard update.oldName != update.newName else { continue }
-
-            guard let target = channelAndDiarizerID(forSpeakerKey: key) else {
-                if missingTargetFails { return false }
-                continue
-            }
-            if let channelFilter, !channelFilter.contains(target.channel) {
-                continue
-            }
-
-            let prefix = target.channel == .mic ? "Mic" : "System"
-            let expectedCount = expectedVisibleUtteranceCount(
-                in: result,
-                channel: target.channel,
-                diarizerSpeakerId: target.diarizerSpeakerId
-            )
-
-            if expectedCount == 0 {
-                guard countOccurrences(content, prefix, update.oldName, target.channel) == 0 else { return false }
-                continue
-            }
-
-            if gateCountAtPlanTime {
-                guard countOccurrences(content, prefix, update.oldName, target.channel) == expectedCount else {
-                    return false
-                }
-            }
-
-            replacementPlans.append((prefix: prefix, oldName: update.oldName, newName: update.newName, channel: target.channel))
-        }
-
-        if !gateCountAtPlanTime {
-            for plan in replacementPlans {
-                guard countOccurrences(content, plan.prefix, plan.oldName, plan.channel) == 1 else {
-                    return false
-                }
-            }
-        }
-
-        var deferredReplacements: [(token: String, newName: String)] = []
-        for (index, plan) in replacementPlans.enumerated() {
-            let token = scopedReplacementToken(kind: tokenKind, index: index)
-            let replaced = performReplace(&content, plan.prefix, plan.oldName, token, plan.channel)
-            guard replacedCountIsValid(replaced) else { return false }
-            deferredReplacements.append((token: token, newName: plan.newName))
-        }
-        applyDeferredScopedReplacements(in: &content, replacements: deferredReplacements)
-        return true
-    }
-
-    private static func scopedReplacementToken(kind: String, index: Int) -> String {
-        "__TRANSCRIPTED_SCOPED_\(kind.uppercased())_\(index)_\(UUID().uuidString)__"
-    }
-
-    private static func applyDeferredScopedReplacements(
-        in content: inout String,
-        replacements: [(token: String, newName: String)]
-    ) {
-        for replacement in replacements {
-            content = content.replacingOccurrences(of: replacement.token, with: replacement.newName)
-        }
-    }
-
-    private static func channelAndDiarizerID(forSpeakerKey key: String) -> (channel: UtteranceChannel, diarizerSpeakerId: Int)? {
-        if key.hasPrefix("mic_"), let id = Int(key.dropFirst("mic_".count)) {
-            return (.mic, id)
-        }
-        if key.hasPrefix("system_"), let id = Int(key.dropFirst("system_".count)) {
-            return (.system, id)
-        }
-        return nil
-    }
-
-    private static func expectedVisibleUtteranceCount(
-        in result: TranscriptionResult,
-        channel: UtteranceChannel,
-        diarizerSpeakerId: Int
-    ) -> Int {
-        let utterances = channel == .mic ? result.micUtterances : result.systemUtterances
-        return utterances.filter {
-            $0.speakerId == diarizerSpeakerId
-                && !$0.transcript.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.count
-    }
-
-    // extractYAMLQuotedString moved to RetroactiveSpeakerUpdater+Scanning.swift.
-
-    private static func updateFrontmatterSpeakerMetadata(
-        in content: inout String,
-        update: SpeakerNameUpdate
-    ) {
-        writeFrontmatterSpeakerMetadata(
-            in: &content,
-            diarizerSpeakerId: update.diarizerSpeakerId,
-            channel: update.channel,
-            persistentSpeakerId: update.resolvedPersistentSpeakerId ?? update.persistentSpeakerId,
-            name: update.newName,
-            source: NameSource.userManual
-        )
-    }
-
-    static func currentSpeakerName(
-        in content: String,
-        diarizerSpeakerId: String,
-        channel: UtteranceChannel
-    ) -> String? {
-        guard let frontmatterRange = frontmatterContentRange(in: content) else { return nil }
-
-        let lines = String(content[frontmatterRange]).components(separatedBy: "\n")
-        let targetIdLine = #"id: "\#(diarizerSpeakerId)""#
-        var lineIndex = 0
-
-        while lineIndex < lines.count {
-            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("- "), trimmed.contains(targetIdLine) else {
-                lineIndex += 1
-                continue
-            }
-
-            let nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: {
-                $0.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
-            }) ?? lines.count
-
-            let block = lines[lineIndex..<nextEntryIndex]
-            guard speakerBlockMatchesChannel(block, channel: channel) else {
-                lineIndex = nextEntryIndex
-                continue
-            }
-
-            for index in (lineIndex + 1)..<nextEntryIndex {
-                let candidate = lines[index].trimmingCharacters(in: .whitespaces)
-                guard candidate.hasPrefix("name:") else { continue }
-                // Names are written through `escapeYAML`. Unescape them, or a name
-                // with `"` or `\` comes back with stray backslashes: the scoped
-                // fallback then searches for a label that isn't in the body, and
-                // the breakdown rewrite prints the mangled name for speakers that
-                // were not part of this update.
-                if let quotedName = extractYAMLQuotedString(from: candidate, prefix: "name: ") {
-                    return quotedName
-                }
-                return candidate
-                    .dropFirst("name:".count)
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            }
-
-            return nil
-        }
-
-        return nil
-    }
-
-    static func currentSpeakerName(
-        in content: String,
-        diarizerSpeakerId: String,
-        channel: UtteranceChannel,
-        matchingDbId dbId: UUID
-    ) -> String? {
-        guard let frontmatterRange = frontmatterContentRange(in: content) else { return nil }
-
-        let lines = String(content[frontmatterRange]).components(separatedBy: "\n")
-        let targetIdLine = #"id: "\#(diarizerSpeakerId)""#
-        let targetDbId = dbId.uuidString
-        var lineIndex = 0
-
-        while lineIndex < lines.count {
-            let trimmed = lines[lineIndex].trimmingCharacters(in: .whitespaces)
-            guard trimmed.hasPrefix("- "), trimmed.contains(targetIdLine) else {
-                lineIndex += 1
-                continue
-            }
-
-            let nextEntryIndex = lines[(lineIndex + 1)..<lines.count].firstIndex(where: {
-                $0.trimmingCharacters(in: .whitespaces).hasPrefix("- ")
-            }) ?? lines.count
-
-            let block = lines[lineIndex..<nextEntryIndex]
-            guard speakerBlockMatchesChannel(block, channel: channel),
-                  block.contains(where: { line in
-                      let trimmed = line.trimmingCharacters(in: .whitespaces)
-                      return trimmed == #"db_id: "\#(targetDbId)""# || trimmed == "db_id: \(targetDbId)"
-                  }) else {
-                lineIndex = nextEntryIndex
-                continue
-            }
-
-            for index in (lineIndex + 1)..<nextEntryIndex {
-                let candidate = lines[index].trimmingCharacters(in: .whitespaces)
-                guard candidate.hasPrefix("name:") else { continue }
-                return extractYAMLQuotedString(from: candidate, prefix: "name: ")
-            }
-
-            return nil
-        }
-
-        return nil
-    }
-
-    // rewriteFullTranscriptSection and its legacy/styled transcript-section helpers
-    // moved to RetroactiveSpeakerUpdater+TranscriptRewrite.swift. rewriteRemoteSpeakerBreakdown,
-    // rewriteLocalSpeakerBreakdownIfPresent, and rewriteSpeakerBreakdown moved to
-    // RetroactiveSpeakerUpdater+BreakdownRewrite.swift. (audit 2026-07-08 wave 2)
-
-    private static func isObsidianFormatted(_ content: String) -> Bool {
-        content.contains("\ncssclasses:\n  - transcripted")
-            || content.contains("\naliases:\n  - \"Meeting ")
     }
 
 }

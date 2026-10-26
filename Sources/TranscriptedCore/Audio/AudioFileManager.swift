@@ -385,9 +385,8 @@ extension Audio {
                         guard strongSelf.recordingSessionGeneration == sessionGeneration else {
                             return
                         }
-                        strongSelf.recordSystemAudioStartPermissionDenial(
+                        strongSelf.systemAudioStartPermissionExplicitlyDenied =
                             SystemAudioCaptureFailureCopy.isExplicitPermissionDenial(error)
-                        )
                         strongSelf.systemAudioFileURL = nil
                         // The WAV was just removed; the stop path must not
                         // hand the pipeline a URL for a file that no longer

@@ -64,6 +64,59 @@ extension SpeakerDatabase {
         }
     }
 
+    /// Takes back one meeting's match from a profile when its review row is corrected or
+    /// discarded. Unlike `restoreProfile`, it never writes the name or dispute count, so a
+    /// rename made while the review was open survives. The voiceprint goes back to the
+    /// snapshot only when this meeting was the profile's one match since; otherwise newer
+    /// matches keep their voiceprint and only this meeting's call is taken off.
+    public func revertMatchContribution(snapshot: SpeakerProfile) {
+        if isExecutingOnQueue {
+            revertMatchContributionImpl(snapshot)
+            return
+        }
+        queue.sync {
+            revertMatchContributionImpl(snapshot)
+        }
+    }
+
+    private func revertMatchContributionImpl(_ snapshot: SpeakerProfile) {
+        guard isDatabaseOpen else {
+            AppLogger.speakers.error("revertMatchContribution failed — database not open", ["speakerId": snapshot.id.uuidString])
+            recordMutationFailure(operation: "revert match contribution", code: SQLITE_MISUSE)
+            return
+        }
+
+        // SET expressions all read the row as it was, so every CASE sees the same call_count.
+        let sql = """
+        UPDATE speakers
+        SET embedding = CASE WHEN call_count = ?1 + 1 THEN ?2 ELSE embedding END,
+            last_seen = CASE WHEN call_count = ?1 + 1 THEN ?3 ELSE last_seen END,
+            confidence = CASE WHEN call_count = ?1 + 1 THEN ?4 ELSE confidence END,
+            call_count = CASE WHEN call_count > ?1 THEN call_count - 1 ELSE call_count END
+        WHERE id = ?5;
+        """
+
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
+            let embeddingData = snapshot.embedding.withUnsafeBufferPointer { Data(buffer: $0) }
+            let lastSeen = ISO8601DateFormatter().string(from: snapshot.lastSeen) as NSString
+            sqlite3_bind_int(statement, 1, Int32(snapshot.callCount))
+            sqlite3_bind_blob(statement, 2, (embeddingData as NSData).bytes, Int32(embeddingData.count), SQLITE_TRANSIENT)
+            sqlite3_bind_text(statement, 3, lastSeen.utf8String, -1, SQLITE_TRANSIENT)
+            sqlite3_bind_double(statement, 4, snapshot.confidence)
+            sqlite3_bind_text(statement, 5, (snapshot.id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+
+            if sqlite3_step(statement) != SQLITE_DONE {
+                AppLogger.speakers.error("Failed to revert match contribution", ["sqlite_error": dbErrorMessage(), "id": snapshot.id.uuidString])
+                recordMutationFailure(operation: "revert match contribution", code: sqlite3_errcode(db))
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare revertMatchContribution", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare revert match contribution", code: sqlite3_errcode(db))
+        }
+        sqlite3_finalize(statement)
+    }
+
     func setDisplayNameImpl(id: UUID, name: String, source: String) {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("setDisplayName failed — database not open", ["speakerId": id.uuidString, "name": name])
@@ -366,6 +419,46 @@ extension SpeakerDatabase {
         defer { sqlite3_finalize(statement) }
         sqlite3_bind_text(statement, 1, (profileId.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
         try requireDone(statement, operation: "step \(operation)")
+    }
+
+    /// Every profile id that was merged into `profileId`, directly or through a chain, by a
+    /// merge that was not undone. Saved transcripts can still carry these ids (duplicate
+    /// cleanup doesn't rewrite files), so a rename or merge of `profileId` must reach them.
+    public func mergedAliasIds(of profileId: UUID) -> Set<UUID> {
+        if isExecutingOnQueue { return mergedAliasIdsImpl(of: profileId) }
+        return queue.sync { mergedAliasIdsImpl(of: profileId) }
+    }
+
+    private func mergedAliasIdsImpl(of profileId: UUID) -> Set<UUID> {
+        guard isDatabaseOpen else { return [] }
+        let sql = "SELECT source_id FROM speaker_merge_events WHERE target_id = ? AND undone_at IS NULL;"
+        var visited: Set<UUID> = [profileId]
+        var frontier: [UUID] = [profileId]
+        // Same guard as mergeSurvivorIdImpl: the hop cap and visited set only stop a
+        // corrupt event log that loops.
+        for _ in 0..<16 where !frontier.isEmpty {
+            var next: [UUID] = []
+            for current in frontier {
+                var statement: OpaquePointer?
+                guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                    AppLogger.speakers.error("Failed to prepare merged alias lookup", ["sqlite_error": dbErrorMessage()])
+                    sqlite3_finalize(statement)
+                    return visited.subtracting([profileId])
+                }
+                sqlite3_bind_text(statement, 1, (current.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    // A source that exists again (restored outside unmerge) is its own person.
+                    if let source = sqlite3_column_text(statement, 0).map(String.init(cString:)).flatMap(UUID.init(uuidString:)),
+                       getSpeakerImpl(id: source) == nil,
+                       visited.insert(source).inserted {
+                        next.append(source)
+                    }
+                }
+                sqlite3_finalize(statement)
+            }
+            frontier = next
+        }
+        return visited.subtracting([profileId])
     }
 
     // MARK: - Duplicate Merging

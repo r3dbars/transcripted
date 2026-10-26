@@ -74,7 +74,8 @@ extension TranscriptedSettingsView {
                 }
             },
             permissionsEditor: { generalPermissionsEditor },
-            reportingEditor: { generalReportingEditor }
+            reportingEditor: { generalReportingEditor },
+            developerPreviewEditor: { DeveloperPreviewSettingsRows() }
         )
         .sheet(isPresented: $showCorrectionsSheet) {
             VStack(alignment: .leading, spacing: 12) {

@@ -22,11 +22,7 @@ class FloatingOverlayController {
         )
     }
 
-    enum SessionMode {
-        case dictation
-    }
-
-    enum OverlayState {
+    enum OverlayState: String {
         case idle
         case starting     // Microphone start requested — cancellable before recording flips on
         case loading      // Voice model still loading — waiting for readiness
@@ -42,6 +38,9 @@ class FloatingOverlayController {
                 return false
             }
         }
+
+        /// The case name, for diagnostics trails.
+        var diagnosticName: String { rawValue }
     }
 
     /// How a drafting-state message should read: a real problem, or a calm
@@ -159,7 +158,7 @@ class FloatingOverlayController {
         // no second hop, so the island never gets them in bunches.
         sttRouter.audioLevels.readings
             .sink { [weak self] reading in
-                guard let self, self.isIslandMode else { return }
+                guard let self, self.isIslandMode, !self.quiet else { return }
                 self.island?.updateDictationLevel(DictationMeterPolicy.presentation(
                     isListening: self.state == .listening, sttIsRecording: sttRouter.isRecording, reading: reading
                 ))
@@ -177,9 +176,13 @@ class FloatingOverlayController {
 
     // MARK: - State → Island Push
 
+    /// Next Sentence's card is the listening UI for its dictations, so the notch stays hidden. Cleared on
+    /// hide, and set again by every dictation start (only a hand-off take keeps it).
+    var quiet = false { didSet { pushStateToIsland() } }
+
     private func pushStateToIsland() {
         guard let island else { return }
-        guard isIslandMode, isVisible else {
+        guard isIslandMode, isVisible, !quiet else {
             island.updateDictation(nil, targetApp: nil)
             return
         }
@@ -420,7 +423,7 @@ class FloatingOverlayController {
     /// set aside, so the words were never put on it. The island shows them
     /// with a Copy button (the one step that replaces what's on the
     /// clipboard, only when asked). Without an island it shows the error.
-    func showClipboardBusyNotice(_ text: String, fallbackMessage: String, copy: @escaping () -> Void) {
+    func showClipboardBusyNotice(_ text: String, fallbackMessage: String, hint: String, copy: @escaping () -> Void) {
         guard isIslandMode else {
             showError(fallbackMessage)
             return
@@ -428,7 +431,7 @@ class FloatingOverlayController {
         showMessage("Not pasted", tone: .notice, kind: .other, notPasted: NotPastedNotice(
             text: text,
             actionTitle: "Copy",
-            hint: "Your clipboard holds something too big to set aside.",
+            hint: hint,
             watchesForManualPaste: false,
             action: copy
         ))
@@ -638,7 +641,7 @@ class FloatingOverlayController {
         messageTone = .error
         discardActionableMessageIfNeeded()
         successTitle = title
-        if isIslandMode {
+        if isIslandMode && !quiet {
             island?.noteDictationInserted(title: title)
         }
         state = .success
@@ -677,7 +680,7 @@ class FloatingOverlayController {
         listeningNotice = ""
         loadingPresentation = .initial
         islandSourceApp = nil
-        pushStateToIsland()
+        quiet = false
     }
 
     // MARK: - System Wake Recovery & Periodic AG Refresh

@@ -127,6 +127,14 @@ func testCallAppNamePrefill() {
         assertNil(legacy?.callAppSuggestedName, "a legacy Speaker N voice has no suggestion")
         assertEqual(legacy?.sourceName, "Speaker 2", "a legacy voice reads exactly as before")
         assertEqual(legacy?.sampleText, "Sounds good to me.")
+        let whoSpoke = SpeakerReviewQueueScanner.groupedByMeeting(
+            SpeakerReviewQueueScanner.groupedByVoice(items)
+        )
+        let cardVoice = whoSpoke.first?.voices.first { $0.id == callId }
+        assertEqual(
+            cardVoice?.representative.callAppSuggestedName, "Rina Okafor",
+            "the Speakers Who spoke? card still sees the call-app name"
+        )
     }
 
     runSuite("A real name without name_source is not treated as a call-app suggestion") {

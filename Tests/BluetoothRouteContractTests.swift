@@ -10,14 +10,13 @@
 // AirPods/Bluetooth hardware still needs manual verification
 // (`bash check.sh hardware`).
 //
-// Two suites still read source as text: a banned-call scan that no Parakeet
-// file writes the Mac-wide default input (the snapshot ordering it used to
-// pin is a behavior test in ParakeetAudioGraphTests), and TranscriptedApp
-// awaiting the persistent input restore on quit, which the fast runner can't
-// compile. The persistent controller itself runs against fakes in
-// PersistentDictationInputControllerTests. The
-// "QA report names mocked proof boundary" suite is a docs/report consistency
-// check.
+// Nothing here reads source as text. The banned-call scan that no Parakeet
+// file writes the Mac-wide default input is a rule in
+// scripts/dev/check-banned-calls.py (the snapshot ordering it used to pin is a
+// behavior test in ParakeetAudioGraphTests), and the "mocked proof boundary"
+// wording the QA report and its docs share is checked by
+// scripts/dev/check-audio-automation-contract.py. The persistent controller
+// itself runs against fakes in PersistentDictationInputControllerTests.
 
 import AVFoundation
 import Foundation
@@ -677,39 +676,10 @@ func testBluetoothRouteContract() async {
         )
     }
 
-    runSuite("Bluetooth route contract - dictation never writes the Mac-wide default input") {
-        // A banned-call check, not an ordering pin. The snapshot's ordering
-        // (serialized selection, fail-closed lookup, ignore window armed before
-        // the graph read) is a behavior test in ParakeetAudioGraphTests.swift.
-        // The only legitimate Mac-wide input writes are
-        // PersistentDictationInputController's, through DefaultInputDeviceMonitor.
-        let speechFolder = "Sources/Speech"
-        let names = ((try? FileManager.default.contentsOfDirectory(atPath: repoFixtureURL(speechFolder).path)) ?? [])
-            .filter { $0.hasPrefix("Parakeet") && $0.hasSuffix(".swift") }
-            .filter { $0 != "ParakeetAudioDeviceLookup.swift" } // declares the CoreAudio setter
-            .sorted()
-        assertTrue(names.count > 10, "the dictation engine files should be found")
-        for name in names {
-            let text = readSourceFixture("\(speechFolder)/\(name)")
-            assertFalse(text.contains("setDefaultInputDeviceID("), "\(name) must not write the Mac-wide default input")
-            assertFalse(text.contains("setDefaultInputDevice("), "\(name) must not write the Mac-wide default input")
-        }
-    }
-
-    runSuite("Bluetooth route contract - QA report names mocked proof boundary") {
-        let bench = readSourceFixture("scripts/ops/transcripted-qa-bench.sh")
-        let benchDoc = readSourceFixture("docs/qa-test-bench.md")
-        let dailyDoc = readSourceFixture("docs/audio-reliability-daily-check.md")
-        let gates = readSourceFixture(".agents/qa-gates.yml")
-
-        let boundary = "Mocked Bluetooth/AirPods route contracts are automated policy proof, not hardware proof."
-        let manualProof = "Real connected AirPods/Bluetooth hardware remains manual proof."
-
-        for content in [bench, benchDoc, dailyDoc, gates] {
-            assertTrue(content.contains(boundary), "Bluetooth route docs/report should include the mocked proof boundary")
-            assertTrue(content.contains(manualProof), "Bluetooth route docs/report should keep real hardware proof manual")
-        }
-    }
+    // Two former suites here read files as text and now live in Linux-safe
+    // consistency checks: "dictation never writes the Mac-wide default input"
+    // is a rule in scripts/dev/check-banned-calls.py, and the QA report's
+    // mocked-proof boundary is in scripts/dev/check-audio-automation-contract.py.
 }
 
 private func bluetoothDevice(

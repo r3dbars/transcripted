@@ -193,7 +193,7 @@ final class SummaryItemIndexTests: XCTestCase {
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         XCTAssertTrue(try index.listSummaryItems().isEmpty)
         // The transcript itself still indexes as a meeting.
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
     }
 
     func testOlderSchemaVersionForcesRebuild() throws {
@@ -213,11 +213,11 @@ final class SummaryItemIndexTests: XCTestCase {
 
         // Reopening trips the schema gate, which wipes the stale index.
         let reopened = try TranscriptIndex(indexDir: tempDir)
-        XCTAssertTrue(try reopened.listRecentMeetings(count: 10).isEmpty)
+        XCTAssertTrue(try reopened.listMeetings(count: 10).isEmpty)
 
         // A reconcile rebuilds everything, now including summary items.
         try reopened.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertEqual(try reopened.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try reopened.listMeetings(count: 10).count, 1)
         XCTAssertEqual(try reopened.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count, 2)
     }
 
@@ -238,11 +238,11 @@ final class SummaryItemIndexTests: XCTestCase {
 
         let newerServer = try TranscriptIndex(indexDir: tempDir)
         XCTAssertTrue(FileManager.default.fileExists(atPath: dbPath))
-        XCTAssertTrue(try olderServer.listRecentMeetings(count: 10).isEmpty)
+        XCTAssertTrue(try olderServer.listMeetings(count: 10).isEmpty)
 
         try newerServer.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertEqual(try olderServer.listRecentMeetings(count: 10).count, 1)
-        XCTAssertEqual(try newerServer.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try olderServer.listMeetings(count: 10).count, 1)
+        XCTAssertEqual(try newerServer.listMeetings(count: 10).count, 1)
     }
 
     func testOpeningNeverLowersANewerSchemaVersion() throws {
@@ -305,7 +305,7 @@ final class SummaryItemIndexTests: XCTestCase {
             try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         }
 
-        XCTAssertEqual(try index.listRecentMeetings(count: 50).count, 50)
+        XCTAssertEqual(try index.listMeetings(count: 50).count, 50)
 
         for number in 0..<500 {
             let result = try index.searchUtterances(
@@ -344,7 +344,7 @@ final class SummaryItemIndexTests: XCTestCase {
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
         // The sidecar must not appear as its own meeting row.
-        let meetings = try index.listRecentMeetings(count: 10)
+        let meetings = try index.listMeetings(count: 10)
         XCTAssertEqual(meetings.count, 1)
         XCTAssertEqual(meetings.first?.filename, "2026-04-18 Beta sync")
 
@@ -387,7 +387,7 @@ final class SummaryItemIndexTests: XCTestCase {
         }
 
         XCTAssertTrue(failures.isEmpty, "reconcile failed: \(failures)")
-        XCTAssertEqual(try index.listRecentMeetings(count: 100).count, meetingCount)
+        XCTAssertEqual(try index.listMeetings(count: 100).count, meetingCount)
         XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), meetingCount)
         XCTAssertEqual(
             try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count,

@@ -183,6 +183,8 @@ final class MeetingSessionController: ObservableObject {
     var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     var activeRecordingTrigger: StartTrigger = .unknown
     var activeRecordingIdentity: UUID?
+    /// Set while stop/cancel tears down, so a borrowed-mic claim stays current until dictation is handed back.
+    var stoppingRecordingIdentity: UUID?
     var micBoostPromptRecordingIdentity: UUID?
     var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
     /// The recording an accepted Boost is still trying to arm. Stop doesn't
@@ -307,21 +309,15 @@ final class MeetingSessionController: ObservableObject {
     /// between those actions, so meeting stop cannot slip into the handoff.
     ///
     /// Mints the `SharedMeetingMicClaim` dictation will hold for the
-    /// lifetime of the borrow: `activeRecordingIdentity` is always non-nil
-    /// here because it is coined before `.startingRecording` and only
-    /// cleared when this session leaves `.recording` (see
-    /// `clearActiveRecordingIdentity()` call sites), i.e. exactly the window
-    /// `canShareMicWithDictation` covers. `isSessionAlive` closes over
-    /// `self` weakly so Speech never needs a reference to
-    /// `MeetingSessionController` itself, and delegates to
-    /// `SharedMeetingMicClaimPolicy.isClaimSessionAlive`, which requires
-    /// BOTH `isCaptureSessionActive` — the broader "is the capture pipeline
-    /// live for this recording" check that also covers this session's own
-    /// teardown window, rather than `isRecording`/`canShareMicWithDictation`,
-    /// which would go false the instant this session starts stopping and
-    /// make every claim look stale during completely normal teardown — AND
-    /// that `activeRecordingIdentity` is still the exact identity minted
-    /// below (`mintedIdentity`), captured by value here so a later
+    /// lifetime of the borrow. `isSessionAlive` closes over `self` weakly so
+    /// Speech never needs a reference to `MeetingSessionController`, and
+    /// delegates to `SharedMeetingMicClaimPolicy.isClaimSessionAlive`, which
+    /// requires BOTH `isCaptureSessionActive` (which, unlike `isRecording`,
+    /// also covers this session's own teardown window) AND that the
+    /// recording identity is still the one minted below. Stop and cancel
+    /// clear `activeRecordingIdentity` at once but stash it in
+    /// `stoppingRecordingIdentity` until dictation is handed back, so normal
+    /// teardown doesn't read stale. `mintedIdentity` is captured so a later
     /// recording on this same controller (a fresh identity) cannot make an
     /// orphaned claim from an earlier, already-ended recording read as
     /// alive just because something is active again.
@@ -335,9 +331,11 @@ final class MeetingSessionController: ObservableObject {
                 return SharedMeetingMicClaimPolicy.isClaimSessionAlive(
                     mintedIdentity: mintedIdentity,
                     currentIdentity: self.activeRecordingIdentity,
+                    stoppingIdentity: self.stoppingRecordingIdentity,
                     isCaptureSessionActive: self.isCaptureSessionActive
                 )
-            }
+            },
+            flushRelayedBuffers: { [weak self] in await self?.capture.flushSharedDictationMicHandler() }
         )
         return sttRouter.startRecordingFromSharedMeetingMic(claim: claim)
     }
@@ -661,7 +659,8 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    func clearActiveRecordingIdentity() {
+    func clearActiveRecordingIdentity(keepingForStopTeardown: Bool = false) {
+        stoppingRecordingIdentity = keepingForStopTeardown ? activeRecordingIdentity : nil
         if let identity = activeRecordingIdentity {
             LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
         }

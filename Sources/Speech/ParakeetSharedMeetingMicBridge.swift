@@ -90,6 +90,12 @@ extension ParakeetEngine {
     /// continue the same dictation on its regular mic engine.
     func resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded() async {
         guard sharedMeetingMicClaim != nil else { return }
+        // A user stop is awaiting the relay flush: keep the borrowed take for
+        // it, and don't reopen the mic after the user let go.
+        if audioStopInProgress {
+            finishSharedMeetingMicRecording(keepRecordingState: false)
+            return
+        }
         let transitionToken = sharedMeetingMicTransition.beginResume()
         finishSharedMeetingMicRecording(keepRecordingState: false)
         preservingRecordingAcrossRecovery = !recoveredRecordingTimeline.isEmpty

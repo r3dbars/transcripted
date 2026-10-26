@@ -50,8 +50,8 @@ final class SpeakerProfileMergerTests: XCTestCase {
             existingId: nil
         )
 
-        database.setDisplayName(id: first.id, name: "Matt Vlasach", source: NameSource.userManual)
-        database.setDisplayName(id: second.id, name: "Sarah Graham", source: NameSource.userManual)
+        database.setDisplayName(id: first.id, name: "Milo Vasquez", source: NameSource.userManual)
+        database.setDisplayName(id: second.id, name: "Sadie Greene", source: NameSource.userManual)
         database.mergeDuplicates(threshold: 0.6)
 
         XCTAssertNotNil(database.getSpeaker(id: first.id))
@@ -75,6 +75,50 @@ final class SpeakerProfileMergerTests: XCTestCase {
             "Profiles referenced by pending speaker review rows must not be absorbed before review completes."
         )
         XCTAssertNotNil(database.getSpeaker(id: second.id))
+    }
+
+    func testCorrectingAnOpenReviewKeepsALaterRenameAndMatch() throws {
+        var voice = [Float](repeating: 0, count: 256)
+        voice[0] = 1
+        let alice = database.addOrUpdateSpeaker(embedding: voice, existingId: nil)
+        database.setDisplayName(id: alice.id, name: "Alice", source: NameSource.userManual)
+        let snapshot = try XCTUnwrap(database.getSpeaker(id: alice.id))
+
+        // Meeting 1 matches Alice and its review stays open; meeting 2 matches her too,
+        // then she's renamed in Settings.
+        var meetingOneVoice = [Float](repeating: 0, count: 256)
+        meetingOneVoice[1] = 1
+        _ = database.addOrUpdateSpeaker(embedding: meetingOneVoice, existingId: alice.id)
+        _ = database.addOrUpdateSpeaker(embedding: voice, existingId: alice.id)
+        database.setDisplayName(id: alice.id, name: "Alice Chen", source: NameSource.userManual)
+        let beforeCorrection = try XCTUnwrap(database.getSpeaker(id: alice.id))
+
+        // Meeting 1's review: "not Alice".
+        database.revertMatchContribution(snapshot: snapshot)
+
+        let after = try XCTUnwrap(database.getSpeaker(id: alice.id))
+        XCTAssertEqual(after.displayName, "Alice Chen")
+        XCTAssertEqual(after.callCount, snapshot.callCount + 1, "meeting 2's match still counts")
+        XCTAssertEqual(after.embedding, beforeCorrection.embedding, "meeting 2's voiceprint isn't rolled back")
+    }
+
+    func testCorrectingTheOnlyMatchSinceTheSnapshotRestoresTheVoiceprint() throws {
+        var voice = [Float](repeating: 0, count: 256)
+        voice[0] = 1
+        let profile = database.addOrUpdateSpeaker(embedding: voice, existingId: nil)
+        let snapshot = try XCTUnwrap(database.getSpeaker(id: profile.id))
+        var wrongVoice = [Float](repeating: 0, count: 256)
+        wrongVoice[1] = 1
+        _ = database.addOrUpdateSpeaker(embedding: wrongVoice, existingId: profile.id)
+        database.setDisplayName(id: profile.id, name: "Rowan", source: NameSource.userManual)
+
+        database.revertMatchContribution(snapshot: snapshot)
+
+        let after = try XCTUnwrap(database.getSpeaker(id: profile.id))
+        XCTAssertEqual(after.embedding, snapshot.embedding)
+        XCTAssertEqual(after.callCount, snapshot.callCount)
+        XCTAssertEqual(after.confidence, snapshot.confidence)
+        XCTAssertEqual(after.displayName, "Rowan", "a revert never writes the name")
     }
 
     func testDefaultProtectedMergeFallbackSkipsWhenIdsAreProtected() {

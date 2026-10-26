@@ -273,6 +273,70 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertGreaterThan(merged.length, 3_000)
     }
 
+    func testRecoveryRemergesAllSegmentsAfterCrashMidMerge() async throws {
+        let (manager, paths) = makeManager()
+
+        let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_midmerge_mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_midmerge_mic_recovery.wav")
+        let partialURL = paths.audioCaptures.appendingPathComponent("meeting_midmerge_mic_merged.partial.wav")
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        // What a crash partway through the stop-time merge leaves behind.
+        try writeMonoWAV(to: partialURL, sampleRate: 16_000, samples: Array(repeating: 0.3, count: 800))
+        for url in [primaryURL, recoveryURL, partialURL] {
+            try backdate(url)
+        }
+
+        _ = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: "meeting_midmerge_mic.wav",
+            segments: [
+                .init(filename: "meeting_midmerge_mic.wav", gapBefore: 0),
+                .init(filename: "meeting_midmerge_mic_recovery.wav", gapBefore: 0.1)
+            ],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+
+        XCTAssertEqual(recovered, 1)
+        let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(entry.micAudioURL.lastPathComponent, "meeting_midmerge_mic_merged.wav")
+        // 1,600 + 1,600 gap + 1,600 frames at 16 kHz, not the 800-frame partial.
+        let merged = try AVAudioFile(forReading: entry.micAudioURL)
+        XCTAssertGreaterThan(merged.length, 4_700)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: partialURL.path))
+    }
+
+    func testRecoveryKeepsFinishedMergeWhenASegmentWasAlreadyDeleted() async throws {
+        let (manager, paths) = makeManager()
+
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_halfclean_mic_recovery.wav")
+        let mergedURL = paths.audioCaptures.appendingPathComponent("meeting_halfclean_mic_merged.wav")
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        try writeMonoWAV(to: mergedURL, sampleRate: 16_000, samples: Array(repeating: 0.4, count: 4_800))
+        try backdate(recoveryURL)
+        try backdate(mergedURL)
+
+        _ = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: "meeting_halfclean_mic.wav",
+            segments: [
+                .init(filename: "meeting_halfclean_mic.wav", gapBefore: 0),
+                .init(filename: "meeting_halfclean_mic_recovery.wav", gapBefore: 0.1)
+            ],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
+
+        XCTAssertEqual(recovered, 1)
+        let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(entry.micAudioURL.lastPathComponent, "meeting_halfclean_mic_merged.wav")
+        let merged = try AVAudioFile(forReading: entry.micAudioURL)
+        XCTAssertEqual(merged.length, 4_800)
+    }
+
     func testRecoveryPromotesExistingTimeoutRowWithoutDuplicatingIt() async throws {
         let (manager, paths) = makeManager()
         let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_timeout_mic.wav")

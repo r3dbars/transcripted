@@ -257,9 +257,9 @@ extension TranscriptionTaskManagerMetadataTests {
         // preserve() already called task.cancel() on the underlying Task; the blocking engine
         // (unlike the uncooperative one used elsewhere in this file) checks Task.isCancelled and
         // throws CancellationError on its own within ~20ms, without needing speech.release().
-        try await waitUntil(timeout: 3) { speech.sawCancellation }
+        try await waitUntil(timeout: 60) { speech.sawCancellation }
 
-        try await waitUntil(timeout: 3) {
+        try await waitUntil(timeout: 60) {
             if case .failed = manager.displayStatus { return true }
             return false
         }

@@ -441,33 +441,37 @@ extension GhostInputController {
 
     func breakHistorySegment() {
         historySegmentIdentifier = UUID().uuidString
-        historyOwner = nil
+        historyContinuity.reset()
         historyDeletions.reset()
     }
 
     func invalidateHistoryContinuity() {
-        if historyOwner != nil { breakHistorySegment() }
+        if historyContinuity.isTracking { breakHistorySegment() }
     }
 
     /// Tracks only known app/caret boundaries. IMKit cannot distinguish two
     /// same-app fields at the same caret without broader system permissions.
+    /// Hosts that report a frozen or late caret still continue the chain;
+    /// see `PersonalHistoryCaretContinuity`.
     func prepareHistoryInsertion(
         _ text: String,
         observation: InsertionObservation
     ) -> Bool {
-        let selection = observation.selection
-        guard selection.location != NSNotFound else {
+        switch historyContinuity.insertion(
+            bundle: observation.bundle,
+            selection: observation.selection,
+            utf16Length: text.utf16.count
+        ) {
+        case .unusable:
             breakHistorySegment()
             return false
-        }
-        let current = FallbackOwner(bundle: observation.bundle, caret: selection.location)
-        if selection.length != 0 || (historyOwner != nil && historyOwner != current) {
+        case .breaks:
+            let continuity = historyContinuity
             breakHistorySegment()
+            historyContinuity = continuity
+        case .continues:
+            break
         }
-        historyOwner = FallbackOwner(
-            bundle: current.bundle,
-            caret: current.caret + text.utf16.count
-        )
         return true
     }
 }

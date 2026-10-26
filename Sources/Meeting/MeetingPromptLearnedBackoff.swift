@@ -20,7 +20,6 @@ final class MeetingPromptLearnedBackoff {
         var dismissStreak: Int = 0
         var quietUntil: Date?
         var lastDismissedAt: Date?
-        var recordCount: Int = 0
         var lastAcceptedAt: Date?
     }
 
@@ -130,7 +129,6 @@ final class MeetingPromptLearnedBackoff {
         entry.dismissStreak = 0
         entry.quietUntil = nil
         entry.lastDismissedAt = nil
-        entry.recordCount = min(entry.recordCount + 1, 1_000)
         entry.lastAcceptedAt = now
         entries[kind] = entry
         persist()

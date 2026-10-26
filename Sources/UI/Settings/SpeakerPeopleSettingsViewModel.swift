@@ -12,10 +12,13 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
     /// Lets each Meetings row's "has a review" check skip scanning the queue.
     private(set) var reviewQueueTranscriptPaths: Set<String> = []
-    /// The "Name these people" cards and what they hide from Everyone,
-    /// rebuilt only when the queue, a skip, or Later changes it. The page,
-    /// the Everyone list, and Home's attention row all read this one value.
+    /// The "Who spoke?" cards and what they hide from Everyone, rebuilt only
+    /// when the queue, a skip, Later, or the visit's state changes it. The
+    /// page, the Everyone list, and Home's attention row all read this one value.
     @Published private(set) var reviewStack = SpeakerReviewStack.empty
+    /// Per saved meeting (transcript path): voices still to name and the card
+    /// that holds them, for the Meetings page.
+    private(set) var meetingNamingByTranscriptPath: [String: SpeakerReviewStack.MeetingNaming] = [:]
     @Published private(set) var hasLoadedProfiles = false
     /// Bumped to ask the "Search speakers" field to take focus (⌘F).
     @Published private(set) var searchFocusRequestToken = 0
@@ -33,22 +36,33 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
     /// Calendar invitees per call, offered as one-tap names on its card.
     @Published private(set) var inviteesByCallKey: [String: [String]] = [:]
-    /// One owner for review visibility, held cards and save completions.
-    @Published private(set) var reviewSession = SpeakerReviewSession()
+    /// This visit to the "Who spoke?" cards: meetings done, the card just
+    /// finished (Undo), cards saving, and a card the Meetings page asked for.
+    /// See `+MeetingReview.swift`.
+    @Published var meetingReview = SpeakerMeetingReviewState() {
+        didSet { if meetingReview.heldOutCallKeys != oldValue.heldOutCallKeys || meetingReview.focusedCallKey != oldValue.focusedCallKey { rebuildReviewStack() } }
+    }
+    /// The finished card's saves, waiting out its Undo.
+    var pendingMeetingSaves: [UUID: (call: SpeakerPendingMeetingGroup, steps: [SpeakerMeetingReviewPolicy.Step])] = [:]
+    var meetingSaveTask: Task<Void, Never>?
+    /// Meeting saves run one meeting at a time, each after the snapshot the
+    /// one before it left, so two meetings naming the same new person make
+    /// one person, not two.
+    /// Answers from a "Who spoke?" card that didn't save, said once under
+    /// the headline until the next Done or Skip.
+    @Published var meetingSaveError: String?
+    var waitingMeetingSaves: [(@escaping @MainActor () -> Void) -> Void] = []
+    var isRunningMeetingSave = false
+    /// Quit waits here for the meeting saves to finish.
+    var meetingSavesIdleWaiters: [CheckedContinuation<Void, Never>] = []
+    /// The window's model, so Quit can finish its meeting saves without
+    /// building one.
+    static weak var live: SpeakerPeopleSettingsViewModel?
     /// Bumped per person when a yes for them lands from this page, so their
     /// print in the list plays the match animation. See `celebrate(_:)`.
     @Published private(set) var celebrationTokens: [UUID: Int] = [:]
     private var inviteeLookupsStarted: Set<String> = []
 
-    func openReview() { reviewSession.open() }
-    func closeReview() { reviewSession.close() }
-    func leaveReview(_ call: SpeakerPendingMeetingGroup) { reviewSession.leave(call) }
-    func finishReview(_ call: SpeakerPendingMeetingGroup, total: Int) {
-        reviewSession.finish(call, total: total)
-    }
-    func recordReviewName(_ voice: SpeakerReviewNamedVoice, on call: SpeakerPendingMeetingGroup, visitToken: UUID) {
-        reviewSession.record(voice, on: call, visit: visitToken)
-    }
 
     /// Mirrors the meeting controller's voiceprint migration gate: saved people
     /// moving into a new voice model's database. Edits made meanwhile wait in
@@ -67,6 +81,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
     private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
+    private var clipQuotesByProfileID: [UUID: String] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord] = [:]
     private var namingStandingsByProfileID: [UUID: SpeakerNamingStanding] = [:]
     private var snapshotPublication = RefreshPublicationOrder()
@@ -81,6 +96,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let duplicateCountsByProfileID: [UUID: Int]
         let mergeTargetIndex: SpeakerMergeTargetIndex
         let clipURLsByProfileID: [UUID: URL]
+        let clipQuotesByProfileID: [UUID: String]
         let reviewQueueItems: [SpeakerPendingReviewItem]
         let undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord]
         let namingStandingsByProfileID: [UUID: SpeakerNamingStanding]
@@ -103,6 +119,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         self.transcriptDirectory = transcriptDirectory
         self.reviewDefaults = reviewDefaults
         self.skippedCallKeys = SpeakerReviewSkippedCalls.load(defaults: reviewDefaults)
+        Self.live = self
         if let voiceprintMigrationGate {
             voiceprintMigrationPhase = voiceprintMigrationGate.phase
             // Synchronous on purpose: the mirror changes in the same step as
@@ -147,8 +164,11 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         reviewStack = SpeakerReviewStack(
             voices: voices,
             skippedCallKeys: skippedCallKeys,
-            laterCallKeys: laterCallKeys
+            laterCallKeys: laterCallKeys,
+            heldOutCallKeys: meetingReview.heldOutCallKeys,
+            focusedCallKey: meetingReview.focusedCallKey
         )
+        meetingNamingByTranscriptPath = reviewStack.meetingNaming(items: reviewQueueItems)
     }
 
     /// Dismisses a queued voice from its review card for this session without
@@ -163,7 +183,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     func sendCallToBack(_ group: SpeakerPendingMeetingGroup) {
-        leaveReview(group)
         laterCallKeys.removeAll { $0 == group.id }
         laterCallKeys.append(group.id)
     }
@@ -171,7 +190,6 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// Skips a whole call. Its voices move to Everyone (still unnamed, still
     /// mergeable) and the card stays gone after a restart.
     func skipCall(_ group: SpeakerPendingMeetingGroup) {
-        leaveReview(group)
         SpeakerReviewSkippedCalls.add(group.id, defaults: reviewDefaults)
         skippedCallKeys.insert(group.id)
     }
@@ -190,21 +208,19 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     }
 
     /// The "Everyone" directory: every voice except the ones on the open
-    /// review card right above it (named, deleted, or "This is me" there).
-    /// Voices on cards further down the stack stay here, badged "Waiting in
-    /// review", so they can be renamed, merged, or deleted without cycling
-    /// the stack, and a search never hides a match. While the stack is
-    /// closed to its summary card nothing is hidden.
-    /// See `SpeakerReviewStack.directory`.
+    /// "Who spoke?" card right above it (and a card just finished). Voices on
+    /// cards further down the stack stay here, badged "Waiting in review", so
+    /// they can be renamed, merged, or deleted without cycling the stack, and
+    /// a search never hides a match. See `SpeakerReviewStack.directory`.
     var directoryProfiles: [SpeakerProfile] {
-        reviewStack.directory(filteredProfiles, isSearching: isSearching || !reviewSession.isOpen, heldCallID: reviewSession.heldCall?.id)
+        reviewStack.directory(filteredProfiles, isSearching: isSearching)
     }
 
     /// Directory membership count independent of the search filter, used to
     /// decide whether the search field and the voice-print sections render
     /// at all.
     var directoryCount: Int {
-        reviewStack.directory(profiles, isSearching: !reviewSession.isOpen, heldCallID: reviewSession.heldCall?.id).count
+        reviewStack.directory(profiles, isSearching: false).count
     }
 
     /// Plays `personID`'s match animation in the list (after their new
@@ -219,18 +235,12 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     var filteredProfiles: [SpeakerProfile] {
         let duplicateIds = duplicateProfileIDs
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(profiles, duplicateIds: duplicateIds)
-        }
-
-        let query = trimmed.lowercased()
-        let matches = profiles.filter { profile in
-            if let name = profile.displayName?.lowercased(), name.contains(query) {
-                return true
-            }
-            return profile.id.uuidString.lowercased().contains(query)
-        }
+        let matches = SpeakerNameSelectionPolicy.matchingProfiles(
+            profiles,
+            query: searchText,
+            id: { $0.id },
+            displayName: { $0.displayName }
+        )
         return SpeakerPeopleReviewPolicy.sortedForPeopleSettings(matches, duplicateIds: duplicateIds)
     }
 
@@ -281,6 +291,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
 
     func clipURL(for speakerId: UUID) -> URL? {
         clipURLsByProfileID[speakerId]
+    }
+
+    func clipSampleText(for speakerId: UUID) -> String? {
+        clipQuotesByProfileID[speakerId]
     }
 
     func playSample(for speakerId: UUID) {
@@ -356,41 +370,22 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// spec's fallback, this reuses the confirmed existing "You" semantic
     /// (`SpeakerNameSelectionPolicy.ownerLabel`, already used by the naming
     /// sheet's autocomplete for local-mic entries) through the model's own
-    /// existing rename write path — the same thing that happens if the user
-    /// types "You" into the field and presses Enter — and then folds the
-    /// result into any other profile already named "You" so the identity
-    /// stays singular instead of leaving two "You" profiles behind.
+    /// existing naming write paths: when a "You" profile already exists the
+    /// voice joins it in one transaction (`mergePendingReviewItem`, the same
+    /// path as naming a voice after a saved person), so the identity stays
+    /// singular; otherwise it is named "You" like typing it and pressing Enter.
     func markPendingReviewItemAsMe(
         _ item: SpeakerPendingReviewItem,
-        completion: ((Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         let existingOwnerProfile = profiles.first {
             $0.id != item.speakerId && SpeakerNameSelectionPolicy.isOwnerLabel($0.displayName ?? "")
         }
-        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { [weak self] didRename in
-            guard didRename else {
-                completion?(false)
-                return
-            }
-            guard let self, let existingOwnerProfile else {
-                completion?(true)
-                return
-            }
-            // `namePendingReviewItem` already refreshed `profiles` on the main
-            // actor before invoking this completion, so the just-renamed
-            // profile (now displayName == "You") is findable here.
-            guard let renamedProfile = self.profiles.first(where: { $0.id == item.speakerId }) else {
-                completion?(true)
-                return
-            }
-            // The rename to the owner label already succeeded, which is what
-            // justifies completing the queue row. The fold-into-"You" merge
-            // below is async cleanup; if it fails, the duplicate stays
-            // visible in the directory with the normal duplicate badge and
-            // Merge Into tools, so nothing is silently lost.
-            self.merge(source: renamedProfile, into: existingOwnerProfile)
-            completion?(true)
+        if let owner = existingOwnerProfile {
+            mergePendingReviewItem(item, into: owner, completion: completion)
+            return
         }
+        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { completion?($0) }
     }
 
     /// Rename from an Everyone row. A voice still waiting for a name goes
@@ -479,15 +474,18 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let legacyClipsDirectory = self.legacyClipsDirectory
 
         runEditInBackground(completion: completion) {
+            // A closed database reads as missing, so require the row first.
+            guard speakerDatabase.getSpeaker(id: profileId) != nil else { return false }
             speakerDatabase.deleteSpeaker(id: profileId)
+            // Confirm the row is actually gone before reporting success so a
+            // failed delete surfaces an error and keeps the person's review clips.
+            guard speakerDatabase.getSpeaker(id: profileId) == nil else { return false }
             SpeakerClipLibrary.deleteClips(
                 for: profileId,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            // Confirm the row is actually gone before reporting success so a
-            // failed delete surfaces an error instead of silently no-opping.
-            return speakerDatabase.getSpeaker(id: profileId) == nil
+            return true
         }
     }
 
@@ -499,7 +497,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// A meeting's Name speakers moved silently named voices to someone else.
     /// Queued on the snapshot queue ahead of the edit itself, so the outcome
     /// rows are read before the merge moves them.
-    func prepareSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice], completion: @escaping ([[String: String]]) -> Void) {
+    func prepareSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice], completion: @escaping @MainActor @Sendable ([[String: String]]) -> Void) {
         guard !voices.isEmpty else { completion([]); return }
         let speakerDatabase = self.speakerDatabase
         snapshotQueue.async {
@@ -580,6 +578,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
         mergeTargetIndex = snapshot.mergeTargetIndex
         clipURLsByProfileID = snapshot.clipURLsByProfileID
+        clipQuotesByProfileID = snapshot.clipQuotesByProfileID
         reviewQueueItems = snapshot.reviewQueueItems
         undoableMergesByTargetID = snapshot.undoableMergesByTargetID
         namingStandingsByProfileID = snapshot.namingStandingsByProfileID
@@ -643,6 +642,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         )
 
         var clipURLsByProfileID: [UUID: URL] = [:]
+        var clipQuotesByProfileID: [UUID: String] = [:]
         for profile in profiles {
             if let url = SpeakerClipLibrary.clipURL(
                 for: profile.id,
@@ -650,6 +650,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 legacyClipsDirectory: legacyClipsDirectory
             ) {
                 clipURLsByProfileID[profile.id] = url
+                if let quote = SpeakerClipLibrary.sampleText(nextTo: url) {
+                    clipQuotesByProfileID[profile.id] = quote
+                }
             }
         }
 
@@ -666,6 +669,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             duplicateCountsByProfileID: duplicateCountsByProfileID,
             mergeTargetIndex: mergeTargetIndex,
             clipURLsByProfileID: clipURLsByProfileID,
+            clipQuotesByProfileID: clipQuotesByProfileID,
             reviewQueueItems: reviewQueueItems,
             undoableMergesByTargetID: undoableMergesByTargetID,
             namingStandingsByProfileID: namingStandingsByProfileID

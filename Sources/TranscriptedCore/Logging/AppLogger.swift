@@ -39,7 +39,7 @@ public final class AppLogger: @unchecked Sendable {
         let safeMetadata = LogPrivacySanitizer.sanitizeMetadata(metadata)
 
         // Write to file logger (agent-readable)
-        fileLogger.write(level: level, subsystem: subsystem, message: safeMessage, metadata: safeMetadata)
+        fileLogger.writeSanitized(level: level, subsystem: subsystem, message: safeMessage, metadata: safeMetadata)
 
         // Write to os.Logger (Console.app)
         let osLog = cachedOSLog(for: subsystem)

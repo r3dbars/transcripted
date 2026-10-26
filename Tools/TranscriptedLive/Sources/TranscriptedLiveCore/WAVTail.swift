@@ -75,12 +75,6 @@ public final class WAVTail {
         return Self.downmix(data, format: format, frames: frames)
     }
 
-    /// Re-reads the declared data size, e.g. after the writer closed the file.
-    public func refreshDeclaredSize() {
-        guard format != nil else { return }
-        _ = try? parseHeader()
-    }
-
     // MARK: - Header
 
     private func currentFileSize() throws -> UInt64 {

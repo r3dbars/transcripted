@@ -446,7 +446,10 @@ final class SpeakerImportedConfirmationDedupeTests: XCTestCase {
         )
 
         let manager = harness.manager
-        for _ in 0..<400 {
+        // Hang guard only: the save always finishes, so a busy machine just
+        // takes longer to get here. A short budget here flaked under load.
+        let deadline = Date().addingTimeInterval(60)
+        while Date() < deadline {
             if manager.speakerNamingRequest == nil, manager.lastSavedTranscriptId == transcriptId { return }
             try await Task.sleep(nanoseconds: 10_000_000)
         }

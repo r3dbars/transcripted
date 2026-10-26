@@ -71,11 +71,6 @@ struct ModelCacheCleanupResult: Equatable {
 }
 
 enum ModelCacheInventory {
-    // FluidAudio 0.15.x resolves the v3 cache folder WITHOUT the -coreml suffix
-    // (ModelNames.folderName strips it). ParakeetEngine renames a 0.7.9-era
-    // -coreml cache to this name on first init so users keep their download.
-    static let activeParakeetModelDirectoryName = ParakeetModelVariant.v3.directoryName
-
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
         // Both v2 folder spellings are supported: FluidAudio 0.7.9 already
         // downloaded the modern v2 model set into the -coreml directory.

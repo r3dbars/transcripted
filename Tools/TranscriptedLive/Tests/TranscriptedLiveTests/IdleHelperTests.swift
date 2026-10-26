@@ -279,3 +279,25 @@ private func writeJournal(in directory: URL, meetingId: String, state: String) t
         #expect(session.state == .idle)
     }
 }
+
+@Suite struct MeetingRetentionTests {
+    @Test func startingTheHelperDropsMeetingTranscriptsOlderThanADay() throws {
+        let root = try tempDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let clock = VirtualClock()
+        let meetings = root.appendingPathComponent("meetings", isDirectory: true)
+        try FileManager.default.createDirectory(at: meetings, withIntermediateDirectories: true)
+        let files = ["old.jsonl": 25.0, "recent.jsonl": 1.0, "notes.txt": 25.0]
+        for (name, hoursAgo) in files {
+            let url = meetings.appendingPathComponent(name)
+            try Data("{}\n".utf8).write(to: url)
+            try FileManager.default.setAttributes(
+                [.modificationDate: clock.now - hoursAgo * 3600], ofItemAtPath: url.path)
+        }
+
+        _ = try LiveOutput(root: root, model: "test", now: { clock.now })
+
+        let left = try FileManager.default.contentsOfDirectory(atPath: meetings.path).sorted()
+        #expect(left == ["notes.txt", "recent.jsonl"])
+    }
+}

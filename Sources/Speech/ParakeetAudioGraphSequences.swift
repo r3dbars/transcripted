@@ -317,6 +317,8 @@ protocol ParakeetStopRecordingHost: AnyObject {
     var hasSharedMeetingMicClaim: Bool { get }
     var isSharedMeetingMicResumeInProgress: Bool { get }
     func invalidateSharedMeetingMicTransition()
+    /// Delivers borrowed-mic buffers the meeting relay already accepted.
+    func flushSharedMeetingMicBuffers() async
     /// Ends a dictation that borrows the meeting's mic.
     func finishSharedMeetingMicStop()
     /// The config-recovery generation in flight, if any.
@@ -335,6 +337,9 @@ protocol ParakeetStopRecordingHost: AnyObject {
     /// Moves captured samples into the take and marks recording stopped.
     func finishStoppedRecording()
     func reportRecordingStopped()
+    /// Ends the recovery hold once a stop has the take: the next press starts
+    /// fresh, and idle route changes stay off the live-recovery path.
+    func endRecordingContinuity()
 }
 
 enum ParakeetStopRecordingSequence {
@@ -353,7 +358,14 @@ enum ParakeetStopRecordingSequence {
             host.invalidateSharedMeetingMicTransition()
         }
         if host.hasSharedMeetingMicClaim {
-            host.finishSharedMeetingMicStop()
+            // Drain the relay first: the recorder drops buffers after finish.
+            await host.flushSharedMeetingMicBuffers()
+            // The meeting may have ended during the flush and finalized the
+            // borrowed take itself.
+            if host.hasSharedMeetingMicClaim {
+                host.finishSharedMeetingMicStop()
+            }
+            host.endRecordingContinuity()
             return
         }
 
@@ -371,6 +383,7 @@ enum ParakeetStopRecordingSequence {
             switch host.idleStopAction() {
             case .drainRecoveredAudio:
                 host.cancelPendingRecordingRecovery()
+                host.endRecordingContinuity()
             case .cancelPendingZombieRestart:
                 // A zombie reset marks recording idle while it waits to retry,
                 // with nothing preserved. A stop then cancels that restart.
@@ -395,9 +408,13 @@ enum ParakeetStopRecordingSequence {
         }
         if host.hasPinnedDictationRecording {
             await host.stopPinnedDictationRecording()
+            host.endRecordingContinuity()
             return
         }
-        if await graph.stopRecording(finishRecording: { host.finishStoppedRecording() }) {
+        if await graph.stopRecording(finishRecording: {
+            host.finishStoppedRecording()
+            host.endRecordingContinuity()
+        }) {
             host.reportRecordingStopped()
         }
     }

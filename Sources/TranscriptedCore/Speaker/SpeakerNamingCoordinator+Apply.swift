@@ -149,8 +149,8 @@ extension TranscriptionTaskManager {
                 }
             case .setDisplayName(let id, let name):
                 speakerDB.setDisplayName(id: id, name: name, source: NameSource.userManual)
-            case .restoreProfile(let profile):
-                speakerDB.restoreProfile(profile)
+            case .revertMatchContribution(let profile):
+                speakerDB.revertMatchContribution(snapshot: profile)
             case .addOrUpdateEmbedding(let embedding, let existingId):
                 _ = speakerDB.addOrUpdateSpeaker(embedding: embedding, existingId: existingId)
             case .teachVoice(let embedding, let profileId):

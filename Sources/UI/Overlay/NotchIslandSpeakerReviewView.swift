@@ -27,6 +27,10 @@
 // answered and leaves the rest for Speakers. A name typed but not submitted
 // counts on both. The ring only runs while the review is on screen. The rules
 // live in NotchIslandSpeakerReviewPolicy; rows are NotchIslandVoiceRowView.
+//
+// Settings › Speakers draws the same review as a card, one meeting at a time
+// (`Chrome.page`, +Page): no ring, a quote under each voice, Skip and
+// "Done, next meeting"; the page shows what happens after Done.
 
 import AppKit
 import TranscriptedCore
@@ -36,6 +40,44 @@ import TranscriptedCore
 final class NotchIslandSpeakerReviewView: NSView {
     static let contentWidth = NotchIslandGeometry.dropWidth - 40
 
+    /// Where the review is drawn.
+    enum Chrome: Equatable {
+        /// The island: the Later ring, Delete recording…, "Everyone's named".
+        case island
+        /// A card on the Speakers page, with the page's own words.
+        case page(PageCard)
+    }
+
+    /// The page card's words, worked out by the page.
+    struct PageCard: Equatable {
+        /// "Who spoke? · Weekly sync"
+        var title: String
+        /// The meeting's day and time, small on the right.
+        var detail: String?
+        /// "Done, next meeting" or "Done".
+        var doneTitle: String
+        var skipTitle: String
+        var skipHelp: String
+    }
+
+    /// What one review asks about. The island builds it from Core's request;
+    /// the Speakers page builds it from a saved meeting.
+    struct Input {
+        let id: UUID
+        let speakers: [SpeakerNamingEntry]
+        let knownPeople: [SpeakerNameChoice]
+        var recognizedSpeakers: [SpeakerNamingEntry] = []
+        var recognizedSpeakerNames: [String] = []
+        /// How each voice plays, by entry id; unlisted voices play their clip file.
+        var clips: [UUID: NotchIslandVoiceClip] = [:]
+    }
+
+    var chrome: Chrome
+    /// The page's Done, so its words can change without a rebuild.
+    weak var pageDoneButton: NotchIslandButton?
+    /// Content width: the island's, or the page card's.
+    let width: CGFloat
+
     /// The rows changed height; the island should resize around them.
     var onLayoutChange: (() -> Void)?
     /// A name box wants the keyboard.
@@ -44,6 +86,8 @@ final class NotchIslandSpeakerReviewView: NSView {
     var onDone: ((_ updates: [SpeakerReviewUpdate], _ leftForLater: Int) -> Void)?
     /// Later, or the ring ran out: save what was answered, leave the rest.
     var onLater: ((_ updates: [SpeakerReviewUpdate]) -> Void)?
+    /// The page's Skip: save what was answered, stop asking about the rest.
+    var onSkip: ((_ updates: [SpeakerReviewUpdate]) -> Void)?
     var onOpenTranscript: (() -> Void)?
     /// Nil means success; an error keeps the review available for retry.
     var onDeleteRecording: (() async -> String?)?
@@ -55,7 +99,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     var onDoneLingerEnded: (() -> Void)?
 
     let requestID: UUID
-    private let request: SpeakerNamingRequest
+    private let input: Input
     let knownPeople: [SpeakerNameChoice]
     private let stack = NSStackView()
     /// The footer's dots and "N people named automatically", refreshed in place.
@@ -92,6 +136,8 @@ final class NotchIslandSpeakerReviewView: NSView {
     private var didOfferOneOnOnePrefill = false
     /// "All me" is on: every asked local mic voice saves as You.
     private var keepMicAsYou = false
+    /// "All me" is on (for the page's draft check).
+    var keepsMicAsYou: Bool { keepMicAsYou }
     /// The button carrying the countdown ring: Later, or Done when nothing is asked.
     private var countdownButton: NotchIslandButton?
     private var laterTask: Task<Void, Never>?
@@ -110,14 +156,26 @@ final class NotchIslandSpeakerReviewView: NSView {
     private var isOnScreen = false
     private(set) var isFinished = false
 
-    init(request: SpeakerNamingRequest) {
-        self.request = request
-        self.knownPeople = request.knownPeople.map {
-            SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount, confirmedMeetings: $0.confirmedMeetings, isTrusted: $0.isTrusted, earnsConfirmation: $0.earnsConfirmation)
-        }
-        self.requestID = request.id
-        self.isRecognizedOnly = request.speakers.isEmpty
-        super.init(frame: NSRect(x: 0, y: 0, width: Self.contentWidth, height: 10))
+    convenience init(request: SpeakerNamingRequest) {
+        self.init(input: Input(
+            id: request.id,
+            speakers: request.speakers,
+            knownPeople: request.knownPeople.map {
+                SpeakerNameChoice(id: $0.id, displayName: $0.displayName, callCount: $0.callCount, confirmedMeetings: $0.confirmedMeetings, isTrusted: $0.isTrusted, earnsConfirmation: $0.earnsConfirmation)
+            },
+            recognizedSpeakers: request.recognizedSpeakers,
+            recognizedSpeakerNames: request.recognizedSpeakerNames
+        ))
+    }
+
+    init(input: Input, chrome: Chrome = .island, width: CGFloat = NotchIslandSpeakerReviewView.contentWidth) {
+        self.input = input
+        self.chrome = chrome
+        self.width = width
+        self.knownPeople = input.knownPeople
+        self.requestID = input.id
+        self.isRecognizedOnly = input.speakers.isEmpty
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 10))
         translatesAutoresizingMaskIntoConstraints = false
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -125,15 +183,15 @@ final class NotchIslandSpeakerReviewView: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
         NSLayoutConstraint.activate([
-            widthAnchor.constraint(equalToConstant: Self.contentWidth),
+            widthAnchor.constraint(equalToConstant: width),
             stack.topAnchor.constraint(equalTo: topAnchor),
             stack.leadingAnchor.constraint(equalTo: leadingAnchor),
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         // Doubtful suggestions first: the first answer teaches the matcher most.
-        let ranked = SpeakerReviewBridge.ranked(request.speakers.filter { $0.channel == .system })
-            + SpeakerReviewBridge.ranked(request.speakers.filter { $0.channel == .mic })
+        let ranked = SpeakerReviewBridge.ranked(input.speakers.filter { $0.channel == .system })
+            + SpeakerReviewBridge.ranked(input.speakers.filter { $0.channel == .mic })
         rows = ranked.map { makeRow(for: $0, recognized: false) }
         // A name the call app showed for an unnamed voice fills its box now;
         // the calendar 1:1 name (later) never replaces it.
@@ -142,11 +200,11 @@ final class NotchIslandSpeakerReviewView: NSView {
                   prefill.source == .callApp else { continue }
             row.prefill(prefill.name, source: .callApp)
         }
-        recognizedRows = request.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
-        let correctable = Set(request.recognizedSpeakers.compactMap {
+        recognizedRows = input.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
+        let correctable = Set(input.recognizedSpeakers.compactMap {
             $0.currentName.map(SpeakerNameSelectionPolicy.normalizedSearchText)
         })
-        plainRecognizedNames = request.recognizedSpeakerNames.filter {
+        plainRecognizedNames = input.recognizedSpeakerNames.filter {
             !correctable.contains(SpeakerNameSelectionPolicy.normalizedSearchText($0))
         }
         printTip.translatesAutoresizingMaskIntoConstraints = false
@@ -156,16 +214,24 @@ final class NotchIslandSpeakerReviewView: NSView {
         NSLayoutConstraint.activate([tipTop, tipLeading].compactMap { $0 })
         assignColors()
         rebuild()
-        // The ring waits until the island reports the review on screen.
-        if !isRecognizedOnly { trackShown() }
-        scheduleHardCap()
+        if isPage {
+            // The page waits for its reader: no ring, no hard cap.
+            laterStopped = true
+        } else {
+            // The ring waits until the island reports the review on screen.
+            if !isRecognizedOnly { trackShown() }
+            scheduleHardCap()
+        }
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
         setAccessibilityLabel(accessibilityTitle)
     }
 
     private func makeRow(for entry: SpeakerNamingEntry, recognized: Bool) -> NotchIslandVoiceRowView {
-        let row = NotchIslandVoiceRowView(entry: entry, knownPeople: knownPeople, recognized: recognized)
+        let row = NotchIslandVoiceRowView(
+            entry: entry, knownPeople: knownPeople, recognized: recognized, width: width,
+            clip: input.clips[entry.id] ?? .file(entry.clipURL), showsQuote: isPage
+        )
         row.onChange = { [weak self] in self?.rowChanged() }
         row.onInteract = { [weak self] in self?.stopLaterCountdown() }
         row.onWantsKeyboard = { [weak self] in self?.onWantsKeyboard?() }
@@ -264,7 +330,7 @@ final class NotchIslandSpeakerReviewView: NSView {
             return
         }
 
-        let header = headerLine()
+        let header = isPage ? pageHeaderLine() : headerLine()
         stack.addArrangedSubview(header)
         stack.setCustomSpacing(14, after: header)
 
@@ -273,7 +339,8 @@ final class NotchIslandSpeakerReviewView: NSView {
             stack.addArrangedSubview(row)
             lastRow = row
         }
-        for name in plainRecognizedNames {
+        // The page names who was recognized only in the footer's dots.
+        for name in plainRecognizedNames where !isPage {
             let row = recognizedRow(name)
             stack.addArrangedSubview(row)
             lastRow = row
@@ -292,10 +359,13 @@ final class NotchIslandSpeakerReviewView: NSView {
         }
         refreshInvitees()
 
-        let done = NotchIslandButton(title: "Done", style: .white, height: 34)
-        done.onPress = { [weak self] in self?.finishDone() }
         let buttons: NSStackView
-        if isRecognizedOnly {
+        let done = NotchIslandButton(title: pageCard?.doneTitle ?? "Done", style: .white, height: 34)
+        done.onPress = { [weak self] in self?.finishDone() }
+        if let pageCard {
+            pageDoneButton = done
+            buttons = pageButtons(pageCard, done: done)
+        } else if isRecognizedOnly {
             // Nothing to put off: Done carries the ring and closes the list.
             done.setAccessibilityHelp("Close. Names are already saved.")
             buttons = NSStackView(views: [done])
@@ -322,10 +392,12 @@ final class NotchIslandSpeakerReviewView: NSView {
         footer.distribution = .fill
         footer.spacing = 16
         footer.translatesAutoresizingMaskIntoConstraints = false
-        footer.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        footer.widthAnchor.constraint(equalToConstant: width).isActive = true
         stack.setCustomSpacing(18, after: lastRow)
         stack.addArrangedSubview(footer)
         refreshFooterSummary(animated: false)
+        // A saved meeting is deleted from Meetings, not from its card.
+        guard !isPage else { return }
         let delete = NotchIslandTextButton(title: NotchIslandSpeakerReviewPolicy.deleteTitle, restAlpha: 0.65)
         delete.setAccessibilityIdentifier("speaker-review-delete-recording")
         delete.setAccessibilityHelp("Delete this recording and its saved audio, with confirmation. Saved people are kept.")
@@ -353,7 +425,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         let detail = NSTextField(wrappingLabelWithString: deletionError ?? NotchIslandSpeakerReviewPolicy.deleteDetail)
         detail.font = .systemFont(ofSize: 13)
         detail.textColor = NotchIslandPalette.secondaryText
-        detail.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        detail.widthAnchor.constraint(equalToConstant: width).isActive = true
         stack.addArrangedSubview(title)
         stack.addArrangedSubview(detail)
         if deletingRecording {
@@ -414,7 +486,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         line.alignment = .firstBaseline
         line.spacing = 12
         line.translatesAutoresizingMaskIntoConstraints = false
-        line.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        line.widthAnchor.constraint(equalToConstant: width).isActive = true
         // VoiceOver reads the review's own label instead.
         line.setAccessibilityElement(false)
         return line
@@ -446,7 +518,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         line.spacing = 8
         line.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 0, right: 0)
         line.translatesAutoresizingMaskIntoConstraints = false
-        line.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        line.widthAnchor.constraint(equalToConstant: width).isActive = true
         return line
     }
 
@@ -553,7 +625,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     /// Every answer, including a name left typed in an open box. Recognized
     /// voices only add an update when they were corrected; `unanswered`
     /// counts the asked voices still unnamed.
-    private func collectUpdates(
+    func collectUpdates(
         finish: NotchIslandSpeakerReviewPolicy.Finish
     ) -> (updates: [SpeakerReviewUpdate], unanswered: Int) {
         var updates = recognizedRows.compactMap { $0.buildUpdate(finish: finish) }
@@ -584,6 +656,10 @@ final class NotchIslandSpeakerReviewView: NSView {
 
     private func finishDone() {
         guard !isFinished, !confirmingDeletion else { return }
+        if isPage {
+            finishPageDone()
+            return
+        }
         let result = collectUpdates(finish: .done)
         guard NotchIslandSpeakerReviewPolicy.doneShowsSummary(
             recognizedOnly: isRecognizedOnly,
@@ -622,7 +698,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         let footer = NSStackView(views: [NSView(), open])
         footer.orientation = .horizontal
         footer.translatesAutoresizingMaskIntoConstraints = false
-        footer.widthAnchor.constraint(equalToConstant: Self.contentWidth).isActive = true
+        footer.widthAnchor.constraint(equalToConstant: width).isActive = true
         stack.addArrangedSubview(titleRow)
         stack.addArrangedSubview(detail)
         stack.setCustomSpacing(12, after: detail)
@@ -650,10 +726,10 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     private func analyticsProperties() -> [String: String] {
-        let mic = request.speakers.filter { $0.channel == .mic }.count
-        let system = request.speakers.count - mic
-        let needsNaming = request.speakers.contains { $0.needsNaming }
-        let needsConfirmation = request.speakers.contains { $0.needsConfirmation }
+        let mic = input.speakers.filter { $0.channel == .mic }.count
+        let system = input.speakers.count - mic
+        let needsNaming = input.speakers.contains { $0.needsNaming }
+        let needsConfirmation = input.speakers.contains { $0.needsConfirmation }
         let reason: String
         switch (needsNaming, needsConfirmation) {
         case (true, true): reason = "mixed"
@@ -662,11 +738,11 @@ final class NotchIslandSpeakerReviewView: NSView {
         case (false, false): reason = "unknown"
         }
         return [
-            "known_people_bucket": AnalyticsReporter.countBucket(request.knownPeople.count),
+            "known_people_bucket": AnalyticsReporter.countBucket(input.knownPeople.count),
             "local_voice_bucket": AnalyticsReporter.countBucket(mic),
-            "match_suggestion_bucket": AnalyticsReporter.countBucket(request.speakers.filter { $0.suggestedProfileId != nil }.count),
+            "match_suggestion_bucket": AnalyticsReporter.countBucket(input.speakers.filter { $0.suggestedProfileId != nil }.count),
             "remote_voice_bucket": AnalyticsReporter.countBucket(system),
-            "review_item_bucket": AnalyticsReporter.countBucket(request.speakers.count),
+            "review_item_bucket": AnalyticsReporter.countBucket(input.speakers.count),
             "review_reason": reason,
             "surface": Self.surface,
         ]
@@ -678,9 +754,9 @@ final class NotchIslandSpeakerReviewView: NSView {
         // Recognized voices too, so a "Not Taylor?" correction reports the
         // match it overrode instead of an empty bucket.
         let key: (SpeakerNamingEntry) -> String = { $0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId) }
-        let entriesByKey = NotchIslandSpeakerReviewPolicy.entriesByKey(asked: request.speakers, recognized: request.recognizedSpeakers, key: key)
+        let entriesByKey = NotchIslandSpeakerReviewPolicy.entriesByKey(asked: input.speakers, recognized: input.recognizedSpeakers, key: key)
         // Named silently: a correction on one of these is a wrong silent name.
-        let autoKeys = NotchIslandSpeakerReviewPolicy.autoRecognizedKeys(asked: request.speakers, recognized: request.recognizedSpeakers, key: key)
+        let autoKeys = NotchIslandSpeakerReviewPolicy.autoRecognizedKeys(asked: input.speakers, recognized: input.recognizedSpeakers, key: key)
         for update in updates {
             guard let kind = SpeakerReviewBridge.matchOutcome(for: update) else { continue }
             let updateKey = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)

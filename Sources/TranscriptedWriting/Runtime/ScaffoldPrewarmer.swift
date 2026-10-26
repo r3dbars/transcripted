@@ -52,7 +52,7 @@ final class ScaffoldPrewarmer: @unchecked Sendable {
         self.now = now
         self.enabled = enabled
         self.allowsApp = allowsApp
-        self.perform = perform ?? Self.performOverLoopback
+        self.perform = perform ?? { await Self.performOverLoopback($0) }
     }
 
     /// Pause/background admission changes leave the helper and cache intact.

@@ -352,11 +352,9 @@ enum CLIContextStore {
             throw ValidationError("Invalid dictation filename: \(filename)")
         }
 
-        guard let markdownURL else {
-            throw ValidationError("Dictation not found: \(filename)")
-        }
-
-        guard let day = loadDictationDay(at: markdownURL) else {
+        guard let markdownURL,
+              CaptureMarkdown.captureKind(of: markdownURL) == .dictationDay,
+              let day = loadDictationDay(at: markdownURL) else {
             throw ValidationError("Dictation not found: \(filename)")
         }
 

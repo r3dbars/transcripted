@@ -19,10 +19,40 @@ extension TranscriptedSettingsView {
 
             Spacer(minLength: 0)
 
+            sidebarFeedbackButton
+                .padding(.horizontal, 12)
+                .padding(.bottom, 8)
+
             sidebarBottomLine
         }
         .frame(maxHeight: .infinity)
         .background(LibraryTokens.sidebarBackground.ignoresSafeArea())
+    }
+
+    private var sidebarFeedbackButton: some View {
+        Button {
+            feedbackComposer.open(area: "general")
+            feedbackIsPresented = true
+        } label: {
+            Label("Feedback", systemImage: "bubble.left")
+                .font(.system(size: 13.5))
+                .foregroundStyle(Color.primary.opacity(0.72))
+                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+                .padding(.horizontal, 9)
+                .contentShape(RoundedRectangle(cornerRadius: 6))
+        }
+        .buttonStyle(SidebarQuietButtonStyle())
+        .help("Send a problem, idea, or screenshot to Transcripted support")
+        .accessibilityIdentifier("transcripted.settings.sidebar.feedback")
+        .background {
+            FeedbackPopoverAnchor(isPresented: $feedbackIsPresented) {
+                FeedbackComposerView(
+                    model: feedbackComposer,
+                    onClose: { feedbackIsPresented = false },
+                    onPickerClosed: { feedbackIsPresented = true }
+                )
+            }
+        }
     }
 
     /// One quiet line at the bottom of the sidebar (Things-style): a tiny
@@ -277,7 +307,7 @@ extension TranscriptedSettingsView {
     private var homePage: some View {
         HomeSettingsPage(
             homeViewModel: homeViewModel,
-            capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+            capturesToday: homeViewModel.todayMeetingCount,
             attentionTitle: homeAttentionIssues.first?.title,
             meetingDaySections: homeMeetingDaySections,
             homeCopiedRowID: homeCopiedRowID,
@@ -325,7 +355,7 @@ extension TranscriptedSettingsView {
             onCancelActivity: {
                 trackSettingsAction("cancel_current_activity", page: .home)
                 actions.cancelPendingAudioImports()
-                meetingSession.cancelActiveTranscription(reason: .userRequested)
+                meetingSession.cancelActiveTranscription()
             },
             onOpenSavedMeeting: { transcriptURL in
                 trackSettingsAction("open_saved_meeting", page: .home)
@@ -380,6 +410,12 @@ extension TranscriptedSettingsView {
                 assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
+            meetingVoicesToName: { item in
+                speakerPeopleModel.hasLoadedProfiles ? speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) : 0
+            },
+            onWhoSpoke: { item in
+                openHomeSpeakerReview(actionName: "review_meeting_speakers_pill", transcriptURL: item.transcriptURL)
+            },
             onRetryFailedMeeting: { failedMeeting in
                 trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
                 retryFailedMeeting(failedMeeting)
@@ -578,8 +614,11 @@ extension TranscriptedSettingsView {
         }
     }
 
-    func openHomeSpeakerReview(actionName: String) {
+    /// Opens Speakers at its "Who spoke?" cards; with a meeting, that
+    /// meeting's card goes on top.
+    func openHomeSpeakerReview(actionName: String, transcriptURL: URL? = nil) {
         trackSettingsAction(actionName, page: navigation.selectedPage)
+        speakerPeopleModel.focusMeeting(transcriptURL: transcriptURL)
         speakerPeopleModel.refresh()
         speakerPeopleModel.searchText = ""
         navigation.select(.people, source: .settingsAction)
@@ -690,6 +729,10 @@ extension TranscriptedSettingsView {
             crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {
                 trackSettingsAction("submit_feedback", page: .general)
+                feedbackComposer.open(area: "general")
+                feedbackIsPresented = true
+            },
+            onEmailSupport: {
                 actions.sendFeedback()
             },
             onSendDiagnosticEvent: {

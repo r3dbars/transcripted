@@ -6,8 +6,8 @@
 // fast-tested PhysicalDictationTriggerPreferences matchers) so the chord
 // precedence can be pinned by tests without the Carbon/CGEventTap engine.
 //
-// The stateful per-action debounce and the CGEventTap wiring stay in
-// ContextCaptureEngine; only the deterministic binding-selection logic lives
+// The CGEventTap lives in PhysicalShortcutDetector; debounce stays in
+// ContextCaptureEngine. Only the deterministic binding-selection logic lives
 // here.
 
 import Foundation
@@ -157,10 +157,9 @@ enum PhysicalShortcutMatcher {
 
     static func shouldActivateDelayedModifierPress(
         current: DelayedModifierShortcutPress?,
-        expected: DelayedModifierShortcutPress,
-        isPhysicallyDown: Bool
+        expected: DelayedModifierShortcutPress
     ) -> Bool {
-        current == expected && isPhysicallyDown
+        current == expected
     }
 
     static func shouldSynthesizePushToTalkRelease(
@@ -268,34 +267,40 @@ struct HotkeyActionDebouncer {
 
 extension PhysicalShortcutMatcher {
     /// The binding snapshot the event tap matches against. Meetings is
-    /// always there; the dictation key comes first, only while dictation
+    /// always there unless it now collides with the dictation F-key (F8 vs
+    /// Fn+F8); the dictation key comes first, only while dictation
     /// shortcuts are on. Built once per
     /// (re)configure, never per keystroke.
     static func configuredBindings(userDefaults: UserDefaults = .standard) -> [PhysicalShortcutBinding] {
         // No paste-last-dictation shortcut: it was dropped from Settings,
         // and a global chord nobody can see or change shouldn't stay live.
-        var bindings = [
-            PhysicalShortcutBinding(
-                action: .meeting,
-                binding: PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults)
-            )
-        ]
+        let meeting = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults)
+        var bindings: [PhysicalShortcutBinding] = []
 
-        guard HotkeyPreferences.dictationShortcutsEnabled(userDefaults: userDefaults) else {
-            return bindings
+        if HotkeyPreferences.dictationShortcutsEnabled(userDefaults: userDefaults) {
+            // One dictation key. Tap to toggle runs it through the hands-free
+            // path; the other behaviors are Push to Talk, where Hold or tap
+            // keeps listening after a quick tap (DictationHotkeyRouter).
+            let behavior = HotkeyPreferences.dictationKeyBehavior(userDefaults: userDefaults)
+            let dictation = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
+            bindings.append(
+                PhysicalShortcutBinding(
+                    action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
+                    binding: dictation
+                )
+            )
+            // F8 vs Fn+F8 now compare equal. Installing both would make
+            // `.first` matching leave meetings silently dead. Settings
+            // shows `storedClashReason` so the user can pick a free key.
+            if PhysicalDictationTriggerPreferences.storedClashReason(
+                dictation: dictation,
+                meeting: meeting
+            ) != nil {
+                return bindings
+            }
         }
 
-        // One dictation key. Tap to toggle runs it through the hands-free
-        // path; the other behaviors are Push to Talk, where Hold or tap
-        // keeps listening after a quick tap (DictationHotkeyRouter).
-        let behavior = HotkeyPreferences.dictationKeyBehavior(userDefaults: userDefaults)
-        bindings.insert(
-            PhysicalShortcutBinding(
-                action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
-                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
-            ),
-            at: 0
-        )
+        bindings.append(PhysicalShortcutBinding(action: .meeting, binding: meeting))
         return bindings
     }
 
@@ -312,21 +317,6 @@ extension PhysicalShortcutMatcher {
             return (modifierFlags & modifier) != 0
         }
         return keyState(keyCode)
-    }
-
-    /// Whether a delayed modifier press should start push-to-talk. It reads
-    /// the bound key itself, so Left Option held doesn't count as a held
-    /// Right Option binding.
-    static func shouldActivateDelayedModifierPress(
-        current: DelayedModifierShortcutPress?,
-        expected: DelayedModifierShortcutPress,
-        keyState: (UInt32) -> Bool
-    ) -> Bool {
-        shouldActivateDelayedModifierPress(
-            current: current,
-            expected: expected,
-            isPhysicallyDown: keyState(expected.keyCode)
-        )
     }
 
     struct TapDisabledReconciliation: Equatable {

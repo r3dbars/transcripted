@@ -27,7 +27,7 @@ extension DictationSessionController {
                 extra: [
                     "dictation_session_id": currentDictationSessionID.uuidString,
                     "trigger": trigger.rawValue,
-                    "overlay_state": overlayStateName(overlayController.state),
+                    "overlay_state": overlayController.state.diagnosticName,
                     "stt_recording": "\(appState.sttRouter.isRecording)"
                 ]
             )
@@ -68,7 +68,7 @@ extension DictationSessionController {
                 context: dictationContext(
                     extra: [
                         "trigger": trigger.rawValue,
-                        "overlay_state": overlayStateName(overlayController.state),
+                        "overlay_state": overlayController.state.diagnosticName,
                         "stt_recording": "\(appState.sttRouter.isRecording)"
                     ]
                 )
@@ -127,7 +127,7 @@ extension DictationSessionController {
                 context: dictationContext(
                     extra: [
                         "trigger": trigger.rawValue,
-                        "overlay_state": overlayStateName(overlayController.state),
+                        "overlay_state": overlayController.state.diagnosticName,
                         "stt_recording": "\(appState.sttRouter.isRecording)"
                     ]
                 )
@@ -147,7 +147,7 @@ extension DictationSessionController {
                         context: dictationContext(
                             extra: [
                                 "trigger": trigger.rawValue,
-                                "overlay_state": overlayStateName(overlayController.state),
+                                "overlay_state": overlayController.state.diagnosticName,
                                 "failure_kind": failureKind
                             ]
                         )
@@ -312,6 +312,10 @@ extension DictationSessionController {
             }
             stopTiming.cleanedAt = CFAbsoluteTimeGetCurrent()
             guard let text = cleanupResult?.text, !text.isEmpty else {
+                // A hand-off take that heard nothing still answers its card, so the card doesn't wait.
+                if DictationHandOffPolicy.handsOff(sessionID: taskSessionID, handOffSessionID: self.handOffSessionID) {
+                    self.publishHandOff("", sessionID: taskSessionID)
+                }
                 let emptyReason = appState.sttRouter.lastEmptyTranscriptionReason ?? .noSpeech
                 // finishEmptyTake (DictationSessionPipeline.swift) runs
                 // DictationEmptyTranscriptPolicy and the matching message.
@@ -323,6 +327,8 @@ extension DictationSessionController {
                         sessionStartedAt: sessionStartTime,
                         heldBackText: { appState.sttRouter.heldBackDictationText },
                         report: { emptyDecision in
+                            // A hand-off take that heard nothing is reported nowhere (its card says so).
+                            guard self.sendsDictationAnalytics else { return }
                             appState.logger.log("DICTATION | no transcription (\(emptyReason.rawValue)), cancelling")
                             EventReporter.shared.capture(
                                 level: .warning,
@@ -392,6 +398,17 @@ extension DictationSessionController {
                 appState.logger.log("DICTATION | filler cleanup removed \(cleanupResult?.removedCount ?? 0) items")
             }
 
+            if DictationHandOffPolicy.handsOff(sessionID: taskSessionID, handOffSessionID: self.handOffSessionID) {
+                // Write for Me's voice: the words go back to its card, quietly. Whatever stopped it.
+                await self.finalizeHandOff(
+                    text: text,
+                    appState: appState,
+                    overlayController: overlayController,
+                    sessionID: taskSessionID
+                )
+                return
+            }
+
             if !autoPaste {
                 // Session cap reached (the user walked away mid-dictation).
                 // Recover the transcript by saving it to the daily Markdown file,
@@ -429,7 +446,6 @@ extension DictationSessionController {
             let saveContext = self.dictationSaveContext(text: text)
             stopTiming.finalizationStartedAt = CFAbsoluteTimeGetCurrent()
             let finalization = await DictationStopFinalizer.finalize(
-                order: DictationStopFinalizationPolicy.order,
                 startSaving: {
                     return self.startPersistingDictationTranscript(
                         text: text,
@@ -441,11 +457,6 @@ extension DictationSessionController {
                     let result = await saveTask.value
                     self.publishDictationTranscriptPersistence(result, delivery: pasteOutcome.delivery, context: saveContext)
                     return result
-                },
-                saveSynchronously: {
-                    self.persistDictationTranscript(
-                        text: text, delivery: pasteOutcome.delivery, recovery: recovery, context: saveContext
-                    )
                 },
                 performAutoEnter: {
                     stopTiming.autoEnterStartedAt = CFAbsoluteTimeGetCurrent()
@@ -481,6 +492,20 @@ extension DictationSessionController {
                 "duration_ms": "\(Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000))",
             ]
             deliveryContext.merge(pasteOutcome.deliveryProperties) { _, delivery in delivery }
+            // `delivery` counts a likely paste as pasted, so say why Auto
+            // Enter held back and how the paste was confirmed.
+            let autoSendTelemetry = DictationAutoSendTelemetry.snapshot(
+                request: self.autoSendRequestDecision,
+                pasteOutcome: pasteOutcome,
+                sendOutcome: autoSendOutcome
+            )
+            let targetConfirmationMode = DictationTargetConfirmationMode.resolve(
+                outcome: pasteOutcome,
+                diagnostic: self.textPaster.lastConfirmationDiagnostic
+            )
+            deliveryContext.merge(
+                autoSendTelemetry.localDiagnosticContext(targetConfirmationMode: targetConfirmationMode)
+            ) { _, new in new }
             DiagnosticsTrail.record(
                 logger: appState.logger,
                 level: pasteOutcome.diagnosticLevel,
@@ -530,7 +555,7 @@ extension DictationSessionController {
                         )
                     },
                     // The words never went on the clipboard; offer them back.
-                    showClipboardBusy: { self.showClipboardBusy(text, message: $0, overlayController: overlayController) },
+                    showClipboardBusy: { self.showClipboardBusy(text, message: $0, hint: $1, overlayController: overlayController) },
                     showError: { overlayController.showError($0) }
                 )
             )
@@ -540,15 +565,6 @@ extension DictationSessionController {
             if case .failed(let failure) = autoSendOutcome {
                 appState.logger.log("DICTATION | auto enter failed: \(failure.message)")
             }
-            let autoSendTelemetry = DictationAutoSendTelemetry.snapshot(
-                request: self.autoSendRequestDecision,
-                pasteOutcome: pasteOutcome,
-                sendOutcome: autoSendOutcome
-            )
-            let targetConfirmationMode = DictationTargetConfirmationMode.resolve(
-                outcome: pasteOutcome,
-                diagnostic: self.textPaster.lastConfirmationDiagnostic
-            )
             var dictationCompletedExtra: [String: String] = [
                 "auto_send": autoSendOutcome.diagnosticName,
                 "duration_bucket": AnalyticsReporter.durationBucket(seconds: CFAbsoluteTimeGetCurrent() - sessionStartTime),
@@ -565,17 +581,6 @@ extension DictationSessionController {
                 )
             )
             appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "completed")
-        }
-    }
-
-    private func overlayStateName(_ state: FloatingOverlayController.OverlayState) -> String {
-        switch state {
-        case .idle: return "idle"
-        case .starting: return "starting"
-        case .loading: return "loading"
-        case .listening: return "listening"
-        case .drafting: return "drafting"
-        case .success: return "success"
         }
     }
 }

@@ -532,6 +532,20 @@ func testHomeMeetingRename() {
         assertFalse(rewritten.contains("# Old heading"), "old heading should be replaced")
     }
 
+    runSuite("HomeMeetingRename.rewriteTitle keeps backslashes and quotes when read back") {
+        let raw = """
+        ---
+        capture_type: meeting
+        title: "Old"
+        ---
+
+        # Old
+        """
+        let title = #"Fix C:\new "parser""#
+        let rewritten = HomeMeetingRename.rewriteTitle(in: raw, to: title)
+        assertEqual(TranscriptFrontmatter.values(in: rewritten)?["title"], title, "saved title should read back unchanged")
+    }
+
     runSuite("HomeMeetingSpeakerRename updates one source-scoped speaker") {
         withTemporaryHomeMeetingRenameLibrary { meetingsRoot in
             let transcriptURL = meetingsRoot.appendingPathComponent("Scoped Speaker.md")

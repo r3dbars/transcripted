@@ -15,7 +15,7 @@ extension NotchIslandVoiceRowView {
     func buildSkeleton() {
         translatesAutoresizingMaskIntoConstraints = false
         clipsToBounds = false
-        widthAnchor.constraint(equalToConstant: NotchIslandSpeakerReviewView.contentWidth).isActive = true
+        widthAnchor.constraint(equalToConstant: rowWidth).isActive = true
 
         stack.orientation = .vertical
         stack.alignment = .leading
@@ -53,9 +53,14 @@ extension NotchIslandVoiceRowView {
         topLine.addArrangedSubview(printSlot)
         topLine.addArrangedSubview(textColumn)
         topLine.addArrangedSubview(controls)
+        if showsQuote {
+            // The page's rows are wider than the island's; the column takes
+            // the extra width so the buttons sit at the row's end.
+            textColumn.setHuggingPriority(.init(1), for: .horizontal)
+        }
         stack.addArrangedSubview(topLine)
         NSLayoutConstraint.activate([
-            topLine.widthAnchor.constraint(equalToConstant: NotchIslandSpeakerReviewView.contentWidth),
+            topLine.widthAnchor.constraint(equalToConstant: rowWidth),
             topLine.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.printDiameter),
         ])
     }
@@ -129,6 +134,34 @@ extension NotchIslandVoiceRowView {
             }
         }
         shownHint = hint?.text
+        quoteLabel = nil
+        if showsQuote, let quote = Policy.quoteLine(entry.sampleText) {
+            let label = NotchIslandPalette.label(quote, font: .systemFont(ofSize: 12), color: NSColor(white: 1, alpha: 0.55))
+            label.font = NSFontManager.shared.convert(.systemFont(ofSize: 12), toHaveTrait: .italicFontMask)
+            label.lineBreakMode = .byTruncatingTail
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            // The quote never sets the column's width: the title (or the
+            // name field) spans the row and the buttons stay at its end.
+            label.setContentHuggingPriority(.defaultLow, for: .horizontal)
+            textColumn.addArrangedSubview(label)
+            label.widthAnchor.constraint(lessThanOrEqualTo: textColumn.widthAnchor).isActive = true
+            quoteLabel = label
+            refreshQuote()
+        }
+    }
+
+    /// While a saved clip plays, the quote is the one checked against the
+    /// bytes being heard (none when its note no longer matches the clip);
+    /// otherwise the quote the card was built with.
+    func refreshQuote() {
+        guard let quoteLabel else { return }
+        var text = entry.sampleText
+        if case .file = clip, clip.isPlaying {
+            text = SpeakerClipPlayback.shared.activeValidatedQuote ?? ""
+        }
+        let line = Policy.quoteLine(text)
+        quoteLabel.stringValue = line ?? ""
+        quoteLabel.isHidden = line == nil
     }
 
     func updateHintColor() {
@@ -273,7 +306,7 @@ extension NotchIslandVoiceRowView {
         list.wantsLayer = true
         list.layer?.backgroundColor = NotchIslandPalette.buttonSubtle.cgColor
         list.layer?.cornerRadius = 10
-        let width = NotchIslandSpeakerReviewView.contentWidth - Self.belowIndent
+        let width = rowWidth - Self.belowIndent
         let details = Dictionary(suggestions.map { ($0.label, $0.detail) }, uniquingKeysWith: { first, _ in first })
         for (index, row) in rows.enumerated() {
             let detail: String

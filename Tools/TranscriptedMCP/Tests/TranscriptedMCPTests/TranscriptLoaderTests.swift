@@ -18,7 +18,7 @@ final class TranscriptLoaderTests: XCTestCase {
         let fixture = makeFixtureJSON()
         try writeFixture(fixture, filename: "Call_test", to: tempDir)
 
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_test.md"))
+        let transcript = TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_test.md"))
         XCTAssertNotNil(transcript)
         XCTAssertEqual(transcript?.version, "2.0")
         XCTAssertEqual(transcript?.utterances.count, 2)
@@ -32,7 +32,7 @@ final class TranscriptLoaderTests: XCTestCase {
         )
         try writeFixture(fixture, filename: "Call_nemotron", to: tempDir)
 
-        let transcript = try XCTUnwrap(TranscriptLoader.load(tempDir.appendingPathComponent("Call_nemotron.md")))
+        let transcript = try XCTUnwrap(TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_nemotron.md")))
         XCTAssertEqual(transcript.recording.engines.diarization, "nemotron_offline")
         XCTAssertEqual(transcript.recording.engines.voiceprintModel, "redimnet2-b4")
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(transcript.recording.engines)) as? [String: String]
@@ -42,7 +42,7 @@ final class TranscriptLoaderTests: XCTestCase {
     func testLoadLegacyTranscriptWithoutVoiceprintModelOmitsIt() throws {
         try writeFixture(makeFixtureJSON(), filename: "Call_legacy_engine", to: tempDir)
 
-        let transcript = try XCTUnwrap(TranscriptLoader.load(tempDir.appendingPathComponent("Call_legacy_engine.md")))
+        let transcript = try XCTUnwrap(TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_legacy_engine.md")))
         XCTAssertEqual(transcript.recording.engines.diarization, "pyannote_offline")
         XCTAssertNil(transcript.recording.engines.voiceprintModel)
         let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(transcript.recording.engines)) as? [String: String]
@@ -63,7 +63,7 @@ final class TranscriptLoaderTests: XCTestCase {
         )
         try writeFixture(fixture, filename: "Call_duplicate_names", to: tempDir)
 
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_duplicate_names.md"))
+        let transcript = TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_duplicate_names.md"))
 
         XCTAssertNotNil(transcript)
         XCTAssertEqual(transcript?.utterances.count, 2)
@@ -71,7 +71,7 @@ final class TranscriptLoaderTests: XCTestCase {
 
     func testLoadMalformedMarkdownReturnsNil() throws {
         try "not markdown at all".write(to: tempDir.appendingPathComponent("Call_bad.md"), atomically: true, encoding: .utf8)
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_bad.md"))
+        let transcript = TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_bad.md"))
         XCTAssertNil(transcript)
     }
 
@@ -95,7 +95,7 @@ final class TranscriptLoaderTests: XCTestCase {
         """
         try markdown.write(to: tempDir.appendingPathComponent("Call_malformed_legacy.md"), atomically: true, encoding: .utf8)
 
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_malformed_legacy.md"))
+        let transcript = TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_malformed_legacy.md"))
 
         XCTAssertNotNil(transcript)
         XCTAssertEqual(transcript?.utterances.count, 1)
@@ -123,14 +123,14 @@ final class TranscriptLoaderTests: XCTestCase {
             """
             try markdown.write(to: tempDir.appendingPathComponent("\(filename).md"), atomically: true, encoding: .utf8)
 
-            let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("\(filename).md"))
+            let transcript = TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("\(filename).md"))
 
             XCTAssertEqual(transcript?.recording.durationSeconds, 0)
         }
     }
 
     func testLoadMissingFileReturnsNil() {
-        let transcript = TranscriptLoader.load(tempDir.appendingPathComponent("Call_missing.md"))
+        let transcript = TranscriptLoader.loadMeeting(tempDir.appendingPathComponent("Call_missing.md"))
         XCTAssertNil(transcript)
     }
 
@@ -234,7 +234,7 @@ final class TranscriptLoaderTests: XCTestCase {
         let fixture = makeFixtureJSON()
         let url = tempDir.appendingPathComponent("Call_lookup.md")
         try! fixture.write(to: url, atomically: true, encoding: .utf8)
-        let transcript = TranscriptLoader.load(url)!
+        let transcript = TranscriptLoader.loadMeeting(url)!
         let lookup = TranscriptLoader.speakerLookup(from: transcript)
 
         XCTAssertEqual(lookup["mic_0"]?.name, "You")

@@ -98,6 +98,26 @@ final class CaptureLibraryWritingResolverTests: XCTestCase {
         XCTAssertEqual(resolved.resolutionSource, .defaultCaptures)
     }
 
+    func testEmptyMeetingsAndDictationsEnvOverridesAreIgnored() {
+        // A blank exported variable must not resolve to the working directory
+        // or hide the writing folder.
+        let resolved = CaptureLibraryResolver.resolve(
+            environment: ["TRANSCRIPTED_MEETINGS_DIR": "", "TRANSCRIPTED_DICTATIONS_DIR": ""],
+            homeDirectory: tempHome
+        )
+
+        XCTAssertEqual(paths(resolved.meetingDirs), [
+            path("Library/Application Support/Transcripted/captures/meetings"),
+        ])
+        XCTAssertEqual(paths(resolved.dictationDirs), [
+            path("Library/Application Support/Transcripted/captures/dictations"),
+        ])
+        XCTAssertEqual(paths(resolved.writingDirs), [
+            path("Library/Application Support/Transcripted/captures/writing"),
+        ])
+        XCTAssertEqual(resolved.resolutionSource, .defaultCaptures)
+    }
+
     func testSharedDataDirWithSubfoldersUsesWritingSubfolder() throws {
         let sharedRoot = tempHome.appendingPathComponent("shared", isDirectory: true)
         try FileManager.default.createDirectory(

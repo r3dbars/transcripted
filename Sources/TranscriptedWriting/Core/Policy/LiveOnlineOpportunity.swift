@@ -10,16 +10,6 @@ public struct LiveOnlineOpportunity: Equatable, Sendable {
         case all
     }
 
-    public enum CloseReason: String, Sendable {
-        case accepted
-        case dismissed
-        case typedThrough = "typed-through"
-        case ignored
-        case segment
-        case privacyExcluded = "privacy-excluded"
-        case observerStopped = "observer-stopped"
-    }
-
     public private(set) var id: UUID
     public let shownAt: Date
     public let sessionDigestSHA256: String

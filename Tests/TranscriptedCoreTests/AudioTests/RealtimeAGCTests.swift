@@ -336,4 +336,37 @@ final class RealtimeAGCTests: XCTestCase {
         XCTAssertLessThan(leftPeak, 0.07, "Quiet sibling channel should not get independent over-boost")
         XCTAssertEqual(leftPeak / rightPeak, 0.10, accuracy: 0.02, "Shared gain should preserve the stereo channel ratio")
     }
+
+    func testGainTracksTheSameForSmallAndLargeBuffers() {
+        // The pinned mic recorder delivers ~10 ms buffers; the engine tap
+        // delivers ~85 ms ones. Quiet speech, a short pause with room noise
+        // above the gate, then speech again must ride the same gain curve, or
+        // small buffers forget the speech peak and pump the noise up.
+        let blockFrames = 4096
+        let speech = sineSamples(peak: 0.05, frames: 12 * blockFrames)
+        let pause = sineSamples(peak: 0.005, frames: 3 * blockFrames)
+        let signal = speech + pause + speech
+
+        func gainAtBlockEnds(bufferFrames: Int) -> [Float] {
+            let agc = RealtimeAGC()
+            var gains: [Float] = []
+            var start = 0
+            while start < signal.count {
+                let end = start + bufferFrames
+                agc.process(buffer: makeMonoBuffer(samples: Array(signal[start..<end])))
+                if end % blockFrames == 0 { gains.append(agc.appliedGain) }
+                start = end
+            }
+            return gains
+        }
+
+        let large = gainAtBlockEnds(bufferFrames: blockFrames)
+        let small = gainAtBlockEnds(bufferFrames: 512)
+        XCTAssertEqual(large.count, small.count)
+        for (index, (expected, actual)) in zip(large, small).enumerated() {
+            XCTAssertEqual(actual, expected, accuracy: expected * 0.05,
+                           "512-frame buffers should follow the 4096-frame gain curve (block \(index))")
+        }
+        XCTAssertLessThan(small.max() ?? 0, 10, "A short noisy pause must not pump gain toward maxGain")
+    }
 }

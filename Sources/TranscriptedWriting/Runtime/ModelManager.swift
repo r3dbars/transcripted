@@ -36,7 +36,6 @@ final class ModelManager: @unchecked Sendable {
 
     var state: ModelState { stateQueue.sync { stateStorage } }
     var currentState: ModelState { state }
-    var installedModelURL: URL? { state.modelURL }
 
     /// Revalidates the exact bytes at the runtime handoff. A prior `.ready`
     /// state is not enough because the external file can be replaced after the
@@ -155,7 +154,7 @@ final class ModelManager: @unchecked Sendable {
         callbackQueue: DispatchQueue = .main,
         onStateChange: StateHandler? = nil,
         onProgress: ProgressHandler? = nil,
-        availableDiskSpace: @escaping DiskSpaceProvider = ModelManager.defaultDiskSpace,
+        availableDiskSpace: @escaping DiskSpaceProvider = { ModelManager.defaultDiskSpace($0) },
         retryDelays: [Duration] = [
             .milliseconds(500), .seconds(1), .seconds(2), .seconds(4),
             .seconds(8), .seconds(16), .seconds(30), .seconds(30)

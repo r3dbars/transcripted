@@ -64,8 +64,17 @@ final class FileLogger: @unchecked Sendable {
     /// Write a log entry asynchronously (non-blocking)
     func write(level: String, subsystem: String, message: String, metadata: [String: String]?) {
         guard !isDisabled else { return }
-        let message = LogPrivacySanitizer.sanitizeText(message)
-        let metadata = LogPrivacySanitizer.sanitizeMetadata(metadata)
+        writeSanitized(
+            level: level,
+            subsystem: subsystem,
+            message: LogPrivacySanitizer.sanitizeText(message),
+            metadata: LogPrivacySanitizer.sanitizeMetadata(metadata)
+        )
+    }
+
+    /// Same as `write`, for callers that already ran `LogPrivacySanitizer` on message and metadata.
+    func writeSanitized(level: String, subsystem: String, message: String, metadata: [String: String]?) {
+        guard !isDisabled else { return }
         guard !message.isEmpty else { return }
         queue.async { [weak self] in
             self?.writeSync(level: level, subsystem: subsystem, message: message, metadata: metadata)

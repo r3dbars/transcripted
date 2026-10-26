@@ -115,6 +115,10 @@ final class WritingContextTests: XCTestCase {
         let meetings = CLIContextStore.recent(in: resolved, kind: .meeting, count: 10, dateFrom: nil, dateTo: nil)
         XCTAssertEqual(meetings.map(\.filename), ["Call_2026-09-20_09-15-00"])
         XCTAssertThrowsError(try CLIContextStore.readMeeting(filename: "Writing_2026-09-25", in: resolved))
+        XCTAssertThrowsError(
+            try CLIContextStore.readDictationDocument(filename: "Call_2026-09-20_09-15-00", entryId: nil, in: resolved),
+            "a meeting sharing the folder is not readable as a dictation"
+        )
 
         let writing = CLIContextStore.recent(in: resolved, kind: .writing, count: 10, dateFrom: nil, dateTo: nil)
         XCTAssertEqual(writing.count, 2)

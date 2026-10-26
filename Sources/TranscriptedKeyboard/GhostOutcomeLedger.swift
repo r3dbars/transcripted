@@ -479,5 +479,6 @@ enum GhostOutcomeLedger {
         defer { try? handle.close() }
         _ = try? handle.seekToEnd()
         try? handle.write(contentsOf: data)
+        TextFreeOnlineEventFile.compactIfNeeded(at: url)
     }
 }

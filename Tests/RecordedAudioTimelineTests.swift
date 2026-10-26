@@ -183,7 +183,7 @@ func testRecordedAudioTimeline() {
         assertEqual(recorder.finish().segments.first?.samples ?? [], [0.5, 0.5], "metering never consumes the samples")
     }
 
-    runSuite("SharedMeetingMicRecorder downmixes stereo and preserves route sample-rate changes") {
+    runSuite("SharedMeetingMicRecorder keeps the strongest channel and preserves route sample-rate changes") {
         let recorder = SharedMeetingMicRecorder()
         recorder.begin()
         recorder.append(makeSharedMicTestBuffer(channels: [[0.2, 0.4], [0.4, 0.8]], sampleRate: 48_000))
@@ -191,8 +191,15 @@ func testRecordedAudioTimeline() {
 
         let captured = recorder.finish()
         assertEqual(captured.segments.count, 2, "sample-rate changes should remain separate for safe resampling")
-        assertEqual(captured.segments[0].samples, [0.3, 0.6], "stereo meeting PCM should downmix to mono")
+        assertEqual(captured.segments[0].samples, [0.4, 0.8], "stereo meeting PCM should keep the strongest channel")
         assertEqual(captured.segments.map(\.sampleRate), [48_000, 24_000], "each route format should be preserved")
+    }
+
+    runSuite("SharedMeetingMicRecorder never cancels opposite-polarity channels") {
+        let recorder = SharedMeetingMicRecorder()
+        recorder.begin()
+        recorder.append(makeSharedMicTestBuffer(channels: [[0.5, -0.5], [-0.5, 0.5]]))
+        assertEqual(recorder.finish().segments.first?.samples ?? [], [0.5, -0.5], "an inverted pair should keep one channel, not average to silence")
     }
 
     runSuite("SharedMeetingMicRecorder cancel discards borrowed dictation audio") {

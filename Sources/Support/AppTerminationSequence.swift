@@ -5,7 +5,11 @@ import Foundation
 ///
 /// Dictation goes first. If it can't promise its audio is saved, Quit is
 /// refused: cleanup admission resets so a later Quit can try again, every
-/// pending request gets `false`, and nothing else shuts down. Otherwise the
+/// pending request gets `false`, and nothing else shuts down. Writing goes
+/// next. Names just given on Speakers save before app state shuts down. A failed final flush can stay failed (an offline or unwritable
+/// library fills the bounded journal), so it asks instead of refusing every
+/// Quit, logout and update forever: Quit goes on only when
+/// `confirmQuitWithoutSavingWriting` says so. Otherwise the
 /// meeting is prepared, app state shuts down, the persistent dictation input
 /// is restored, and buffered local events are flushed, all before AppKit hears
 /// `true`.
@@ -17,8 +21,12 @@ enum AppTerminationSequence {
     struct Steps {
         var finishDictationForTermination: @MainActor () async -> Bool
         var finishWritingForTermination: @MainActor () async -> Bool = { true }
+        /// Writing's last entry has no durable owner. True quits anyway.
+        var confirmQuitWithoutSavingWriting: @MainActor () async -> Bool = { false }
         var resetCleanupAdmission: @MainActor () -> Void
         var prepareMeetingForTermination: @MainActor () async -> Void
+        /// Names given on Speakers' "Who spoke?" cards that are still saving.
+        var finishSpeakerReviewSaves: @MainActor () async -> Void = {}
         var shutDownAppState: @MainActor () -> Void
         var stopAndRestorePersistentInput: @MainActor () async -> Void
         var flushLocalEvents: @MainActor () async -> Void
@@ -37,12 +45,15 @@ enum AppTerminationSequence {
             steps.replyToPendingRequests(false)
             return false
         }
-        guard await steps.finishWritingForTermination() else {
-            steps.resetCleanupAdmission()
-            steps.replyToPendingRequests(false)
-            return false
+        if await steps.finishWritingForTermination() == false {
+            guard await steps.confirmQuitWithoutSavingWriting() else {
+                steps.resetCleanupAdmission()
+                steps.replyToPendingRequests(false)
+                return false
+            }
         }
         await steps.prepareMeetingForTermination()
+        await steps.finishSpeakerReviewSaves()
         steps.shutDownAppState()
         await steps.stopAndRestorePersistentInput()
         await steps.flushLocalEvents()

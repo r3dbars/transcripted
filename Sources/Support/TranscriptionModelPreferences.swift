@@ -112,10 +112,6 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         }
     }
 
-    var availabilityStatus: String {
-        "Available"
-    }
-
     var isWhisper: Bool {
         switch self {
         case .parakeetTDTv2, .parakeetTDTv3, .appleSpeech, .parakeetUltraExperimental:

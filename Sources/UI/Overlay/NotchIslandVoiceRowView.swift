@@ -101,13 +101,33 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     lazy var titleFieldHolder: NSView = makeTitleFieldHolder()
     var nameField: NotchIslandNameField { titleField.field }
 
+    /// The row's width: the island's, or the Speakers page card's.
+    let rowWidth: CGFloat
+    /// How this voice plays.
+    let clip: NotchIslandVoiceClip
+    /// The page shows the voice's quote under its name.
+    let showsQuote: Bool
+    /// That quote, so playback can swap in the words of the clip it plays.
+    var quoteLabel: NSTextField?
+
     static let printDiameter: CGFloat = 42
     static let printGap: CGFloat = 14
     /// Chips and the list sit under the title, past the print.
     static var belowIndent: CGFloat { printDiameter + printGap }
 
-    init(entry: SpeakerNamingEntry, knownPeople: [SpeakerNameChoice], recognized: Bool = false, colorIndex: Int = 0) {
+    init(
+        entry: SpeakerNamingEntry,
+        knownPeople: [SpeakerNameChoice],
+        recognized: Bool = false,
+        colorIndex: Int = 0,
+        width: CGFloat = NotchIslandSpeakerReviewView.contentWidth,
+        clip: NotchIslandVoiceClip? = nil,
+        showsQuote: Bool = false
+    ) {
         self.entry = entry
+        self.rowWidth = width
+        self.clip = clip ?? .file(entry.clipURL)
+        self.showsQuote = showsQuote
         self.isRecognized = recognized && !(entry.currentName?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true)
         self.question = Policy.question(currentName: entry.currentName, needsConfirmation: entry.needsConfirmation)
         let labels = SpeakerNameSelectionPolicy.makeIdentityLabels(
@@ -281,9 +301,10 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         print.onPlay = { [weak self] in
             guard let self else { return }
             self.onInteract?()
-            SpeakerClipPlayback.play(self.entry.clipURL)
+            self.clip.play()
             self.syncPlayback()
         }
+        print.isPlayable = clip.isPlayable
         printSlot.onHover = { [weak self] inside in
             guard let self else { return }
             self.onPrintTip?(inside ? self.printExplanation : nil, self.printSlot)
@@ -299,7 +320,8 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     }
 
     private func syncPlayback() {
-        printSlot.print.isPlaying = SpeakerClipPlayback.isPlaying(entry.clipURL)
+        printSlot.print.isPlaying = clip.isPlaying
+        refreshQuote()
     }
 
     var printExplanation: String {
@@ -346,7 +368,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
 
     /// Answering a voice ends its clip, so the next one is ready to play.
     func stopClipIfPlaying() {
-        if SpeakerClipPlayback.isPlaying(entry.clipURL) {
+        if clip.isPlaying {
             SpeakerClipPlayback.stop()
         }
     }

@@ -181,28 +181,6 @@ enum ParakeetShortAudioGate {
         )
     }
 
-    static func dictationFallback(
-        nativeSampleCount: Int,
-        resampledSampleCount: Int,
-        errorMessage: String
-    ) -> ParakeetTranscriptionDecision? {
-        // Enough audio means the error is a real model failure, whatever its
-        // text says. Reporting it as "too short" discarded a full dictation's
-        // audio instead of keeping it for recovery.
-        guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(resampledSampleCount),
-              shouldTreatFailureAsShortAudio(
-                sampleCount: resampledSampleCount,
-                errorMessage: errorMessage
-              ) else {
-            return nil
-        }
-
-        return dictation(
-            nativeSampleCount: nativeSampleCount,
-            resampledSampleCount: resampledSampleCount
-        )
-    }
-
     static func meetingSegment(sampleCount: Int, sourceDescription: String) -> ParakeetTranscriptionDecision {
         guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) else {
             return .transcribe
@@ -227,31 +205,31 @@ enum ParakeetShortAudioGate {
         sourceDescription: String,
         errorMessage: String
     ) -> ParakeetTranscriptionDecision? {
-        guard shouldTreatFailureAsShortAudio(
-            sampleCount: sampleCount,
-            errorMessage: errorMessage
-        ) else {
-            return nil
+        let normalized = errorMessage.lowercased()
+        let messageSaysTooShort = normalized.contains("at least 1 second")
+            || normalized.contains("invalid audio data")
+            || normalized.contains("recording too short")
+            || normalized.contains("too short")
+        guard !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) else {
+            guard messageSaysTooShort else { return nil }
+            // Long audio the model rejected: still left empty (a rethrow would abort the
+            // whole meeting batch), but reported as a failure, not as short audio.
+            let audioDuration = Double(sampleCount) / TranscriptedConstants.parakeetSampleRate
+            return ParakeetTranscriptionDecision(
+                shouldTranscribe: false,
+                event: "meeting_segment_inference_failed",
+                message: "Parakeet rejected a full-length meeting segment; segment left empty",
+                context: [
+                    "samples": "\(sampleCount)",
+                    "audio_duration_s": String(format: "%.2f", audioDuration),
+                    "source": sourceDescription,
+                ]
+            )
         }
 
         return meetingSegment(
             sampleCount: sampleCount,
             sourceDescription: sourceDescription
         )
-    }
-
-    private static func shouldTreatFailureAsShortAudio(
-        sampleCount: Int,
-        errorMessage: String
-    ) -> Bool {
-        if !TranscriptedConstants.hasMinimumParakeetAudioSamples(sampleCount) {
-            return true
-        }
-
-        let normalized = errorMessage.lowercased()
-        return normalized.contains("at least 1 second")
-            || normalized.contains("invalid audio data")
-            || normalized.contains("recording too short")
-            || normalized.contains("too short")
     }
 }

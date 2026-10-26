@@ -67,9 +67,6 @@ enum PhysicalDictationTriggerPreferences {
     /// land here through `DictationShortcutUpgrade` (custom Hands-Free
     /// becomes this one key instead).
     static let defaultPushToTalkBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
-    /// 1.1.69 Hands-Free default. Upgrade copies a distinct stored value
-    /// onto the one dictation key, then clears this slot.
-    static let defaultHandsFreeBinding = PhysicalDictationTriggerBinding(keyCode: UInt32(kVK_RightOption))
     static let defaultMeetingBinding = PhysicalDictationTriggerBinding(
         keyCode: UInt32(kVK_ANSI_M),
         modifiers: PhysicalDictationTriggerModifiers.option
@@ -85,8 +82,9 @@ enum PhysicalDictationTriggerPreferences {
     private static let meetingKeyCodeKey = "meetingTrigger-keyCode"
     private static let meetingModifiersKey = "meetingTrigger-modifiers"
     private static let oneDictationKeyMigratedKey = "dictationOneKeyMigrated"
-    private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
-    private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
+    // Immutable CFString constants.
+    nonisolated(unsafe) private static let functionKeyUsageDomain = "com.apple.HIToolbox" as CFString
+    nonisolated(unsafe) private static let functionKeyUsageKey = "AppleFnUsageType" as CFString
 
     static func binding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
         pushToTalkBinding(userDefaults: userDefaults)
@@ -119,17 +117,6 @@ enum PhysicalDictationTriggerPreferences {
         )
     }
 
-    static func handsFreeBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
-        safeBinding(
-            storedBinding(
-                keyCodeKey: handsFreeKeyCodeKey,
-                modifiersKey: handsFreeModifiersKey,
-                userDefaults: userDefaults
-            ) ?? migratedHandsFreeBinding(userDefaults: userDefaults),
-            fallback: defaultHandsFreeBinding
-        )
-    }
-
     static func meetingBinding(userDefaults: UserDefaults = .standard) -> PhysicalDictationTriggerBinding {
         safeBinding(
             storedBinding(
@@ -150,15 +137,6 @@ enum PhysicalDictationTriggerPreferences {
             binding,
             keyCodeKey: pushToTalkKeyCodeKey,
             modifiersKey: pushToTalkModifiersKey,
-            userDefaults: userDefaults
-        )
-    }
-
-    static func saveHandsFree(_ binding: PhysicalDictationTriggerBinding, userDefaults: UserDefaults = .standard) {
-        saveBinding(
-            binding,
-            keyCodeKey: handsFreeKeyCodeKey,
-            modifiersKey: handsFreeModifiersKey,
             userDefaults: userDefaults
         )
     }
@@ -303,10 +281,21 @@ enum PhysicalDictationTriggerPreferences {
         modifiers: UInt32
     ) -> Bool {
         guard !isModifierKey(binding.keyCode) else { return false }
-        // Caps Lock is latched, not held, so it never blocks a chord.
-        let relevant = PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
+        let relevant = relevantHeldModifiers(forKeyCode: binding.keyCode)
         return binding.keyCode == keyCode
             && (binding.modifiers & relevant) == (modifiers & relevant)
+    }
+
+    /// Held modifiers that must match a saved chord. Caps Lock is latched, not
+    /// held. F1-F20 also ignore Fn: macOS sets `maskSecondaryFn` on those keys
+    /// depending on "Use F1, F2, etc. as standard function keys" and the
+    /// keyboard's hardware row, so an exact-flag match silently drops F8.
+    static func relevantHeldModifiers(forKeyCode keyCode: UInt32) -> UInt32 {
+        var ignored = PhysicalDictationTriggerModifiers.capsLock
+        if isFunctionKey(keyCode) {
+            ignored |= PhysicalDictationTriggerModifiers.function
+        }
+        return PhysicalDictationTriggerModifiers.all & ~ignored
     }
 
     static func matchesFlagsChangedPress(
@@ -520,10 +509,33 @@ enum PhysicalDictationTriggerPreferences {
         return "\(displayString(for: binding)) is already used for \(clash.name). Choose a different key."
     }
 
+    /// Why the stored dictation and meeting shortcuts now collide, or nil.
+    /// F8 and Fn+F8 used to be distinct; after F-keys ignore Fn they are
+    /// one key, and `.first` matching would leave meetings silently dead.
+    static func storedClashReason(
+        dictation: PhysicalDictationTriggerBinding,
+        meeting: PhysicalDictationTriggerBinding
+    ) -> String? {
+        duplicateReason(
+            for: meeting,
+            otherShortcuts: [(name: "Dictation key", binding: dictation)]
+        )
+    }
+
+    /// Caption under a Settings shortcut row. Recording shows why the last
+    /// press was refused; idle shows a stored dictation/meeting clash.
+    static func shortcutRowHint(
+        isRecording: Bool,
+        rejectionHint: String?,
+        storedClashReason: String?
+    ) -> String? {
+        isRecording ? rejectionHint : storedClashReason
+    }
+
     private static func normalizedForComparison(_ binding: PhysicalDictationTriggerBinding) -> PhysicalDictationTriggerBinding {
         PhysicalDictationTriggerBinding(
             keyCode: binding.keyCode,
-            modifiers: binding.modifiers & PhysicalDictationTriggerModifiers.all & ~PhysicalDictationTriggerModifiers.capsLock
+            modifiers: binding.modifiers & relevantHeldModifiers(forKeyCode: binding.keyCode)
         )
     }
 
@@ -576,7 +588,7 @@ enum PhysicalDictationTriggerPreferences {
         return rejectionReason(for: binding) == nil ? binding : fallback
     }
 
-    private static func isFunctionKey(_ keyCode: UInt32) -> Bool {
+    static func isFunctionKey(_ keyCode: UInt32) -> Bool {
         switch Int(keyCode) {
         case kVK_F1, kVK_F2, kVK_F3, kVK_F4, kVK_F5, kVK_F6, kVK_F7, kVK_F8, kVK_F9, kVK_F10,
              kVK_F11, kVK_F12, kVK_F13, kVK_F14, kVK_F15, kVK_F16, kVK_F17, kVK_F18, kVK_F19, kVK_F20:
@@ -610,20 +622,6 @@ enum PhysicalDictationTriggerPreferences {
 
         return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
             ? defaultPushToTalkBinding
-            : legacyCarbonDictationBinding(userDefaults: userDefaults)
-    }
-
-    private static func migratedHandsFreeBinding(userDefaults: UserDefaults) -> PhysicalDictationTriggerBinding {
-        guard HotkeyPreferences.legacyDictationShortcutMode(userDefaults: userDefaults) == .handsFree else {
-            return defaultHandsFreeBinding
-        }
-
-        if userDefaults.object(forKey: keyCodeKey) != nil {
-            return legacyDictationBinding(userDefaults: userDefaults)
-        }
-
-        return HotkeyPreferences.rightOptionDictationEnabled(userDefaults: userDefaults)
-            ? defaultHandsFreeBinding
             : legacyCarbonDictationBinding(userDefaults: userDefaults)
     }
 

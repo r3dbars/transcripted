@@ -94,7 +94,7 @@ struct TranscriptedDataDirectories {
             fileManager: fileManager,
             homeDirectory: homeDirectory
         )
-        let indexOverride = environment["TRANSCRIPTED_INDEX_DIR"].map(URL.init(fileURLWithPath:))
+        let indexOverride = environment["TRANSCRIPTED_INDEX_DIR"].flatMap { $0.isEmpty ? nil : URL(fileURLWithPath: $0) }
 
         if let sharedDataRoot = resolved.sharedDataRoot {
             return TranscriptedDataDirectories(

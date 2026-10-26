@@ -132,7 +132,7 @@ enum TranscriptedPermissionAccess {
 
     static func showAccessibilityPrompt(userDefaults: UserDefaults = .standard) {
         userDefaults.set(true, forKey: accessibilityPromptShownKey)
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary // literal value of kAXTrustedCheckOptionPrompt
         _ = AXIsProcessTrustedWithOptions(options)
     }
 

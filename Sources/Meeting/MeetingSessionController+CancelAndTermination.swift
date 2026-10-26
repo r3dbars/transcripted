@@ -19,7 +19,7 @@ extension MeetingSessionController {
     /// pending start (bounded) first, then stop it.
     func stopRecordingJoiningPendingStart(reason: StopReason) async {
         if isStartingRecording {
-            await waitForPendingRecordingStartToResolve()
+            await waitWhile { isStartingRecording }
         }
         await stopRecording(reason: reason)
     }
@@ -34,7 +34,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         let recordingSnapshot = makeRecordingStopSnapshot()
-        clearActiveRecordingIdentity()
+        clearActiveRecordingIdentity(keepingForStopTeardown: true)
         // Discarded: the call-app names go with the audio.
         callSpeakerNames.discard(recordingStartedAt: recordingSnapshot.recordingStartedAt)
 
@@ -55,6 +55,7 @@ extension MeetingSessionController {
         await capture.flushSharedDictationMicHandler()
         clearSharedDictationMicRelay()
         await sttRouter.resumeRegularRecordingAfterSharedMeetingMicEndedIfNeeded()
+        stoppingRecordingIdentity = nil
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let afterStopVolumeContext = capture.routeVolumeDiagnosticsContext(currentPhase: "after")
         var cancelCaptureDiagnostics = MeetingCaptureVolumeDiagnostics.annotatedStopContext(
@@ -158,11 +159,11 @@ extension MeetingSessionController {
             // nor visibly recorded, breaking the dialog's promise. Once this
             // resolves, `state` is .recording (success) or .error (failure)
             // — startRecording() itself owns that transition synchronously.
-            await waitForPendingRecordingStartToResolve()
+            await waitWhile { isStartingRecording }
         }
 
         if isStoppingRecording {
-            await waitForRecordingFinishBeforeTermination()
+            await waitWhile { isStoppingRecording }
         }
 
         if case .recording = state {
@@ -260,23 +261,16 @@ extension MeetingSessionController {
         )
     }
 
-    private func waitForRecordingFinishBeforeTermination() async {
+    /// Bounded wait while `condition` holds. Used to join an in-flight
+    /// `startRecording()` before deciding what to save on termination or
+    /// before an explicit stop (so "Stop Recording" during the mic-engage
+    /// window can't be silently dropped), and to let a stop finish before
+    /// termination. The bridge start deadline is 12s after a known grant, or
+    /// 120s while a first-run permission prompt may still be up. Either way
+    /// it is shorter than this outer bound.
+    private func waitWhile(_ condition: @MainActor () -> Bool) async {
         let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
-        while isStoppingRecording && Date() < deadline {
-            try? await Task.sleep(nanoseconds: 100_000_000)
-        }
-    }
-
-    /// Bounded wait for an in-flight `startRecording()` call to resolve —
-    /// used both by `prepareForTermination()` (join before deciding what to
-    /// save) and `stopRecordingJoiningPendingStart(reason:)` (join before
-    /// stopping, so an explicit "Stop Recording" during the mic-engage
-    /// window can't be silently dropped). The bridge start deadline is 12s
-    /// after a known grant, or 120s while a first-run permission prompt may
-    /// still be up. Either way it is shorter than this outer bound.
-    private func waitForPendingRecordingStartToResolve() async {
-        let deadline = Date().addingTimeInterval(TranscriptedConstants.meetingTerminationFinishWaitTimeout)
-        while isStartingRecording && Date() < deadline {
+        while condition() && Date() < deadline {
             try? await Task.sleep(nanoseconds: 100_000_000)
         }
     }

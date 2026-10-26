@@ -466,8 +466,20 @@ final class AudioInitializationTests: XCTestCase {
         let audio = Audio(paths: paths)
         audio.recordStartFailureStage(.systemAudio)
 
+        let preflightFailed = expectation(description: "preflight failure published")
+        var cancellables = Set<AnyCancellable>()
+        audio.$error
+            .compactMap { $0 }
+            .first()
+            .sink { _ in preflightFailed.fulfill() }
+            .store(in: &cancellables)
+
         audio.start()
 
+        // Preflight runs off the main thread; a second start meanwhile is ignored.
+        XCTAssertTrue(audio.isStarting)
+        wait(for: [preflightFailed], timeout: 5.0)
+        XCTAssertFalse(audio.isStarting, "a preflight failure must release the start gate")
         XCTAssertEqual(
             audio.error?.hasPrefix("Can't write to save folder"),
             true,

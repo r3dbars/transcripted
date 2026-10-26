@@ -713,4 +713,11 @@ enum NotchIslandSpeakerReviewPolicy {
     static func accessibilityTitle(meetingTitle: String?) -> String {
         headerDetail(meetingTitle: meetingTitle).map { "\(headerTitle) \($0)" } ?? headerTitle
     }
+
+    /// The quote a Speakers page card shows under a voice, in curly quotes,
+    /// or nil when there's nothing to quote.
+    static func quoteLine(_ sampleText: String) -> String? {
+        let trimmed = sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : "\u{201C}\(trimmed)\u{201D}"
+    }
 }

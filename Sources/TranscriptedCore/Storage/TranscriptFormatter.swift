@@ -5,14 +5,8 @@ import Foundation
 extension TranscriptSaver {
 
     /// Escape special characters for safe YAML string interpolation.
-    /// Security: YAML double-quoted scalars prohibit raw newlines/tabs — an unescaped \n
-    /// ends the scalar value, letting subsequent text be parsed as additional YAML keys.
     static func escapeYAML(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\")
-         .replacingOccurrences(of: "\"", with: "\\\"")
-         .replacingOccurrences(of: "\n", with: "\\n")
-         .replacingOccurrences(of: "\r", with: "\\r")
-         .replacingOccurrences(of: "\t", with: "\\t")
+        TranscriptFrontmatter.escapeYAML(s)
     }
 
     /// Format local transcript as markdown with YAML frontmatter

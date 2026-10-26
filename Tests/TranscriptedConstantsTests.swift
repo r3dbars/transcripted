@@ -34,6 +34,11 @@ func testTranscriptedConstants() async {
             "a proven paste still gets a margin before the user's clipboard comes back"
         )
         assertTrue(
+            TranscriptedConstants.clipboardSnapshotReadTimeout > 0
+                && TranscriptedConstants.clipboardSnapshotReadTimeout < 5,
+            "a stalled clipboard read must fail before Sentry's 5 s hang threshold"
+        )
+        assertTrue(
             TranscriptedConstants.dictationAutoEnterDelay <= 150_000_000,
             "auto-enter should stay tuned for a fast opt-in stop path"
         )

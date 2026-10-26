@@ -28,9 +28,6 @@ final class MenuBarPanelController: NSViewController {
 
     private var contentView: MenuBarContentView?
     private var subscriptions = Set<AnyCancellable>()
-    private var latestDictation: SavedDictationEntry?
-    private var latestDictationLoaded = false
-    private var latestDictationTask: Task<Void, Never>?
     private var scheduledRefreshTask: Task<Void, Never>?
 
     init(
@@ -50,7 +47,6 @@ final class MenuBarPanelController: NSViewController {
     required init?(coder: NSCoder) { fatalError() }
 
     deinit {
-        latestDictationTask?.cancel()
         scheduledRefreshTask?.cancel()
     }
 
@@ -144,7 +140,6 @@ final class MenuBarPanelController: NSViewController {
             isEnabled: updateActionEnabled
         )
 
-        content.utilityActionsView.pasteAvailable = latestDictationLoaded ? (latestDictation != nil) : nil
         content.utilityActionsView.update(
             updateSymbolName: updatePresentation.symbolName,
             updateTitle: updatePresentation.title,
@@ -162,7 +157,6 @@ final class MenuBarPanelController: NSViewController {
         content.needsLayout = true
         content.layoutSubtreeIfNeeded()
         preferredContentSize = content.preferredPanelSize
-        refreshLatestDictationIfNeeded()
     }
 
     func launchUISmokeReport(
@@ -282,14 +276,6 @@ final class MenuBarPanelController: NSViewController {
             }
             .store(in: &subscriptions)
 
-        NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
-                self?.latestDictationLoaded = false
-                self?.refresh()
-            }
-            .store(in: &subscriptions)
-
     }
 
     private func shortcutWarningPresentation() -> MenuBarShortcutWarningPresentation? {
@@ -398,23 +384,8 @@ final class MenuBarPanelController: NSViewController {
                 "action_id": actionID,
                 "dictation_ready": appState.sttRouter.isModelLoaded ? "true" : "false",
                 "meeting_recording_ready": TranscriptedPermissionAccess.isGranted(.systemAudioRecording) ? "true" : "false",
-                "paste_available": latestDictation == nil ? "false" : "true",
             ]
         )
-    }
-
-    private func refreshLatestDictationIfNeeded() {
-        guard !latestDictationLoaded else { return }
-        latestDictationTask?.cancel()
-        latestDictationTask = Task { @MainActor [weak self] in
-            let latest = await Task.detached(priority: .utility) {
-                DictationTranscriptStore.latestSavedDictation()
-            }.value
-            guard let self, !Task.isCancelled else { return }
-            self.latestDictation = latest
-            self.latestDictationLoaded = true
-            self.refresh()
-        }
     }
 
     private func resolvedSourceApp() -> NSRunningApplication? {

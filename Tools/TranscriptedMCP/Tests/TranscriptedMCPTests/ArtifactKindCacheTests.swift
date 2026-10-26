@@ -52,7 +52,7 @@ final class ArtifactKindCacheTests: XCTestCase {
         let index = try TranscriptIndex(indexDir: root.appendingPathComponent("index", isDirectory: true).creatingDirectory())
         try index.reconcile(meetingsDir: library, dictationsDir: library)
         XCTAssertEqual(kinds(library)["\(filename).md"], .meeting)
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 1)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
 
         // Overwrite in place (same inode, same size) so the opening fence is
         // gone, then put the old mtime back.
@@ -70,7 +70,7 @@ final class ArtifactKindCacheTests: XCTestCase {
 
         XCTAssertNil(kinds(library)["\(filename).md"])
         try index.reconcile(meetingsDir: library, dictationsDir: library)
-        XCTAssertEqual(try index.listRecentMeetings(count: 10).count, 0)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 0)
     }
 
     func testSwappingACachedFileForASymlinkExcludesIt() throws {

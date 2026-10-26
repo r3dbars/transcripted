@@ -21,6 +21,8 @@ enum DictationStopFinalizationOrder: String {
     }
 }
 
+/// The app always saves before Auto Enter. The order setting exists only so
+/// the stop benchmark, the Lab and dictation-stop-autoeval.sh can compare runs.
 enum DictationStopFinalizationPolicy {
     static let order: DictationStopFinalizationOrder = .saveBeforeAutoEnter
 }
@@ -31,31 +33,20 @@ struct DictationStopFinalizationResult<AutoEnterOutcome, SaveResult> {
 }
 
 enum DictationStopFinalizer {
+    /// Starts the save off the main actor, sends Auto Enter, then awaits the save.
     @MainActor
     static func finalize<SaveResult, AutoEnterOutcome>(
-        order: DictationStopFinalizationOrder,
         startSaving: () -> Task<SaveResult, Never>,
         finishSaving: (Task<SaveResult, Never>) async -> SaveResult,
-        saveSynchronously: () -> SaveResult,
         performAutoEnter: () async -> AutoEnterOutcome
     ) async -> DictationStopFinalizationResult<AutoEnterOutcome, SaveResult> {
-        switch order {
-        case .saveAfterAutoEnter:
-            let autoEnterOutcome = await performAutoEnter()
-            let saveResult = saveSynchronously()
-            return DictationStopFinalizationResult(
-                autoEnterOutcome: autoEnterOutcome,
-                saveResult: saveResult
-            )
-        case .saveBeforeAutoEnter:
-            let saveTask = startSaving()
-            let autoEnterOutcome = await performAutoEnter()
-            let saveResult = await finishSaving(saveTask)
-            return DictationStopFinalizationResult(
-                autoEnterOutcome: autoEnterOutcome,
-                saveResult: saveResult
-            )
-        }
+        let saveTask = startSaving()
+        let autoEnterOutcome = await performAutoEnter()
+        let saveResult = await finishSaving(saveTask)
+        return DictationStopFinalizationResult(
+            autoEnterOutcome: autoEnterOutcome,
+            saveResult: saveResult
+        )
     }
 }
 
@@ -82,6 +73,9 @@ extension TextPasteOutcome {
         if let failureReason {
             properties["failure_kind"] = failureReason.rawValue
         }
+        if let cause = failureReason?.clipboardSnapshotCause {
+            properties["clipboard_snapshot_cause"] = cause.rawValue
+        }
         return properties
     }
 }
@@ -94,7 +88,7 @@ enum DictationDeliveryPresentation: Equatable {
     /// The words are on the clipboard; the notice offers Paste where they go.
     case notPasted(message: String, unconfirmed: Bool)
     /// The words never reached the clipboard; the notice offers to copy them.
-    case clipboardBusy(message: String)
+    case clipboardBusy(message: String, hint: String)
     case error(String)
 
     static let likelyPastedAutoSendNotice = "Pasted. Press Return to send it."
@@ -113,7 +107,8 @@ enum DictationDeliveryPresentation: Equatable {
         case .success: return self
         case .clipboardNotice(let message): return .clipboardNotice("\(message) \(Self.pendingAudioNotice)")
         case .notPasted(let message, let unconfirmed): return .notPasted(message: "\(message) \(Self.pendingAudioNotice)", unconfirmed: unconfirmed)
-        case .clipboardBusy(let message): return .clipboardBusy(message: "\(message) \(Self.pendingAudioNotice)")
+        case .clipboardBusy(let message, let hint):
+            return .clipboardBusy(message: "\(message) \(Self.pendingAudioNotice)", hint: hint)
         case .error(let message): return .error("\(message) \(Self.pendingAudioNotice)")
         }
     }
@@ -153,8 +148,8 @@ enum DictationDeliveryPresentation: Equatable {
             return .notPasted(message: message, unconfirmed: reason == .pasteNotConfirmed)
         case .failed(let message, reason: _):
             let combined = saveFailureMessage.map { "\(message) \($0)" } ?? message
-            if saveFailureMessage == nil, outcome.notPastedOffer == .clipboardBusy {
-                return .clipboardBusy(message: combined)
+            if saveFailureMessage == nil, case .clipboardBusy(let cause) = outcome.notPastedOffer {
+                return .clipboardBusy(message: combined, hint: cause.notPastedHint)
             }
             return .error(combined)
         }

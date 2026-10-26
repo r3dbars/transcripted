@@ -94,7 +94,7 @@ extension DictationQueuedStartPolicy {
         var showSuccess: (_ title: String) -> Void
         var showClipboardNotice: (_ message: String, _ kind: MessageKind) -> Void
         var showNotPasted: (_ message: String, _ unconfirmed: Bool) -> Void
-        var showClipboardBusy: (_ message: String) -> Void
+        var showClipboardBusy: (_ message: String, _ hint: String) -> Void
         var showError: (_ message: String) -> Void
     }
 
@@ -110,8 +110,8 @@ extension DictationQueuedStartPolicy {
             steps.showClipboardNotice(message, messageKind(for: presentation))
         case .notPasted(let message, let unconfirmed):
             steps.showNotPasted(message, unconfirmed)
-        case .clipboardBusy(let message):
-            steps.showClipboardBusy(message)
+        case .clipboardBusy(let message, let hint):
+            steps.showClipboardBusy(message, hint)
         case .error(let message):
             steps.showError(message)
         }
@@ -141,6 +141,15 @@ extension DictationQueuedStartPolicy {
         if showsDropMessage(requested: showMessage, isDictating: isDictating) {
             steps.showStillFinishing()
         }
+    }
+
+    /// What any Esc during a take does to a start waiting on it, including
+    /// the first Esc of "press again to discard": it takes the start back,
+    /// quietly, so no "still finishing" message lands over the confirm.
+    static func escapeKeyAction(
+        dropQueuedStart: @escaping (_ showMessage: Bool) -> Void
+    ) -> () -> Void {
+        { dropQueuedStart(false) }
     }
 }
 

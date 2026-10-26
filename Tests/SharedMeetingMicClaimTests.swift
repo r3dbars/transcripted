@@ -36,6 +36,7 @@ func testSharedMeetingMicClaim() {
             SharedMeetingMicClaimPolicy.isClaimSessionAlive(
                 mintedIdentity: identity,
                 currentIdentity: identity,
+                stoppingIdentity: nil,
                 isCaptureSessionActive: true
             ),
             "a claim minted for the currently active session must read alive"
@@ -56,6 +57,7 @@ func testSharedMeetingMicClaim() {
             SharedMeetingMicClaimPolicy.isClaimSessionAlive(
                 mintedIdentity: mintedForMeetingA,
                 currentIdentity: currentlyRecordingMeetingB,
+                stoppingIdentity: nil,
                 isCaptureSessionActive: true
             ),
             "a claim from a superseded recording must resolve stale even though a different recording is active"
@@ -68,6 +70,7 @@ func testSharedMeetingMicClaim() {
             SharedMeetingMicClaimPolicy.isClaimSessionAlive(
                 mintedIdentity: identity,
                 currentIdentity: identity,
+                stoppingIdentity: nil,
                 isCaptureSessionActive: false
             ),
             "identity matching alone is not enough — the session must also report itself active"
@@ -79,9 +82,34 @@ func testSharedMeetingMicClaim() {
             SharedMeetingMicClaimPolicy.isClaimSessionAlive(
                 mintedIdentity: UUID(),
                 currentIdentity: nil,
+                stoppingIdentity: nil,
                 isCaptureSessionActive: false
             ),
             "between recordings there is no current identity to match, so any claim reads stale"
+        )
+    }
+
+    runSuite("SharedMeetingMicClaimPolicy.isClaimSessionAlive — a claim stays alive through its own stop teardown") {
+        // Stop clears the live identity before the files finalize; a route
+        // change or wake in that window must not drop the dictation.
+        let identity = UUID()
+        assertTrue(
+            SharedMeetingMicClaimPolicy.isClaimSessionAlive(
+                mintedIdentity: identity,
+                currentIdentity: nil,
+                stoppingIdentity: identity,
+                isCaptureSessionActive: true
+            ),
+            "while its session is stopping, the claim must read alive under the stashed identity"
+        )
+        assertFalse(
+            SharedMeetingMicClaimPolicy.isClaimSessionAlive(
+                mintedIdentity: identity,
+                currentIdentity: nil,
+                stoppingIdentity: nil,
+                isCaptureSessionActive: true
+            ),
+            "once the stashed identity is cleared, the claim must read stale"
         )
     }
 
