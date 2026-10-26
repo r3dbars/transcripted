@@ -755,7 +755,7 @@ APP_SOURCES=(
     "Sources/Meeting/SpeakerReviewChannel.swift"
     "Sources/UI/Shared/SpeakerReviewQueueScanner.swift"
     "Sources/UI/Settings/SpeakerReviewStack.swift"
-    "Sources/UI/Settings/SpeakerReviewSession.swift"
+    "Sources/UI/Settings/SpeakerMeetingReviewPolicy.swift"
     "Sources/UI/Settings/SpeakerDuplicateDetection.swift"
     "Sources/UI/Shared/SpeakerClipPlayback.swift"
     "Sources/UI/Settings/AutoEnterDisplayNameResolver.swift"

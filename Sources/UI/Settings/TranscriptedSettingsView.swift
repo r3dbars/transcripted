@@ -276,8 +276,6 @@ struct TranscriptedSettingsView: View {
     }
 
     func scrollToSpeakerInbox(using proxy: ScrollViewProxy) {
-        // A deep link to the queue opens the review stack, not its summary.
-        speakerPeopleModel.openReview()
         Task { @MainActor in
             await Task.yield()
             withAnimation(.snappy(duration: 0.22)) {
@@ -563,8 +561,9 @@ struct TranscriptedSettingsView: View {
                     )
                 }
             case .reviewSpeakers:
+                let title = HomeRowMenuPolicy.whoSpokeTitle(voicesToName: speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL))
                 return HomeRowMenuItem(title: title, symbolName: symbolName) {
-                    openHomeSpeakerReview(actionName: "review_meeting_speakers_row")
+                    openHomeSpeakerReview(actionName: "review_meeting_speakers_row", transcriptURL: item.transcriptURL)
                 }
             case .boostMic:
                 return HomeRowMenuItem(title: title, symbolName: symbolName) {

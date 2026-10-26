@@ -4,19 +4,53 @@ import Foundation
 // only the top card is drawn, so every voice not on it must stay reachable from
 // Everyone, a search must reach any voice, and Home must not count skipped calls.
 func testSpeakerReviewStack() {
-    runSuite("A completed held call never hides the next call's voices") {
+    runSuite("A finished card waiting to save keeps its voices out of Everyone while the next card shows") {
         let fixture = ReviewStackFixture()
-        let advanced = fixture.stack(skipping: [fixture.designKey])
+        let advanced = fixture.stack(heldOut: [fixture.designKey])
+        assertEqual(advanced.calls.map(\.meetingTitle), ["Standup", "Retro"], "the finished call has no card while it saves")
         assertEqual(
-            advanced.directory(fixture.profiles, isSearching: false, heldCallID: fixture.designKey).map(\.id),
-            fixture.profiles.map(\.id),
-            "the old call is still displayed, so every queued voice stays reachable"
+            advanced.directory(fixture.profiles, isSearching: false).map(\.id),
+            [fixture.dee, fixture.named],
+            "the finished call's voice and the new top card's voices both stay out of the list"
         )
+        assertEqual(advanced.voiceCount, 3, "a finished call's voices don't count as waiting")
         assertEqual(
-            advanced.directory(fixture.profiles, isSearching: false, heldCallID: fixture.standupKey).map(\.id),
-            [fixture.ada, fixture.dee, fixture.named],
-            "once the next call is displayed only its voices are hidden"
+            advanced.directory(fixture.profiles, isSearching: true).count,
+            fixture.profiles.count,
+            "a search still reaches every voice"
         )
+    }
+
+    runSuite("A meeting picked from Meetings moves its card to the top") {
+        let fixture = ReviewStackFixture()
+        let focused = fixture.stack(focused: fixture.retroKey)
+        assertEqual(focused.calls.map(\.meetingTitle), ["Retro", "Design sync", "Standup"])
+        assertEqual(
+            focused.directory(fixture.profiles, isSearching: false).map(\.id),
+            [fixture.ada, fixture.bea, fixture.cal, fixture.named],
+            "the focused card's voice is the one on the open card"
+        )
+        let skippedFocus = fixture.stack(skipping: [fixture.retroKey], focused: fixture.retroKey)
+        assertEqual(skippedFocus.calls.map(\.meetingTitle), ["Design sync", "Standup"], "a skipped call stays skipped")
+    }
+
+    runSuite("Each saved meeting knows how many voices it still has to name and which card holds them") {
+        let fixture = ReviewStackFixture()
+        let naming = fixture.stack().meetingNaming(items: fixture.queue)
+        assertEqual(naming["/tmp/Standup.md"], .init(voicesToName: 2, callKey: fixture.standupKey))
+        assertEqual(naming["/tmp/Retro.md"], .init(voicesToName: 1, callKey: fixture.retroKey))
+
+        // Bea was also heard in Retro; she waits on Standup's card, the newer one.
+        let shared = fixture.queue + [fixture.extraItem(fixture.bea, inRetro: true)]
+        let sharedStack = SpeakerReviewStack(voices: SpeakerReviewQueueScanner.groupedByVoice(shared), skippedCallKeys: [], laterCallKeys: [])
+        assertEqual(
+            sharedStack.meetingNaming(items: shared)["/tmp/Retro.md"],
+            .init(voicesToName: 2, callKey: fixture.retroKey),
+            "Retro counts both of its voices and opens its own card"
+        )
+
+        let skipped = fixture.stack(skipping: [fixture.standupKey]).meetingNaming(items: fixture.queue)
+        assertNil(skipped["/tmp/Standup.md"], "a skipped meeting has nothing waiting")
     }
 
     runSuite("Voices on review cards below the top one stay listed in Everyone") {
@@ -150,8 +184,18 @@ private struct ReviewStackFixture {
         profiles.first { $0.id == id }!
     }
 
-    func stack(skipping skipped: Set<String> = [], later: [String] = []) -> SpeakerReviewStack {
-        SpeakerReviewStack(voices: voices, skippedCallKeys: skipped, laterCallKeys: later)
+    func stack(
+        skipping skipped: Set<String> = [],
+        later: [String] = [],
+        heldOut: Set<String> = [],
+        focused: String? = nil
+    ) -> SpeakerReviewStack {
+        SpeakerReviewStack(voices: voices, skippedCallKeys: skipped, laterCallKeys: later, heldOutCallKeys: heldOut, focusedCallKey: focused)
+    }
+
+    /// One more appearance of a voice, in Retro (older than Standup).
+    func extraItem(_ speakerId: UUID, inRetro: Bool) -> SpeakerPendingReviewItem {
+        item(speakerId, call: retroId, title: "Retro", day: 1)
     }
 
     var queue: [SpeakerPendingReviewItem] {

@@ -21,7 +21,7 @@ enum HomeRowMenuEntry: Equatable, CaseIterable {
         case .revealDictation: return "Reveal in Finder"
         case .reportIssue: return "Report issue"
         case .showTranscript: return "Show transcript in Finder"
-        case .reviewSpeakers: return "Review speakers"
+        case .reviewSpeakers: return "Who spoke?"
         case .boostMic: return "Boost mic next meeting"
         case .showAudio: return "Show audio in Finder"
         case .deleteMeeting: return "Delete meeting"
@@ -50,6 +50,12 @@ enum HomeRowMenuEntry: Equatable, CaseIterable {
 /// Which actions a Home row's ⋯ menu offers, in order. The Settings view maps
 /// each entry to its handler; this decides what's there.
 enum HomeRowMenuPolicy {
+    /// "Who spoke? · 2 to name", or just "Who spoke?" when the count isn't
+    /// known yet. It opens the meeting's card on Speakers.
+    static func whoSpokeTitle(voicesToName: Int) -> String {
+        voicesToName > 0 ? "Who spoke? \u{00B7} \(voicesToName) to name" : "Who spoke?"
+    }
+
     /// No Report issue and no Delete here: dictations are quiet rows; the
     /// Dictations page drives per-entry delete itself through the inline-undo
     /// flow (QuietDictationLibrary), with no dialog.

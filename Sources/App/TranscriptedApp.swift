@@ -630,6 +630,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                         await self.appState.meetingSession.prepareForTermination()
                     }
                 },
+                finishSpeakerReviewSaves: { await SpeakerPeopleSettingsViewModel.finishMeetingSavesForTermination() },
                 shutDownAppState: { self.appState.shutdown() },
                 stopAndRestorePersistentInput: { await self.persistentDictationInputController.stopAndRestore() },
                 flushLocalEvents: { await EventReporter.shared.flushLocalEventsForShutdown() },
