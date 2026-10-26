@@ -464,7 +464,7 @@ func testTodayPresentation() {
         assertEqual(later?.allMarks.last?.id, "d-new", "the new capture is on the tape")
     }
 
-    runSuite("TodayCopy.minuteKey - equal keys never hide a change in the day card's time copy") {
+    runSuite("TodayCopy.minuteKey - equal keys never hide a change in the Now label") {
         let utc = TimeZone(identifier: "UTC")!
         var utcCalendar = Calendar(identifier: .gregorian)
         utcCalendar.timeZone = utc
@@ -551,5 +551,146 @@ func testTodayPresentation() {
 
         let rejected = TodayWritingParser.entries(fromDayFile: dayFile(["2026-09-24 16:05:00.387Z", "not a date"]))
         assertTrue(rejected.isEmpty, "out-of-format Captured values make no entry")
+    }
+
+    runSuite("TodayClockPolicy.nowLabelText keeps the existing Now prefix") {
+        assertEqual(
+            TodayClockPolicy.nowLabelText(now: date(24, 14, 5), locale: locale, calendar: calendar),
+            "Now " + TodayCopy.rowWhen(for: date(24, 14, 5), now: date(24, 14, 5), locale: locale, calendar: calendar),
+            "the Now label is the existing row time with a Now prefix"
+        )
+    }
+
+    runSuite("TodayDayCard identity skips a minute tick and changes with the calendar day") {
+        let morningNow = date(24, 10, 1)
+        let afternoonNow = date(24, 16, 45)
+        let fridayNow = date(25, 0, 1)
+        let morningDay = TodayTapeBuilder.days(
+            captures: tapeCaptures, now: morningNow, calendar: calendar, locale: locale
+        ).last
+        let afternoonDay = TodayTapeBuilder.days(
+            captures: tapeCaptures, now: afternoonNow, calendar: calendar, locale: locale
+        ).last
+        let fridayDay = TodayTapeBuilder.days(
+            captures: tapeCaptures, now: fridayNow, calendar: calendar, locale: locale
+        ).last
+        guard let morningDay, let afternoonDay, let fridayDay else {
+            assertTrue(false, "the week has today and the next morning")
+            return
+        }
+
+        assertEqual(morningDay, afternoonDay, "building the week at two minutes of the same day is the same tape")
+        let morning = TodayClockPolicy.dayCardIdentity(day: morningDay, pickedMarkID: nil, formatKey: "en")
+        let afternoon = TodayClockPolicy.dayCardIdentity(day: afternoonDay, pickedMarkID: nil, formatKey: "en")
+        let friday = TodayClockPolicy.dayCardIdentity(day: fridayDay, pickedMarkID: nil, formatKey: "en")
+        assertEqual(morning, afternoon, "the same captures at two minutes of the same day keep one card identity")
+        assertTrue(morning != friday, "a new calendar day is a different card")
+        assertTrue(
+            TodayClockPolicy.dayCardIdentity(day: morningDay, pickedMarkID: "m-0900", formatKey: "en")
+                != morning,
+            "picking a mark is a different card"
+        )
+        assertTrue(
+            TodayClockPolicy.dayCardIdentity(day: morningDay, pickedMarkID: nil, formatKey: "de")
+                != morning,
+            "a region change is a different card"
+        )
+        assertEqual(
+            TodayClockPolicy.dayKey(morningNow, calendar: calendar),
+            TodayClockPolicy.dayKey(afternoonNow, calendar: calendar),
+            "two minutes of the same local day share one day key"
+        )
+        assertTrue(
+            TodayClockPolicy.dayKey(afternoonNow, calendar: calendar)
+                != TodayClockPolicy.dayKey(fridayNow, calendar: calendar),
+            "midnight starts a new day key"
+        )
+    }
+
+    runSuite("TodayClockPolicy.nextMidnight follows the local calendar day") {
+        assertEqual(
+            TodayClockPolicy.nextMidnight(after: date(24, 15, 30), calendar: calendar),
+            date(25, 0, 0),
+            "afternoon rolls to the next local midnight"
+        )
+        assertEqual(
+            TodayClockPolicy.nextMidnight(after: date(25, 0, 0), calendar: calendar),
+            date(26, 0, 0),
+            "exactly midnight rolls to the following midnight"
+        )
+
+        var la = Calendar(identifier: .gregorian)
+        la.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        // 2026-03-08 is the US spring-forward Sunday.
+        let beforeSpring = la.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 1, minute: 30))!
+        let afterSpring = TodayClockPolicy.nextMidnight(after: beforeSpring, calendar: la)
+        assertEqual(la.component(.day, from: afterSpring), 9, "DST spring-forward still lands on the next calendar day")
+        assertEqual(la.component(.hour, from: afterSpring), 0, "and at local midnight")
+        assertEqual(la.component(.minute, from: afterSpring), 0, "on the hour")
+    }
+
+    runSuite("TodayClockPolicy.needsRollover is true across midnight and DST, false inside one day") {
+        assertFalse(
+            TodayClockPolicy.needsRollover(storedDay: date(24, 10, 1), now: date(24, 16, 45), calendar: calendar),
+            "two minutes of the same local day do not roll over"
+        )
+        assertTrue(
+            TodayClockPolicy.needsRollover(storedDay: date(24, 23, 59), now: date(25, 0, 1), calendar: calendar),
+            "midnight starts a new day"
+        )
+        assertTrue(
+            TodayClockPolicy.needsRollover(storedDay: .distantPast, now: date(24, 10), calendar: calendar),
+            "a never-built snapshot always needs a refresh"
+        )
+
+        var la = Calendar(identifier: .gregorian)
+        la.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let beforeSpring = la.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 1, minute: 30))!
+        let sameSpringDay = la.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 4, minute: 0))!
+        let afterSpring = la.date(from: DateComponents(year: 2026, month: 3, day: 9, hour: 0, minute: 1))!
+        assertFalse(
+            TodayClockPolicy.needsRollover(storedDay: beforeSpring, now: sameSpringDay, calendar: la),
+            "spring-forward stays on the same calendar day"
+        )
+        assertTrue(
+            TodayClockPolicy.needsRollover(storedDay: beforeSpring, now: afterSpring, calendar: la),
+            "the next local midnight after DST still rolls over"
+        )
+    }
+
+    runSuite("TodayClockPolicy.nowMarkerFraction follows the clock's day, not a stale tape day") {
+        let nine = TodayClockPolicy.nowMarkerFraction(now: date(24, 9), tapeDay: date(24, 0), calendar: calendar)
+        assertEqual(nine, 1.0 / 6.0, "9am is a sixth of 6am-to-midnight")
+        assertNil(
+            TodayClockPolicy.nowMarkerFraction(now: date(25, 0, 1), tapeDay: date(24, 0), calendar: calendar),
+            "after midnight the marker leaves yesterday's tape"
+        )
+        assertNotNil(
+            TodayClockPolicy.nowMarkerFraction(now: date(25, 0, 1), tapeDay: date(25, 0), calendar: calendar),
+            "the new day's tape still shows it"
+        )
+    }
+
+    runSuite("TodaySessionRow identity includes locale and time zone") {
+        let session = TodaySession(
+            items: [tapeItem(.dictation, "d", date(24, 10))],
+            start: date(24, 10),
+            end: date(24, 10, 20),
+            title: "Morning"
+        )
+        let openEN = TodayClockPolicy.sessionRowIdentity(session: session, isOpen: true, formatKey: "en|America/Los_Angeles")
+        assertEqual(
+            openEN,
+            TodayClockPolicy.sessionRowIdentity(session: session, isOpen: true, formatKey: "en|America/Los_Angeles"),
+            "the same session, open state, and region keep one row identity"
+        )
+        assertTrue(
+            openEN != TodayClockPolicy.sessionRowIdentity(session: session, isOpen: false, formatKey: "en|America/Los_Angeles"),
+            "opening the row is a different identity"
+        )
+        assertTrue(
+            openEN != TodayClockPolicy.sessionRowIdentity(session: session, isOpen: true, formatKey: "de|Europe/Berlin"),
+            "a locale or time zone change is a different identity so session times redraw"
+        )
     }
 }

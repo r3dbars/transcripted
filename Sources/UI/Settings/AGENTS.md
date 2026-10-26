@@ -68,13 +68,13 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Today
 
-`TodayPresentation.swift`, `TodayViewModel.swift`, `Pages/TodaySettingsPage.swift`, `TodayWritingDayFileCache.swift`.
+`TodayPresentation.swift`, `TodayViewModel.swift`, `Pages/TodaySettingsPage.swift`, `TodayClockViews.swift`, `TodayWritingDayFileCache.swift`.
 
 - Data comes from local files only: `RecentMeetingsScanner.loadTodayIndex`, `DictationTranscriptStore.savedDictationDayCounts`, and `Writing_<date>.md` files (`TodayWritingParser`, cached by mtime+size).
 - The rolling seven-day tape retitles the header and swaps numbers when you pick a day (`TodayTapeBuilder.dayStats`). Below it, the day splits into sessions (`TodaySessionBuilder`): a pause over 30 minutes starts a new one, titled by rule, never a model (first meeting's title, else the first dictation's opening words cut at a whole word, else "Writing in <app>"). Picking a session picks its latest mark and vice versa.
 - Writing bar lengths are estimated from word count (the files keep only the first keystroke); a writing click opens its day file.
 - Meeting clicks reuse `requestHomeRevealMeeting`; dictation clicks open Dictations. Stream colors are `LibraryTokens.meetingsStream`/`dictationStream`/`writingStream`.
-- Performance: `TodayTapeDay` stores `allMarks` and `sessions`; each `TodayTapeMark` carries its `hoverText`; `TodayTapeSelection` resolves hovered/picked once per draw; the shell passes a minute-granular `now` from `TimelineView(.everyMinute)`; the day card and week cells are `Equatable`.
+- Performance: `TodayTapeDay` stores `allMarks` and `sessions`; each `TodayTapeMark` carries its `hoverText`; `TodayTapeSelection` resolves hovered/picked once per draw; only the Now label and tape marker sit in `TimelineView(.everyMinute)` (`TodayClockViews.swift`); `TodayClockPolicy.needsRollover` rebuilds the snapshot at midnight, wake, become-active, and window-key so the seven-day window and Today label roll over; the day card, week cells, and session rows are `Equatable` (session rows include `formatKey`) and do not take `now`. `today-page-wide-minute-tick` in `scripts/dev/lint.py` fails if the page-wide minute wrap or a `now:` on the page/card/row comes back.
 
 ### Home (Meetings) and Dictations
 
