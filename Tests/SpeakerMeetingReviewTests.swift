@@ -117,6 +117,16 @@ func testSpeakerMeetingReview() {
         assertMergeLeavesNoBlankName(spacesIntoSelf, voice: voice, target: voice, "whitespace-only name into the same voice")
         assertEqual(spacesIntoSelf, [], "a whitespace-only self-merge needs a name instead of saving blank")
 
+        let typedWins = Policy.steps(
+            for: [update(voice, "Rosa Diaz", .merged(targetProfileId: other))],
+            existingNames: [other: "Dana Holt"]
+        )
+        assertEqual(
+            typedWins,
+            [.join(voiceID: voice, personID: other, name: "Rosa Diaz")],
+            "a typed name still wins over the target's saved name"
+        )
+
         let underTarget = Policy.steps(
             for: [update(voice, "", .merged(targetProfileId: other))],
             existingNames: [other: "Dana Holt"]
