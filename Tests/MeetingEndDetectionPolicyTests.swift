@@ -21,6 +21,71 @@ func testMeetingEndDetectionPolicy() {
         assertEqual(MeetingRecordingWarningOwner.displayed(callEnd: nil, silence: detector.warning), silence)
         assertTrue(silence != nil, "the silence fallback must still be available after temporary source loss")
     }
+    runSuite("Meeting end detection — a held call-end prompt yields to the five-minute silence warning") {
+        var detector = MeetingAudioInactivityDetector()
+        _ = detector.startRecording()
+        _ = detector.tick(at: 300)
+        let silence = detector.warning
+        let held = MeetingAudioInactivityWarning(
+            inactiveDuration: 10,
+            countdownSeconds: 30,
+            kind: .callEnded,
+            automaticStopAllowed: false
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.displayed(callEnd: held, silence: silence),
+            silence,
+            "a forgotten recording must still hit the five-minute No sound stop"
+        )
+        let liveCountdown = MeetingAudioInactivityWarning(
+            inactiveDuration: 10,
+            countdownSeconds: 30,
+            kind: .callEnded
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.displayed(callEnd: liveCountdown, silence: silence),
+            liveCountdown,
+            "an in-progress Meeting ended? countdown still wins over silence"
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.displayed(callEnd: held, silence: nil),
+            held,
+            "with no silence warning yet, the held prompt stays up"
+        )
+    }
+    runSuite("Meeting end detection — silence latched before hold is re-raised after hold") {
+        var detector = MeetingAudioInactivityDetector()
+        _ = detector.startRecording()
+        _ = detector.tick(at: 300)
+        let silence = detector.warning
+        let live = MeetingAudioInactivityWarning(inactiveDuration: 10, countdownSeconds: 30, kind: .callEnded)
+        assertEqual(
+            MeetingRecordingWarningOwner.displayed(callEnd: live, silence: silence),
+            live,
+            "a live Meeting ended? countdown still covers an already-latched silence warning"
+        )
+        assertEqual(
+            detector.tick(at: 400),
+            .none,
+            "the silence detector will not emit again while its warning is still latched"
+        )
+        let held = MeetingAudioInactivityWarning(
+            inactiveDuration: 10,
+            countdownSeconds: 30,
+            kind: .callEnded,
+            automaticStopAllowed: false
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.afterCallEndHeld(held: held, pendingSilence: detector.warning),
+            silence!,
+            "hold must re-raise the already-latched silence warning; tick will not"
+        )
+        assertEqual(
+            MeetingRecordingWarningOwner.afterCallEndHeld(held: held, pendingSilence: nil),
+            held,
+            "with nothing latched, hold stays a Continue / Stop prompt"
+        )
+    }
     runSuite("Meeting end detection — room speech clears only the hidden silence warning") {
         var detector = MeetingAudioInactivityDetector()
         _ = detector.startRecording()
@@ -99,11 +164,15 @@ func testMeetingEndDetectionPolicy() {
                   "browser playback alone cannot identify which browser owns the detected microphone call")
     }
 
-    runSuite("Meeting end detection binding — native output-only activity binds a muted native meeting") {
+    runSuite("Meeting end detection binding — native output-only activity cannot arm at Record time") {
         let snapshot = MeetingCallActivitySnapshot(inputUsers: [], outputUsers: ["us.zoom.xos"], isReliable: true)
-        assertEqual(snapshot.sourceFamilies(detectedPrompt: true, provider: .zoom, isBrowserCall: false,
-                                            cameraOnly: false, sampledAt: 100, now: 100), zoom,
-                    "a muted native call can be bound from its output activity")
+        assertNil(snapshot.sourceFamilies(detectedPrompt: true, provider: .zoom, isBrowserCall: false,
+                                          cameraOnly: false, sampledAt: 100, now: 100),
+                  "a chat chime before joining must not arm; the microphone stream is required")
+        let mutedJoin = MeetingCallActivitySnapshot(inputUsers: ["us.zoom.xos"], outputUsers: [], isReliable: true)
+        assertEqual(mutedJoin.sourceFamilies(detectedPrompt: true, provider: .zoom, isBrowserCall: false,
+                                             cameraOnly: false, sampledAt: 100, now: 100), zoom,
+                    "a muted call that still holds the microphone can arm immediately")
     }
 
     runSuite("Meeting end detection binding — Safari and WebKit belong to one jointly tracked browser") {
@@ -118,16 +187,50 @@ func testMeetingEndDetectionPolicy() {
         }
     }
 
-    runSuite("Meeting end detection tracking — another browser cannot replace the recording's frozen source family") {
+    runSuite("Meeting end detection tracking — another call app cancels the countdown without retargeting") {
         let identity = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
         var tracking = MeetingCallEndTracking(recordingIdentity: identity, families: chrome)
+        let ended = MeetingCallActivitySnapshot(inputUsers: [], outputUsers: [], isReliable: true)
+        _ = tracking.policy.observe(ended.activity(in: tracking.families, cameraInUse: false), sampledAt: 100, at: 100)
+        assertEqual(
+            tracking.policy.observe(ended.activity(in: tracking.families, cameraInUse: false), sampledAt: 110, at: 110),
+            .warningStarted,
+            "the bound browser ending with nothing else on a call still warns"
+        )
         let safari = MeetingCallActivitySnapshot(inputUsers: ["com.apple.WebKit.GPU"], outputUsers: [], isReliable: true)
         let safariActivity = safari.activity(in: tracking.families, cameraInUse: false)
-        assertTrue(safariActivity == .inactive, "a different browser's call does not sustain the recorded Chrome meeting")
-        _ = tracking.policy.observe(safariActivity, sampledAt: 100, at: 100)
-        assertEqual(tracking.policy.observe(safariActivity, sampledAt: 110, at: 110), .warningStarted,
-                    "the bound browser ending still warns when another browser is active")
+        assertTrue(safariActivity == .active, "another browser taking the microphone cancels the ended-call countdown")
+        assertEqual(
+            tracking.policy.observe(safariActivity, sampledAt: 120, at: 120),
+            .warningCleared,
+            "a new call in a different app must not auto-stop recording A"
+        )
         assertEqual(tracking.families, chrome, "later snapshots do not retarget the recording")
+        let teams = MeetingCallActivitySnapshot(inputUsers: ["com.microsoft.teams2"], outputUsers: [], isReliable: true)
+        var zoomTracking = MeetingCallEndTracking(recordingIdentity: identity, families: zoom)
+        assertTrue(
+            teams.activity(in: zoomTracking.families, cameraInUse: false) == .active,
+            "a native Teams join also cancels a Zoom-end countdown"
+        )
+        _ = zoomTracking.policy.observe(.inactive, sampledAt: 200, at: 200)
+        _ = zoomTracking.policy.observe(.inactive, sampledAt: 210, at: 210)
+        assertEqual(
+            zoomTracking.policy.observe(teams.activity(in: zoomTracking.families, cameraInUse: false), sampledAt: 215, at: 215),
+            .warningCleared,
+            "Zoom ended and Teams started: keep recording A"
+        )
+        let youtube = MeetingCallActivitySnapshot(inputUsers: [], outputUsers: ["com.google.Chrome.helper"], isReliable: true)
+        assertTrue(
+            youtube.activity(in: zoom, cameraInUse: false) == .inactive,
+            "browser playback alone is not another call"
+        )
+        let teamsListenOnly = MeetingCallActivitySnapshot(
+            inputUsers: [], outputUsers: ["com.microsoft.teams2"], isReliable: true
+        )
+        assertTrue(
+            teamsListenOnly.activity(in: zoom, cameraInUse: false) == .active,
+            "a listen-only native Teams join still cancels the Zoom-end countdown"
+        )
     }
 
     runSuite("Meeting end detection tracking — only the matching recording and warning may stop on timeout") {
