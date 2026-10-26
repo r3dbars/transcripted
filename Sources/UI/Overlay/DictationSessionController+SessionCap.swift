@@ -8,8 +8,6 @@ extension DictationSessionController {
     /// Prevents stuck sessions when the user walks away from the computer.
     /// Derived from the shared constant so the speech engine's audio buffer
     /// sizing stays in lockstep with the cap.
-    private static let sessionTimeoutNanos: UInt64 =
-        UInt64(TranscriptedConstants.dictationSessionMaxDuration * 1_000_000_000)
     private static let sessionTimeoutInterval: TimeInterval =
         TranscriptedConstants.dictationSessionMaxDuration
     /// Cap on each polling sleep so a wake from system sleep gets a chance to

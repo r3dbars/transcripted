@@ -74,6 +74,40 @@ func testClaudeDesktopIntegrationInstaller() {
         assertEqual(transcripted["command"] as? String, "/tmp/transcripted-mcp", "Transcripted command should be written after repair")
     }
 
+    runSuite("ClaudeDesktopIntegrationInstaller.writeMCPServersConfig — keeps a symlinked config linked") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedSymlinkConfigTests-\(UUID().uuidString)", isDirectory: true)
+        let targetURL = tempRoot
+            .appendingPathComponent("dotfiles", isDirectory: true)
+            .appendingPathComponent("mcp.json", isDirectory: false)
+        let linkURL = tempRoot
+            .appendingPathComponent("agent", isDirectory: true)
+            .appendingPathComponent("mcp.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: linkURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "{}".write(to: targetURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.createSymbolicLink(at: linkURL, withDestinationURL: targetURL)
+
+        _ = try? ClaudeDesktopIntegrationInstaller.writeMCPServersConfig(
+            commandPath: "/tmp/transcripted-mcp",
+            configURL: linkURL
+        )
+
+        let linkType = (try? FileManager.default.attributesOfItem(atPath: linkURL.path))?[.type] as? FileAttributeType
+        assertEqual(linkType, .typeSymbolicLink, "config path should still be a symlink after writing")
+
+        guard let data = try? Data(contentsOf: targetURL),
+              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let servers = root["mcpServers"] as? [String: Any],
+              let transcripted = servers["transcripted"] as? [String: Any] else {
+            assertTrue(false, "symlink target should hold the Transcripted server entry")
+            return
+        }
+        assertEqual(transcripted["command"] as? String, "/tmp/transcripted-mcp", "Transcripted command should land in the symlink target")
+    }
+
     runSuite("ClaudeDesktopIntegrationInstaller.configSnippet — emits parseable MCP config") {
         let commandPath = "Managed Helpers/transcripted-mcp"
 

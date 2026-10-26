@@ -27,8 +27,15 @@ public protocol SpeakerStore: Sendable {
     /// Set the display name for a speaker
     func setDisplayName(id: UUID, name: String, source: String)
 
+    /// Set the display name, throwing when the profile row is gone
+    func requireDisplayNameUpdate(id: UUID, name: String, source: String) throws
+
     /// Restore a profile to a previously snapshotted state.
     func restoreProfile(_ profile: SpeakerProfile)
+
+    /// Take one meeting's match back from a profile (a review row corrected or discarded)
+    /// without overwriting its name or any match that landed after the snapshot.
+    func revertMatchContribution(snapshot: SpeakerProfile)
 
     /// Delete a speaker profile
     func deleteSpeaker(id: UUID)
@@ -67,6 +74,9 @@ public protocol SpeakerStore: Sendable {
     /// The profile that now holds `profileId` after merges that were not undone, if any.
     func mergeSurvivorId(of profileId: UUID) -> UUID?
 
+    /// Every id merged into `profileId` (directly or through a chain) by merges not undone.
+    func mergedAliasIds(of profileId: UUID) -> Set<UUID>
+
     /// Record that a match suggestion was rejected by the user.
     func incrementDisputeCount(id: UUID)
 
@@ -96,6 +106,14 @@ public extension SpeakerStore {
         try mutations()
     }
 
+    /// Back-compat default for test doubles: fails like `SpeakerDatabase` when the row is gone.
+    func requireDisplayNameUpdate(id: UUID, name: String, source: String) throws {
+        guard getSpeaker(id: id) != nil else {
+            throw SpeakerStoreProfileMissingError(id: id)
+        }
+        setDisplayName(id: id, name: name, source: source)
+    }
+
     /// Back-compat default for test doubles and lightweight stores that do not
     /// persist the explicit-confirmation ledger.
     func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws {}
@@ -116,6 +134,13 @@ public extension SpeakerStore {
 
     /// Back-compat default: stores without a merge log cannot follow a merged profile.
     func mergeSurvivorId(of profileId: UUID) -> UUID? { nil }
+
+    func mergedAliasIds(of profileId: UUID) -> Set<UUID> { [] }
+
+    /// Back-compat default: stores without match history fall back to the full snapshot restore.
+    func revertMatchContribution(snapshot: SpeakerProfile) {
+        restoreProfile(snapshot)
+    }
 
     /// Back-compat default: conformers that don't model an EMA blend weight (test doubles, simple
     /// stores) fall back to the standard write-back, ignoring `blendAlpha`. `SpeakerDatabase`
@@ -141,4 +166,8 @@ public extension SpeakerStore {
     func recordNegativeExemplar(profileId: UUID, embedding: [Float]) {}
 
     func negativeExemplarsByProfile() -> [UUID: [[Float]]] { [:] }
+}
+
+private struct SpeakerStoreProfileMissingError: Error {
+    let id: UUID
 }

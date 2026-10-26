@@ -72,7 +72,7 @@ func testCaptureLibraryMigrationPlanner() {
         defer { try? fileManager.removeItem(at: dictationsOnly) }
         writeFile("- dictated", at: dictationsOnly
             .appendingPathComponent("dictations", isDirectory: true)
-            .appendingPathComponent("2026-01-05.md", isDirectory: false))
+            .appendingPathComponent("Dictations_2026-01-05.md", isDirectory: false))
         assertTrue(
             planner.libraryHasCaptures(at: dictationsOnly),
             "a dictation day file alone should count as existing captures"
@@ -103,7 +103,7 @@ func testCaptureLibraryMigrationPlanner() {
             .appendingPathComponent("loose.wav", isDirectory: false))
         writeFile("- dictated", at: old
             .appendingPathComponent("dictations", isDirectory: true)
-            .appendingPathComponent("2026-01-05.md", isDirectory: false))
+            .appendingPathComponent("Dictations_2026-01-05.md", isDirectory: false))
 
         let plan = planner.makePlan(from: old, to: new)
 
@@ -170,10 +170,10 @@ func testCaptureLibraryMigrationPlanner() {
             .appendingPathComponent("microphone.m4a", isDirectory: false))
         writeFile("- dictated", at: old
             .appendingPathComponent("dictations", isDirectory: true)
-            .appendingPathComponent("2026-01-05.md", isDirectory: false))
+            .appendingPathComponent("Dictations_2026-01-05.md", isDirectory: false))
         let collidingDestination = new
             .appendingPathComponent("dictations", isDirectory: true)
-            .appendingPathComponent("2026-01-05.md", isDirectory: false)
+            .appendingPathComponent("Dictations_2026-01-05.md", isDirectory: false)
         writeFile("destination keeps this", at: collidingDestination)
 
         let plan = planner.makePlan(from: old, to: new)
@@ -261,11 +261,11 @@ func testCaptureLibraryMigrationPlanner() {
 
         let oldTranscript = old.appendingPathComponent("meetings/2026-01-05 Standup.md")
         let oldAudio = old.appendingPathComponent("meetings/audio/2026-01-05 Standup_audio", isDirectory: true)
-        let oldDictation = old.appendingPathComponent("dictations/2026-01-05.md")
+        let oldDictation = old.appendingPathComponent("dictations/Dictations_2026-01-05.md")
         writeFile("# standup", at: oldTranscript)
         writeFile("mic", at: oldAudio.appendingPathComponent("microphone.m4a"))
         writeFile("- dictated", at: oldDictation)
-        let collidingDestination = new.appendingPathComponent("dictations/2026-01-05.md")
+        let collidingDestination = new.appendingPathComponent("dictations/Dictations_2026-01-05.md")
         writeFile("destination keeps this", at: collidingDestination)
 
         let plan = movingPlanner.makePlan(from: old, to: new)
@@ -295,7 +295,7 @@ func testCaptureLibraryMigrationPlanner() {
             try fileManager.removeItem(at: url)
         })
 
-        let oldDictation = old.appendingPathComponent("dictations/2026-01-05.md")
+        let oldDictation = old.appendingPathComponent("dictations/Dictations_2026-01-05.md")
         let oldAudio = old.appendingPathComponent("meetings/audio/2026-01-05 Standup_audio", isDirectory: true)
         writeFile("- first", at: oldDictation)
         writeFile("mic", at: oldAudio.appendingPathComponent("microphone.wav"))
@@ -321,7 +321,7 @@ func testCaptureLibraryMigrationPlanner() {
             try? fileManager.removeItem(at: new)
         }
         let oldTranscript = old.appendingPathComponent("meetings/2026-01-05 Standup.md")
-        let oldDictation = old.appendingPathComponent("dictations/2026-01-05.md")
+        let oldDictation = old.appendingPathComponent("dictations/Dictations_2026-01-05.md")
         writeFile("# standup", at: oldTranscript)
         writeFile("- dictated", at: oldDictation)
 
@@ -457,6 +457,37 @@ func testCaptureLibraryMigrationPlanner() {
         assertEqual(readFile(at: collidingDestination), "destination keeps this", "the destination file must not be touched")
         assertEqual(readFile(at: new.appendingPathComponent("writing/Writing_2026-09-24.md")), "yesterday")
         assertEqual(readFile(at: new.appendingPathComponent("writing/Writing_2026-09-25.md")), "today, first entry")
+    }
+
+    runSuite("move - leaves the user's own Markdown in dictations and writing alone") {
+        let old = makeLibraryRoot("own-notes-old")
+        let new = makeLibraryRoot("own-notes-new")
+        defer {
+            try? fileManager.removeItem(at: old)
+            try? fileManager.removeItem(at: new)
+        }
+        var removedPaths: [String] = []
+        let movingPlanner = CaptureLibraryMigrationPlanner(removeOriginal: { url in
+            removedPaths.append(url.lastPathComponent)
+            try fileManager.removeItem(at: url)
+        })
+
+        let ownDraft = old.appendingPathComponent("writing/essay draft.md")
+        let ownNote = old.appendingPathComponent("dictations/ideas.md")
+        writeFile("my essay", at: ownDraft)
+        writeFile("my ideas", at: ownNote)
+        assertFalse(movingPlanner.libraryHasCaptures(at: old), "Markdown the app didn't write is not a capture")
+        writeFile("- dictated", at: old.appendingPathComponent("dictations/Dictations_2026-09-25.md"))
+
+        let plan = movingPlanner.makePlan(from: old, to: new)
+        assertEqual(plan.itemsToCopy.map(\.sourceURL.lastPathComponent), ["Dictations_2026-09-25.md"])
+
+        let copyResult = try? movingPlanner.copy(plan)
+        _ = movingPlanner.removeOriginals(of: copyResult?.copiedItems ?? [])
+
+        assertEqual(removedPaths, ["Dictations_2026-09-25.md"], "only the app's own day file should go to the Trash")
+        assertEqual(readFile(at: ownDraft), "my essay")
+        assertEqual(readFile(at: ownNote), "my ideas")
     }
 
     runSuite("move summary - says what moved, what stayed, and where") {

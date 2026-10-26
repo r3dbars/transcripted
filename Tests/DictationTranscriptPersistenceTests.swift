@@ -89,7 +89,6 @@ func testDictationTranscriptPersistence() async {
             let output = folder.appendingPathComponent("synthetic.md")
             let task = Task { @MainActor in
                 let result: DictationStopFinalizationResult<Bool, DictationTranscriptPersistenceResult> = await DictationStopFinalizer.finalize(
-                    order: .saveBeforeAutoEnter,
                     startSaving: {
                         Task.detached {
                             started.continuation.yield(())
@@ -103,7 +102,6 @@ func testDictationTranscriptPersistence() async {
                         }
                     },
                     finishSaving: { await $0.value },
-                    saveSynchronously: { fatalError("Wrong finalization order") },
                     performAutoEnter: { false }
                 )
                 if DictationSessionCompletionPolicy.canPublish(

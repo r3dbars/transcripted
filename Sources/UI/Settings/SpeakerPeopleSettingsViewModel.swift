@@ -67,6 +67,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     private var duplicateCountsByProfileID: [UUID: Int] = [:]
     private var mergeTargetIndex = SpeakerMergeTargetIndex.empty
     private var clipURLsByProfileID: [UUID: URL] = [:]
+    private var clipQuotesByProfileID: [UUID: String] = [:]
     private var undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord] = [:]
     private var namingStandingsByProfileID: [UUID: SpeakerNamingStanding] = [:]
     private var snapshotPublication = RefreshPublicationOrder()
@@ -81,6 +82,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let duplicateCountsByProfileID: [UUID: Int]
         let mergeTargetIndex: SpeakerMergeTargetIndex
         let clipURLsByProfileID: [UUID: URL]
+        let clipQuotesByProfileID: [UUID: String]
         let reviewQueueItems: [SpeakerPendingReviewItem]
         let undoableMergesByTargetID: [UUID: SpeakerSettingsStore.MergeRecord]
         let namingStandingsByProfileID: [UUID: SpeakerNamingStanding]
@@ -283,6 +285,10 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         clipURLsByProfileID[speakerId]
     }
 
+    func clipSampleText(for speakerId: UUID) -> String? {
+        clipQuotesByProfileID[speakerId]
+    }
+
     func playSample(for speakerId: UUID) {
         guard let url = clipURL(for: speakerId) else { return }
         SpeakerClipPlayback.play(url)
@@ -356,41 +362,22 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// spec's fallback, this reuses the confirmed existing "You" semantic
     /// (`SpeakerNameSelectionPolicy.ownerLabel`, already used by the naming
     /// sheet's autocomplete for local-mic entries) through the model's own
-    /// existing rename write path — the same thing that happens if the user
-    /// types "You" into the field and presses Enter — and then folds the
-    /// result into any other profile already named "You" so the identity
-    /// stays singular instead of leaving two "You" profiles behind.
+    /// existing naming write paths: when a "You" profile already exists the
+    /// voice joins it in one transaction (`mergePendingReviewItem`, the same
+    /// path as naming a voice after a saved person), so the identity stays
+    /// singular; otherwise it is named "You" like typing it and pressing Enter.
     func markPendingReviewItemAsMe(
         _ item: SpeakerPendingReviewItem,
-        completion: ((Bool) -> Void)? = nil
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
     ) {
         let existingOwnerProfile = profiles.first {
             $0.id != item.speakerId && SpeakerNameSelectionPolicy.isOwnerLabel($0.displayName ?? "")
         }
-        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { [weak self] didRename in
-            guard didRename else {
-                completion?(false)
-                return
-            }
-            guard let self, let existingOwnerProfile else {
-                completion?(true)
-                return
-            }
-            // `namePendingReviewItem` already refreshed `profiles` on the main
-            // actor before invoking this completion, so the just-renamed
-            // profile (now displayName == "You") is findable here.
-            guard let renamedProfile = self.profiles.first(where: { $0.id == item.speakerId }) else {
-                completion?(true)
-                return
-            }
-            // The rename to the owner label already succeeded, which is what
-            // justifies completing the queue row. The fold-into-"You" merge
-            // below is async cleanup; if it fails, the duplicate stays
-            // visible in the directory with the normal duplicate badge and
-            // Merge Into tools, so nothing is silently lost.
-            self.merge(source: renamedProfile, into: existingOwnerProfile)
-            completion?(true)
+        if let owner = existingOwnerProfile {
+            mergePendingReviewItem(item, into: owner, completion: completion)
+            return
         }
+        namePendingReviewItem(item, to: SpeakerNameSelectionPolicy.ownerLabel) { completion?($0) }
     }
 
     /// Rename from an Everyone row. A voice still waiting for a name goes
@@ -479,15 +466,18 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let legacyClipsDirectory = self.legacyClipsDirectory
 
         runEditInBackground(completion: completion) {
+            // A closed database reads as missing, so require the row first.
+            guard speakerDatabase.getSpeaker(id: profileId) != nil else { return false }
             speakerDatabase.deleteSpeaker(id: profileId)
+            // Confirm the row is actually gone before reporting success so a
+            // failed delete surfaces an error and keeps the person's review clips.
+            guard speakerDatabase.getSpeaker(id: profileId) == nil else { return false }
             SpeakerClipLibrary.deleteClips(
                 for: profileId,
                 preferredClipsDirectory: preferredClipsDirectory,
                 legacyClipsDirectory: legacyClipsDirectory
             )
-            // Confirm the row is actually gone before reporting success so a
-            // failed delete surfaces an error instead of silently no-opping.
-            return speakerDatabase.getSpeaker(id: profileId) == nil
+            return true
         }
     }
 
@@ -499,7 +489,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
     /// A meeting's Name speakers moved silently named voices to someone else.
     /// Queued on the snapshot queue ahead of the edit itself, so the outcome
     /// rows are read before the merge moves them.
-    func prepareSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice], completion: @escaping ([[String: String]]) -> Void) {
+    func prepareSilentNameCorrections(transcriptId: UUID?, voices: [SpeakerSilentNameCorrectionTelemetry.Voice], completion: @escaping @MainActor @Sendable ([[String: String]]) -> Void) {
         guard !voices.isEmpty else { completion([]); return }
         let speakerDatabase = self.speakerDatabase
         snapshotQueue.async {
@@ -580,6 +570,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         duplicateCountsByProfileID = snapshot.duplicateCountsByProfileID
         mergeTargetIndex = snapshot.mergeTargetIndex
         clipURLsByProfileID = snapshot.clipURLsByProfileID
+        clipQuotesByProfileID = snapshot.clipQuotesByProfileID
         reviewQueueItems = snapshot.reviewQueueItems
         undoableMergesByTargetID = snapshot.undoableMergesByTargetID
         namingStandingsByProfileID = snapshot.namingStandingsByProfileID
@@ -643,6 +634,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         )
 
         var clipURLsByProfileID: [UUID: URL] = [:]
+        var clipQuotesByProfileID: [UUID: String] = [:]
         for profile in profiles {
             if let url = SpeakerClipLibrary.clipURL(
                 for: profile.id,
@@ -650,6 +642,9 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
                 legacyClipsDirectory: legacyClipsDirectory
             ) {
                 clipURLsByProfileID[profile.id] = url
+                if let quote = SpeakerClipLibrary.sampleText(nextTo: url) {
+                    clipQuotesByProfileID[profile.id] = quote
+                }
             }
         }
 
@@ -666,6 +661,7 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
             duplicateCountsByProfileID: duplicateCountsByProfileID,
             mergeTargetIndex: mergeTargetIndex,
             clipURLsByProfileID: clipURLsByProfileID,
+            clipQuotesByProfileID: clipQuotesByProfileID,
             reviewQueueItems: reviewQueueItems,
             undoableMergesByTargetID: undoableMergesByTargetID,
             namingStandingsByProfileID: namingStandingsByProfileID

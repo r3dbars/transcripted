@@ -75,17 +75,6 @@ func testParakeetShortAudioGate() {
         assertEqual(transcribes.context, [:], "transcribable segments should not attach skip-only diagnostics")
     }
 
-    runSuite("ParakeetShortAudioGate.dictationFallback — treats invalid-audio errors as short-audio skips") {
-        let decision = ParakeetShortAudioGate.dictationFallback(
-            nativeSampleCount: 43_200,
-            resampledSampleCount: 14_400,
-            errorMessage: "Invalid audio data provided. Must be at least 1 second of 16kHz audio."
-        )
-
-        assertEqual(decision?.event, "recording_too_short", "short-audio failures should collapse into the dedicated skip event")
-        assertEqual(decision?.context["samples"], "14400", "fallback skips should preserve the failing sample count")
-    }
-
     runSuite("ParakeetShortAudioGate.meetingSegmentFallback — protects the meeting pipeline from short-audio throws") {
         let decision = ParakeetShortAudioGate.meetingSegmentFallback(
             sampleCount: 15_500,
@@ -97,14 +86,22 @@ func testParakeetShortAudioGate() {
         assertEqual(decision?.context["source"], "microphone", "meeting fallback should preserve which stream failed")
     }
 
-    runSuite("ParakeetShortAudioGate.dictationFallback — ignores unrelated inference failures when audio is long enough") {
-        let decision = ParakeetShortAudioGate.dictationFallback(
-            nativeSampleCount: 96_000,
-            resampledSampleCount: 32_000,
-            errorMessage: "GPU memory pressure"
+    runSuite("ParakeetShortAudioGate.meetingSegmentFallback — a long segment the model rejects is a failure, not short audio") {
+        let rejected = ParakeetShortAudioGate.meetingSegmentFallback(
+            sampleCount: 96_000,
+            sourceDescription: "system",
+            errorMessage: "Invalid audio data"
+        )
+        let unrelated = ParakeetShortAudioGate.meetingSegmentFallback(
+            sampleCount: 96_000,
+            sourceDescription: "system",
+            errorMessage: "Model not loaded"
         )
 
-        assertNil(decision, "non-short-audio failures should still surface as real transcription errors")
+        assertEqual(rejected?.shouldTranscribe, false, "a rejected long segment is still skipped rather than aborting the meeting")
+        assertEqual(rejected?.event, "meeting_segment_inference_failed", "a 6 s segment must not be reported as segment_too_short")
+        assertEqual(rejected?.context["audio_duration_s"], "6.00", "failure diagnostics should carry the real segment duration")
+        assertNil(unrelated, "other long-segment errors should still rethrow")
     }
 
     runSuite("DictationEmptyTranscriptionReason keeps too-short telemetry out of no-speech") {
@@ -147,16 +144,6 @@ func testParakeetShortAudioGate() {
         for reason in [DictationEmptyTranscriptionReason.noSpeech, .modelFailure, .audioNeedsRecovery] {
             assertFalse(reason.isAccidentalStart(pressDuration: 0.4), "\(reason.rawValue) must keep its message and recovery path")
         }
-    }
-
-    runSuite("ParakeetShortAudioGate.dictationFallback — a long dictation's error is never 'too short'") {
-        let decision = ParakeetShortAudioGate.dictationFallback(
-            nativeSampleCount: 240_000,
-            resampledSampleCount: 80_000,
-            errorMessage: "Invalid audio data provided."
-        )
-
-        assertNil(decision, "five seconds of audio that fails inference is a model failure, and its audio must be kept")
     }
 
     // "Dictation mis-taps close like a cancel, not an error" is a behavior

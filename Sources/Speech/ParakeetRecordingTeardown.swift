@@ -36,6 +36,12 @@ extension ParakeetEngine {
         // was heard for the recovery prompt, but without touching the engine:
         // tearing that down here would bind the default input.
         if let pinnedDictationRecording {
+            // Return without touching the engine: a reset here would bind
+            // the default input (AirPods into call mode).
+            guard !pinnedDictationRecording.stopping else {
+                AppLogger.transcription.info("PARAKEET | system wake detected during pinned stop, letting the stop finish")
+                return
+            }
             interruptPinnedDictationRecording(pinnedDictationRecording, reason: "system_wake")
             AppLogger.transcription.info("PARAKEET | system wake detected, pinned dictation interrupted")
             return
@@ -249,6 +255,11 @@ extension ParakeetEngine: ParakeetStopRecordingHost {
         sharedMeetingMicTransition.invalidate()
     }
 
+    func flushSharedMeetingMicBuffers() async {
+        guard let flush = sharedMeetingMicClaim?.flushRelayedBuffers else { return }
+        await flush()
+    }
+
     func finishSharedMeetingMicStop() {
         finishSharedMeetingMicRecording(keepRecordingState: false)
         EventReporter.shared.capture(
@@ -271,6 +282,10 @@ extension ParakeetEngine: ParakeetStopRecordingHost {
         drainPendingSamplesIntoTimeline()
         isRecording = false
         audioLevel = 0
+    }
+
+    func endRecordingContinuity() {
+        preservingRecordingAcrossRecovery = false
     }
 
     func reportRecordingStopped() {

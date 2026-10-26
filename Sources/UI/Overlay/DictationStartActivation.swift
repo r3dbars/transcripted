@@ -53,7 +53,7 @@ final class DictationStartActivation {
         isActive: @escaping () -> Bool,
         activate: () -> Void,
         restore: @escaping () -> Void,
-        observeExternalActivation: (@escaping (FocusTarget) -> Void) -> (() -> Void) = { _ in {} },
+        observeExternalActivation: (@escaping @MainActor @Sendable (FocusTarget) -> Void) -> (() -> Void) = { _ in {} },
         now: () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         wait: () async throws -> Void = { try await Task.sleep(nanoseconds: 10_000_000) }
     ) async -> Bool {

@@ -129,7 +129,11 @@ enum TranscriptedStoragePreferences {
         let probe = root.appendingPathComponent(".transcripted-write-test-\(UUID().uuidString)", isDirectory: false)
 
         do {
-            try fileManager.createPrivateDirectory(at: root)
+            // A folder the user already has (shared, or their home) keeps its permissions;
+            // the capture subfolders below are what stay owner-only.
+            if !isExistingCaptureLibraryURL(root, fileManager: fileManager) {
+                try fileManager.createPrivateDirectory(at: root)
+            }
             try fileManager.createPrivateDirectory(at: meetings)
             try fileManager.createPrivateDirectory(at: dictations)
             try fileManager.createPrivateDirectory(at: writing)
@@ -223,8 +227,9 @@ extension FileManager {
     }
 
     var transcriptedCaptureLibraryDir: URL {
-        let url = TranscriptedStoragePreferences.captureLibraryURL(fileManager: self)
-        let captureLibrary = ensuredPrivateDirectory(at: url, context: "Transcripted capture library")
+        // No chmod here: a custom root is only returned when it already exists, and it
+        // keeps the user's permissions; the default root is made owner-only by its getter.
+        let captureLibrary = TranscriptedStoragePreferences.captureLibraryURL(fileManager: self)
         try? writeTranscriptedMCPDirectoriesManifestIfNeeded(captureLibraryURL: captureLibrary)
         return captureLibrary
     }

@@ -159,7 +159,7 @@ extension TranscriptionTaskManagerMetadataTests {
                 outputFolder: tempDirectory.appendingPathComponent("transcripts")
             )
         }
-        try await waitUntil(timeout: 3.0) {
+        try await waitUntil(timeout: 60) {
             speech.didStart
         }
 

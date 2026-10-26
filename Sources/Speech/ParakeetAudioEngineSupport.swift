@@ -25,7 +25,8 @@ struct ParakeetInputDeviceApplication {
     let errorDescription: String?
 }
 
-final class ParakeetRetiredAudioEngineStore {
+/// `@unchecked Sendable`: `engines` is only touched under `lock`.
+final class ParakeetRetiredAudioEngineStore: @unchecked Sendable {
     static let shared = ParakeetRetiredAudioEngineStore()
 
     private let lock = NSLock()

@@ -278,6 +278,45 @@ func testTranscriptedStoragePaths() {
         }
     }
 
+    runSuite("Transcripted capture library helpers — an existing chosen folder keeps its permissions") {
+        let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        defer {
+            restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        }
+
+        let sharedRoot = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("TranscriptedStoragePathsTests-shared-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: sharedRoot) }
+        try? FileManager.default.createDirectory(
+            at: sharedRoot,
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o755]
+        )
+
+        assertTrue(
+            TranscriptedStoragePreferences.setCaptureLibraryURL(sharedRoot),
+            "an existing safe folder should be accepted as the capture library"
+        )
+        assertEqual(
+            permissions(of: sharedRoot),
+            NSNumber(value: 0o755),
+            "choosing an existing folder should not change its permissions"
+        )
+
+        let meetings = FileManager.default.meetingSupportDir
+        assertEqual(
+            permissions(of: sharedRoot),
+            NSNumber(value: 0o755),
+            "reading the capture library should not change the chosen folder's permissions"
+        )
+        assertEqual(meetings, sharedRoot.standardizedFileURL.appendingPathComponent("meetings", isDirectory: true), "meetings should live in the chosen folder")
+        assertEqual(
+            permissions(of: meetings),
+            NSNumber(value: 0o700),
+            "the meetings folder inside a shared library should still be owner-only"
+        )
+    }
+
     runSuite("Transcripted capture library helpers — reject unsafe capture folders") {
         let original = UserDefaults.standard.object(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         defer {

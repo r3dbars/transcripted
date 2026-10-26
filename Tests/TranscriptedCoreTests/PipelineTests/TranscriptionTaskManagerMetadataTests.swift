@@ -573,7 +573,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
                 writerEntered.signal()
                 // Deadlock escape only: the assertion checks who released the
                 // writer, never how long scanning or scheduling took.
-                return releaseWriter.wait(timeout: .now() + 10) == .success
+                return releaseWriter.wait(timeout: .now() + 60) == .success
             }
         }
         await Task.detached { writerEntered.wait() }.value
@@ -873,8 +873,10 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
         ]
     }
 
+    // The deadline is a hang guard, not a speed check: on a loaded Mac a
+    // 2-3 s budget timed out on work that always finishes.
     func waitUntil(
-        timeout: TimeInterval = 2.0,
+        timeout: TimeInterval = 60.0,
         condition: @escaping @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)

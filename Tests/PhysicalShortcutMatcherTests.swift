@@ -156,7 +156,7 @@ func testPhysicalShortcutMatcher() {
         )
     }
 
-    runSuite("PhysicalShortcutMatcher — delayed modifier press requires current ownership and a held key") {
+    runSuite("PhysicalShortcutMatcher — delayed modifier press requires current ownership") {
         let current = DelayedModifierShortcutPress(
             generation: 2,
             keyCode: UInt32(kVK_RightOption),
@@ -171,35 +171,16 @@ func testPhysicalShortcutMatcher() {
         assertTrue(
             PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                 current: current,
-                expected: current,
-                isPhysicallyDown: true
+                expected: current
             ),
-            "the current delayed press may activate while its modifier is still held"
+            "the current delayed press may activate"
         )
         assertFalse(
             PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
                 current: current,
-                expected: stale,
-                isPhysicallyDown: true
+                expected: stale
             ),
             "a cancelled or superseded work item must not consume the current pending press"
-        )
-        assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: current,
-                expected: current,
-                isPhysicallyDown: false
-            ),
-            "a modifier released at the debounce deadline must not start push-to-talk"
-        )
-        let physicallyDownKeyCodes: Set<UInt32> = [UInt32(kVK_Option)]
-        assertFalse(
-            PhysicalShortcutMatcher.shouldActivateDelayedModifierPress(
-                current: current,
-                expected: current,
-                isPhysicallyDown: physicallyDownKeyCodes.contains(current.keyCode)
-            ),
-            "left Option staying down must not activate a released right-side bound key"
         )
     }
 

@@ -80,13 +80,6 @@ public final class BackgroundLoadedSpeakerSegmentEmbedder: BackgroundLoadingSpea
         return state
     }
 
-    /// Starts the load on `loadQueue` if nothing has yet. Returns at once.
-    public func startLoading() {
-        condition.lock()
-        defer { condition.unlock() }
-        startLoadingLocked()
-    }
-
     public func waitUntilLoaded() async -> Bool {
         await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
             condition.lock()

@@ -168,6 +168,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Lock-free mirror of `pinnedMicrophoneCapture != nil` for main-thread
     /// readers; the graph lock can be held across slow HAL calls.
     let pinnedMicrophoneRecording = Atomic<Bool>(false)
+    /// Off-by-default per-second mic statistics (`CaptureTelemetry.swift`).
+    let micCaptureTelemetry = LockedCaptureSignalTelemetry()
     /// Record the meeting mic through a Core Audio IOProc on the selected
     /// device instead of an `AVAudioEngine` input node, which opens the macOS
     /// default input (AirPods) first. Ignored when Apple voice processing is
@@ -389,11 +391,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // (stored inside the same critical sections): the getter is the staleness
     // gate in per-buffer audio callbacks — mic tap, recovery tap, and
     // system-audio — so a lock-free read keeps those callbacks from ever
-    // blocking behind a start/stop mid-bump. (The tap thread is not the HAL
-    // real-time thread — see calculateLevel — so this is contention hygiene,
-    // not a real-time-safety requirement.)
+    // blocking behind a start/stop mid-bump. (The tap thread is not the HAL real-time
+    // thread, see calculateLevel: contention hygiene, not a real-time-safety need.)
     var recordingSessionGenerationEpoch = SupersessionEpoch()
     let recordingSessionGenerationLock = NSLock()
+    var _inFlightStopGeneration: UInt64?  // Guarded by recordingSessionGenerationLock.
     private let recordingSessionGenerationMirror = Atomic<UInt64>(0)
     var recordingSessionGeneration: UInt64 {
         get {
@@ -479,7 +481,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
             systemAudioCaptureStateLock.unlock()
         }
     }
-    private let systemAudioCaptureFactory:
+    let systemAudioCaptureFactory:
         () -> (any SystemAudioCaptureEngine & Sendable)?
     // Audio file recording
     var systemAudioCaptureAttemptOwnership =
@@ -599,14 +601,14 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var _recordingStartCapturedInputDeviceID: AudioDeviceID?
 
     // System audio status observation
-    private var systemAudioCancellable: AnyCancellable?
+    var systemAudioCancellable: AnyCancellable?
     // Recovery/health event observation (device-switch + gap parity with the
     // mic path). Separate from `systemAudioCancellable` so re-wiring one
     // subscription on a new capture attempt doesn't need to touch the other.
-    private var systemAudioRecoveryEventCancellable: AnyCancellable?
+    var systemAudioRecoveryEventCancellable: AnyCancellable?
     /// Synchronous subscriber so recovery write-hold is armed on the sending
     /// thread before SCK's async restart can deliver buffers.
-    private var systemAudioRecoveryPadCancellable: AnyCancellable?
+    var systemAudioRecoveryPadCancellable: AnyCancellable?
     // Protected by systemSilenceLock — written from callback thread, reset on main thread
     private var _systemAudioSilenceStart: Date?
     private let systemSilenceLock = NSLock()
@@ -655,20 +657,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // MARK: - Shared microphone PCM hook
     //
-    // This callback lets an embedder tap mic PCM as it arrives
-    // from CoreAudio, in parallel with the WAV file writes. The app uses this
-    // to let dictation borrow the active meeting microphone without starting
-    // a second audio engine.
+    // Lets an embedder tap mic PCM in parallel with the WAV file writes, so
+    // dictation can borrow the meeting mic without a second audio engine.
+    // Delivered off the tap thread through the bounded `micHostPCMBufferFanout`.
+    // Set the hook once before `start()`; reads are unsynchronized, like
+    // `onRecordingComplete`.
     //
-    // Threading: fired on the audio thread (same thread as the tap callback).
-    // Consumers MUST NOT do I/O or blocking work on this thread — hand the
-    // owned buffer to a bounded worker. Matching the convention of
-    // `onRecordingComplete`, optional reads are unsynchronized: set the hook
-    // once before `start()` and do not reassign during recording.
-    //
-    // Mic buffers are the processed copy written to the saved mic WAV (software
-    // AGC with VPIO off, Apple's VPIO output with it on), owned by the callback.
+    // Mic buffers are the processed copy (software AGC with VPIO off, Apple's
+    // VPIO output with it on), owned by the callback. While the borrowed-
+    // dictation gate is on, only this hook gets them: the saved mic WAV and
+    // live preview get silence of the same length (Audio+MicDictationGate.swift).
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
+    let micDictationGate = Atomic<Bool>(false)
     let livePCMDelivery = LiveMeetingPCMDelivery() // live preview side channel; see Audio+LivePCM.swift
 
     /// Filesystem layout used for writing raw mic/system WAV captures.
@@ -707,78 +707,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         if let systemAudioCapture {
             wireSystemAudioStatusPublisher(from: systemAudioCapture)
         }
-    }
-
-    func ensureCaptureInfrastructureConfigured() {
-        installMicEngineConfigurationChangeObserver()
-        guard systemAudioCapture == nil else { return }
-
-        // Core Audio process taps capture system audio without enumerating
-        // screens or requiring the broader screen-recording permission.
-        guard let capture = systemAudioCaptureFactory() else { return }
-        systemAudioCapture = capture
-        wireSystemAudioStatusPublisher(from: capture)
-        installWorkspaceSleepWakeObservers()
-    }
-
-    /// Builds this recording's system-audio tap. A mic-only recording never
-    /// builds one: that would ask macOS for System Audio Recording and record
-    /// silence the user already said they don't want.
-    func makeSystemAudioCaptureForRecordingAttempt()
-        -> (any SystemAudioCaptureEngine & Sendable)? {
-        guard currentRecordingCapturesSystemAudio else {
-            AppLogger.audioSystem.info("System audio capture skipped for a mic-only recording", [
-                "event": "system_audio_capture_skipped_mic_only"
-            ])
-            return nil
-        }
-        guard let capture = systemAudioCaptureFactory() else { return nil }
-        systemAudioCapture = capture
-        wireSystemAudioStatusPublisher(from: capture)
-        return capture
-    }
-
-    private func wireSystemAudioStatusPublisher(from capture: any SystemAudioCaptureEngine) {
-        systemAudioCancellable = capture.errorMessagePublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] errorMessage in
-                self?.updateSystemAudioStatus(fromError: errorMessage)
-            }
-        systemAudioRecoveryEventCancellable = capture.recoveryEventPublisher
-            .receive(on: DispatchQueue.main)
-            .sink { [weak self] event in
-                guard let self else { return }
-                switch event {
-                case .deviceSwitch:
-                    self.recordSystemAudioDeviceSwitch()
-                case .systemWake, .fellBehind:
-                    // Sleeping the Mac or falling behind is not a route
-                    // change. The reconnect's gap is still recorded when its
-                    // first buffer lands.
-                    break
-                case .gap(let duration):
-                    // The pad and the hold release already ran on the
-                    // sending thread; see `padSystemAudioGapBeforeNextBuffer`.
-                    self.appendSystemAudioGap(duration: duration)
-                case .recoveryAbandoned:
-                    break
-                }
-            }
-        // Arm the write-hold on the sending thread so it is visible before
-        // SCK start() can deliver the first post-restart buffer, and release
-        // it on the same thread when the recovery ends, with or without a
-        // `.gap`, so the first buffer after the pad is written.
-        systemAudioRecoveryPadCancellable = capture.recoveryEventPublisher
-            .sink { [weak self] event in
-                switch event {
-                case .deviceSwitch, .systemWake, .fellBehind:
-                    self?.armSystemRecoveryWriteHold()
-                case .recoveryAbandoned:
-                    self?.releaseSystemRecoveryWriteHold()
-                case .gap(let duration):
-                    self?.padSystemAudioGapBeforeNextBuffer(duration: duration)
-                }
-            }
     }
 
     deinit {

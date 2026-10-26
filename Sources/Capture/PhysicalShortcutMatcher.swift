@@ -157,10 +157,9 @@ enum PhysicalShortcutMatcher {
 
     static func shouldActivateDelayedModifierPress(
         current: DelayedModifierShortcutPress?,
-        expected: DelayedModifierShortcutPress,
-        isPhysicallyDown: Bool
+        expected: DelayedModifierShortcutPress
     ) -> Bool {
-        current == expected && isPhysicallyDown
+        current == expected
     }
 
     static func shouldSynthesizePushToTalkRelease(
@@ -312,21 +311,6 @@ extension PhysicalShortcutMatcher {
             return (modifierFlags & modifier) != 0
         }
         return keyState(keyCode)
-    }
-
-    /// Whether a delayed modifier press should start push-to-talk. It reads
-    /// the bound key itself, so Left Option held doesn't count as a held
-    /// Right Option binding.
-    static func shouldActivateDelayedModifierPress(
-        current: DelayedModifierShortcutPress?,
-        expected: DelayedModifierShortcutPress,
-        keyState: (UInt32) -> Bool
-    ) -> Bool {
-        shouldActivateDelayedModifierPress(
-            current: current,
-            expected: expected,
-            isPhysicallyDown: keyState(expected.keyCode)
-        )
     }
 
     struct TapDisabledReconciliation: Equatable {

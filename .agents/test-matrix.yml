@@ -157,6 +157,8 @@ rules:
   - paths:
       - "Sources/UI/Settings/SpeakerPeopleSettingsViewModel*.swift"
       - "Sources/UI/Settings/SpeakerReviewSession.swift"
+      - "Sources/Meeting/SpeakerSettingsStore.swift"
+      - "Sources/Meeting/SpeakerClipLibrary.swift"
       - "Tests/Integration/SpeakerSettingsModel*.swift"
       - "scripts/dev/test-speaker-settings-model.sh"
     checks:
@@ -235,6 +237,9 @@ rules:
       - "scripts/ops/transcripted-qa-bench.sh"
       - "scripts/entrypoints/run-e2e-smoke.sh"
       - "scripts/entrypoints/lib/shared-smoke-sources.sh"
+      - "docs/qa-test-bench.md"
+      - "docs/audio-reliability-daily-check.md"
+      - ".agents/qa-gates.yml"
       - "scripts/dev/check-audio-automation-contract.py"
     checks:
       - "python3 scripts/dev/check-audio-automation-contract.py --self-test"
@@ -266,6 +271,32 @@ rules:
     checks:
       - "python3 scripts/dev/check-test-shape.py --self-test"
       - "python3 scripts/dev/check-test-shape.py"
+
+  # Calls some files must never make: dictation writing the Mac-wide default
+  # input, NSException-throwing FileHandle APIs in log writers, sounds on the
+  # feedback paths (were source-text suites in BluetoothRouteContractTests,
+  # ObservabilityLogWriterTests and DictationSoundsTests).
+  - paths:
+      - "Sources/Speech/Parakeet*.swift"
+      - "Sources/Observability/**"
+      - "Sources/TranscriptedCore/Logging/FileLogger.swift"
+      - "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift"
+      - "Sources/App/TranscriptedSupportActions.swift"
+      - "Sources/UI/Settings/TranscriptedSettingsView.swift"
+      - "scripts/dev/check-banned-calls.py"
+    checks:
+      - "python3 scripts/dev/check-banned-calls.py --self-test"
+      - "python3 scripts/dev/check-banned-calls.py"
+
+  # The keyboard's Info.plist must match TildeProductProfile.production (was
+  # Tests/TranscriptedWritingTests/Core/KeyboardIdentityTests.swift).
+  - paths:
+      - "Sources/TranscriptedKeyboard/Info.plist"
+      - "Sources/TranscriptedWriting/Core/Runtime/TildeProductProfile.swift"
+      - "scripts/dev/check-keyboard-identity.py"
+    checks:
+      - "python3 scripts/dev/check-keyboard-identity.py --self-test"
+      - "python3 scripts/dev/check-keyboard-identity.py"
 
   # QA harness permission-state contract: the CLI command, the bench ordering,
   # and the docs/gates that say permission blockers are INCOMPLETE must agree.
@@ -323,12 +354,11 @@ rules:
 
   # Module-boundary and file-size ratchets: every Sources/ file belongs to a
   # module in .agents/modules.json and names only types its module may depend
-  # on; no new Swift file over 800 lines. Both baselines can only shrink.
+  # on; no new Swift file over 800 lines. The file-size baseline can only shrink.
   - paths:
       - "Sources/**/*.swift"
       - "Tools/*/Sources/**/*.swift"
       - ".agents/modules.json"
-      - ".agents/module-boundary-baseline.json"
       - ".agents/file-size-baseline.json"
       - "scripts/dev/check-module-boundaries.py"
       - "scripts/dev/check-duplicate-declarations.py"
@@ -338,6 +368,37 @@ rules:
       - "python3 scripts/dev/check-module-boundaries.py"
       - "python3 scripts/dev/check-file-size.py --self-test"
       - "python3 scripts/dev/check-file-size.py"
+
+  # Repo lint runner and rule registry: lint.py runs the rules in
+  # scripts/dev/lint_rules/ (fixtures + proofs in --self-test, per-file ratchet
+  # in .agents/lint-baseline.json); check-rule-registry.py keeps
+  # .agents/rules.json and the generated docs/rules.md in step with every check.
+  - paths:
+      - "scripts/dev/lint.py"
+      - "scripts/dev/lint_rules/**"
+      - "scripts/dev/check-rule-registry.py"
+      - "scripts/dev/check-*.py"
+      - "scripts/dev/concurrency-census.*"
+      - ".agents/rules.json"
+      - ".agents/lint-baseline.json"
+      - "docs/rules.md"
+      - ".claude/settings.json"
+      - ".claude/hooks/**"
+      - ".githooks/**"
+    checks:
+      - "python3 scripts/dev/lint.py --self-test"
+      - "python3 scripts/dev/lint.py --all"
+      - "python3 scripts/dev/check-rule-registry.py --self-test"
+      - "python3 scripts/dev/check-rule-registry.py"
+      - "python3 .githooks/public-repo-guard.py --self-test"
+
+  # Lint rules cover Swift sources too; only the changed files are linted here.
+  - paths:
+      - "Sources/**/*.swift"
+      - "Tests/**/*.swift"
+      - "Tools/*/Sources/**/*.swift"
+    checks:
+      - "python3 scripts/dev/lint.py --changed"
 
   - paths:
       - "Tools/*/Package.swift"
@@ -477,7 +538,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.72.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.73.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"

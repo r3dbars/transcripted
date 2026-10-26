@@ -307,7 +307,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     }
 
     func cleanup() {
-        finishTranscriptionJob()
+        // The activeCount sink is the only place a job ends.
         discardPreparedModel()
     }
 

@@ -65,7 +65,7 @@ func testDictationStartActivation() async {
     await runSuite("A superseded observer cannot change a newer preparation's restore target") {
         let activation = DictationStartActivation()
         let newer = ActivationMicFixture()
-        var oldReceiver: ((DictationStartActivation.FocusTarget) -> Void)?
+        var oldReceiver: (@MainActor @Sendable (DictationStartActivation.FocusTarget) -> Void)?
         var oldObserverRemovals = 0
         var staleRestores = 0
         var time: TimeInterval = 0
@@ -236,7 +236,7 @@ private final class ActivationMicFixture {
     var time: TimeInterval = 0
     var waits = 0
     var afterWait: (() -> Void)?
-    var receiveExternalActivation: ((DictationStartActivation.FocusTarget) -> Void)?
+    var receiveExternalActivation: (@MainActor @Sendable (DictationStartActivation.FocusTarget) -> Void)?
     var observerRemovals = 0
 
     func userActivates(_ app: String) {

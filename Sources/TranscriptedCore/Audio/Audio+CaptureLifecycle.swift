@@ -22,6 +22,7 @@ extension Audio {
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         systemAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         resetSignalDiagnostics()
+        micCaptureTelemetry.reset(enabled: CaptureTelemetryPreferences.isEnabled())
         // Fresh instance = clean one-shot latch per recording.
         quietMicAttenuationDetector = QuietMicAttenuationDetector()
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
@@ -73,10 +74,6 @@ extension Audio {
         journalSession = nil
     }
 
-    func recordSystemAudioStartPermissionDenial(_ observed: Bool) {
-        systemAudioStartPermissionExplicitlyDenied = observed
-    }
-
     public func recordStartFailureStage(_ stage: AudioCaptureStartFailureStage) {
         startFailureStage = stage
     }
@@ -113,16 +110,27 @@ extension Audio {
         // typed stage before any validation can return.
         startFailureStage = .unknown
 
-        // Pre-flight validation checks
-        let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
-        guard validationResult.isValid else {
-            AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
-            error = validationResult.errorMessage
-            return
-        }
-
         let startIntentId = beginStartIntent()
+        let paths = paths
+        // Preflight writes a probe file and queries the volume; a sleeping
+        // external or network library would freeze the UI if this ran on main.
+        DispatchQueue.global(qos: .userInitiated).async {
+            let validationResult = RecordingValidator.validateRecordingConditions(paths: paths)
+            DispatchQueue.main.async {
+                guard self.isCurrentStartIntent(startIntentId) else { return }
+                guard validationResult.isValid else {
+                    AppLogger.audio.error("Pre-flight check failed", ["error": validationResult.errorMessage ?? "Unknown error"])
+                    self.clearStartIntent(startIntentId)
+                    self.isStarting = false
+                    self.error = validationResult.errorMessage
+                    return
+                }
+                self.startAfterPreflight(startIntentId: startIntentId)
+            }
+        }
+    }
 
+    private func startAfterPreflight(startIntentId: UUID) {
         // Check microphone permission and request if not determined
         // This allows users who skipped permission during onboarding to grant it at record time
         let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
@@ -218,14 +226,10 @@ extension Audio {
     @MainActor
     private func finishSuccessfulStartIfCurrent(_ startGeneration: UInt64) {
         guard recordingSessionGeneration == startGeneration, isStarting else {
-            AppLogger.audio.warning("Audio capture start finished after session was cancelled; tearing down stale capture", [
+            AppLogger.audio.warning("Audio capture start finished after session boundary; stop() owns teardown", [
                 "startGeneration": "\(startGeneration)",
                 "currentGeneration": "\(recordingSessionGeneration)"
             ])
-            if recordingSessionGeneration == startGeneration {
-                isRecording = false
-                isStarting = false
-            }
             return
         }
 
@@ -284,7 +288,35 @@ extension Audio {
 
     // MARK: - Stop Recording
 
+    /// The generation of a stop() whose completion has not landed yet, while
+    /// no newer recording has started. A second stop joins it: finalizing the
+    /// same segments twice deletes the merged mic file the first one made.
+    public internal(set) var inFlightStopGeneration: UInt64? {
+        get {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            guard _inFlightStopGeneration == recordingSessionGenerationEpoch.snapshot().rawValue else { return nil }
+            return _inFlightStopGeneration
+        }
+        set {
+            recordingSessionGenerationLock.lock()
+            defer { recordingSessionGenerationLock.unlock() }
+            _inFlightStopGeneration = newValue
+        }
+    }
+
     public func stop() {
+        if let inFlightStopGeneration {
+            // A new start still in preflight has no generation yet; this stop cancels it.
+            if isStarting, !isRecording {
+                pendingStartIntentId = nil
+                isStarting = false
+            }
+            AppLogger.audio.info("Ignoring repeat stop; this capture's stop is already finalizing", [
+                "stopGeneration": "\(inFlightStopGeneration)"
+            ])
+            return
+        }
         // Bump generation synchronously on the calling thread so any
         // concurrent recovery work that checks the generation immediately
         // sees the new session boundary.
@@ -302,6 +334,7 @@ extension Audio {
         micAudioWriteBackpressure.beginFinishing(generation: captureGeneration)
         pendingStartIntentId = nil
         let stopGeneration = beginRecordingSessionGeneration()
+        inFlightStopGeneration = stopGeneration
         systemAudioWriteBackpressure.close(generation: captureGeneration)
         writeBackpressureStopAdmission.close(generation: captureGeneration)
         let cleanupGroup = DispatchGroup()
@@ -459,6 +492,7 @@ extension Audio {
                 )
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
+                        self.inFlightStopGeneration = nil
                         self.originalMicAudioFileURL = nil
                         self.micSegments = []
                         self.micAudioFileURL = micFinalization.micURL

@@ -122,13 +122,6 @@ final class WritingController {
 
     var modelState: ModelState? { runtime?.models.manager.state }
 
-    var modelProgress: Double? {
-        guard case let .downloading(receivedBytes, totalBytes) = modelState, totalBytes > 0 else {
-            return nil
-        }
-        return min(1, max(0, Double(receivedBytes) / Double(totalBytes)))
-    }
-
     var runtimeState: LlamaRuntimeSnapshot? { runtime?.llamaServerHost.snapshot }
     /// The current model's store, while Writing runs.
     var modelManager: ModelManager? { runtime?.models.manager }
@@ -248,6 +241,9 @@ final class WritingController {
     private var hasStarted = false
     /// Set by `stop()` at quit. Nothing starts after it.
     private var isTerminated = false
+    /// Quit went ahead without a durable final flush (the user chose Quit
+    /// Anyway, or macOS is logging out). Teardown must still stop the helper.
+    private var quitAbandonsUnsavedWriting = false
     /// Set by `startIfEnabled(log:)`. Until launch allows it, the Writing tab
     /// can't start Writing, so automated launches never do.
     private var activationAllowed = false
@@ -436,11 +432,21 @@ final class WritingController {
         }.value
     }
 
+    /// The final flush failed and Quit goes on anyway: the open entry is lost,
+    /// the journal keeps whatever it already owns.
+    func abandonUnsavedWritingForTermination() {
+        quitAbandonsUnsavedWriting = true
+        runtime?.dayFiles.recorder.sealWithoutFlush()
+    }
+
     /// The stop itself, shared by the quit and by turning both features off.
     /// A later `start` builds a fresh runtime.
     private func tearDown() {
         // A model/runtime restart also must not drop an unresolved open entry.
-        guard runtime?.dayFiles.stop() != false else { return }
+        // After Quit Anyway, don't retry the failed write on main: it can hang
+        // on a stuck volume. Atomic day-file writes make exiting mid-rescrub safe.
+        let abandoning = isTerminated && quitAbandonsUnsavedWriting
+        guard abandoning || runtime?.dayFiles.stop() != false else { return }
         hasStarted = false
         autocompleteRuntimeActive = false
         let wasRunning = isRunning

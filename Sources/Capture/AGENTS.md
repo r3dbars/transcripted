@@ -13,7 +13,7 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 
 ## Files
 
-- `ContextCaptureEngine.swift` — the event tap (`PhysicalShortcutDetector`), shortcut debounce, delayed modifier presses, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`.
+- `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The event tap itself (`PhysicalShortcutDetector`, delayed modifier presses) is in `PhysicalShortcutDetector.swift`.
 - `ContextCaptureEngine+DictationKeys.swift` — the dictation keys as session commands: Push to Talk press, release and combo-interrupt, and the hands-free toggle. Press/release semantics live in `DictationHotkeyRouter` (`Sources/Speech/DictationTrigger.swift`).
 - `PhysicalShortcutMatcher.swift` — Foundation-pure helpers: `configuredBindings`, exact/fallback binding precedence, release matching, and the tap and combo trackers below.
 

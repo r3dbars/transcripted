@@ -73,6 +73,36 @@ final class SpeakerConfirmationTests: XCTestCase {
         XCTAssertTrue(SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: []))
     }
 
+    func testFailedSpeakerDeleteKeepsConfirmationsAndNegativeExemplars() throws {
+        let profile = database.addOrUpdateSpeaker(embedding: [1, 0], existingId: nil)
+        try database.recordUserConfirmations([
+            SpeakerUserConfirmation(profileId: profile.id, transcriptId: UUID(), kind: .named),
+            SpeakerUserConfirmation(profileId: profile.id, transcriptId: UUID(), kind: .confirmed),
+        ])
+        database.recordNegativeExemplar(profileId: profile.id, embedding: [0, 1])
+
+        // Deny only the final speakers DELETE so the person row survives.
+        let authorizerResult = database.queue.sync {
+            sqlite3_set_authorizer(database.db, { _, action, tableName, _, _, _ in
+                guard action == SQLITE_DELETE, let tableName, String(cString: tableName) == "speakers" else {
+                    return SQLITE_OK
+                }
+                return SQLITE_DENY
+            }, nil)
+        }
+        XCTAssertEqual(authorizerResult, SQLITE_OK)
+        database.deleteSpeaker(id: profile.id)
+        _ = database.queue.sync { sqlite3_set_authorizer(database.db, nil, nil) }
+
+        let survivor = try XCTUnwrap(database.getSpeaker(id: profile.id))
+        XCTAssertEqual(survivor.confirmedMeetingCount, 2, "a failed delete must not wipe the confirmation ledger")
+        XCTAssertEqual(database.negativeExemplars(profileId: profile.id).count, 1)
+
+        database.deleteSpeaker(id: profile.id)
+        XCTAssertNil(database.getSpeaker(id: profile.id))
+        XCTAssertTrue(database.negativeExemplars(profileId: profile.id).isEmpty)
+    }
+
     func testMergeUsesSetUnionAndUnmergeRestoresBothConfirmationSets() throws {
         let source = database.addOrUpdateSpeaker(embedding: [1, 0], existingId: nil)
         let target = database.addOrUpdateSpeaker(embedding: [0, 1], existingId: nil)

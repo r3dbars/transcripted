@@ -21,6 +21,8 @@ enum DictationStopFinalizationOrder: String {
     }
 }
 
+/// The app always saves before Auto Enter. The order setting exists only so
+/// the stop benchmark, the Lab and dictation-stop-autoeval.sh can compare runs.
 enum DictationStopFinalizationPolicy {
     static let order: DictationStopFinalizationOrder = .saveBeforeAutoEnter
 }
@@ -31,31 +33,20 @@ struct DictationStopFinalizationResult<AutoEnterOutcome, SaveResult> {
 }
 
 enum DictationStopFinalizer {
+    /// Starts the save off the main actor, sends Auto Enter, then awaits the save.
     @MainActor
     static func finalize<SaveResult, AutoEnterOutcome>(
-        order: DictationStopFinalizationOrder,
         startSaving: () -> Task<SaveResult, Never>,
         finishSaving: (Task<SaveResult, Never>) async -> SaveResult,
-        saveSynchronously: () -> SaveResult,
         performAutoEnter: () async -> AutoEnterOutcome
     ) async -> DictationStopFinalizationResult<AutoEnterOutcome, SaveResult> {
-        switch order {
-        case .saveAfterAutoEnter:
-            let autoEnterOutcome = await performAutoEnter()
-            let saveResult = saveSynchronously()
-            return DictationStopFinalizationResult(
-                autoEnterOutcome: autoEnterOutcome,
-                saveResult: saveResult
-            )
-        case .saveBeforeAutoEnter:
-            let saveTask = startSaving()
-            let autoEnterOutcome = await performAutoEnter()
-            let saveResult = await finishSaving(saveTask)
-            return DictationStopFinalizationResult(
-                autoEnterOutcome: autoEnterOutcome,
-                saveResult: saveResult
-            )
-        }
+        let saveTask = startSaving()
+        let autoEnterOutcome = await performAutoEnter()
+        let saveResult = await finishSaving(saveTask)
+        return DictationStopFinalizationResult(
+            autoEnterOutcome: autoEnterOutcome,
+            saveResult: saveResult
+        )
     }
 }
 

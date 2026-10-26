@@ -148,3 +148,109 @@ public struct PersonalHistoryDeletionTracker: Equatable, Sendable {
         segmentHasText = false
     }
 }
+
+/// Transcripted: whether a key lands at the end of the keyboard's own text,
+/// so it continues the segment chain, from the caret the host reports. Not
+/// every host moves that caret as text goes in: Ghostty reports `{0, 0}`
+/// whenever nothing is selected, and Chromium fields can report the caret
+/// from before the last few keys. Requiring the caret to land exactly where
+/// the last key's text ended broke the chain on every key there, and the
+/// app saved each character on its own line. So a caret anywhere from the
+/// one the host reported for the previous key up to where the keyboard's
+/// text ends continues the chain: a host that's frozen or behind never
+/// reports past that end, and a host that keeps up reports just that end.
+/// So does a caret where that end was within the last few keys, for a host
+/// that's behind across a Backspace (its carets go back down there). A
+/// selection starting at such a caret (Chrome's omnibox selects its inline
+/// completion after the caret) continues it too. Anything else is a caret
+/// jump and breaks the chain. The cost: in a host that keeps up, a click
+/// back up to `recentEndLimit` characters into the keyboard's own text just
+/// typed isn't seen as a jump. Not part of Tilde.
+public struct PersonalHistoryCaretContinuity: Equatable, Sendable {
+    public enum Decision: Equatable, Sendable {
+        /// The key continues the current chain.
+        case continues
+        /// The key starts a new chain.
+        case breaks
+        /// The host reports no caret; the key isn't captured.
+        case unusable
+    }
+
+    /// How many keys a host may be behind across a Backspace.
+    public static let recentEndLimit = 3
+
+    private struct Chain: Equatable, Sendable {
+        let bundle: String
+        /// Where the keyboard's own text ends, as the host would report it
+        /// if it kept up.
+        var end: Int
+        /// The caret the host reported for the previous key.
+        var lastReported: Int
+        /// Where the keyboard's text ended before each of the last few keys.
+        var recentEnds: [Int]
+
+        mutating func moveEnd(to newEnd: Int) {
+            recentEnds.append(end)
+            if recentEnds.count > PersonalHistoryCaretContinuity.recentEndLimit {
+                recentEnds.removeFirst(recentEnds.count - PersonalHistoryCaretContinuity.recentEndLimit)
+            }
+            end = newEnd
+        }
+    }
+
+    private var chain: Chain?
+
+    public init() {}
+
+    public var isTracking: Bool { chain != nil }
+
+    /// A key about to insert `utf16Length` UTF-16 units with the host's
+    /// caret at `selection`. Moves the chain past that text unless the host
+    /// reports no caret.
+    public mutating func insertion(bundle: String, selection: NSRange, utf16Length: Int) -> Decision {
+        guard selection.location != NSNotFound, selection.location >= 0 else {
+            chain = nil
+            return .unusable
+        }
+        let caret = selection.location
+        let decision: Decision
+        if let current = chain, continues(current, bundle: bundle, caret: caret) {
+            decision = .continues
+        } else {
+            decision = chain == nil && selection.length == 0 ? .continues : .breaks
+        }
+        if decision == .continues, var current = chain {
+            current.moveEnd(to: current.end + max(0, utf16Length))
+            current.lastReported = min(caret, current.end)
+            chain = current
+        } else {
+            chain = Chain(bundle: bundle, end: caret + max(0, utf16Length), lastReported: caret, recentEnds: [caret])
+        }
+        return decision
+    }
+
+    /// Whether a Backspace with the host's caret at `selection` lands at the
+    /// end of the keyboard's own text (no selection).
+    public func isAtOwnTextEnd(bundle: String, selection: NSRange) -> Bool {
+        guard let chain, selection.location != NSNotFound, selection.length == 0 else { return false }
+        return continues(chain, bundle: bundle, caret: selection.location)
+    }
+
+    /// A Backspace at the end of the keyboard's text removed `utf16Length`
+    /// units of it, with the host's caret at `caret`.
+    public mutating func backspaced(utf16Length: Int, caret: Int) {
+        guard var current = chain else { return }
+        current.moveEnd(to: max(0, current.end - utf16Length))
+        current.lastReported = min(caret, current.end)
+        chain = current
+    }
+
+    public mutating func reset() {
+        chain = nil
+    }
+
+    private func continues(_ chain: Chain, bundle: String, caret: Int) -> Bool {
+        guard chain.bundle == bundle else { return false }
+        return (chain.lastReported...chain.end).contains(caret) || chain.recentEnds.contains(caret)
+    }
+}

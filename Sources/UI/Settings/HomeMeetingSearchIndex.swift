@@ -114,11 +114,4 @@ struct HomeMeetingSearchIndex: Sendable {
         }
         return SearchResult(items: items, hasMore: false)
     }
-
-    /// Drops a meeting the user just deleted so it can't come back in results
-    /// before the next rebuild.
-    mutating func removeMeeting(id: String) {
-        entries.removeAll { $0.item.id == id || $0.scanned.path == id }
-        entriesByPath = Self.index(entries)
-    }
 }

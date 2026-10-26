@@ -8,7 +8,8 @@ import SwiftUI
 /// always-visible row inside a rounded card — no disclosures to hunt through.
 /// Rows carry at most a few words; the explanation for each setting lives in
 /// its ⓘ info popover. Sections: Dictation, Microphone, Send after
-/// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy.
+/// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy,
+/// Developer Preview.
 struct GeneralSettingsPage<
     ShortcutEditor: View,
     BluetoothMicEditor: View,
@@ -17,7 +18,8 @@ struct GeneralSettingsPage<
     ModelEditor: View,
     MicProcessingEditor: View,
     PermissionsEditor: View,
-    ReportingEditor: View
+    ReportingEditor: View,
+    DeveloperPreviewEditor: View
 >: View {
     @Binding var launchAtLoginEnabled: Bool
     let launchAtLoginStatus: String
@@ -44,6 +46,7 @@ struct GeneralSettingsPage<
     let micProcessingEditor: () -> MicProcessingEditor
     let permissionsEditor: () -> PermissionsEditor
     let reportingEditor: () -> ReportingEditor
+    let developerPreviewEditor: () -> DeveloperPreviewEditor
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -254,6 +257,14 @@ struct GeneralSettingsPage<
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.privacy")
+
+            SettingsCardLabel(text: "Developer Preview")
+                .padding(.top, 16)
+            SettingsCard {
+                developerPreviewEditor()
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("transcripted.settings.section.developer-preview")
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.general")

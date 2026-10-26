@@ -277,7 +277,7 @@ extension TranscriptedSettingsView {
     private var homePage: some View {
         HomeSettingsPage(
             homeViewModel: homeViewModel,
-            capturesToday: homeViewModel.todayDictationCount + homeViewModel.todayMeetingCount,
+            capturesToday: homeViewModel.todayMeetingCount,
             attentionTitle: homeAttentionIssues.first?.title,
             meetingDaySections: homeMeetingDaySections,
             homeCopiedRowID: homeCopiedRowID,
@@ -325,7 +325,7 @@ extension TranscriptedSettingsView {
             onCancelActivity: {
                 trackSettingsAction("cancel_current_activity", page: .home)
                 actions.cancelPendingAudioImports()
-                meetingSession.cancelActiveTranscription(reason: .userRequested)
+                meetingSession.cancelActiveTranscription()
             },
             onOpenSavedMeeting: { transcriptURL in
                 trackSettingsAction("open_saved_meeting", page: .home)

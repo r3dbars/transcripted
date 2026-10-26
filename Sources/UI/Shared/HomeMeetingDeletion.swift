@@ -4,12 +4,6 @@ import Foundation
 import TranscriptedCore
 #endif
 
-struct HomeMeetingDeletionResult: Equatable {
-    let removedTranscriptURLs: [URL]
-    let removedSummaryURLs: [URL]
-    let removedAudioDirectoryURLs: [URL]
-}
-
 enum HomeMeetingDeletionError: LocalizedError {
     case transcriptUnavailable
     case retranscriptionInProgress
@@ -101,32 +95,6 @@ enum HomeMeetingDeletion {
             // Queued writers cannot interleave with the restore. This remains
             // best-effort if a Trash item is gone or a destination is occupied.
             CaptureTrashOperation.restore(payload.trashedFiles, fileManager: fileManager)
-        }
-    }
-
-    static func delete(
-        _ item: RecentMeetingItem,
-        fileManager: FileManager = .default
-    ) throws -> HomeMeetingDeletionResult {
-        try withCurrentPlan(for: item, fileManager: fileManager) { plan in
-            try delete(plan, fileManager: fileManager)
-        }
-    }
-
-    static func delete(
-        _ plan: Plan,
-        fileManager: FileManager = .default
-    ) throws -> HomeMeetingDeletionResult {
-        try MeetingTranscriptFileUpdateSerializer.sync(protecting: plan.transcriptURLs) {
-            let removedSummaries = try removeExistingItems(plan.summaryURLs, fileManager: fileManager)
-            let removedTranscripts = try removeExistingItems(plan.transcriptURLs, fileManager: fileManager)
-            let removedAudioDirectories = try removeExistingItems(plan.audioDirectoryURLs, fileManager: fileManager)
-
-            return HomeMeetingDeletionResult(
-                removedTranscriptURLs: removedTranscripts,
-                removedSummaryURLs: removedSummaries,
-                removedAudioDirectoryURLs: removedAudioDirectories
-            )
         }
     }
 
@@ -371,19 +339,6 @@ enum HomeMeetingDeletion {
         }
 
         return hasher.finalize().map { String(format: "%02x", $0) }.joined()
-    }
-
-    private static func removeExistingItems(
-        _ urls: [URL],
-        fileManager: FileManager
-    ) throws -> [URL] {
-        var removed: [URL] = []
-        for url in urls {
-            guard fileManager.fileExists(atPath: url.path) else { continue }
-            try fileManager.removeItem(at: url)
-            removed.append(url)
-        }
-        return removed
     }
 
     private static func isRegularFile(_ url: URL, fileManager: FileManager) -> Bool {

@@ -49,20 +49,34 @@ func postClipboardPasteShortcut() -> Bool {
 }
 
 private func currentPasteShortcutKeyCode() -> CGKeyCode {
-    resolveCurrentKeyboardLayoutKeyCode(for: "v") ?? CGKeyCode(kVK_ANSI_V)
+    guard let inputSource = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue() else {
+        return CGKeyCode(kVK_ANSI_V)
+    }
+    return pasteShortcutKeyCode(in: inputSource) ?? CGKeyCode(kVK_ANSI_V)
 }
 
-private func resolveCurrentKeyboardLayoutKeyCode(for targetCharacter: Character) -> CGKeyCode? {
-    guard let inputSource = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
-          let layoutProperty = TISGetInputSourceProperty(inputSource, kTISPropertyUnicodeKeyLayoutData) else {
+/// The keycode that types "v" in this layout. The paste is posted with Command held, so look
+/// in the layout's Command table first: "Dvorak - QWERTY Cmd" swaps to QWERTY under Command,
+/// and its unmodified "v" key would arrive as Cmd+. instead. Layouts without a Latin "v"
+/// under Command fall back to the unmodified table.
+func pasteShortcutKeyCode(in inputSource: TISInputSource) -> CGKeyCode? {
+    guard let layoutProperty = TISGetInputSourceProperty(inputSource, kTISPropertyUnicodeKeyLayoutData) else {
         return nil
     }
 
     let layoutData = unsafeBitCast(layoutProperty, to: CFData.self)
     guard let layoutBytes = CFDataGetBytePtr(layoutData) else { return nil }
     let keyboardLayout = UnsafeRawPointer(layoutBytes).assumingMemoryBound(to: UCKeyboardLayout.self)
-    let target = String(targetCharacter).lowercased()
+    let commandKeyState = UInt32((cmdKey >> 8) & 0xFF)
+    return keyCode(producing: "v", in: keyboardLayout, modifierKeyState: commandKeyState)
+        ?? keyCode(producing: "v", in: keyboardLayout, modifierKeyState: 0)
+}
 
+private func keyCode(
+    producing target: String,
+    in keyboardLayout: UnsafePointer<UCKeyboardLayout>,
+    modifierKeyState: UInt32
+) -> CGKeyCode? {
     for keyCode in UInt16(0)..<UInt16(128) {
         var deadKeyState: UInt32 = 0
         var actualLength = 0
@@ -71,7 +85,7 @@ private func resolveCurrentKeyboardLayoutKeyCode(for targetCharacter: Character)
             keyboardLayout,
             keyCode,
             UInt16(kUCKeyActionDown),
-            0,
+            modifierKeyState,
             UInt32(LMGetKbdType()),
             OptionBits(kUCKeyTranslateNoDeadKeysBit),
             &deadKeyState,
@@ -135,6 +149,24 @@ struct DictationPasteTarget: Equatable {
             processIdentifier: frontmostApp.processIdentifier,
             bundleIdentifier: frontmostApp.bundleIdentifier
         )
+    }
+
+    /// Return goes to whatever holds key focus, and a launcher panel can take
+    /// key focus without becoming frontmost. Blocks only when both pids are
+    /// known and differ, so apps that expose little to Accessibility keep Auto Enter.
+    func ownsFocusedElement(focusedProcessIdentifier: pid_t?) -> Bool {
+        guard let processIdentifier, let focusedProcessIdentifier else { return true }
+        return processIdentifier == focusedProcessIdentifier
+    }
+
+    func ownsCurrentFocusedElement() -> Bool {
+        let focused = FocusedTextPasteConfirmationPolicy.boundedFocusedElement(
+            systemWide: AXUIElementCreateSystemWide()
+        ).flatMap { element -> pid_t? in
+            var pid: pid_t = 0
+            return AXUIElementGetPid(element, &pid) == .success ? pid : nil
+        }
+        return ownsFocusedElement(focusedProcessIdentifier: focused)
     }
 
     func matches(processIdentifier currentProcessIdentifier: pid_t?, bundleIdentifier currentBundleIdentifier: String?) -> Bool {

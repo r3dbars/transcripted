@@ -70,7 +70,7 @@ func testCaptureUndo() async {
         )
     }
 
-    await runSuite("CaptureUndoManager.deleteFiles — trashes immediately and publishes a pending offer") {
+    await runSuite("CaptureUndoManager.stage — publishes a pending offer for a delete the caller already ran") {
         let fm = FileManager.default
         let root = temporaryCaptureUndoTestRoot()
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
@@ -84,11 +84,11 @@ func testCaptureUndo() async {
         let id = "meeting-1"
 
         do {
-            let offer = try await manager.deleteFiles(
+            let trashed = try CaptureTrashOperation.trash([transcript], fileManager: fm)
+            let offer = await manager.stage(
                 id: id,
-                urls: [transcript],
                 message: CaptureUndoMessage.deleted("Product review"),
-                fileManager: fm
+                undoAction: { CaptureTrashOperation.restore(trashed, fileManager: fm) }
             )
 
             assertEqual(offer.id, id, "offer should carry the caller's id")
@@ -97,11 +97,11 @@ func testCaptureUndo() async {
             assertFalse(fm.fileExists(atPath: transcript.path), "file should already be gone from its original path")
 
             let isPending = await manager.isPending(id)
-            assertTrue(isPending, "id should be pending right after delete")
+            assertTrue(isPending, "id should be pending right after stage")
             let lookedUp = await manager.offer(for: id)
             assertEqual(lookedUp, offer, "offer(for:) should return the published offer")
         } catch {
-            assertTrue(false, "deleteFiles should not throw: \(error)")
+            assertTrue(false, "trashing the fixture should not throw: \(error)")
         }
 
         // Clean up the pending timer for this manager instance.
@@ -121,11 +121,11 @@ func testCaptureUndo() async {
         let id = "meeting-1"
 
         do {
-            _ = try await manager.deleteFiles(
+            let trashed = try CaptureTrashOperation.trash([transcript], fileManager: fm)
+            _ = await manager.stage(
                 id: id,
-                urls: [transcript],
                 message: CaptureUndoMessage.deleted("Product review"),
-                fileManager: fm
+                undoAction: { CaptureTrashOperation.restore(trashed, fileManager: fm) }
             )
 
             await manager.undo(id)
@@ -136,7 +136,7 @@ func testCaptureUndo() async {
             let clearedOffer = await manager.offer(for: id)
             assertNil(clearedOffer, "offer should be cleared after undo")
         } catch {
-            assertTrue(false, "deleteFiles should not throw: \(error)")
+            assertTrue(false, "trashing the fixture should not throw: \(error)")
         }
     }
 
@@ -154,11 +154,11 @@ func testCaptureUndo() async {
         let finalizeRan = FinalizeFlag()
 
         do {
-            _ = try await manager.deleteFiles(
+            let trashed = try CaptureTrashOperation.trash([transcript], fileManager: fm)
+            _ = await manager.stage(
                 id: id,
-                urls: [transcript],
                 message: CaptureUndoMessage.deleted("Quick notes"),
-                fileManager: fm,
+                undoAction: { CaptureTrashOperation.restore(trashed, fileManager: fm) },
                 finalize: { finalizeRan.mark() }
             )
 
@@ -176,7 +176,7 @@ func testCaptureUndo() async {
             // finalize is idempotent — calling it again must not re-run the closure.
             await manager.finalize(id)
         } catch {
-            assertTrue(false, "deleteFiles should not throw: \(error)")
+            assertTrue(false, "trashing the fixture should not throw: \(error)")
         }
     }
 
@@ -196,18 +196,18 @@ func testCaptureUndo() async {
         let firstFinalizeRan = FinalizeFlag()
 
         do {
-            _ = try await manager.deleteFiles(
+            let firstTrashed = try CaptureTrashOperation.trash([first], fileManager: fm)
+            _ = await manager.stage(
                 id: id,
-                urls: [first],
                 message: "Deleted \u{201C}first\u{201D}",
-                fileManager: fm,
+                undoAction: { CaptureTrashOperation.restore(firstTrashed, fileManager: fm) },
                 finalize: { firstFinalizeRan.mark() }
             )
-            _ = try await manager.deleteFiles(
+            let secondTrashed = try CaptureTrashOperation.trash([second], fileManager: fm)
+            _ = await manager.stage(
                 id: id,
-                urls: [second],
                 message: "Deleted \u{201C}second\u{201D}",
-                fileManager: fm
+                undoAction: { CaptureTrashOperation.restore(secondTrashed, fileManager: fm) }
             )
 
             assertTrue(firstFinalizeRan.value, "starting a new delete for a still-pending id should finalize the stale one")
@@ -218,7 +218,7 @@ func testCaptureUndo() async {
             assertTrue(fm.fileExists(atPath: second.path), "undo should restore the second (still-pending) delete")
             assertFalse(fm.fileExists(atPath: first.path), "the first delete stayed finalized — permanently trashed")
         } catch {
-            assertTrue(false, "deleteFiles should not throw: \(error)")
+            assertTrue(false, "trashing the fixture should not throw: \(error)")
         }
     }
 }

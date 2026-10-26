@@ -83,8 +83,6 @@ struct ModelDescriptor: Equatable, Sendable {
     }
 }
 
-typealias Gemma4E2BModelDescriptor = ModelDescriptor
-
 /// The externally visible lifecycle of the model asset.
 enum ModelState: Equatable, Sendable {
     case checking

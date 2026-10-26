@@ -411,7 +411,13 @@ struct WritingSecretScrubberTests {
         #expect(result.kinds == [.password])
     }
 
-    @Test("A command typed right after sudo (no prompt shown) is kept", arguments: commandLikeLines)
+    // Owner call on #2165: a lone command word of 4+ characters (`clear`,
+    // `exit`) right after a prompt is redacted as a likely password, so it is
+    // no longer in this kept list. Shorter words, paths and multi-word
+    // commands are still kept.
+    static let keptAfterPrompt = commandLikeLines.filter { !["clear", "exit"].contains($0) }
+
+    @Test("A command typed right after sudo (no prompt shown) is kept", arguments: keptAfterPrompt)
     func commandRightAfterPromptKept(_ commandLine: String) {
         // Conservative reading: the "looks like a command" stop applies to the first answer line too.
         let text = "sudo -v\n\(commandLine)"

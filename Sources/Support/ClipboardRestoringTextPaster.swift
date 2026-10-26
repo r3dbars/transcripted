@@ -422,14 +422,18 @@ final class ClipboardRestoringTextPaster {
                 && temporaryProvider?.firstReadAt != nil
             diagnostics["target_still_frontmost"] = "\(targetStillFrontmost)"
             diagnostics["likely_paste_ended_wait"] = "\(waitEndedOnLikelyPaste || (waitEndedOnReadWithoutSurface && clipboardReadSuggestsPaste))"
-            diagnostics["paste_evidence"] = targetStillFrontmost && clipboardReadSuggestsPaste
+            diagnostics["paste_evidence"] = clipboardReadSuggestsPaste
                 ? "clipboard_read"
                 : clipboardReadOutsideWindow ? "read_outside_window" : "none"
+            diagnostics["focus_refutes_paste"] = "\(focusRefutesPaste)"
             lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
                 event: "dictation_paste_confirmation_diagnostics",
                 context: diagnostics
             )
-            if !targetStillFrontmost {
+            // Focus moving after the target read the clipboard doesn't undo the paste,
+            // and asking for ⌘V then invites a double paste: take the likely-paste path.
+            let pasteLikelyLanded = clipboardReadSuggestsPaste && !focusRefutesPaste
+            if !targetStillFrontmost && !pasteLikelyLanded {
                 let clipboardFallbackState = leaveTemporaryClipboardAvailable(
                     savingClipboardForNextPaste: true
                 )
@@ -464,12 +468,7 @@ final class ClipboardRestoringTextPaster {
             // Cmd+V even with no text box focused, so a quick read only counts
             // as a paste when the focus could take text. A caller that decides
             // confirmation itself (`pasteConfirmed`) also owns this call.
-            diagnostics["focus_refutes_paste"] = "\(focusRefutesPaste)"
-            lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
-                event: "dictation_paste_confirmation_diagnostics",
-                context: diagnostics
-            )
-            if clipboardReadSuggestsPaste && !focusRefutesPaste {
+            if pasteLikelyLanded {
                 guard isCurrentOperation() else { return cancelledOutcome }
                 // Ending early adds the skipped wait back, so the clipboard returns about
                 // when a full wait's would: a few ms sooner, ~300 ms when AX stalls the

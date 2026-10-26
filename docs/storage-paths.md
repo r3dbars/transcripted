@@ -75,7 +75,8 @@ library moves:
   the keyboard socket `ghost.sock`, `runtime.lock`, the text-free
   `Outcome Ledger/` and `Word Diary/` (Tilde's plaintext word diary isn't
   ported; accepted text is saved only by Save my writing), and the encrypted
-  `Personal History/`
+  `Personal History/`. `Outcome Ledger/events.jsonl` is cut back to its newest
+  12 MiB once it passes 24 MiB, which still covers the seven-day window
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
   excluded from backup. The Writing tab's **Delete model** empties this folder
   (never Delete all writing); it refuses the folder if it's a symlink
@@ -91,8 +92,9 @@ unavailable recovery store refuses new closed-entry admission rather than droppi
 old entries. Save errors stay visible until every pending entry is resolved.
 Consent changes, scope narrowing, opt-out and Delete all discard pending writing
 intentionally. Raw open entries and scrubber context are never journaled; a
-crash/force quit can still lose unfinished writing. Graceful Quit refuses while
-the final open entry cannot be closed into durable ownership.
+crash/force quit can still lose unfinished writing. When the final open entry
+can't be closed into durable ownership, graceful Quit asks first (Keep Open /
+Quit Anyway); logout, restart and shutdown go ahead and lose that entry.
 
 ## Meetings
 
@@ -134,6 +136,14 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 
 - MCP helper: `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`
 - MCP directory manifest: `~/Library/Application Support/Transcripted/mcp-directories.json`
+
+The opt-in live meeting helper (`Tools/TranscriptedLive`) writes outside the app's folder, under
+`~/Library/Application Support/TranscriptedLive/` (or `TRANSCRIPTED_LIVE_DIR`):
+
+- `session.json`: the helper's state and current ghost lines
+- `meetings/<id>.jsonl`: the rough transcript of each meeting it heard; the helper deletes ones older
+  than 24 h when it starts. Deleting a meeting in the app, moving the capture library and the app's
+  cleanup never touch this folder
 
 Script-installed experimental models (never downloaded by the app) live under:
 

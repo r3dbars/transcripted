@@ -241,10 +241,12 @@ enum DictationTranscriptStore {
         case trashedFile(originalURL: URL, trashedURL: URL?)
     }
 
-    /// Reversible variant of `deleteEntry` for the inline-undo flow: same
-    /// lock-protected mutation and matching rules, but the empty-day case
-    /// moves the file to the Trash instead of permanently removing it, and
-    /// the returned payload lets `restoreDeletedEntry` put things back.
+    /// Removes a single dictation entry by matching on its stable saved entry
+    /// ID, for the inline-undo flow. If the day file has no remaining entries,
+    /// it moves to the Trash instead of being permanently removed, and the
+    /// returned payload lets `restoreDeletedEntry` put things back. Kept
+    /// audio is the caller's to remove (`DictationAudioArchive.deleteKeptAudio(for:)`);
+    /// this file stays free of the archive so the storage smokes compile it alone.
     static func deleteEntryReversibly(_ entry: SavedDictationEntry) throws -> EntryDeletionUndo {
         let undo: EntryDeletionUndo = try DictationTranscriptMutationLock.withLock {
             let url = entry.url
@@ -362,49 +364,6 @@ enum DictationTranscriptStore {
         var lines = section.components(separatedBy: "\n")
         while lines.count > 1, let last = lines.last, last.isEmpty { lines.removeLast() }
         return lines.joined(separator: "\n")
-    }
-
-    /// Removes a single dictation entry by matching on its stable saved entry ID.
-    /// If the day file has no remaining entries, the file is deleted. Kept
-    /// audio is the caller's to remove (`DictationAudioArchive.deleteKeptAudio(for:)`);
-    /// this file stays free of the archive so the storage smokes compile it alone.
-    static func deleteEntry(_ entry: SavedDictationEntry) throws {
-        try DictationTranscriptMutationLock.withLock {
-            let url = entry.url
-            guard let content = try? String(contentsOf: url, encoding: .utf8) else {
-                throw NSError(domain: "DictationTranscriptStore", code: 1, userInfo: [NSLocalizedDescriptionKey: "Could not read \(url.lastPathComponent)."])
-            }
-
-            let sections = splitSections(in: content)
-            var removedCount = 0
-            let kept: [String] = sections.filter { section in
-                guard let parsed = parseEntry(from: section, in: url) else { return true }
-                if isSameEntry(parsed, as: entry) {
-                    removedCount += 1
-                    return false
-                }
-                return true
-            }
-
-            guard removedCount > 0 else {
-                throw NSError(
-                    domain: "DictationTranscriptStore",
-                    code: 2,
-                    userInfo: [NSLocalizedDescriptionKey: "Could not find the dictation entry to delete."]
-                )
-            }
-
-            if kept.isEmpty {
-                try FileManager.default.removeItem(at: url)
-            } else {
-                let header = headerPreface(in: content)
-                let rebuilt = (header + kept.map(droppingTrailingBlankLines).joined(separator: "\n\n")).trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
-                try TranscriptFileRewrite.write(rebuilt, to: url)
-                FileManager.default.restrictFileToOwnerOnly(at: url)
-            }
-        }
-
-        NotificationCenter.default.post(name: .dictationTranscriptDidSave, object: entry.url)
     }
 
     private static func isSameEntry(_ lhs: SavedDictationEntry, as rhs: SavedDictationEntry) -> Bool {

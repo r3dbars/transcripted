@@ -45,15 +45,10 @@ Operational caveats:
 
 ## Model integrity
 
-Model files come from `https://huggingface.co` only. There is no third-party
-mirror fallback: if huggingface.co is unreachable, the download fails closed
-rather than silently degrading to a less-trusted source whose manifest could
-supply attacker-controlled digests.
-
-LFS-tracked files (weights) are verified against the SHA-256 digest reported by
-the HuggingFace API before being moved into the cache. Non-LFS files
-(tokenizer.json, config.json, etc.) ride on HTTPS to huggingface.co with no
-per-file digest — those are documented but not currently hash-pinned.
+Speech and diarization model files come from `https://huggingface.co` over
+HTTPS, downloaded by their SDKs (FluidAudio, WhisperKit). There is no
+third-party mirror fallback. Those SDK downloads are not hash-pinned by
+Transcripted today; see `docs/threat-model.md`.
 
 ## Beta build entitlements
 

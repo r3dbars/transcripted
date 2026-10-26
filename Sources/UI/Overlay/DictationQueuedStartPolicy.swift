@@ -142,6 +142,15 @@ extension DictationQueuedStartPolicy {
             steps.showStillFinishing()
         }
     }
+
+    /// What any Esc during a take does to a start waiting on it, including
+    /// the first Esc of "press again to discard": it takes the start back,
+    /// quietly, so no "still finishing" message lands over the confirm.
+    static func escapeKeyAction(
+        dropQueuedStart: @escaping (_ showMessage: Bool) -> Void
+    ) -> () -> Void {
+        { dropQueuedStart(false) }
+    }
 }
 
 /// The wait behind a remembered press. It used to check every 50 ms; now it

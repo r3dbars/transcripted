@@ -1,6 +1,6 @@
 // DictationSoundsTests.swift
 //
-// Three kinds of coverage live in this file; they are NOT the same strength of proof:
+// Two kinds of coverage live in this file; they are NOT the same strength of proof:
 //
 // REAL BEHAVIORAL COVERAGE (compiled): the UISoundPreferences suites and the
 // "AppSoundPlayer uses expected bundled files only" / "playback entrypoints are best
@@ -14,19 +14,12 @@
 // bundle, so this is a genuine resource invariant (no unused/surprise cues ship) — it
 // checks the real filesystem, not source text.
 //
-// IMPLEMENTATION-PINNING PRESENCE PINS (NOT compiled): the "Stop click plays on Stop"
-// suite reads DictationSessionController.swift as TEXT and pins that the stop cue is
-// queued once, before the transcription task, so it acknowledges Stop without waiting
-// on paste. The "Start click answers the key press" suite pins that the fast path
-// queues the start cue before the mic start task, and that it plays once per session.
-// The "Feedback submit paths stay silent" suite reads Sources/App/TranscriptedSupportActions.swift and
-// Sources/UI/Settings/TranscriptedSettingsView.swift as TEXT and asserts ABSENCE of
-// `AppSoundPlayer.shared.play(` and `NSSound.beep()` on the feedback
-// paths. These SwiftUI/AppKit sources are NOT compiled into this Foundation-only runner,
-// so these greps pin source structure, not runtime behavior: they guard the product rule
-// that submitting feedback opens email silently (no app cue, no system beep). If you
-// rename those functions or change how feedback playback is wired, update both the source
-// and these presence pins together.
+// BANNED-CALL SCAN (not here any more): "Feedback submit paths stay silent" used to
+// read TranscriptedSupportActions.swift and TranscriptedSettingsView.swift as TEXT.
+// It is now a rule in scripts/dev/check-banned-calls.py, which keeps
+// `AppSoundPlayer.shared.play(` and `NSSound.beep()` off the feedback paths
+// (submitting feedback opens email silently). The stop and start click timing are
+// behavior tests in DictationStopCheckpointTests and DictationSessionPipelineTests.
 
 import Foundation
 
@@ -159,35 +152,11 @@ func testDictationSounds() {
     // per session). Not covered: a direct AppSoundPlayer call added to the
     // paste or finalize tail, or a start path that skips playStartCueOnce.
 
-    runSuite("Feedback submit paths stay silent") {
-        // Banned-call scan (keep). TranscriptedSupportActions needs the whole
-        // app graph, so the runner can't compile it, and an injected sound
-        // player wouldn't catch a direct call added beside it. The mail handoff
-        // itself is behavior-tested in TranscriptedSupportActionsTests: a
-        // failed open shows the fallback window, never a sound.
-        let supportActions = readRepoTextFile("Sources/App/TranscriptedSupportActions.swift")
-        for (bannedCall, reason) in [
-            ("AppSoundPlayer.shared.play(", "support email actions should not play any UI sound cue"),
-            ("NSSound.beep()", "support email actions should not fall back to a system beep"),
-        ] {
-            assertFalse(supportActions.contains(bannedCall), reason)
-        }
-
-        let settingsView = readRepoTextFile("Sources/UI/Settings/TranscriptedSettingsView.swift")
-        let homeFeedbackSubmit = sourceSlice(
-            in: settingsView,
-            from: "private func submitHomeFeedback",
-            to: "private func flashCopied"
-        )
-        assertFalse(
-            homeFeedbackSubmit.contains("AppSoundPlayer.shared.play"),
-            "Home contextual feedback should open email without an app sound"
-        )
-        assertFalse(
-            homeFeedbackSubmit.contains("NSSound.beep()"),
-            "Home contextual feedback should not use a system beep on submit failure"
-        )
-    }
+    // "Feedback submit paths stay silent" is a banned-call rule in
+    // scripts/dev/check-banned-calls.py: TranscriptedSupportActions and the
+    // Home feedback submit never call AppSoundPlayer or NSSound.beep(). The
+    // mail handoff itself is behavior-tested in TranscriptedSupportActionsTests:
+    // a failed open shows the fallback window, never a sound.
 }
 
 private func repoRoot() -> URL {
@@ -202,16 +171,4 @@ private func restoreUserDefault(_ value: Any?, forKey key: String) {
     } else {
         UserDefaults.standard.removeObject(forKey: key)
     }
-}
-
-private func readRepoTextFile(_ relativePath: String) -> String {
-    let url = repoRoot().appendingPathComponent(relativePath)
-    return (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-}
-
-private func sourceSlice(in contents: String, from startMarker: String, to endMarker: String) -> String {
-    guard let start = contents.range(of: startMarker) else { return "" }
-    let remainder = contents[start.lowerBound...]
-    guard let end = remainder.range(of: endMarker) else { return String(remainder) }
-    return String(remainder[..<end.lowerBound])
 }

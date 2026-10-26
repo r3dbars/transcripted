@@ -17,10 +17,6 @@ struct ContextArtifactFile {
 }
 
 enum TranscriptLoader {
-    static func load(_ url: URL) -> AgentTranscript? {
-        loadMeeting(url)
-    }
-
     static func loadMeeting(_ url: URL) -> AgentTranscript? {
         guard let content = CaptureMarkdown.readBoundedContents(of: url),
               let parsed = CaptureMarkdownParser.parseMeeting(from: content) else {

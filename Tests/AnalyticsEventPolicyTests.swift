@@ -701,7 +701,7 @@ func testAnalyticsEventPolicy() {
         let updateSetting = AnalyticsEventPolicy.policy(forEvent: "update_setting_changed")
         let updateCheckFinished = AnalyticsEventPolicy.policy(forEvent: "update_check_finished")
 
-        assertEqual(menuOpened?.allowedProperties.contains("paste_available"), true, "menu opens should preserve whether paste has value")
+        assertEqual(menuOpened?.allowedProperties.contains("entrypoint"), true, "menu opens should preserve the entrypoint")
         assertEqual(menuAction?.allowedProperties.contains("action_id"), true, "menu clicks should preserve the clicked action")
         assertEqual(settingsOpened?.allowedProperties.contains("source"), true, "settings opens should preserve entry source")
         assertEqual(settingsPage?.allowedProperties.contains("page_id"), true, "settings page views should preserve page id")

@@ -318,15 +318,14 @@ func testDictationQueuedStartPolicy() async {
         assertEqual(shown(.error("Couldn't save")), ["error Couldn't save"], "a failure goes to the error")
     }
 
-    // Still source-text, deliberately: the Esc callback wiring lives in
-    // DictationSessionController, which a fast test can't build. The overlay
-    // half (which messages give way) is a behavioral suite above now.
-    runSuite("Esc takes back a waiting start") {
-        let controller = readSourceFixture("Sources/UI/Overlay/DictationSessionController.swift")
-        assertTrue(
-            controller.contains("overlayController?.onEscapeKeyDuringSession = { [weak self] in\n                self?.dropQueuedDictationStart(showMessage: false)"),
-            "the first Esc of a confirm already takes back a waiting start"
-        )
+    runSuite("Esc takes back a waiting start without a message") {
+        var drops: [Bool] = []
+        let onEscape = DictationQueuedStartPolicy.escapeKeyAction { showMessage in drops.append(showMessage) }
+        assertEqual(drops, [], "building the Esc action drops nothing")
+        onEscape()
+        assertEqual(drops, [false], "the first Esc of a confirm already takes back a waiting start, quietly")
+        onEscape()
+        assertEqual(drops, [false, false], "every Esc tries again; dropping an empty queue is a no-op in the controller")
     }
 }
 

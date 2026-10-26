@@ -435,35 +435,24 @@ public class TranscriptSaver {
         return savedURL
     }
 
+    /// Keeps only the creation date: the new text must get a fresh mtime so mtime-keyed indexes pick it up.
     private struct ExistingFileDates {
-        let creationDate: Date?
-        let modificationDate: Date?
+        let creationDate: Date
 
         static func capture(for url: URL?) -> ExistingFileDates? {
             guard let url,
                   FileManager.default.fileExists(atPath: url.path),
-                  let attributes = try? FileManager.default.attributesOfItem(atPath: url.path) else {
+                  let attributes = try? FileManager.default.attributesOfItem(atPath: url.path),
+                  let creationDate = attributes[.creationDate] as? Date else {
                 return nil
             }
 
-            return ExistingFileDates(
-                creationDate: attributes[.creationDate] as? Date,
-                modificationDate: attributes[.modificationDate] as? Date
-            )
+            return ExistingFileDates(creationDate: creationDate)
         }
 
         func restore(to url: URL) {
-            var attributes: [FileAttributeKey: Any] = [:]
-            if let creationDate {
-                attributes[.creationDate] = creationDate
-            }
-            if let modificationDate {
-                attributes[.modificationDate] = modificationDate
-            }
-            guard !attributes.isEmpty else { return }
-
             do {
-                try FileManager.default.setAttributes(attributes, ofItemAtPath: url.path)
+                try FileManager.default.setAttributes([.creationDate: creationDate], ofItemAtPath: url.path)
             } catch {
                 AppLogger.pipeline.warning("Failed to restore replacement transcript file dates", [
                     "error_type": String(describing: type(of: error))

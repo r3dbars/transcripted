@@ -47,12 +47,6 @@ public struct PersonalNextWordShadowSnapshot: Equatable, Sendable {
     public var precision: Double {
         predictions == 0 ? 0 : Double(exactHits) / Double(predictions)
     }
-    public var baselineCoverage: Double {
-        opportunities == 0 ? 0 : Double(baselinePredictions) / Double(opportunities)
-    }
-    public var baselinePrecision: Double {
-        baselinePredictions == 0 ? 0 : Double(baselineExactHits) / Double(baselinePredictions)
-    }
 }
 
 /// A single production-serving lookup result from `predictNextWord`. Not

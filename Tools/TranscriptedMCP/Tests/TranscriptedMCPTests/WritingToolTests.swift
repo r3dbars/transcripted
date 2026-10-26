@@ -65,6 +65,20 @@ final class WritingToolTests: XCTestCase {
             Set(try index.listWritingDays(count: 50).map(\.filename)),
             ["Writing_2026-09-25", "exported-writing"]
         )
+
+        let asMeeting = try handleReadMeeting(
+            params: CallTool.Parameters(name: "read_meeting", arguments: ["filename": .string("Writing_2026-09-25")]),
+            meetingDirs: directories.meetingDirs
+        )
+        XCTAssertEqual(asMeeting.isError, true, "a writing day is not readable as a meeting")
+        XCTAssertTrue(try text(asMeeting).contains("Meeting not found"))
+
+        let asDictation = try handleReadDictation(
+            params: CallTool.Parameters(name: "read_dictation", arguments: ["filename": .string("Writing_2026-09-25")]),
+            dictationDirs: directories.dictationDirs
+        )
+        XCTAssertEqual(asDictation.isError, true, "a writing day is not readable as a dictation")
+        XCTAssertTrue(try text(asDictation).contains("Dictation not found"))
     }
 
     func testArtifactKindRecognizesWritingBeforeMeetingDefault() throws {

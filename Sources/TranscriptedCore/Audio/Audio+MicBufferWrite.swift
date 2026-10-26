@@ -52,6 +52,9 @@ extension Audio {
         }
         lastBufferTime = CACurrentMediaTime()
         let rawPeak = linearPeak(buffer: buffer)
+        if let window = micCaptureTelemetry.record(buffer, arrival: CACurrentMediaTime()) {
+            AppLogger.audioMic.info("Mic capture window", window)
+        }
 
         // Meter + silence detection see the RAW signal so the user's
         // visible level reflects their actual mic input, and the
@@ -82,7 +85,20 @@ extension Audio {
             agcMaxGain: agc?.maxGain
         )
 
-        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
+        // Borrowed dictation gets the real samples; the saved track and live
+        // preview get silence of the same length (Audio+MicDictationGate.swift).
+        let meetingBuffer: AVAudioPCMBuffer
+        if isMicGatedForBorrowedDictation {
+            guard let silent = silentCopy(matching: bufferForAsyncUse) else {
+                AppLogger.audioMic.warning("Failed to build silent mic buffer while dictation is borrowing the mic")
+                return
+            }
+            meetingBuffer = silent
+        } else {
+            meetingBuffer = bufferForAsyncUse
+        }
+
+        let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: meetingBuffer)
         switch micAudioWriteBackpressure.admit(
             bytes: retainedBytes,
             generation: sessionGeneration
@@ -118,11 +134,11 @@ extension Audio {
         }
 
         if let liveHandler = onLivePCMBuffer {
-            livePCMDelivery.enqueue(bufferForAsyncUse, source: .microphone, captureGeneration: sessionGeneration, handler: liveHandler)
+            livePCMDelivery.enqueue(meetingBuffer, source: .microphone, captureGeneration: sessionGeneration, handler: liveHandler)
         }
 
         enqueueMicFileWrite(
-            bufferForAsyncUse,
+            meetingBuffer,
             retainedBytes: retainedBytes,
             writeContext: writeContext
         )
@@ -144,6 +160,10 @@ extension Audio {
         // Same tap thread as the rest of this recording, so RealtimeAGC's
         // single-thread contract holds and the tail keeps the same loudness.
         realtimeAGC?.process(buffer: bufferForAsyncUse)
+        // No host consumer sees the tail, so a gated tail is just silence.
+        if isMicGatedForBorrowedDictation {
+            zeroSamples(of: bufferForAsyncUse)
+        }
 
         let retainedBytes = PCMBufferBackpressureGate.retainedByteCount(for: bufferForAsyncUse)
         guard micAudioWriteBackpressure.admit(

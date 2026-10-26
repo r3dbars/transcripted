@@ -519,6 +519,7 @@ func testFailedMeetingPresentation() {
             hasAudioFiles: Bool = true,
             audioURLs: [URL] = [URL(fileURLWithPath: "/tmp/synthetic-meeting_mic.wav")],
             usableAudio: FailedMeetingUsableAudio = .unknown,
+            isRetrying: Bool = false,
             canRetry: Bool = true
         ) -> HomeFailedMeetingRowActions {
             HomeFailedMeetingRowActions.make(
@@ -530,7 +531,7 @@ func testFailedMeetingPresentation() {
                     meta: "",
                     failureKind: .saveFailed,
                     isRetryable: isRetryable,
-                    isRetrying: false,
+                    isRetrying: isRetrying,
                     hasAudioFiles: hasAudioFiles,
                     audioURLs: audioURLs,
                     usableAudio: usableAudio
@@ -557,6 +558,8 @@ func testFailedMeetingPresentation() {
 
         assertEqual(complete.deleteTitle, "Delete failed meeting", "cleanup is labeled as a delete")
         assertTrue(complete.deleteIsDestructive, "cleanup is marked destructive")
+        assertFalse(complete.deleteDisabled, "an idle failed meeting can be deleted")
+        assertTrue(row(isRetrying: true).deleteDisabled, "delete waits while a retry is running")
     }
 
     runSuite("Failed-meeting metadata calls retained WAVs raw audio and counts only files still on disk") {

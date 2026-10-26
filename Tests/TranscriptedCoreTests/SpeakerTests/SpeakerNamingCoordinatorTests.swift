@@ -18,7 +18,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let secondSpeakerId = firstSpeakerId
         let thirdSpeakerId = firstSpeakerId
         let namedTarget = harness.speakerDB.addOrUpdateSpeaker(embedding: [Float](repeating: 0.24, count: 256), existingId: nil)
-        harness.speakerDB.setDisplayName(id: namedTarget.id, name: "Grigory", source: NameSource.userManual)
+        harness.speakerDB.setDisplayName(id: namedTarget.id, name: "Gustavo", source: NameSource.userManual)
         let transcriptURL = harness.paths.transcripts.appendingPathComponent("Split_Speaker.md")
         let micURL = harness.paths.audioCaptures.appendingPathComponent("split-mic.wav")
         let systemURL = harness.paths.audioCaptures.appendingPathComponent("split-system.wav")
@@ -67,9 +67,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         harness.manager.handleNamingComplete(
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .merged(targetProfileId: namedTarget.id)),
-                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .merged(targetProfileId: namedTarget.id)),
-                SpeakerNameUpdate(persistentSpeakerId: thirdSpeakerId, diarizerSpeakerId: "3", newName: "GRIGORY", action: .merged(targetProfileId: namedTarget.id)),
+                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Gustavo", action: .merged(targetProfileId: namedTarget.id)),
+                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "gustavo", action: .merged(targetProfileId: namedTarget.id)),
+                SpeakerNameUpdate(persistentSpeakerId: thirdSpeakerId, diarizerSpeakerId: "3", newName: "GUSTAVO", action: .merged(targetProfileId: namedTarget.id)),
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
@@ -151,7 +151,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .merged(targetProfileId: persistentSpeakerId)
                 )
@@ -437,7 +437,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -469,7 +469,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, transcriptURL)
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
@@ -553,7 +553,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -581,7 +581,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
 
         try await Task.sleep(nanoseconds: 150_000_000)
-        XCTAssertFalse(try String(contentsOf: transcriptURL).contains("Sarah Graham"))
+        XCTAssertFalse(try String(contentsOf: transcriptURL).contains("Sadie Greene"))
 
         harness.manager.cancelSpeakerNamingRequest(
             transcriptId: transcriptId,
@@ -595,7 +595,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 && harness.manager.displayStatus == .transcriptSaved
         }
 
-        XCTAssertTrue(try String(contentsOf: transcriptURL).contains("Sarah Graham"))
+        XCTAssertTrue(try String(contentsOf: transcriptURL).contains("Sadie Greene"))
     }
 
     @MainActor
@@ -662,9 +662,9 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         harness.manager.handleNamingComplete(
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: thirdSpeakerId, diarizerSpeakerId: "3", newName: "GRIGORY", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: thirdSpeakerId, diarizerSpeakerId: "3", newName: "GUSTAVO", action: .named),
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
@@ -687,14 +687,14 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let dbIdLines = savedTranscript.components(separatedBy: "\n")
             .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("db_id:") }
         XCTAssertEqual(Set(dbIdLines).count, 1, savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Grigory] First fragment."), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("[00:05] [System/Grigory] Second fragment."), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("[00:09] [System/Grigory] Third fragment."), savedTranscript)
-        XCTAssertFalse(savedTranscript.contains("[System/grigory]"), savedTranscript)
-        XCTAssertFalse(savedTranscript.contains("[System/GRIGORY]"), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("- **Grigory:** 3 utterances, ~6 words, 00:09"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Gustavo] First fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:05] [System/Gustavo] Second fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:09] [System/Gustavo] Third fragment."), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/gustavo]"), savedTranscript)
+        XCTAssertFalse(savedTranscript.contains("[System/GUSTAVO]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("- **Gustavo:** 3 utterances, ~6 words, 00:09"), savedTranscript)
 
-        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
+        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Gustavo" }
         XCTAssertEqual(namedProfiles.count, 1)
         XCTAssertNil(harness.speakerDB.getSpeaker(id: secondSpeakerId))
         XCTAssertNil(harness.speakerDB.getSpeaker(id: thirdSpeakerId))
@@ -1050,8 +1050,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         harness.manager.handleNamingComplete(
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: firstSpeakerId, diarizerSpeakerId: "1", newName: "Gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondSpeakerId, diarizerSpeakerId: "2", newName: "gustavo", action: .named),
                 SpeakerNameUpdate(persistentSpeakerId: emptySpeakerId, diarizerSpeakerId: "3", newName: "Known Phantom", action: .merged(targetProfileId: emptySpeakerTargetId)),
             ],
             transcriptURL: transcriptURL,
@@ -1072,15 +1072,15 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Grigory]"), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("**00:05**  [System/Grigory]"), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("- **Grigory:** 2 utterances, ~4 words, 00:06"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Gustavo]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("**00:05**  [System/Gustavo]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("- **Gustavo:** 2 utterances, ~4 words, 00:06"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains("- **Speaker 3:**"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains("[System/Speaker 3]"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains("[System/Known Phantom]"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains(#"name: "Known Phantom""#), savedTranscript)
 
-        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
+        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Gustavo" }
         XCTAssertEqual(namedProfiles.count, 1)
         XCTAssertNil(harness.speakerDB.getSpeaker(id: secondSpeakerId))
         XCTAssertNil(harness.speakerDB.getSpeaker(id: emptySpeakerId))
@@ -1097,7 +1097,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             embedding: [Float](repeating: 0.31, count: 256),
             existingId: nil
         ).id
-        harness.speakerDB.setDisplayName(id: matchedSpeakerId, name: "Matt Vlasach")
+        harness.speakerDB.setDisplayName(id: matchedSpeakerId, name: "Milo Vasquez")
         guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: matchedSpeakerId) else {
             XCTFail("Expected matched speaker snapshot")
             return
@@ -1112,11 +1112,11 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let firstClipURL = harness.paths.speakerClips.appendingPathComponent("corrected-split-1.wav")
         let secondClipURL = harness.paths.speakerClips.appendingPathComponent("corrected-split-2.wav")
         let speakers = [
-            MarkdownSpeaker(id: "1", persistentSpeakerId: matchedSpeakerId, name: "Matt Vlasach", confidence: "medium", source: "db_pending"),
+            MarkdownSpeaker(id: "1", persistentSpeakerId: matchedSpeakerId, name: "Milo Vasquez", confidence: "medium", source: "db_pending"),
             MarkdownSpeaker(id: "2", persistentSpeakerId: splitSpeakerId, name: "Speaker 2", confidence: "unknown", source: "db_pending"),
         ]
         let utterances = [
-            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Matt Vlasach", text: "First fragment.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Milo Vasquez", text: "First fragment.", diarizerSpeakerId: 1),
             MarkdownUtterance(timestamp: "00:05", source: "System", label: "Speaker 2", text: "Second fragment.", diarizerSpeakerId: 2),
         ]
 
@@ -1125,7 +1125,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 2, duration: "00:03"),
                 BreakdownEntry(name: "Speaker 2", utterances: 1, wordCount: 2, duration: "00:03"),
             ],
             totalWords: 4
@@ -1147,8 +1147,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         harness.manager.handleNamingComplete(
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: matchedSpeakerId, diarizerSpeakerId: "1", newName: "Grigory", previousName: "Matt Vlasach", action: .corrected),
-                SpeakerNameUpdate(persistentSpeakerId: splitSpeakerId, diarizerSpeakerId: "2", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: matchedSpeakerId, diarizerSpeakerId: "1", newName: "Gustavo", previousName: "Milo Vasquez", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: splitSpeakerId, diarizerSpeakerId: "2", newName: "Gustavo", action: .named),
             ],
             transcriptURL: transcriptURL,
             transcriptId: transcriptId,
@@ -1156,7 +1156,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             micURL: micURL,
             systemURL: systemURL,
             clips: [
-                SpeakerNamingEntry(id: matchedSpeakerId, diarizerSpeakerId: "1", clipURL: firstClipURL, sampleText: "First fragment.", currentName: "Matt Vlasach", matchSimilarity: 0.86, needsNaming: false, needsConfirmation: true, sessionEmbedding: [Float](repeating: 0.33, count: 256), matchedProfileSnapshot: matchedSnapshot),
+                SpeakerNamingEntry(id: matchedSpeakerId, diarizerSpeakerId: "1", clipURL: firstClipURL, sampleText: "First fragment.", currentName: "Milo Vasquez", matchSimilarity: 0.86, needsNaming: false, needsConfirmation: true, sessionEmbedding: [Float](repeating: 0.33, count: 256), matchedProfileSnapshot: matchedSnapshot),
                 SpeakerNamingEntry(id: splitSpeakerId, diarizerSpeakerId: "2", clipURL: secondClipURL, sampleText: "Second fragment.", currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false, sessionEmbedding: [Float](repeating: 0.32, count: 256)),
             ]
         )
@@ -1170,15 +1170,15 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let dbIdLines = savedTranscript.components(separatedBy: "\n")
             .filter { $0.trimmingCharacters(in: .whitespaces).hasPrefix("db_id:") }
         XCTAssertEqual(Set(dbIdLines).count, 1, savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Grigory] First fragment."), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("[00:05] [System/Grigory] Second fragment."), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("- **Grigory:** 2 utterances, ~4 words, 00:06"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:01] [System/Gustavo] First fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("[00:05] [System/Gustavo] Second fragment."), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("- **Gustavo:** 2 utterances, ~4 words, 00:06"), savedTranscript)
 
-        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Grigory" }
+        let namedProfiles = harness.speakerDB.allSpeakers().filter { $0.displayName == "Gustavo" }
         XCTAssertEqual(namedProfiles.count, 1)
         XCTAssertNil(harness.speakerDB.getSpeaker(id: splitSpeakerId))
         let restoredProfile = harness.speakerDB.getSpeaker(id: matchedSpeakerId)
-        XCTAssertEqual(restoredProfile?.displayName, "Matt Vlasach")
+        XCTAssertEqual(restoredProfile?.displayName, "Milo Vasquez")
         XCTAssertEqual(restoredProfile?.disputeCount, matchedSnapshot.disputeCount + 1)
     }
 
@@ -1243,7 +1243,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -1276,7 +1276,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, renamedURL)
         XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
         let savedTranscript = try String(contentsOf: renamedURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path))
@@ -1380,7 +1380,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             embedding: [Float](repeating: 0.25, count: 256),
             existingId: nil
         ).id
-        harness.speakerDB.setDisplayName(id: matchedProfileId, name: "Matt Vlasach")
+        harness.speakerDB.setDisplayName(id: matchedProfileId, name: "Milo Vasquez")
         guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: matchedProfileId) else {
             XCTFail("Expected matched profile snapshot")
             return
@@ -1434,7 +1434,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                     diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
-                    currentName: "Matt Vlasach",
+                    currentName: "Milo Vasquez",
                     matchSimilarity: 0.9,
                     needsNaming: false,
                     needsConfirmation: true,
@@ -1452,7 +1452,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         let profiles = harness.speakerDB.allSpeakers()
         let deferredProfile = try XCTUnwrap(profiles.first { $0.id != matchedProfileId })
         let restoredProfile = try XCTUnwrap(harness.speakerDB.getSpeaker(id: matchedProfileId))
-        XCTAssertEqual(restoredProfile.displayName, "Matt Vlasach")
+        XCTAssertEqual(restoredProfile.displayName, "Milo Vasquez")
         XCTAssertNil(deferredProfile.displayName)
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
@@ -2310,7 +2310,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             embedding: [Float](repeating: 0.35, count: 256),
             existingId: nil
         )
-        harness.speakerDB.setDisplayName(id: matchedProfile.id, name: "Matt Vlasach")
+        harness.speakerDB.setDisplayName(id: matchedProfile.id, name: "Milo Vasquez")
         let matchedSnapshot = try XCTUnwrap(harness.speakerDB.getSpeaker(id: matchedProfile.id))
 
         _ = harness.speakerDB.addOrUpdateSpeaker(
@@ -2338,7 +2338,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
           - id: "1"
             channel: mic
             db_id: "\(matchedProfile.id.uuidString)"
-            name: "Matt Vlasach"
+            name: "Milo Vasquez"
             confidence: medium
             source: db_pending
         ---
@@ -2353,13 +2353,13 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         #### Local Speaker Breakdown
 
-        - **Matt Vlasach:** 1 utterances, ~5 words, 00:03
+        - **Milo Vasquez:** 1 utterances, ~5 words, 00:03
 
         ---
 
         ## Full Transcript
 
-        [00:01] [Mic/Matt Vlasach] I am in the room.
+        [00:01] [Mic/Milo Vasquez] I am in the room.
         """
 
         try transcript.write(to: transcriptURL, atomically: true, encoding: .utf8)
@@ -2383,7 +2383,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                     diarizerSpeakerId: "1",
                     channel: .mic,
                     newName: "You",
-                    previousName: "Matt Vlasach",
+                    previousName: "Milo Vasquez",
                     action: .collapsedToMe
                 )
             ],
@@ -2404,7 +2404,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                     channel: .mic,
                     clipURL: clipURL,
                     sampleText: "I am in the room.",
-                    currentName: "Matt Vlasach",
+                    currentName: "Milo Vasquez",
                     matchSimilarity: 0.9,
                     needsNaming: false,
                     needsConfirmation: true,
@@ -2420,7 +2420,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         let restoredProfile = try XCTUnwrap(harness.speakerDB.getSpeaker(id: matchedProfile.id))
-        XCTAssertEqual(restoredProfile.displayName, "Matt Vlasach")
+        XCTAssertEqual(restoredProfile.displayName, "Milo Vasquez")
         XCTAssertEqual(restoredProfile.callCount, matchedSnapshot.callCount)
         XCTAssertEqual(restoredProfile.disputeCount, matchedSnapshot.disputeCount + 1)
 
@@ -2493,7 +2493,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -2557,7 +2557,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             embedding: [Float](repeating: 0.26, count: 256),
             existingId: nil
         )
-        harness.speakerDB.setDisplayName(id: target.id, name: "Sarah Graham", source: NameSource.userManual)
+        harness.speakerDB.setDisplayName(id: target.id, name: "Sadie Greene", source: NameSource.userManual)
 
         let transcriptURL = harness.paths.transcripts.appendingPathComponent("Merge_Rollback.md")
         let micURL = harness.paths.audioCaptures.appendingPathComponent("merge-rollback-mic.wav")
@@ -2623,7 +2623,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: source.id,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -2756,7 +2756,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             transcriptionResult: result, micURL: nil, systemURL: systemURL,
             shouldRemoveTemporaryAudio: false, clips: clips
         )
-        try await waitUntil(timeout: 5) {
+        try await waitUntil(timeout: 60) {
             harness.manager.speakerNamingRequest == nil && harness.manager.displayStatus == .transcriptSaved
         }
         XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
@@ -2830,7 +2830,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -2862,7 +2862,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, renamedTranscriptURL)
         let savedTranscript = try String(contentsOf: renamedTranscriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"))
         XCTAssertFalse(FileManager.default.fileExists(atPath: originalTranscriptURL.path))
     }
 
@@ -2932,7 +2932,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -2982,7 +2982,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: originalTranscriptURL.path))
         let savedTranscript = try String(contentsOf: renamedTranscriptURL, encoding: .utf8)
         XCTAssertNotEqual(savedTranscript, originalTranscript)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains("[System/Speaker 1]"), savedTranscript)
     }
 
@@ -3055,7 +3055,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -3091,7 +3091,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         do {
             try TranscriptSaver.serializeTranscriptFileUpdate {
                 let finalizedTranscript = try String(contentsOf: originalTranscriptURL, encoding: .utf8)
-                XCTAssertTrue(finalizedTranscript.contains("Sarah Graham"), finalizedTranscript)
+                XCTAssertTrue(finalizedTranscript.contains("Sadie Greene"), finalizedTranscript)
                 try FileManager.default.moveItem(at: originalTranscriptURL, to: renamedTranscriptURL)
             }
         } catch {
@@ -3109,7 +3109,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertEqual(harness.manager.lastSavedTranscriptTaskId, savedTaskId)
         XCTAssertFalse(FileManager.default.fileExists(atPath: originalTranscriptURL.path))
         let savedTranscript = try String(contentsOf: renamedTranscriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"), savedTranscript)
     }
 
     @MainActor
@@ -3186,7 +3186,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
         harness.speakerDB.setDisplayName(
             id: matchedProfile.id,
-            name: "Matt Vlasach",
+            name: "Milo Vasquez",
             source: NameSource.userManual
         )
         guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: matchedProfile.id) else {
@@ -3200,12 +3200,12 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
         harness.speakerDB.setDisplayName(
             id: targetProfile.id,
-            name: "Sarah Graham",
+            name: "Sadie Greene",
             source: NameSource.userManual
         )
         let targetBefore = harness.speakerDB.getSpeaker(id: targetProfile.id)
 
-        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Meeting with Matt Vlasach.md")
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Meeting with Milo Vasquez.md")
         let clipURL = tempDirectory.appendingPathComponent("speaker-correction.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-correction.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-correction.wav")
@@ -3213,7 +3213,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             MarkdownSpeaker(
                 id: "1",
                 persistentSpeakerId: matchedProfile.id,
-                name: "Matt Vlasach",
+                name: "Milo Vasquez",
                 confidence: "medium",
                 source: "db_pending"
             )
@@ -3222,7 +3222,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             MarkdownUtterance(
                 timestamp: "00:01",
                 source: "System",
-                label: "Matt Vlasach",
+                label: "Milo Vasquez",
                 text: "Thanks for joining."
             )
         ]
@@ -3232,7 +3232,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:03")
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
         let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
@@ -3254,8 +3254,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: matchedProfile.id,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
-                    previousName: "Matt Vlasach",
+                    newName: "Sadie Greene",
+                    previousName: "Milo Vasquez",
                     action: .corrected
                 )
             ],
@@ -3270,7 +3270,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                     diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
-                    currentName: "Matt Vlasach",
+                    currentName: "Milo Vasquez",
                     matchSimilarity: 0.86,
                     needsNaming: false,
                     needsConfirmation: true,
@@ -3286,16 +3286,16 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
-        XCTAssertFalse(savedTranscript.contains("Matt Vlasach"))
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"))
+        XCTAssertFalse(savedTranscript.contains("Milo Vasquez"))
         XCTAssertTrue(savedTranscript.contains(targetProfile.id.uuidString))
 
         let rejectedProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
-        XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
+        XCTAssertEqual(rejectedProfile?.displayName, "Milo Vasquez")
         XCTAssertEqual(rejectedProfile?.disputeCount, matchedSnapshot.disputeCount + 1)
 
         let correctedProfile = harness.speakerDB.getSpeaker(id: targetProfile.id)
-        XCTAssertEqual(correctedProfile?.displayName, "Sarah Graham")
+        XCTAssertEqual(correctedProfile?.displayName, "Sadie Greene")
         XCTAssertEqual(correctedProfile?.disputeCount, 0)
         XCTAssertGreaterThan(correctedProfile?.callCount ?? 0, targetBefore?.callCount ?? 0)
     }
@@ -3454,7 +3454,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: "Speaker 1",
                     action: .named
                 )
@@ -3486,7 +3486,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertNotEqual(savedTranscript, originalTranscript)
-        XCTAssertTrue(savedTranscript.contains("Sarah Graham"))
+        XCTAssertTrue(savedTranscript.contains("Sadie Greene"))
     }
 
     @MainActor
@@ -3573,7 +3573,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: "Speaker 1",
                     action: .named
                 )
@@ -3604,10 +3604,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains(#"name: "Sarah Graham""#), savedTranscript)
-        XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Sarah Graham]"), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains(#"name: "Sadie Greene""#), savedTranscript)
+        XCTAssertTrue(savedTranscript.contains("**00:01**  [System/Sadie Greene]"), savedTranscript)
         XCTAssertFalse(savedTranscript.contains("#### Remote Speaker Breakdown"), savedTranscript)
-        XCTAssertEqual(harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName, "Sarah Graham")
+        XCTAssertEqual(harness.speakerDB.getSpeaker(id: persistentSpeakerId)?.displayName, "Sadie Greene")
     }
 
     @MainActor
@@ -3620,7 +3620,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
         harness.speakerDB.setDisplayName(
             id: matchedProfile.id,
-            name: "Matt Vlasach",
+            name: "Milo Vasquez",
             source: NameSource.userManual
         )
         guard let matchedSnapshot = harness.speakerDB.getSpeaker(id: matchedProfile.id) else {
@@ -3628,7 +3628,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             return
         }
 
-        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Meeting with Matt Vlasach.md")
+        let transcriptURL = harness.paths.transcripts.appendingPathComponent("Meeting with Milo Vasquez.md")
         let clipURL = tempDirectory.appendingPathComponent("speaker-no-embedding.wav")
         let micURL = tempDirectory.appendingPathComponent("mic-no-embedding.wav")
         let systemURL = tempDirectory.appendingPathComponent("system-no-embedding.wav")
@@ -3636,7 +3636,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             MarkdownSpeaker(
                 id: "1",
                 persistentSpeakerId: matchedProfile.id,
-                name: "Matt Vlasach",
+                name: "Milo Vasquez",
                 confidence: "medium",
                 source: "db_pending"
             )
@@ -3645,7 +3645,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             MarkdownUtterance(
                 timestamp: "00:01",
                 source: "System",
-                label: "Matt Vlasach",
+                label: "Milo Vasquez",
                 text: "Thanks for joining."
             )
         ]
@@ -3655,7 +3655,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:03")
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 5, duration: "00:03")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
         let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
@@ -3677,8 +3677,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: matchedProfile.id,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
-                    previousName: "Matt Vlasach",
+                    newName: "Sadie Greene",
+                    previousName: "Milo Vasquez",
                     action: .corrected
                 )
             ],
@@ -3693,7 +3693,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                     diarizerSpeakerId: "1",
                     clipURL: clipURL,
                     sampleText: "Thanks for joining.",
-                    currentName: "Matt Vlasach",
+                    currentName: "Milo Vasquez",
                     matchSimilarity: 0.85,
                     needsNaming: false,
                     needsConfirmation: true,
@@ -3712,14 +3712,14 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         }
 
         let savedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(savedTranscript.contains("Matt Vlasach"))
-        XCTAssertFalse(savedTranscript.contains("Sarah Graham"))
+        XCTAssertTrue(savedTranscript.contains("Milo Vasquez"))
+        XCTAssertFalse(savedTranscript.contains("Sadie Greene"))
 
         XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
         XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
         XCTAssertTrue(harness.failedManager.failedTranscriptions.isEmpty)
         let rejectedProfile = harness.speakerDB.getSpeaker(id: matchedProfile.id)
-        XCTAssertEqual(rejectedProfile?.displayName, "Matt Vlasach")
+        XCTAssertEqual(rejectedProfile?.displayName, "Milo Vasquez")
         XCTAssertEqual(
             rejectedProfile?.disputeCount,
             matchedSnapshot.disputeCount,
@@ -3816,7 +3816,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: nil,
                     action: .named
                 )
@@ -3852,7 +3852,7 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         do {
             try TranscriptSaver.serializeTranscriptFileUpdate {
                 let finalizedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-                XCTAssertTrue(finalizedTranscript.contains("Sarah Graham"), finalizedTranscript)
+                XCTAssertTrue(finalizedTranscript.contains("Sadie Greene"), finalizedTranscript)
                 try FileManager.default.moveItem(at: transcriptURL, to: unresolvedTranscriptURL)
             }
         } catch {
@@ -3887,10 +3887,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: scenario.clipURL.path))
         XCTAssertFalse(FileManager.default.fileExists(atPath: scenario.transcriptURL.path))
         let preservedTranscript = try String(contentsOf: scenario.unresolvedTranscriptURL, encoding: .utf8)
-        XCTAssertTrue(preservedTranscript.contains("Sarah Graham"), preservedTranscript)
+        XCTAssertTrue(preservedTranscript.contains("Sadie Greene"), preservedTranscript)
         XCTAssertEqual(
             scenario.harness.speakerDB.getSpeaker(id: scenario.persistentSpeakerId)?.displayName,
-            "Sarah Graham"
+            "Sadie Greene"
         )
     }
 
@@ -4087,8 +4087,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         return (parts[0] * 60) + parts[1]
     }
 
+    // The deadline is a hang guard, not a speed check: on a loaded Mac a
+    // 2-3 s budget timed out on work that always finishes.
     private func waitUntil(
-        timeout: TimeInterval = 2.0,
+        timeout: TimeInterval = 60.0,
         condition: @escaping @Sendable @MainActor () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeout)
@@ -4241,7 +4243,8 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         stateLock.unlock()
 
         if shouldBlock {
-            _ = mayContinue.wait(timeout: .now() + 5)
+            // Deadlock escape only; the test always calls resume().
+            _ = mayContinue.wait(timeout: .now() + 60)
         }
     }
 }

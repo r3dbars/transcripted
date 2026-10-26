@@ -59,7 +59,7 @@ enum TranscriptedSupportActions {
         let diskFields = await Task.detached(priority: .userInitiated) {
             (
                 storage: ModelCacheInventory.snapshot().diagnosticsFields,
-                reliabilityPackets: ReliabilityPacketRecorder.recentPacketSummaries()
+                reliabilityPacketCount: ReliabilityPacketRecorder.recentPacketSummaries().count
             )
         }.value
 
@@ -110,8 +110,7 @@ enum TranscriptedSupportActions {
             speakerReviewPending: speakerReviewPending,
             queuedMeetingCount: queuedMeetingCount,
             meetingShortcut: meetingShortcut,
-            reliabilityPackets: diskFields.reliabilityPackets,
-            recentLogLines: [],
+            reliabilityPacketCount: diskFields.reliabilityPacketCount,
             installUUID: InstallIdentity.id(),
             buildRevision: AnalyticsRuntimeConfiguration.buildRevision(),
             recentFailures: UsageHealthStore.shared.snapshot().failures
