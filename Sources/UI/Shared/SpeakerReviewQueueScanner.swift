@@ -31,6 +31,9 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     var meetingDurationSeconds: Int? = nil
     /// Imported recordings have no calendar slot, so no invitees.
     var isImported = false
+    /// Remote voices this meeting named on its own, for the glowing dots in
+    /// the footer of its "Who spoke?" card.
+    var recognizedNames: [String] = []
 
     var id: String {
         [
@@ -75,6 +78,8 @@ struct SpeakerPendingMeetingGroup: Identifiable, Sendable {
     let durationSeconds: Int?
     let isImported: Bool
     let voices: [SpeakerPendingVoiceGroup]
+    /// Remote voices this meeting named on its own.
+    var recognizedNames: [String] = []
 
     var id: String { SpeakerReviewSkippedCalls.key(transcriptId: transcriptId, transcriptURL: transcriptURL) }
 }
@@ -306,6 +311,8 @@ enum SpeakerReviewQueueScanner {
         let isImported: Bool
         /// Only the `db_pending` speakers, in frontmatter order.
         let speakers: [Speaker]
+        /// Remote voices named on their own (`db`), in frontmatter order.
+        let recognizedNames: [String]
         let hasLineWindows: Bool
 
         func needsAudioFallback(clipURLsByProfileID: [UUID: URL]) -> Bool {
@@ -367,6 +374,7 @@ enum SpeakerReviewQueueScanner {
                     channelWindow: sampleWindow(from: channelSample?.channelWindow)
                 )
             },
+            recognizedNames: recognizedNames(in: document.lines),
             hasLineWindows: !transcriptLines.isEmpty
         )
     }
@@ -414,7 +422,8 @@ enum SpeakerReviewQueueScanner {
                 profile: profile,
                 sourceName: speaker.name,
                 meetingDurationSeconds: summary.meetingDuration,
-                isImported: summary.isImported
+                isImported: summary.isImported,
+                recognizedNames: summary.recognizedNames
             )
         }
 
@@ -471,7 +480,8 @@ enum SpeakerReviewQueueScanner {
                 fallbackDate: item.fallbackDate,
                 durationSeconds: item.meetingDurationSeconds,
                 isImported: item.isImported,
-                voices: groupVoices
+                voices: groupVoices,
+                recognizedNames: item.recognizedNames
             )
         }
     }
@@ -479,6 +489,18 @@ enum SpeakerReviewQueueScanner {
     private static func deduplicatedPendingItems(_ items: [SpeakerPendingReviewItem]) -> [SpeakerPendingReviewItem] {
         var seen = Set<String>()
         return items.filter { seen.insert($0.id).inserted }
+    }
+
+    /// Remote voices the meeting named on its own: `db` speakers with a name,
+    /// each name once.
+    static func recognizedNames(in frontmatterLines: [String]) -> [String] {
+        var seen = Set<String>()
+        return frontmatterSpeakers(from: frontmatterLines).compactMap { speaker in
+            let name = speaker.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard speaker.source == "db", speaker.channel == .system, !name.isEmpty,
+                  seen.insert(name.lowercased()).inserted else { return nil }
+            return name
+        }
     }
 
     fileprivate struct FrontmatterSpeaker: Sendable {

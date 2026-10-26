@@ -6,7 +6,7 @@ import Foundation
 /// Dictation goes first. If it can't promise its audio is saved, Quit is
 /// refused: cleanup admission resets so a later Quit can try again, every
 /// pending request gets `false`, and nothing else shuts down. Writing goes
-/// next. A failed final flush can stay failed (an offline or unwritable
+/// next. Names just given on Speakers save before app state shuts down. A failed final flush can stay failed (an offline or unwritable
 /// library fills the bounded journal), so it asks instead of refusing every
 /// Quit, logout and update forever: Quit goes on only when
 /// `confirmQuitWithoutSavingWriting` says so. Otherwise the
@@ -25,6 +25,8 @@ enum AppTerminationSequence {
         var confirmQuitWithoutSavingWriting: @MainActor () async -> Bool = { false }
         var resetCleanupAdmission: @MainActor () -> Void
         var prepareMeetingForTermination: @MainActor () async -> Void
+        /// Names given on Speakers' "Who spoke?" cards that are still saving.
+        var finishSpeakerReviewSaves: @MainActor () async -> Void = {}
         var shutDownAppState: @MainActor () -> Void
         var stopAndRestorePersistentInput: @MainActor () async -> Void
         var flushLocalEvents: @MainActor () async -> Void
@@ -51,6 +53,7 @@ enum AppTerminationSequence {
             }
         }
         await steps.prepareMeetingForTermination()
+        await steps.finishSpeakerReviewSaves()
         steps.shutDownAppState()
         await steps.stopAndRestorePersistentInput()
         await steps.flushLocalEvents()

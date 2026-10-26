@@ -231,8 +231,8 @@ It uses temporary SQLite, Markdown, clips and a dedicated defaults suite to
 check new names, existing-person joins, distinct-meeting progress and failed
 save rollback. Calendar, playback and telemetry trap if accessed. It does not
 prove native card animation or live voice identity; those remain UI checks.
-`bash run-tests.sh --filter SpeakerReviewSession` covers review visit transitions
-and stale completions with pure fixtures.
+`bash run-tests.sh --filter SpeakerMeetingReview` covers the "Who spoke?"
+cards' visit state (Done, Undo, Skip, focus) and save plans with pure fixtures.
 
 Parakeet model-lifecycle changes also have a deterministic executor harness:
 `bash scripts/dev/test-parakeet-lifecycle.sh`. It compiles the production
