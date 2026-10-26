@@ -100,6 +100,10 @@ jobs:
         shell: bash
         run: bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh
 
+      - name: Sparkle appcast signing guards
+        shell: bash
+        run: bash Tests/BuildDependencies/SparkleAppcastSigningTests.sh
+
       - name: Ruby syntax
         shell: bash
         run: |
@@ -115,6 +119,10 @@ jobs:
       - name: Appcast critical-update marker
         shell: bash
         run: python3 scripts/release/mark-appcast-critical.py --self-test
+
+      - name: Legacy appcast freeze
+        shell: bash
+        run: python3 scripts/release/freeze-legacy-appcast.py --self-test
 
       # Catches same-scope duplicate declarations (e.g. a symbol declared twice
       # by a bad git auto-merge) in seconds, so they fail here instead of 20

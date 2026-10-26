@@ -87,12 +87,22 @@ rules:
       - "scripts/release/generate-sparkle-appcast.sh"
       - "scripts/release/verify-sparkle-release.sh"
       - "scripts/release/provision-release-models.sh"
+      - "scripts/release/sign-appcast.sh"
+      - "scripts/release/sign-release.sh"
+      - "scripts/release/fetch-sparkle-tools.sh"
+      - "scripts/entrypoints/lib/release-package.sh"
       - ".github/workflows/release-candidate.yml"
     checks:
       - "bash -n scripts/release/generate-sparkle-appcast.sh"
       - "bash -n scripts/release/verify-sparkle-release.sh"
       - "bash -n scripts/release/provision-release-models.sh"
+      - "bash -n scripts/release/sign-appcast.sh"
+      - "bash -n scripts/release/sign-release.sh"
+      - "bash -n scripts/release/fetch-sparkle-tools.sh"
+      - "bash -n scripts/entrypoints/lib/release-package.sh"
+      - "bash -n scripts/entrypoints/build-beta.sh"
       - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
+      - "bash Tests/BuildDependencies/SparkleAppcastSigningTests.sh"
 
   - paths:
       - "scripts/entrypoints/lib/bundle-cli.sh"
@@ -577,11 +587,16 @@ rules:
 
   - paths:
       - "scripts/release/mark-appcast-critical.py"
+      - "scripts/release/freeze-legacy-appcast.py"
+      - "config/release/legacy-appcast-freeze.json"
       - "docs/appcast.xml"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/release/mark-appcast-critical.py"
+      - "python3 -m py_compile scripts/release/freeze-legacy-appcast.py"
       - "python3 scripts/release/mark-appcast-critical.py --self-test"
+      - "python3 scripts/release/freeze-legacy-appcast.py --self-test"
+      - "python3 scripts/dev/check-known-traps.py"
 
   - paths:
       - "scripts/release/sentry-release-dry-run.py"

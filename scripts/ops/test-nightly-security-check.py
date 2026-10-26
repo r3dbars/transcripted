@@ -183,6 +183,25 @@ class ReleaseHealthGateTests(unittest.TestCase):
         self.assertIn(manifest["live_release_surfaces"]["appcast"], urls)
         self.assertEqual(len(urls), len(set(urls)))
 
+    def test_live_release_asset_feed_is_skipped_until_the_legacy_feed_is_frozen(self):
+        manifest = load_manifest()
+        feed = manifest["expected_info_plist"]["SUFeedURL"]
+        website = manifest["live_release_surfaces"]["appcast"]
+        self.assertTrue(feed.endswith(CHECKER.RELEASE_ASSET_FEED_SUFFIX))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            before = CHECKER.live_appcast_urls(manifest, root)
+            self.assertNotIn(feed, before)
+            self.assertIn(website, before)
+
+            record = root / "config/release/legacy-appcast-freeze.json"
+            record.parent.mkdir(parents=True)
+            record.write_text("{}\n", encoding="utf-8")
+            after = CHECKER.live_appcast_urls(manifest, root)
+            self.assertIn(feed, after)
+            self.assertIn(website, after)
+
 
 class ReleaseMetadataTests(TempRootTestCase):
     """Info.plist, appcast and cask fixtures in a temp root shaped like the repo."""
