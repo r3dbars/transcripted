@@ -35,6 +35,12 @@
       "surface": "NSWindow(",
       "policy": "capturable",
       "reason": "Settings window; people expect normal screenshots."
+    },
+    {
+      "file": "Sources/Writing/NextSentence/NextSentencePanel.swift",
+      "surface": "NextSentencePanel",
+      "policy": "protected",
+      "reason": "Shows text written from the user's screen and saved context; follows Show island in screen sharing."
     }
   ]
 }

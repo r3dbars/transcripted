@@ -77,8 +77,12 @@ enum DictationStoppedAudioRecoveryStore {
         directory: URL? = nil,
         fileManager: FileManager = .default
     ) throws -> DictationStoppedAudioRecovery? {
-        DictationAudioArchive.lockStorageMutation()
-        defer { DictationAudioArchive.unlockStorageMutation() }
+        // No storage-mutation lock: the stop path awaits this before paste,
+        // and the lock's other owners hold it through library writes and
+        // compression. Nothing else can touch this take's files yet. They're
+        // new and named for this session. The folder-wide passes keep them:
+        // the launch purge only removes files from before launch, and audio
+        // retry only reads receipts with a committed transcript.
         guard !samples16k.isEmpty else { return nil }
 
         let folder = directory ?? defaultDirectory

@@ -23,6 +23,12 @@ private final class DictationCommitMarkerFailureFileManager: FileManager, @unche
     }
 }
 
+/// Written on the checkpoint and holder threads, read after both signal.
+private final class CheckpointOutcome: @unchecked Sendable {
+    var finishedWhileHeld = false
+    var recovery: DictationStoppedAudioRecovery?
+}
+
 func testDictationAudioRetentionConcurrency() async {
     let fm = FileManager.default
     runSuite("Failed or absent text commit keeps the original recovery through retry Off expiry and restart") {
@@ -238,5 +244,38 @@ func testDictationAudioRetentionConcurrency() async {
         assertFalse(fm.fileExists(atPath: wav.path))
         assertFalse(fm.fileExists(atPath: audio.appendingPathComponent("\(stem).m4a").path))
         assertEqual((try? fm.contentsOfDirectory(atPath: audio.path)) ?? [], [], "no staging copy survives")
+    }
+
+    runSuite("A stop checkpoint doesn't wait behind another take's archive work") {
+        let root = fm.temporaryDirectory.appendingPathComponent("DictationCheckpointLock-\(UUID())")
+        defer { try? fm.removeItem(at: root) }
+        let directory = root.appendingPathComponent("recovery")
+        let checkpointed = DispatchSemaphore(value: 0)
+        let holderDone = DispatchSemaphore(value: 0)
+        let outcome = CheckpointOutcome()
+        // Stands in for the previous take's save, a slow library copy or a
+        // background compression publish: all hold the storage lock.
+        Thread {
+            DictationAudioArchive.lockStorageMutation()
+            DispatchQueue.global().async {
+                outcome.recovery = try? DictationStoppedAudioRecoveryStore.persist(
+                    samples16k: Array(repeating: 0.1, count: 16_000),
+                    sessionID: UUID(), directory: directory
+                )
+                checkpointed.signal()
+            }
+            // Hang guard only: a checkpoint stuck on the lock never signals.
+            outcome.finishedWhileHeld = checkpointed.wait(timeout: .now() + 30) == .success
+            DictationAudioArchive.unlockStorageMutation()
+            if !outcome.finishedWhileHeld { checkpointed.wait() }
+            holderDone.signal()
+        }.start()
+        holderDone.wait()
+        assertTrue(outcome.finishedWhileHeld, "the checkpoint finished while the archive lock was held")
+        assertNotNil(outcome.recovery)
+        if let recovery = outcome.recovery {
+            assertTrue(fm.fileExists(atPath: recovery.url.path))
+            assertEqual(DictationStoppedAudioRecoveryStore.pendingRecoveries(directory: directory), [recovery])
+        }
     }
 }

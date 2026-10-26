@@ -18,6 +18,9 @@ struct TranscriptedApp: App {
         // Set this before app startup creates logs, scratch files, or atomic-write
         // temp files so new app-owned files default to owner-only permissions.
         umask(0o077)
+        // A write to a dead child's stdin raises SIGPIPE; ignore it so write()
+        // returns EPIPE instead of killing the app (possibly mid-recording).
+        ProcessSignals.ignoreSIGPIPE()
     }
 
     var body: some Scene {
@@ -197,6 +200,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] in
             self?.pasteLastDictationFromSettings()
         }
+        wireNextSentenceVoice()
         notchIsland.prewarm()
         AppLaunchSteps.runAfterOverlaySetup(dictation: sessionController)
 
@@ -608,6 +612,14 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             await AppTerminationSequence.run(AppTerminationSequence.Steps(
                 finishDictationForTermination: { await self.sessionController.finishDictationForTermination() },
                 finishWritingForTermination: { await self.appState.writingController.finishWritingForTermination() },
+                confirmQuitWithoutSavingWriting: {
+                    // Logout, restart and shutdown don't wait on a library
+                    // that may never come back.
+                    guard WritingController.terminationIsSystemInitiated
+                        || self.confirmQuitWithUnsavedWriting() else { return false }
+                    self.appState.writingController.abandonUnsavedWritingForTermination()
+                    return true
+                },
                 resetCleanupAdmission: {
                     self.terminationCleanupStarted = false
                     // A refused Quit lets dictation start again.

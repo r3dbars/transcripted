@@ -32,6 +32,7 @@ swiftc -parse-as-library -target arm64-apple-macos26.0 -O \
     Sources/Meeting/SpeakerSilentNameCorrectionTelemetry.swift \
     Sources/Observability/SpeakerRecognitionTelemetry.swift \
     Sources/UI/Shared/HomeMeetingPreviewFormatter.swift \
+    Sources/UI/Shared/SpeakerReviewSamplePolicy.swift \
     Sources/UI/Shared/SpeakerReviewQueueScanner.swift \
     Sources/UI/Shared/SpeakerNamingTierPresentation.swift \
     Sources/UI/Settings/SpeakerDuplicateNameMatching.swift \

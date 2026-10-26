@@ -403,7 +403,8 @@ extension TranscriptionTaskManager {
                         ?? Self.reviewClipSpeakerIdsByKey(from: plannedChanges.resolvedUpdates),
                     excludingSpeakerIds: Self.nonRetainedReviewSpeakerIds(from: collapsedUpdates + discardedUpdates),
                     excludingSpeakerKeys: plannedChanges.transcriptOnlySpeakerKeys,
-                    clipsDirectory: clipsDirectory
+                    clipsDirectory: clipsDirectory,
+                    transcriptId: transcriptId
                 )
             }
 
@@ -575,16 +576,22 @@ extension TranscriptionTaskManager {
         speakerIdsByKey: [String: UUID],
         excludingSpeakerIds excludedSpeakerIds: Set<UUID>,
         excludingSpeakerKeys excludedSpeakerKeys: Set<String> = [],
-        clipsDirectory: URL
+        clipsDirectory: URL,
+        transcriptId: UUID
     ) {
         for clip in clips where !excludedSpeakerIds.contains(clip.id) {
             let key = clip.channel.speakerKey(diarizerSpeakerId: clip.diarizerSpeakerId)
             guard !excludedSpeakerKeys.contains(key) else { continue }
             let speakerId = speakerIdsByKey[key] ?? clip.id
+            // Only the sidecar next to the temp wav is the quote. If extract
+            // never wrote one, persist the wav without inventing text.
+            var sidecar = SpeakerClipSidecar.load(nextTo: clip.clipURL)
+            sidecar?.transcriptId = transcriptId
             SpeakerClipExtractor.persistClip(
                 from: clip.clipURL,
                 speakerId: speakerId,
-                clipsDirectory: clipsDirectory
+                clipsDirectory: clipsDirectory,
+                sidecar: sidecar
             )
         }
     }

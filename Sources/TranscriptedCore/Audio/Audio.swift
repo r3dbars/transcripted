@@ -168,6 +168,8 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Lock-free mirror of `pinnedMicrophoneCapture != nil` for main-thread
     /// readers; the graph lock can be held across slow HAL calls.
     let pinnedMicrophoneRecording = Atomic<Bool>(false)
+    /// Off-by-default per-second mic statistics (`CaptureTelemetry.swift`).
+    let micCaptureTelemetry = LockedCaptureSignalTelemetry()
     /// Record the meeting mic through a Core Audio IOProc on the selected
     /// device instead of an `AVAudioEngine` input node, which opens the macOS
     /// default input (AirPods) first. Ignored when Apple voice processing is
@@ -655,20 +657,18 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // MARK: - Shared microphone PCM hook
     //
-    // This callback lets an embedder tap mic PCM as it arrives
-    // from CoreAudio, in parallel with the WAV file writes. The app uses this
-    // to let dictation borrow the active meeting microphone without starting
-    // a second audio engine.
+    // Lets an embedder tap mic PCM in parallel with the WAV file writes, so
+    // dictation can borrow the meeting mic without a second audio engine.
+    // Delivered off the tap thread through the bounded `micHostPCMBufferFanout`.
+    // Set the hook once before `start()`; reads are unsynchronized, like
+    // `onRecordingComplete`.
     //
-    // Threading: fired on the audio thread (same thread as the tap callback).
-    // Consumers MUST NOT do I/O or blocking work on this thread — hand the
-    // owned buffer to a bounded worker. Matching the convention of
-    // `onRecordingComplete`, optional reads are unsynchronized: set the hook
-    // once before `start()` and do not reassign during recording.
-    //
-    // Mic buffers are the processed copy written to the saved mic WAV (software
-    // AGC with VPIO off, Apple's VPIO output with it on), owned by the callback.
+    // Mic buffers are the processed copy (software AGC with VPIO off, Apple's
+    // VPIO output with it on), owned by the callback. While the borrowed-
+    // dictation gate is on, only this hook gets them: the saved mic WAV and
+    // live preview get silence of the same length (Audio+MicDictationGate.swift).
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
+    let micDictationGate = Atomic<Bool>(false)
     let livePCMDelivery = LiveMeetingPCMDelivery() // live preview side channel; see Audio+LivePCM.swift
 
     /// Filesystem layout used for writing raw mic/system WAV captures.

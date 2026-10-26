@@ -508,7 +508,10 @@ extension TranscriptionTaskManager {
                 for clip in clips {
                     guard let name = clip.currentName?.trimmingCharacters(in: .whitespacesAndNewlines),
                           !name.isEmpty else {
-                        _ = removeManagedCleanupFile(clip.clipURL, label: "unnamed recognized speaker clip")
+                        SpeakerClipExtractor.removeClipAndSidecar(
+                            at: clip.clipURL,
+                            label: "unnamed recognized speaker clip"
+                        )
                         continue
                     }
                     let context = result.systemSpeakerContexts[clip.diarizerSpeakerId]
@@ -606,6 +609,10 @@ extension TranscriptionTaskManager {
                         )
                         for entry in reviewed.discardClips {
                             _ = self?.removeManagedCleanupFile(entry.clipURL, label: "recognized speaker clip")
+                            _ = self?.removeManagedCleanupFile(
+                                SpeakerClipSidecar.url(nextTo: entry.clipURL),
+                                label: "recognized speaker clip sidecar"
+                            )
                         }
                         self?.handleNamingComplete(
                             updates: updates,

@@ -940,19 +940,19 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let didUpdate = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: thirdId, diarizerSpeakerId: "3", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: thirdId, diarizerSpeakerId: "3", newName: "Gustavo", action: .named),
             ],
             transcriptionResult: result
         )
 
         XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("[00:00] [System/Grigory] first fragment"), markdown)
-        XCTAssertTrue(markdown.contains("[00:02] [System/Grigory] second fragment"), markdown)
-        XCTAssertTrue(markdown.contains("[00:04] [System/Grigory] third fragment"), markdown)
-        XCTAssertTrue(markdown.contains(#"name: "Grigory""#), markdown)
+        XCTAssertTrue(markdown.contains("[00:00] [System/Gustavo] first fragment"), markdown)
+        XCTAssertTrue(markdown.contains("[00:02] [System/Gustavo] second fragment"), markdown)
+        XCTAssertTrue(markdown.contains("[00:04] [System/Gustavo] third fragment"), markdown)
+        XCTAssertTrue(markdown.contains(#"name: "Gustavo""#), markdown)
         XCTAssertFalse(markdown.contains("[System/Speaker 1]"), markdown)
         XCTAssertFalse(markdown.contains("- **Speaker 2:**"), markdown)
     }
@@ -1020,16 +1020,16 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let didUpdate = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Grigory", action: .named),
-                SpeakerNameUpdate(persistentSpeakerId: thirdId, diarizerSpeakerId: "3", newName: "Grigory", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Gustavo", action: .named),
+                SpeakerNameUpdate(persistentSpeakerId: thirdId, diarizerSpeakerId: "3", newName: "Gustavo", action: .named),
             ],
             transcriptionResult: result
         )
 
         XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("- **Grigory:** 3 utterances, ~6 words, 00:03"), markdown)
+        XCTAssertTrue(markdown.contains("- **Gustavo:** 3 utterances, ~6 words, 00:03"), markdown)
         XCTAssertTrue(markdown.contains("system_speakers: 1"), markdown)
         XCTAssertTrue(markdown.contains("| 6 words | 1 speakers*"), markdown)
         XCTAssertFalse(markdown.contains("- **Speaker 2:**"), markdown)
@@ -1354,7 +1354,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
     func testResolveTranscriptURLFindsRenamedTranscriptByStableId() throws {
         let transcriptId = UUID()
         let originalURL = tempDirectory.appendingPathComponent("Call_2026-04-10_15-01-23.md")
-        let renamedURL = tempDirectory.appendingPathComponent("Meeting with Sarah Graham.md")
+        let renamedURL = tempDirectory.appendingPathComponent("Meeting with Sadie Greene.md")
 
         try sampleTranscript(
             transcriptId: transcriptId,
@@ -1469,12 +1469,12 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let transcriptId = UUID()
         let originalPersistentId = UUID()
         let correctedPersistentId = UUID()
-        let transcriptURL = tempDirectory.appendingPathComponent("Meeting with Matt Vlasach.md")
+        let transcriptURL = tempDirectory.appendingPathComponent("Meeting with Milo Vasquez.md")
         let speakers = [
             MarkdownSpeaker(
                 id: "1",
                 persistentSpeakerId: originalPersistentId,
-                name: "Matt Vlasach",
+                name: "Milo Vasquez",
                 confidence: "medium",
                 source: "db_pending"
             )
@@ -1483,7 +1483,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             MarkdownUtterance(
                 timestamp: "00:01",
                 source: "System",
-                label: "Matt Vlasach",
+                label: "Milo Vasquez",
                 text: "Thanks for joining.",
                 speakingSeconds: 12.0
             )
@@ -1494,7 +1494,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:12")
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 5, duration: "00:12")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
         let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
@@ -1505,8 +1505,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: originalPersistentId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
-                    previousName: "Matt Vlasach",
+                    newName: "Sadie Greene",
+                    previousName: "Milo Vasquez",
                     action: .corrected,
                     resolvedPersistentSpeakerId: correctedPersistentId
                 )
@@ -1519,10 +1519,10 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(updatedMarkdown.contains(#"transcript_id: "\#(transcriptId.uuidString)""#))
         XCTAssertTrue(updatedMarkdown.contains(#"db_id: "\#(correctedPersistentId.uuidString)""#))
-        XCTAssertTrue(updatedMarkdown.contains(#"name: "Sarah Graham""#))
+        XCTAssertTrue(updatedMarkdown.contains(#"name: "Sadie Greene""#))
         XCTAssertTrue(updatedMarkdown.contains("source: user_manual"))
-        XCTAssertTrue(updatedMarkdown.contains("[System/Sarah Graham]"))
-        XCTAssertTrue(updatedMarkdown.contains("- **Sarah Graham:** 1 utterances, ~3 words, 00:12"))
+        XCTAssertTrue(updatedMarkdown.contains("[System/Sadie Greene]"))
+        XCTAssertTrue(updatedMarkdown.contains("- **Sadie Greene:** 1 utterances, ~3 words, 00:12"))
     }
 
     func testRepeatedSpeakerReviewAfterRenamePreservesCaptureIdentityAndRecordingDate() throws {
@@ -1542,7 +1542,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         try original.write(to: originalURL, atomically: true, encoding: .utf8)
         let result = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
         let updates = [SpeakerNameUpdate(persistentSpeakerId: speakerId,
-            diarizerSpeakerId: "1", newName: "Sarah", previousName: "Speaker 1", action: .named)]
+            diarizerSpeakerId: "1", newName: "Sadie", previousName: "Speaker 1", action: .named)]
 
         XCTAssertTrue(TranscriptSaver.updateSpeakerNames(
             transcriptURL: originalURL, updates: updates, transcriptionResult: result))
@@ -1607,7 +1607,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: "Speaker 1",
                     action: .named
                 )
@@ -1618,7 +1618,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(didUpdate)
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertNotEqual(updatedMarkdown, originalMarkdown)
-        XCTAssertTrue(updatedMarkdown.contains("Sarah Graham"))
+        XCTAssertTrue(updatedMarkdown.contains("Sadie Greene"))
     }
 
     func testUpdateSpeakerNamesIgnoresCorruptAdjacentJSON() throws {
@@ -1661,7 +1661,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: "Speaker 1",
                     action: .named
                 )
@@ -1672,7 +1672,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(didUpdate)
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertNotEqual(updatedMarkdown, originalMarkdown)
-        XCTAssertTrue(updatedMarkdown.contains("Sarah Graham"))
+        XCTAssertTrue(updatedMarkdown.contains("Sadie Greene"))
         XCTAssertEqual(try String(contentsOf: jsonURL, encoding: .utf8), "{not-json")
     }
 
@@ -1717,7 +1717,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: "Speaker 1",
                     action: .named
                 )
@@ -1728,7 +1728,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(didUpdate)
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertNotEqual(updatedMarkdown, originalMarkdown)
-        XCTAssertTrue(updatedMarkdown.contains("Sarah Graham"))
+        XCTAssertTrue(updatedMarkdown.contains("Sadie Greene"))
         XCTAssertEqual(try String(contentsOf: jsonURL, encoding: .utf8), originalJSON)
     }
 
@@ -1773,7 +1773,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: persistentSpeakerId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
+                    newName: "Sadie Greene",
                     previousName: "Speaker 1",
                     action: .named
                 )
@@ -1784,7 +1784,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(didUpdate)
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertNotEqual(updatedMarkdown, originalMarkdown)
-        XCTAssertTrue(updatedMarkdown.contains("Sarah Graham"))
+        XCTAssertTrue(updatedMarkdown.contains("Sadie Greene"))
         XCTAssertEqual(try String(contentsOf: jsonURL, encoding: .utf8), originalJSON)
     }
 
@@ -1793,19 +1793,19 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let firstPersistentId = UUID()
         let secondPersistentId = UUID()
         let correctedPersistentId = UUID()
-        let transcriptURL = tempDirectory.appendingPathComponent("Meeting with Matt Vlasach.md")
+        let transcriptURL = tempDirectory.appendingPathComponent("Meeting with Milo Vasquez.md")
         let speakers = [
             MarkdownSpeaker(
                 id: "1",
                 persistentSpeakerId: firstPersistentId,
-                name: "Matt Vlasach",
+                name: "Milo Vasquez",
                 confidence: "medium",
                 source: "db_pending"
             ),
             MarkdownSpeaker(
                 id: "2",
                 persistentSpeakerId: secondPersistentId,
-                name: "Matt Vlasach",
+                name: "Milo Vasquez",
                 confidence: "medium",
                 source: "db_pending"
             )
@@ -1814,16 +1814,16 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             MarkdownUtterance(
                 timestamp: "00:01",
                 source: "System",
-                label: "Matt Vlasach",
-                text: "Sarah is actually joining today.",
+                label: "Milo Vasquez",
+                text: "Sadie is actually joining today.",
                 diarizerSpeakerId: 1,
                 speakingSeconds: 3.0
             ),
             MarkdownUtterance(
                 timestamp: "00:05",
                 source: "System",
-                label: "Matt Vlasach",
-                text: "Matt Vlasach is still the label on this other speaker.",
+                label: "Milo Vasquez",
+                text: "Milo Vasquez is still the label on this other speaker.",
                 diarizerSpeakerId: 2,
                 speakingSeconds: 4.0
             )
@@ -1834,8 +1834,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 5, duration: "00:03"),
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 7, duration: "00:04")
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 5, duration: "00:03"),
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 7, duration: "00:04")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
         let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
@@ -1846,8 +1846,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: firstPersistentId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
-                    previousName: "Matt Vlasach",
+                    newName: "Sadie Greene",
+                    previousName: "Milo Vasquez",
                     action: .corrected,
                     resolvedPersistentSpeakerId: correctedPersistentId
                 )
@@ -1860,22 +1860,22 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
         XCTAssertTrue(updatedMarkdown.contains(#"  - id: "1""#))
         XCTAssertTrue(updatedMarkdown.contains(#"    db_id: "\#(correctedPersistentId.uuidString)""#))
-        XCTAssertTrue(updatedMarkdown.contains("[00:01] [System/Sarah Graham] Sarah is actually joining today."))
-        XCTAssertTrue(updatedMarkdown.contains("[00:05] [System/Matt Vlasach] Matt Vlasach is still the label on this other speaker."))
-        XCTAssertTrue(updatedMarkdown.contains("- **Sarah Graham:** 1 utterances, ~5 words, 00:03"))
-        XCTAssertTrue(updatedMarkdown.contains("- **Matt Vlasach:** 1 utterances, ~10 words, 00:04"))
+        XCTAssertTrue(updatedMarkdown.contains("[00:01] [System/Sadie Greene] Sadie is actually joining today."))
+        XCTAssertTrue(updatedMarkdown.contains("[00:05] [System/Milo Vasquez] Milo Vasquez is still the label on this other speaker."))
+        XCTAssertTrue(updatedMarkdown.contains("- **Sadie Greene:** 1 utterances, ~5 words, 00:03"))
+        XCTAssertTrue(updatedMarkdown.contains("- **Milo Vasquez:** 1 utterances, ~10 words, 00:04"))
     }
 
     func testUpdateSpeakerNamesDoesNotRewriteLiteralTextMentions() throws {
         let transcriptId = UUID()
         let originalPersistentId = UUID()
         let correctedPersistentId = UUID()
-        let transcriptURL = tempDirectory.appendingPathComponent("Meeting with Matt Vlasach.md")
+        let transcriptURL = tempDirectory.appendingPathComponent("Meeting with Milo Vasquez.md")
         let speakers = [
             MarkdownSpeaker(
                 id: "1",
                 persistentSpeakerId: originalPersistentId,
-                name: "Matt Vlasach",
+                name: "Milo Vasquez",
                 confidence: "medium",
                 source: "db_pending"
             )
@@ -1884,8 +1884,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             MarkdownUtterance(
                 timestamp: "00:01",
                 source: "System",
-                label: "[[Matt Vlasach]]",
-                text: #"Literal tokens: [[Matt Vlasach]] [System/Matt Vlasach] **Matt Vlasach:** name: "Matt Vlasach""#,
+                label: "[[Milo Vasquez]]",
+                text: #"Literal tokens: [[Milo Vasquez]] [System/Milo Vasquez] **Milo Vasquez:** name: "Milo Vasquez""#,
                 diarizerSpeakerId: 1,
                 speakingSeconds: 3.0
             )
@@ -1896,7 +1896,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 10, duration: "00:03")
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 10, duration: "00:03")
             ]
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
         let transcriptionResult = sampleTranscriptionResult(speakers: speakers, utterances: utterances)
@@ -1907,8 +1907,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
                 SpeakerNameUpdate(
                     persistentSpeakerId: originalPersistentId,
                     diarizerSpeakerId: "1",
-                    newName: "Sarah Graham",
-                    previousName: "Matt Vlasach",
+                    newName: "Sadie Greene",
+                    previousName: "Milo Vasquez",
                     action: .corrected,
                     resolvedPersistentSpeakerId: correctedPersistentId
                 )
@@ -1919,22 +1919,22 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         XCTAssertTrue(didUpdate)
 
         let updatedMarkdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(updatedMarkdown.contains(#"name: "Sarah Graham""#))
-        XCTAssertTrue(updatedMarkdown.contains("[00:01] [System/[[Sarah Graham]]] Literal tokens: [[Matt Vlasach]] [System/Matt Vlasach] **Matt Vlasach:** name: \"Matt Vlasach\""))
-        XCTAssertTrue(updatedMarkdown.contains("- **Sarah Graham:** 1 utterances, ~11 words, 00:03"))
+        XCTAssertTrue(updatedMarkdown.contains(#"name: "Sadie Greene""#))
+        XCTAssertTrue(updatedMarkdown.contains("[00:01] [System/[[Sadie Greene]]] Literal tokens: [[Milo Vasquez]] [System/Milo Vasquez] **Milo Vasquez:** name: \"Milo Vasquez\""))
+        XCTAssertTrue(updatedMarkdown.contains("- **Sadie Greene:** 1 utterances, ~11 words, 00:03"))
     }
 
     func testUpdateSpeakerNamesFallbackRenamesWikiLinkedLabels() throws {
         let speakerId = UUID()
         let transcriptURL = tempDirectory.appendingPathComponent("wiki-fallback.md")
         let speakers = [
-            MarkdownSpeaker(id: "1", persistentSpeakerId: speakerId, name: "Matt Vlasach", confidence: "medium", source: "db_pending")
+            MarkdownSpeaker(id: "1", persistentSpeakerId: speakerId, name: "Milo Vasquez", confidence: "medium", source: "db_pending")
         ]
         let utterances = [
             MarkdownUtterance(
                 timestamp: "00:01",
                 source: "System",
-                label: "[[Matt Vlasach]]",
+                label: "[[Milo Vasquez]]",
                 text: "Hello there.",
                 diarizerSpeakerId: 1
             )
@@ -1945,7 +1945,7 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt Vlasach", utterances: 1, wordCount: 2, duration: "00:03")
+                BreakdownEntry(name: "Milo Vasquez", utterances: 1, wordCount: 2, duration: "00:03")
             ],
             totalWords: 2
         ).write(to: transcriptURL, atomically: true, encoding: .utf8)
@@ -1962,15 +1962,15 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let didUpdate = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: speakerId, diarizerSpeakerId: "1", newName: "Sarah Graham", previousName: "Matt Vlasach", action: .corrected)
+                SpeakerNameUpdate(persistentSpeakerId: speakerId, diarizerSpeakerId: "1", newName: "Sadie Greene", previousName: "Milo Vasquez", action: .corrected)
             ],
             transcriptionResult: driftedResult
         )
 
         XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("[00:01] [System/[[Sarah Graham]]] Hello there."), markdown)
-        XCTAssertFalse(markdown.contains("[System/[[Matt Vlasach]]]"), markdown)
+        XCTAssertTrue(markdown.contains("[00:01] [System/[[Sadie Greene]]] Hello there."), markdown)
+        XCTAssertFalse(markdown.contains("[System/[[Milo Vasquez]]]"), markdown)
     }
 
     func testUpdateSpeakerNamesFallbackFailsClosedWhenLabelsCollide() throws {
@@ -2025,20 +2025,20 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let secondId = UUID()
         let transcriptURL = tempDirectory.appendingPathComponent("overlapping-renames.md")
         let speakers = [
-            MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Matt", confidence: "medium", source: "db_pending"),
-            MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Sarah", confidence: "medium", source: "db_pending"),
+            MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Milo", confidence: "medium", source: "db_pending"),
+            MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Sadie", confidence: "medium", source: "db_pending"),
         ]
         let utterances = [
-            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Matt", text: "First speaker.", diarizerSpeakerId: 1),
-            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Sarah", text: "Second speaker.", diarizerSpeakerId: 2),
+            MarkdownUtterance(timestamp: "00:01", source: "System", label: "Milo", text: "First speaker.", diarizerSpeakerId: 1),
+            MarkdownUtterance(timestamp: "00:05", source: "System", label: "Sadie", text: "Second speaker.", diarizerSpeakerId: 2),
         ]
         let originalMarkdown = sampleTranscript(
             transcriptId: UUID(),
             speakers: speakers,
             utterances: utterances,
             breakdownEntries: [
-                BreakdownEntry(name: "Matt", utterances: 1, wordCount: 2, duration: "00:03"),
-                BreakdownEntry(name: "Sarah", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Milo", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Sadie", utterances: 1, wordCount: 2, duration: "00:03"),
             ],
             totalWords: 4
         )
@@ -2057,18 +2057,18 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let didUpdate = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sarah", previousName: "Matt", action: .corrected),
-                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Jamie", previousName: "Sarah", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sadie", previousName: "Milo", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Jamie", previousName: "Sadie", action: .corrected),
             ],
             transcriptionResult: driftedResult
         )
 
         XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("[00:01] [System/Sarah] First speaker."), markdown)
+        XCTAssertTrue(markdown.contains("[00:01] [System/Sadie] First speaker."), markdown)
         XCTAssertTrue(markdown.contains("[00:05] [System/Jamie] Second speaker."), markdown)
         XCTAssertFalse(markdown.contains("[00:01] [System/Jamie] First speaker."), markdown)
-        XCTAssertTrue(markdown.contains(#"name: "Sarah""#), markdown)
+        XCTAssertTrue(markdown.contains(#"name: "Sadie""#), markdown)
         XCTAssertTrue(markdown.contains(#"name: "Jamie""#), markdown)
     }
 
@@ -2082,21 +2082,21 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         speakers:
           - id: "1"
             db_id: "\(firstId.uuidString)"
-            name: "Matt"
+            name: "Milo"
             confidence: medium
             source: db_pending
           - id: "2"
             db_id: "\(secondId.uuidString)"
-            name: "Sarah"
+            name: "Sadie"
             confidence: medium
             source: db_pending
         ---
 
         ## Full Transcript
 
-        [00:12] [System/Matt] First speaker.
+        [00:12] [System/Milo] First speaker.
 
-        [00:16] [System/Sarah] Second speaker.
+        [00:16] [System/Sadie] Second speaker.
 
         ---
 
@@ -2104,8 +2104,8 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
 
         #### Remote Speaker Breakdown
 
-        - **Matt:** 1 utterances, ~2 words, 00:03
-        - **Sarah:** 1 utterances, ~2 words, 00:03
+        - **Milo:** 1 utterances, ~2 words, 00:03
+        - **Sadie:** 1 utterances, ~2 words, 00:03
         """
         try originalMarkdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
 
@@ -2122,18 +2122,18 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let didUpdate = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sarah", previousName: "Matt", action: .corrected),
-                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Jamie", previousName: "Sarah", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sadie", previousName: "Milo", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Jamie", previousName: "Sadie", action: .corrected),
             ],
             transcriptionResult: result
         )
 
         XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertTrue(markdown.contains("- **Sarah:** 1 utterances, ~2 words, 00:03"), markdown)
+        XCTAssertTrue(markdown.contains("- **Sadie:** 1 utterances, ~2 words, 00:03"), markdown)
         XCTAssertTrue(markdown.contains("- **Jamie:** 1 utterances, ~2 words, 00:03"), markdown)
-        XCTAssertFalse(markdown.contains("- **Matt:**"), markdown)
-        XCTAssertFalse(markdown.contains("- **Sarah:** 2 utterances"), markdown)
+        XCTAssertFalse(markdown.contains("- **Milo:**"), markdown)
+        XCTAssertFalse(markdown.contains("- **Sadie:** 2 utterances"), markdown)
     }
 
     func testUpdateSpeakerNamesBreakdownFallbackFailsClosedWhenRowsCollide() throws {
@@ -2203,16 +2203,16 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let originalMarkdown = sampleTranscript(
             transcriptId: UUID(),
             speakers: [
-                MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Matt", confidence: "medium", source: "db_pending"),
-                MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Sarah", confidence: "medium", source: "db_pending"),
+                MarkdownSpeaker(id: "1", persistentSpeakerId: firstId, name: "Milo", confidence: "medium", source: "db_pending"),
+                MarkdownSpeaker(id: "2", persistentSpeakerId: secondId, name: "Sadie", confidence: "medium", source: "db_pending"),
             ],
             utterances: [
-                MarkdownUtterance(timestamp: "00:01", source: "System", label: "Matt", text: "First speaker.", diarizerSpeakerId: 1),
-                MarkdownUtterance(timestamp: "00:05", source: "System", label: "Sarah", text: "Second speaker.", diarizerSpeakerId: 2),
+                MarkdownUtterance(timestamp: "00:01", source: "System", label: "Milo", text: "First speaker.", diarizerSpeakerId: 1),
+                MarkdownUtterance(timestamp: "00:05", source: "System", label: "Sadie", text: "Second speaker.", diarizerSpeakerId: 2),
             ],
             breakdownEntries: [
-                BreakdownEntry(name: "Matt", utterances: 1, wordCount: 2, duration: "00:03"),
-                BreakdownEntry(name: "Sarah", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Milo", utterances: 1, wordCount: 2, duration: "00:03"),
+                BreakdownEntry(name: "Sadie", utterances: 1, wordCount: 2, duration: "00:03"),
             ],
             totalWords: 4
         )
@@ -2231,18 +2231,18 @@ final class RetroactiveSpeakerUpdaterTests: XCTestCase {
         let didUpdate = TranscriptSaver.updateSpeakerNames(
             transcriptURL: transcriptURL,
             updates: [
-                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sarah", previousName: "Matt", action: .corrected),
-                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Sarah", previousName: "Sarah", action: .confirmed),
+                SpeakerNameUpdate(persistentSpeakerId: firstId, diarizerSpeakerId: "1", newName: "Sadie", previousName: "Milo", action: .corrected),
+                SpeakerNameUpdate(persistentSpeakerId: secondId, diarizerSpeakerId: "2", newName: "Sadie", previousName: "Sadie", action: .confirmed),
             ],
             transcriptionResult: result
         )
 
         XCTAssertTrue(didUpdate)
         let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
-        XCTAssertFalse(markdown.contains("Matt"), markdown)
-        XCTAssertTrue(markdown.contains("[00:01] [System/Sarah] First speaker."), markdown)
-        XCTAssertTrue(markdown.contains("[00:05] [System/Sarah] Second speaker."), markdown)
-        XCTAssertTrue(markdown.contains("- **Sarah:** 2 utterances, ~4 words, 00:06"), markdown)
+        XCTAssertFalse(markdown.contains("Milo"), markdown)
+        XCTAssertTrue(markdown.contains("[00:01] [System/Sadie] First speaker."), markdown)
+        XCTAssertTrue(markdown.contains("[00:05] [System/Sadie] Second speaker."), markdown)
+        XCTAssertTrue(markdown.contains("- **Sadie:** 2 utterances, ~4 words, 00:06"), markdown)
     }
 
     private func sampleTranscript(

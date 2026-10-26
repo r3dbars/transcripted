@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 func testHomeMeetingDeletion() {
@@ -425,6 +426,53 @@ func testHomeMeetingDeletion() {
         }
     }
 
+    runSuite("HomeMeetingDeletion leaves the person's voice sample when the producing meeting is trashed") {
+        withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
+            let transcriptURL = meetingsRoot.appendingPathComponent("Pricing memo.md")
+            try writeDeletionMeeting(title: "Pricing memo", transcriptURL: transcriptURL)
+            guard let item = deletionMeetingItem(transcriptURL) else {
+                assertionFailure("synthetic meeting should scan")
+                return
+            }
+            let clipsDirectory = meetingsRoot
+                .deletingLastPathComponent()
+                .appendingPathComponent("speaker_clips", isDirectory: true)
+            let clipURL = try writeDeletionSpeakerClip(
+                in: clipsDirectory,
+                sampleText: "This voice sample stays."
+            )
+            let wavBefore = try Data(contentsOf: clipURL)
+            assertEqual(
+                SpeakerClipSidecarQuote.validatedText(nextTo: clipURL, wavData: wavBefore),
+                "This voice sample stays.",
+                "the fixture pair must already be a matching quote"
+            )
+            let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
+            let payload = try HomeMeetingDeletion.trash(item, fileManager: fm)
+            defer { HomeMeetingDeletion.restore(payload, fileManager: fm) }
+
+            assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "the producing meeting moves to Trash")
+            assertFalse(
+                payload.plan.audioDirectoryURLs.contains { $0.path == clipsDirectory.path },
+                "meeting deletion must not plan the Speakers clip folder"
+            )
+            assertTrue(FileManager.default.fileExists(atPath: clipURL.path), "the person's wav stays")
+            assertTrue(
+                FileManager.default.fileExists(
+                    atPath: clipURL.deletingPathExtension().appendingPathExtension("json").path
+                ),
+                "the person's sidecar stays"
+            )
+            let wavAfter = try Data(contentsOf: clipURL)
+            assertEqual(wavAfter, wavBefore)
+            assertEqual(
+                SpeakerClipSidecarQuote.validatedText(nextTo: clipURL, wavData: wavAfter),
+                "This voice sample stays.",
+                "the clip is the person's voice sample, not meeting-owned media"
+            )
+        }
+    }
+
     runSuite("HomeMeetingDeletion only treats same-size audio as a duplicate when the bytes match") {
         withTemporaryHomeMeetingDeletionLibrary { meetingsRoot in
             let selectedURL = meetingsRoot.appendingPathComponent("Weekly sync.md")
@@ -580,6 +628,27 @@ private func writeDeletionMeeting(
     Synthetic reply.
     """
     try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
+}
+
+@discardableResult
+private func writeDeletionSpeakerClip(in directory: URL, sampleText: String) throws -> URL {
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let clipURL = directory.appendingPathComponent("\(UUID().uuidString).wav")
+    try Data([3, 1, 4, 1, 5]).write(to: clipURL)
+    let wav = try Data(contentsOf: clipURL)
+    let digest = SHA256.hash(data: wav).map { String(format: "%02x", $0) }.joined()
+    let json: [String: Any] = [
+        "channel": "system",
+        "diarizerSpeakerId": "1",
+        "segments": [["start": 2.0, "end": 6.0, "text": sampleText]],
+        "sampleText": sampleText,
+        "formatVersion": 1,
+        "wavByteCount": wav.count,
+        "wavSHA256": digest
+    ]
+    try JSONSerialization.data(withJSONObject: json, options: [.sortedKeys])
+        .write(to: clipURL.deletingPathExtension().appendingPathExtension("json"))
+    return clipURL
 }
 
 @discardableResult

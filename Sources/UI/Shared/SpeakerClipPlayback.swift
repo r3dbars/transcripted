@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CryptoKit
 import Foundation
 
 /// Plays one persisted speaker sample clip at a time.
@@ -23,7 +24,26 @@ final class SpeakerClipPlayback: ObservableObject {
     /// transitions rather than consulting `NSSound.isPlaying` at read time,
     /// so observers and the AX layer always agree with what was started.
     @Published private(set) var activeURL: URL?
+    /// Quote validated against the same wav bytes that started playing.
+    /// Nil when the sidecar does not describe those bytes, or nothing is playing.
+    @Published private(set) var activeValidatedQuote: String?
+    /// SHA-256 of the wav `Data` this play loaded. Same bytes as the quote
+    /// and the `NSSound`. Nil when nothing is playing.
+    private(set) var activeWavSHA256: String?
+    /// The wav bytes `play` loaded for the current clip. Quote and sound
+    /// both come from this `Data`. Tests replace the file after load and
+    /// still read this, not a live reread.
+    private(set) var lastLoadedPlay: LoadedPlay?
+    /// Test seam: start playback of already-loaded wav bytes. Production
+    /// leaves this nil and uses `NSSound`.
+    var playLoadedWavData: ((Data) -> Bool)?
     @Published private(set) var activeRetainedSample: SpeakerRetainedAudioSample?
+
+    struct LoadedPlay {
+        let wavData: Data
+        let quote: String?
+        let sha256: String
+    }
 
     private final class PlaybackDelegate: NSObject, NSSoundDelegate {
         func sound(_ sound: NSSound, didFinishPlaying flag: Bool) {
@@ -59,10 +79,25 @@ final class SpeakerClipPlayback: ObservableObject {
         }
 
         stop()
+        guard let wavData = try? Data(contentsOf: url), !wavData.isEmpty else { return }
+        let quote = SpeakerClipSidecarQuote.validatedText(nextTo: url, wavData: wavData)
+        let digest = SpeakerClipSidecarQuote.sha256Hex(wavData)
+        lastLoadedPlay = LoadedPlay(wavData: wavData, quote: quote, sha256: digest)
+        if let playLoadedWavData {
+            guard playLoadedWavData(wavData) else { return }
+            activeURL = url
+            activeValidatedQuote = quote
+            activeWavSHA256 = digest
+            notifyStateDidChange()
+            return
+        }
+        guard let sound = NSSound(data: wavData) else { return }
+        sound.delegate = playbackDelegate
         activeURL = url
-        activeSound = NSSound(contentsOf: url, byReference: false)
-        activeSound?.delegate = playbackDelegate
-        if activeSound?.play() == true {
+        activeValidatedQuote = quote
+        activeWavSHA256 = digest
+        activeSound = sound
+        if sound.play() {
             notifyStateDidChange()
         } else {
             stop()
@@ -142,6 +177,9 @@ final class SpeakerClipPlayback: ObservableObject {
         activeSound?.stop()
         activeSound = nil
         activeURL = nil
+        activeValidatedQuote = nil
+        activeWavSHA256 = nil
+        lastLoadedPlay = nil
         retainedAudioStatusObserver?.invalidate()
         retainedAudioStatusObserver = nil
         retainedAudioPlayer.pause()
@@ -157,6 +195,9 @@ final class SpeakerClipPlayback: ObservableObject {
         activeSound?.delegate = nil
         activeSound = nil
         activeURL = nil
+        activeValidatedQuote = nil
+        activeWavSHA256 = nil
+        lastLoadedPlay = nil
         notifyStateDidChange()
     }
 
@@ -165,5 +206,35 @@ final class SpeakerClipPlayback: ObservableObject {
             name: Self.stateDidChangeNotification,
             object: activeURL
         )
+    }
+}
+
+/// Decodes the sidecar JSON by key so this module does not name the Core
+/// sidecar type. The quote is returned only when it describes `wavData`.
+enum SpeakerClipSidecarQuote {
+    struct Payload: Decodable {
+        var sampleText: String
+        var formatVersion: Int
+        var wavByteCount: Int
+        var wavSHA256: String
+    }
+
+    static func validatedText(nextTo clipURL: URL, wavData: Data) -> String? {
+        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
+        guard let data = try? Data(contentsOf: url),
+              let payload = try? JSONDecoder().decode(Payload.self, from: data),
+              payload.formatVersion == 1,
+              payload.wavByteCount > 0,
+              !payload.wavSHA256.isEmpty,
+              wavData.count == payload.wavByteCount,
+              sha256Hex(wavData) == payload.wavSHA256.lowercased() else {
+            return nil
+        }
+        let text = payload.sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
+    }
+
+    static func sha256Hex(_ data: Data) -> String {
+        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 }

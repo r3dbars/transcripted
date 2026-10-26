@@ -113,13 +113,19 @@ final class WhisperEngine: ObservableObject {
 
         let startTime = CFAbsoluteTimeGetCurrent()
         do {
+            let audioIsVoiced = await Self.voicedSegments([samples])[0]
+            try Task.checkCancellation()
             let results = try await whisperKit.transcribe(
                 audioArray: samples,
                 decodeOptions: Self.decodeOptions(languageCode: languageCode, concurrentWorkerCount: 1)
             )
             try Task.checkCancellation()
             let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            let transcript = SegmentedEngineTranscript(segmentTexts: results.map(\.text))
+            let kept = Self.keptTexts(
+                results.map { ($0.text, $0.segments.map { $0.text }) },
+                audioIsVoiced: audioIsVoiced
+            )
+            let transcript = SegmentedEngineTranscript(segmentTexts: kept.texts)
             let trimmed = transcript.uncorrected
             let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
             let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
@@ -137,6 +143,8 @@ final class WhisperEngine: ObservableObject {
                     "rtf": String(format: "%.3f", rtf),
                     "chars": "\(trimmed.count)",
                     "source": sourceDescription,
+                    "voiced": "\(audioIsVoiced)",
+                    "dropped_windows": "\(kept.droppedWindows)",
                 ]
             )
 
@@ -203,6 +211,8 @@ final class WhisperEngine: ObservableObject {
         guard !eligible.isEmpty else { return texts }
 
         let startTime = CFAbsoluteTimeGetCurrent()
+        let voiced = await Self.voicedSegments(eligible.map { segments[$0] })
+        try Task.checkCancellation()
         let results = await whisperKit.transcribeWithResults(
             audioArrays: eligible.map { segments[$0] },
             decodeOptions: Self.decodeOptions(
@@ -216,10 +226,16 @@ final class WhisperEngine: ObservableObject {
                 NSLocalizedDescriptionKey: "Whisper returned \(results.count) results for \(eligible.count) segments."
             ])
         }
-        for (index, result) in zip(eligible, results) {
+        var droppedWindows = 0
+        for ((index, result), audioIsVoiced) in zip(zip(eligible, results), voiced) {
             switch result {
             case .success(let segmentResults):
-                texts[index] = SegmentedEngineTranscript(segmentTexts: segmentResults.map(\.text)).text
+                let kept = Self.keptTexts(
+                    segmentResults.map { ($0.text, $0.segments.map { $0.text }) },
+                    audioIsVoiced: audioIsVoiced
+                )
+                droppedWindows += kept.droppedWindows
+                texts[index] = SegmentedEngineTranscript(segmentTexts: kept.texts).text
             case .failure(let error):
                 if error is CancellationError { throw CancellationError() }
                 throw error
@@ -243,9 +259,37 @@ final class WhisperEngine: ObservableObject {
                 "rtf": String(format: "%.3f", audioDuration > 0 ? elapsed / audioDuration : 0),
                 "segments": "\(eligible.count)",
                 "source": source == .microphone ? "microphone" : "system",
+                "unvoiced_segments": "\(voiced.filter { !$0 }.count)",
+                "dropped_windows": "\(droppedWindows)",
             ]
         )
         return texts
+    }
+
+    /// Whether each segment has a voice in it (`WhisperVoicedSpeechGate`),
+    /// worked out off the main actor.
+    private static func voicedSegments(_ segments: [[Float]]) async -> [Bool] {
+        await Task.detached(priority: .userInitiated) {
+            segments.map(WhisperVoicedSpeechGate.hasVoicedSpeech)
+        }.value
+    }
+
+    /// Whisper's text for one segment, given each result's text and its
+    /// decoding windows' texts. Voiced audio keeps it all, as before;
+    /// unvoiced audio loses the windows that only hold stock silence lines
+    /// (`WhisperHallucinationFilter`).
+    private static func keptTexts(
+        _ results: [(text: String, windowTexts: [String])],
+        audioIsVoiced: Bool
+    ) -> (texts: [String], droppedWindows: Int) {
+        guard !audioIsVoiced else { return (results.map(\.text), 0) }
+        let windowTexts = results.flatMap(\.windowTexts)
+        let kept = WhisperHallucinationFilter.keptWindowTexts(windowTexts, audioIsVoiced: false)
+        let dropped = windowTexts.count - kept.count
+        if dropped > 0 {
+            AppLogger.transcription.info("WHISPER | dropped \(dropped) silence line(s) from unvoiced audio")
+        }
+        return (kept, dropped)
     }
 
     /// Decode options every transcription uses. `concurrentWorkerCount` only

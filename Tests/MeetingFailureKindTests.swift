@@ -167,7 +167,7 @@ func testMeetingFailureKind() {
             message: "Couldnt save speaker names. Saved them all in preview window, then got failed to save need another pass."
         )
 
-        assertEqual(kind, .speakerNameFinalizationFailed, "Grigory-style save-stage speaker-name failures should not become generic transcript save failures")
+        assertEqual(kind, .speakerNameFinalizationFailed, "Save-stage speaker-name failures should not become generic transcript save failures")
     }
 
     runSuite("MeetingFailureKind classifies pipeline-busy errors") {

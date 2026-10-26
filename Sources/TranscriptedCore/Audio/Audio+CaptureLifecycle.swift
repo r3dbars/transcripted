@@ -22,6 +22,7 @@ extension Audio {
         micAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         systemAudioStreaming = false  // Re-gate readiness on a fresh first buffer
         resetSignalDiagnostics()
+        micCaptureTelemetry.reset(enabled: CaptureTelemetryPreferences.isEnabled())
         // Fresh instance = clean one-shot latch per recording.
         quietMicAttenuationDetector = QuietMicAttenuationDetector()
         recordingStartRouteVolumeSnapshot = AudioRouteVolumeSnapshot.captureDefaultRoute()
