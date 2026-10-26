@@ -70,7 +70,7 @@ func testCallAppNamePrefill() {
         assertNil(Policy.reviewRowDraft(currentDraft: "", savedName: nil, callAppSuggestedName: nil))
     }
 
-    runSuite("Name these people reads a call-app name and still lists that voice as pending") {
+    runSuite("Who spoke? reads a call-app name and still lists that voice as pending") {
         let callId = UUID()
         let legacyId = UUID()
         let markdown = """
@@ -107,6 +107,8 @@ func testCallAppNamePrefill() {
         Sounds good to me.
         """
         let url = URL(fileURLWithPath: "/nonexistent-call-app-prefill/Planning_sync.md")
+        // No profile clips: #2273 reads the quote from a clip sidecar when a
+        // clip URL is present, so a fake path would hide the labeled line.
         let items = SpeakerReviewQueueScanner.pendingItems(
             in: markdown,
             transcriptURL: url,
@@ -114,10 +116,7 @@ func testCallAppNamePrefill() {
                 callId: callAppPrefillProfile(id: callId),
                 legacyId: callAppPrefillProfile(id: legacyId),
             ],
-            clipURLsByProfileID: [
-                callId: URL(fileURLWithPath: "/nonexistent-call-app-prefill/a.wav"),
-                legacyId: URL(fileURLWithPath: "/nonexistent-call-app-prefill/b.wav"),
-            ]
+            clipURLsByProfileID: [:]
         )
         let named = items.first { $0.speakerId == callId }
         let legacy = items.first { $0.speakerId == legacyId }
@@ -163,7 +162,7 @@ func testCallAppNamePrefill() {
             in: markdown,
             transcriptURL: URL(fileURLWithPath: "/nonexistent-call-app-prefill/Hand_edited.md"),
             profilesById: [id: callAppPrefillProfile(id: id)],
-            clipURLsByProfileID: [id: URL(fileURLWithPath: "/nonexistent-call-app-prefill/c.wav")]
+            clipURLsByProfileID: [:]
         )
         assertEqual(items.count, 1, "still pending, as today")
         assertNil(items.first?.callAppSuggestedName, "no name_source, no suggestion")
