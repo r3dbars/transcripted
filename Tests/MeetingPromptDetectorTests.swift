@@ -828,7 +828,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
         var summary: MeetingPromptDetectedCallSummary?
         detector.onDetectedCallEnded = { summary = $0 }
