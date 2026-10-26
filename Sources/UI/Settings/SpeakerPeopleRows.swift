@@ -124,7 +124,7 @@ struct SpeakerVoiceToNameRow: View {
             }
 
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 10) {
+                HStack(alignment: .top, spacing: 10) {
                     nameField
                     saveHint
                     quietQueueActions

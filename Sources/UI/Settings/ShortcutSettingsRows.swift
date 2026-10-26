@@ -69,7 +69,16 @@ final class ShortcutRecorderModel: ObservableObject {
     }
 
     func hint(for target: ShortcutRecordingTarget) -> String? {
-        recordingTarget == target ? rejectionHint : nil
+        PhysicalDictationTriggerPreferences.shortcutRowHint(
+            isRecording: recordingTarget == target,
+            rejectionHint: recordingTarget == target ? rejectionHint : nil,
+            storedClashReason: target == .meeting
+                ? PhysicalDictationTriggerPreferences.storedClashReason(
+                    dictation: ShortcutRecordingTarget.dictation.binding,
+                    meeting: ShortcutRecordingTarget.meeting.binding
+                )
+                : nil
+        )
     }
 
     func toggleRecording(_ target: ShortcutRecordingTarget) {

@@ -554,7 +554,7 @@ extension DictationSessionPipelineHost {
                 case .success:
                     showPasted()
                 case .clipboardNotice(let message), .notPasted(message: let message, unconfirmed: _),
-                     .clipboardBusy(message: let message), .error(let message):
+                     .clipboardBusy(message: let message, hint: _), .error(let message):
                     showError(message)
                 }
                 if presentation.canOfferAudioRetentionRetry { self.showPendingAudioRetention(result) }

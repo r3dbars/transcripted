@@ -459,6 +459,20 @@ func testSentryEventPolicy() {
         assertNil(tags["dictation_session_id"], "session identifiers must stay out of Sentry")
         assertNil(tags["source_app_name"], "source app names must stay out of Sentry")
         assertNil(tags["transcript_text"], "transcript text must stay out of Sentry")
+
+        let snapshotTags = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_delivery_completed",
+            context: [
+                "delivery": "failed",
+                "failure_kind": "clipboard_snapshot_incomplete",
+                "clipboard_snapshot_cause": "timeout",
+                "transcript_text": "private words",
+            ]
+        )
+        assertEqual(snapshotTags["failure_kind"], "clipboard_snapshot_incomplete", "snapshot failures keep their existing kind")
+        assertEqual(snapshotTags["clipboard_snapshot_cause"], "timeout", "the snapshot cause is queryable next to failure_kind")
+        assertNil(snapshotTags["transcript_text"], "dictation text must stay out of Sentry")
     }
 
     runSuite("SentryEventPolicy diagnosticTags rejects free-text reason tags") {
