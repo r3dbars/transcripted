@@ -443,6 +443,54 @@ func testNotchIslandPresentation() {
         assertFalse(NotchIslandPresentation.callPromptIsOnScreen(dictation: nil, callPrompt: nil), "no prompt, nothing on screen")
     }
 
+    runSuite("The meeting warning is off screen while a dictation has the island, and back once it lands") {
+        var meeting = recording()
+        meeting.prompt = NotchIslandMeetingContent.Prompt(
+            title: "Call ended",
+            detail: "Call audio stopped.",
+            countdown: "Stops in 30s",
+            primaryTitle: "Stop",
+            secondaryTitle: "Keep recording",
+            tertiaryTitle: nil
+        )
+        let message = NotchIslandDictationContent.Message(
+            tone: .error,
+            text: "Mic didn't start.",
+            actionTitle: "Try Again"
+        )
+        let covering: [NotchIslandDictationContent] = [
+            NotchIslandDictationContent(phase: .starting),
+            listening(),
+            NotchIslandDictationContent(phase: .message(message)),
+        ]
+        for dictation in covering {
+            assertFalse(
+                NotchIslandPresentation.meetingPromptIsOnScreen(dictation: dictation, meeting: meeting),
+                "a Meeting ended? prompt behind \(dictation.phase) can't be seen"
+            )
+            let layout = notchLayout(dictation: dictation, meeting: meeting)
+            assertFalse(
+                layout.drop == .meetingPrompt(meeting.prompt!),
+                "dictation must cover the meeting warning drop"
+            )
+        }
+        assertTrue(
+            NotchIslandPresentation.meetingPromptIsOnScreen(dictation: nil, meeting: meeting),
+            "with no dictation the warning is the one on screen"
+        )
+        assertEqual(notchLayout(meeting: meeting).drop, .meetingPrompt(meeting.prompt!))
+        assertFalse(
+            NotchIslandPresentation.meetingPromptIsOnScreen(dictation: nil, meeting: recording()),
+            "no warning, nothing on screen"
+        )
+        let key = NotchIslandPresentation.stickyKey(dictation: nil, meeting: meeting, callPrompt: nil)
+        assertTrue(
+            NotchIslandPresentation.meetingPromptIsOnScreen(dictation: nil, meeting: meeting),
+            "closing the drop still counts as seen — the person already had Keep recording"
+        )
+        assertNil(notchLayout(meeting: meeting, collapsedStickyKey: key).drop)
+    }
+
     runSuite("The island keeps the keyboard only while it is asking for names on screen") {
         let naming = NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: "Standup", stage: .naming)
         let done = NotchIslandSpeakerReviewContent(reviewID: UUID(), meetingTitle: "Standup", stage: .done(leftForLater: 0))

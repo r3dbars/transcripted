@@ -36,6 +36,10 @@ func overlayStateName(_ state: FloatingOverlayController.OverlayState?) -> Strin
     state?.diagnosticName ?? "unknown"
 }
 
+// PhysicalShortcutAction and PhysicalShortcutBinding live in
+// PhysicalShortcutMatcher.swift. The CGEvent tap is PhysicalShortcutDetector;
+// Fn/media-key diagnostics are PhysicalShortcutTapPolicy.
+
 // MARK: - Context Capture Engine
 
 @MainActor
@@ -176,10 +180,23 @@ class ContextCaptureEngine: ObservableObject {
         // here through reRegisterHotkeys(), so the detector's cache never goes
         // stale — and the per-keystroke tap callback stays free of
         // UserDefaults reads and migration-fallback work.
-        physicalShortcutDetector.updateShortcutBindings(Self.currentShortcutBindings())
+        let bindings = Self.currentShortcutBindings()
+        physicalShortcutDetector.updateShortcutBindings(bindings)
         physicalShortcutDetector.onShortcut = { [weak self] action, phase in
             Task { @MainActor [weak self] in
                 self?.handlePhysicalShortcut(action, phase: phase)
+            }
+        }
+        // The tap thread hops here: EventReporter is main-actor-only.
+        physicalShortcutDetector.onLog = { event, message, context in
+            Task { @MainActor in
+                EventReporter.shared.capture(
+                    level: event == PhysicalShortcutDiagnosticEvent.tapDisabled ? .warning : .info,
+                    engine: "capture",
+                    event: event,
+                    message: message,
+                    context: context
+                )
             }
         }
 
@@ -194,6 +211,14 @@ class ContextCaptureEngine: ObservableObject {
                     "dictation_shortcuts_enabled": HotkeyPreferences.dictationShortcutsEnabled() ? "true" : "false",
                     "meeting": PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.meetingBinding())
                 ]
+            )
+        } else {
+            EventReporter.shared.capture(
+                level: .info,
+                engine: "capture",
+                event: PhysicalShortcutDiagnosticEvent.installed,
+                message: "Physical shortcut tap installed",
+                context: PhysicalShortcutTapPolicy.installedBindingsContext(bindings)
             )
         }
         updateHotkeyError()

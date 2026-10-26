@@ -123,9 +123,31 @@ struct MeetingAudioInactivityDetector {
 /// Call ownership changes independently of the waveform. The underlying
 /// silence detector keeps observing so its warning can be restored later.
 enum MeetingRecordingWarningOwner {
+    /// A live call-end countdown wins: the user is deciding whether the
+    /// meeting ended. Once that prompt is held (room audio or a failed
+    /// read blocked the automatic stop), a silence warning that is already
+    /// latched or arrives later takes over so a forgotten recording still
+    /// ends.
     static func displayed(callEnd: MeetingAudioInactivityWarning?,
                           silence: MeetingAudioInactivityWarning?) -> MeetingAudioInactivityWarning? {
-        if let callEnd, callEnd.kind == .callEnded { return callEnd }
+        if let callEnd, callEnd.kind == .callEnded {
+            if !callEnd.automaticStopAllowed, let silence, silence.kind != .callEnded {
+                return silence
+            }
+            return callEnd
+        }
         return silence
+    }
+
+    /// After the call-end countdown is held, re-raise any silence warning
+    /// the detector already latched. `tick` will not emit again while that
+    /// warning is still stored, so a quiet call that crossed five minutes
+    /// during the live countdown would otherwise sit on a held prompt
+    /// forever.
+    static func afterCallEndHeld(
+        held: MeetingAudioInactivityWarning,
+        pendingSilence: MeetingAudioInactivityWarning?
+    ) -> MeetingAudioInactivityWarning {
+        displayed(callEnd: held, silence: pendingSilence) ?? held
     }
 }

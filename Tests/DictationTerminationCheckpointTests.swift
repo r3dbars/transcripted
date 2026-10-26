@@ -204,8 +204,8 @@ func testDictationTerminationCheckpoint() async {
         assertTrue(acceptedQuit, "saved dictation audio admits Quit")
         assertEqual(
             accepted.events,
-            ["finishDictation", "meetingPrepare", "appStateShutdown", "restoreInput", "flushEvents", "markFinished", "reply:true"],
-            "meeting prep, shutdown, input restore, and the event flush all finish before AppKit hears true"
+            ["finishDictation", "meetingPrepare", "speakerSaves", "appStateShutdown", "restoreInput", "flushEvents", "markFinished", "reply:true"],
+            "meeting prep, Speakers' pending names, shutdown, input restore, and the event flush all finish before AppKit hears true"
         )
     }
 
@@ -237,7 +237,7 @@ func testDictationTerminationCheckpoint() async {
                    "a Writing flush that keeps failing can't block Quit, logout or an update forever")
         assertEqual(
             confirmed.events,
-            ["finishDictation", "askWriting", "meetingPrepare", "appStateShutdown", "restoreInput",
+            ["finishDictation", "askWriting", "meetingPrepare", "speakerSaves", "appStateShutdown", "restoreInput",
              "flushEvents", "markFinished", "reply:true"],
             "Quit Anyway still prepares the meeting and restores input before AppKit hears true"
         )
@@ -271,6 +271,7 @@ private final class AppTerminationRecorder {
             finishDictationForTermination: { await self.record("finishDictation"); return self.dictationAdmits },
             resetCleanupAdmission: { self.events.append("resetAdmission") },
             prepareMeetingForTermination: { await self.record("meetingPrepare") },
+            finishSpeakerReviewSaves: { await self.record("speakerSaves") },
             shutDownAppState: { self.events.append("appStateShutdown") },
             stopAndRestorePersistentInput: { await self.record("restoreInput") },
             flushLocalEvents: { await self.record("flushEvents") },

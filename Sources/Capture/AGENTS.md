@@ -7,13 +7,15 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 `Capture` in `.agents/modules.json`.
 
 - **Owns:** global physical triggers and their routing (dictation, meeting start/stop).
-- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`, `SecureKeyboardEntryWarningPolicy`.
+- **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`, `PhysicalShortcutTapPolicy`, `SecureKeyboardEntryWarningPolicy`.
 - **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
 - **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`, `--filter SecureKeyboardEntry`.
 
 ## Files
 
 - `ContextCaptureEngine.swift` — shortcut debounce, `hotkeyError`, and the routing switch in `handlePhysicalShortcut`. The event tap itself (`PhysicalShortcutDetector`, delayed modifier presses) is in `PhysicalShortcutDetector.swift`. `secureKeyboardEntryNotice` is the menu-bar warning while another app holds Secure Keyboard Entry and dictation is bound to a non-modifier key.
+- `PhysicalShortcutDetector.swift` — the CGEvent tap (`keyDown` / `keyUp` / `flagsChanged` / `NSSystemDefined`). Media-key events always pass through and never fire dictation. NSSystemDefined skips `NSEvent` wrapping unless dictation is F1–F12. F1–F20 matching ignores Fn; Cmd, Ctrl, Opt, and Shift still have to match. Logs `physical_shortcut_tap_disabled` with the reason and whether it was re-enabled. Other diagnostics hop through `onLog` onto the main actor.
+- `PhysicalShortcutTapPolicy.swift` — Foundation-pure tap mask, media-key parse (`NX_KEYTYPE_PLAY` = 16 for F8), NSEvent-wrap gate, F8 press/repeat/release sequence, modifier-mismatch logging (saved dictation key only, never the meeting key), tap-disable and install context. Fast-tested so a macOS Fn/media-key change is diagnosable without reading Sources as text.
 - `ContextCaptureEngine+DictationKeys.swift` — the dictation keys as session commands: Push to Talk press, release and combo-interrupt, and the hands-free toggle. Press/release semantics live in `DictationHotkeyRouter` (`Sources/Speech/DictationTrigger.swift`).
 - `ContextCaptureEngine+SecureKeyboardEntry.swift` — polls Secure Keyboard Entry (~2.5 s) and also checks on app activation and `flagsChanged`, because a CGEventTap cannot see F8 `keyDown` while another app holds it. Queued activation/`flagsChanged` work after stop must not restart the poll. Harness launches skip the watch.
 - `SecureKeyboardEntryWarningPolicy.swift` — Foundation-pure on/off, owner-change, modifier-silence, notice-text rebuild, and local-log decisions. Fast tests drive it with snapshots.
@@ -41,6 +43,7 @@ The paste-last-dictation shortcut is no longer registered. The unused paste-last
 - Registration failures surface as `hotkeyError`, which the menubar shows. The Accessibility one has its own message (`accessibilityPermissionErrorMessage`) so the menubar can offer to open that pane.
 - **Secure Keyboard Entry:** a non-modifier dictation key (F8) can go silent while another app holds Secure Keyboard Entry, and the tap cannot see that F8 press. Warn once per owner in the menu bar; rebuild the copy if the bound key or resolved owner name changes; clear when it releases; stay quiet when dictation is a modifier (that binding still arrives as `flagsChanged`). Log `secure_input_state_changed` locally only — never PostHog or Sentry. Do not treat our own PID as a foreign owner.
 - Keep tap callbacks tiny and bounce into `@MainActor`. Keep meeting routing separate from dictation routing.
+- A saved F1–F20 dictation key ignores `maskSecondaryFn` when matching, so F8 fires with or without the implicit Fn flag macOS attaches in media-key mode. Arrow keys still need an exact Fn match. Local diagnostics: `hotkey_fkey_arrived_as_media_key` (rate-limited 5s, never swallows play/pause), `hotkey_modifier_mismatch` (saved dictation key only), `physical_shortcut_trigger_installed`. None of these go to PostHog. A stored F8 vs Fn+F8 clash with the meeting shortcut is a duplicate: Settings shows it, and the tap does not install the meeting binding.
 - No screenshot or OCR assumptions here unless that feature returns in the same change.
 
 ## Verify

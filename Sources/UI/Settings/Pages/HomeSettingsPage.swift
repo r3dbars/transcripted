@@ -55,6 +55,9 @@ struct HomeSettingsPage: View {
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     let meetingRowMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
+    /// Voices a meeting still has to name, and opening its "Who spoke?" card.
+    let meetingVoicesToName: (RecentMeetingItem) -> Int
+    let onWhoSpoke: (RecentMeetingItem) -> Void
     let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
     let onClearFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -227,7 +230,9 @@ struct HomeSettingsPage: View {
                         meetingDate: meeting.date,
                         voiceProcessingPreferenceEnabled: voiceProcessingEnabled,
                         hintsHiddenThrough: micBoostHintsHiddenThrough
-                    )
+                    ),
+                    voicesToName: meetingVoicesToName(meeting),
+                    onWhoSpoke: { onWhoSpoke(meeting) }
                 )
             }
         case .failed(let failedMeeting):
