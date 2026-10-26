@@ -109,12 +109,16 @@ extension MeetingSessionController {
             return
         }
         let heardAudio = callEndTracking?.heardAudioDuringWarning == true
-        audioInactivityWarning = MeetingAudioInactivityWarning(
+        let held = MeetingAudioInactivityWarning(
             inactiveDuration: warning.inactiveDuration,
             countdownSeconds: warning.countdownSeconds,
             kind: .callEnded,
             automaticStopAllowed: false,
             recordingIdentity: warning.recordingIdentity
+        )
+        audioInactivityWarning = MeetingRecordingWarningOwner.afterCallEndHeld(
+            held: held,
+            pendingSilence: audioInactivityDetector.warning
         )
         recordCallEndDiagnostic("meeting_call_end_auto_stop_held",
                                 "Call-end countdown expired; left for the user to decide",
@@ -133,10 +137,10 @@ extension MeetingSessionController {
         }
     }
 
-    /// Arms call-end detection for a detected-prompt start. When the call app
-    /// is not using audio yet (the prompt was accepted before joining), the
-    /// candidate is remembered and bound after sustained activity for this
-    /// recording. Manual starts never arm.
+    /// Arms call-end detection for a detected-prompt start. Binding needs
+    /// the call app on the microphone; output alone (a chat chime) waits
+    /// and binds later, the same rule as late arming. Manual starts never
+    /// arm.
     func armCallEndDetection(callFamilies: Set<String>?,
                              detectedPrompt: Bool,
                              candidate: MeetingPromptDetector.Candidate?) {

@@ -366,6 +366,7 @@ enum ReliabilityPacketRecorder {
         "default_system_output_volume_during",
         "delivery",
         "display_status",
+        "clipboard_snapshot_cause",
         "failure_kind",
         "format_ready",
         "hfp_suspected",

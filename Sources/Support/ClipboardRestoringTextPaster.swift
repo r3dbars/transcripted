@@ -165,7 +165,8 @@ final class ClipboardRestoringTextPaster {
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait,
         endWaitOnLikelyPaste: Bool = false,
-        onLateConfirmation: (@MainActor (ClipboardPasteConfirmationDiagnostic) -> Void)? = nil
+        onLateConfirmation: (@MainActor (ClipboardPasteConfirmationDiagnostic) -> Void)? = nil,
+        snapshotRead: ClipboardSnapshotReadContext = .production()
     ) -> TextPasteOutcome {
         let operation = operationEpoch.begin()
         latestStartedOperation = operation
@@ -215,18 +216,19 @@ final class ClipboardRestoringTextPaster {
            !target.matchesCurrentFrontmostApp(),
            !waitForTargetActivation(target, timeout: activationWait, isCurrentOperation: isCurrentOperation) {
             guard isCurrentOperation() else { return cancelledOutcome }
-            let copied = copyTextForManualPaste(text, to: pasteboard, isCurrentOperation: isCurrentOperation)
-            guard isCurrentOperation() else { return cancelledOutcome }
-            guard copied else {
-                return .failed(
+            return outcomeForManualCopy(
+                copyTextForManualPaste(
+                    text, to: pasteboard, isCurrentOperation: isCurrentOperation, snapshotRead: snapshotRead
+                ),
+                isCurrentOperation: isCurrentOperation,
+                copied: .copied(
+                    "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
+                    reason: .focusChanged
+                ),
+                writeFailed: .failed(
                     "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .focusChangeClipboardWriteFailed
                 )
-            }
-            guard isCurrentOperation() else { return cancelledOutcome }
-            return .copied(
-                "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
-                reason: .focusChanged
             )
         }
 
@@ -236,18 +238,19 @@ final class ClipboardRestoringTextPaster {
         guard trusted else {
             requestAccessibilityTrust()
             guard isCurrentOperation() else { return cancelledOutcome }
-            let copied = copyTextForManualPaste(text, to: pasteboard, isCurrentOperation: isCurrentOperation)
-            guard isCurrentOperation() else { return cancelledOutcome }
-            guard copied else {
-                return .failed(
+            return outcomeForManualCopy(
+                copyTextForManualPaste(
+                    text, to: pasteboard, isCurrentOperation: isCurrentOperation, snapshotRead: snapshotRead
+                ),
+                isCurrentOperation: isCurrentOperation,
+                copied: .copied(
+                    "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
+                    reason: .accessibilityMissing
+                ),
+                writeFailed: .failed(
                     "Accessibility is off, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
                     reason: .accessibilityFallbackClipboardWriteFailed
                 )
-            }
-            guard isCurrentOperation() else { return cancelledOutcome }
-            return .copied(
-                "Accessibility is off, so Transcripted can't paste for you. Your text is on the clipboard — press ⌘V.",
-                reason: .accessibilityMissing
             )
         }
 
@@ -255,19 +258,11 @@ final class ClipboardRestoringTextPaster {
         let accessibilityConfirmation = confirmationSource?() ?? FocusedTextPasteConfirmation.capture()
         accessibilityCaptureMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - accessibilityStartedAt) * 1_000).rounded()))
         guard isCurrentOperation() else { return cancelledOutcome }
-        let snapshotStartedAt = CFAbsoluteTimeGetCurrent()
-        let snapshotChangeCount = pasteboard.changeCount
-        let savedItems = snapshotPasteboardItems(from: pasteboard)
-        clipboardSnapshotMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - snapshotStartedAt) * 1_000).rounded()))
-        // Lazy clipboard providers can run while materializing a snapshot. Do
-        // not overwrite a newer clipboard with an older restore snapshot.
+        let snapshot = snapshotClipboardForPaste(from: pasteboard, read: snapshotRead)
+        clipboardSnapshotMS = snapshot.snapshotMS
         guard isCurrentOperation() else { return cancelledOutcome }
-        guard savedItems.isComplete, pasteboard.changeCount == snapshotChangeCount else {
-            return .failed(
-                "Couldn't paste automatically without risking your current clipboard. The dictation was saved, but paste-back did not run.",
-                reason: .clipboardSnapshotIncomplete
-            )
-        }
+        if let refusal = snapshot.refusal { return refusal }
+        let savedItems = snapshot.savedItems
         let pasteToken = pasteEpoch.begin()
         var temporaryChangeCount = 0
         var restoreInstalled = false

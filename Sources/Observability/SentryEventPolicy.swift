@@ -51,6 +51,7 @@ struct SentryEventPolicy: Equatable {
         "buffer_success_bucket",
         "capture_outcome",
         "capture_quality",
+        "clipboard_snapshot_cause",
         "captured_input_volume_changed",
         "captured_input_volume_dropped",
         "default_input_class",
