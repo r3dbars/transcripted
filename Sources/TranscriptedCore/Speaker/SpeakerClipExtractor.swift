@@ -2,6 +2,7 @@
 // Extracts short audio clips per speaker from a source WAV file (mic or system).
 // Used by the post-meeting naming flow so users can hear each speaker's voice.
 
+import Darwin
 import Foundation
 import AVFoundation
 
@@ -17,14 +18,29 @@ struct ClipResult {
     let callCount: Int            // how many times this speaker has been seen
 }
 
+/// Outcome of copying a voice-sample clip onto the kept person during a merge.
+public struct SpeakerClipMergeTransfer: Equatable, Sendable {
+    public let succeeded: Bool
+    public let copiedWavSHA256: String?
+
+    public static let skipped = SpeakerClipMergeTransfer(succeeded: true, copiedWavSHA256: nil)
+    public static let failed = SpeakerClipMergeTransfer(succeeded: false, copiedWavSHA256: nil)
+
+    public static func copied(wavSHA256: String) -> SpeakerClipMergeTransfer {
+        SpeakerClipMergeTransfer(succeeded: true, copiedWavSHA256: wavSHA256)
+    }
+}
+
 @available(macOS 14.0, *)
 public enum SpeakerClipExtractor {
 
-    /// Extract a 5-8 second audio clip per speaker from a source WAV file.
+    /// Extract a short audio clip per speaker from a source WAV file.
     ///
-    /// For each speaker, picks the longest single utterance (capped at 8s).
-    /// If the longest utterance is under 3s, concatenates short utterances up to 8s.
-    /// Uses frame-level seeking to avoid loading the entire file into memory.
+    /// Prefers one turn that fits the 8s write cap so the whole quote can
+    /// play. If none fit, writes the longest turn cropped and stores no
+    /// quote. Short turns under 3s are glued, longest-first, then time
+    /// order. The sidecar is built from the segments that actually produced
+    /// bytes, not from turns the writer skipped.
     ///
     /// - Parameters:
     ///   - sourceAudioURL: Path to the source WAV file (mic or system audio)
@@ -37,7 +53,8 @@ public enum SpeakerClipExtractor {
         utterances: [TranscriptionUtterance],
         channel: UtteranceChannel,
         speakerDB: any SpeakerStore,
-        clipsDirectory: URL = defaultClipsDirectory
+        clipsDirectory: URL = defaultClipsDirectory,
+        readClipFrames: ((AVAudioFile, AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void)? = nil
     ) throws -> [ClipResult] {
 
         let audioFile = try AVAudioFile(forReading: sourceAudioURL)
@@ -66,23 +83,47 @@ public enum SpeakerClipExtractor {
             let similarity = firstWithId.matchSimilarity
 
             // Pick the best segment(s) for the clip
-            let clipSegments = selectClipSegments(utterances: speakerUtterances)
-            guard !clipSegments.isEmpty else { continue }
+            let clipSegments = SpeakerClipSamplePolicy.selectClipSegments(utterances: speakerUtterances)
+            let sourceDuration = Double(audioFile.length) / sampleRate
+            let written = SpeakerClipSamplePolicy.writtenSegments(
+                from: clipSegments,
+                sourceDuration: sourceDuration
+            )
+            guard !written.isEmpty else { continue }
 
             // Extract audio and write to temp file
-            let clipURL = try writeClip(
+            let (clipURL, actuallyWritten) = try writeClip(
                 from: audioFile,
-                segments: clipSegments,
+                segments: written,
                 sampleRate: sampleRate,
                 speakerId: speakerId,
                 channel: channel,
-                clipsDirectory: clipsDirectory
+                clipsDirectory: clipsDirectory,
+                readClipFrames: readClipFrames
             )
+            guard !actuallyWritten.isEmpty else {
+                removeClipAndSidecar(at: clipURL, label: "empty speaker clip")
+                continue
+            }
 
-            // Pick a representative text sample (longest utterance text)
-            let sampleText = clipSegments
-                .max(by: { $0.transcript.count < $1.transcript.count })?
-                .transcript ?? ""
+            let sampleText = SpeakerClipSamplePolicy.sampleText(from: actuallyWritten)
+            do {
+                var sidecar = SpeakerClipSamplePolicy.sidecar(
+                    channel: channel.rawValue,
+                    diarizerSpeakerId: String(speakerId),
+                    written: actuallyWritten
+                )
+                if let stamped = sidecar.stamped(withWavAt: clipURL) {
+                    sidecar = stamped
+                    try sidecar.write(nextTo: clipURL)
+                }
+            } catch {
+                AppLogger.pipeline.warning("Failed to write speaker clip sidecar", [
+                    "speakerId": "\(speakerId)",
+                    "channel": channel.rawValue,
+                    "error": error.localizedDescription
+                ])
+            }
 
             results.append(ClipResult(
                 clipURL: clipURL,
@@ -110,26 +151,195 @@ public enum SpeakerClipExtractor {
     }
 
     /// Copy a temporary clip to persistent storage, keyed by speaker UUID.
-    /// Overwrites any existing clip for this speaker (keeps the latest).
+    /// Writes the wav and sidecar to sibling temp names, then renames them
+    /// into place so a failed copy never deletes the previous pair. The
+    /// incoming sidecar is kept only when it already matches the source wav;
+    /// an unbound sidecar is dropped.
+    @discardableResult
     public static func persistClip(
         from tempClipURL: URL,
         speakerId: UUID,
-        clipsDirectory: URL = defaultClipsDirectory
+        clipsDirectory: URL = defaultClipsDirectory,
+        sidecar: SpeakerClipSidecar? = nil
+    ) -> Bool {
+        persistLocks.withLock(for: speakerId) {
+            persistClipLocked(
+                from: tempClipURL,
+                speakerId: speakerId,
+                clipsDirectory: clipsDirectory,
+                sidecar: sidecar
+            )
+        }
+    }
+
+    /// Copy the source profile's clip onto the kept profile. Returns
+    /// `.failed` when that copy fails so the caller can leave the source
+    /// in place. A successful copy reports the dest wav hash so a later
+    /// failed people-merge can delete only that exact copy. The
+    /// target-has-clip check and the copy share one ordered lock pair so
+    /// a clip that lands on the target cannot be overwritten.
+    @discardableResult
+    public static func transferOnMerge(
+        from sourceId: UUID,
+        to targetId: UUID,
+        clipsDirectory: URL
+    ) -> SpeakerClipMergeTransfer {
+        transferOnMerge(
+            from: sourceId,
+            to: targetId,
+            preferredClipsDirectory: clipsDirectory,
+            legacyClipsDirectory: clipsDirectory
+        )
+    }
+
+    @discardableResult
+    public static func transferOnMerge(
+        from sourceId: UUID,
+        to targetId: UUID,
+        preferredClipsDirectory: URL,
+        legacyClipsDirectory: URL
+    ) -> SpeakerClipMergeTransfer {
+        withOrderedPersistLocks(sourceId, targetId) {
+            if persistentClipURL(for: targetId, clipsDirectory: preferredClipsDirectory) != nil
+                || persistentClipURL(for: targetId, clipsDirectory: legacyClipsDirectory) != nil {
+                return .skipped
+            }
+            let sourceDirectory: URL
+            if persistentClipURL(for: sourceId, clipsDirectory: preferredClipsDirectory) != nil {
+                sourceDirectory = preferredClipsDirectory
+            } else if persistentClipURL(for: sourceId, clipsDirectory: legacyClipsDirectory) != nil {
+                sourceDirectory = legacyClipsDirectory
+            } else {
+                return .skipped
+            }
+            let sourceClip = sourceDirectory.appendingPathComponent("\(sourceId.uuidString).wav")
+            guard persistClipLocked(
+                from: sourceClip,
+                speakerId: targetId,
+                clipsDirectory: preferredClipsDirectory,
+                sidecar: nil
+            ) else {
+                return .failed
+            }
+            let dest = preferredClipsDirectory.appendingPathComponent("\(targetId.uuidString).wav")
+            guard let hash = SpeakerClipSidecar.uncachedWavSHA256(of: dest) else {
+                removeClipAndSidecar(at: dest, label: "unhashed merge copy")
+                return .failed
+            }
+            return .copied(wavSHA256: hash)
+        }
+    }
+
+    /// Delete the kept person's inherited clip only when it still hashes
+    /// to the copy this merge wrote. A later writer that replaced those
+    /// bytes keeps their clip.
+    public static func rollbackCopiedClip(
+        for speakerId: UUID,
+        copiedWavSHA256: String,
+        clipsDirectory: URL
     ) {
-        let dir = clipsDirectory
+        persistLocks.withLock(for: speakerId) {
+            let dest = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+            guard FileManager.default.fileExists(atPath: dest.path),
+                  let current = SpeakerClipSidecar.uncachedWavSHA256(of: dest),
+                  current.lowercased() == copiedWavSHA256.lowercased() else {
+                return
+            }
+            removeClipAndSidecar(at: dest, label: "rolled-back merge copy")
+        }
+    }
+
+    public static var persistLockWillAcquire: ((UUID) -> Void)? {
+        get { persistLocks.willAcquire }
+        set { persistLocks.willAcquire = newValue }
+    }
+
+    public static func withPersistLock(for speakerId: UUID, _ body: () -> Void) {
+        persistLocks.withLock(for: speakerId, body)
+    }
+
+    private static func withOrderedPersistLocks<T>(
+        _ firstId: UUID,
+        _ secondId: UUID,
+        _ body: () -> T
+    ) -> T {
+        if firstId == secondId {
+            return persistLocks.withLock(for: firstId, body)
+        }
+        let leading = firstId.uuidString < secondId.uuidString ? firstId : secondId
+        let trailing = leading == firstId ? secondId : firstId
+        return persistLocks.withLock(for: leading) {
+            persistLocks.withLock(for: trailing, body)
+        }
+    }
+
+    private static func persistClipLocked(
+        from tempClipURL: URL,
+        speakerId: UUID,
+        clipsDirectory: URL,
+        sidecar: SpeakerClipSidecar?
+    ) -> Bool {
+        let fileManager = FileManager.default
         do {
-            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try fileManager.createDirectory(at: clipsDirectory, withIntermediateDirectories: true)
         } catch {
             AppLogger.pipeline.error("Failed to create clips directory", ["error": error.localizedDescription])
-            return
+            return false
         }
-        let dest = dir.appendingPathComponent("\(speakerId.uuidString).wav")
-        removeClipFile(dest, label: "existing persisted clip")
+
+        let dest = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+        let destSidecar = SpeakerClipSidecar.url(nextTo: dest)
+        let partWav = dest.appendingPathExtension("part")
+        let partSidecar = destSidecar.appendingPathExtension("part")
+        defer {
+            try? fileManager.removeItem(at: partWav)
+            try? fileManager.removeItem(at: partSidecar)
+        }
+
         do {
-            try FileManager.default.copyItem(at: tempClipURL, to: dest)
-            FileManager.default.restrictToOwnerOnly(atPath: dest.path)
+            try? fileManager.removeItem(at: partWav)
+            try? fileManager.removeItem(at: partSidecar)
+            try fileManager.copyItem(at: tempClipURL, to: partWav)
+            fileManager.restrictToOwnerOnly(atPath: partWav.path)
+
+            let incoming = SpeakerClipSidecar.acceptedIncoming(
+                sidecar ?? SpeakerClipSidecar.load(nextTo: tempClipURL),
+                matchingSourceAt: tempClipURL
+            )
+            if let stamped = incoming?.stamped(withWavAt: partWav) {
+                let encoder = JSONEncoder()
+                encoder.outputFormatting = [.sortedKeys]
+                try encoder.encode(stamped).write(to: partSidecar, options: .atomic)
+                fileManager.restrictToOwnerOnly(atPath: partSidecar.path)
+                // Sidecar first: if the wav rename then fails, the old clip
+                // stays and the new sidecar will not match it.
+                try replaceItem(at: destSidecar, with: partSidecar)
+                try replaceItem(at: dest, with: partWav)
+            } else {
+                try replaceItem(at: dest, with: partWav)
+                try? fileManager.removeItem(at: destSidecar)
+            }
+            fileManager.restrictToOwnerOnly(atPath: dest.path)
+            return true
         } catch {
-            AppLogger.pipeline.error("Failed to persist speaker clip", ["speakerId": speakerId.uuidString, "error": error.localizedDescription])
+            AppLogger.pipeline.error("Failed to persist speaker clip", [
+                "speakerId": speakerId.uuidString,
+                "error": error.localizedDescription
+            ])
+            return false
+        }
+    }
+
+    private static func replaceItem(at dest: URL, with part: URL) throws {
+        // POSIX rename in the same directory keeps `dest`'s name and, when
+        // `dest` already exists, replaces it atomically. `replaceItemAt`
+        // can keep the `.part` name instead, which would hide the clip.
+        if rename(part.path, dest.path) != 0 {
+            throw NSError(
+                domain: NSPOSIXErrorDomain,
+                code: Int(errno),
+                userInfo: [NSLocalizedDescriptionKey: "Atomic clip replace failed"]
+            )
         }
     }
 
@@ -147,54 +357,22 @@ public enum SpeakerClipExtractor {
         for speakerId: UUID,
         clipsDirectory: URL = defaultClipsDirectory
     ) {
-        let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
-        removeClipFile(url, label: "persisted clip")
-    }
-
-    // MARK: - Private
-
-    /// Select which utterance segments to use for the clip.
-    /// Prefers the single longest segment (cap 8s). Falls back to concatenating
-    /// short segments if the longest is under 3s.
-    private static func selectClipSegments(utterances: [TranscriptionUtterance]) -> [TranscriptionUtterance] {
-        let maxClipDuration: Double = 8.0
-        let minPreferredDuration: Double = 3.0
-
-        // Sort by duration descending
-        let sorted = utterances.sorted { ($0.end - $0.start) > ($1.end - $1.start) }
-
-        guard let longest = sorted.first else { return [] }
-        let longestDuration = longest.end - longest.start
-
-        if longestDuration >= minPreferredDuration {
-            // Single segment is long enough — use it (capped at 8s)
-            return [longest]
+        persistLocks.withLock(for: speakerId) {
+            let url = clipsDirectory.appendingPathComponent("\(speakerId.uuidString).wav")
+            removeClipAndSidecar(at: url, label: "persisted clip")
         }
-
-        // Concatenate short segments until we reach target duration
-        var selected: [TranscriptionUtterance] = []
-        var totalDuration: Double = 0
-
-        for utterance in sorted {
-            let duration = utterance.end - utterance.start
-            if totalDuration + duration > maxClipDuration { break }
-            selected.append(utterance)
-            totalDuration += duration
-        }
-
-        // Sort by time for natural playback order
-        return selected.sorted { $0.start < $1.start }
     }
 
     /// Write audio segments to a temporary mono WAV file using frame-level seeking.
     private static func writeClip(
         from audioFile: AVAudioFile,
-        segments: [TranscriptionUtterance],
+        segments: [SpeakerClipSamplePolicy.WrittenSegment],
         sampleRate: Double,
         speakerId: Int,
         channel: UtteranceChannel,
-        clipsDirectory: URL
-    ) throws -> URL {
+        clipsDirectory: URL,
+        readClipFrames: ((AVAudioFile, AVAudioPCMBuffer, AVAudioFrameCount) throws -> Void)? = nil
+    ) throws -> (url: URL, written: [SpeakerClipSamplePolicy.WrittenSegment]) {
         guard AudioRecordingFormatPolicy.isUsableSampleRate(sampleRate) else {
             throw ClipError.invalidAudioFormat
         }
@@ -223,13 +401,14 @@ public enum SpeakerClipExtractor {
         let inputFormat = audioFile.processingFormat
         let maxClipFrames = AVAudioFrameCount(8.0 * sampleRate)
         var totalFramesWritten: AVAudioFrameCount = 0
+        var actuallyWritten: [SpeakerClipSamplePolicy.WrittenSegment] = []
 
         for segment in segments {
             guard totalFramesWritten < maxClipFrames else { break }
             guard segment.start.isFinite, segment.end.isFinite else { continue }
 
             let rawStartFrame = segment.start * sampleRate
-            let rawEndFrame = min(segment.end, segment.start + 8.0) * sampleRate
+            let rawEndFrame = segment.end * sampleRate
             guard rawStartFrame.isFinite,
                   rawEndFrame.isFinite,
                   rawStartFrame >= 0,
@@ -262,7 +441,11 @@ public enum SpeakerClipExtractor {
             guard let buffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: framesToRead) else {
                 continue
             }
-            try audioFile.read(into: buffer, frameCount: framesToRead)
+            if let readClipFrames {
+                try readClipFrames(audioFile, buffer, framesToRead)
+            } else {
+                try audioFile.read(into: buffer, frameCount: framesToRead)
+            }
 
             // Convert to mono if needed
             let monoBuffer: AVAudioPCMBuffer
@@ -277,9 +460,16 @@ public enum SpeakerClipExtractor {
 
             try outputFile.write(from: monoBuffer)
             totalFramesWritten += monoBuffer.frameLength
+            if let recorded = SpeakerClipSamplePolicy.recordedSegment(
+                from: segment,
+                framesWritten: Int(monoBuffer.frameLength),
+                sampleRate: sampleRate
+            ) {
+                actuallyWritten.append(recorded)
+            }
         }
 
-        return clipURL
+        return (clipURL, actuallyWritten)
     }
 
     /// Mix a multi-channel buffer down to mono
@@ -322,6 +512,16 @@ public enum SpeakerClipExtractor {
         }
     }
 
+    public static func removeClipAndSidecar(at url: URL, label: String) {
+        let sidecar = SpeakerClipSidecar.url(nextTo: url)
+        removeClipFile(url, label: label)
+        removeClipFile(url.appendingPathExtension("part"), label: "\(label) wav part")
+        removeClipFile(sidecar, label: "\(label) sidecar")
+        removeClipFile(sidecar.appendingPathExtension("part"), label: "\(label) sidecar part")
+    }
+
+    private static let persistLocks = PersistLockTable()
+
     private static func removeClipFile(_ url: URL, label: String) {
         do {
             try FileManager.default.removeItem(at: url)
@@ -336,6 +536,27 @@ public enum SpeakerClipExtractor {
                 "error": error.localizedDescription
             ])
         }
+    }
+}
+
+private final class PersistLockTable: @unchecked Sendable {
+    private let tableLock = NSLock()
+    private var locks: [UUID: NSLock] = [:]
+    var willAcquire: ((UUID) -> Void)?
+
+    func withLock<T>(for speakerId: UUID, _ body: () -> T) -> T {
+        let lock: NSLock = {
+            tableLock.lock()
+            defer { tableLock.unlock() }
+            if let existing = locks[speakerId] { return existing }
+            let created = NSLock()
+            locks[speakerId] = created
+            return created
+        }()
+        willAcquire?(speakerId)
+        lock.lock()
+        defer { lock.unlock() }
+        return body()
     }
 }
 

@@ -99,6 +99,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var producerStoppedSafely = true
     let hardwareHooks: HardwareHooks?
     let clock: () -> TimeInterval
+    /// Off-by-default per-second and route diagnostics (`CaptureTelemetry.swift`).
+    let telemetryEnabled: Bool
+    var signalTelemetry: CaptureSignalTelemetry?
+    var deviceTelemetry: CaptureDeviceTelemetryObserver?
+    private var telemetryAggregate: AudioObjectID = 0
     private static let formatListener: AudioObjectPropertyListenerProc = { _, _, _, context in
         if let context {
             Unmanaged<CoreAudioTapBufferRing>.fromOpaque(context).takeUnretainedValue()
@@ -110,11 +115,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     public init() {
         hardwareHooks = nil
         clock = { ProcessInfo.processInfo.systemUptime }
+        telemetryEnabled = CaptureTelemetryPreferences.isEnabled()
         queue.setSpecific(key: queueKey, value: true)
     }
-    init(hardwareHooks: HardwareHooks, clock: @escaping () -> TimeInterval) {
+    init(hardwareHooks: HardwareHooks, clock: @escaping () -> TimeInterval, telemetryEnabled: Bool = false) {
         self.hardwareHooks = hardwareHooks
         self.clock = clock
+        self.telemetryEnabled = telemetryEnabled
         queue.setSpecific(key: queueKey, value: true)
     }
     deinit { stopSync() }
@@ -315,6 +322,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             do { try startHardware() } catch { callback = nil; destroyHardware(); throw error }
             silenceWatch = .armed(.start, at: clock())
             installDefaultOutputListener()
+            startTelemetry(aggregate: device)
             beginActivity()
             errors.send(nil)
         }
@@ -411,6 +419,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         }
         guard deliverQueued(from: ring, format: tapFormat, at: now, generation: drainGeneration) else { return }
         drainCadence.settle(timer, hasDeliveredBuffer: lastTapBufferFrames != nil)
+        if signalTelemetry != nil { tickTelemetry(at: now) }
+        if let deviceTelemetry, telemetryAggregate != device {
+            telemetryAggregate = device
+            deviceTelemetry.noteAggregate(device)
+        }
         // `clock` is system uptime, which stops while the Mac is asleep, so
         // only awake time counts: a sleep that never reaches a wake cannot
         // switch off stall recovery for the rest of the meeting.
@@ -482,6 +495,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             awaitingFirstBuffer = nil
             let hasSignal = Self.containsSignal(buffer)
             if hasSignal { signalTracker.noteSignal(at: now) }
+            if signalTelemetry != nil { recordTelemetry(buffer, at: now, hostSeconds: hostStart) }
             if silenceWatch != nil { noteSilenceWatchBuffer(hasSignal: hasSignal, at: now) }
             if let started = recoveryStarted {
                 recoveryStarted = nil
@@ -639,6 +653,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             releasedForSleep = false
             silenceWatch = nil
             removeDefaultOutputListener()
+            stopTelemetry()
             clearRebuildRetryState()
             endActivity()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }
@@ -657,6 +672,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
             releasedForSleep = false
             silenceWatch = nil
             removeDefaultOutputListener()
+            stopTelemetry()
             clearRebuildRetryState()
             endActivity()
             if recoveryStarted != nil { recoveryStarted = nil; recovery.send(.recoveryAbandoned) }

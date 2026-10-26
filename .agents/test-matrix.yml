@@ -147,6 +147,8 @@ rules:
   - paths:
       - "Sources/UI/Settings/SpeakerPeopleSettingsViewModel*.swift"
       - "Sources/UI/Settings/SpeakerReviewSession.swift"
+      - "Sources/Meeting/SpeakerSettingsStore.swift"
+      - "Sources/Meeting/SpeakerClipLibrary.swift"
       - "Tests/Integration/SpeakerSettingsModel*.swift"
       - "scripts/dev/test-speaker-settings-model.sh"
     checks:
@@ -342,12 +344,11 @@ rules:
 
   # Module-boundary and file-size ratchets: every Sources/ file belongs to a
   # module in .agents/modules.json and names only types its module may depend
-  # on; no new Swift file over 800 lines. Both baselines can only shrink.
+  # on; no new Swift file over 800 lines. The file-size baseline can only shrink.
   - paths:
       - "Sources/**/*.swift"
       - "Tools/*/Sources/**/*.swift"
       - ".agents/modules.json"
-      - ".agents/module-boundary-baseline.json"
       - ".agents/file-size-baseline.json"
       - "scripts/dev/check-module-boundaries.py"
       - "scripts/dev/check-duplicate-declarations.py"
@@ -527,7 +528,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.72.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.73.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"

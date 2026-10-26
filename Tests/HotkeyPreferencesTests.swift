@@ -51,7 +51,7 @@ func testHotkeyPreferences() {
         )
     }
 
-    runSuite("Onboarding keeps Daniel Goncalves's meeting-only setup fully off") {
+    runSuite("Onboarding keeps a meeting-only setup fully off") {
         let suiteName = "HotkeyPreferencesTests.danielMeetingOnly.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }

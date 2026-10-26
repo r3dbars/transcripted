@@ -219,6 +219,35 @@ func testDictationTerminationCheckpoint() async {
         steps.finishWritingForTermination = { true }
         assertTrue(await AppTerminationSequence.run(steps), "a later durable flush admits Quit")
     }
+
+    await runSuite("App Quit with unsaved Writing asks, and Quit Anyway still shuts everything down in order") { @MainActor in
+        let declined = AppTerminationRecorder(dictationAdmits: true)
+        var declinedSteps = declined.steps()
+        declinedSteps.finishWritingForTermination = { false }
+        declinedSteps.confirmQuitWithoutSavingWriting = { declined.events.append("askWriting"); return false }
+        assertFalse(await AppTerminationSequence.run(declinedSteps), "Keep Open leaves the app running")
+        assertEqual(declined.events, ["finishDictation", "askWriting", "resetAdmission", "reply:false"],
+                    "Keep Open shuts nothing down")
+
+        let confirmed = AppTerminationRecorder(dictationAdmits: true)
+        var confirmedSteps = confirmed.steps()
+        confirmedSteps.finishWritingForTermination = { false }
+        confirmedSteps.confirmQuitWithoutSavingWriting = { confirmed.events.append("askWriting"); return true }
+        assertTrue(await AppTerminationSequence.run(confirmedSteps),
+                   "a Writing flush that keeps failing can't block Quit, logout or an update forever")
+        assertEqual(
+            confirmed.events,
+            ["finishDictation", "askWriting", "meetingPrepare", "appStateShutdown", "restoreInput",
+             "flushEvents", "markFinished", "reply:true"],
+            "Quit Anyway still prepares the meeting and restores input before AppKit hears true"
+        )
+
+        let saved = AppTerminationRecorder(dictationAdmits: true)
+        var savedSteps = saved.steps()
+        savedSteps.confirmQuitWithoutSavingWriting = { saved.events.append("askWriting"); return false }
+        assertTrue(await AppTerminationSequence.run(savedSteps), "saved Writing never asks")
+        assertFalse(saved.events.contains("askWriting"))
+    }
 }
 
 /// Records the app's Quit steps. Each async step yields first, so a step

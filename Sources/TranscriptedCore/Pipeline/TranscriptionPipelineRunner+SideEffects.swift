@@ -281,7 +281,7 @@ extension TranscriptionTaskManager {
         guard !urls.isEmpty else { return }
         rollback.register {
             for url in urls {
-                try? FileManager.default.removeItem(at: url)
+                SpeakerClipExtractor.removeClipAndSidecar(at: url, label: "extracted speaker clip")
             }
             AppLogger.pipeline.info("Rollback: removed extracted speaker clips", [
                 "channel": channel,

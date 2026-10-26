@@ -120,7 +120,7 @@ func testSpeakerVoiceRowPresentation() {
     runSuite("Name autocomplete reuses SpeakerNameSelectionPolicy for inline completion") {
         let profiles = [
             makeVoiceRowProfile(id: UUID(), name: "Taylor Wolfe", calls: 9),
-            makeVoiceRowProfile(id: UUID(), name: "Matt Bentley", calls: 4),
+            makeVoiceRowProfile(id: UUID(), name: "Milo Bennett", calls: 4),
         ]
         let options = SpeakerNameSuggestionSource.options(from: profiles, excluding: nil)
         let labels = SpeakerNameSelectionPolicy.makeIdentityLabels(

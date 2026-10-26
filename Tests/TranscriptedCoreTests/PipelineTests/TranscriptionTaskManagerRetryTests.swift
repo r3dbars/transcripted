@@ -341,7 +341,7 @@ extension TranscriptionTaskManagerMetadataTests {
                 persistentSpeakerId: speaker.id,
                 diarizerSpeakerId: speaker.diarizerSpeakerId,
                 channel: speaker.channel,
-                newName: "Sarah Graham",
+                newName: "Sadie Greene",
                 previousName: speaker.currentName,
                 action: .named
             )
@@ -462,7 +462,7 @@ extension TranscriptionTaskManagerMetadataTests {
                 persistentSpeakerId: speaker.id,
                 diarizerSpeakerId: speaker.diarizerSpeakerId,
                 channel: speaker.channel,
-                newName: "Sarah Graham",
+                newName: "Sadie Greene",
                 previousName: speaker.currentName,
                 action: .named
             )
@@ -534,7 +534,7 @@ extension TranscriptionTaskManagerMetadataTests {
                 persistentSpeakerId: speaker.id,
                 diarizerSpeakerId: speaker.diarizerSpeakerId,
                 channel: speaker.channel,
-                newName: "Sarah Graham",
+                newName: "Sadie Greene",
                 previousName: speaker.currentName,
                 action: .named
             )
