@@ -553,13 +553,7 @@ func testTodayPresentation() {
         assertTrue(rejected.isEmpty, "out-of-format Captured values make no entry")
     }
 
-    runSuite("TodayClockPolicy - only the Now chrome ticks every minute") {
-        let minute = Set(TodayClockPolicy.Surface.allCases.filter { TodayClockPolicy.tick(for: $0) == .everyMinute })
-        let day = Set(TodayClockPolicy.Surface.allCases.filter { TodayClockPolicy.tick(for: $0) == .calendarDay })
-        let none = Set(TodayClockPolicy.Surface.allCases.filter { TodayClockPolicy.tick(for: $0) == .none })
-        assertEqual(minute, [.nowLabel, .nowMarker], "the Now label and tape marker own the minute clock")
-        assertEqual(day, [.previewMeta, .headerTitle], "Yesterday and the Today title follow the calendar day")
-        assertEqual(none, [.sessionRow, .weekCell, .dayCard], "the page, card, and session rows skip the clock")
+    runSuite("TodayClockPolicy.nowLabelText keeps the existing Now prefix") {
         assertEqual(
             TodayClockPolicy.nowLabelText(now: date(24, 14, 5), locale: locale, calendar: calendar),
             "Now " + TodayCopy.rowWhen(for: date(24, 14, 5), now: date(24, 14, 5), locale: locale, calendar: calendar),
@@ -633,5 +627,70 @@ func testTodayPresentation() {
         assertEqual(la.component(.day, from: afterSpring), 9, "DST spring-forward still lands on the next calendar day")
         assertEqual(la.component(.hour, from: afterSpring), 0, "and at local midnight")
         assertEqual(la.component(.minute, from: afterSpring), 0, "on the hour")
+    }
+
+    runSuite("TodayClockPolicy.needsRollover is true across midnight and DST, false inside one day") {
+        assertFalse(
+            TodayClockPolicy.needsRollover(storedDay: date(24, 10, 1), now: date(24, 16, 45), calendar: calendar),
+            "two minutes of the same local day do not roll over"
+        )
+        assertTrue(
+            TodayClockPolicy.needsRollover(storedDay: date(24, 23, 59), now: date(25, 0, 1), calendar: calendar),
+            "midnight starts a new day"
+        )
+        assertTrue(
+            TodayClockPolicy.needsRollover(storedDay: .distantPast, now: date(24, 10), calendar: calendar),
+            "a never-built snapshot always needs a refresh"
+        )
+
+        var la = Calendar(identifier: .gregorian)
+        la.timeZone = TimeZone(identifier: "America/Los_Angeles")!
+        let beforeSpring = la.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 1, minute: 30))!
+        let sameSpringDay = la.date(from: DateComponents(year: 2026, month: 3, day: 8, hour: 4, minute: 0))!
+        let afterSpring = la.date(from: DateComponents(year: 2026, month: 3, day: 9, hour: 0, minute: 1))!
+        assertFalse(
+            TodayClockPolicy.needsRollover(storedDay: beforeSpring, now: sameSpringDay, calendar: la),
+            "spring-forward stays on the same calendar day"
+        )
+        assertTrue(
+            TodayClockPolicy.needsRollover(storedDay: beforeSpring, now: afterSpring, calendar: la),
+            "the next local midnight after DST still rolls over"
+        )
+    }
+
+    runSuite("TodayClockPolicy.nowMarkerFraction follows the clock's day, not a stale tape day") {
+        let nine = TodayClockPolicy.nowMarkerFraction(now: date(24, 9), tapeDay: date(24, 0), calendar: calendar)
+        assertEqual(nine, 1.0 / 6.0, "9am is a sixth of 6am-to-midnight")
+        assertNil(
+            TodayClockPolicy.nowMarkerFraction(now: date(25, 0, 1), tapeDay: date(24, 0), calendar: calendar),
+            "after midnight the marker leaves yesterday's tape"
+        )
+        assertNotNil(
+            TodayClockPolicy.nowMarkerFraction(now: date(25, 0, 1), tapeDay: date(25, 0), calendar: calendar),
+            "the new day's tape still shows it"
+        )
+    }
+
+    runSuite("TodaySessionRow identity includes locale and time zone") {
+        let session = TodaySession(
+            items: [tapeItem(.dictation, "d", date(24, 10))],
+            start: date(24, 10),
+            end: date(24, 10, 20),
+            title: "Morning"
+        )
+        let openEN = TodayClockPolicy.sessionRowIdentity(session: session, isOpen: true, formatKey: "en|America/Los_Angeles")
+        assertEqual(
+            openEN,
+            TodayClockPolicy.sessionRowIdentity(session: session, isOpen: true, formatKey: "en|America/Los_Angeles"),
+            "the same session, open state, and region keep one row identity"
+        )
+        assertTrue(
+            openEN != TodayClockPolicy.sessionRowIdentity(session: session, isOpen: false, formatKey: "en|America/Los_Angeles"),
+            "opening the row is a different identity"
+        )
+        assertTrue(
+            openEN != TodayClockPolicy.sessionRowIdentity(session: session, isOpen: true, formatKey: "de|Europe/Berlin"),
+            "a locale or time zone change is a different identity so session times redraw"
+        )
     }
 }

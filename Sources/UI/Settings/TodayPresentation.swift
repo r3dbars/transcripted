@@ -663,32 +663,17 @@ struct TodayDayCardIdentity: Equatable, Sendable {
     let formatKey: String
 }
 
-/// Which Today surfaces subscribe to a live clock, and how coarsely.
+/// What a session row compares. Locale / time zone live in `formatKey` so a
+/// region change still redraws the formatted times.
+struct TodaySessionRowIdentity: Equatable, Sendable {
+    let session: TodaySession
+    let isOpen: Bool
+    let formatKey: String
+}
+
+/// Calendar-day helpers for Today's live clock leaves. Minute ticks stay on
+/// the Now label and tape marker; a day change rebuilds the snapshot.
 enum TodayClockPolicy {
-    enum Surface: String, CaseIterable, Equatable, Hashable, Sendable {
-        case nowLabel
-        case nowMarker
-        case sessionRow
-        case previewMeta
-        case headerTitle
-        case weekCell
-        case dayCard
-    }
-
-    enum Tick: Equatable, Sendable {
-        case none
-        case calendarDay
-        case everyMinute
-    }
-
-    static func tick(for surface: Surface) -> Tick {
-        switch surface {
-        case .nowLabel, .nowMarker: return .everyMinute
-        case .previewMeta, .headerTitle: return .calendarDay
-        case .sessionRow, .weekCell, .dayCard: return .none
-        }
-    }
-
     static func dayKey(_ date: Date, calendar: Calendar = .current) -> Date {
         calendar.startOfDay(for: date)
     }
@@ -698,12 +683,41 @@ enum TodayClockPolicy {
         return calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
     }
 
+    /// True when the snapshot's calendar day is not the local day of `now`.
+    /// A never-built snapshot (`distantPast`) always needs a refresh.
+    static func needsRollover(
+        storedDay: Date,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> Bool {
+        !calendar.isDate(storedDay, inSameDayAs: now)
+    }
+
+    /// Where the Now marker sits on the tape, or nil when `tapeDay` is not
+    /// the local day of `now` (stale `isToday` after midnight, or a past day).
+    static func nowMarkerFraction(
+        now: Date,
+        tapeDay: Date,
+        calendar: Calendar = .current
+    ) -> Double? {
+        guard calendar.isDate(tapeDay, inSameDayAs: now) else { return nil }
+        return TodayTapeBuilder.fraction(of: now, onDayStarting: dayKey(now, calendar: calendar), calendar: calendar)
+    }
+
     static func dayCardIdentity(
         day: TodayTapeDay,
         pickedMarkID: String?,
         formatKey: String
     ) -> TodayDayCardIdentity {
         TodayDayCardIdentity(day: day, pickedMarkID: pickedMarkID, formatKey: formatKey)
+    }
+
+    static func sessionRowIdentity(
+        session: TodaySession,
+        isOpen: Bool,
+        formatKey: String
+    ) -> TodaySessionRowIdentity {
+        TodaySessionRowIdentity(session: session, isOpen: isOpen, formatKey: formatKey)
     }
 
     static func nowLabelText(

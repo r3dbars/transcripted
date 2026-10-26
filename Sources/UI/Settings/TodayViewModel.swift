@@ -103,11 +103,12 @@ final class TodayViewModel: ObservableObject {
     func refresh(force: Bool = false) {
         guard windowHold.isWindowOpen else { return }
         let now = Date()
+        let skipThrottle = force || TodayClockPolicy.needsRollover(storedDay: snapshot.builtAt, now: now)
         if refreshTask != nil {
             scheduleTrailingRefresh(after: Self.minimumRefreshInterval)
             return
         }
-        if !force, let delay = passiveRefreshDelay(now: now) {
+        if !skipThrottle, let delay = passiveRefreshDelay(now: now) {
             scheduleTrailingRefresh(after: delay)
             return
         }

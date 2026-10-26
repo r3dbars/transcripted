@@ -67,7 +67,7 @@ struct TodaySettingsPage: View {
             openSessionID = nil
         }
         .overlay(alignment: .topLeading) {
-            TodayDayRollover {
+            TodayDayRollover(storedDay: snapshot.builtAt) {
                 todayViewModel.refresh(force: true)
             }
             .allowsHitTesting(false)
@@ -135,6 +135,7 @@ struct TodaySettingsPage: View {
                 TodaySessionRow(
                     session: session,
                     isOpen: openSessionID == session.id,
+                    formatKey: formatKey,
                     onToggle: {
                         withAnimation(.easeOut(duration: 0.15)) {
                             if openSessionID == session.id {
@@ -380,7 +381,7 @@ private struct TodayDayCard: View, Equatable {
                         markView(mark, color: kind.streamColor, width: geo.size.width, isPicked: mark.id == shownID)
                     }
                     if day.isToday {
-                        TodayNowMarker(dayStart: day.day, width: geo.size.width)
+                        TodayNowMarker(tapeDay: day.day, width: geo.size.width)
                     }
                 }
                 .frame(height: 20)
@@ -623,13 +624,23 @@ private struct TodayWeekCell: View, Equatable {
 private struct TodaySessionRow: View, Equatable {
     let session: TodaySession
     let isOpen: Bool
+    /// Locale, time zone and calendar, so a region change still re-renders.
+    let formatKey: String
     let onToggle: () -> Void
     let onOpen: (TodayRecentItem) -> Void
 
     @State private var isHovering = false
 
     nonisolated static func == (lhs: TodaySessionRow, rhs: TodaySessionRow) -> Bool {
-        lhs.session == rhs.session && lhs.isOpen == rhs.isOpen
+        TodayClockPolicy.sessionRowIdentity(
+            session: lhs.session,
+            isOpen: lhs.isOpen,
+            formatKey: lhs.formatKey
+        ) == TodayClockPolicy.sessionRowIdentity(
+            session: rhs.session,
+            isOpen: rhs.isOpen,
+            formatKey: rhs.formatKey
+        )
     }
 
     /// Fits "11:15 AM – 12:31 PM".
