@@ -381,6 +381,151 @@ import TranscriptedCore
         print("failedDatabaseMergeRollsBackACopiedClip: source kept clip and quote; target has neither")
     }
 
+    /// Waits until the "Who spoke?" visit has no card saving or waiting on Undo.
+    @MainActor static func meetingSavesSettle(_ model: SpeakerPeopleSettingsViewModel) async {
+        guard model.meetingReview.finished != nil || !model.meetingReview.heldOutCallKeys.isEmpty else { return }
+        await withCheckedContinuation { continuation in
+            var observation: AnyCancellable?
+            observation = model.$meetingReview.dropFirst().sink { _ in
+                // @Published emits before the setter lands; read it next turn.
+                DispatchQueue.main.async {
+                    guard model.meetingReview.heldOutCallKeys.isEmpty, observation != nil else { return }
+                    observation?.cancel()
+                    observation = nil
+                    continuation.resume()
+                }
+            }
+        }
+    }
+
+    @MainActor static func whoSpokeDoneWaitsForUndoThenSaves() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let voice = try fixture.voice()
+        _ = try fixture.meeting(voice: voice, filename: "weekly")
+        let model = await fixture.load()
+        guard let call = model.reviewStack.calls.first else { fatalError("FAIL: the meeting has a card") }
+        let answer = SpeakerReviewUpdate(persistentSpeakerId: voice.id, diarizerSpeakerId: "1", newName: "Rosa Diaz", action: .named)
+
+        model.finishMeeting(call, updates: [answer])
+        check(model.reviewStack.calls.isEmpty && model.meetingReview.finished?.names == ["Rosa Diaz"],
+            "Done takes the card off the stack and shows who was named")
+        check(fixture.database.getSpeaker(id: voice.id)?.displayName == nil, "nothing saves while Undo is up")
+
+        model.undoFinishedMeeting()
+        check(model.reviewStack.calls.map(\.id) == [call.id] && model.meetingReview.meetingsDone == 0,
+            "Undo puts the card back and takes the meeting off the count")
+        check(fixture.database.getSpeaker(id: voice.id)?.displayName == nil, "Undo saved nothing")
+
+        model.finishMeeting(call, updates: [answer])
+        // Quit right after Done: the answers save before the app goes.
+        await SpeakerPeopleSettingsViewModel.finishMeetingSavesForTermination()
+        check(fixture.database.getSpeaker(id: voice.id)?.displayName == "Rosa Diaz", "Quit saves a card still waiting on Undo before it returns")
+        await meetingSavesSettle(model)
+        check(model.reviewQueueItems.isEmpty && model.reviewStack.calls.isEmpty, "a fully named meeting leaves the queue")
+        check(model.meetingReview.meetingsDone == 0, "with nothing left to name the next visit starts at Meeting 1")
+        print("whoSpokeDoneWaitsForUndoThenSaves: Undo saved nothing; the save named the voice")
+    }
+
+    @MainActor static func whoSpokeTwoMeetingsNamingOneNewPersonMakeOnePerson() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let first = try fixture.voice(embedding: [1, 0])
+        let second = try fixture.voice(embedding: [0, 1])
+        _ = try fixture.meeting(voice: first, id: UUID(), filename: "first")
+        _ = try fixture.meeting(voice: second, id: UUID(), filename: "second")
+        let model = await fixture.load()
+        check(model.reviewStack.calls.count == 2, "two meetings, two cards")
+        let calls = model.reviewStack.calls
+        let voiceOn: (SpeakerPendingMeetingGroup) -> UUID = { $0.voices[0].id }
+
+        model.finishMeeting(calls[0], updates: [
+            SpeakerReviewUpdate(persistentSpeakerId: voiceOn(calls[0]), diarizerSpeakerId: "1", newName: "Sam Ortiz", action: .named),
+        ])
+        // The second Done saves the first card now; leaving saves the second.
+        model.finishMeeting(calls[1], updates: [
+            SpeakerReviewUpdate(persistentSpeakerId: voiceOn(calls[1]), diarizerSpeakerId: "1", newName: "Sam Ortiz", action: .named),
+        ])
+        model.saveFinishedMeetingNow()
+        await meetingSavesSettle(model)
+        let named = fixture.database.allSpeakers().filter { $0.displayName == "Sam Ortiz" }
+        check(named.count == 1, "the second meeting's Sam Ortiz joins the first instead of making a second person")
+        print("whoSpokeTwoMeetingsNamingOneNewPersonMakeOnePerson: one Sam Ortiz")
+    }
+
+    @MainActor static func whoSpokeFailedSaveKeepsTheMeetingAndSaysSo() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let voice = try fixture.voice()
+        _ = try fixture.meeting(voice: voice, filename: "retro")
+        let moved = try fixture.meeting(voice: voice, filename: "moved")
+        let model = await fixture.load()
+        guard let call = model.reviewStack.calls.first else { fatalError("FAIL: the meeting has a card") }
+        // One of the voice's meetings is gone, so its transaction can't save.
+        try FileManager.default.removeItem(at: moved)
+        model.skipMeeting(call, updates: [
+            SpeakerReviewUpdate(persistentSpeakerId: voice.id, diarizerSpeakerId: "1", newName: "Dana Holt", action: .named),
+        ])
+        await meetingSavesSettle(model)
+        check(model.meetingSaveError?.hasPrefix("Couldn't save 1 name") == true, "a save that fails says so")
+        check(!SpeakerReviewSkippedCalls.load(defaults: fixture.defaults).contains(call.id), "a failed Skip doesn't skip the meeting")
+        check(model.reviewStack.calls.map(\.id) == [call.id], "its card comes back to try again")
+        print("whoSpokeFailedSaveKeepsTheMeetingAndSaysSo: error shown, meeting kept")
+    }
+
+    @MainActor static func whoSpokeSkipSavesAnswersAndSkipsTheRest() async throws {
+        let fixture = try Fixture()
+        defer { try? fixture.close() }
+        let answered = try fixture.voice(embedding: [1, 0])
+        let left = try fixture.voice(embedding: [0, 1])
+        let url = fixture.transcripts.appendingPathComponent("standup.md")
+        try """
+        ---
+        title: "Standup"
+        transcript_id: "\(UUID().uuidString)"
+        capture_type: meeting
+        date: "2026-01-02"
+        duration: "00:30"
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "\(answered.id.uuidString)"
+            name: "Speaker 1"
+            source: db_pending
+          - id: "2"
+            channel: system
+            db_id: "\(left.id.uuidString)"
+            name: "Speaker 2"
+            source: db_pending
+        ---
+        ## Full Transcript
+        [00:01] [System/Speaker 1] Synthetic words.
+        [00:02] [System/Speaker 2] Other synthetic words.
+        """.write(to: url, atomically: true, encoding: .utf8)
+        let model = await fixture.load()
+        guard let call = model.reviewStack.calls.first, call.voices.count == 2 else { fatalError("FAIL: one card, two voices") }
+
+        await withCheckedContinuation { continuation in
+            var observation: AnyCancellable?
+            observation = model.$profiles.dropFirst().sink { _ in
+                DispatchQueue.main.async {
+                    guard observation != nil, model.currentProfile(id: answered.id)?.displayName == "Jordan Lee" else { return }
+                    observation?.cancel()
+                    observation = nil
+                    continuation.resume()
+                }
+            }
+            model.skipMeeting(call, updates: [
+                SpeakerReviewUpdate(persistentSpeakerId: answered.id, diarizerSpeakerId: "1", newName: "Jordan Lee", action: .named),
+            ])
+        }
+        check(SpeakerReviewSkippedCalls.load(defaults: fixture.defaults).contains(call.id), "Skip is saved, so the meeting stays skipped")
+        check(model.reviewStack.calls.isEmpty, "a skipped meeting has no card")
+        check(fixture.database.getSpeaker(id: left.id)?.displayName == nil, "the unanswered voice stays unnamed for later")
+        check(model.directoryProfiles.contains { $0.id == left.id }, "and is listed under Not named yet")
+        print("whoSpokeSkipSavesAnswersAndSkipsTheRest: answered voice named, the other left in the list")
+    }
+
     @MainActor static func main() async throws {
         guard ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1" else {
             fatalError("Smoke requires file logging disabled")
@@ -393,6 +538,10 @@ import TranscriptedCore
         try await failedDeleteKeepsVoiceClip()
         try await failedMergeKeepsSourceProfileAndClip()
         try await failedDatabaseMergeRollsBackACopiedClip()
+        try await whoSpokeDoneWaitsForUndoThenSaves()
+        try await whoSpokeSkipSavesAnswersAndSkipsTheRest()
+        try await whoSpokeTwoMeetingsNamingOneNewPersonMakeOnePerson()
+        try await whoSpokeFailedSaveKeepsTheMeetingAndSaysSo()
         print("Speaker settings model smoke: \(assertions) assertions passed")
     }
 }

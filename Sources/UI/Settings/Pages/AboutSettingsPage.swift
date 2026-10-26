@@ -20,6 +20,7 @@ struct AboutSettingsPage: View {
     let diagnosticsActionStatus: String?
     let crashReportingEnabled: Bool
     let onSubmitFeedback: () -> Void
+    let onEmailSupport: () -> Void
     let onSendDiagnosticEvent: () -> Void
 
     var body: some View {
@@ -96,10 +97,10 @@ struct AboutSettingsPage: View {
 
             SettingsCard {
                 SettingsControlRow(
-                    title: "Something broken? Tell us.",
+                    title: "A problem or an idea? Tell us.",
                     info: GeneralInfo(
                         title: "Support",
-                        message: "Email opens a prefilled message to help@transcripted.app. We usually reply within a day. Send Diagnostics sends a privacy-safe snapshot of how the app is doing (no transcripts, audio, or names). Send it first, then email us: the email carries the report ID so we can match them up. It needs Crash reports on."
+                        message: "Feedback opens a report you can review before sending to help@transcripted.app. Add your own screenshots and optionally include app and macOS details. No transcripts or audio are attached automatically. Send Diagnostics is a separate privacy-safe app snapshot and needs Crash reports on."
                     ),
                     automationIdentifier: "transcripted.settings.about.support",
                     showsDivider: diagnosticsActionStatus != nil || diagnosticsDisabledReason != nil
@@ -110,8 +111,11 @@ struct AboutSettingsPage: View {
                         }
                         .disabled(!(CrashReporter.isAvailable && crashReportingEnabled))
 
-                        SettingsInlineActionButton(title: "Email Support…", tone: .accent) {
+                        SettingsInlineActionButton(title: "Feedback…", tone: .accent) {
                             onSubmitFeedback()
+                        }
+                        SettingsInlineActionButton(title: "Email Support…") {
+                            onEmailSupport()
                         }
                     }
                 }

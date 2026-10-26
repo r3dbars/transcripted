@@ -254,7 +254,7 @@ func testDictationQueuedStartPolicy() async {
             (.success(title: "Pasted"), .other),
             (.notPasted(message: "Not pasted", unconfirmed: false), .other),
             (.notPasted(message: "Maybe pasted", unconfirmed: true), .other),
-            (.clipboardBusy(message: "Clipboard busy"), .other),
+            (.clipboardBusy(message: "Clipboard busy", hint: "Your clipboard took too long to read."), .other),
             (.error("Couldn't save"), .other),
         ]
         for (presentation, expected) in cases {
@@ -288,7 +288,7 @@ func testDictationQueuedStartPolicy() async {
                         events.append("clipboard \(message) givesWay=\(givesWay)")
                     },
                     showNotPasted: { events.append("notPasted \($0) unconfirmed=\($1)") },
-                    showClipboardBusy: { events.append("busy \($0)") },
+                    showClipboardBusy: { events.append("busy \($0) hint=\($1)") },
                     showError: { events.append("error \($0)") }
                 )
             )
@@ -311,8 +311,8 @@ func testDictationQueuedStartPolicy() async {
             "a not-pasted take goes to the Paste notice, never the passing clipboard note"
         )
         assertEqual(
-            shown(.clipboardBusy(message: "Clipboard busy")),
-            ["busy Clipboard busy"],
+            shown(.clipboardBusy(message: "Clipboard busy", hint: "Your clipboard took too long to read.")),
+            ["busy Clipboard busy hint=Your clipboard took too long to read."],
             "a busy clipboard goes to the Copy notice"
         )
         assertEqual(shown(.error("Couldn't save")), ["error Couldn't save"], "a failure goes to the error")

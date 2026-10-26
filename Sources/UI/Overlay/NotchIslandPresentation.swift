@@ -385,6 +385,17 @@ enum NotchIslandPresentation {
         callPrompt != nil && dictation == nil
     }
 
+    /// The meeting warning drop is on screen unless a dictation (or its
+    /// message) has the island. Closing the drop still counts as on screen:
+    /// the person already saw Keep recording. Covered by a take or error
+    /// does not.
+    static func meetingPromptIsOnScreen(
+        dictation: NotchIslandDictationContent?,
+        meeting: NotchIslandMeetingContent?
+    ) -> Bool {
+        meeting?.prompt != nil && dictation == nil
+    }
+
     /// The island keeps the keyboard only while "Who was on this call?" is
     /// asking for names and is on screen. Once naming ends, the review is
     /// replaced, or something else covers it, the keyboard goes back to the
