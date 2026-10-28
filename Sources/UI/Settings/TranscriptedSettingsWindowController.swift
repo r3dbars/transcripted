@@ -10,6 +10,11 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     /// rebuilds and hand the newest one over before it shows again.
     private let todayViewModel: TodayViewModel
     private let hostingController: NSHostingController<TranscriptedSettingsView>
+    /// After the first `present()`, `window.frame` is the user's position (or
+    /// the placement we just applied). Before that, the constructor origin
+    /// `(0, 0)` is not a saved frame — passing it in would keep the window
+    /// in a corner.
+    private var hasPlacedWindow = false
 
     init(appState: TranscriptedAppState, actions: TranscriptedSettingsActions) {
         let speakerDatabase = appState.meetingSession.speakerStoreForSettings()
@@ -34,7 +39,6 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         )
 
         let window = TranscriptedSettingsWindow.make(contentViewController: hostingController)
-        window.center()
 
         super.init(window: window)
         window.delegate = self
@@ -45,6 +49,10 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func present(page: TranscriptedSettingsPage = .today, source: String = "unknown") {
         guard let window else { return }
+        let frame = plannedFrame(for: window)
+        if window.frame != frame {
+            window.setFrame(frame, display: false)
+        }
         navigationModel.isWindowOpen = true
         speakerPeopleModel.setShown(true)
         speakerPeopleModel.refresh()
@@ -63,7 +71,45 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         // Publish anything Today built while closed before the first frame.
         todayViewModel.windowWillShow()
         window.makeKeyAndOrderFront(nil)
+        // Recent macOS can ignore a pre-show setFrame and drop an unplaced
+        // window in the bottom-trailing corner. Re-apply after orderFront.
+        if window.frame != frame {
+            window.setFrame(frame, display: true)
+        }
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private func plannedFrame(for window: NSWindow) -> CGRect {
+        let screens = NSScreen.screens
+        guard !screens.isEmpty else { return window.frame }
+
+        let visibleFrames = screens.map(\.visibleFrame)
+        let mouse = NSEvent.mouseLocation
+        let preferred = screens.first { NSMouseInRect(mouse, $0.frame, false) }?.visibleFrame
+            ?? NSScreen.main?.visibleFrame
+            ?? visibleFrames[0]
+
+        let saved: CGRect?
+        if hasPlacedWindow {
+            saved = window.frame
+        } else if window.setFrameUsingName(TranscriptedSettingsWindow.frameAutosaveName) {
+            saved = window.frame
+        } else {
+            saved = nil
+        }
+        window.setFrameAutosaveName(TranscriptedSettingsWindow.frameAutosaveName)
+        hasPlacedWindow = true
+
+        let size = window.frame.size
+        let windowSize = (size.width >= 1 && size.height >= 1)
+            ? size
+            : MainWindowFramePolicy.defaultSize
+        return MainWindowFramePolicy.frame(
+            savedFrame: saved,
+            windowSize: windowSize,
+            visibleFrames: visibleFrames,
+            preferredVisibleFrame: preferred
+        )
     }
 
     /// Opens (or surfaces) the window on the Speakers page and asks the search
