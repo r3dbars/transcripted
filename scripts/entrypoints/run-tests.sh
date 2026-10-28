@@ -767,6 +767,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/SettingsMeetingRenderGate.swift"
     "Sources/UI/Settings/SettingsRecordingClock.swift"
     "Sources/UI/Settings/SettingsClosedWindowPolicy.swift"
+    "Sources/UI/Settings/MainWindowFramePolicy.swift"
     "Sources/UI/Settings/TodayWritingDayFileCache.swift"
     "Sources/UI/Settings/HomeSearchMatching.swift"
     "Sources/UI/Settings/HomeMeetingSearchIndex.swift"

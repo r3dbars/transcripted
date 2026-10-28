@@ -59,6 +59,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `MeetingLanguageSettingRow.swift` / `MeetingMicrophoneSettingRow.swift` / `MicrophoneSettingsPolicy.swift` - meeting language picker, Mac-selected-mic toggle, and which mic rows General shows (Foundation-pure).
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the shell (start dictation/meeting, import audio, feedback, diagnostics).
 - `TranscriptedSettingsWindowController.swift` / `TranscriptedOnboardingWindowController.swift` - AppKit windows. The settings controller owns `TodayViewModel`.
+- `MainWindowFramePolicy.swift` - Foundation-pure placement for the main window: keep a saved frame whose titlebar is on a connected screen, otherwise center on the mouse/main display. Tested by `Tests/MainWindowFramePolicyTests.swift`.
 - `TranscriptedMenuCommandCatalog.swift` - the ⌘ commands as values, consumed by `Sources/App/TranscriptedMenuCommands.swift`.
 - `SettingsMeetingRenderGate.swift` - coalesces a chatty ObservableObject, publishes only on key change; also `HomeActivityPercent`.
 - `SettingsMeetingShellState.swift`, `SettingsRecordingClock.swift` / `QuietRecordingElapsedLabel.swift` - meeting values the shell shows; Home's 1 Hz elapsed label as an environment-fed leaf so the tick doesn't redraw the shell.
