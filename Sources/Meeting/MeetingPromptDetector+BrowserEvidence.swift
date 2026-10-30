@@ -24,16 +24,34 @@ extension MeetingPromptDetector {
         var namedCall: MeetingPromptProvider?
         /// A known non-call site was focused. Sticky too, so ChatGPT voice
         /// does not prompt when the user clicks to another tab; only a
-        /// call-only title can still win.
+        /// call-only title, or a claimed call shortcut, can still win.
         var sawNonCallSite = false
+        /// A Meet/Teams/Zoom app shortcut is the mic user for this session.
+        /// Beats a non-call window in a different app of the same family.
+        var claimedShortcut: MeetingPromptProvider?
         var readTask: Task<Void, Never>?
         var readToken = 0
+        /// When this session's first title read started. The prompt is held
+        /// only until `titleReadGiveUp`, not until a hung read returns.
+        var readStartedAt: Date?
         /// Browser kinds the user said Not now to in this session.
         var declinedKinds: [String: Date] = [:]
 
-        var verdict: BrowserCallTitleVerdict? {
+        func verdict(now: Date, titleReadGiveUp: TimeInterval) -> BrowserCallTitleVerdict? {
             if let namedCall { return .call(provider: namedCall) }
+            if let claimedShortcut { return .callSite(provider: claimedShortcut) }
+            // Coming back to a Meet tab beats an early ChatGPT glance. A
+            // random tab switch does not: that still needs sawNonCallSite.
+            if case .call = latest { return latest }
+            if case .callSite = latest { return latest }
             if sawNonCallSite { return .notCall }
+            if latest == nil {
+                guard let readStartedAt else { return nil }
+                return BrowserCallEvidence.verdictBeforeTitleReadLands(
+                    pendingFor: now.timeIntervalSince(readStartedAt),
+                    giveUp: titleReadGiveUp
+                )
+            }
             return latest
         }
     }
@@ -56,11 +74,16 @@ extension MeetingPromptDetector {
         let families = browserFamiliesForEvidence(reason: signal.reason, frontmostBundleID: frontmostBundleID)
         let since = browserEvidenceStart(reason: signal.reason, families: families, now: now)
         let playingAudio = browserIsPlayingAudio(families: families)
+        ensureCallShortcutLookup(frontmostBundleID)
 
-        guard let verdict = currentBrowserTitleVerdict(families: families, now: now) else {
-            // The first title read of this session is still running (well
-            // under a second); it re-evaluates when it lands. Too brief to be
-            // worth a suppression event.
+        guard let verdict = currentBrowserTitleVerdict(
+            families: families,
+            frontmostBundleID: frontmostBundleID,
+            now: now
+        ) else {
+            // The first title read of this session is still running, inside
+            // `titleReadGiveUp`. It re-evaluates when it lands. Too brief to
+            // be worth a suppression event.
             browserFirstTitleReadPending = true
             return nil
         }
@@ -175,7 +198,11 @@ extension MeetingPromptDetector {
     /// rules applied, or `nil` while the session's first read is running.
     /// Starts a background read when the last one is old enough; its result
     /// re-evaluates.
-    private func currentBrowserTitleVerdict(families: Set<String>, now: Date) -> BrowserCallTitleVerdict? {
+    private func currentBrowserTitleVerdict(
+        families: Set<String>,
+        frontmostBundleID: String?,
+        now: Date
+    ) -> BrowserCallTitleVerdict? {
         guard !families.isEmpty else { return .unknown }
         if var session = browserTitles, !session.families.isDisjoint(with: families) {
             // Same browser (another one may have joined or left): keep what
@@ -187,12 +214,19 @@ extension MeetingPromptDetector {
             browserTitles?.readTask?.cancel()
             browserTitles = BrowserTitleSession(families: families, startedAt: now)
         }
-        guard let session = browserTitles else { return nil }
+        guard var session = browserTitles else { return nil }
+        session.claimedShortcut = BrowserCallEvidence.claimedCallShortcut(
+            frontmostShortcut: frontmostBundleID.flatMap { callShortcutProviders[$0] },
+            recentProvider: recentCallShortcutActivation?.provider,
+            recentActivationAt: recentCallShortcutActivation?.at,
+            sessionStartedAt: session.startedAt
+        )
+        browserTitles = session
         let readIsStale = session.readAt.map { now.timeIntervalSince($0) >= browserEvidenceTiming.titleReadSpacing } ?? true
         if session.namedCall == nil, session.readTask == nil, readIsStale {
             startBrowserTitleRead(families: families)
         }
-        return session.verdict
+        return session.verdict(now: now, titleReadGiveUp: browserEvidenceTiming.titleReadGiveUp)
     }
 
     private func startBrowserTitleRead(families: Set<String>) {
@@ -200,6 +234,9 @@ extension MeetingPromptDetector {
         let token = browserTitleReadCounter
         let provider = browserWindowTitlesProvider
         browserTitles?.readToken = token
+        if browserTitles?.readStartedAt == nil {
+            browserTitles?.readStartedAt = Date()
+        }
         evaluationsInFlight += 1
         browserTitles?.readTask = Task { @MainActor [weak self] in
             let titles = await provider(families)
@@ -221,11 +258,16 @@ extension MeetingPromptDetector {
         switch verdict {
         case .call(let provider):
             session.namedCall = provider
+            session.sawNonCallSite = false
+        case .callSite:
+            // The user is on a call app now. An earlier non-call glance was
+            // not the thing holding the mic.
+            session.sawNonCallSite = false
         case .notCall:
             if now.timeIntervalSince(session.startedAt) <= browserEvidenceTiming.nonCallSiteStickyWindow {
                 session.sawNonCallSite = true
             }
-        case .callSite, .unknown:
+        case .unknown:
             break
         }
         browserTitles = session
@@ -269,6 +311,33 @@ extension MeetingPromptDetector {
             self.browserMicEndTask = nil
             guard !self.micActiveBundleIDs.contains(where: MeetingPromptProvider.isBrowserBundleID) else { return }
             self.endBrowserMicSession()
+        }
+    }
+
+    /// A browser app came forward or launched. If it is a call shortcut, remember
+    /// it so a calendar-opened Meet PWA is not vetoed by another Helium window.
+    func noteCallShortcutActivation(bundleID: String, provider: MeetingPromptProvider, at: Date) {
+        callShortcutProviders[bundleID] = provider
+        callShortcutLookupDone.insert(bundleID)
+        recentCallShortcutActivation = (provider: provider, at: at)
+        scheduleEvaluation()
+    }
+
+    /// Classify the frontmost app's shortcut URL once, off this pass. The next
+    /// evaluation uses the answer. A miss is remembered too, so a busy main
+    /// browser is not read again on every mic poll.
+    private func ensureCallShortcutLookup(_ bundleID: String?) {
+        guard let bundleID, MeetingPromptProvider.isBrowserBundleID(bundleID) else { return }
+        guard !callShortcutLookupDone.contains(bundleID) else { return }
+        callShortcutLookupDone.insert(bundleID)
+        let lookup = callShortcutProvider
+        Task { @MainActor [weak self] in
+            let site = await lookup(bundleID)
+            guard let self else { return }
+            if let site {
+                self.callShortcutProviders[bundleID] = site
+            }
+            self.scheduleEvaluation()
         }
     }
 

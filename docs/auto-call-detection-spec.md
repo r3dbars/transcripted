@@ -146,7 +146,13 @@ results below are the provenance for the production monitor design.
     `com.apple.WebKit` prefix and also cover any WKWebView-based app in a web call.
   - So browser detection recognizes: `com.google.Chrome*`, `com.google.Chrome.canary*`,
     `com.microsoft.edgemac*`, `com.brave.Browser*`, `company.thebrowser.Browser*`,
-    `org.mozilla.firefox*`, `com.apple.Safari`, and `com.apple.WebKit*`.
+    `net.imput.helium*`, `org.mozilla.firefox*`, `com.apple.Safari`, and `com.apple.WebKit*`.
+    Helium is a Chromium fork. Its mic is held by `net.imput.helium.helper` (same
+    shape as Chrome's Audio Service helper), and installed web-app shortcuts use
+    `net.imput.helium.app.*`. The `net.imput.helium` family prefix covers both.
+    A calendar prompt's "meeting tab is active" line uses the same prefixes for
+    the frontmost app. That line only decorates a calendar event that is already
+    prompting. It does not detect a call by itself.
 - **Self-exclusion:** our bundle ID is `com.justinbetker.draft` (legacy Draft id);
   exclude it by prefix so any future helper process is dropped too.
 - Aside: `ai.plaud.desktop.plaud` + `.helper` show up in the process list — Plaud
@@ -578,11 +584,21 @@ twice. "Not now" bought 30 minutes, lived in memory, and reset on relaunch.
    chat, the Meet home page, a Slack huddle, WhatsApp, Discord) -> prompt
    after 20 s as the generic browser call (`mic:browser-call`). These only
    count from the focused window: a chat app left open all day says nothing.
+   A browser family can include app shortcuts (a Helium Meet PWA is
+   `net.imput.helium.app.*`, and its mic is still the main browser's helper).
+   Only the frontmost app's window is focused, and that app is read first.
+   A ChatGPT tab in the main browser must not veto a call in the shortcut.
+   The shortcut in front is a call site even when its window title cannot be
+   read. A shortcut that opened as the mic was taken (a calendar link, within
+   15 s) is a call site too, so Calendar staying in front does not hide it.
+   A shortcut left open from earlier does not: ChatGPT voice with Meet sitting
+   in the background stays quiet.
 3. The focused window is a known non-call site (ChatGPT, Claude, Gemini,
    Loom, a mic test...) -> no prompt while it is in front. When it was in
    front within 10 s of the browser taking the mic, no prompt for the rest of
-   that browser session, even after a tab switch; only a title from step 1
-   can still win. Without a prompt or a recording, such a session feeds
+   that browser session, even after a tab switch to an ordinary page; a
+   title from step 1, or coming back to a call site (the Meet window), can
+   still win. Without a prompt or a recording, such a session feeds
    neither the funnel event nor the missed-call nudge. Pages people keep open
    during calls (Google Docs, YouTube) are not on this list, and markers match
    whole words ("Bloomberg" is not Loom).
@@ -608,7 +624,8 @@ always in front.
 Titles come from Accessibility (`BrowserWindowTitleReader`), which the app
 holds for paste-back when dictation is on: no new permission, nothing when
 untrusted. The round trips run on a background queue under a 0.3 s overall
-budget; the first read of a session holds the prompt until it lands. Titles
+budget; the first read of a session holds the prompt until it lands, or for
+1 s, whichever comes first. A hung read must not keep a real call quiet. Titles
 are classified in memory and dropped; only the coarse `call_evidence` enum
 reaches analytics. While a browser holds the mic and nothing is decided, the
 detector re-reads titles every 15 s (every 60 s once it is a non-call site),

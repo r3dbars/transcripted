@@ -106,9 +106,11 @@ enum MeetingPromptCalendarScoring {
             return "\(provider.displayName) is open"
         }
 
+        // Family prefix, same list as mic and camera attribution. An exact
+        // bundle ID misses Helium helpers and `net.imput.helium.app.*` shortcuts.
         if provider.browserHosted,
            let frontmostBundleID = runtimeSnapshot.frontmostBundleID,
-           MeetingPromptRuntimeSnapshot.browserBundleIdentifiers.contains(frontmostBundleID) {
+           MeetingPromptProvider.isBrowserBundleID(frontmostBundleID) {
             return "meeting tab is active"
         }
 

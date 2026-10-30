@@ -1061,6 +1061,94 @@ func testMeetingPromptDetector() async {
         assertEqual(box.suppression?.reason, .learnedQuiet, "the skip should say it came from the learned quiet window")
     }
 
+    await runSuite("MeetingPromptDetector browser evidence — a Meet shortcut opened with the mic is not vetoed by ChatGPT") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.browserEvidenceTiming = instantBrowserEvidenceTiming
+        let meetShortcut = "net.imput.helium.app.meet"
+        detector.frontmostBundleIDProvider = { "com.apple.iCal" }
+        showBrowserTab("ChatGPT", on: detector)
+        detector.noteCallShortcutActivation(bundleID: meetShortcut, provider: .googleMeet, at: Date())
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["net.imput.helium.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(
+            box.promptCount,
+            1,
+            "opening the Meet shortcut as the mic starts is a call, even if a ChatGPT window is focused in the main browser"
+        )
+        assertEqual(
+            box.candidate?.id,
+            MeetingPromptDetector.browserCallSiteCandidateID,
+            "without an in-call title the shortcut waits as a call site"
+        )
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — a Meet shortcut left open does not turn ChatGPT voice into a call") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.browserEvidenceTiming = instantBrowserEvidenceTiming
+        detector.frontmostBundleIDProvider = { "net.imput.helium" }
+        showBrowserTab("ChatGPT", on: detector)
+        detector.noteCallShortcutActivation(
+            bundleID: "net.imput.helium.app.meet",
+            provider: .googleMeet,
+            at: Date().addingTimeInterval(-3_600)
+        )
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["net.imput.helium.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(box.promptCount, 0, "Meet left open in the background must not turn ChatGPT voice into a call")
+        assertEqual(box.suppression?.reason, .notACall, "ChatGPT in front is still not a call")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — coming back to Meet beats an early ChatGPT glance") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.browserEvidenceTiming = instantBrowserEvidenceTiming
+        showBrowserTab("ChatGPT", on: detector)
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["net.imput.helium.helper"])
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.suppression?.reason, .notACall, "precondition: ChatGPT in front as the mic starts is not a call")
+
+        showBrowserTab("Google Meet", on: detector)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 300)
+        detector.updateBrowserOutputUsers(["net.imput.helium.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(box.promptCount, 1, "switching back to the Meet window should still prompt")
+        assertEqual(box.candidate?.id, MeetingPromptDetector.browserCallSiteCandidateID, "the Meet window is a call site, not a named tab")
+    }
+
     await runSuite("MeetingPromptDetector browser evidence — ChatGPT voice stays quiet after a tab switch") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
@@ -1348,6 +1436,7 @@ private func makeIsolatedDetector(
     detector.frontmostBundleIDProvider = { nil }
     detector.runningBundleIDsProvider = { [] }
     detector.browserWindowTitlesProvider = { _ in [] }
+    detector.callShortcutProvider = { _ in nil }
     return detector
 }
 

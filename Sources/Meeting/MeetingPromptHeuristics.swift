@@ -102,6 +102,7 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         "com.microsoft.edgemac",      // Edge + helpers
         "com.brave.Browser",          // Brave + helpers
         "company.thebrowser.Browser", // Arc + helpers
+        "net.imput.helium",           // Helium (Chromium) + helpers, including .helper and .app.* shortcuts
         "org.mozilla.firefox",        // Firefox + plugin-container children
         "com.apple.Safari",           // Safari main process
         "com.apple.WebKit",           // Safari / WKWebView service processes (GPU, Networking, WebContent)

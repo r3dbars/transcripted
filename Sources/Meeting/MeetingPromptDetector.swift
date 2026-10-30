@@ -67,6 +67,12 @@ final class MeetingPromptDetector {
     var browserWindowTitlesProvider: (Set<String>) async -> [BrowserWindowTitle] = { families in
         await BrowserWindowTitleReader.titles(forBrowserFamilies: families)
     }
+    /// The call a browser app shortcut is for, from its start URL. Defaults to
+    /// the plist reader; unit tests inject a fixed answer. The URL is classified
+    /// and dropped.
+    var callShortcutProvider: (String) async -> MeetingPromptProvider? = { bundleID in
+        await BrowserWindowTitleReader.callShortcutProvider(forBundleID: bundleID)
+    }
     /// How long an unrecognized browser has to hold the mic before it prompts.
     /// Tests shrink these.
     var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
@@ -142,6 +148,13 @@ final class MeetingPromptDetector {
     // prompt re-offers a couple of times before inheriting the full dismissal.
     var promptExpiryHistory: [String: (count: Int, lastExpiredAt: Date)] = [:]
     var browserTitleReadCounter = 0
+    /// Call shortcut bundle IDs already classified. A missing key has not been
+    /// read; a present nil is a shortcut that is not a call app.
+    var callShortcutProviders: [String: MeetingPromptProvider] = [:]
+    var callShortcutLookupDone: Set<String> = []
+    /// The latest call shortcut that launched or came forward. Used only when
+    /// that was as the mic was taken; an old activation does not count.
+    var recentCallShortcutActivation: (provider: MeetingPromptProvider, at: Date)?
     // Set by `adHocCandidate` during one evaluate pass when a browser session's
     // first title read has not landed yet.
     var browserFirstTitleReadPending = false
