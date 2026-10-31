@@ -42,6 +42,7 @@ extension SpeakerPeopleSettingsViewModel {
                     isTrusted: standing.isTrusted
                 )
             }
+            entry.callAppSuggestedName = item.callAppSuggestedName
             return entry
         }
         return NotchIslandSpeakerReviewView.Input(

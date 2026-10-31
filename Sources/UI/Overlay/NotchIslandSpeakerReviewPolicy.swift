@@ -171,8 +171,8 @@ enum NotchIslandSpeakerReviewPolicy {
     static let newPersonProgress = Progress(confirmed: 1, required: SpeakerNamingPolicy.requiredConfirmedMeetings)
 
     /// The line under the name (shared copy in SpeakerNamingTierPresentation),
-    /// or the calendar note on a 1:1 name nobody touched.
-    static func rowHint(_ state: RowState, progress: Progress?, prefilledUntouched: Bool = false) -> SpeakerNamingTierPresentation.ReviewHint? {
+    /// or where a filled-in name nobody touched came from (call app or calendar).
+    static func rowHint(_ state: RowState, progress: Progress?, prefilledUntouched: Bool = false, prefillSource: PrefillSource = .calendar) -> SpeakerNamingTierPresentation.ReviewHint? {
         switch state {
         case .asking:
             guard let progress else { return nil }
@@ -189,7 +189,7 @@ enum NotchIslandSpeakerReviewPolicy {
                 moment: .savedNew, confirmedBefore: 0, required: newPersonProgress.required, isTrusted: true
             )
         case .naming:
-            return prefilledUntouched ? SpeakerNamingTierPresentation.ReviewHint(text: prefillNote, usesPersonColor: false) : nil
+            return prefilledUntouched ? SpeakerNamingTierPresentation.ReviewHint(text: prefillNote(for: prefillSource), usesPersonColor: false) : nil
         case .recognized, .named(.owner), .locked:
             return nil
         }

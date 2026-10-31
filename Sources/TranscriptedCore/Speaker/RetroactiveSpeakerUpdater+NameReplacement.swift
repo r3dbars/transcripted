@@ -237,13 +237,18 @@ extension TranscriptSaver {
         )
     }
 
+    /// Rewrites one `speakers:` row (matched by diarizer id and channel) with
+    /// the given db_id, name and source. `nameSource` sets the row's
+    /// `name_source:`; nil removes it, so naming or confirming a voice through
+    /// review drops a `call_app` marker.
     static func writeFrontmatterSpeakerMetadata(
         in content: inout String,
         diarizerSpeakerId: String,
         channel: UtteranceChannel,
         persistentSpeakerId: UUID,
         name: String,
-        source: String
+        source: String,
+        nameSource: String? = nil
     ) {
         guard let frontmatterRange = frontmatterContentRange(in: content) else { return }
 
@@ -271,12 +276,29 @@ extension TranscriptSaver {
                 nextEntryIndex = lines.count
             }
 
+            let block = lines[lineIndex..<nextEntryIndex]
+            guard speakerBlockMatchesChannel(block, channel: channel) else {
+                lineIndex = nextEntryIndex
+                continue
+            }
+
+            // Drop the old `name_source:` first; it is re-added after `source:`
+            // when this write still has one.
+            var blockEnd = nextEntryIndex
+            if lineIndex + 1 < blockEnd {
+                for index in stride(from: blockEnd - 1, to: lineIndex, by: -1)
+                where lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("name_source:") {
+                    lines.remove(at: index)
+                    blockEnd -= 1
+                }
+            }
+
             var dbIdIndex: Int?
             var nameIndex: Int?
             var sourceIndex: Int?
 
-            if lineIndex + 1 < nextEntryIndex {
-                for index in (lineIndex + 1)..<nextEntryIndex {
+            if lineIndex + 1 < blockEnd {
+                for index in (lineIndex + 1)..<blockEnd {
                     let candidate = lines[index].trimmingCharacters(in: .whitespaces)
                     if candidate.hasPrefix("db_id:") {
                         dbIdIndex = index
@@ -286,12 +308,6 @@ extension TranscriptSaver {
                         sourceIndex = index
                     }
                 }
-            }
-
-            let block = lines[lineIndex..<nextEntryIndex]
-            guard speakerBlockMatchesChannel(block, channel: channel) else {
-                lineIndex = nextEntryIndex
-                continue
             }
 
             let dbIdLine = #"    db_id: "\#(resolvedPersistentId)""#
@@ -324,10 +340,17 @@ extension TranscriptSaver {
                 nextInsertIndex += 1
             }
 
+            let writtenSourceIndex: Int
             if let sourceIndex {
                 lines[sourceIndex] = sourceLine
+                writtenSourceIndex = sourceIndex
             } else {
                 lines.insert(sourceLine, at: nextInsertIndex)
+                writtenSourceIndex = nextInsertIndex
+            }
+
+            if let nameSource {
+                lines.insert("    name_source: \(nameSource)", at: writtenSourceIndex + 1)
             }
 
             content.replaceSubrange(frontmatterRange, with: lines.joined(separator: "\n"))

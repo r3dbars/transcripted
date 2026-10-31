@@ -243,8 +243,14 @@ extension TranscriptSaver {
 
     /// Names one queued voice's row in a transcript: the row must still match
     /// (same diarizer id, channel, and profile), gets the new name with a
-    /// `user_manual` source, and its body labels follow. Shared with
-    /// `SpeakerIdentityMutationService`'s reviewed-voice merge.
+    /// `user_manual` source (dropping any `name_source:`), and its body labels
+    /// follow. Shared with `SpeakerIdentityMutationService`'s reviewed-voice
+    /// merge.
+    ///
+    /// Body labels are `[System/<name>]` / `[Mic/<name>]`, so when another row
+    /// on the same channel shows the same old name, the body can't tell the
+    /// two voices apart: only the row is renamed and the body is left alone
+    /// rather than renaming the other voice too.
     static func applyDeferredSpeakerName(
         in content: inout String,
         update: DeferredSpeakerNameUpdate,
@@ -264,6 +270,9 @@ extension TranscriptSaver {
             ])
             return false
         }
+        let rowsSharingOldName = parseFrontmatterSpeakerRows(in: content.components(separatedBy: "\n")).filter {
+            $0.name == oldName && ($0.channel ?? .system) == update.channel
+        }
 
         writeFrontmatterSpeakerMetadata(
             in: &content,
@@ -273,12 +282,20 @@ extension TranscriptSaver {
             name: newName,
             source: NameSource.userManual
         )
-        applyScopedNameReplacement(
-            in: &content,
-            oldName: oldName,
-            newName: newName,
-            channel: update.channel
-        )
+        if rowsSharingOldName.count > 1 {
+            AppLogger.pipeline.warning("Deferred speaker name hit a shared display name; body left as is", [
+                "path": update.transcriptURL.lastPathComponent,
+                "channel": update.channel.rawValue,
+                "rowsSharingName": "\(rowsSharingOldName.count)"
+            ])
+        } else {
+            applyScopedNameReplacement(
+                in: &content,
+                oldName: oldName,
+                newName: newName,
+                channel: update.channel
+            )
+        }
         content = SpeakerBreakdownConsolidator.consolidate(content)
         return true
     }
@@ -387,7 +404,9 @@ extension TranscriptSaver {
     /// Rename one person (by db_id) inside a single transcript without bleeding into
     /// other speakers who share the old display name.
     ///
-    /// - YAML `name:` lines are rewritten row-targeted, only for rows matching `dbId`.
+    /// - YAML `name:` lines are rewritten row-targeted, only for rows matching `dbId`,
+    ///   and those rows lose any `name_source:` marker: the name is now the
+    ///   person's confirmed name, not a call-app hint.
     /// - When the old name is unique to this db_id in the file, the historical full
     ///   replacement (labels, wiki links, breakdown, speaker tag) is unambiguous and
     ///   applies as before.
@@ -419,6 +438,12 @@ extension TranscriptSaver {
             guard let index = row.nameLineIndex else { continue }
             let indent = lines[index].prefix(while: { $0 == " " })
             lines[index] = "\(indent)name: \"\(escapeYAML(hedgedName(newName, replacing: row.name)))\""
+            changed = true
+        }
+        // A renamed row's name no longer came from the call app. Remove from
+        // the bottom up so earlier indices stay valid.
+        for index in targetRows.compactMap(\.nameSourceLineIndex).sorted(by: >) {
+            lines.remove(at: index)
             changed = true
         }
         content = lines.joined(separator: "\n")
@@ -475,8 +500,10 @@ extension TranscriptSaver {
     // MARK: - Speaker Name Updating (Post-Naming Flow)
 
     /// Preserve a deferred speaker review without applying a name.
-    /// This keeps transcript labels generic, but refreshes frontmatter db_id/source
-    /// so Settings > People can safely name the right local profile later.
+    /// This keeps transcript labels as saved, but refreshes frontmatter db_id/source
+    /// so Settings > People can safely name the right local profile later. A row
+    /// shown under its call-app name (`callAppSuggestedName`) keeps that name and
+    /// `name_source: call_app`; every other row goes back to "Speaker N".
     @discardableResult
     static func markSpeakerReviewDeferred(
         transcriptURL: URL,
@@ -499,8 +526,9 @@ extension TranscriptSaver {
                     diarizerSpeakerId: entry.diarizerSpeakerId,
                     channel: entry.channel,
                     persistentSpeakerId: speakerId,
-                    name: "Speaker \(entry.diarizerSpeakerId)",
-                    source: "db_pending"
+                    name: entry.callAppSuggestedName ?? "Speaker \(entry.diarizerSpeakerId)",
+                    source: "db_pending",
+                    nameSource: entry.callAppSuggestedName == nil ? nil : SpeakerMapping.ShownNameSource.callApp.rawValue
                 )
             }
 

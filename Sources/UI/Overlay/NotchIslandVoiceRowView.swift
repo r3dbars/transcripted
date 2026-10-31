@@ -71,8 +71,11 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     var isDiscarded = false
     /// "All me" is on for this local mic voice.
     var isKeptAsYou = false
-    /// The name field holds the calendar 1:1 name and nobody has touched it.
+    /// The name field holds a filled-in name (call app or calendar 1:1) and
+    /// nobody has touched it.
     var prefilledUntouched = false
+    /// Where that filled-in name came from, for the line under it.
+    var prefillSource: Policy.PrefillSource = .calendar
     /// Palette index for this row's person on this call; the review assigns
     /// it so nobody on the call shares a color.
     private(set) var colorIndex: Int
