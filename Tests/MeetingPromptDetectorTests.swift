@@ -1121,6 +1121,79 @@ func testMeetingPromptDetector() async {
         assertEqual(box.suppression?.reason, .notACall, "ChatGPT in front is still not a call")
     }
 
+    await runSuite("MeetingPromptDetector browser evidence — another browser's Meet shortcut doesn't make a call") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.browserEvidenceTiming = instantBrowserEvidenceTiming
+        detector.frontmostBundleIDProvider = { "com.google.Chrome" }
+        showBrowserTab("ChatGPT", on: detector)
+        detector.noteCallShortcutActivation(bundleID: "net.imput.helium.app.meet", provider: .googleMeet, at: Date())
+        let box = CandidateBox()
+        detector.onPromptRequest = { _ in
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(box.promptCount, 0, "a Helium Meet shortcut must not turn ChatGPT voice in Chrome into a call")
+        assertEqual(box.suppression?.reason, .notACall, "ChatGPT in front is still not a call")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — a Meet shortcut that quit doesn't make a call") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.browserEvidenceTiming = instantBrowserEvidenceTiming
+        detector.frontmostBundleIDProvider = { "net.imput.helium" }
+        showBrowserTab("ChatGPT", on: detector)
+        detector.noteCallShortcutActivation(bundleID: "net.imput.helium.app.meet", provider: .googleMeet, at: Date())
+        detector.noteCallShortcutTermination(bundleID: "net.imput.helium.app.meet")
+        let box = CandidateBox()
+        detector.onPromptRequest = { _ in
+            box.promptCount += 1
+            return true
+        }
+        detector.onPromptSuppressed = { suppression in
+            box.suppression = suppression
+        }
+
+        detector.updateMicInputUsers(["net.imput.helium.helper"])
+        await waitForPromptEvaluation(detector)
+
+        assertEqual(box.promptCount, 0, "a Meet shortcut that already quit must not turn ChatGPT voice into a call")
+        assertEqual(box.suppression?.reason, .notACall, "ChatGPT in front is still not a call")
+    }
+
+    await runSuite("MeetingPromptDetector browser evidence — a title read that never returns stops holding the prompt") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        var timing = instantBrowserEvidenceTiming
+        timing.titleReadGiveUp = 0.2
+        detector.browserEvidenceTiming = timing
+        // An Accessibility read that hangs until the test ends.
+        detector.browserWindowTitlesProvider = { _ in
+            try? await Task.sleep(nanoseconds: 3_600 * 1_000_000_000)
+            return []
+        }
+        let box = CandidateBox()
+        detector.onPromptRequest = { _ in
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["com.google.Chrome.helper"])
+        // The hung read keeps an evaluation in flight, so this can't wait for
+        // the detector to settle; poll the outcome with a deadline instead.
+        for _ in 0..<100 where box.promptCount == 0 {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        assertEqual(box.promptCount, 1, "once the first-read hold runs out, the browser call must prompt without another event")
+    }
+
     await runSuite("MeetingPromptDetector browser evidence — coming back to Meet beats an early ChatGPT glance") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }

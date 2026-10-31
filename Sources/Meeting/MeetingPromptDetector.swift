@@ -154,7 +154,7 @@ final class MeetingPromptDetector {
     var callShortcutLookupDone: Set<String> = []
     /// The latest call shortcut that launched or came forward. Used only when
     /// that was as the mic was taken; an old activation does not count.
-    var recentCallShortcutActivation: (provider: MeetingPromptProvider, at: Date)?
+    var recentCallShortcutActivation: (bundleID: String, provider: MeetingPromptProvider, at: Date)?
     // Set by `adHocCandidate` during one evaluate pass when a browser session's
     // first title read has not landed yet.
     var browserFirstTitleReadPending = false

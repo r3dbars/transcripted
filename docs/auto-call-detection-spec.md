@@ -150,8 +150,9 @@ results below are the provenance for the production monitor design.
     Helium is a Chromium fork. Its mic is held by `net.imput.helium.helper` (same
     shape as Chrome's Audio Service helper), and installed web-app shortcuts use
     `net.imput.helium.app.*`. The `net.imput.helium` family prefix covers both.
-    A calendar prompt's "meeting tab is active" line uses the same prefixes for
-    the frontmost app. That line only decorates a calendar event that is already
+    A calendar prompt's "meeting tab is active" line counts a browser's own app
+    or a Helium web app in front, not a helper and not a Chrome, Edge or Safari
+    web app (that may be Slack or Gmail). That line only decorates a calendar event that is already
     prompting. It does not detect a call by itself.
 - **Self-exclusion:** our bundle ID is `com.justinbetker.draft` (legacy Draft id);
   exclude it by prefix so any future helper process is dropped too.
@@ -592,7 +593,12 @@ twice. "Not now" bought 30 minutes, lived in memory, and reset on relaunch.
    read. A shortcut that opened as the mic was taken (a calendar link, within
    15 s) is a call site too, so Calendar staying in front does not hide it.
    A shortcut left open from earlier does not: ChatGPT voice with Meet sitting
-   in the background stays quiet.
+   in the background stays quiet. Either way the shortcut has to belong to the
+   browser holding the mic (a Helium Meet shortcut says nothing about Chrome),
+   and one that quit no longer counts. Known limitation: bringing the Meet
+   shortcut forward on its landing page while another Helium tab holds the
+   mic prompts, because the shortcut's title can't tell a landing page from a
+   call.
 3. The focused window is a known non-call site (ChatGPT, Claude, Gemini,
    Loom, a mic test...) -> no prompt while it is in front. When it was in
    front within 10 s of the browser taking the mic, no prompt for the rest of
@@ -625,7 +631,8 @@ Titles come from Accessibility (`BrowserWindowTitleReader`), which the app
 holds for paste-back when dictation is on: no new permission, nothing when
 untrusted. The round trips run on a background queue under a 0.3 s overall
 budget; the first read of a session holds the prompt until it lands, or for
-1 s, whichever comes first. A hung read must not keep a real call quiet. Titles
+1 s, whichever comes first; a re-check at the 1 s mark ends the hold even if
+nothing else changes. A hung read must not keep a real call quiet. Titles
 are classified in memory and dropped; only the coarse `call_evidence` enum
 reaches analytics. While a browser holds the mic and nothing is decided, the
 detector re-reads titles every 15 s (every 60 s once it is a non-call site),

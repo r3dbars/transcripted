@@ -115,6 +115,17 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         browserBundleIDPrefixes.contains { bundleID.matchesBundleFamily($0) }
     }
 
+    /// Whether `bundleID` is a browser's own app (not a helper, and not a
+    /// Chrome, Edge or Safari web app, which may be Slack or Gmail), or a
+    /// Helium web app. Helium's Meet shortcut is how calendar links open
+    /// there; its other shortcuts can't be told apart without reading them.
+    static func isMeetingTabHost(_ bundleID: String) -> Bool {
+        if bundleID == "com.apple.WebKit" { return false }
+        if bundleID == "com.google.Chrome.canary" { return true }
+        if bundleID.matchesBundleFamily("net.imput.helium.app") { return true }
+        return browserBundleIDPrefixes.contains(bundleID)
+    }
+
     /// The browser family prefix `bundleID` belongs to (`com.google.Chrome`
     /// for `com.google.Chrome.helper`), or `nil` when it is not a browser.
     /// Used to line a browser's mic process up with its audio-output process

@@ -438,6 +438,12 @@ func testMeetingPromptHeuristics() {
             .calendarPlusRuntimeMatch,
             "Chrome still counts as the meeting tab"
         )
+        for webApp in ["com.google.Chrome.app.slackwebapp", "com.apple.Safari.WebApp.gmail", "com.google.Chrome.helper"] {
+            assertTrue(
+                scored(frontmost: webApp)?.candidate.reason != .calendarPlusRuntimeMatch,
+                "a Chrome or Safari web app or a browser helper in front is not the meeting tab"
+            )
+        }
         assertEqual(
             scored(frontmost: "com.google.Chrome.canary")?.candidate.reason,
             .calendarPlusRuntimeMatch,

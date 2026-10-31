@@ -82,9 +82,16 @@ extension MeetingPromptDetector {
             now: now
         ) else {
             // The first title read of this session is still running, inside
-            // `titleReadGiveUp`. It re-evaluates when it lands. Too brief to
-            // be worth a suppression event.
+            // `titleReadGiveUp`. It re-evaluates when it lands; if it hangs,
+            // the re-check below ends the hold. Too brief to be worth a
+            // suppression event.
             browserFirstTitleReadPending = true
+            if let readStartedAt = browserTitles?.readStartedAt {
+                scheduleBrowserEvidenceRecheck(
+                    at: readStartedAt.addingTimeInterval(browserEvidenceTiming.titleReadGiveUp),
+                    now: now
+                )
+            }
             return nil
         }
 
@@ -215,10 +222,14 @@ extension MeetingPromptDetector {
             browserTitles = BrowserTitleSession(families: families, startedAt: now)
         }
         guard var session = browserTitles else { return nil }
+        // Only a shortcut of the browser holding the mic can claim it: a Meet
+        // shortcut in Helium says nothing about Chrome's mic.
+        let isMicBrowser = { (bundleID: String) in !Self.browserAppFamilies(for: [bundleID]).isDisjoint(with: families) }
+        let recent = recentCallShortcutActivation.flatMap { isMicBrowser($0.bundleID) ? $0 : nil }
         session.claimedShortcut = BrowserCallEvidence.claimedCallShortcut(
-            frontmostShortcut: frontmostBundleID.flatMap { callShortcutProviders[$0] },
-            recentProvider: recentCallShortcutActivation?.provider,
-            recentActivationAt: recentCallShortcutActivation?.at,
+            frontmostShortcut: frontmostBundleID.flatMap { isMicBrowser($0) ? callShortcutProviders[$0] : nil },
+            recentProvider: recent?.provider,
+            recentActivationAt: recent?.at,
             sessionStartedAt: session.startedAt
         )
         browserTitles = session
@@ -319,8 +330,14 @@ extension MeetingPromptDetector {
     func noteCallShortcutActivation(bundleID: String, provider: MeetingPromptProvider, at: Date) {
         callShortcutProviders[bundleID] = provider
         callShortcutLookupDone.insert(bundleID)
-        recentCallShortcutActivation = (provider: provider, at: at)
+        recentCallShortcutActivation = (bundleID: bundleID, provider: provider, at: at)
         scheduleEvaluation()
+    }
+
+    /// A call shortcut quit: it can no longer be the call that is starting.
+    func noteCallShortcutTermination(bundleID: String) {
+        guard recentCallShortcutActivation?.bundleID == bundleID else { return }
+        recentCallShortcutActivation = nil
     }
 
     /// Classify the frontmost app's shortcut URL once, off this pass. The next

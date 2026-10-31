@@ -44,6 +44,18 @@ extension MeetingPromptDetector {
                 }
             }
         }
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            Task { @MainActor [weak self] in
+                guard let app,
+                      let bundleIdentifier = await RunningApplicationsReader.bundleIdentifier(of: app) else { return }
+                self?.noteCallShortcutTermination(bundleID: bundleIdentifier)
+            }
+        })
     }
 
     private func handleWorkspaceApplication(bundleIdentifier: String?) {
