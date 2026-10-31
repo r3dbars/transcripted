@@ -49,7 +49,11 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
 
     func present(page: TranscriptedSettingsPage = .today, source: String = "unknown") {
         guard let window else { return }
-        let frame = plannedFrame(for: window)
+        // Only place a window that isn't up yet. One already on screen (⌘F,
+        // Find, "Open meeting") stays where the person left it, and a full
+        // screen one would otherwise be shrunk back to a centered window.
+        let placesWindow = !window.isVisible && !window.styleMask.contains(.fullScreen)
+        let frame = placesWindow ? plannedFrame(for: window) : window.frame
         if window.frame != frame {
             window.setFrame(frame, display: false)
         }
@@ -73,7 +77,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         window.makeKeyAndOrderFront(nil)
         // Recent macOS can ignore a pre-show setFrame and drop an unplaced
         // window in the bottom-trailing corner. Re-apply after orderFront.
-        if window.frame != frame {
+        if placesWindow, window.frame != frame {
             window.setFrame(frame, display: true)
         }
         NSApp.activate(ignoringOtherApps: true)
