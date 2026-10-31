@@ -160,6 +160,14 @@ final class MeetingPromptDetector {
     // keep the next call of the same kind silent.
     let declinedThisCallLimit: TimeInterval = 8 * 60 * 60
     private let pendingCooldown: TimeInterval = 90
+    // Ad-hoc candidates a Record quieted, so the end of that call can lift
+    // their quiet (`recordedCallSessionEnded`). A calendar event keeps its own.
+    var recordSelectedAdHocCandidateIDs: Set<String> = []
+    // A session ended while still recording; cut Record's quiet once one ends,
+    // or a new one starts, with the recording stopped.
+    var recordedCallQuietCutPending = false
+    var recordedCallEndGrace: TimeInterval = MeetingPromptHeuristics.recordedCallEndGrace
+    var recordedCallQuietEndTask: Task<Void, Never>?
     // One suppression event per candidate + reason per window. It was 90s,
     // which re-sent the same "still snoozed" event every poll for the whole
     // call and made suppressions most of the prompt event volume.
@@ -247,6 +255,8 @@ final class MeetingPromptDetector {
         browserEvidenceRecheckTask?.cancel()
         browserEvidenceRecheckTask = nil
         browserEvidenceRecheckAt = nil
+        recordedCallQuietEndTask?.cancel()
+        recordedCallQuietEndTask = nil
         endBrowserMicSession()
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)

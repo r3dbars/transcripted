@@ -221,10 +221,12 @@ extension MeetingPromptDetector {
             until = runtimeSuppressionEndDate(for: candidate.provider, now: now)
                 ?? now.addingTimeInterval(defaultSnoozeInterval)
             suppressRuntimePrompts(for: candidate.provider, until: until, reason: "record_selected")
+            recordSelectedAdHocCandidateIDs.insert(candidate.id)
         }
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
         cooldownReasons[candidate.id] = "record_selected"
+        recordedCallQuietCutPending = false
     }
 
     /// The Record start `markAccepted` covered did not start. The call is
@@ -232,6 +234,7 @@ extension MeetingPromptDetector {
     /// learned "yes" stays: the user did choose Record for this kind of call.
     func markRecordStartFailed(candidate: Candidate) {
         guard let undo = recordStartUndo.removeValue(forKey: candidate.id) else { return }
+        recordSelectedAdHocCandidateIDs.remove(candidate.id)
         if let session = detectedCallSession, session.startedAt == undo.callStartedAt {
             detectedCallSession?.sawMeetingRecording = undo.sawMeetingRecording
         }
@@ -243,6 +246,72 @@ extension MeetingPromptDetector {
         if runtimeSuppressionReasons[candidate.provider] == "record_selected" {
             runtimeSuppressedUntil[candidate.provider] = undo.runtimeSuppressedUntil
             runtimeSuppressionReasons[candidate.provider] = undo.runtimeSuppressionReason
+        }
+    }
+
+    /// The detected-call session ended. Record's quiet (the matching calendar
+    /// event's end, or 30 minutes) is there so the recorded call doesn't prompt
+    /// again, not the next one. If the recording has stopped, cut it to
+    /// `recordedCallEndGrace` and re-check then, so a back-to-back call still
+    /// prompts and a mic flap at hang-up doesn't. If it's still running, this
+    /// may be a mute that let go of the mic (Safari does), so keep the quiet
+    /// until a session ends, or a new one starts, with the recording stopped.
+    func recordedCallSessionEnded(now: Date) {
+        guard hasRecordedCallQuiet else { return }
+        if isMeetingRecordingActive {
+            recordedCallQuietCutPending = true
+            return
+        }
+        cutRecordedCallQuiet(until: now.addingTimeInterval(recordedCallEndGrace), now: now)
+    }
+
+    /// A detected-call session started. The last one ended while still
+    /// recording and that recording has stopped since: this is a new call, so
+    /// it prompts now.
+    func recordedCallSessionStarted(now: Date) {
+        guard recordedCallQuietCutPending, !isMeetingRecordingActive else { return }
+        cutRecordedCallQuiet(until: now, now: now)
+    }
+
+    private var hasRecordedCallQuiet: Bool {
+        runtimeSuppressionReasons.values.contains("record_selected")
+            || recordSelectedAdHocCandidateIDs.contains { cooldownReasons[$0] == "record_selected" }
+    }
+
+    private var isMeetingRecordingActive: Bool {
+        switch currentOwnCaptureActivity() {
+        case .meetingRecording, .unknown: true
+        case .none, .dictation: false
+        }
+    }
+
+    /// Cuts Record's quiet to `until`. A recorded calendar event keeps its own
+    /// snooze, so its reminder doesn't come back.
+    private func cutRecordedCallQuiet(until: Date, now: Date) {
+        recordedCallQuietCutPending = false
+        for (provider, reason) in runtimeSuppressionReasons where reason == "record_selected" {
+            if let current = runtimeSuppressedUntil[provider], current > until {
+                runtimeSuppressedUntil[provider] = until
+            }
+        }
+        for id in recordSelectedAdHocCandidateIDs where cooldownReasons[id] == "record_selected" {
+            if let current = snoozedUntil[id], current > until {
+                snoozedUntil[id] = until
+            }
+            if let current = pendingUntil[id], current > until {
+                pendingUntil[id] = until
+            }
+        }
+        recordSelectedAdHocCandidateIDs.removeAll()
+        recordedCallQuietEndTask?.cancel()
+        recordedCallQuietEndTask = nil
+        let delay = until.timeIntervalSince(now)
+        guard delay > 0 else { return }
+        recordedCallQuietEndTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled, let self else { return }
+            self.recordedCallQuietEndTask = nil
+            self.scheduleEvaluation()
         }
     }
 
