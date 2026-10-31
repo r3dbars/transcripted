@@ -18,6 +18,11 @@ struct DetectedMeetingPromptWiring {
     var onDismiss: (MeetingPromptDetector.Candidate) -> Void
     var onExpired: (MeetingPromptDetector.Candidate) -> Void
     var onRemind: (MeetingPromptDetector.Candidate) -> Void
+    /// Defaults to prompt so existing installs and tests keep today's island.
+    var decisionForCandidate: (MeetingPromptDetector.Candidate) -> MeetingAutoRecordPolicy.Decision = { _ in .prompt }
+    /// Starts capture through the Record path without showing the prompt.
+    /// Return false when kickoff bailed so the island prompt is shown instead.
+    var onAutoStart: ((MeetingPromptDetector.Candidate) -> Bool)? = nil
 
     func install(on detector: MeetingPromptDetector, pill: CapturePillController) {
         pill.onRecord = onRecord
@@ -28,9 +33,10 @@ struct DetectedMeetingPromptWiring {
         let onboardingCompleted = onboardingCompleted
         let detailOverride = detailOverride
         let onShown = onShown
-        detector.onPromptRequest = { [weak pill] candidate in
-            guard onboardingCompleted() else { return false }
-            guard let pill else { return false }
+        let decisionForCandidate = decisionForCandidate
+        let onAutoStart = onAutoStart
+        let presentPrompt: (MeetingPromptDetector.Candidate) -> MeetingPromptDetector.RequestResult = { [weak pill] candidate in
+            guard let pill else { return .skipped }
             let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
                 for: candidate.reason,
                 calendarDefault: 30
@@ -41,7 +47,77 @@ struct DetectedMeetingPromptWiring {
                 detailOverride: detailOverride()
             )
             if presented { onShown(candidate) }
-            return presented
+            return presented ? .presented : .skipped
         }
+        detector.onPromptFallback = { [weak detector] candidate in
+            guard onboardingCompleted() else { return .skipped }
+            // A kickoff that bailed because capture is already running must
+            // not stack Record / Not now on the live recording.
+            if detector?.shouldSkipPromptEvaluation?() == true {
+                return .skipped
+            }
+            return presentPrompt(candidate)
+        }
+        detector.onPromptRequest = { [weak detector] candidate in
+            guard onboardingCompleted() else { return .skipped }
+            switch decisionForCandidate(candidate) {
+            case .none:
+                return .skipped
+            case .autoStart:
+                if onAutoStart?(candidate) == true {
+                    return .autoStarted
+                }
+            case .prompt:
+                break
+            }
+            if detector?.shouldSkipPromptEvaluation?() == true {
+                return .skipped
+            }
+            return presentPrompt(candidate)
+        }
+    }
+
+    static func autoRecordDecision(
+        for candidate: MeetingPromptDetector.Candidate,
+        otherCaptureActive: Bool,
+        autoRecordEnabled: Bool = AutoRecordDetectedCallsPreferences.isEnabled(),
+        microphoneGranted: Bool = TranscriptedPermissionAccess.isGranted(.microphone),
+        systemAudioGranted: Bool? = nil,
+        liveSystemAudio: (() -> Bool)? = nil,
+        cachedSystemAudio: (() -> Bool)? = nil
+    ) -> MeetingAutoRecordPolicy.Decision {
+        let granted: Bool
+        if let systemAudioGranted {
+            granted = systemAudioGranted
+        } else if autoRecordEnabled {
+            granted = liveSystemAudio?() ?? liveSystemAudioGranted()
+        } else {
+            granted = cachedSystemAudio?() ?? TranscriptedPermissionAccess.systemAudioRecordingGranted()
+        }
+        return MeetingAutoRecordPolicy.decision(
+            for: MeetingAutoRecordPolicy.Request(
+                autoRecordEnabled: autoRecordEnabled,
+                evidence: candidate.callEvidence,
+                provider: candidate.provider,
+                reason: candidate.reason,
+                microphoneGranted: microphoneGranted,
+                systemAudioGranted: granted,
+                otherCaptureActive: otherCaptureActive,
+                holdsMicrophone: candidate.holdsMicrophone,
+                isFocusedFrontWindow: candidate.isFocusedFrontWindow,
+                isMeetPreJoin: candidate.isMeetPreJoin,
+                evidenceAge: candidate.evidenceAge,
+                isPlayingCallAudio: candidate.isPlayingCallAudio,
+                borrowedProofSource: candidate.borrowedProofSource,
+                nativeProcessHoldsMicrophone: candidate.nativeProcessHoldsMicrophone
+            )
+        )
+    }
+
+    /// Prompt-free live TCC peek. A cached UserDefaults grant is not enough:
+    /// auto-start must not raise the macOS box from the background. Does not
+    /// rewrite the saved grant.
+    static func liveSystemAudioGranted() -> Bool {
+        TranscriptedPermissionAccess.peekSystemAudioRecordingStatusFromSystem() == .authorized
     }
 }

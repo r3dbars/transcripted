@@ -73,11 +73,12 @@ extension MeetingPromptDetector {
             guard provider.supportsRuntimeOnlyPrompt else { return nil }
             guard provider.activeBundleIdentifiers.contains(where: runningBundleIDs.contains) else { return nil }
             if let suppressedUntil = runtimeSuppressedUntil[provider], suppressedUntil > now {
+                let cooldown = runtimeSuppressionReasons[provider]
                 recordSuppression(
                     candidate: runtimeCandidate(for: provider, now: now),
-                    reason: .runtimeSuppressed,
+                    reason: MeetingAutoRecordPolicy.runtimeSuppressionReason(cooldownReason: cooldown),
                     now: now,
-                    cooldownReason: runtimeSuppressionReasons[provider]
+                    cooldownReason: cooldown
                 )
                 return nil
             }

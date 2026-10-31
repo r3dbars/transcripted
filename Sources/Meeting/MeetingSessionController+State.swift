@@ -8,24 +8,10 @@
 // and the model downloader. Exposes @Published state for the meeting UI to
 // bind against.
 //
-// Boot sequence:
-//   1. init() constructs all Core services with app-owned CoreStoragePaths
-//      so meeting captures follow the selected capture library while speakers DB,
-//      stats DB, failed-queue, logs, and scratch audio stay under the app-owned
-//      Transcripted Application Support folders.
-//   2. prepareModels() loads the selected STT model + offline PyAnnote/WeSpeaker diarization.
-//      TranscriptedAppState runs it quietly at launch. Optional streaming
-//      diarization warms only when bundled and never blocks the current
-//      meeting transcript path.
-//   3. startRecording() begins capture via MeetingCaptureBridge. It never waits
-//      on step 2; models that are still loading catch up in the background.
-//   4. stopRecording() awaits capture files, then either starts a background
-//      transcription immediately or enqueues it behind the current one.
-//      TranscriptionTaskManager still runs one diarize→transcribe→save
-//      pipeline at a time and writes a .md to MeetingStoragePaths.transcriptsFolder.
-//
-// The session controller does NOT own a hotkey or UI — Lane C (meeting-ui)
-// wires those up.
+// Boot: init() builds Core services with app-owned paths; prepareModels()
+// loads STT + diarization in the background; startRecording() never waits
+// on that; stopRecording() then transcribes or enqueues.
+// The session controller does not own a hotkey or UI.
 import AppKit
 import Combine
 import Foundation
@@ -182,14 +168,14 @@ final class MeetingSessionController: ObservableObject {
     var activeDetectedPromptTranscriptionTelemetryProperties: [String: String]?
     var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     var activeRecordingTrigger: StartTrigger = .unknown
+    var activeRecordingWasAutoStarted = false
+    var onAutoStartedRecordingWillEnd: (() -> Void)?
     var activeRecordingIdentity: UUID?
     /// Set while stop/cancel tears down, so a borrowed-mic claim stays current until dictation is handed back.
     var stoppingRecordingIdentity: UUID?
     var micBoostPromptRecordingIdentity: UUID?
     var micBoostPromptOutcome: MeetingMicBoostPromptOutcome = .notShown
-    /// The recording an accepted Boost is still trying to arm. Stop doesn't
-    /// clear it, so a Boost that never applied before Stop is saved as
-    /// `shown`, not `accepted`.
+    /// Boost still arming; Stop keeps it so an unapplied Boost is `shown`, not `accepted`.
     var micBoostArmPendingIdentity: UUID?
     /// When the current "can't hear the call" stretch began. Wall clock, not
     /// `recordingDuration`, which reads 0 once an unexpected stop reset it.
@@ -657,12 +643,24 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
+    func finishAutoStartedRecording(stopReason: StopReason? = nil, cancelReason: RecordingCancelReason? = nil) {
+        if MeetingAutoRecordPolicy.recordsDeclineOnEnd(
+            wasAutoStarted: activeRecordingWasAutoStarted,
+            stopReason: stopReason?.rawValue,
+            cancelReason: cancelReason?.rawValue
+        ) {
+            onAutoStartedRecordingWillEnd?()
+        }
+        activeRecordingWasAutoStarted = false
+    }
+
     func clearActiveRecordingIdentity(keepingForStopTeardown: Bool = false) {
         stoppingRecordingIdentity = keepingForStopTeardown ? activeRecordingIdentity : nil
         if let identity = activeRecordingIdentity {
             LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
         }
         activeRecordingIdentity = nil
+        finishAutoStartedRecording()
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil

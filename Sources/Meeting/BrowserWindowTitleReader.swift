@@ -39,6 +39,7 @@ enum BrowserWindowTitleReader {
         guard !families.isEmpty, AXIsProcessTrusted() else { return [] }
 
         let appFamilies = Set(families.map(MeetingPromptProvider.browserAppFamily(forBundleFamily:)))
+        let frontmostPID = NSWorkspace.shared.frontmostApplication?.processIdentifier
         // Bundle IDs are read off the main thread: that read can block on
         // LaunchServices.
         let pids: [pid_t] = await RunningApplicationsReader.applications().compactMap { app in
@@ -55,14 +56,20 @@ enum BrowserWindowTitleReader {
                 var titles: [BrowserWindowTitle] = []
                 for pid in pids {
                     guard Date() < deadline else { break }
-                    titles.append(contentsOf: windowTitles(forPID: pid, deadline: deadline))
+                    titles.append(contentsOf: windowTitles(
+                        forPID: pid, frontmostPID: frontmostPID, deadline: deadline
+                    ))
                 }
                 continuation.resume(returning: titles)
             }
         }
     }
 
-    private static func windowTitles(forPID pid: pid_t, deadline: Date) -> [BrowserWindowTitle] {
+    private static func windowTitles(
+        forPID pid: pid_t,
+        frontmostPID: pid_t?,
+        deadline: Date
+    ) -> [BrowserWindowTitle] {
         let appElement = AXUIElementCreateApplication(pid)
 
         var focusedWindow: AXUIElement?
@@ -81,15 +88,29 @@ enum BrowserWindowTitleReader {
             // No window list (or no time left for it). The focused window
             // alone is still useful.
             guard let focusedWindow, let title = title(of: focusedWindow, deadline: deadline) else { return [] }
-            return [BrowserWindowTitle(title: title, isFocused: true)]
+            return [BrowserWindowTitle(
+                title: title,
+                isFocused: true,
+                isSystemFront: BrowserWindowTitle.isSystemFront(
+                    appPID: pid, frontmostPID: frontmostPID, windowIsAppFocused: true
+                )
+            )]
         }
 
         var titles: [BrowserWindowTitle] = []
         for window in windows.prefix(maxWindowsPerApp) {
             guard Date() < deadline else { break }
             guard let title = title(of: window, deadline: deadline) else { continue }
-            let isFocused = focusedWindow.map { CFEqual($0, window) } ?? false
-            titles.append(BrowserWindowTitle(title: title, isFocused: isFocused))
+            let windowIsAppFocused = focusedWindow.map { CFEqual($0, window) } ?? false
+            titles.append(BrowserWindowTitle(
+                title: title,
+                isFocused: windowIsAppFocused,
+                isSystemFront: BrowserWindowTitle.isSystemFront(
+                    appPID: pid,
+                    frontmostPID: frontmostPID,
+                    windowIsAppFocused: windowIsAppFocused
+                )
+            ))
         }
         return titles
     }

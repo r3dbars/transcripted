@@ -172,15 +172,10 @@ final class MeetingOverlayController: NSObject {
         guard let session = meetingSession else { return }
         Task { [weak session] in
             guard let session else { return }
-            switch session.state {
-            case .idle, .ready, .transcribing, .error:
-                await session.startRecording(trigger: .hotkey)
-            case .loadingModels, .startingRecording, .stoppingRecording:
-                // Still loading, or a start/stop is already in flight —
-                // ignore to avoid double-starts/double-stops.
-                break
-            case .recording:
-                await session.stopRecording(reason: .hotkeyToggle)
+            switch MeetingHotkeyTogglePolicy.action(for: session.state, startCallInFlight: session.startRecordingCallInFlight) {
+            case .start: await session.startRecording(trigger: .hotkey)
+            case .stop: await session.stopRecording(reason: .hotkeyToggle)
+            case .ignore: break
             }
         }
     }
@@ -743,27 +738,5 @@ final class MeetingOverlayController: NSObject {
     private func pushAudioLevelsToView() {
         guard islandShown else { return }
         island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
-    }
-}
-
-@available(macOS 14.0, *)
-private extension MeetingPromptOverlayPromptState {
-    init(_ state: MeetingOverlayController.OverlayState) {
-        switch state {
-        case .idle:
-            self = .idle
-        case .prompt:
-            self = .prompt
-        case .preparing:
-            self = .preparing
-        case .recording:
-            self = .recording
-        case .transcribing:
-            self = .transcribing
-        case .saved:
-            self = .saved
-        case .error:
-            self = .error
-        }
     }
 }

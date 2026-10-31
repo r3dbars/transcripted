@@ -34,6 +34,7 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         let recordingSnapshot = makeRecordingStopSnapshot()
+        finishAutoStartedRecording(cancelReason: reason)
         clearActiveRecordingIdentity(keepingForStopTeardown: true)
 
         DiagnosticsTrail.record(

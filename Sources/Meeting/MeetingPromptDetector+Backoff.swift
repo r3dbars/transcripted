@@ -64,6 +64,36 @@ extension MeetingPromptDetector {
         learnedBackoff.reset()
     }
 
+    /// Stop or Discard on an auto-started recording: stay quiet for the
+    /// providers in this session until it ends. Does not stamp an 8-hour
+    /// runtime suppress on every provider.
+    func declineRestOfDetectedCall(now: Date = Date()) {
+        guard var session = detectedCallSession else { return }
+        session.userDeclined = true
+        session.autoStartDeclinedProviders.formUnion(session.providers)
+        if let named = session.namedBrowserProvider {
+            session.autoStartDeclinedProviders.insert(named)
+        }
+        for kind in session.candidateKinds {
+            session.declinedKinds[kind] = now
+        }
+        let wasBrowser = session.providers.contains(.googleMeet)
+            || session.namedBrowserProvider != nil
+            || session.sawBrowserCallTitle
+        if wasBrowser {
+            for kind in MeetingPromptLearnedBackoff.browserKinds {
+                session.declinedKinds[kind] = now
+            }
+            if var titles = browserTitles {
+                for kind in MeetingPromptLearnedBackoff.browserKinds {
+                    titles.declinedKinds[kind] = now
+                }
+                browserTitles = titles
+            }
+        }
+        detectedCallSession = session
+    }
+
     /// Consecutive explicit dismissals for `provider` since the last accepted
     /// recording, for the dismiss-streak telemetry bucket.
     func dismissStreak(for provider: MeetingPromptProvider) -> Int {
@@ -225,6 +255,29 @@ extension MeetingPromptDetector {
         snoozedUntil[candidate.id] = until
         pendingUntil[candidate.id] = until
         cooldownReasons[candidate.id] = "record_selected"
+    }
+
+    /// Auto-start already reported `.autoStarted` but capture never began.
+    /// Undo the early `markAccepted`, drop the 90-second pending window, then
+    /// show the island prompt so the user is not left in a silent wait.
+    func recoverFailedAutoStart(candidate: Candidate, now: Date = Date()) {
+        markRecordStartFailed(candidate: candidate)
+        snoozedUntil[candidate.id] = nil
+        pendingUntil[candidate.id] = nil
+        cooldownReasons[candidate.id] = nil
+        runtimeSuppressedUntil[candidate.provider] = nil
+        runtimeSuppressionReasons[candidate.provider] = nil
+        if detectedCallSession?.sawMeetingRecording == true {
+            detectedCallSession?.sawMeetingRecording = false
+        }
+        switch onPromptFallback?(candidate) ?? .skipped {
+        case .presented:
+            pendingUntil[candidate.id] = now.addingTimeInterval(pendingCooldown)
+            cooldownReasons[candidate.id] = "prompt_pending"
+            detectedCallSession?.promptShown = true
+        case .autoStarted, .skipped:
+            break
+        }
     }
 
     /// The Record start `markAccepted` covered did not start. The call is

@@ -222,11 +222,36 @@ extension MeetingOverlayController {
             duration: currentDuration,
             callAudioNote: callAudioNote,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
-            asksAboutCallAudio: islandCallAudioAskPending
+            asksAboutCallAudio: islandCallAudioAskPending,
+            autoRecordNote: autoRecordNoteVisible
+        )
+    }
+
+    /// Quiet for a few seconds after an opt-in auto-start. Yields to the
+    /// call-audio ask so that prompt still owns the island.
+    var autoRecordNoteVisible: Bool {
+        MeetingAutoRecordNoteCopy.isVisible(
+            duration: currentDuration,
+            asksAboutCallAudio: islandCallAudioAskPending,
+            noteEnabled: state == .recording && meetingSession?.activeRecordingWasAutoStarted == true
         )
     }
 
     func handleIslandAction(_ action: NotchIslandAction) {
+        switch MeetingAutoRecordIslandActionPolicy.route(
+            action: action,
+            noteVisible: autoRecordNoteVisible,
+            overlayPromptActive: state == .prompt || islandCallAudioAskPending
+        ) {
+        case .stop:
+            handleCloseTapped()
+            return
+        case .discard:
+            handleDiscardRequested()
+            return
+        case .inherit:
+            break
+        }
         switch action {
         case .meetingCallAudioDismiss:
             islandCallAudioAskPending = false

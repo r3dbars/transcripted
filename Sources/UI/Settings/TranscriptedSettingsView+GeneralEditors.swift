@@ -46,6 +46,21 @@ extension TranscriptedSettingsView {
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
             ),
+            autoRecordDetectedCallsEnabled: Binding(
+                get: { autoDetectCallsEnabled && autoRecordDetectedCallsEnabled },
+                set: { newValue in
+                    guard autoDetectCallsEnabled else { return }
+                    if newValue, AutoRecordDetectedCallsConsentPolicy.shouldConfirm(
+                        acknowledged: AutoRecordDetectedCallsPreferences.hasAcknowledgedConsent()
+                    ) {
+                        confirmsAutoRecordConsent = true
+                        return
+                    }
+                    autoRecordDetectedCallsEnabled = newValue
+                    trackSettingsToggle("auto_record_detected_calls", enabled: newValue, page: .general)
+                    AutoRecordDetectedCallsPreferences.setEnabled(newValue)
+                }
+            ),
             correctionsStatusLine: customDictionaryStatusLine,
             onTrackAction: { actionID in
                 trackSettingsAction(actionID, page: .general)
@@ -77,6 +92,21 @@ extension TranscriptedSettingsView {
             reportingEditor: { generalReportingEditor },
             developerPreviewEditor: { DeveloperPreviewSettingsRows() }
         )
+        .confirmationDialog(
+            AutoRecordDetectedCallsConsentPolicy.title,
+            isPresented: $confirmsAutoRecordConsent,
+            titleVisibility: .visible
+        ) {
+            Button(AutoRecordDetectedCallsConsentPolicy.confirmTitle) {
+                AutoRecordDetectedCallsPreferences.acknowledgeConsent()
+                autoRecordDetectedCallsEnabled = true
+                trackSettingsToggle("auto_record_detected_calls", enabled: true, page: .general)
+                AutoRecordDetectedCallsPreferences.setEnabled(true)
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(AutoRecordDetectedCallsConsentPolicy.message)
+        }
         .sheet(isPresented: $showCorrectionsSheet) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
