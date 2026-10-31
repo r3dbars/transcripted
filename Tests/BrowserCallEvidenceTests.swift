@@ -171,6 +171,115 @@ func testBrowserCallEvidence() {
         )
     }
 
+    runSuite("BrowserCallEvidence.callShortcutProvider — a Meet shortcut URL is Google Meet") {
+        assertEqual(
+            BrowserCallEvidence.callShortcutProvider(forURL: "https://meet.google.com/landing?lfhs=2"),
+            .googleMeet,
+            "a Helium Meet shortcut is a Google Meet call site"
+        )
+        assertEqual(
+            BrowserCallEvidence.callShortcutProvider(forURL: "https://www.meet.google.com/abc-defg-hij"),
+            .googleMeet,
+            "a shortcut to one meeting is still Google Meet"
+        )
+        assertEqual(
+            BrowserCallEvidence.callShortcutProvider(forURL: "https://chat.google.com/"),
+            nil,
+            "Google Chat is not a call shortcut"
+        )
+        assertEqual(
+            BrowserCallEvidence.callShortcutProvider(forURL: "https://calendar.google.com/calendar/u/0/r"),
+            nil,
+            "Google Calendar is not a call shortcut"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.claimedCallShortcut — a shortcut opened with the mic beats a background non-call window") {
+        let started = Date(timeIntervalSince1970: 1_000)
+        assertEqual(
+            BrowserCallEvidence.claimedCallShortcut(
+                frontmostShortcut: nil,
+                recentProvider: .googleMeet,
+                recentActivationAt: started.addingTimeInterval(-5),
+                sessionStartedAt: started
+            ),
+            .googleMeet,
+            "a Meet shortcut that opened as the mic was taken is the call, even if Calendar stays in front"
+        )
+        assertEqual(
+            BrowserCallEvidence.claimedCallShortcut(
+                frontmostShortcut: .googleMeet,
+                recentProvider: nil,
+                recentActivationAt: nil,
+                sessionStartedAt: started
+            ),
+            .googleMeet,
+            "the Meet shortcut the user is in is the call even without a fresh activation"
+        )
+        assertEqual(
+            BrowserCallEvidence.claimedCallShortcut(
+                frontmostShortcut: nil,
+                recentProvider: .googleMeet,
+                recentActivationAt: started.addingTimeInterval(-3_600),
+                sessionStartedAt: started
+            ),
+            nil,
+            "a Meet shortcut left open from an hour ago does not turn ChatGPT voice into a call"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.verdictBeforeTitleReadLands — a hung title read does not hold the prompt") {
+        assertEqual(
+            BrowserCallEvidence.verdictBeforeTitleReadLands(pendingFor: 0.2, giveUp: 1),
+            nil,
+            "the first read still holds the prompt while it is in flight"
+        )
+        assertEqual(
+            BrowserCallEvidence.verdictBeforeTitleReadLands(pendingFor: 1, giveUp: 1),
+            .unknown,
+            "once the hold runs out the timing rules start, instead of waiting on a hung read"
+        )
+    }
+
+    runSuite("BrowserWindowTitleReader — a frontmost Meet shortcut is the focused window") {
+        let meet: pid_t = 10
+        let helium: pid_t = 20
+        let chat: pid_t = 30
+        assertEqual(
+            BrowserWindowTitleReader.readingOrder(pids: [helium, chat, meet], frontmostPID: meet),
+            [meet, helium, chat],
+            "the shortcut the user is in is read first so the title budget is not spent on the main browser"
+        )
+        assertEqual(
+            BrowserWindowTitleReader.readingOrder(pids: [helium, chat], frontmostPID: meet),
+            [helium, chat],
+            "an unrelated frontmost app does not reorder the browsers"
+        )
+        assertTrue(
+            BrowserWindowTitleReader.isUserFocused(appPID: meet, frontmostPID: meet),
+            "the Meet shortcut the user is in is the focused window"
+        )
+        assertFalse(
+            BrowserWindowTitleReader.isUserFocused(appPID: helium, frontmostPID: meet),
+            "a background Helium window is not the focused window"
+        )
+        assertFalse(
+            BrowserWindowTitleReader.isUserFocused(appPID: meet, frontmostPID: nil),
+            "with no frontmost app, no window counts as focused"
+        )
+    }
+
+    runSuite("BrowserCallEvidence.classify — a background non-call window does not veto a frontmost Meet shortcut") {
+        assertEqual(
+            BrowserCallEvidence.classify([
+                BrowserWindowTitle(title: "ChatGPT", isFocused: false),
+                BrowserWindowTitle(title: "Google Meet", isFocused: true),
+            ]),
+            .callSite(provider: .googleMeet),
+            "the Meet shortcut in front is a call site even if another Helium window is ChatGPT"
+        )
+    }
+
     runSuite("BrowserCallEvidence.classify — only the focused window can say not a call") {
         let windows = [
             BrowserWindowTitle(title: "ChatGPT", isFocused: false),
