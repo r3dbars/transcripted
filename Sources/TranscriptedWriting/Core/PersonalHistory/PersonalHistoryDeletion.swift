@@ -214,7 +214,7 @@ public struct PersonalHistoryCaretContinuity: Equatable, Sendable {
         }
         let caret = selection.location
         let decision: Decision
-        if let current = chain, continues(current, bundle: bundle, caret: caret) {
+        if let current = chain, continues(current, bundle: bundle, selection: selection) {
             decision = .continues
         } else {
             decision = chain == nil && selection.length == 0 ? .continues : .breaks
@@ -233,7 +233,7 @@ public struct PersonalHistoryCaretContinuity: Equatable, Sendable {
     /// end of the keyboard's own text (no selection).
     public func isAtOwnTextEnd(bundle: String, selection: NSRange) -> Bool {
         guard let chain, selection.location != NSNotFound, selection.length == 0 else { return false }
-        return continues(chain, bundle: bundle, caret: selection.location)
+        return continues(chain, bundle: bundle, selection: selection)
     }
 
     /// A Backspace at the end of the keyboard's text removed `utf16Length`
@@ -249,8 +249,14 @@ public struct PersonalHistoryCaretContinuity: Equatable, Sendable {
         chain = nil
     }
 
-    private func continues(_ chain: Chain, bundle: String, caret: Int) -> Bool {
+    private func continues(_ chain: Chain, bundle: String, selection: NSRange) -> Bool {
         guard chain.bundle == bundle else { return false }
+        let caret = selection.location
+        // A selection is replaced by the key. One that starts at the end of
+        // the keyboard's text is the host's own completion after it (Chrome's
+        // omnibox); one that starts earlier covers text the keyboard typed,
+        // so the saved line no longer matches the field.
+        guard selection.length == 0 else { return caret == chain.end }
         return (chain.lastReported...chain.end).contains(caret) || chain.recentEnds.contains(caret)
     }
 }
