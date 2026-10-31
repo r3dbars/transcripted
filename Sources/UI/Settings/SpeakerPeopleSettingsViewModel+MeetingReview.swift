@@ -61,6 +61,9 @@ extension SpeakerPeopleSettingsViewModel {
     /// Done on the top card. Its answers wait out Undo, then save. A card
     /// still waiting on Undo saves now.
     func finishMeeting(_ call: SpeakerPendingMeetingGroup, updates: [SpeakerReviewUpdate]) {
+        // A second Done (or a Skip) on a card already finished, e.g. a click
+        // while it animates away, must not save it twice.
+        guard !meetingReview.heldOutCallKeys.contains(call.id) else { return }
         meetingSaveError = nil
         let steps = SpeakerMeetingReviewPolicy.steps(for: updates, existingNames: meetingReviewExistingNames())
         let finished = SpeakerMeetingReviewState.Finished(
@@ -107,6 +110,7 @@ extension SpeakerPeopleSettingsViewModel {
     /// Its other voices move to Not named yet. If an answer doesn't save, the
     /// meeting isn't skipped: its card comes back with a note.
     func skipMeeting(_ call: SpeakerPendingMeetingGroup, updates: [SpeakerReviewUpdate]) {
+        guard !meetingReview.heldOutCallKeys.contains(call.id) else { return }
         meetingSaveError = nil
         let steps = SpeakerMeetingReviewPolicy.steps(for: updates, existingNames: meetingReviewExistingNames())
         meetingReview.skipped(callKey: call.id)

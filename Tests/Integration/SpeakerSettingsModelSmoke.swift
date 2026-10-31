@@ -411,6 +411,12 @@ import TranscriptedCore
         check(model.reviewStack.calls.isEmpty && model.meetingReview.finished?.names == ["Rosa Diaz"],
             "Done takes the card off the stack and shows who was named")
         check(fixture.database.getSpeaker(id: voice.id)?.displayName == nil, "nothing saves while Undo is up")
+        let finishedToken = model.meetingReview.finished?.token
+        model.finishMeeting(call, updates: [answer])
+        model.skipMeeting(call, updates: [answer])
+        check(model.meetingReview.finished?.token == finishedToken && model.meetingReview.meetingsDone == 1,
+            "a second Done or a Skip on the finished card changes nothing")
+        check(fixture.database.getSpeaker(id: voice.id)?.displayName == nil, "a second Done doesn't save past Undo")
 
         model.undoFinishedMeeting()
         check(model.reviewStack.calls.map(\.id) == [call.id] && model.meetingReview.meetingsDone == 0,
