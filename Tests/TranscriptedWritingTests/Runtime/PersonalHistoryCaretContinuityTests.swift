@@ -161,6 +161,14 @@ struct PersonalHistoryCaretContinuityTests {
         #expect(keyboard.savedText() == "pebble harbor\nx")
     }
 
+    @Test("Typing over a selected word the keyboard just typed starts a new segment")
+    func selectionOverOwnTextBreaks() {
+        var keyboard = Self.typeInOneGo("the cat", into: .keepsUp)
+        keyboard.type("d", at: NSRange(location: 4, length: 3))
+        #expect(keyboard.chains == 1)
+        #expect(keyboard.savedText() == "the cat\nd")
+    }
+
     @Test("A caret past the keyboard's own text, or another app, starts a new segment")
     func caretAheadOrOtherAppBreaks() {
         var continuity = PersonalHistoryCaretContinuity()

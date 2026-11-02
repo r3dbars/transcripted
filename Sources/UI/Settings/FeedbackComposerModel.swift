@@ -67,6 +67,9 @@ final class FeedbackComposerModel: ObservableObject {
     }
 
     func open(area: String) {
+        // A report that was already sent is finished: the next open starts a
+        // fresh one rather than showing the old success screen.
+        if step == .sent { reset() }
         // Reopening a draft must not change what the person already reviewed.
         guard message.isEmpty, attachments.isEmpty, step == .compose else { return }
         self.area = area
