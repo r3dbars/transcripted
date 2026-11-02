@@ -106,9 +106,12 @@ enum MeetingPromptCalendarScoring {
             return "\(provider.displayName) is open"
         }
 
+        // A browser's own app, or a Helium web app (`net.imput.helium.app.*`,
+        // how a calendar link opens Meet there). Not every Chrome or Safari
+        // web app: a Slack shortcut in front is not the meeting tab.
         if provider.browserHosted,
            let frontmostBundleID = runtimeSnapshot.frontmostBundleID,
-           MeetingPromptRuntimeSnapshot.browserBundleIdentifiers.contains(frontmostBundleID) {
+           MeetingPromptProvider.isMeetingTabHost(frontmostBundleID) {
             return "meeting tab is active"
         }
 
