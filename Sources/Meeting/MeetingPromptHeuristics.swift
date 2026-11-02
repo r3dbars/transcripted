@@ -462,6 +462,9 @@ enum MeetingPromptHeuristics {
     static let runtimeActivityFreshness: TimeInterval = 5 * 60
     static let calendarReminderLeadTime: TimeInterval = 60
     static let calendarReminderPostStartGrace: TimeInterval = 5 * 60
+    // A Record keeps its call quiet until that call ends, then this long, so a
+    // mic flap at hang-up doesn't prompt but the next call does.
+    static let recordedCallEndGrace: TimeInterval = 60
 
     // MARK: Unattended prompt expiry (countdown ran out, nobody clicked)
     //
