@@ -44,19 +44,19 @@ enum WritingDemoScript {
             app: "Slack",
             symbolName: "number",
             typed: "Sounds good, I can ",
-            suggestion: "take a look after lunch"
+            suggestion: "jump on a quick call at three"
         ),
         Scene(
             app: "Mail",
             symbolName: "envelope",
             typed: "Thanks for sending this over. I'll ",
-            suggestion: "review it and reply tomorrow"
+            suggestion: "share my notes by Friday"
         ),
         Scene(
             app: "Notes",
             symbolName: "note.text",
             typed: "Next step: follow up with ",
-            suggestion: "the design team on Monday"
+            suggestion: "the whole team about the launch"
         ),
     ]
 
