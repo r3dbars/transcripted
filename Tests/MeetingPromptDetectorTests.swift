@@ -871,7 +871,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
@@ -901,7 +901,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
@@ -928,7 +928,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
@@ -969,7 +969,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
 
         detector.updateMicInputUsers(["us.zoom.xos"])
@@ -1213,7 +1213,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
         detector.onPromptSuppressed = { suppression in
             box.suppression = suppression
@@ -1248,7 +1248,7 @@ func testMeetingPromptDetector() async {
         let box = CandidateBox()
         detector.onPromptRequest = { candidate in
             box.promptCount += 1
-            return true
+            return .presented
         }
         detector.onPromptSuppressed = { suppression in
             box.suppression = suppression
@@ -1271,7 +1271,7 @@ func testMeetingPromptDetector() async {
         let box = CandidateBox()
         detector.onPromptRequest = { _ in
             box.promptCount += 1
-            return true
+            return .presented
         }
         detector.onPromptSuppressed = { suppression in
             box.suppression = suppression
@@ -1295,7 +1295,7 @@ func testMeetingPromptDetector() async {
         let box = CandidateBox()
         detector.onPromptRequest = { _ in
             box.promptCount += 1
-            return true
+            return .presented
         }
         detector.onPromptSuppressed = { suppression in
             box.suppression = suppression
@@ -1322,7 +1322,7 @@ func testMeetingPromptDetector() async {
         let box = CandidateBox()
         detector.onPromptRequest = { _ in
             box.promptCount += 1
-            return true
+            return .presented
         }
 
         detector.updateMicInputUsers(["com.google.Chrome.helper"])
@@ -1343,7 +1343,7 @@ func testMeetingPromptDetector() async {
         detector.onPromptRequest = { candidate in
             box.candidate = candidate
             box.promptCount += 1
-            return true
+            return .presented
         }
         detector.onPromptSuppressed = { suppression in
             box.suppression = suppression
