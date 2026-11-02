@@ -33,7 +33,7 @@ struct DetectedMeetingPromptWiring {
             guard let pill else { return false }
             let promptTimeout = MeetingPromptHeuristics.promptTimeoutSeconds(
                 for: candidate.reason,
-                calendarDefault: 30
+                calendarDefault: 60
             )
             let presented = pill.present(
                 candidate: candidate,

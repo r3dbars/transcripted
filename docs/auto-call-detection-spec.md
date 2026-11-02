@@ -469,8 +469,8 @@ single prompt and existing snooze/dismiss/backoff applies unchanged.
 
 ### Leak 2 — an ignored prompt was treated as an explicit "no"
 
-The detected-meeting call prompt in the Notch island shows a 30s countdown for calendar prompts
-(ad-hoc call prompts use the longer heuristic timeout). Before this
+The detected-meeting call prompt in the Notch island shows a 60s countdown for calendar prompts
+(ad-hoc call prompts use the same length through the heuristic timeout). Before this
 phase, countdown expiry took the *same* path as clicking × —
 `detector.dismiss(candidate:)` — which suppresses the provider for up to 30
 minutes (Teams: 2h). A user heads-down in the call, on another Space, or away
