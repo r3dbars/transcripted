@@ -347,6 +347,135 @@ func testMeetingPromptHeuristics() {
         )
     }
 
+    runSuite("MeetingPromptProvider — Helium is a Chromium-family browser call") {
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("net.imput.helium"),
+            "the main Helium bundle should be recognized as a browser"
+        )
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("net.imput.helium.helper"),
+            "Helium's helper (the process that holds the mic) must be recognized"
+        )
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("net.imput.helium.helper.renderer"),
+            "Helium's renderer helper must be recognized so playback lines up with the mic"
+        )
+        assertTrue(
+            MeetingPromptProvider.isBrowserBundleID("net.imput.helium.app.shortcut"),
+            "a Helium web-app shortcut shares the Helium family and must be recognized"
+        )
+        assertFalse(
+            MeetingPromptProvider.isBrowserBundleID("net.imput.heliumEvil"),
+            "a bundle id that only shares a prefix segment should not match Helium"
+        )
+        assertEqual(
+            MeetingPromptProvider.micInputProvider(forBundleID: "net.imput.helium.helper"),
+            .googleMeet,
+            "Helium holding the mic maps to the representative browser-call provider"
+        )
+        assertEqual(
+            MeetingPromptProvider.cameraCallProvider(forFrontmostBundleID: "net.imput.helium"),
+            .googleMeet,
+            "Helium frontmost with the camera on maps to the generic browser call"
+        )
+        assertNil(
+            MeetingPromptProvider.audioOutputProvider(forBundleID: "net.imput.helium.helper"),
+            "Helium output alone is browser playback and must not prompt by itself"
+        )
+        assertEqual(
+            MeetingPromptProvider.browserFamily(forBundleID: "net.imput.helium.helper.renderer"),
+            "net.imput.helium",
+            "a Helium helper belongs to the Helium family so mic and playback line up"
+        )
+    }
+
+    runSuite("MeetingPromptCalendarScoring — a frontmost Helium window is the meeting tab on a calendar prompt") {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let meet = MeetingPromptCalendarEventSnapshot(
+            id: "design-review",
+            title: "Design review",
+            startDate: now,
+            endDate: now.addingTimeInterval(30 * 60),
+            isAllDay: false,
+            url: URL(string: "https://meet.google.com/abc-defg-hij"),
+            location: nil,
+            notes: nil
+        )
+
+        func scored(frontmost: String?, event: MeetingPromptCalendarEventSnapshot = meet) -> MeetingPromptScoredCandidate? {
+            MeetingPromptCalendarScoring.calendarCandidates(
+                from: [event],
+                now: now,
+                runtimeSnapshot: MeetingPromptRuntimeSnapshot(
+                    runningBundleIDs: [],
+                    frontmostBundleID: frontmost,
+                    recentNativeActivity: [:],
+                    runtimeSuppressedUntil: [:]
+                )
+            ).first
+        }
+
+        let helium = scored(frontmost: "net.imput.helium")
+        assertEqual(
+            helium?.candidate.detail,
+            "Design review - meeting tab is active",
+            "Helium in front of a calendar Meet should say the meeting tab is active"
+        )
+        assertEqual(
+            helium?.candidate.reason,
+            .calendarPlusRuntimeMatch,
+            "a frontmost browser upgrades the calendar prompt's reason"
+        )
+        assertEqual(helium?.score, 5, "the meeting-tab boost plus the start window should outrank a plain calendar prompt")
+
+        assertEqual(
+            scored(frontmost: "net.imput.helium.app.shortcut")?.candidate.detail,
+            "Design review - meeting tab is active",
+            "a Helium web-app shortcut is still the meeting tab"
+        )
+        assertEqual(
+            scored(frontmost: "com.google.Chrome")?.candidate.reason,
+            .calendarPlusRuntimeMatch,
+            "Chrome still counts as the meeting tab"
+        )
+        for webApp in ["com.google.Chrome.app.slackwebapp", "com.apple.Safari.WebApp.gmail", "com.google.Chrome.helper"] {
+            assertTrue(
+                scored(frontmost: webApp)?.candidate.reason != .calendarPlusRuntimeMatch,
+                "a Chrome or Safari web app or a browser helper in front is not the meeting tab"
+            )
+        }
+        assertEqual(
+            scored(frontmost: "com.google.Chrome.canary")?.candidate.reason,
+            .calendarPlusRuntimeMatch,
+            "Chrome Canary still counts through the Chrome family prefix"
+        )
+
+        let unrelated = scored(frontmost: "com.apple.TextEdit")
+        assertEqual(
+            unrelated?.candidate.detail,
+            "Design review - starting now",
+            "an unrelated front app should not be called a meeting tab"
+        )
+        assertEqual(unrelated?.candidate.reason, .calendarNearby, "no browser in front keeps the plain calendar reason")
+        assertEqual(unrelated?.score, 3, "without the meeting-tab boost the start window alone scores 3")
+
+        let zoom = MeetingPromptCalendarEventSnapshot(
+            id: "zoom-review",
+            title: "Design review",
+            startDate: now,
+            endDate: now.addingTimeInterval(30 * 60),
+            isAllDay: false,
+            url: URL(string: "https://zoom.us/j/123456789"),
+            location: nil,
+            notes: nil
+        )
+        assertEqual(
+            scored(frontmost: "net.imput.helium", event: zoom)?.candidate.detail,
+            "Design review - starting now",
+            "Helium in front does not decorate a native Zoom calendar event"
+        )
+    }
+
     runSuite("MeetingPromptProvider.micInputProvider — attributes mic-holding processes to a provider") {
         assertEqual(
             MeetingPromptProvider.micInputProvider(forBundleID: "us.zoom.xos"),

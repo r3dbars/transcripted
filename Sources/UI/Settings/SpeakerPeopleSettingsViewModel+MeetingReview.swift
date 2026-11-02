@@ -47,13 +47,25 @@ extension SpeakerPeopleSettingsViewModel {
         meetingReview.focus(key)
     }
 
+    /// Saved people with a real name, so a merge can keep that name when the
+    /// typed field is blank.
+    private func meetingReviewExistingNames() -> [UUID: String] {
+        Dictionary(uniqueKeysWithValues: profiles.compactMap { profile in
+            guard let name = SpeakerMeetingReviewPolicy.usableName(profile.displayName) else { return nil }
+            return (profile.id, name)
+        })
+    }
+
     // MARK: Done, Undo, Skip
 
     /// Done on the top card. Its answers wait out Undo, then save. A card
     /// still waiting on Undo saves now.
     func finishMeeting(_ call: SpeakerPendingMeetingGroup, updates: [SpeakerReviewUpdate]) {
+        // A second Done (or a Skip) on a card already finished, e.g. a click
+        // while it animates away, must not save it twice.
+        guard !meetingReview.heldOutCallKeys.contains(call.id) else { return }
         meetingSaveError = nil
-        let steps = SpeakerMeetingReviewPolicy.steps(for: updates)
+        let steps = SpeakerMeetingReviewPolicy.steps(for: updates, existingNames: meetingReviewExistingNames())
         let finished = SpeakerMeetingReviewState.Finished(
             callKey: call.id,
             title: call.meetingTitle,
@@ -98,8 +110,9 @@ extension SpeakerPeopleSettingsViewModel {
     /// Its other voices move to Not named yet. If an answer doesn't save, the
     /// meeting isn't skipped: its card comes back with a note.
     func skipMeeting(_ call: SpeakerPendingMeetingGroup, updates: [SpeakerReviewUpdate]) {
+        guard !meetingReview.heldOutCallKeys.contains(call.id) else { return }
         meetingSaveError = nil
-        let steps = SpeakerMeetingReviewPolicy.steps(for: updates)
+        let steps = SpeakerMeetingReviewPolicy.steps(for: updates, existingNames: meetingReviewExistingNames())
         meetingReview.skipped(callKey: call.id)
         enqueueMeetingSave { [weak self] done in
             guard let self else { return done() }
@@ -216,8 +229,10 @@ extension SpeakerPeopleSettingsViewModel {
         case .join(_, let personID, let name):
             if let person = profiles.first(where: { $0.id == personID }) {
                 joinReviewVoice(item, into: person, completion: landed)
+            } else if let fallback = SpeakerMeetingReviewPolicy.fallbackNameAfterMissingJoin(name) {
+                saveReviewName(item, to: fallback, completion: landed)
             } else {
-                saveReviewName(item, to: name, completion: landed)
+                next(false)
             }
         case .markAsMe:
             markReviewVoiceAsMe(item, completion: landed)

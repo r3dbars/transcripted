@@ -106,6 +106,18 @@ func testFeedbackComposerModel() async {
     assertEqual(successful.message, "", "Write another clears the previous text")
     assertEqual(successful.replyEmail, "", "Write another clears the previous address")
     assertFalse(successful.includeDiagnostics, "a new report requires fresh diagnostic consent")
+    successful.message = "The speaker review was clear."
+    successful.replyEmail = "person@example.com"
+    successful.review()
+    await successful.send()
+    assertTrue(successful.step == .sent, "a second report reaches success")
+    successful.open(area: "meetings")
+    runSuite("Opening Feedback after a sent report starts a fresh report") {
+        assertTrue(successful.step == .compose, "the old success screen is not shown again")
+        assertEqual(successful.message, "", "the sent message is not kept")
+        assertEqual(successful.replyEmail, "", "the sent address is not kept")
+        assertEqual(successful.area, "meetings", "the new report takes the area it was opened from")
+    }
     await feedbackScreenshotProviderSuites()
     await feedbackDropTransferSuites()
     await feedbackDiagnosticConsentSuites()

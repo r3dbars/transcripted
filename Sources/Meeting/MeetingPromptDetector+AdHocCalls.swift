@@ -130,6 +130,7 @@ extension MeetingPromptDetector {
 
         guard var session = detectedCallSession else {
             if !providers.isEmpty {
+                recordedCallSessionStarted(now: now)
                 detectedCallSession = DetectedCallSession(
                     providers: providers,
                     seenReasons: reasons,
@@ -147,6 +148,7 @@ extension MeetingPromptDetector {
                 clearPromptPendingWindows(for: session)
             }
             detectedCallSession = nil
+            recordedCallSessionEnded(now: now)
             finishDetectedCallSession(session, endedAt: now)
         } else {
             session.providers.formUnion(providers)

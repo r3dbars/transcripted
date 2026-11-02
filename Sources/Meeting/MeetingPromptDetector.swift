@@ -115,6 +115,12 @@ final class MeetingPromptDetector {
     var browserWindowTitlesProvider: (Set<String>) async -> [BrowserWindowTitle] = { families in
         await BrowserWindowTitleReader.titles(forBrowserFamilies: families)
     }
+    /// The call a browser app shortcut is for, from its start URL. Defaults to
+    /// the plist reader; unit tests inject a fixed answer. The URL is classified
+    /// and dropped.
+    var callShortcutProvider: (String) async -> MeetingPromptProvider? = { bundleID in
+        await BrowserWindowTitleReader.callShortcutProvider(forBundleID: bundleID)
+    }
     /// How long an unrecognized browser has to hold the mic before it prompts.
     /// Tests shrink these.
     var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
@@ -197,6 +203,13 @@ final class MeetingPromptDetector {
     // prompt re-offers a couple of times before inheriting the full dismissal.
     var promptExpiryHistory: [String: (count: Int, lastExpiredAt: Date)] = [:]
     var browserTitleReadCounter = 0
+    /// Call shortcut bundle IDs already classified. A missing key has not been
+    /// read; a present nil is a shortcut that is not a call app.
+    var callShortcutProviders: [String: MeetingPromptProvider] = [:]
+    var callShortcutLookupDone: Set<String> = []
+    /// The latest call shortcut that launched or came forward. Used only when
+    /// that was as the mic was taken; an old activation does not count.
+    var recentCallShortcutActivation: (bundleID: String, provider: MeetingPromptProvider, at: Date)?
     // Set by `adHocCandidate` during one evaluate pass when a browser session's
     // first title read has not landed yet.
     var browserFirstTitleReadPending = false
@@ -215,6 +228,14 @@ final class MeetingPromptDetector {
     // keep the next call of the same kind silent.
     let declinedThisCallLimit: TimeInterval = 8 * 60 * 60
     let pendingCooldown: TimeInterval = 90
+    // Ad-hoc candidates a Record quieted, so the end of that call can lift
+    // their quiet (`recordedCallSessionEnded`). A calendar event keeps its own.
+    var recordSelectedAdHocCandidateIDs: Set<String> = []
+    // A session ended while still recording; cut Record's quiet once one ends,
+    // or a new one starts, with the recording stopped.
+    var recordedCallQuietCutPending = false
+    var recordedCallEndGrace: TimeInterval = MeetingPromptHeuristics.recordedCallEndGrace
+    var recordedCallQuietEndTask: Task<Void, Never>?
     // One suppression event per candidate + reason per window. It was 90s,
     // which re-sent the same "still snoozed" event every poll for the whole
     // call and made suppressions most of the prompt event volume.
@@ -302,6 +323,8 @@ final class MeetingPromptDetector {
         browserEvidenceRecheckTask?.cancel()
         browserEvidenceRecheckTask = nil
         browserEvidenceRecheckAt = nil
+        recordedCallQuietEndTask?.cancel()
+        recordedCallQuietEndTask = nil
         endBrowserMicSession()
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
