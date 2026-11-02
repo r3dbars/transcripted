@@ -44,15 +44,37 @@ extension MeetingPromptDetector {
                 }
             }
         }
+        workspaceObservers.append(NSWorkspace.shared.notificationCenter.addObserver(
+            forName: NSWorkspace.didTerminateApplicationNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let app = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
+            Task { @MainActor [weak self] in
+                guard let app,
+                      let bundleIdentifier = await RunningApplicationsReader.bundleIdentifier(of: app) else { return }
+                self?.noteCallShortcutTermination(bundleID: bundleIdentifier)
+            }
+        })
     }
 
     private func handleWorkspaceApplication(bundleIdentifier: String?) {
-        guard let bundleIdentifier,
-              let provider = provider(forBundleIdentifier: bundleIdentifier),
-              provider.supportsNativeRuntimePrompt else { return }
-
-        recentNativeActivity[provider] = Date()
-        scheduleEvaluation()
+        guard let bundleIdentifier else { return }
+        if let provider = provider(forBundleIdentifier: bundleIdentifier),
+           provider.supportsNativeRuntimePrompt {
+            recentNativeActivity[provider] = Date()
+            scheduleEvaluation()
+        }
+        // A calendar link opens the Meet shortcut. Remember that activation
+        // even though the shortcut is not a native runtime app: its mic is
+        // the main browser's helper, and the shortcut is the call.
+        guard MeetingPromptProvider.isBrowserBundleID(bundleIdentifier) else { return }
+        let activatedAt = Date()
+        let lookup = callShortcutProvider
+        Task { @MainActor [weak self] in
+            guard let site = await lookup(bundleIdentifier) else { return }
+            self?.noteCallShortcutActivation(bundleID: bundleIdentifier, provider: site, at: activatedAt)
+        }
     }
 
     func seedNativeActivityIfNeeded(frontmostBundleID: String?, now: Date) {

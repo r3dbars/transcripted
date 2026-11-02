@@ -111,7 +111,13 @@ func testMicActivityMonitorProbeFilter() {
         assertFalse(MicActivityMonitor.shouldProbe(bundleID: "", ownBundleID: own), "a bundle-less daemon is dropped downstream anyway")
         assertFalse(MicActivityMonitor.shouldProbe(bundleID: "com.justinbetker.draft", ownBundleID: own), "our own app is never a call")
         assertFalse(MicActivityMonitor.shouldProbe(bundleID: "com.justinbetker.draft.helper", ownBundleID: own), "our own helpers are never a call")
-        for bundle in ["com.google.Chrome.helper", "com.apple.WebKit.GPU", "us.zoom.xos", "com.microsoft.teams2.helper"] {
+        for bundle in [
+            "com.google.Chrome.helper",
+            "com.apple.WebKit.GPU",
+            "net.imput.helium.helper",
+            "us.zoom.xos",
+            "com.microsoft.teams2.helper",
+        ] {
             assertTrue(MicActivityMonitor.shouldProbe(bundleID: bundle, ownBundleID: own), "\(bundle) can be a call")
         }
         for bundle in ["com.apple.QuickTimePlayerX", "com.tinyspeck.slackmacgap", "com.spotify.client"] {

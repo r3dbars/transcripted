@@ -111,16 +111,6 @@ struct MeetingPromptRuntimeSnapshot: Equatable {
         self.isOwnCaptureActive = isOwnCaptureActive
         self.isMicInputPromptEnabled = isMicInputPromptEnabled
     }
-
-    static let browserBundleIdentifiers: Set<String> = [
-        "com.apple.Safari",
-        "com.google.Chrome",
-        "com.google.Chrome.canary",
-        "com.microsoft.edgemac",
-        "com.brave.Browser",
-        "company.thebrowser.Browser",
-        "org.mozilla.firefox"
-    ]
 }
 
 @available(macOS 14.0, *)

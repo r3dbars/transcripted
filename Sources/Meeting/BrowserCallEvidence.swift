@@ -18,8 +18,9 @@
 //    `corroboratedDelay`, as the generic browser call.
 // 3. The focused window is a known non-call site (ChatGPT, Claude, Loom...)
 //    -> no prompt while it is in front. When it was in front as the browser
-//    took the mic, no prompt for the whole session, even after the user
-//    clicks to another tab; only a title from step 1 can still win.
+//    took the mic, no prompt for the whole session after a switch to an
+//    ordinary page. A title from step 1, or coming back to a call site, can
+//    still win.
 // 4. The browser is also playing audio, or the camera is on -> prompt after
 //    `corroboratedDelay` of continuous mic use.
 // 5. Mic only -> prompt after `uncorroboratedDelay`.
@@ -141,6 +142,16 @@ enum BrowserCallEvidence {
     /// one using it. Seen later (notes in Claude during a call), it only
     /// holds the prompt back while it stays in front.
     static let nonCallSiteStickyWindow: TimeInterval = 10
+    /// A call shortcut (a Helium Meet PWA) opened this close to the mic
+    /// starting is the thing that took the mic, even if another app in the
+    /// family is in front. Wider than the non-call sticky window so a
+    /// calendar link that opens the shortcut, then leaves Calendar in front,
+    /// still counts.
+    static let callShortcutActivationSlack: TimeInterval = 15
+    /// How long the first title read may hold the prompt. A hung Accessibility
+    /// read must not keep a real call quiet; after this the timing rules run,
+    /// and a late title can still upgrade or suppress before the wait ends.
+    static let titleReadGiveUp: TimeInterval = 1
 
     struct Timing: Equatable {
         var corroboratedDelay: TimeInterval
@@ -149,6 +160,7 @@ enum BrowserCallEvidence {
         var nonCallSiteRecheckInterval: TimeInterval = BrowserCallEvidence.nonCallSiteRecheckInterval
         var micReleaseGrace: TimeInterval = BrowserCallEvidence.micReleaseGrace
         var nonCallSiteStickyWindow: TimeInterval = BrowserCallEvidence.nonCallSiteStickyWindow
+        var titleReadGiveUp: TimeInterval = BrowserCallEvidence.titleReadGiveUp
         /// Minimum spacing between title reads within one browser session.
         /// Several sensor edges can land in the same second; one read answers
         /// all of them.
@@ -213,6 +225,58 @@ enum BrowserCallEvidence {
         // Re-read titles on the recheck cadence, but never later than the
         // moment the wait runs out.
         return .wait(recheckAt: min(promptAt, now.addingTimeInterval(timing.titleRecheckInterval)))
+    }
+
+    // MARK: App shortcuts
+
+    /// The call a Chromium app shortcut is for, from its start URL, or `nil`.
+    /// The URL is classified and dropped: a Meet shortcut is
+    /// `https://meet.google.com/...`, including the landing page. A meeting
+    /// code in the path is not proof a call is on, so this is a call site,
+    /// not a named tab. Chat, Calendar and Gmail shortcuts do not match.
+    static func callShortcutProvider(forURL raw: String) -> MeetingPromptProvider? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let host = URLComponents(string: trimmed)?.host?.lowercased() else { return nil }
+        let bare = host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
+        switch bare {
+        case "meet.google.com":
+            return .googleMeet
+        case "teams.microsoft.com", "teams.live.com":
+            return .teams
+        case "zoom.us", "app.zoom.us":
+            return .zoom
+        default:
+            return nil
+        }
+    }
+
+    /// Which call shortcut is using the shared mic helper, if either signal
+    /// says so. The shortcut in front wins. Otherwise a shortcut that opened
+    /// as the mic was taken (a calendar link) wins, so a ChatGPT tab in the
+    /// main browser cannot veto it. A shortcut left open from long before the
+    /// mic started does not: ChatGPT voice with Meet sitting in the background
+    /// stays a non-call.
+    static func claimedCallShortcut(
+        frontmostShortcut: MeetingPromptProvider?,
+        recentProvider: MeetingPromptProvider?,
+        recentActivationAt: Date?,
+        sessionStartedAt: Date,
+        slack: TimeInterval = callShortcutActivationSlack
+    ) -> MeetingPromptProvider? {
+        if let frontmostShortcut { return frontmostShortcut }
+        guard let recentProvider, let recentActivationAt else { return nil }
+        let delta = recentActivationAt.timeIntervalSince(sessionStartedAt)
+        guard abs(delta) <= slack else { return nil }
+        return recentProvider
+    }
+
+    /// `nil` while the first title read should still hold the prompt; `.unknown`
+    /// once that hold has run out, so the timing rules can start.
+    static func verdictBeforeTitleReadLands(
+        pendingFor: TimeInterval,
+        giveUp: TimeInterval
+    ) -> BrowserCallTitleVerdict? {
+        pendingFor >= giveUp ? .unknown : nil
     }
 
     // MARK: Title classification
