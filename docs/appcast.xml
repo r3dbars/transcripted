@@ -7,6 +7,25 @@
     <description>Release feed for Transcripted macOS updates.</description>
     <language>en</language>
     <item>
+      <title>1.1.74</title>
+      <pubDate>Mon, 02 Nov 2026 14:54:53 +0000</pubDate>
+      <sparkle:version>1.1.74</sparkle:version>
+      <sparkle:shortVersionString>1.1.74</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.74/Transcripted-1.1.74.dmg" length="703092916" type="application/octet-stream" sparkle:edSignature="3sEPosvi+lJDAwaJlA5bqhP5jaR2ZC+QWaxwSPpOSBmalzkjUjuvLu/8rH/v6uU6iwKiylKHU6GW5Tb1UinXBg==" />
+      <sparkle:deltas>
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.74/Transcripted1.1.74-1.1.73.delta" sparkle:deltaFrom="1.1.73" length="2453430" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="nfmHoJ+klVhKwbReJqMmBcmqCjBjyF3aS3EI2VVkPe54HlOARI/7r6t333U3FEsq9xeqvhvk60nMnVr98eT8Bg==" />
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.74/Transcripted1.1.74-1.1.72.delta" sparkle:deltaFrom="1.1.72" length="4764302" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="qlkX5CAPitbAYmGoOclF9dlTCdRu3fuOKdi2IoahlS/rUCokvwfNXmkvaAbOgrBpFzNG3QZ8/SaCMd7NbuXKCQ==" />
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.74/Transcripted1.1.74-1.1.71.delta" sparkle:deltaFrom="1.1.71" length="5005350" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="OZbF6sVQqB7RHHRre7/vmncHfP4n4Q7HgRcQvPgBGzwZRVZYvGocdOmtw6WVN2WG3lF13ZhjFC97hgoqrkb/AA==" />
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.74/Transcripted1.1.74-1.1.70.delta" sparkle:deltaFrom="1.1.70" length="5790338" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="7ScUxUCZp9g4PW0/KLZJjmXD8QLqcscwxip0Iluyl23h0keLylHoNg0t6ZCgTmL2hWTL4pfBaNKkc50wjDqJDw==" />
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.74/Transcripted1.1.74-1.1.69.delta" sparkle:deltaFrom="1.1.69" length="6337610" type="application/octet-stream" sparkle:deltaFromSparkleExecutableSize="977808" sparkle:deltaFromSparkleLocales="de,he,ar,el,ja,fa,uk" sparkle:edSignature="3tTpOGDQlHPuSzXHTj4IRhmAp86IS2Ko7zF+EDb6yGL9GjuQuNmHJk552TqQeJEmYShO2+an68RUNlUYCVfxDQ==" />
+      </sparkle:deltas>
+      <link>https://github.com/r3dbars/transcripted/releases/tag/v1.1.74</link>
+      <sparkle:releaseNotesLink>https://github.com/r3dbars/transcripted/releases/tag/v1.1.74</sparkle:releaseNotesLink>
+      <sparkle:criticalUpdate sparkle:version="1.1.63" />
+    </item>
+    <item>
       <title>1.1.73</title>
       <pubDate>Wed, 21 Oct 2026 18:27:27 +0000</pubDate>
       <sparkle:version>1.1.73</sparkle:version>
