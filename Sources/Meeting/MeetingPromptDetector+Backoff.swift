@@ -267,11 +267,10 @@ extension MeetingPromptDetector {
         snoozedUntil[candidate.id] = nil
         pendingUntil[candidate.id] = nil
         cooldownReasons[candidate.id] = nil
-        runtimeSuppressedUntil[candidate.provider] = nil
-        runtimeSuppressionReasons[candidate.provider] = nil
-        if detectedCallSession?.sawMeetingRecording == true {
-            detectedCallSession?.sawMeetingRecording = false
-        }
+        // `markRecordStartFailed` already put back the provider's runtime
+        // quiet and the call's earlier recording state. Clearing them here
+        // would wipe an earlier Not now, or a recording this call already had
+        // (which keeps auto-start off), along with the failed start's own.
         switch onPromptFallback?(candidate) ?? .skipped {
         case .presented:
             pendingUntil[candidate.id] = now.addingTimeInterval(pendingCooldown)

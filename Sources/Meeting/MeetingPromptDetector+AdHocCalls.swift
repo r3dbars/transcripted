@@ -147,6 +147,9 @@ extension MeetingPromptDetector {
             if !session.autoStartDeclinedProviders.isEmpty {
                 clearPromptPendingWindows(for: session)
             }
+            if session.sawMeetingRecording || session.userDeclined || !session.autoStartDeclinedProviders.isEmpty {
+                autoStartBlockedUntil = now.addingTimeInterval(MeetingAutoRecordPolicy.autoStartBlockAfterCall)
+            }
             detectedCallSession = nil
             recordedCallSessionEnded(now: now)
             finishDetectedCallSession(session, endedAt: now)
@@ -433,11 +436,31 @@ extension MeetingPromptDetector {
                     for: provider, evidence: evidence, reason: reason, now: now
                 ),
                 isPlayingCallAudio: evidence == .tabTitle
-                    && (titleSession.map { browserIsPlayingAudio(families: $0.families) } ?? false),
+                    ? (titleSession.map { browserIsPlayingAudio(families: $0.families) } ?? false)
+                    : evidence == .nativeApp && nativeAppIsPlayingCallAudio(provider),
                 nativeProcessHoldsMicrophone: evidence == .nativeApp && reason == .micInput
             ),
             score: presentation.score
         )
+    }
+
+    /// Auto-start may never undo the person's own choice. Once this call has
+    /// had a recording that is no longer running (Stop from the menu, hotkey
+    /// or island, an inactivity or warning stop, a 30-minute quiet running
+    /// out), or a declined auto-start, only the prompt may show. The same holds
+    /// for a call that starts soon after such a call ended (a mute that let go
+    /// of the mic).
+    func isAutoStartBlockedThisCall(now: Date) -> Bool {
+        if let until = autoStartBlockedUntil, until > now { return true }
+        guard let session = detectedCallSession else { return false }
+        if session.userDeclined || !session.autoStartDeclinedProviders.isEmpty { return true }
+        return session.sawMeetingRecording && currentOwnCaptureActivity() != .meetingRecording
+    }
+
+    /// The native call app is playing audio output (a joined call). Its mic
+    /// alone is also the pre-join meter or a mic test.
+    func nativeAppIsPlayingCallAudio(_ provider: MeetingPromptProvider) -> Bool {
+        audioOutputActiveBundleIDs.contains { MeetingPromptProvider.audioOutputProvider(forBundleID: $0) == provider }
     }
 
     func refreshNativeMicSince(now: Date = Date()) {

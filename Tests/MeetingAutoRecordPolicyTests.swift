@@ -32,6 +32,39 @@ func testMeetingAutoRecordPolicy() {
             expected: .autoStart
         ),
         Row(
+            name: "native Zoom on the mic but silent (pre-join meter, Test mic) stays a prompt",
+            request: autoRecordRequest(
+                evidence: .nativeApp, provider: .zoom, reason: .micInput,
+                isPlayingCallAudio: false
+            ),
+            expected: .prompt
+        ),
+        Row(
+            name: "native Teams on the mic but silent (device preview) stays a prompt",
+            request: autoRecordRequest(
+                evidence: .nativeApp, provider: .teams, reason: .micInput,
+                isPlayingCallAudio: false
+            ),
+            expected: .prompt
+        ),
+        Row(
+            name: "a call whose recording was stopped asks instead of auto-starting again",
+            request: autoRecordRequest(
+                evidence: .nativeApp, provider: .zoom, reason: .micInput,
+                autoStartBlockedThisCall: true
+            ),
+            expected: .prompt
+        ),
+        Row(
+            name: "a stopped in-call Meet tab asks instead of auto-starting again",
+            request: autoRecordRequest(
+                evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
+                isPlayingCallAudio: true,
+                autoStartBlockedThisCall: true
+            ),
+            expected: .prompt
+        ),
+        Row(
             name: "a focused in-call Meet tab that holds the mic and plays audio auto-starts",
             request: autoRecordRequest(
                 evidence: .tabTitle, provider: .googleMeet, reason: .micInput,
@@ -426,9 +459,10 @@ private func autoRecordRequest(
     isFocusedFrontWindow: Bool = true,
     isMeetPreJoin: Bool = false,
     evidenceAge: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration,
-    isPlayingCallAudio: Bool = false,
+    isPlayingCallAudio: Bool? = nil,
     borrowedProofSource: MeetingBorrowedCallProofSource = .none,
-    nativeProcessHoldsMicrophone: Bool? = nil
+    nativeProcessHoldsMicrophone: Bool? = nil,
+    autoStartBlockedThisCall: Bool = false
 ) -> MeetingAutoRecordPolicy.Request {
     let micHeld = holdsMicrophone ?? (reason == .micInput)
     return MeetingAutoRecordPolicy.Request(
@@ -443,9 +477,12 @@ private func autoRecordRequest(
         isFocusedFrontWindow: isFocusedFrontWindow,
         isMeetPreJoin: isMeetPreJoin,
         evidenceAge: evidenceAge,
-        isPlayingCallAudio: isPlayingCallAudio,
+        // A joined native call plays audio; tab rows opt in explicitly.
+        isPlayingCallAudio: isPlayingCallAudio
+            ?? (evidence == .nativeApp || borrowedProofSource == .nativeApp),
         borrowedProofSource: borrowedProofSource,
         nativeProcessHoldsMicrophone: nativeProcessHoldsMicrophone
-            ?? (evidence == .nativeApp && micHeld)
+            ?? (evidence == .nativeApp && micHeld),
+        autoStartBlockedThisCall: autoStartBlockedThisCall
     )
 }

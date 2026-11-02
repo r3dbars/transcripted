@@ -1621,6 +1621,7 @@ func testMeetingPromptDetector() async {
         live.callEvidence = .nativeApp
         live.holdsMicrophone = true
         live.nativeProcessHoldsMicrophone = true
+        live.isPlayingCallAudio = true
         live.evidenceAge = MeetingAutoRecordPolicy.evidenceHoldDuration
         let merged = calendar.borrowingCallProof(from: live)
         assertEqual(merged.callEvidence, .none, "calendar telemetry stays call_evidence none")
@@ -1755,6 +1756,70 @@ func testMeetingPromptDetector() async {
         assertEqual(box.candidate?.callEvidence, .tabTitle, "the tab still names Meet")
         assertFalse(box.candidate?.isPlayingCallAudio == true, "no browser output means no auto-start")
         assertFalse(box.candidate?.isMeetPreJoin == true, "a named meeting is not the code-only lobby")
+    }
+
+    await runSuite("MeetingPromptDetector auto-record — stopping a recording mid-call asks instead of auto-starting") {
+        let detector = makeIsolatedDetector()
+        var activity = MeetingPromptOwnCaptureActivity.meetingRecording
+        detector.ownCaptureActivity = { activity }
+        detector.isAutoRecordEnabled = { true }
+        detector.autoRecordEvidenceHoldDuration = 0
+        detector.nativeMicSince[.zoom] = Date().addingTimeInterval(-MeetingAutoRecordPolicy.evidenceHoldDuration)
+        detector.audioOutputActiveBundleIDs = ["us.zoom.xos"]
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in autoRecordOrPrompt(candidate, box: box) }
+
+        // ⌥M first, then join Zoom: the recording covers the call.
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount + box.autoStartCount, 0, "precondition: nothing while recording")
+
+        // Stop from the menu while still in the call.
+        activity = .none
+        detector.requestEvaluation()
+        await waitForPromptEvaluation(detector, until: { box.promptCount + box.autoStartCount > 0 })
+        assertEqual(box.autoStartCount, 0, "a Stop must never be undone by an auto-start")
+        assertEqual(box.promptCount, 1, "the call still offers Record")
+        assertTrue(box.candidate?.autoStartBlockedThisCall == true, "the handed candidate says why")
+    }
+
+    await runSuite("MeetingPromptDetector auto-record — a mic release after a recorded call keeps auto-start off") {
+        let detector = makeIsolatedDetector()
+        var activity = MeetingPromptOwnCaptureActivity.meetingRecording
+        detector.ownCaptureActivity = { activity }
+        detector.isAutoRecordEnabled = { true }
+
+        // A recorded call; the browser lets go of the mic on mute, then Stop.
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        activity = .none
+        assertTrue(detector.isAutoStartBlockedThisCall(now: Date()), "the call that just ended had a recording")
+
+        // Unmute: a new detected-call session starts.
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        assertTrue(
+            detector.isAutoStartBlockedThisCall(now: Date()),
+            "a session that starts right after a recorded call must not auto-start"
+        )
+    }
+
+    await runSuite("MeetingPromptDetector auto-record — a silent native Zoom mic (Test mic) prompts instead") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.isAutoRecordEnabled = { true }
+        detector.autoRecordEvidenceHoldDuration = 0
+        detector.nativeMicSince[.zoom] = Date().addingTimeInterval(-MeetingAutoRecordPolicy.evidenceHoldDuration)
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in autoRecordOrPrompt(candidate, box: box) }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector, until: { box.promptCount + box.autoStartCount > 0 })
+        assertEqual(box.autoStartCount, 0, "mic without call audio is not proof of a joined call")
+        assertEqual(box.promptCount, 1, "the Record prompt is still offered")
+        assertFalse(box.candidate?.isPlayingCallAudio == true, "Zoom played no audio")
     }
 
     await runSuite("MeetingPromptDetector learned backoff — never learned off without window titles") {
@@ -1894,6 +1959,30 @@ private func makeIsolatedDetector(
 
 /// Makes the detector see one focused browser window with `title`, instead of
 /// reading real windows through Accessibility.
+/// Hands the candidate to the real auto-record decision, as the app wiring
+/// does, and counts what happened.
+@available(macOS 14.0, *)
+@MainActor
+private func autoRecordOrPrompt(
+    _ candidate: MeetingPromptDetector.Candidate,
+    box: CandidateBox
+) -> MeetingPromptDetector.RequestResult {
+    box.candidate = candidate
+    let decision = DetectedMeetingPromptWiring.autoRecordDecision(
+        for: candidate,
+        otherCaptureActive: false,
+        autoRecordEnabled: true,
+        microphoneGranted: true,
+        systemAudioGranted: true
+    )
+    if decision == .autoStart {
+        box.autoStartCount += 1
+        return .autoStarted
+    }
+    box.promptCount += 1
+    return .presented
+}
+
 @available(macOS 14.0, *)
 @MainActor
 private func showBrowserTab(_ title: String, on detector: MeetingPromptDetector) {

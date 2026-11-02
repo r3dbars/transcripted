@@ -34,6 +34,9 @@ final class MeetingPromptDetector {
         var borrowedProofSource: MeetingBorrowedCallProofSource = .none
         /// The native Zoom or Teams process (not a browser helper) is on the mic.
         var nativeProcessHoldsMicrophone: Bool = false
+        /// Set by the detector on the candidate it hands over: this call
+        /// already had a recording that stopped, or a declined auto-start.
+        var autoStartBlockedThisCall: Bool = false
 
         /// Keep a calendar event's title and `call_evidence` while copying
         /// live-call proof that auto-record needs. Telemetry and call-end
@@ -172,6 +175,9 @@ final class MeetingPromptDetector {
     var micActiveBundleIDs: Set<String> = []
     /// When each native conferencing app first showed up on the mic this call.
     var nativeMicSince: [MeetingPromptProvider: Date] = [:]
+    /// A detected call that had a recording, or a declined auto-start, ended
+    /// recently: auto-start stays off (the prompt still shows) until then.
+    var autoStartBlockedUntil: Date?
     // Whether a camera is confirmed in use, pushed by CameraActivityMonitor.
     var cameraInUse = false
     // Native conferencing bundle IDs confirmed playing audio output, pushed by
@@ -422,7 +428,11 @@ final class MeetingPromptDetector {
         }
         guard let match = preferredCandidate(from: visibleCandidates) else { return }
 
+        var handedCandidate = match.candidate
+        handedCandidate.autoStartBlockedThisCall = isAutoStartBlockedThisCall(now: now)
+
         if isAutoRecordEnabled(),
+           !handedCandidate.autoStartBlockedThisCall,
            match.candidate.evidenceAge < autoRecordEvidenceHoldDuration {
             let held = MeetingAutoRecordPolicy.Request(
                 autoRecordEnabled: true,
@@ -436,7 +446,12 @@ final class MeetingPromptDetector {
                 isFocusedFrontWindow: match.candidate.isFocusedFrontWindow,
                 isMeetPreJoin: match.candidate.isMeetPreJoin,
                 evidenceAge: MeetingAutoRecordPolicy.evidenceHoldDuration,
-                isPlayingCallAudio: match.candidate.isPlayingCallAudio,
+                // Native call audio usually starts a beat after the mic: hold for
+                // it instead of prompting on the first mic edge. After the hold
+                // the real decision still needs the output.
+                isPlayingCallAudio: match.candidate.isPlayingCallAudio
+                    || match.candidate.callEvidence == .nativeApp
+                    || match.candidate.borrowedProofSource == .nativeApp,
                 borrowedProofSource: match.candidate.borrowedProofSource,
                 nativeProcessHoldsMicrophone: match.candidate.nativeProcessHoldsMicrophone
             )
@@ -479,7 +494,7 @@ final class MeetingPromptDetector {
             return
         }
 
-        switch onPromptRequest?(match.candidate) ?? .skipped {
+        switch onPromptRequest?(handedCandidate) ?? .skipped {
         case .presented:
             pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
             cooldownReasons[match.candidate.id] = "prompt_pending"

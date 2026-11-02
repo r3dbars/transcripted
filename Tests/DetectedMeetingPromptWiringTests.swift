@@ -394,6 +394,7 @@ func testDetectedMeetingPromptWiring() async {
         rig.detector.nativeMicSince[.zoom] = Date().addingTimeInterval(
             -MeetingAutoRecordPolicy.evidenceHoldDuration
         )
+        rig.detector.audioOutputActiveBundleIDs = ["us.zoom.xos"]
 
         rig.detector.updateMicInputUsers(["us.zoom.xos"])
         await rig.detector.waitUntilEvaluationsSettle()
@@ -493,6 +494,7 @@ private func wiringCandidate(
         holdsMicrophone: provenNativeZoom,
         isFocusedFrontWindow: provenNativeZoom,
         evidenceAge: provenNativeZoom ? MeetingAutoRecordPolicy.evidenceHoldDuration : 0,
+        isPlayingCallAudio: provenNativeZoom,
         nativeProcessHoldsMicrophone: provenNativeZoom
     )
 }

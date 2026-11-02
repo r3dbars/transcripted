@@ -109,7 +109,8 @@ struct DetectedMeetingPromptWiring {
                 evidenceAge: candidate.evidenceAge,
                 isPlayingCallAudio: candidate.isPlayingCallAudio,
                 borrowedProofSource: candidate.borrowedProofSource,
-                nativeProcessHoldsMicrophone: candidate.nativeProcessHoldsMicrophone
+                nativeProcessHoldsMicrophone: candidate.nativeProcessHoldsMicrophone,
+                autoStartBlockedThisCall: candidate.autoStartBlockedThisCall
             )
         )
     }

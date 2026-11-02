@@ -17,6 +17,14 @@ enum MeetingAutoRecordPolicy {
     /// happens at once when the setting is off.
     static let evidenceHoldDuration: TimeInterval = 3
 
+    /// After a call that had a recording (stopped for any reason) or an
+    /// explicit Stop/Discard, a call that starts within this window asks
+    /// instead of auto-starting. A Safari mute lets go of the mic and ends the
+    /// detected-call session, so the unmute must not count as a fresh call and
+    /// undo the person's Stop. The prompt still shows, so a real back-to-back
+    /// call is one tap away.
+    static let autoStartBlockAfterCall: TimeInterval = 10 * 60
+
     /// Stop reasons that count as the user explicitly ending an auto-started
     /// recording. Call-end, inactivity, quit, warning, debug, and lab stops
     /// do not.
@@ -58,13 +66,17 @@ enum MeetingAutoRecordPolicy {
         /// How long the auto-start evidence has been true.
         var evidenceAge: TimeInterval
         /// The browser (or call app) is playing audio output. Required for
-        /// a tab-title auto-start, not for native Zoom/Teams.
+        /// both tab-title and native Zoom/Teams auto-start.
         var isPlayingCallAudio: Bool
         /// Where a calendar/runtime `.none` candidate borrowed live proof.
         /// Live ad-hoc candidates keep this `.none` and use `evidence`.
         var borrowedProofSource: MeetingBorrowedCallProofSource = .none
         /// The native Zoom or Teams process (not a browser helper) is on the mic.
         var nativeProcessHoldsMicrophone: Bool = false
+        /// This call (or one that just ended) already had a recording that
+        /// stopped, or the person declined auto-start. Only the prompt may
+        /// show: never start recording again without asking.
+        var autoStartBlockedThisCall: Bool = false
     }
 
     static func decision(for request: Request) -> Decision {
@@ -72,6 +84,7 @@ enum MeetingAutoRecordPolicy {
         // calendar prompt either: when the setting is off this matches main,
         // and when it is on an unproven (or calendar) candidate still asks.
         if request.autoRecordEnabled,
+           !request.autoStartBlockedThisCall,
            isCallProven(request),
            request.microphoneGranted,
            request.systemAudioGranted,
@@ -138,7 +151,7 @@ enum MeetingAutoRecordPolicy {
     /// Setting is on and the call would auto-start once the evidence has
     /// been held long enough. The detector waits instead of prompting.
     static func shouldWaitForEvidenceHold(_ request: Request) -> Bool {
-        guard request.autoRecordEnabled else { return false }
+        guard request.autoRecordEnabled, !request.autoStartBlockedThisCall else { return false }
         guard request.evidenceAge < evidenceHoldDuration else { return false }
         var held = request
         held.evidenceAge = evidenceHoldDuration
@@ -148,8 +161,11 @@ enum MeetingAutoRecordPolicy {
         return isCallProven(held)
     }
 
+    /// Native Zoom or Teams on the mic and playing call audio. Mic alone is
+    /// the pre-join mic meter or "Test mic"; a joined call also plays output.
     private static func isProvenNativeApp(_ request: Request) -> Bool {
         request.nativeProcessHoldsMicrophone
+            && request.isPlayingCallAudio
             && (request.provider == .zoom || request.provider == .teams)
     }
 
