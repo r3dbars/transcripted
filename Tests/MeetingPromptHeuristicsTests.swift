@@ -602,25 +602,26 @@ func testMeetingPromptHeuristics() {
         )
     }
 
-    runSuite("MeetingPromptHeuristics.promptTimeoutSeconds — live call prompts outlast calendar reminders") {
+    runSuite("MeetingPromptHeuristics.promptTimeoutSeconds — live calls get their own lifetime, calendar prompts the caller's default") {
         assertEqual(
             MeetingPromptHeuristics.promptTimeoutSeconds(for: .micInput, calendarDefault: 30),
             MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
-            "an ad-hoc mic call prompt should use the longer live-call lifetime"
+            "an ad-hoc mic call prompt should use the live-call lifetime"
         )
         assertEqual(
             MeetingPromptHeuristics.promptTimeoutSeconds(for: .audioOutput, calendarDefault: 30),
             MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
-            "an output-led call prompt should use the longer live-call lifetime"
+            "an output-led call prompt should use the live-call lifetime"
         )
         assertEqual(
             MeetingPromptHeuristics.promptTimeoutSeconds(for: .calendarNearby, calendarDefault: 30),
             30,
-            "calendar reminders keep the shorter default because their moment ages out"
+            "calendar reminders use the caller's default"
         )
-        assertTrue(
-            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds > 30,
-            "the live-call prompt lifetime should actually be longer than the calendar default"
+        assertEqual(
+            MeetingPromptHeuristics.adHocCallPromptTimeoutSeconds,
+            60,
+            "the live-call prompt should stay up a full minute"
         )
     }
 

@@ -35,7 +35,7 @@ func testDetectedMeetingPromptWiring() async {
         _ = rig.detector.onPromptRequest?(wiringCandidate(id: "wiring-b", reason: .calendarNearby))
 
         assertEqual(rig.island.prompt?.detail, "Mic only", "the override reaches the island")
-        assertEqual(rig.island.prompt?.secondsLeft, 30, "a calendar prompt gets the default timeout")
+        assertEqual(rig.island.prompt?.secondsLeft, 60, "a calendar prompt stays up a full minute")
     }
 
     runSuite("nothing is shown before first-run setup finishes") {

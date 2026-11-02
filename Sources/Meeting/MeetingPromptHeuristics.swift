@@ -497,10 +497,9 @@ enum MeetingPromptHeuristics {
         expiryCount <= maxPromptExpiryReoffers
     }
 
-    /// Ad-hoc call prompts stay up longer than calendar reminders: the call is
-    /// happening *right now*, and the first minute of a join is exactly when
-    /// the user is not looking at overlays. Calendar prompts keep the shorter
-    /// default because their moment ("starts in 1 min") ages out quickly.
+    /// Ad-hoc call prompts stay up a full minute: the call is happening
+    /// *right now*, and the first minute of a join is exactly when the user is
+    /// not looking at overlays. Every other prompt uses the caller's default.
     static let adHocCallPromptTimeoutSeconds = 60
 
     static func promptTimeoutSeconds(for reason: MeetingPromptReason, calendarDefault: Int) -> Int {
