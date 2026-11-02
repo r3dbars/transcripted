@@ -148,6 +148,7 @@ extension NotchIslandVoiceRowView {
                     suggestions: currentSuggestions,
                     highlighted: highlightedRow,
                     typedIsUntouchedPrefill: prefilledUntouched,
+                    prefillSource: prefillSource,
                     finish: finish
                   ) else { return nil }
             if isRecognized, Self.sameName(pending, entry.currentName) { return nil }

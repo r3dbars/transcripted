@@ -511,17 +511,22 @@ enum NotchIslandSpeakerReviewPolicy {
     /// already submitted, else whatever is sitting in its name box, read the
     /// same way Return would. No typed name is lost. A name the calendar
     /// filled in for a 1:1 that nobody touched is only a suggestion: Done
-    /// saves it like a typed name, Later leaves the voice unnamed.
+    /// saves it like a typed name, Later leaves the voice unnamed. A name the
+    /// call app filled in is a guess that can be on every row at once, so
+    /// untouched it saves on neither: the person has to press Return on it or
+    /// edit it. Otherwise one Done would confirm (and learn the voiceprint of)
+    /// every guess on the list.
     static func answerOnFinish(
         committed: String?,
         typed: String,
         suggestions: [Suggestion],
         highlighted: Int?,
         typedIsUntouchedPrefill: Bool = false,
+        prefillSource: PrefillSource = .calendar,
         finish: Finish = .done
     ) -> String? {
         if let committed { return committed }
-        if typedIsUntouchedPrefill, finish == .later { return nil }
+        if typedIsUntouchedPrefill, finish == .later || prefillSource == .callApp { return nil }
         return nameToSave(typed: typed, suggestions: suggestions, highlighted: highlighted)
     }
 
