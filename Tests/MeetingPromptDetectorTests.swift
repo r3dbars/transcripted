@@ -851,6 +851,134 @@ func testMeetingPromptDetector() async {
         assertEqual(box.unrecordedCallCount, 1, "a Record that failed to start must still raise the missed-call nudge")
     }
 
+    await runSuite("MeetingPromptDetector.markAccepted — the next call prompts after a recorded call ends") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.recordedCallEndGrace = 0.2
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate else {
+            assertTrue(false, "a Zoom mic should prompt")
+            return
+        }
+        detector.markAccepted(candidate: candidate)
+        detector.requestEvaluation()
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount, 1, "the call a Record covered must not prompt again")
+
+        // Hang up, then join the next Zoom call straight away.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector, until: { box.promptCount == 2 })
+        assertEqual(box.promptCount, 2, "the next call must prompt once the recorded call has ended")
+    }
+
+    await runSuite("MeetingPromptDetector.markAccepted — a mic flap as the recorded call ends stays quiet") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.recordedCallEndGrace = 60 * 60
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate else {
+            assertTrue(false, "a Zoom mic should prompt")
+            return
+        }
+        detector.markAccepted(candidate: candidate)
+
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount, 1, "the mic coming back inside the grace must not prompt")
+    }
+
+    await runSuite("MeetingPromptDetector.markAccepted — a mute while recording keeps the recorded call quiet") {
+        let detector = makeIsolatedDetector()
+        detector.recordedCallEndGrace = 0.2
+        var activity = MeetingPromptOwnCaptureActivity.none
+        detector.ownCaptureActivity = { activity }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate else {
+            assertTrue(false, "a Zoom mic should prompt")
+            return
+        }
+        detector.markAccepted(candidate: candidate)
+        activity = .meetingRecording
+
+        // A mute that lets go of the mic, then unmute, all while recording.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+
+        // Stop recording but stay in the same call.
+        activity = .none
+        detector.requestEvaluation()
+        await waitForPromptEvaluation(detector, extraMilliseconds: 400)
+        assertEqual(box.promptCount, 1, "the call that was recorded must not prompt after Stop")
+
+        // Hang up, then join the next call.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector, until: { box.promptCount == 2 })
+        assertEqual(box.promptCount, 2, "the next call must prompt once the recorded call has ended")
+    }
+
+    await runSuite("MeetingPromptDetector.markAccepted — hanging up before Stop still lets the next call prompt") {
+        let detector = makeIsolatedDetector()
+        detector.recordedCallEndGrace = 60 * 60
+        var activity = MeetingPromptOwnCaptureActivity.none
+        detector.ownCaptureActivity = { activity }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return true
+        }
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate else {
+            assertTrue(false, "a Zoom mic should prompt")
+            return
+        }
+        detector.markAccepted(candidate: candidate)
+        activity = .meetingRecording
+
+        // Leave the call with the recording still running, then stop it.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        activity = .none
+
+        detector.updateMicInputUsers(["us.zoom.xos"])
+        await waitForPromptEvaluation(detector)
+        assertEqual(box.promptCount, 2, "a call joined after the recording stopped must prompt")
+    }
+
     await runSuite("MeetingPromptDetector browser evidence — an unrecognized site waits before prompting") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
