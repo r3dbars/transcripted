@@ -4,7 +4,11 @@ import CoreGraphics
 /// space when it has something to say: a status line (recording, making a
 /// transcript, or warmup progress) and/or a shortcut warning.
 enum MenuBarHeaderLayoutPolicy {
-    static let warningTextHeight: CGFloat = 56
+    /// The warning row is as tall as its text: two lines (the Accessibility
+    /// warning) up to four (`maximumNumberOfLines`, the Secure Keyboard Entry
+    /// notice). A fixed four-line row left short warnings sitting on empty space.
+    static let minWarningTextHeight: CGFloat = 26
+    static let maxWarningTextHeight: CGFloat = 56
     static let statusRowHeight: CGFloat = 20
     static let progressTop: CGFloat = 20
     static let detailTop: CGFloat = 32
@@ -18,7 +22,17 @@ enum MenuBarHeaderLayoutPolicy {
         return showsStatus ? statusRowHeight + 2 : 2
     }
 
-    static func intrinsicHeight(isReady: Bool, hasWarning: Bool, isRecording: Bool = false) -> CGFloat {
+    /// The warning row's height for text measured at `measured` points tall.
+    static func warningTextHeight(measured: CGFloat) -> CGFloat {
+        min(max(measured.rounded(.up), minWarningTextHeight), maxWarningTextHeight)
+    }
+
+    static func intrinsicHeight(
+        isReady: Bool,
+        hasWarning: Bool,
+        isRecording: Bool = false,
+        warningTextHeight: CGFloat = minWarningTextHeight
+    ) -> CGFloat {
         if hasWarning {
             return warningTop(isReady: isReady, showsStatus: isRecording) + warningTextHeight + 2
         }

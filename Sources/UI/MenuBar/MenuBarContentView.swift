@@ -97,7 +97,7 @@ final class MenuBarContentView: NSView {
         let width = bounds.width - pad * 2
         var y = pad
 
-        let headerHeight = headerView.intrinsicHeight
+        let headerHeight = headerView.intrinsicHeight(forWidth: width)
         headerView.isHidden = headerHeight <= 0
         if headerHeight > 0 {
             headerView.frame = NSRect(x: pad, y: y, width: width, height: headerHeight)
