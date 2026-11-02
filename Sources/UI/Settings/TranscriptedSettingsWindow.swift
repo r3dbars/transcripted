@@ -4,9 +4,13 @@ import AppKit
 /// controller builds, so a test can make the real window.
 @MainActor
 enum TranscriptedSettingsWindow {
+    /// Distinct from the SwiftUI Settings scene and from onboarding, so a
+    /// restored frame cannot land on the wrong window.
+    static let frameAutosaveName = "Transcripted.MainWindow"
+
     static func make(contentViewController: NSViewController) -> NSWindow {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 980, height: 760),
+            contentRect: NSRect(origin: .zero, size: MainWindowFramePolicy.defaultSize),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false

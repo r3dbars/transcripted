@@ -200,7 +200,7 @@ func testNightlySecurityContract() {
         let passing = runRepoPythonScript("scripts/ops/nightly-security-check.py", arguments: [
             "--strict",
             "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
-            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.73.json"
+            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.74.json"
         ])
         let staleCask = runRepoPythonScript("scripts/ops/nightly-security-check.py", arguments: [
             "--strict",
