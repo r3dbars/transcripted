@@ -358,7 +358,10 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
             if completedBeforeTimeout {
                 completion(.success(value))
             } else {
-                timedOutWorkerCompleted()
+                // Late cleanup can block in native hardware teardown too.
+                // Keep that worker inside the same hard circuit until all of
+                // its native work, including cleanup, has actually returned.
+                defer { timedOutWorkerCompleted() }
                 cleanupAfterLateCompletion?(value)
             }
         }
