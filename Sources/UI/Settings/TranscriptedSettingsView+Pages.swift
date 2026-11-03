@@ -208,6 +208,8 @@ extension TranscriptedSettingsView {
             todayPage
         case .home:
             homePage
+        case .files:
+            fileTranscriptionPage
         case .dictations:
             dictationsPage
         case .writing:
@@ -301,6 +303,34 @@ extension TranscriptedSettingsView {
             // used to send on open comes from Today's list. Home owns the
             // once-per-window latch, so visiting Meetings after doesn't count twice.
             homeViewModel.trackActivationReturnProxyIfNeeded(todayRecent: snapshot.recent)
+        }
+    }
+
+    private var fileTranscriptionPage: some View {
+        FileTranscriptionSettingsPage(
+            onImportAudioFile: actions.importAudioFile,
+            onShowMeetings: { navigation.select(.home, source: .settingsAction) }
+        ) {
+            if let activity = homeTranscriptionActivity {
+                QuietWorkingRow(
+                    title: activity.title,
+                    status: activity.status,
+                    progress: activity.progress,
+                    symbolName: activity.symbolName,
+                    tone: activity.tone,
+                    onCancel: homeTranscriptionActivityIsCancellable ? {
+                        actions.cancelPendingAudioImports()
+                        meetingSession.cancelActiveTranscription()
+                    } : nil,
+                    detail: activity.tone == .caution ? activity.detail : nil,
+                    onOpen: activity.transcriptURL.map { transcriptURL in
+                        {
+                            navigation.select(.home, source: .settingsAction)
+                            navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
+                        }
+                    }
+                )
+            }
         }
     }
 

@@ -257,7 +257,7 @@ extension TranscriptedSettingsView {
 
     private func settingsDiscoveryFeatureArea(for page: TranscriptedSettingsPage) -> FeatureDiscoveryTelemetry.FeatureArea? {
         switch page {
-        case .today, .home, .dictations:
+        case .today, .home, .files, .dictations:
             return .localArtifactActions
         case .people:
             return .speakerReview

@@ -38,6 +38,7 @@ func testDebugControlCommand() {
         assertEqual(debugArgv(["import", "/tmp/x.wav"]), .success(DebugControlRequest(id: "cli", commandName: "import_audio", action: .importAudio(path: "/tmp/x.wav"))))
         assertEqual(debugArgv(["paste-target", "open"]), .success(DebugControlRequest(id: "cli", commandName: "paste_target_open", action: .pasteTargetOpen)))
         assertEqual(debugArgv(["open", "people"]), .success(DebugControlRequest(id: "cli", commandName: "open_screen", action: .openScreen(screen: "people"))))
+        assertEqual(debugArgv(["open", "files"]), .success(DebugControlRequest(id: "cli", commandName: "open_screen", action: .openScreen(screen: "files"))))
         assertEqual(debugArgv(["settings", "get", "usage_stats"]), .success(DebugControlRequest(id: "cli", commandName: "settings_get", action: .settingsGet(key: "usage_stats"))))
         assertEqual(debugArgv(["settings", "set", "crash_reports", "false"]), .success(DebugControlRequest(id: "cli", commandName: "settings_set", action: .settingsSet(key: "crash_reports", value: false))))
     }

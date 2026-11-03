@@ -5,6 +5,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     /// value so automation identifiers and analytics `page_id` stay stable.
     case today
     case home
+    case files
     case dictations
     case writing
     case general
@@ -35,6 +36,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .today: return .today
         case .home: return .meetings
+        case .files: return .files
         case .dictations: return .dictations
         case .writing: return .writing
         case .general: return .settings
@@ -47,6 +49,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .today: return "Today"
         case .home: return "Meetings"
+        case .files: return "Transcribe a file"
         case .dictations: return "Dictations"
         case .writing: return "Writing"
         case .general: return "Settings"
@@ -58,7 +61,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     /// Conventional ⌘ shortcut for the primary sidebar sections, surfaced in
     /// the "Go" menu and as the sidebar row tooltip. `nil` for gear-gated
-    /// settings pages, which have no navigation shortcut.
+    /// settings pages and file import (which already has ⌘O).
     var navigationShortcutKey: String? {
         switch self {
         case .today: return "1"
@@ -82,6 +85,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .today: return "sun.max.fill"
         case .home: return "bubble.left.and.bubble.right.fill"
+        case .files: return "waveform"
         case .dictations: return "mic.fill"
         case .writing: return "keyboard.fill"
         case .general: return "gearshape.fill"

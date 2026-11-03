@@ -605,6 +605,7 @@ APP_SOURCES=(
     "Sources/UI/MenuBar/MenuBarPopoverPresentation.swift"
     "Sources/UI/Shared/AccessibilityDisplayPolicy.swift"
     "Sources/UI/Settings/TranscriptedSettingsSidebar.swift"
+    "Sources/UI/Settings/Pages/FileTranscriptionSettingsPage.swift"
     "Sources/UI/Settings/TranscriptedOnboardingWindow.swift"
     "Sources/UI/Settings/TranscriptedSettingsWindow.swift"
     "Sources/UI/Shared/MeetingPillFinishPresentation.swift"

@@ -432,6 +432,8 @@ final class DebugControlChannel {
             appDelegate.showSettingsWindow(page: .today, source: "debug_control")
         case "home":
             appDelegate.showSettingsWindow(page: .home, source: "debug_control")
+        case "files":
+            appDelegate.showSettingsWindow(page: .files, source: "debug_control")
         case "dictations":
             appDelegate.showSettingsWindow(page: .dictations, source: "debug_control")
         case "writing":
