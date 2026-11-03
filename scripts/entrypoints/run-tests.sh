@@ -762,6 +762,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/SpeakerDuplicateDetection.swift"
     "Sources/UI/Shared/SpeakerClipPlayback.swift"
     "Sources/UI/Settings/AutoEnterDisplayNameResolver.swift"
+    "Sources/UI/Settings/HomeBackgroundTapCatcher.swift"
     "Sources/UI/Overlay/MeetingDurationFormatter.swift"
     "Sources/Meeting/MeetingStartFailureClassifier.swift"
     "Sources/Meeting/MeetingSystemAudioStatusCopy.swift"

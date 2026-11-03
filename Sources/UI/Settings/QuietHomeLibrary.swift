@@ -634,33 +634,6 @@ private struct QuietTranscriptTimestamp: View {
 }
 
 
-// MARK: - Background tap catcher
-
-/// Makes a container's full bounds hit-testable so a tap on otherwise-empty
-/// space (the gaps around rows, day-group padding, the space below the last
-/// row) can be caught by the shell — typically to collapse an open
-/// `QuietMeetingExpansion`. Apply to the list container, not individual
-/// rows: SwiftUI resolves gestures on the innermost view that recognizes
-/// them first, so a row's own `onTapGesture` (open/toggle) or a button
-/// inside the expansion still wins over this background catcher.
-private struct HomeBackgroundTapCatcherModifier: ViewModifier {
-    let onTap: () -> Void
-
-    func body(content: Content) -> some View {
-        content
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onTap)
-    }
-}
-
-extension View {
-    /// See `HomeBackgroundTapCatcherModifier`. Wire `onTap` to collapse the
-    /// currently-open Home meeting expansion.
-    func homeBackgroundTapCatcher(onTap: @escaping () -> Void) -> some View {
-        modifier(HomeBackgroundTapCatcherModifier(onTap: onTap))
-    }
-}
-
 extension RecentMeetingItem {
     /// The speech model that made this transcript, e.g. "Parakeet V3".
     var transcriptionModelName: String? {
