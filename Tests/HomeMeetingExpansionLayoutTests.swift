@@ -29,5 +29,8 @@ func testHomeMeetingExpansionLayout() {
 
     runSuite("Clicking an opened meeting's header closes it") {
         assertEqual(HomeMeetingExpansionLayout.headerClick, .collapse)
+        var collapses = 0
+        HomeMeetingExpansionLayout.performHeaderClick { collapses += 1 }
+        assertEqual(collapses, 1, "the header dispatches its existing collapse action once")
     }
 }

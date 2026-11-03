@@ -1,7 +1,7 @@
 import Foundation
 
 /// One action on an opened Meetings card (`QuietMeetingExpansion`).
-enum HomeMeetingExpansionAction: Equatable, CaseIterable {
+enum HomeMeetingExpansionAction: Hashable, CaseIterable {
     case copy
     case revealInFinder
     case more
@@ -18,10 +18,17 @@ enum HomeMeetingExpansionLayout {
     }
 
     /// Actions in the header row, top right.
-    static let headerActions: [HomeMeetingExpansionAction] = []
+    static let headerActions: [HomeMeetingExpansionAction] = [.copy, .revealInFinder, .more]
 
     /// Actions in the bar under the transcript.
-    static let footerActions: [HomeMeetingExpansionAction] = [.copy, .revealInFinder, .more]
+    static let footerActions: [HomeMeetingExpansionAction] = []
 
-    static let headerClick: HeaderClick = .nothing
+    static let headerClick: HeaderClick = .collapse
+
+    static func performHeaderClick(onCollapse: () -> Void) {
+        switch headerClick {
+        case .nothing: break
+        case .collapse: onCollapse()
+        }
+    }
 }

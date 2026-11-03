@@ -338,24 +338,41 @@ struct QuietMeetingExpansion: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(item.title)
-                        .font(.system(size: 15, weight: .semibold))
-                        .accessibilityIdentifier("transcripted.home.expansion.title")
-                    Text(metaLine)
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(LibraryTokens.ink3)
-                    if let warning = item.systemAudioVerificationWarning {
-                        Label(warning, systemImage: "exclamationmark.triangle")
-                            .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.attention)
-                        Text("Didn't hear anyone else on the call. They may have been quiet, or call audio wasn't recorded.")
-                            .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.ink2)
+            HStack(alignment: .top, spacing: 12) {
+                // Only the title/meta area closes the card. Actions sit beside
+                // this button, so Copy, Finder and the menu never collapse it.
+                Button {
+                    HomeMeetingExpansionLayout.performHeaderClick(onCollapse: onCollapse)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(.system(size: 15, weight: .semibold))
+                            .accessibilityIdentifier("transcripted.home.expansion.title")
+                        Text(metaLine)
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(LibraryTokens.ink3)
+                        if let warning = item.systemAudioVerificationWarning {
+                            Label(warning, systemImage: "exclamationmark.triangle")
+                                .font(LibraryTokens.meta)
+                                .foregroundStyle(LibraryTokens.attention)
+                            Text("Didn't hear anyone else on the call. They may have been quiet, or call audio wasn't recorded.")
+                                .font(LibraryTokens.meta)
+                                .foregroundStyle(LibraryTokens.ink2)
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help("Close capture")
+                .accessibilityIdentifier("transcripted.home.expansion.header")
+
+                HStack(spacing: 16) {
+                    ForEach(HomeMeetingExpansionLayout.headerActions, id: \.self) { action in
+                        expansionAction(for: action)
                     }
                 }
-                Spacer()
+
                 // Hidden control so Esc collapses the expansion.
                 Button(action: onCollapse) { EmptyView() }
                     .buttonStyle(.plain)
@@ -373,37 +390,18 @@ struct QuietMeetingExpansion: View {
             content
                 .padding(.top, 12)
 
-            HStack(spacing: 16) {
-                quietAction(
-                    title: isCopied ? "Copied" : "Copy",
-                    symbol: isCopied ? "checkmark" : "square.on.square",
-                    tint: isCopied ? LibraryTokens.accent : LibraryTokens.ink2,
-                    action: onCopy
-                )
-                .accessibilityIdentifier("transcripted.home.expansion.copy")
-
-                quietAction(
-                    title: "Show in Finder",
-                    symbol: "folder",
-                    tint: LibraryTokens.ink2,
-                    action: onRevealInFinder
-                )
-                .accessibilityIdentifier("transcripted.home.expansion.reveal")
-
-                Spacer()
-
-                if !menuItems.isEmpty {
-                    HomeRowMoreMenuButton(
-                        items: menuItems,
-                        automationIdentifier: "transcripted.home.expansion.more"
-                    )
-                    .frame(width: 24, height: 24)
+            if !HomeMeetingExpansionLayout.footerActions.isEmpty {
+                HStack(spacing: 16) {
+                    ForEach(HomeMeetingExpansionLayout.footerActions, id: \.self) { action in
+                        expansionAction(for: action)
+                    }
+                    Spacer()
                 }
-            }
-            .padding(.top, 12)
-            .overlay(alignment: .top) {
-                Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
-                    .padding(.top, 6)
+                .padding(.top, 12)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
+                        .padding(.top, 6)
+                }
             }
         }
         .padding(18)
@@ -570,6 +568,36 @@ struct QuietMeetingExpansion: View {
 
     private func identityIsSaved(_ identity: HomeMeetingSpeakerIdentity) -> Bool {
         identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false
+    }
+
+    @ViewBuilder
+    private func expansionAction(for action: HomeMeetingExpansionAction) -> some View {
+        switch action {
+        case .copy:
+            quietAction(
+                title: isCopied ? "Copied" : "Copy",
+                symbol: isCopied ? "checkmark" : "square.on.square",
+                tint: isCopied ? LibraryTokens.accent : LibraryTokens.ink2,
+                action: onCopy
+            )
+            .accessibilityIdentifier("transcripted.home.expansion.copy")
+        case .revealInFinder:
+            quietAction(
+                title: "Show in Finder",
+                symbol: "folder",
+                tint: LibraryTokens.ink2,
+                action: onRevealInFinder
+            )
+            .accessibilityIdentifier("transcripted.home.expansion.reveal")
+        case .more:
+            if !menuItems.isEmpty {
+                HomeRowMoreMenuButton(
+                    items: menuItems,
+                    automationIdentifier: "transcripted.home.expansion.more"
+                )
+                .frame(width: 24, height: 24)
+            }
+        }
     }
 
     private func quietAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
