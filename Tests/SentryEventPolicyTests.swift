@@ -495,7 +495,7 @@ func testSentryEventPolicy() {
         assertEqual(privateReason["reason"], "unknown", "short free text is also excluded")
     }
 
-    runSuite("Every allowlisted Sentry tag key survives the sanitizer") {
+    runSuite("Every allowlisted Sentry tag key permits a contract-valid value") {
         // `start_profile` was added to the allowlist and still arrived nil,
         // because "profile" contains "file" and the shared sensitive-key
         // fragment list drops any key containing it. A key that is
@@ -505,12 +505,18 @@ func testSentryEventPolicy() {
         // hatch when a key genuinely needs one.
         let keys = SentryEventPolicy.allowedDiagnosticTagKeys.sorted()
         assertTrue(keys.count > 50, "the allowlist should have more than 50 keys; got \(keys.count)")
+        let fixedVocabularyFixtures = [
+            "work_source": "system_input",
+            "work_step": "selection",
+            "inflight_bucket": "2_3",
+        ]
 
         for key in keys {
+            let value = fixedVocabularyFixtures[key] ?? "sample_value"
             assertEqual(
-                SentryPayloadSanitizer.sanitizeTags([key: "sample_value"])[key],
-                "sample_value",
-                "\(key) is allowlisted but the sanitizer drops it, so it can never reach Sentry"
+                SentryPayloadSanitizer.sanitizeTags([key: value])[key],
+                value,
+                "\(key) is allowlisted but the sanitizer rejects its contract-valid fixture"
             )
         }
     }
