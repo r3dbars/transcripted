@@ -265,6 +265,9 @@ struct TranscriptedSettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshAfterAppActivation()
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSWorkspace.didWakeNotification)) { _ in
+            refreshAfterAppActivation()
+        }
         .onDisappear {
             homeDashboardRefreshTask?.cancel()
             homeDashboardRefreshTask = nil

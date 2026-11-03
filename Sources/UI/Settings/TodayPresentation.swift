@@ -624,9 +624,8 @@ enum TodayCopy {
         return TodayFormatterCache.timeRange(from: start, to: end, locale: locale, calendar: calendar)
     }
 
-    /// Whole minutes since the reference date. Everything the day card shows
-    /// about `now` (the "Now 2:41 PM" label, the now line, "Yesterday") moves
-    /// at most once a minute, so the card skips renders inside one minute.
+    /// Whole minutes since the reference date. The Now label uses this so a
+    /// tick that has not changed the displayed clock time can skip work.
     static func minuteKey(_ date: Date) -> Int64 {
         Int64((date.timeIntervalSinceReferenceDate / 60).rounded(.down))
     }
@@ -651,6 +650,82 @@ enum TodayCopy {
             template = "MMMd"
         }
         return TodayFormatterCache.string(from: date, template: template, locale: locale, calendar: calendar)
+    }
+}
+
+// MARK: - Clock
+
+/// What the day card compares. It does not include the current minute, so a
+/// clock tick does not rebuild the tape, preview, or session list.
+struct TodayDayCardIdentity: Equatable, Sendable {
+    let day: TodayTapeDay
+    let pickedMarkID: String?
+    let formatKey: String
+}
+
+/// What a session row compares. Locale / time zone live in `formatKey` so a
+/// region change still redraws the formatted times.
+struct TodaySessionRowIdentity: Equatable, Sendable {
+    let session: TodaySession
+    let isOpen: Bool
+    let formatKey: String
+}
+
+/// Calendar-day helpers for Today's live clock leaves. Minute ticks stay on
+/// the Now label and tape marker; a day change rebuilds the snapshot.
+enum TodayClockPolicy {
+    static func dayKey(_ date: Date, calendar: Calendar = .current) -> Date {
+        calendar.startOfDay(for: date)
+    }
+
+    static func nextMidnight(after date: Date, calendar: Calendar = .current) -> Date {
+        let start = calendar.startOfDay(for: date)
+        return calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+    }
+
+    /// True when the snapshot's calendar day is not the local day of `now`.
+    /// A never-built snapshot (`distantPast`) always needs a refresh.
+    static func needsRollover(
+        storedDay: Date,
+        now: Date,
+        calendar: Calendar = .current
+    ) -> Bool {
+        !calendar.isDate(storedDay, inSameDayAs: now)
+    }
+
+    /// Where the Now marker sits on the tape, or nil when `tapeDay` is not
+    /// the local day of `now` (stale `isToday` after midnight, or a past day).
+    static func nowMarkerFraction(
+        now: Date,
+        tapeDay: Date,
+        calendar: Calendar = .current
+    ) -> Double? {
+        guard calendar.isDate(tapeDay, inSameDayAs: now) else { return nil }
+        return TodayTapeBuilder.fraction(of: now, onDayStarting: dayKey(now, calendar: calendar), calendar: calendar)
+    }
+
+    static func dayCardIdentity(
+        day: TodayTapeDay,
+        pickedMarkID: String?,
+        formatKey: String
+    ) -> TodayDayCardIdentity {
+        TodayDayCardIdentity(day: day, pickedMarkID: pickedMarkID, formatKey: formatKey)
+    }
+
+    static func sessionRowIdentity(
+        session: TodaySession,
+        isOpen: Bool,
+        formatKey: String
+    ) -> TodaySessionRowIdentity {
+        TodaySessionRowIdentity(session: session, isOpen: isOpen, formatKey: formatKey)
+    }
+
+    static func nowLabelText(
+        now: Date,
+        locale: Locale = .current,
+        calendar: Calendar = .current
+    ) -> String {
+        "Now \(TodayCopy.rowWhen(for: now, now: now, locale: locale, calendar: calendar))"
     }
 }
 
