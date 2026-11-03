@@ -6,6 +6,7 @@ extension TranscriptionTaskManager {
 
     @MainActor func finishNamingFlow(
         didFinalizeTranscript: Bool,
+        finalizedTranscriptData: Data? = nil,
         failure: SpeakerFinalizationFailure? = nil,
         updatesCount: Int,
         transcriptId: UUID,
@@ -42,12 +43,23 @@ extension TranscriptionTaskManager {
                     }
                     guard let currentURL = TranscriptSaver.resolveTranscriptURL(
                         resolvedURL,
-                        transcriptId: transcriptId
+                        transcriptId: transcriptId,
+                        currentDirectoryProvider: transcriptDirectoryProvider
                     ) else {
                         return (
                             metadata: Optional<(resolvedURL: URL, didAlreadyPublish: Bool)>.none,
                             superseded: false
                         )
+                    }
+
+                    let crossedDirectories = currentURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+                        != resolvedURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+                    if crossedDirectories {
+                        guard let finalizedTranscriptData,
+                              let currentData = try? Data(contentsOf: currentURL),
+                              currentData == finalizedTranscriptData else {
+                            return (metadata: Optional<(resolvedURL: URL, didAlreadyPublish: Bool)>.none, superseded: false)
+                        }
                     }
 
                     let didAlreadyPublish = lastSavedTranscriptId == transcriptId
@@ -170,7 +182,9 @@ extension TranscriptionTaskManager {
         }
 
         let values = TranscriptSaver.serializeTranscriptFileUpdate {
-            let currentURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, transcriptId: id)
+            let currentURL = TranscriptSaver.resolveTranscriptURL(
+                transcriptURL, transcriptId: id, currentDirectoryProvider: transcriptDirectoryProvider
+            )
                 ?? transcriptURL
             return (try? TranscriptFrontmatter.readValues(from: currentURL)) ?? [:]
         }

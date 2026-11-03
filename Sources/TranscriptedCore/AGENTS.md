@@ -102,6 +102,9 @@ Run `find Sources/TranscriptedCore -name '*.swift'` for the live list. By folder
 
 ## Storage and format
 
+Pending speaker reviews receive the host's dynamic `transcriptDirectoryProvider`. Save and publication resolve stable IDs in that current authorized folder before the original parent; a readable current folder with no matching ID permits the original fallback. Ambiguous, unavailable or read-only current matches fail closed. Never expand this lookup into a home-directory scan or infer identity from a filename.
+When finalization and publication resolve to different folders, publication also requires the exact finalized Markdown postimage captured before database mutations. A pre-copied file with the same UUID can still have stale speaker names; mismatch preserves retry audio and reports publication failure. Same-folder title/style renames retain their existing behavior.
+
 Standalone `TranscriptedCore.default` paths, under `~/Library/Application Support/Transcripted/`: `captures/meetings/` (captures), `state/` (databases, failed queue), `tmp/recordings/` (clips, raw audio scratch), `logs/`. The app injects its own `CoreStoragePaths` so the capture folder follows the selected capture library. Full map: `docs/storage-paths.md`.
 
 `TranscriptSaver.saveTranscript(...)` writes the Markdown transcript with YAML speaker metadata and recording-health fields (`capture_quality`, `audio_gaps`, `device_switches`). The format (frontmatter keys, `format_version` / `transcript_style`, both body grammars, the save, summary-injection and restyle lifecycle) is specified in `docs/capture-format.md`; keep that in sync with formatter changes, and keep new frontmatter keys flat (the shared parser skips indented lines).

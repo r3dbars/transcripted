@@ -158,6 +158,8 @@ public class TranscriptionTaskManager: ObservableObject {
     public let statsStore: (any StatsStore)?
     let retainedAudioDirectory: URL?
     let retainedAudioDirectoryProvider: (() -> URL?)?
+    /// The host's current authorized meeting folder, read again when a review saves.
+    let transcriptDirectoryProvider: (@Sendable () -> URL?)?
     let transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)?
     let cleanupDirectories: [URL]
     /// Audio the app layer has spoken for but that Core cannot see on its own.
@@ -241,6 +243,7 @@ public class TranscriptionTaskManager: ObservableObject {
         cleanupDirectories: [URL]? = nil,
         retainedAudioDirectory: URL? = nil,
         retainedAudioDirectoryProvider: (() -> URL?)? = nil,
+        transcriptDirectoryProvider: (@Sendable () -> URL?)? = nil,
         transcriptFormatOptionsProvider: (() -> TranscriptFormatOptions)? = nil,
         statsStore: (any StatsStore)? = nil,
         notifier: TranscriptNotifier? = nil
@@ -250,6 +253,7 @@ public class TranscriptionTaskManager: ObservableObject {
         self.notifier = notifier
         self.retainedAudioDirectory = retainedAudioDirectory
         self.retainedAudioDirectoryProvider = retainedAudioDirectoryProvider
+        self.transcriptDirectoryProvider = transcriptDirectoryProvider
         self.transcriptFormatOptionsProvider = transcriptFormatOptionsProvider
         self.cleanupDirectories = (cleanupDirectories ?? [speakerClipsDirectory])
             .map(Self.canonicalDirectoryURL)

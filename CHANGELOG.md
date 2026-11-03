@@ -28,6 +28,9 @@ force-installed by Sparkle so existing users recover from a regression.
   check, tap installation or engine start, while preserving the recording's format.
 - The speaker database opens on its serial queue instead of blocking its
   constructor on filesystem and SQLite work during launch.
+- Pending speaker reviews can be saved after moving the capture library.
+  If the library changes during Save, an older copy cannot be reported as
+  successfully named; retry audio is kept.
 - Disabled hotkey taps recover outside the callback's state lock. Recovery
   uses one worker and ignores callbacks from replaced taps.
 - Timed-out microphone work keeps its bounded worker slot until late cleanup

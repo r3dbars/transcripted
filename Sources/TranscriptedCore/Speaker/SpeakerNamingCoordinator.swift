@@ -68,6 +68,7 @@ extension TranscriptionTaskManager {
         let removeMicAudio = shouldRemoveMicAudio ?? shouldRemoveTemporaryAudio
         let removeSystemAudio = shouldRemoveSystemAudio ?? shouldRemoveTemporaryAudio
         let speakerDB = transcription.speakerDB
+        let currentTranscriptDirectory = transcriptDirectoryProvider
         let clipsDirectory = transcription.speakerClipsDirectory
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
             ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
@@ -197,6 +198,7 @@ extension TranscriptionTaskManager {
             // Resolve and mutate under the same serializer used by transcript styling/title
             // renames. Otherwise the styler can move the canonical file after resolution but
             // before the first speaker rewrite, leaving finalization pointed at a stale path.
+            var finalizedTranscriptData: Data?
             let finalizeTranscript = {
                 TranscriptSaver.serializeTranscriptFileUpdate {
                     if let requestId,
@@ -229,7 +231,8 @@ extension TranscriptionTaskManager {
                     }
                     guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
                         transcriptURL,
-                        transcriptId: transcriptId
+                        transcriptId: transcriptId,
+                        currentDirectoryProvider: currentTranscriptDirectory
                     ) else {
                         return (
                             didFinalize: false,
@@ -281,6 +284,17 @@ extension TranscriptionTaskManager {
                         discardedUpdates: discardedUpdates
                     )
                     if !didFinalize { failureReason = .discardFailed }
+                }
+
+                // Capture the exact postimage before a DB/store callback can
+                // switch libraries. UUID equality alone cannot prove a copy
+                // made before these rewrites contains the finalized names.
+                if didFinalize {
+                    finalizedTranscriptData = try? Data(contentsOf: resolvedURL)
+                    if finalizedTranscriptData == nil {
+                        didFinalize = false
+                        failureReason = .transcriptUnreadable
+                    }
                 }
 
                 if didFinalize {
@@ -359,6 +373,7 @@ extension TranscriptionTaskManager {
             let didFinalizeTranscript = finalization.didFinalize
             let resolvedURL = finalization.resolvedURL
             let failure = finalization.failureReason.map(finalizationFailure)
+            let finalizedData = finalizedTranscriptData
 
             if didFinalizeTranscript {
                 speakerDB.recordMatchOutcomes(Self.plannedMatchOutcomes(
@@ -422,6 +437,7 @@ extension TranscriptionTaskManager {
             Task { @MainActor in
                 let outcome = self.finishNamingFlow(
                     didFinalizeTranscript: didFinalizeTranscript,
+                    finalizedTranscriptData: finalizedData,
                     failure: failure,
                     updatesCount: updates.count,
                     transcriptId: transcriptId,
