@@ -214,6 +214,15 @@ enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
         return false
     }
 
+    var boundedWorkContext: [String: String] {
+        switch self {
+        case .timedOut(let operation, _):
+            return WorkCircuitDiagnostics.properties(source: .systemInput, operation: operation)
+        case .circuitOpen(let operation, let activeTimeouts):
+            return WorkCircuitDiagnostics.properties(source: .systemInput, operation: operation, inflight: activeTimeouts)
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case .timedOut(let operation, let timeoutMs):

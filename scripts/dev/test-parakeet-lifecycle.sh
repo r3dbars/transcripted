@@ -27,6 +27,7 @@ swiftc -parse-as-library -I "$OUT_DIR" -L "$OUT_DIR" -lFluidAudio \
     Sources/Speech/ParakeetModelState.swift \
     Sources/Speech/ParakeetModelInitDiagnostics.swift \
     Sources/Speech/ParakeetStartRecordingFailurePolicy.swift \
+    Sources/Observability/WorkCircuitDiagnostics.swift \
     Sources/Speech/ParakeetDecoderLayerCountCache.swift \
     Sources/Speech/ParakeetModelLifecycle.swift \
     "$TEST_DIR/EngineScaffold.swift" "$TEST_DIR/ExecutorSmoke.swift" \

@@ -21,6 +21,7 @@ enum AnalyticsPayloadSanitizer {
         for (key, value) in properties {
             guard allowedKeys.contains(key) else { continue }
             guard !shouldDrop(key: key) else { continue }
+            guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
             if uuidValuedKeys.contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
             if categoryValuedKeys.contains(key), PayloadSanitizationCore.category(value) == nil { continue }
 
@@ -37,6 +38,7 @@ enum AnalyticsPayloadSanitizer {
 
         for (key, value) in context {
             guard !shouldDrop(key: key) else { continue }
+            guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
 
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }

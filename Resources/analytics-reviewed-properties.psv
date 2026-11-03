@@ -270,4 +270,6 @@ warmup_start_ms
 warning_kind
 was_recorded
 was_recording
+work_source
+work_step
 workflow_kind

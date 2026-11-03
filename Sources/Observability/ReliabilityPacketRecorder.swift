@@ -368,6 +368,9 @@ enum ReliabilityPacketRecorder {
         "display_status",
         "clipboard_snapshot_cause",
         "failure_kind",
+        "work_source",
+        "work_step",
+        "inflight_bucket",
         "format_ready",
         "hfp_suspected",
         "input_channels",
@@ -438,6 +441,7 @@ enum ReliabilityPacketRecorder {
 
 
         for (key, value) in context where reliabilityContextAllowedKeys.contains(key) {
+            guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
             let sanitized = AnalyticsPayloadSanitizer.sanitizeText(value)
             if !sanitized.isEmpty {
                 safe[key] = sanitized
