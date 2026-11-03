@@ -12,6 +12,7 @@ final class WhisperEngine: ObservableObject {
 
     private let modelRepo = "argmaxinc/whisperkit-coreml"
     private var whisperKit: WhisperKit?
+    private let operationGate = WhisperOperationGate()
     private var loadedModel: TranscriptionModelChoice?
     private var initializingModel: TranscriptionModelChoice?
     private var initializationTask: Task<Void, Never>?
@@ -76,97 +77,99 @@ final class WhisperEngine: ObservableObject {
             await initialize(model: model)
         }
 
-        try Task.checkCancellation()
-        guard let whisperKit, isModelLoaded(for: model) else {
-            EventReporter.shared.capture(
-                level: .error,
-                engine: model.engineName,
-                event: "asr_manager_unavailable",
-                message: "WhisperKit model is not loaded",
-                context: ["model": model.rawValue]
-            )
-            throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "\(model.title) is not loaded."
-            ])
-        }
-
-        guard !samples.isEmpty else { return "" }
-
-        let sourceDescription = source == .microphone ? "microphone" : "system"
-        guard TranscriptedConstants.hasMinimumParakeetAudioSamples(samples.count) else {
-            let duration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
-            EventReporter.shared.capture(
-                level: .warning,
-                engine: model.engineName,
-                event: "segment_too_short",
-                message: "Skipped short audio segment before Whisper transcription",
-                context: [
-                    "audio_duration_s": String(format: "%.2f", duration),
-                    "minimum_duration_s": String(format: "%.2f", TranscriptedConstants.parakeetMinimumAudioDuration),
-                    "samples": "\(samples.count)",
-                    "source": sourceDescription,
-                    "model": model.rawValue,
-                ]
-            )
-            return ""
-        }
-
-        let startTime = CFAbsoluteTimeGetCurrent()
-        do {
-            let audioIsVoiced = await Self.voicedSegments([samples])[0]
+        return try await operationGate.run {
             try Task.checkCancellation()
-            let results = try await whisperKit.transcribe(
-                audioArray: samples,
-                decodeOptions: Self.decodeOptions(languageCode: languageCode, concurrentWorkerCount: 1)
-            )
-            try Task.checkCancellation()
-            let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            let kept = Self.keptTexts(
-                results.map { ($0.text, $0.segments.map { $0.text }) },
-                audioIsVoiced: audioIsVoiced
-            )
-            let transcript = SegmentedEngineTranscript(segmentTexts: kept.texts)
-            let trimmed = transcript.uncorrected
-            let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
-            let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
+            guard let whisperKit, isModelLoaded(for: model) else {
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: model.engineName,
+                    event: "asr_manager_unavailable",
+                    message: "WhisperKit model is not loaded",
+                    context: ["model": model.rawValue]
+                )
+                throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "\(model.title) is not loaded."
+                ])
+            }
 
-            AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
-            EventReporter.shared.capture(
-                level: .info,
-                engine: model.engineName,
-                event: source == .microphone ? "dictation_transcribed" : "meeting_segment_transcribed",
-                message: "Whisper segment transcribed in \(String(format: "%.2f", elapsed))s",
-                context: [
-                    "model": model.rawValue,
-                    "elapsed_s": String(format: "%.3f", elapsed),
-                    "audio_duration_s": String(format: "%.2f", audioDuration),
-                    "rtf": String(format: "%.3f", rtf),
-                    "chars": "\(trimmed.count)",
-                    "source": sourceDescription,
-                    "voiced": "\(audioIsVoiced)",
-                    "dropped_windows": "\(kept.droppedWindows)",
-                ]
-            )
+            guard !samples.isEmpty else { return "" }
 
-            // The user's custom dictionary, mirroring ParakeetEngine. Without it,
-            // proper-noun corrections silently fail on the Whisper path.
-            return transcript.text
-        } catch {
-            if Task.isCancelled || error is CancellationError { throw CancellationError() }
-            let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-            EventReporter.shared.capture(
-                level: .error,
-                engine: model.engineName,
-                event: "transcription_failed",
-                message: error.localizedDescription,
-                context: [
-                    "model": model.rawValue,
-                    "samples": "\(samples.count)",
-                    "source": sourceDescription,
-                    "elapsed": String(format: "%.2f", elapsed),
-                ]
-            )
-            throw error
+            let sourceDescription = source == .microphone ? "microphone" : "system"
+            guard TranscriptedConstants.hasMinimumParakeetAudioSamples(samples.count) else {
+                let duration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
+                EventReporter.shared.capture(
+                    level: .warning,
+                    engine: model.engineName,
+                    event: "segment_too_short",
+                    message: "Skipped short audio segment before Whisper transcription",
+                    context: [
+                        "audio_duration_s": String(format: "%.2f", duration),
+                        "minimum_duration_s": String(format: "%.2f", TranscriptedConstants.parakeetMinimumAudioDuration),
+                        "samples": "\(samples.count)",
+                        "source": sourceDescription,
+                        "model": model.rawValue,
+                    ]
+                )
+                return ""
+            }
+
+            let startTime = CFAbsoluteTimeGetCurrent()
+            do {
+                let audioIsVoiced = await Self.voicedSegments([samples])[0]
+                try Task.checkCancellation()
+                let results = try await whisperKit.transcribe(
+                    audioArray: samples,
+                    decodeOptions: Self.decodeOptions(languageCode: languageCode, concurrentWorkerCount: 1)
+                )
+                try Task.checkCancellation()
+                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+                let kept = Self.keptTexts(
+                    results.map { ($0.text, $0.segments.map { $0.text }) },
+                    audioIsVoiced: audioIsVoiced
+                )
+                let transcript = SegmentedEngineTranscript(segmentTexts: kept.texts)
+                let trimmed = transcript.uncorrected
+                let audioDuration = Double(samples.count) / TranscriptedConstants.parakeetSampleRate
+                let rtf = audioDuration > 0 ? elapsed / audioDuration : 0
+
+                AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(sourceDescription) in \(String(format: "%.2f", elapsed))s, chars=\(trimmed.count)")
+                EventReporter.shared.capture(
+                    level: .info,
+                    engine: model.engineName,
+                    event: source == .microphone ? "dictation_transcribed" : "meeting_segment_transcribed",
+                    message: "Whisper segment transcribed in \(String(format: "%.2f", elapsed))s",
+                    context: [
+                        "model": model.rawValue,
+                        "elapsed_s": String(format: "%.3f", elapsed),
+                        "audio_duration_s": String(format: "%.2f", audioDuration),
+                        "rtf": String(format: "%.3f", rtf),
+                        "chars": "\(trimmed.count)",
+                        "source": sourceDescription,
+                        "voiced": "\(audioIsVoiced)",
+                        "dropped_windows": "\(kept.droppedWindows)",
+                    ]
+                )
+
+                // The user's custom dictionary, mirroring ParakeetEngine. Without it,
+                // proper-noun corrections silently fail on the Whisper path.
+                return transcript.text
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: model.engineName,
+                    event: "transcription_failed",
+                    message: error.localizedDescription,
+                    context: [
+                        "model": model.rawValue,
+                        "samples": "\(samples.count)",
+                        "source": sourceDescription,
+                        "elapsed": String(format: "%.2f", elapsed),
+                    ]
+                )
+                throw error
+            }
         }
     }
 
@@ -192,75 +195,77 @@ final class WhisperEngine: ObservableObject {
         if !isModelLoaded(for: model) {
             await initialize(model: model)
         }
-        try Task.checkCancellation()
-        guard let whisperKit, isModelLoaded(for: model) else {
-            throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "\(model.title) is not loaded."
-            ])
-        }
-
-        // Same short-segment rule as `transcribeSamples`: those come back
-        // empty without a model call.
-        let eligible = segments.indices.filter {
-            TranscriptedConstants.hasMinimumParakeetAudioSamples(segments[$0].count)
-        }
-        var texts = Array(repeating: "", count: segments.count)
-        guard !eligible.isEmpty else { return texts }
-
-        let startTime = CFAbsoluteTimeGetCurrent()
-        let voiced = await Self.voicedSegments(eligible.map { segments[$0] })
-        try Task.checkCancellation()
-        let results = await whisperKit.transcribeWithResults(
-            audioArrays: eligible.map { segments[$0] },
-            decodeOptions: Self.decodeOptions(
-                languageCode: languageCode,
-                concurrentWorkerCount: WhisperMeetingBatchPolicy.concurrentWorkerCount
-            )
-        )
-        try Task.checkCancellation()
-        guard results.count == eligible.count else {
-            throw NSError(domain: "WhisperEngine", code: 4, userInfo: [
-                NSLocalizedDescriptionKey: "Whisper returned \(results.count) results for \(eligible.count) segments."
-            ])
-        }
-        var droppedWindows = 0
-        for ((index, result), audioIsVoiced) in zip(zip(eligible, results), voiced) {
-            switch result {
-            case .success(let segmentResults):
-                let kept = Self.keptTexts(
-                    segmentResults.map { ($0.text, $0.segments.map { $0.text }) },
-                    audioIsVoiced: audioIsVoiced
-                )
-                droppedWindows += kept.droppedWindows
-                texts[index] = SegmentedEngineTranscript(segmentTexts: kept.texts).text
-            case .failure(let error):
-                if error is CancellationError { throw CancellationError() }
-                throw error
+        return try await operationGate.run {
+            try Task.checkCancellation()
+            guard let whisperKit, isModelLoaded(for: model) else {
+                throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "\(model.title) is not loaded."
+                ])
             }
-        }
 
-        let elapsed = CFAbsoluteTimeGetCurrent() - startTime
-        let audioDuration = eligible.reduce(0.0) {
-            $0 + Double(segments[$1].count) / TranscriptedConstants.parakeetSampleRate
+            // Same short-segment rule as `transcribeSamples`: those come back
+            // empty without a model call.
+            let eligible = segments.indices.filter {
+                TranscriptedConstants.hasMinimumParakeetAudioSamples(segments[$0].count)
+            }
+            var texts = Array(repeating: "", count: segments.count)
+            guard !eligible.isEmpty else { return texts }
+
+            let startTime = CFAbsoluteTimeGetCurrent()
+            let voiced = await Self.voicedSegments(eligible.map { segments[$0] })
+            try Task.checkCancellation()
+            let results = await whisperKit.transcribeWithResults(
+                audioArrays: eligible.map { segments[$0] },
+                decodeOptions: Self.decodeOptions(
+                    languageCode: languageCode,
+                    concurrentWorkerCount: WhisperMeetingBatchPolicy.concurrentWorkerCount
+                )
+            )
+            try Task.checkCancellation()
+            guard results.count == eligible.count else {
+                throw NSError(domain: "WhisperEngine", code: 4, userInfo: [
+                    NSLocalizedDescriptionKey: "Whisper returned \(results.count) results for \(eligible.count) segments."
+                ])
+            }
+            var droppedWindows = 0
+            for ((index, result), audioIsVoiced) in zip(zip(eligible, results), voiced) {
+                switch result {
+                case .success(let segmentResults):
+                    let kept = Self.keptTexts(
+                        segmentResults.map { ($0.text, $0.segments.map { $0.text }) },
+                        audioIsVoiced: audioIsVoiced
+                    )
+                    droppedWindows += kept.droppedWindows
+                    texts[index] = SegmentedEngineTranscript(segmentTexts: kept.texts).text
+                case .failure(let error):
+                    if error is CancellationError { throw CancellationError() }
+                    throw error
+                }
+            }
+
+            let elapsed = CFAbsoluteTimeGetCurrent() - startTime
+            let audioDuration = eligible.reduce(0.0) {
+                $0 + Double(segments[$1].count) / TranscriptedConstants.parakeetSampleRate
+            }
+            AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(eligible.count) meeting segments in \(String(format: "%.2f", elapsed))s")
+            EventReporter.shared.capture(
+                level: .info,
+                engine: model.engineName,
+                event: "meeting_segment_transcribed",
+                message: "Whisper batch transcribed in \(String(format: "%.2f", elapsed))s",
+                context: [
+                    "model": model.rawValue,
+                    "elapsed_s": String(format: "%.3f", elapsed),
+                    "audio_duration_s": String(format: "%.2f", audioDuration),
+                    "rtf": String(format: "%.3f", audioDuration > 0 ? elapsed / audioDuration : 0),
+                    "segments": "\(eligible.count)",
+                    "source": source == .microphone ? "microphone" : "system",
+                    "unvoiced_segments": "\(voiced.filter { !$0 }.count)",
+                    "dropped_windows": "\(droppedWindows)",
+                ]
+            )
+            return texts
         }
-        AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(eligible.count) meeting segments in \(String(format: "%.2f", elapsed))s")
-        EventReporter.shared.capture(
-            level: .info,
-            engine: model.engineName,
-            event: "meeting_segment_transcribed",
-            message: "Whisper batch transcribed in \(String(format: "%.2f", elapsed))s",
-            context: [
-                "model": model.rawValue,
-                "elapsed_s": String(format: "%.3f", elapsed),
-                "audio_duration_s": String(format: "%.2f", audioDuration),
-                "rtf": String(format: "%.3f", audioDuration > 0 ? elapsed / audioDuration : 0),
-                "segments": "\(eligible.count)",
-                "source": source == .microphone ? "microphone" : "system",
-                "unvoiced_segments": "\(voiced.filter { !$0 }.count)",
-                "dropped_windows": "\(droppedWindows)",
-            ]
-        )
-        return texts
     }
 
     /// Whether each segment has a voice in it (`WhisperVoicedSpeechGate`),
@@ -323,47 +328,49 @@ final class WhisperEngine: ObservableObject {
         }
 
         if !isModelLoaded(for: model) { await initialize(model: model) }
-        try Task.checkCancellation()
-        guard let whisperKit, isModelLoaded(for: model) else {
-            throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
-                NSLocalizedDescriptionKey: "\(model.title) is not loaded."
-            ])
-        }
-
-        var observations: [String?] = []
-        for samples in representativeSamples.prefix(3) {
+        return try await operationGate.run {
             try Task.checkCancellation()
-            // Core supplies speech-selected windows. Keep a second bound at
-            // the engine seam for direct callers and reject invalid PCM.
-            let bounded = Array(samples.prefix(160_000))
-            guard bounded.count >= 32_000, bounded.allSatisfy({ $0.isFinite }) else {
-                observations.append(nil)
-                continue
+            guard let whisperKit, isModelLoaded(for: model) else {
+                throw NSError(domain: "WhisperEngine", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "\(model.title) is not loaded."
+                ])
             }
-            do {
-                // `detectLangauge` is the spelling in pinned WhisperKit 0.18.
-                // langProbs contains log probabilities, usually only the winner.
-                let detected = try await whisperKit.detectLangauge(audioArray: bounded)
+
+            var observations: [String?] = []
+            for samples in representativeSamples.prefix(3) {
                 try Task.checkCancellation()
-                observations.append(MeetingLanguageDetectionPolicy.confidentLanguage(
-                    code: detected.language,
-                    logProbability: detected.langProbs[detected.language],
-                    supportedCodes: supportedCodes
-                ))
-            } catch {
-                if Task.isCancelled || error is CancellationError { throw CancellationError() }
-                // Detection is advisory. An unavailable/ambiguous result must
-                // not discard a recording; retain the existing per-window Auto.
-                observations.append(nil)
+                // Core supplies speech-selected windows. Keep a second bound at
+                // the engine seam for direct callers and reject invalid PCM.
+                let bounded = Array(samples.prefix(160_000))
+                guard bounded.count >= 32_000, bounded.allSatisfy({ $0.isFinite }) else {
+                    observations.append(nil)
+                    continue
+                }
+                do {
+                    // `detectLangauge` is the spelling in pinned WhisperKit 0.18.
+                    // langProbs contains log probabilities, usually only the winner.
+                    let detected = try await whisperKit.detectLangauge(audioArray: bounded)
+                    try Task.checkCancellation()
+                    observations.append(MeetingLanguageDetectionPolicy.confidentLanguage(
+                        code: detected.language,
+                        logProbability: detected.langProbs[detected.language],
+                        supportedCodes: supportedCodes
+                    ))
+                } catch {
+                    if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                    // Detection is advisory. An unavailable/ambiguous result must
+                    // not discard a recording; retain the existing per-window Auto.
+                    observations.append(nil)
+                }
             }
-        }
-        switch MeetingLanguageDetectionPolicy.resolve(observations) {
-        case .multilingual:
-            return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .multilingual)
-        case let .detected(code):
-            return TranscriptionLanguageContext(selection: selection, languageCode: code, resolution: .detected)
-        case .uncertain:
-            return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .automaticUncertain)
+            switch MeetingLanguageDetectionPolicy.resolve(observations) {
+            case .multilingual:
+                return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .multilingual)
+            case let .detected(code):
+                return TranscriptionLanguageContext(selection: selection, languageCode: code, resolution: .detected)
+            case .uncertain:
+                return TranscriptionLanguageContext(selection: selection, languageCode: nil, resolution: .automaticUncertain)
+            }
         }
     }
 
@@ -376,12 +383,25 @@ final class WhisperEngine: ObservableObject {
         whisperKit = nil
         loadedModel = nil
         modelDownloadState = .notLoaded
-        Task {
-            await pipe?.unloadModels()
+        Task { [operationGate] in
+            // Publication is cleared synchronously, but a running decode may
+            // still retain this pipe. Do not unload it until that call returns.
+            try? await operationGate.run { await pipe?.unloadModels() }
         }
     }
 
     private func load(model: TranscriptionModelChoice, generation: SupersessionEpoch.Token) async {
+        do {
+            try await operationGate.run {
+                await loadExclusively(model: model, generation: generation)
+            }
+        } catch {
+            // A superseded load can be canceled while queued behind inference.
+            // It owns no model state and must not publish a failure.
+        }
+    }
+
+    private func loadExclusively(model: TranscriptionModelChoice, generation: SupersessionEpoch.Token) async {
         guard let variant = model.whisperKitModelName else { return }
         guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
 
