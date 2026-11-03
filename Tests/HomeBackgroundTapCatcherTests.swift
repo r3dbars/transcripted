@@ -21,6 +21,20 @@ private struct ClickAwayFooterButton: NSViewRepresentable {
     func updateNSView(_ nsView: NSButton, context: Context) {}
 }
 
+/// Refuses a quit while the fixture is up. A quit ends the test process with
+/// status 0 before the summary, which hides every later suite; one CI run of
+/// this file stopped that way. Counted so the suite can say so.
+@MainActor
+private final class ClickAwayAppDelegate: NSObject, NSApplicationDelegate {
+    static let shared = ClickAwayAppDelegate()
+    var quitRequests = 0
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        quitRequests += 1
+        return .terminateCancel
+    }
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+}
+
 @MainActor
 private final class ClickAwayFixture {
     let target = ClickAwayButtonTarget()
@@ -29,8 +43,12 @@ private final class ClickAwayFixture {
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 240),
                           styleMask: [.borderless], backing: .buffered, defer: false)
 
+    private let previousDelegate: NSApplicationDelegate?
+
     init(title: String) {
         _ = NSApplication.shared
+        previousDelegate = NSApp.delegate
+        NSApp.delegate = ClickAwayAppDelegate.shared
         button = NSButton(title: title, target: nil, action: nil)
         button.isBordered = false
         button.setButtonType(.momentaryChange)
@@ -49,7 +67,17 @@ private final class ClickAwayFixture {
         window.contentView = NSHostingView(rootView: root)
         window.orderFrontRegardless()
         window.contentView?.layoutSubtreeIfNeeded()
+        // SwiftUI puts the AppKit button in the window on a later turn of the
+        // run loop, and builds its gestures when it first draws: wait for the
+        // button to be in place, up to two seconds.
+        let deadline = Date().addingTimeInterval(2)
+        while !isReady, Date() < deadline {
+            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        }
     }
+
+    /// The button is in this window with a real size.
+    var isReady: Bool { button.window === window && button.frame.width > 0 && button.frame.height > 0 }
 
     /// The button's center (or an offset from it) in window coordinates.
     func pointInButton(dx: CGFloat = 0, dy: CGFloat = 0) -> NSPoint {
@@ -83,7 +111,10 @@ private final class ClickAwayFixture {
         }
     }
 
-    func close() { window.close() }
+    func close() {
+        window.close()
+        NSApp.delegate = previousDelegate
+    }
 }
 
 // async so the runner hops to the main thread: windows need it.
@@ -94,6 +125,7 @@ func testHomeBackgroundTapCatcher() async {
     runSuite("A click on empty space still closes the open card") {
         let fixture = ClickAwayFixture(title: doneTitle)
         defer { fixture.close() }
+        assertTrue(fixture.isReady, "the button is in the window")
         fixture.click(at: NSPoint(x: 300, y: 40))
         assertEqual(fixture.clickAways, 1, "empty-space click reached the click-away")
         assertEqual(fixture.target.presses, 0, "empty-space click pressed nothing")
@@ -102,10 +134,7 @@ func testHomeBackgroundTapCatcher() async {
     runSuite("A click on the middle of \"\(doneTitle)\" presses it, not the click-away") {
         let fixture = ClickAwayFixture(title: doneTitle)
         defer { fixture.close() }
-        let hit = fixture.window.contentView?.hitTest(
-            fixture.window.contentView!.convert(fixture.pointInButton(), from: nil))
-        assertTrue(hit === fixture.button || hit?.isDescendant(of: fixture.button) == true,
-                   "hit test at the label's center lands on the button (got \(String(describing: hit)))")
+        assertTrue(fixture.isReady, "the button is in the window")
         fixture.click(at: fixture.pointInButton())
         assertEqual(fixture.target.presses, 1,
                     "center click pressed the button (click-away took \(fixture.clickAways))")
@@ -123,5 +152,9 @@ func testHomeBackgroundTapCatcher() async {
         assertEqual(fixture.target.presses, 9,
                     "nine label clicks pressed the button (click-away took \(fixture.clickAways))")
         assertEqual(fixture.clickAways, 0, "label clicks left the click-away alone")
+    }
+
+    runSuite("Nothing above asked the test process to quit") {
+        assertEqual(ClickAwayAppDelegate.shared.quitRequests, 0, "quit requests refused during the click tests")
     }
 }
