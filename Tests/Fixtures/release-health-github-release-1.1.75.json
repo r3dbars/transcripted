@@ -1,0 +1,72 @@
+{
+  "assets": [
+    {
+      "contentType": "application/x-apple-diskimage",
+      "digest": "sha256:9e297c6c4154a5a6623c0fd711374fb45233faefab20bf718ded5b83068f6cca",
+      "name": "Transcripted-1.1.75.dmg",
+      "size": 703372192,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/Transcripted-1.1.75.dmg"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:105d80fb22dc962b2d1e7140481fdbc8817f3b2572a217318a7769e4098413fb",
+      "name": "Transcripted1.1.75-1.1.70.delta",
+      "size": 6190702,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/Transcripted1.1.75-1.1.70.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:5e72d9314f87e2fb416b3bdd56378bfcd6335b75e8244be7c3c45801ee09b122",
+      "name": "Transcripted1.1.75-1.1.71.delta",
+      "size": 5444646,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/Transcripted1.1.75-1.1.71.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:471d690216ecdcedcfb04233c3876f2a603789ec6e6f1da8cea6a06655a2f542",
+      "name": "Transcripted1.1.75-1.1.72.delta",
+      "size": 5220858,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/Transcripted1.1.75-1.1.72.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:d26652218cda91a8f26d031a8da5c186869e337e9c21e988e51ffa04ee4f7130",
+      "name": "Transcripted1.1.75-1.1.73.delta",
+      "size": 3743842,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/Transcripted1.1.75-1.1.73.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:e4d99ca9f4e624b348e5087feea562925df23c8ea04776e9b0658d7ce8ed2be6",
+      "name": "Transcripted1.1.75-1.1.74.delta",
+      "size": 3284502,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/Transcripted1.1.75-1.1.74.delta"
+    },
+    {
+      "contentType": "application/xml",
+      "digest": "sha256:4ea5be3798c824972aa431c32c14a51bfd56aafda8bf871046bff722305344ad",
+      "name": "appcast.xml",
+      "size": 83703,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.75/appcast.xml"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": false,
+  "tagName": "v1.1.75",
+  "url": "https://github.com/r3dbars/transcripted/releases/tag/v1.1.75",
+  "_fixture": {
+    "kind": "expected published release metadata derived from signed candidate bytes; not a live GitHub snapshot",
+    "candidate_run_id": 41703587330,
+    "signed_artifact_id": 13268023170,
+    "built_source_sha": "dd47b9afaaed40fe021ef53af88178d1986e70b2",
+    "workflow_sha": "77dfa28c3027b68151fa85064636f2eb2bbd1af8",
+    "publication_note": "Expected non-draft state only. Live asset IDs, sizes and digests must be independently verified after publication; this fixture is not evidence of publication."
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "frozen_version": "1.1.75",
+  "legacy_appcast": "docs/appcast.xml",
+  "legacy_appcast_sha256": "19acc70c1b2270a3b24ae3c746265bd19182421365810cea968c3f68fb6b2467",
+  "new_feed_url": "https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml",
+  "frozen_by": "scripts/release/freeze-legacy-appcast.py"
+}
