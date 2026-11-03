@@ -95,7 +95,20 @@ private final class ClickAwayFixture {
     /// tap: yielding lets that work run.
     private func turn() async {
         RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        Self.consumeStrayStops()
         await Task.yield()
+    }
+
+    /// A CI run showed the process ending in Swift's async-main drain: its
+    /// outer run loop returned, and the runtime then calls exit(0). A run-loop
+    /// stop meant for a nested turn here can be left pending and end that
+    /// outer loop instead. A zero-length run takes a pending stop, so do that
+    /// before handing control back.
+    static func consumeStrayStops() {
+        for _ in 0..<10 {
+            guard CFRunLoopRunInMode(.defaultMode, 0, true) == .stopped else { return }
+            print("HomeBackgroundTapCatcher: took a pending run-loop stop")
+        }
     }
 
     /// SwiftUI puts the AppKit button in the window on a later turn, and builds
@@ -141,6 +154,7 @@ private final class ClickAwayFixture {
     func close() {
         window.close()
         NSApp.delegate = previousDelegate
+        Self.consumeStrayStops()
     }
 }
 
