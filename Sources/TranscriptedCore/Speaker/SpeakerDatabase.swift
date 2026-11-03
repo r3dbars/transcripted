@@ -21,7 +21,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
 
     var db: OpaquePointer?
     // Thread-safety invariant:
-    // - Writes happen only during `init` (single-threaded construction) inside
+    // - Writes happen only in the open block `init` puts first on `queue`, inside
     //   `openDatabase` (which delegates open/configure to `SQLiteHandle`).
     // - Reads happen only inside `queue.sync { ... }` via the `*Impl` helpers
     //   below. This serializes reader visibility through the queue's memory
@@ -51,16 +51,22 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// `thresholds` are the bars of the voiceprint model whose vectors this file holds; pass the
     /// diarizer's `activeSpeakerThresholds`. The default is WeSpeaker's.
     public init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker, adoptCanonicalModelIdentity: Bool = true) {
-        dbPath = URL(fileURLWithPath: path)
+        // isDirectory: false so building the URL doesn't stat the disk.
+        dbPath = URL(fileURLWithPath: path, isDirectory: false)
         self.thresholds = thresholds
         queue.setSpecific(key: queueSpecificKey, value: 1)
-        try? FileManager.default.createDirectory(
-            at: dbPath.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
-        openDatabase()
-        createTables()
-        createVoiceprintIdentity(adoptCanonicalModelIdentity: adoptCanonicalModelIdentity)
+        // The app builds this on the main thread at launch, and opening waits on
+        // the disk (APPLE-MACOS-6E). Open on the queue instead: it's the first
+        // block there, so every read or write waits for it.
+        queue.async { [self] in
+            try? FileManager.default.createDirectory(
+                at: dbPath.deletingLastPathComponent(),
+                withIntermediateDirectories: true
+            )
+            openDatabase()
+            createTables()
+            createVoiceprintIdentity(adoptCanonicalModelIdentity: adoptCanonicalModelIdentity)
+        }
     }
 
     /// Persist the model identity so a copied or renamed database cannot be
