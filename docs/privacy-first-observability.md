@@ -268,6 +268,15 @@ without joining against any sensitive context.
 Anything richer than that should stay local unless there is a new explicit
 privacy review and a matching allowlist change.
 
+Native work failures on `reliability_failure_observed` also carry `work_source`
+(`system_input` or `engine_graph`), `work_step` (selection, snapshot, readiness,
+prepare, start, stop, reset or unknown), and `inflight_bucket` (0, 1, 2_3,
+4_plus or unknown). These identify the refused/timed-out operation and its
+bounded circuit capacity; they do not identify an earlier stuck call. Unknown
+operation strings map to unknown, and every off-device sanitizer rejects values
+outside these fixed vocabularies. No raw native error, device or operation label
+is added. The same keys are retained in local reliability packets.
+
 ## Analytics taxonomy review checklist
 
 Every analytics change should update `Resources/analytics-events.psv`,

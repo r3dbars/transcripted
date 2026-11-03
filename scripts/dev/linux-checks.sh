@@ -173,6 +173,7 @@ else
     skip "agent preflight" "origin/main not available; fetch it to enable"
 fi
 check "test matrix selector self-test" "python3 scripts/dev/test-matrix-checks.py --self-test"
+check "fast-test completion runtime proof" "python3 Tests/BuildDependencies/FastTestCompletionTests.py"
 check "agent contract self-test" "python3 scripts/dev/agent-context.py --self-test"
 check "agent proof runner self-test" "python3 scripts/dev/agent-check.py --self-test"
 if [ -f scripts/dev/check-superseded.py ]; then

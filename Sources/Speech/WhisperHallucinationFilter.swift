@@ -1,8 +1,8 @@
 // WhisperHallucinationFilter.swift
 // What Whisper text to keep from audio with no voice in it.
 //
-// `WhisperVoicedSpeechGate` says whether a segment has a voice. Voiced
-// segments keep everything Whisper wrote, exactly as before. Unvoiced ones
+// `WhisperVoicedSpeechGate` says whether a decoder window has a voice. Voiced
+// windows keep everything Whisper wrote, exactly as before. Unvoiced ones
 // still go to Whisper, because whispering has no pitch and a whispered
 // sentence is real speech. From those, a decoding window's text is dropped
 // only when it says nothing: no words at all ("...", "-", "*sigh*"), or
@@ -15,6 +15,87 @@
 import Foundation
 
 enum WhisperHallucinationFilter {
+    /// Pinned WhisperKit 0.18, with timestamps disabled, emits one segment per
+    /// 30 s decoder window. `seek` is an exact sample offset in the input;
+    /// start/end are Float seconds covering the unpadded part of that window.
+    /// See argmax-oss-swift e2adabbe, Core/TranscribeTask.swift window slicing
+    /// and Core/Text/SegmentSeeker.swift's no-consecutive-timestamps branch.
+    struct DecodedWindow: Sendable {
+        let text: String
+        let seek: Int
+        let start: Float
+        let end: Float
+    }
+
+    struct FilteredWindows: Sendable {
+        var texts: [String] = []
+        var droppedWindows = 0
+        var voicedWindows = 0
+        var unvoicedWindows = 0
+    }
+
+    static let decoderWindowSamples = 30 * 16_000
+
+    /// Reconstruct only results that actually lose a window. Full decoder text
+    /// can join tokens differently from separately rendered window text (for
+    /// example Japanese without spaces), so a no-op must keep it verbatim.
+    static func filterResults(
+        _ results: [(text: String, windows: [DecodedWindow])],
+        samples: [Float]
+    ) -> FilteredWindows {
+        var output = FilteredWindows()
+        for result in results {
+            let filtered = filterWindows(result.windows, samples: samples)
+            output.texts.append(contentsOf: filtered.droppedWindows == 0 ? [result.text] : filtered.texts)
+            output.droppedWindows += filtered.droppedWindows
+            output.voicedWindows += filtered.voicedWindows
+            output.unvoicedWindows += filtered.unvoicedWindows
+        }
+        return output
+    }
+
+    /// Scope audio evidence to the window that produced the words, with one
+    /// pitch run's context at its edges to preserve words cut by a boundary.
+    /// Remote voice in another window never exempts this window's silence.
+    /// Unknown timing preserves text: it is never evidence of silence.
+    static func filterWindows(_ windows: [DecodedWindow], samples: [Float]) -> FilteredWindows {
+        var result = FilteredWindows()
+        for window in windows {
+            guard let range = sampleRange(for: window, sampleCount: samples.count) else {
+                result.texts.append(window.text)
+                continue
+            }
+            let voiced = WhisperVoicedSpeechGate.hasVoicedSpeech(samples[range])
+            if voiced { result.voicedWindows += 1 } else { result.unvoicedWindows += 1 }
+            if !voiced, isSilenceHallucination(window.text) {
+                result.droppedWindows += 1
+            } else {
+                result.texts.append(window.text)
+            }
+        }
+        return result
+    }
+
+    private static func sampleRange(for window: DecodedWindow, sampleCount: Int) -> Range<Int>? {
+        guard window.seek >= 0, window.seek < sampleCount,
+              window.start.isFinite, window.end.isFinite, window.end > window.start else { return nil }
+        // Subtract before adding, so even malformed near-Int.max offsets do
+        // not overflow. The final window ends at actual input, before padding.
+        let count = min(decoderWindowSamples, sampleCount - window.seek)
+        let endSample = window.seek + count
+        let expectedStart = Float(window.seek) / 16_000
+        let expectedEnd = expectedStart + Float(count) / 16_000
+        // Match the upstream Float arithmetic, permitting only rounding at
+        // this magnitude. Different timestamp/chunking semantics fail open.
+        let tolerance = max(expectedStart.ulp, expectedEnd.ulp) * 2
+        guard abs(window.start - expectedStart) <= tolerance,
+              abs(window.end - expectedEnd) <= tolerance else { return nil }
+        let context = WhisperVoicedSpeechGate.minimumVoicedSupportSamples
+        let contextStart = max(0, window.seek - context)
+        let contextEnd = endSample + min(context, sampleCount - endSample)
+        return contextStart..<contextEnd
+    }
+
     /// The texts to keep, one per Whisper decoding window, in order.
     static func keptWindowTexts(_ windowTexts: [String], audioIsVoiced: Bool) -> [String] {
         guard !audioIsVoiced else { return windowTexts }

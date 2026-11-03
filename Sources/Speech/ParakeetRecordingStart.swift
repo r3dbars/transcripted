@@ -261,7 +261,7 @@ extension ParakeetEngine {
                     "failure_kind": "audio_engine_work_circuit_open",
                     "start_mode": isRecoveryAttempt ? "recovery" : "normal",
                     "error": circuitOpen.localizedDescription
-                ]
+                ].merging(circuitOpen.boundedWorkContext) { _, diagnostic in diagnostic }
             )
             markFormatUnreadyAndPublish()
             schedulePrewarmRetry()
@@ -318,12 +318,15 @@ extension ParakeetEngine {
                 let failureKind = workCircuitOpen
                     ? "audio_engine_work_circuit_open"
                     : operationTimedOut ? "audio_format_read_timeout" : "audio_format_unavailable"
-                let failureContext = [
+                var failureContext = [
                     "attempt": "\(attempt)",
                     "failure_kind": failureKind,
                     "start_mode": isRecoveryAttempt ? "recovery" : "normal",
                     "error": error.localizedDescription
                 ]
+                failureContext.merge(
+                    audioEngineWorkError?.boundedWorkContext ?? systemInputWorkError?.boundedWorkContext ?? [:]
+                ) { _, diagnostic in diagnostic }
                 if workCircuitOpen {
                     reportWorkCircuitOpenIfNeeded(
                         message: "Audio engine start was blocked by a prior timed operation",
@@ -515,6 +518,7 @@ extension ParakeetEngine {
                 context["failure_kind"] = audioEngineWorkError?.isCircuitOpen == true
                     ? "audio_engine_work_circuit_open"
                     : operationTimedOut ? "audio_engine_start_timeout" : "audio_engine_start_failed"
+                context.merge(audioEngineWorkError?.boundedWorkContext ?? [:]) { _, diagnostic in diagnostic }
                 context["sample_flow_started"] = "\(didReceiveAudioSamples)"
                 context["sample_signal_started"] = "\(didReceiveNonZeroAudioSamples)"
                 let shouldRetry = !operationBlocked

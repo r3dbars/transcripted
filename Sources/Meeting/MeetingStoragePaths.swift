@@ -15,6 +15,13 @@ enum MeetingStoragePaths {
         root
     }
 
+    /// A pending review must not mistake an offline custom library for an
+    /// intentional switch to the default. The storage owner snapshots the
+    /// configured root once and may prepare only its missing meetings child.
+    static var speakerReviewTranscriptsFolder: URL? {
+        TranscriptedStoragePreferences.speakerReviewMeetingsDirectory()
+    }
+
     /// Retained mic/system audio for saved meetings.
     static var audioArchiveFolder: URL {
         let url = root.appendingPathComponent("audio", isDirectory: true)

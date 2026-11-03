@@ -1,6 +1,16 @@
 import Foundation
 
 func testReliabilityPacketRecorder() {
+    runSuite("Support reliability packets retain only fixed native-work diagnostics") {
+        let context = WorkCircuitDiagnostics.properties(source: .systemInput, operation: "start_recording", inflight: 2)
+        let event = ObservabilityEvent(timestamp: "2026-01-01T00:00:00Z", level: "error", engine: "parakeet", event: "audio_engine_work_circuit_open", message: "Blocked", context: context, appVersion: "test", osVersion: "test")
+        let packet = ReliabilityPacketRecorder.packet(from: event)
+        for (key, value) in context { assertEqual(packet?.context[key], value) }
+        let unsafe = ObservabilityEvent(timestamp: "2026-01-01T00:00:00Z", level: "error", engine: "parakeet", event: "audio_engine_work_circuit_open", message: "Blocked", context: ["work_source": "private-device-label", "work_step": "private-words", "inflight_bucket": "123456"], appVersion: "test", osVersion: "test")
+        let unsafePacket = ReliabilityPacketRecorder.packet(from: unsafe)
+        for key in WorkCircuitDiagnostics.keys { assertNil(unsafePacket?.context[key]) }
+    }
+
     runSuite("Unverified system audio never becomes a successful support packet") {
         func packet(_ overrides: [String: String] = [:], event: String = "meeting_recording_stopped") -> ReliabilityPacket? {
             ReliabilityPacketRecorder.packet(from: ObservabilityEvent(

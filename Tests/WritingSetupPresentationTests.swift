@@ -192,6 +192,44 @@ func testWritingSetupPresentation() {
         assertEqual(Copy.keyboardBadge(saveMyWriting: false, autocomplete: true), "Needed")
     }
 
+    runSuite("Edit setup can turn both features off") {
+        // In-app feedback (1.1.74): with both switches off, Edit setup's
+        // Continue stayed disabled, so the user couldn't turn Writing off.
+        assertEqual(
+            Copy.step1Primary(saveMyWriting: false, autocomplete: false, isEditing: true),
+            .turnOffWriting,
+            "Edit setup with both off offers Turn off writing"
+        )
+        assertEqual(
+            Copy.step1Message(saveMyWriting: false, autocomplete: false, isEditing: true),
+            "Both off turns writing off.",
+            "Edit setup with both off explains, not blocks"
+        )
+        var draft = Copy.Draft()
+        draft.saveMyWriting = false
+        draft.autocomplete = false
+        assertTrue(draft.canFinishStep1(isEditing: true), "Edit setup's button stays enabled with both off")
+        assertEqual(Copy.Step1.turnOffTitle, "Turn off writing")
+
+        // First setup still needs one feature on: there's nothing to turn off.
+        assertEqual(
+            Copy.step1Primary(saveMyWriting: false, autocomplete: false, isEditing: false),
+            .continueSetup
+        )
+        assertEqual(
+            Copy.step1Message(saveMyWriting: false, autocomplete: false, isEditing: false),
+            "Turn on at least one to continue."
+        )
+        assertFalse(draft.canFinishStep1(isEditing: false))
+
+        // With one on, both flows continue as before.
+        assertEqual(Copy.step1Primary(saveMyWriting: true, autocomplete: false, isEditing: true), .continueSetup)
+        assertNil(Copy.step1Message(saveMyWriting: false, autocomplete: true, isEditing: true))
+        draft.autocomplete = true
+        assertTrue(draft.canFinishStep1(isEditing: true))
+        assertTrue(draft.canFinishStep1(isEditing: false))
+    }
+
     runSuite("Writing setup validation") {
         assertNil(Copy.step1Message(saveMyWriting: true, autocomplete: false))
         assertNil(Copy.step1Message(saveMyWriting: false, autocomplete: true))

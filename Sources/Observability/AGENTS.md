@@ -27,6 +27,8 @@ Emit with a literal name (`AnalyticsReporter.track("event_name", ...)`) so `pyth
 - `AnalyticsEventForwardingPolicy` (in `AnalyticsEventPolicy.swift`) is the only path from an `EventReporter` event to PostHog besides `reliability_failure_observed`. It reads the caller's own context (never the merged engine-state context), checks every value against a fixed set or buckets it, and maps anything unexpected to `unknown`. Its PostHog names go through a variable, so `check-analytics-emitters.py` can't see them; `Tests/AnalyticsEventForwardingPolicyTests.swift` pins that each is registered. Don't also add a direct `AnalyticsReporter.track` for those events or they double count.
 - `dictation_zombie_recovery_finished` is the single terminal event per zombie-engine attempt. Keep trigger, stage, result and route categorical; no raw device labels or exact sample counts.
 
+`WorkCircuitDiagnostics` owns the fixed work-source/step/inflight vocabularies for native work failures. Both off-device sanitizers validate them as exact enums, including untyped Sentry dictionaries. Never pass raw operation/error strings under those keys. The step names the attempted operation, not the earlier call that may still be stuck.
+
 **Reliability packets**
 - `ReliabilityPacketRecorder` must get the **raw** entry from `EventReporter.capture`, not the locally blanked copy. It positive-allowlists every key and redacts every value itself; feeding it the blanked copy shipped `[redacted-sensitive-value]` in support bundles and made the `recovered` outcome unreachable. Keep its context allowlist coarse and bucketed: no raw error text, transcript text, audio, paths, device names, titles, speaker names, emails, tokens or source app names.
 

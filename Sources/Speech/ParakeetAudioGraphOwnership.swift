@@ -214,6 +214,15 @@ enum ParakeetSystemInputWorkError: LocalizedError, Equatable {
         return false
     }
 
+    var boundedWorkContext: [String: String] {
+        switch self {
+        case .timedOut(let operation, _):
+            return WorkCircuitDiagnostics.properties(source: .systemInput, operation: operation)
+        case .circuitOpen(let operation, let activeTimeouts):
+            return WorkCircuitDiagnostics.properties(source: .systemInput, operation: operation, inflight: activeTimeouts)
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case .timedOut(let operation, let timeoutMs):
@@ -358,7 +367,10 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
             if completedBeforeTimeout {
                 completion(.success(value))
             } else {
-                timedOutWorkerCompleted()
+                // Late cleanup can block in native hardware teardown too.
+                // Keep that worker inside the same hard circuit until all of
+                // its native work, including cleanup, has actually returned.
+                defer { timedOutWorkerCompleted() }
                 cleanupAfterLateCompletion?(value)
             }
         }

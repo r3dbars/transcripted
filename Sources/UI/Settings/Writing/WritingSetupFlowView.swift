@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// Setup, steps 1 to 3 (docs/writing-plan.md, "Setup, step 1 of 3" to
-/// "step 3 of 3"). The steps only fill `model.draft`; "Turn on writing"
-/// applies it through `WritingSettingsModel.turnOnWriting()`.
+/// "step 3 of 3"). Editing both features off applies at step 1 through
+/// `finishSetupStep1()`; enabled choices fill the draft until "Turn on writing".
 struct WritingSetupFlowView: View {
     typealias Copy = WritingSetupPresentation
 
@@ -44,8 +44,9 @@ struct WritingSetupFlowView: View {
 
             validationMessage(Copy.step1Message(
                 saveMyWriting: model.draft.saveMyWriting,
-                autocomplete: model.draft.autocomplete
-            ))
+                autocomplete: model.draft.autocomplete,
+                isEditing: model.isEditingSetup
+            ), isBlocking: !model.draft.canFinishStep1(isEditing: model.isEditingSetup))
 
             HStack(spacing: 12) {
                 if model.isEditingSetup {
@@ -58,11 +59,15 @@ struct WritingSetupFlowView: View {
                 }
                 Spacer()
                 WritingPrimaryButton(
-                    title: Copy.Step1.continueTitle,
-                    isEnabled: model.draft.canContinueStep1,
+                    title: Copy.step1Primary(
+                        saveMyWriting: model.draft.saveMyWriting,
+                        autocomplete: model.draft.autocomplete,
+                        isEditing: model.isEditingSetup
+                    ) == .turnOffWriting ? Copy.Step1.turnOffTitle : Copy.Step1.continueTitle,
+                    isEnabled: model.draft.canFinishStep1(isEditing: model.isEditingSetup),
                     automationIdentifier: "transcripted.settings.writing.setup.continue"
                 ) {
-                    model.showStep(2)
+                    model.finishSetupStep1()
                 }
             }
         }
@@ -323,11 +328,11 @@ struct WritingSetupFlowView: View {
     // MARK: Shared
 
     @ViewBuilder
-    private func validationMessage(_ message: String?) -> some View {
+    private func validationMessage(_ message: String?, isBlocking: Bool = true) -> some View {
         if let message {
             Text(message)
                 .font(LibraryTokens.meta.weight(.semibold))
-                .foregroundStyle(LibraryTokens.attention)
+                .foregroundStyle(isBlocking ? LibraryTokens.attention : LibraryTokens.ink2)
                 .accessibilityIdentifier("transcripted.settings.writing.setup.message")
         }
     }

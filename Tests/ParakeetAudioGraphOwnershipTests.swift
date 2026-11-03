@@ -4,6 +4,15 @@
 import Foundation
 
 func testParakeetAudioGraphOwnership() async {
+    runSuite("Typed native work errors retain source and requested stage without error descriptions") {
+        let hal = ParakeetSystemInputWorkError.circuitOpen(operation: "start_recording_selection", activeTimeouts: 2).boundedWorkContext
+        assertEqual(hal, ["work_source": "system_input", "work_step": "selection", "inflight_bucket": "2_3"])
+        let graph = ParakeetAudioEngineWorkError.circuitOpen(operation: "start_recording", activeWorkers: 4).boundedWorkContext
+        assertEqual(graph, ["work_source": "engine_graph", "work_step": "start", "inflight_bucket": "4_plus"])
+        assertEqual(ParakeetSystemInputWorkError.timedOut(operation: "private-device-label", timeoutMs: 99).boundedWorkContext["work_step"], "unknown")
+        assertEqual(ParakeetAudioEngineWorkError.timedOut(operation: "start_recording_snapshot", timeoutMs: 99).boundedWorkContext["inflight_bucket"], "unknown")
+    }
+
     runSuite("Prewarm coalesces same-resource probes without blocking a replacement graph") {
         let engine = NSObject()
         let queue = NSObject()

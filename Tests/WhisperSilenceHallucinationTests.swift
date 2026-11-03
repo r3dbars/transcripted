@@ -197,4 +197,105 @@ func testWhisperSilenceHallucination() {
             ["Palataan tähän ensi viikolla."]
         )
     }
+
+    runSuite("A real kiitos in one decoder window does not admit kiitos over later silence") {
+        var audio = [Float](repeating: 0, count: rate * 61)
+        let word = vowel(seconds: 0.25, pitch: 130, level: 0.004)
+        audio.replaceSubrange(1_000..<(1_000 + word.count), with: word)
+        let windows: [WhisperHallucinationFilter.DecodedWindow] = [
+            .init(text: "Kiitos.", seek: 0, start: 0, end: 30),
+            .init(text: "Kiitos.", seek: rate * 30, start: 30, end: 60),
+            .init(text: "Nähdään huomenna.", seek: rate * 60, start: 60, end: 61),
+        ]
+        let result = WhisperHallucinationFilter.filterWindows(windows, samples: audio)
+        assertEqual(result.texts, ["Kiitos.", "Nähdään huomenna."])
+        assertEqual(result.droppedWindows, 1)
+        assertEqual(result.voicedWindows, 1)
+        assertEqual(result.unvoicedWindows, 2)
+    }
+
+    runSuite("A quiet short word late in the final decoder window keeps its own stock text") {
+        var audio = [Float](repeating: 0, count: rate * 31)
+        let word = vowel(seconds: 0.15, pitch: 110, level: 0.004)
+        let wordStart = rate * 30 + rate / 2
+        audio.replaceSubrange(wordStart..<(wordStart + word.count), with: word)
+        let result = WhisperHallucinationFilter.filterWindows([
+            .init(text: "Thank you.", seek: 0, start: 0, end: 30),
+            .init(text: "Kiitos.", seek: rate * 30, start: 30, end: 31),
+        ], samples: audio)
+        assertEqual(result.texts, ["Kiitos."])
+        assertEqual(result.droppedWindows, 1)
+        assertEqual(result.voicedWindows, 1)
+    }
+
+    runSuite("A short spoken stock word crossing a decoder boundary is retained") {
+        var audio = [Float](repeating: 0, count: rate * 60)
+        let word = vowel(seconds: 0.12, pitch: 120, level: 0.004)
+        let wordStart = rate * 30 - word.count / 2
+        audio.replaceSubrange(wordStart..<(wordStart + word.count), with: word)
+        let result = WhisperHallucinationFilter.filterWindows([
+            .init(text: "Kiitos.", seek: 0, start: 0, end: 30),
+            .init(text: "Kiitos.", seek: rate * 30, start: 30, end: 60),
+        ], samples: audio)
+        assertEqual(result.texts, ["Kiitos.", "Kiitos."], "a window edge must not turn real speech into silence")
+        assertEqual(result.droppedWindows, 0)
+    }
+
+    runSuite("Unchanged decoder results retain their exact full text and whitespace") {
+        let audio = boostedAndPadded(vowel(seconds: 0.25, pitch: 120, level: 0.004))
+        for text in ["こんにちは世界", "  first\nsecond\t", "Kiitos."] {
+            let result = WhisperHallucinationFilter.filterResults([
+                (text, [.init(text: "different window rendering", seek: 0, start: 0, end: 1)])
+            ], samples: audio)
+            assertEqual(result.texts, [text], "a no-op filter must not reconstruct the decoder's full text")
+            assertEqual(result.droppedWindows, 0)
+        }
+    }
+
+    runSuite("Only a decoder result that loses a stock window is reconstructed") {
+        let audio = [Float](repeating: 0, count: rate * 31)
+        let result = WhisperHallucinationFilter.filterResults([
+            ("こんにちは世界", [
+                .init(text: "こんにちは", seek: 0, start: 0, end: 30),
+                .init(text: "世界", seek: rate * 30, start: 30, end: 31),
+            ]),
+            ("Kiitos. Nähdään huomenna.", [
+                .init(text: "Kiitos.", seek: 0, start: 0, end: 30),
+                .init(text: "Nähdään huomenna.", seek: rate * 30, start: 30, end: 31),
+            ]),
+        ], samples: audio)
+        assertEqual(result.texts, ["こんにちは世界", "Nähdään huomenna."])
+        assertEqual(result.droppedWindows, 1)
+        assertEqual(result.voicedWindows, 0)
+        assertEqual(result.unvoicedWindows, 4)
+    }
+
+    runSuite("Missing or invalid window timing preserves the original decoder result") {
+        let original = "  こんにちは世界\n"
+        let result = WhisperHallucinationFilter.filterResults([
+            (original, []),
+            (original, [.init(text: "Kiitos.", seek: -1, start: .nan, end: .nan)]),
+        ], samples: [Float](repeating: 0, count: rate))
+        assertEqual(result.texts, [original, original])
+        assertEqual(result.droppedWindows, 0)
+    }
+
+    runSuite("Unknown or inconsistent decoder timing preserves words") {
+        let unknown: [WhisperHallucinationFilter.DecodedWindow] = [
+            .init(text: "Kiitos.", seek: -1, start: 0, end: 1),
+            .init(text: "Kiitos.", seek: .max, start: 0, end: 1),
+            .init(text: "Kiitos.", seek: rate, start: 1, end: 2),
+            .init(text: "Kiitos.", seek: 0, start: .nan, end: 1),
+            .init(text: "Kiitos.", seek: 0, start: 0, end: .infinity),
+            .init(text: "Kiitos.", seek: 0, start: 0, end: 0),
+            .init(text: "Kiitos.", seek: 0, start: 0.5, end: 1),
+            .init(text: "Kiitos.", seek: 0, start: 0, end: 2),
+            .init(text: "Kiitos.", seek: 0, start: 0, end: 0.5),
+        ]
+        let result = WhisperHallucinationFilter.filterWindows(unknown, samples: [Float](repeating: 0, count: rate))
+        assertEqual(result.texts, unknown.map(\.text))
+        assertEqual(result.droppedWindows, 0)
+        let empty = WhisperHallucinationFilter.filterWindows(unknown, samples: [])
+        assertEqual(empty.texts, unknown.map(\.text))
+    }
 }

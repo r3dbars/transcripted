@@ -38,7 +38,7 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// Used by the decisions made inside the store: the multi-exemplar same-condition bar on
     /// write-back, the duplicate-profile merge bar, and `matchSpeaker`'s guards.
     public let thresholds: SpeakerEmbeddingThresholds
-    let queue = DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
+    let queue: DispatchQueue
     private let queueSpecificKey = DispatchSpecificKey<UInt8>()
 
     var isExecutingOnQueue: Bool {
@@ -50,10 +50,21 @@ public final class SpeakerDatabase: @unchecked Sendable {
     /// `CoreStoragePaths.default` layout (e.g. a host app redirecting to its own data dir).
     /// `thresholds` are the bars of the voiceprint model whose vectors this file holds; pass the
     /// diarizer's `activeSpeakerThresholds`. The default is WeSpeaker's.
-    public init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker, adoptCanonicalModelIdentity: Bool = true) {
+    public convenience init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker, adoptCanonicalModelIdentity: Bool = true) {
+        self.init(
+            path: path,
+            thresholds: thresholds,
+            adoptCanonicalModelIdentity: adoptCanonicalModelIdentity,
+            queue: DispatchQueue(label: "com.transcripted.speakerdb", qos: .utility)
+        )
+    }
+
+    /// Injecting the queue lets tests hold opening without relying on disk timing.
+    init(path: String, thresholds: SpeakerEmbeddingThresholds = .weSpeaker, adoptCanonicalModelIdentity: Bool = true, queue: DispatchQueue) {
         // isDirectory: false so building the URL doesn't stat the disk.
         dbPath = URL(fileURLWithPath: path, isDirectory: false)
         self.thresholds = thresholds
+        self.queue = queue
         queue.setSpecific(key: queueSpecificKey, value: 1)
         // The app builds this on the main thread at launch, and opening waits on
         // the disk (APPLE-MACOS-6E). Open on the queue instead: it's the first

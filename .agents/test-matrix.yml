@@ -124,12 +124,15 @@ rules:
   - paths:
       - "run-tests.sh"
       - "scripts/entrypoints/run-tests.sh"
+      - "scripts/entrypoints/lib/fast-test-completion.py"
+      - "Tests/BuildDependencies/FastTestCompletionTests.py"
       - "scripts/entrypoints/lib/shared-smoke-sources.sh"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 scripts/dev/check-build-source-lists.py"
       - "bash -n run-tests.sh"
       - "bash -n scripts/entrypoints/run-tests.sh"
+      - "python3 Tests/BuildDependencies/FastTestCompletionTests.py"
       - "bash run-tests.sh"
 
   - paths:

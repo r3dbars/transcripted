@@ -46,6 +46,11 @@ enum WhisperVoicedSpeechGate {
     /// turns and 85% of turns under 0.5 s; most of the rest were backchannels
     /// Whisper wrote nothing for.
     static let minimumVoicedRun = 5
+    /// Samples needed to evaluate one complete minimum-length pitch run.
+    /// Decoder-window evidence borrows this much boundary context so cutting
+    /// a short real word in half cannot make both halves look unvoiced.
+    static let minimumVoicedSupportSamples = frameSamples + maximumLag + 1
+        + (minimumVoicedRun - 1) * hopSamples
     /// Frames quieter than this after filtering carry no evidence either way:
     /// zero padding, or a fade into digital silence.
     static let minimumFrameRMS: Float = 0.000_05
@@ -56,6 +61,11 @@ enum WhisperVoicedSpeechGate {
         longestVoicedRun(samples, stopAt: minimumVoicedRun) >= minimumVoicedRun
     }
 
+    /// A decoder window can borrow its input without copying the entire window.
+    static func hasVoicedSpeech(_ samples: ArraySlice<Float>) -> Bool {
+        longestVoicedRun(samples, stopAt: minimumVoicedRun) >= minimumVoicedRun
+    }
+
     /// Audio filtered and scanned per block, so an hour-long segment costs
     /// a few hundred kilobytes, not a filtered copy of the whole thing.
     static let blockSamples = 160_000
@@ -63,6 +73,10 @@ enum WhisperVoicedSpeechGate {
     /// Longest run of consecutive voiced frames with a steady pitch, counting
     /// no further than `stopAt`.
     static func longestVoicedRun(_ samples: [Float], stopAt: Int = .max) -> Int {
+        longestVoicedRun(samples[...], stopAt: stopAt)
+    }
+
+    private static func longestVoicedRun(_ samples: ArraySlice<Float>, stopAt: Int) -> Int {
         guard samples.count >= frameSamples + maximumLag + 1, stopAt > 0 else { return 0 }
 
         // Band-pass to 120 Hz-1 kHz. The high-pass (run twice for a steep
@@ -74,9 +88,9 @@ enum WhisperVoicedSpeechGate {
         var scan = RunScan(stopAt: stopAt)
         // Filtered audio from the next unscanned frame's start onward.
         var pending: [Float] = []
-        var blockStart = 0
-        while blockStart < samples.count, scan.longest < stopAt {
-            let blockEnd = min(samples.count, blockStart + blockSamples)
+        var blockStart = samples.startIndex
+        while blockStart < samples.endIndex, scan.longest < stopAt {
+            let blockEnd = min(samples.endIndex, blockStart + blockSamples)
             var block = Array(samples[blockStart..<blockEnd])
             for index in filters.indices {
                 filters[index].apply(to: &block)

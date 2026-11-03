@@ -22,6 +22,15 @@ enum ParakeetAudioEngineWorkError: LocalizedError {
         return false
     }
 
+    var boundedWorkContext: [String: String] {
+        switch self {
+        case .timedOut(let operation, _):
+            return WorkCircuitDiagnostics.properties(source: .engineGraph, operation: operation)
+        case .circuitOpen(let operation, let activeWorkers):
+            return WorkCircuitDiagnostics.properties(source: .engineGraph, operation: operation, inflight: activeWorkers)
+        }
+    }
+
     var errorDescription: String? {
         switch self {
         case .timedOut(let operation, let timeoutMs):
