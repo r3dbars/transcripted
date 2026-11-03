@@ -356,12 +356,12 @@ final class SpeakerWhoSpokeContainer: NSView {
 
     private func reportHeight() {
         guard measurement.layoutChanged() else { return }
-        invalidateIntrinsicContentSize()
         // Out of the current layout pass, so SwiftUI isn't changed mid-update.
         DispatchQueue.main.async { [weak self] in
             guard let self, let review = self.review else { return }
             review.layoutSubtreeIfNeeded()
             if let height = self.measurement.measured(review.fittingHeight) {
+                self.invalidateIntrinsicContentSize()
                 self.onHeight?(height)
             }
         }
@@ -376,8 +376,8 @@ final class SpeakerWhoSpokeContainer: NSView {
 
     override var intrinsicContentSize: NSSize {
         guard let review else { return NSSize(width: SpeakerWhoSpokeLayout.contentWidth, height: 10) }
-        if let height = measurement.intrinsicHeight { return NSSize(width: review.width, height: height) }
-        review.layoutSubtreeIfNeeded()
-        return NSSize(width: review.width, height: review.fittingHeight)
+        // SwiftUI asks on every layout pass, scrolling included: answer from
+        // the last measurement instead of laying every voice row out again.
+        return NSSize(width: review.width, height: measurement.intrinsicHeight ?? 10)
     }
 }
