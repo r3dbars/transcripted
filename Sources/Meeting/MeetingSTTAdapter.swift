@@ -248,7 +248,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
             .map { $0.isEmpty ? $0 : CustomDictionaryTextProcessor.apply(to: $0) }
     }
 
-    /// Whisper's batch: the segments run side by side rather than packed into
+    /// Whisper's batch: the segments run one by one rather than packed into
     /// one window, so the text per segment is what one-by-one calls return.
     private func transcribeWhisperBatch(
         _ segments: [[Float]],
