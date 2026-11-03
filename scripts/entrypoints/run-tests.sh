@@ -743,6 +743,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/HomeHitTarget.swift"
+    "Sources/UI/Settings/HomeMeetingExpansionLayout.swift"
     "Sources/UI/Settings/HomeRowMenuPolicy.swift"
     "Sources/UI/Settings/SpeakerPeopleSettingsConstants.swift"
     "Sources/UI/Settings/SettingsActionFailureCopy.swift"
