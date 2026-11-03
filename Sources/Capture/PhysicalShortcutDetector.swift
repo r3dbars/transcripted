@@ -140,9 +140,11 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
             return PhysicalShortcutTriggerStatus.failedToStartMessage
         }
 
+        stateLock.lock()
         eventTap = tap
         tapRecovery = recovery
         runLoopSource = source
+        stateLock.unlock()
         startTapThread(tap: tap, source: source, callbackContext: callbackContext)
         return nil
     }
