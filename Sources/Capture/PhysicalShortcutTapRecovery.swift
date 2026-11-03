@@ -6,13 +6,17 @@ import Foundation
 final class PhysicalShortcutTapRecovery: @unchecked Sendable {
     typealias Enqueue = @Sendable (@escaping @Sendable () -> Void) -> Void
 
+    /// One stalled WindowServer call must not consume another worker for
+    /// each later wake/reinstall. Invalidated queued lifetimes skip their work.
+    private static let recoveryQueue = DispatchQueue(label: "TranscriptedPhysicalShortcutRecovery", qos: .userInteractive)
+
     private let lock = NSLock()
     private let enqueue: Enqueue
     private var active = true
     private var pending = false
 
     init(enqueue: @escaping Enqueue = { work in
-        DispatchQueue.global(qos: .userInteractive).async(execute: work)
+        PhysicalShortcutTapRecovery.recoveryQueue.async(execute: work)
     }) {
         self.enqueue = enqueue
     }

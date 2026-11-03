@@ -79,12 +79,25 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
     /// Hill-climb knob `dictation.hotkey.chord_delay_s`.
     static let modifierChordDelay: TimeInterval = 0.14
 
+    /// The run-loop thread retains this context until its last callback has
+    /// returned. An old port can never handle events as a replacement tap.
+    private final class TapCallbackContext: @unchecked Sendable {
+        weak var detector: PhysicalShortcutDetector?
+        let recovery: PhysicalShortcutTapRecovery
+
+        init(detector: PhysicalShortcutDetector, recovery: PhysicalShortcutTapRecovery) {
+            self.detector = detector
+            self.recovery = recovery
+        }
+    }
+
     private static let callback: CGEventTapCallBack = { _, type, event, userInfo in
         guard let userInfo else { return Unmanaged.passUnretained(event) }
-        let detector = Unmanaged<PhysicalShortcutDetector>
+        let context = Unmanaged<TapCallbackContext>
             .fromOpaque(userInfo)
             .takeUnretainedValue()
-        return detector.handle(type: type, event: event)
+        guard let detector = context.detector else { return Unmanaged.passUnretained(event) }
+        return detector.handle(type: type, event: event, recovery: context.recovery)
     }
 
     func updateDictationActive(_ isDictating: Bool) {
@@ -104,7 +117,9 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
 
         let eventMask = PhysicalShortcutTapPolicy.eventsOfInterestMask()
 
-        let userInfo = Unmanaged.passUnretained(self).toOpaque()
+        let recovery = PhysicalShortcutTapRecovery()
+        let callbackContext = TapCallbackContext(detector: self, recovery: recovery)
+        let userInfo = Unmanaged.passUnretained(callbackContext).toOpaque()
         guard let tap = CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
@@ -126,9 +141,9 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         }
 
         eventTap = tap
-        tapRecovery = PhysicalShortcutTapRecovery()
+        tapRecovery = recovery
         runLoopSource = source
-        startTapThread(tap: tap, source: source)
+        startTapThread(tap: tap, source: source, callbackContext: callbackContext)
         return nil
     }
 
@@ -163,7 +178,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         stateLock.unlock()
     }
 
-    private func startTapThread(tap: CFMachPort, source: CFRunLoopSource) {
+    private func startTapThread(tap: CFMachPort, source: CFRunLoopSource, callbackContext: TapCallbackContext) {
         let ready = DispatchSemaphore(value: 0)
         let thread = Thread { [weak self] in
             autoreleasepool {
@@ -180,7 +195,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
                 CFRunLoopAddSource(runLoop, source, .commonModes)
                 CGEvent.tapEnable(tap: tap, enable: true)
                 ready.signal()
-                CFRunLoopRun()
+                withExtendedLifetime(callbackContext) { CFRunLoopRun() }
             }
         }
         thread.name = "TranscriptedPhysicalShortcutTap"
@@ -203,13 +218,14 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         consumedKeyCodes.removeAll()
     }
 
-    private func handle(type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
+    private func handle(type: CGEventType, event: CGEvent, recovery: PhysicalShortcutTapRecovery) -> Unmanaged<CGEvent>? {
         stateLock.lock()
         defer { stateLock.unlock() }
+        guard tapRecovery === recovery else { return Unmanaged.passUnretained(event) }
 
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reconcileActivePushToTalkAfterTapDisabled()
-            if let tap = eventTap, let recovery = tapRecovery,
+            if let tap = eventTap,
                let reason = PhysicalShortcutTapPolicy.tapDisabledReason(for: type) {
                 // APPLE-MACOS-6H: WindowServer can stall this call. Doing it
                 // in the callback under stateLock also stranded wake's
