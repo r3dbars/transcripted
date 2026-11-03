@@ -170,10 +170,6 @@ final class WhisperEngine: ObservableObject {
         }
     }
 
-    /// Segments WhisperKit decodes side by side in a meeting batch. Its own
-    /// CLI default; each worker holds one decoder's state while it runs.
-    static let meetingBatchWorkerCount = 4
-
     /// Transcribes meeting segments side by side through WhisperKit's batch
     /// API and returns one text per segment, in order. Every segment gets the
     /// same decode options as `transcribeSamples`, and WhisperKit decodes each
@@ -217,7 +213,7 @@ final class WhisperEngine: ObservableObject {
             audioArrays: eligible.map { segments[$0] },
             decodeOptions: Self.decodeOptions(
                 languageCode: languageCode,
-                concurrentWorkerCount: Self.meetingBatchWorkerCount
+                concurrentWorkerCount: WhisperMeetingBatchPolicy.concurrentWorkerCount
             )
         )
         try Task.checkCancellation()
