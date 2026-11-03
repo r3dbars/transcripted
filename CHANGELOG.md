@@ -45,8 +45,21 @@ force-installed by Sparkle so existing users recover from a regression.
   "Keep dictation audio" window asks again before deleting old audio, instead
   of the choice snapping back with no prompt. The four Storage prompts now
   share one presenter.
+- The Today page updates only its time-dependent parts once a minute,
+  instead of rebuilding the whole page, which caused periodic hangs while
+  Settings stayed open.
 
 ### Added
+- Transcribe a file has its own page in the sidebar, with the audio and video
+  picker, import progress, and instructions for the command-line tool.
+- The menu bar warns when another app's Secure Keyboard Entry is blocking the
+  dictation shortcut.
+- Experiment, off by default: auto-record detected meetings. Turning it on
+  asks once, because it records other people on the call without a prompt.
+- Speakers can be named from the call app's active-speaker tiles (Zoom,
+  Google Meet, Teams, Slack huddles) while a meeting records. Names still go
+  to review as "From the call" and nothing is learned until you save.
+  Settings › Speakers › "Name speakers from the call app" turns it off.
 - The Dictations page has new cards: a bar on top with play, time, length,
   words, and app (delivery problems in amber), and the text below in italics,
   four lines with Show more. Press play to hear a kept take right there; a
@@ -67,6 +80,10 @@ force-installed by Sparkle so existing users recover from a regression.
   tooltip. Existing recordable dictation/meeting triggers are unchanged.
 
 ### Changed
+- Updates now come from a feed attached to each GitHub release instead of
+  `docs/appcast.xml` on main, and the release workflow builds and signs in
+  separate jobs. Installed apps move to the new feed with the first release
+  built from it.
 - Transcripted no longer asks about a failed dictation every time it opens.
   When a dictation under 30 seconds doesn't become text, it just says "Didn't
   catch that. Try again." and the recording is deleted; a longer one still

@@ -164,10 +164,13 @@ func testAutomationSurfaceBehavior() async {
             guard case let .openPage(page) = item.action else { return nil }
             return (page, item.key, item.title)
         }
+        // Transcribe a file is in the sidebar but has no ⌘ number: ⌘O in
+        // Capture already opens file import.
+        assertNil(TranscriptedSettingsPage.files.navigationShortcutKey, "Transcribe a file should leave ⌘O to Capture's file import")
         assertEqual(
             pageItems.map { $0.0.automationIdentifier },
-            FocusOrderContract.settingsSidebarOrder,
-            "Go should list the primary sidebar pages in sidebar order"
+            FocusOrderContract.settingsSidebarOrder.filter { $0 != TranscriptedSettingsPage.files.automationIdentifier },
+            "Go should list the primary sidebar pages except Transcribe a file, in sidebar order"
         )
         for (page, key, title) in pageItems {
             assertEqual(page.navigationShortcutKey, String(key), "\(page) should use the same ⌘ key in Go as in its sidebar tooltip")
