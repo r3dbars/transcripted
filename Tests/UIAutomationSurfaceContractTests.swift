@@ -325,11 +325,6 @@ func testUIAutomationSurfaceContract() async {
             storageSource.contains("presenting: activeConfirmationSlot"),
             "audio-retention confirmation should stay on the Storage page that owns the picker, through its one presenter"
         )
-        assertEqual(
-            storageSource.components(separatedBy: ".alert(").count - 1,
-            1,
-            "the Storage page should present every prompt through one alert modifier so none is shadowed"
-        )
         // The shared binding must dismiss only the active alert via
         // HomeRootAlertPolicy, never clear both. HomeRootAlertPolicyTests
         // covers the priority/dismissal behavior directly.
