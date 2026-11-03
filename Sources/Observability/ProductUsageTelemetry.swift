@@ -3,7 +3,7 @@ import Foundation
 /// Content-free outcomes. No saved-result IDs or file-derived values cross this boundary.
 enum ProductUsageTelemetry {
     enum Destination: String, CaseIterable {
-        case today, meetings, dictations, writing, settings, speakers, agent, unknown
+        case today, meetings, files, dictations, writing, settings, speakers, agent, unknown
     }
 
     enum NavigationSource: String, CaseIterable {

@@ -56,6 +56,7 @@ func testFocusOrderContract() async {
                 [
                     "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
+                    "transcripted.settings.sidebar.files",
                     "transcripted.settings.sidebar.dictations",
                     "transcripted.settings.sidebar.writing",
                     "transcripted.settings.sidebar.people",
@@ -201,15 +202,16 @@ func testFocusOrderContract() async {
             )
         }
 
-        // The primary navigation pages are the ones with a ⌘1–⌘6 "Go"
-        // shortcut; in shortcut order they must be exactly the declared Tab order.
+        // Numbered Go shortcuts retain their relative order within the sidebar.
+        // File transcription has its existing ⌘O import shortcut instead.
         let shortcutOrder = TranscriptedSettingsPage.allCases
             .compactMap { page in page.navigationShortcutKey.map { (key: $0, identifier: page.automationIdentifier) } }
             .sorted { $0.key < $1.key }
             .map(\.identifier)
+        let numberedFocusOrder = FocusOrderContract.settingsSidebarOrder.filter { $0 != TranscriptedSettingsPage.files.automationIdentifier }
         assertEqual(
             shortcutOrder,
-            FocusOrderContract.settingsSidebarOrder,
+            numberedFocusOrder,
             "the ⌘1–⌘6 navigation pages should stay in the settings navigation surface, in the declared focus order"
         )
 
@@ -219,13 +221,13 @@ func testFocusOrderContract() async {
             FocusOrderContract.settingsSidebarOrder,
             "the sidebar's primary rows should list the pages in the focus order the contract pins"
         )
-        // The primary pages are the ones with a ⌘ shortcut, in page order.
+        // The numbered pages keep their page order even with file import between them.
         assertEqual(
-            FocusOrderContract.settingsSidebarOrder,
+            numberedFocusOrder,
             TranscriptedSettingsPage.allCases
                 .filter { $0.navigationShortcutKey != nil }
                 .map(\.automationIdentifier),
-            "settings sidebar focus order should cover the six primary navigation pages in ⌘1–⌘6 order"
+            "settings sidebar focus order should preserve the six numbered pages in ⌘1–⌘6 order"
         )
     }
 }

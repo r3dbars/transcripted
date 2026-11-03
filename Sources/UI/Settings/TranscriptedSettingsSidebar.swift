@@ -5,7 +5,7 @@ struct SettingsSidebarSection {
 
     /// Content-first rows that are always visible: Today, the capture library, plus the agent connection.
     static let primarySection = SettingsSidebarSection(
-        pages: [.today, .home, .dictations, .writing, .people, .connectAgent]
+        pages: [.today, .home, .files, .dictations, .writing, .people, .connectAgent]
     )
 
     /// Configuration lives on one combined scrolling page (.general),

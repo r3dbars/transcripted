@@ -12,7 +12,7 @@ import TranscriptedCore
 struct SettingsMeetingShellState: Equatable {
     let state: MeetingSessionController.State
     /// Home's activity row with `progress` cleared; the percent it shows is
-    /// in the key separately, only while Home is selected.
+    /// in the key separately, while Meetings or file transcription is selected.
     let activity: HomeTranscriptionActivityPresentation?
     /// The session is preparing, transcribing or saving (Home's Cancel).
     let isProcessing: Bool
@@ -84,7 +84,7 @@ extension SettingsMeetingRenderGate where Key == SettingsMeetingRenderKey<Settin
                 return SettingsMeetingRenderKey.make(
                     coarse: SettingsMeetingShellState(session: session, activity: activity),
                     activityProgress: activity?.progress,
-                    showsActivityPercent: navigation.selectedPage == .home,
+                    showsActivityPercent: navigation.selectedPage == .home || navigation.selectedPage == .files,
                     now: now()
                 )
             }

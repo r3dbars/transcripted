@@ -168,6 +168,7 @@ enum DebugControlScreenPolicy {
     static let ids = [
         "today",
         "home",
+        "files",
         "dictations",
         "writing",
         "general",

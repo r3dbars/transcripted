@@ -1,6 +1,6 @@
 # Settings UI
 
-`Sources/UI/Settings/` owns the main window (sidebar, Today, Meetings, Dictations, Writing, Speakers, Agent, and the combined settings page), first-run onboarding, Home, and speaker naming and review. The surface summary is `Sources/UI/AGENTS.md`; this file is the per-file guide.
+`Sources/UI/Settings/` owns the main window (sidebar, Today, Meetings, file transcription, Dictations, Writing, Speakers, Agent, and the combined settings page), first-run onboarding, Home, and speaker naming and review. The surface summary is `Sources/UI/AGENTS.md`; this file is the per-file guide.
 
 ## Module
 
@@ -85,6 +85,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `HomeView.swift` - row actions, the ⋯ menu, inline failed-meeting row, feedback sheet, Load more. Kept together because the contract test reads it.
 - `HomeCaptureList.swift`, `HomeScanWarningCard.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift` - list, warning card, value types, feedback types.
 - `QuietHomeLibrary.swift` - Meetings rows and in-place expansion. `HomeMeetingExpansionLayout` keeps Copy/Finder/more in the expansion header; only its title/meta button collapses the card, leaving transcript selection and timestamp playback independent.
+- `Pages/FileTranscriptionSettingsPage.swift` - the sidebar's Transcribe a file entry: the existing import picker, injected shared activity, a Meetings link for transcripts/retries, and the public CLI instructions. No separate pipeline or model preferences.
 - `HomeMeetingSpeakerNamingViews.swift` - speaker label, picker, Name speakers sheet, and the transcript-only voiceprint notice.
 - `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color palette.
 - Foundation-pure policies and copy: `HomePresentation.swift`, `HomeRootAlertPolicy.swift` (single alert presenter, `HomeActionFailureCopy`), `StorageConfirmationPolicy.swift` (the Storage page's single alert presenter: capture library, meeting and dictation audio windows, free up space), `HomeDeleteConfirmationPolicy.swift`, `HomeScanWarningPolicy.swift`, `HomeTranscriptionActivityPresentation.swift` / `HomeTranscriptionActivityCopy.swift`, `HomeFailedMeetingInlinePresentation.swift`, `FailedMeetingRecoveryPresentation.swift`.
