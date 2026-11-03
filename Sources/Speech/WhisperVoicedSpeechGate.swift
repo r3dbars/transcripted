@@ -46,6 +46,11 @@ enum WhisperVoicedSpeechGate {
     /// turns and 85% of turns under 0.5 s; most of the rest were backchannels
     /// Whisper wrote nothing for.
     static let minimumVoicedRun = 5
+    /// Samples needed to evaluate one complete minimum-length pitch run.
+    /// Decoder-window evidence borrows this much boundary context so cutting
+    /// a short real word in half cannot make both halves look unvoiced.
+    static let minimumVoicedSupportSamples = frameSamples + maximumLag + 1
+        + (minimumVoicedRun - 1) * hopSamples
     /// Frames quieter than this after filtering carry no evidence either way:
     /// zero padding, or a fade into digital silence.
     static let minimumFrameRMS: Float = 0.000_05

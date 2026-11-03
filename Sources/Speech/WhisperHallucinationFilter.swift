@@ -36,8 +36,9 @@ enum WhisperHallucinationFilter {
 
     static let decoderWindowSamples = 30 * 16_000
 
-    /// Scope audio evidence to the window that produced the words. A voice in
-    /// one window must not exempt stock lines decoded over another's silence.
+    /// Scope audio evidence to the window that produced the words, with one
+    /// pitch run's context at its edges to preserve words cut by a boundary.
+    /// Remote voice in another window never exempts this window's silence.
     /// Unknown timing preserves text: it is never evidence of silence.
     static func filterWindows(_ windows: [DecodedWindow], samples: [Float]) -> FilteredWindows {
         var result = FilteredWindows()
@@ -71,7 +72,10 @@ enum WhisperHallucinationFilter {
         let tolerance = max(expectedStart.ulp, expectedEnd.ulp) * 2
         guard abs(window.start - expectedStart) <= tolerance,
               abs(window.end - expectedEnd) <= tolerance else { return nil }
-        return window.seek..<endSample
+        let context = WhisperVoicedSpeechGate.minimumVoicedSupportSamples
+        let contextStart = max(0, window.seek - context)
+        let contextEnd = endSample + min(context, sampleCount - endSample)
+        return contextStart..<contextEnd
     }
 
     /// The texts to keep, one per Whisper decoding window, in order.

@@ -216,8 +216,9 @@ func testWhisperSilenceHallucination() {
 
     runSuite("A quiet short word late in the final decoder window keeps its own stock text") {
         var audio = [Float](repeating: 0, count: rate * 31)
-        let word = boostedAndPadded(vowel(seconds: 0.15, pitch: 110, level: 0.004))
-        audio.replaceSubrange((rate * 30)..<(rate * 30 + word.count), with: word)
+        let word = vowel(seconds: 0.15, pitch: 110, level: 0.004)
+        let wordStart = rate * 30 + rate / 2
+        audio.replaceSubrange(wordStart..<(wordStart + word.count), with: word)
         let result = WhisperHallucinationFilter.filterWindows([
             .init(text: "Thank you.", seek: 0, start: 0, end: 30),
             .init(text: "Kiitos.", seek: rate * 30, start: 30, end: 31),
@@ -225,6 +226,19 @@ func testWhisperSilenceHallucination() {
         assertEqual(result.texts, ["Kiitos."])
         assertEqual(result.droppedWindows, 1)
         assertEqual(result.voicedWindows, 1)
+    }
+
+    runSuite("A short spoken stock word crossing a decoder boundary is retained") {
+        var audio = [Float](repeating: 0, count: rate * 60)
+        let word = vowel(seconds: 0.12, pitch: 120, level: 0.004)
+        let wordStart = rate * 30 - word.count / 2
+        audio.replaceSubrange(wordStart..<(wordStart + word.count), with: word)
+        let result = WhisperHallucinationFilter.filterWindows([
+            .init(text: "Kiitos.", seek: 0, start: 0, end: 30),
+            .init(text: "Kiitos.", seek: rate * 30, start: 30, end: 60),
+        ], samples: audio)
+        assertEqual(result.texts, ["Kiitos.", "Kiitos."], "a window edge must not turn real speech into silence")
+        assertEqual(result.droppedWindows, 0)
     }
 
     runSuite("Unknown or inconsistent decoder timing preserves words") {
