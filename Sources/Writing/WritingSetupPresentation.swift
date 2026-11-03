@@ -3,6 +3,15 @@ import TranscriptedWritingCore
 #endif
 import Foundation
 
+/// The reversible feature controls used when an existing setup is turned off.
+@MainActor
+protocol WritingSetupFeatureControl: AnyObject {
+    var saveMyWritingEnabled: Bool { get }
+    func setSaveMyWriting(_ enabled: Bool)
+    func setAutocomplete(_ enabled: Bool)
+    func applyRunState()
+}
+
 /// The Writing tab's words and small rules: the approved design's copy
 /// (docs/writing-plan.md, "Product design (approved)"), which setup rows show,
 /// badge text, validation messages, and the everyday view's summary and
@@ -120,7 +129,8 @@ enum WritingSetupPresentation {
         static let autocompleteLine = "Suggests the next words. Hit Tab to accept."
         static let continueTitle = "Continue"
         static let needsOne = "Turn on at least one to continue."
-        static let turnOffTitle = ""
+        static let turnOffTitle = "Turn off writing"
+        static let turnOffMessage = "Both off turns writing off."
     }
 
     enum Step2 {
@@ -231,9 +241,10 @@ enum WritingSetupPresentation {
         saveMyWriting && autocomplete ? "Both" : "Needed"
     }
 
-    /// `nil` when step 1 can continue.
+    /// A blocking first-setup message or an explanation of an editing action.
     static func step1Message(saveMyWriting: Bool, autocomplete: Bool, isEditing: Bool = false) -> String? {
-        saveMyWriting || autocomplete ? nil : Step1.needsOne
+        guard !saveMyWriting && !autocomplete else { return nil }
+        return isEditing ? Step1.turnOffMessage : Step1.needsOne
     }
 
     /// What step 1's primary button does.
@@ -243,7 +254,16 @@ enum WritingSetupPresentation {
     }
 
     static func step1Primary(saveMyWriting: Bool, autocomplete: Bool, isEditing: Bool) -> Step1Primary {
-        .continueSetup
+        isEditing && !saveMyWriting && !autocomplete ? .turnOffWriting : .continueSetup
+    }
+
+    /// Persist the off choice before applying the runtime's reversible stop.
+    @MainActor
+    static func turnOffWriting(using controls: any WritingSetupFeatureControl) {
+        // Save my writing rotates consent on a real change only.
+        if controls.saveMyWritingEnabled { controls.setSaveMyWriting(false) }
+        controls.setAutocomplete(false)
+        controls.applyRunState()
     }
 
     /// `nil` when step 2 can continue.
@@ -272,7 +292,7 @@ enum WritingSetupPresentation {
 
         /// Whether step 1's primary button is enabled.
         func canFinishStep1(isEditing: Bool) -> Bool {
-            canContinueStep1
+            isEditing || canContinueStep1
         }
 
         var canContinueStep2: Bool {
