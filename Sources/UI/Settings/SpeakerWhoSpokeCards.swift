@@ -372,6 +372,9 @@ final class SpeakerWhoSpokeContainer: NSView {
         invitees = names
         // No 1:1 prefill here: a saved meeting's other voices may be named.
         review.setInvitees(names, remoteVoicesInMeeting: nil)
+        // Invitee names can add a line under a voice, and the review only
+        // reports a change when it prefills one.
+        reportHeight()
     }
 
     override var intrinsicContentSize: NSSize {
