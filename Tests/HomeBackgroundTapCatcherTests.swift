@@ -67,13 +67,22 @@ private final class ClickAwayFixture {
         window.contentView = NSHostingView(rootView: root)
         window.orderFrontRegardless()
         window.contentView?.layoutSubtreeIfNeeded()
-        // SwiftUI puts the AppKit button in the window on a later turn of the
-        // run loop, and builds its gestures when it first draws: wait for the
-        // button to be in place, up to two seconds.
+    }
+
+    /// One short turn of the run loop, then a turn of the main queue. The
+    /// tests run inside a main-queue job, and a run loop turned from there
+    /// does not run other main-queue work, which SwiftUI may use to deliver a
+    /// tap: yielding lets that work run.
+    private func turn() async {
+        RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
+        await Task.yield()
+    }
+
+    /// SwiftUI puts the AppKit button in the window on a later turn, and builds
+    /// its gestures when it first draws: wait for the button, up to two seconds.
+    func waitUntilReady() async {
         let deadline = Date().addingTimeInterval(2)
-        while !isReady, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-        }
+        while !isReady, Date() < deadline { await turn() }
     }
 
     /// The button is in this window with a real size.
@@ -88,7 +97,7 @@ private final class ClickAwayFixture {
     /// A real left click through the window: down, then up. The up is queued
     /// first so a button's tracking loop can take it; if something else took
     /// the down, the up is delivered here instead.
-    func click(at point: NSPoint) {
+    func click(at point: NSPoint) async {
         func event(_ type: NSEvent.EventType) -> NSEvent {
             NSEvent.mouseEvent(with: type, location: point, modifierFlags: [],
                                timestamp: ProcessInfo.processInfo.systemUptime,
@@ -106,9 +115,7 @@ private final class ClickAwayFixture {
         // SwiftUI runs a tap's action on a later turn of the run loop: wait
         // for either answer, up to a second.
         let deadline = Date().addingTimeInterval(1)
-        while target.presses + clickAways == before, Date() < deadline {
-            RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
-        }
+        while target.presses + clickAways == before, Date() < deadline { await turn() }
     }
 
     func close() {
@@ -122,32 +129,35 @@ private final class ClickAwayFixture {
 func testHomeBackgroundTapCatcher() async {
     let doneTitle = SpeakerMeetingReviewPolicy.doneTitle(meetingsAfterThis: 2)
 
-    runSuite("A click on empty space still closes the open card") {
+    await runSuite("A click on empty space still closes the open card") {
         let fixture = ClickAwayFixture(title: doneTitle)
         defer { fixture.close() }
+        await fixture.waitUntilReady()
         assertTrue(fixture.isReady, "the button is in the window")
-        fixture.click(at: NSPoint(x: 300, y: 40))
+        await fixture.click(at: NSPoint(x: 300, y: 40))
         assertEqual(fixture.clickAways, 1, "empty-space click reached the click-away")
         assertEqual(fixture.target.presses, 0, "empty-space click pressed nothing")
     }
 
-    runSuite("A click on the middle of \"\(doneTitle)\" presses it, not the click-away") {
+    await runSuite("A click on the middle of \"\(doneTitle)\" presses it, not the click-away") {
         let fixture = ClickAwayFixture(title: doneTitle)
         defer { fixture.close() }
+        await fixture.waitUntilReady()
         assertTrue(fixture.isReady, "the button is in the window")
-        fixture.click(at: fixture.pointInButton())
+        await fixture.click(at: fixture.pointInButton())
         assertEqual(fixture.target.presses, 1,
                     "center click pressed the button (click-away took \(fixture.clickAways))")
         assertEqual(fixture.clickAways, 0, "center click left the click-away alone")
     }
 
-    runSuite("Clicks anywhere across the label press the button, every time") {
+    await runSuite("Clicks anywhere across the label press the button, every time") {
         let fixture = ClickAwayFixture(title: doneTitle)
         defer { fixture.close() }
+        await fixture.waitUntilReady()
         // Left of the label, its middle, right of it, three times over (one
         // round per queued meeting).
         for _ in 0..<3 {
-            for dx: CGFloat in [-60, 0, 60] { fixture.click(at: fixture.pointInButton(dx: dx, dy: 4)) }
+            for dx: CGFloat in [-60, 0, 60] { await fixture.click(at: fixture.pointInButton(dx: dx, dy: 4)) }
         }
         assertEqual(fixture.target.presses, 9,
                     "nine label clicks pressed the button (click-away took \(fixture.clickAways))")
@@ -157,4 +167,8 @@ func testHomeBackgroundTapCatcher() async {
     runSuite("Nothing above asked the test process to quit") {
         assertEqual(ClickAwayAppDelegate.shared.quitRequests, 0, "quit requests refused during the click tests")
     }
+    // Two CI runs ended with status 0 inside this file and printed no
+    // summary. Flush, so the next run's log shows whether the file finished.
+    print("HomeBackgroundTapCatcher: all four suites returned")
+    fflush(stdout)
 }
