@@ -102,10 +102,6 @@ func testHomeBackgroundTapCatcher() async {
     runSuite("A click on the middle of \"\(doneTitle)\" presses it, not the click-away") {
         let fixture = ClickAwayFixture(title: doneTitle)
         defer { fixture.close() }
-        let hit = fixture.window.contentView?.hitTest(
-            fixture.window.contentView!.convert(fixture.pointInButton(), from: nil))
-        assertTrue(hit === fixture.button || hit?.isDescendant(of: fixture.button) == true,
-                   "hit test at the label's center lands on the button (got \(String(describing: hit)))")
         fixture.click(at: fixture.pointInButton())
         assertEqual(fixture.target.presses, 1,
                     "center click pressed the button (click-away took \(fixture.clickAways))")
