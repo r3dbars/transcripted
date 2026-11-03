@@ -271,6 +271,17 @@ done <<EOF
 $actual_files
 EOF
 
+# Suites that drive real AppKit windows run in their own process, so an early
+# exit there can't hide the rest. A plain run skips them; CI runs each with
+# --filter as its own step.
+OWN_PROCESS_ENTRIES="testHomeBackgroundTapCatcher"
+if [ -z "$filter_selector" ] && [ "$list_only" != true ]; then
+    for own_entry in $OWN_PROCESS_ENTRIES; do
+        test_entries=$(printf '%s\n' "$test_entries" | grep -v ":${own_entry}\$" || true)
+        echo "Own process, not in this run: $own_entry (bash run-tests.sh --filter $own_entry)"
+    done
+fi
+
 if [ "$list_only" = true ]; then
     printf '%s\n' "$known_entry_functions"
     exit 0

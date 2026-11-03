@@ -198,6 +198,18 @@ jobs:
           TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS: "1"
         run: bash run-tests.sh
 
+      - name: AppKit click tests (own process)
+        # Real windows and clicks. Its own process, so an early exit here can't
+        # hide the main suites; the file prints a flushed line when it finishes.
+        if: success() || failure()
+        shell: bash
+        run: |
+          bash run-tests.sh --filter testHomeBackgroundTapCatcher 2>&1 | tee click-tests.log
+          if ! grep -q "HomeBackgroundTapCatcher: all four suites returned" click-tests.log; then
+            echo "::error::AppKit click tests died before finishing; see the last 'Running' line above."
+            exit 1
+          fi
+
       - name: E2E smoke
         shell: bash
         run: bash run-e2e-smoke.sh

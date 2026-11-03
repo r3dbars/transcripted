@@ -35,6 +35,25 @@ private final class ClickAwayAppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
 }
 
+/// Set once the file's last suite returns. An exit before then prints the
+/// stack that called it, so CI shows what ended the process.
+nonisolated(unsafe) private var clickTestsFinished = false
+nonisolated(unsafe) private var clickTestsExitHookInstalled = false
+
+private func installClickTestsExitHook() {
+    guard !clickTestsExitHookInstalled else { return }
+    clickTestsExitHookInstalled = true
+    // An unbundled process can be ended by the system once it looks idle.
+    ProcessInfo.processInfo.disableAutomaticTermination("AppKit click tests")
+    ProcessInfo.processInfo.disableSuddenTermination()
+    atexit {
+        guard !clickTestsFinished else { return }
+        let stack = Thread.callStackSymbols.joined(separator: "\n")
+        print("HomeBackgroundTapCatcher: process exiting before the last suite returned. exit() was called from:\n\(stack)")
+        fflush(stdout)
+    }
+}
+
 @MainActor
 private final class ClickAwayFixture {
     let target = ClickAwayButtonTarget()
@@ -46,6 +65,7 @@ private final class ClickAwayFixture {
     private let previousDelegate: NSApplicationDelegate?
 
     init(title: String) {
+        installClickTestsExitHook()
         _ = NSApplication.shared
         previousDelegate = NSApp.delegate
         NSApp.delegate = ClickAwayAppDelegate.shared
@@ -167,8 +187,9 @@ func testHomeBackgroundTapCatcher() async {
     runSuite("Nothing above asked the test process to quit") {
         assertEqual(ClickAwayAppDelegate.shared.quitRequests, 0, "quit requests refused during the click tests")
     }
-    // Two CI runs ended with status 0 inside this file and printed no
+    // Three CI runs ended with status 0 inside this file and printed no
     // summary. Flush, so the next run's log shows whether the file finished.
+    clickTestsFinished = true
     print("HomeBackgroundTapCatcher: all four suites returned")
     fflush(stdout)
 }
