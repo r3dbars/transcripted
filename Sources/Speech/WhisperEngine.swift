@@ -170,8 +170,9 @@ final class WhisperEngine: ObservableObject {
         }
     }
 
-    /// Transcribes meeting segments side by side through WhisperKit's batch
-    /// API and returns one text per segment, in order. Every segment gets the
+    /// Transcribes meeting segments through WhisperKit's batch API, one at a
+    /// time (`WhisperMeetingBatchPolicy`), and returns one text per segment,
+    /// in order. Every segment gets the
     /// same decode options as `transcribeSamples`, and WhisperKit decodes each
     /// one on its own, so a segment's text is the same as a one-by-one call;
     /// only the wall time changes. Throws if any segment fails, and the
@@ -242,7 +243,7 @@ final class WhisperEngine: ObservableObject {
         let audioDuration = eligible.reduce(0.0) {
             $0 + Double(segments[$1].count) / TranscriptedConstants.parakeetSampleRate
         }
-        AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(eligible.count) meeting segments side by side in \(String(format: "%.2f", elapsed))s")
+        AppLogger.transcription.info("WHISPER | \(model.title) transcribed \(eligible.count) meeting segments in \(String(format: "%.2f", elapsed))s")
         EventReporter.shared.capture(
             level: .info,
             engine: model.engineName,

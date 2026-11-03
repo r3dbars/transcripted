@@ -16,7 +16,10 @@ enum WhisperMeetingBatchPolicy {
     static let windowsPerBatch = 4
 
     /// The `concurrentWorkerCount` a meeting batch passes to WhisperKit.
-    static let concurrentWorkerCount = 4
+    /// One: parallel decodes on one instance race on its shared `progress`
+    /// and crashed Whisper meetings (APPLE-MACOS-45). Not 0, which means
+    /// all at once.
+    static let concurrentWorkerCount = 1
 
     /// The most segments WhisperKit decodes at the same time for a batch of
     /// `segmentCount` segments, with WhisperKit's meaning of the worker

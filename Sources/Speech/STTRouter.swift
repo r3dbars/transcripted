@@ -654,7 +654,7 @@ class STTRouter: ObservableObject {
     /// Whisper's fixed input window: 30 s at 16 kHz.
     private static let whisperWindowSamples = 480_000
 
-    /// Transcribes a batch of meeting segments side by side with Whisper, one
+    /// Transcribes a batch of meeting segments with Whisper, one at a time, one
     /// text per segment; nil when `model` isn't Whisper (the caller falls back).
     func transcribeWhisperMeetingSegments(
         _ segments: [[Float]],
