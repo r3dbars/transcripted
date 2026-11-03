@@ -10,6 +10,10 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 extension MeetingSessionController {
+    func boolString(_ value: Bool) -> String {
+        value ? "true" : "false"
+    }
+
     func meetingStartFailureKind(from message: String, stage: String? = nil) -> String {
         MeetingStartFailureClassifier.kind(from: message, stage: stage)
     }

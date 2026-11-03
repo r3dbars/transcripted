@@ -167,7 +167,24 @@ speakers:
     name: "Justin"
     confidence: high      # high | medium | manual | unknown
     source: db_scan
+    name_source: call_app # optional; see below
 ```
+
+`name_source` is optional and only appears on a row whose name is shown but
+not confirmed. Today the one value is `call_app`: the call app (Zoom, Meet,
+Teams, Slack) showed this person as the one talking while this voice spoke, so
+the body and breakdown use that name, but the voice is still waiting for review
+(`source: db_pending`, `confidence: medium`). Deferring the review keeps the
+name and the key; naming or confirming the voice through review (or Settings ›
+Speakers) rewrites the row with `source: user_manual` and drops `name_source`,
+and renaming or merging that person in Settings › Speakers drops it from every
+row it renames. A call-app name is only ever shown on a voice that has a review
+row, and never when another call-audio voice in the same meeting shows the same
+name. Readers that don't know the key can ignore it; treat the name as a hint,
+not an identity, while it is present. Call-app attribution requires timed
+active-speaker evidence overlapping that voice's speech. A roster alone never
+assigns a name, even with one visible participant and one diarized voice: the
+visible tiles do not prove a complete roster or reliable self identification.
 
 Obsidian metadata (legacy, read-only): older transcripts written while the
 retired `enableObsidianFormat` flag existed may carry nested `tags:`,

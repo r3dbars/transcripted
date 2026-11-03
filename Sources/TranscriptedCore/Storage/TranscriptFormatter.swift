@@ -147,6 +147,9 @@ extension TranscriptSaver {
                 yaml += "\n    name: \"\(Self.escapeYAML(name))\""
                 yaml += "\n    confidence: \(confidence)"
                 yaml += "\n    source: \(source)"
+                if let nameSource = mapping.shownNameSource {
+                    yaml += "\n    name_source: \(nameSource.rawValue)"
+                }
             }
         }
 

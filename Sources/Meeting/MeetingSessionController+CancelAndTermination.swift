@@ -36,6 +36,8 @@ extension MeetingSessionController {
         let recordingSnapshot = makeRecordingStopSnapshot()
         finishAutoStartedRecording(cancelReason: reason)
         clearActiveRecordingIdentity(keepingForStopTeardown: true)
+        // Discarded: the call-app names go with the audio.
+        callSpeakerNames.discard(recordingStartedAt: recordingSnapshot.recordingStartedAt)
 
         DiagnosticsTrail.record(
             engine: "meeting",

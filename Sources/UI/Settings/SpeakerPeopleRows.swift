@@ -21,6 +21,8 @@ struct SpeakerVoiceToNameRow: View {
     @ObservedObject private var playback = SpeakerClipPlayback.shared
 
     @State private var nameDraft = ""
+    /// The call app's name while it sits in the box untouched.
+    @State private var draftFromCall: String?
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
     @State private var showDeleteConfirmation = false
@@ -160,12 +162,18 @@ struct SpeakerVoiceToNameRow: View {
         }
         .padding(.vertical, 10)
         .onAppear {
-            if nameDraft.isEmpty {
-                nameDraft = group.representative.profile.displayName ?? ""
+            if let draft = NotchIslandSpeakerReviewPolicy.reviewRowDraft(
+                currentDraft: nameDraft,
+                savedName: group.representative.profile.displayName,
+                callAppSuggestedName: group.representative.callAppSuggestedName
+            ) {
+                nameDraft = draft.name
+                draftFromCall = draft.isFromCall ? draft.name : nil
             }
         }
-        .onChange(of: nameDraft) { _, _ in
+        .onChange(of: nameDraft) { _, newValue in
             saveErrorMessage = nil
+            if newValue != draftFromCall { draftFromCall = nil }
         }
         .alert(
             SpeakerVoiceRowMenuPolicy.deleteConfirmationTitle,
@@ -229,7 +237,8 @@ struct SpeakerVoiceToNameRow: View {
     /// itself commits on Enter (`onSubmit: saveName`), matching the person
     /// card's "⏎ to rename" pattern.
     private var saveHint: some View {
-        Text(isSaving ? "Saving…" : "⏎ to save")
+        Text(isSaving ? "Saving…" : draftFromCall != nil
+            ? "\(NotchIslandSpeakerReviewPolicy.callAppPrefillNote) · ⏎ to save" : "⏎ to save")
             .font(.system(size: 11))
             .foregroundStyle(LibraryTokens.ink3)
             .fixedSize()

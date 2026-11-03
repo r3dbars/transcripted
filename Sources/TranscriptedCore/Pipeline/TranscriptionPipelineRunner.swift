@@ -296,6 +296,18 @@ extension TranscriptionTaskManager {
                 speakerSources[key] = "db_pending"
             }
         }
+        // Call-app names for voices the voiceprint didn't name (shown, still in review).
+        let callAppNames = await resolveCallSpeakerNames(
+            isImport: isImport,
+            recordingDate: recordingDate,
+            result: result,
+            dbKnowledge: dbKnowledge,
+            autoAcceptedIds: autoAcceptedIds,
+            reviewIds: needsActionIds,
+            speakerDB: speakerDB,
+            speakerMappings: &speakerMappings,
+            speakerSources: &speakerSources
+        )
 
         let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: targetTranscriptURL)
         let transcriptId = replacementTranscriptRollback?.transcriptId
@@ -434,6 +446,7 @@ extension TranscriptionTaskManager {
                         matchedProfileSnapshot: context?.matchedProfileSnapshot
                     ))
                 }
+                namingEntries = Self.withCallAppSuggestedNames(namingEntries, callAppNames)
                 Self.registerSpeakerClipsRollback(clips.map(\.clipURL), channel: "system", into: rollback)
             } catch {
                 AppLogger.pipeline.warning("System clip extraction failed, skipping system naming", ["error": error.localizedDescription])

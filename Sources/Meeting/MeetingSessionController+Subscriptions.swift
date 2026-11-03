@@ -60,6 +60,7 @@ extension MeetingSessionController {
                     event = self.audioInactivityDetector.startRecording(at: self.recordingDuration)
                 } else {
                     self.disableCallEndDetection()
+                    self.callSpeakerNames.recordingEnded()
                     // Still .recording means capture stopped underneath us.
                     // Core flips isRecording before it resets
                     // systemAudioStatus, so the bridge mirror still holds the

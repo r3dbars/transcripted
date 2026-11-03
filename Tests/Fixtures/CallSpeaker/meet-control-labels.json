@@ -1,0 +1,61 @@
+{
+  "role": "AXWindow",
+  "title": "Meet - abc-defg-hij - Google Chrome",
+  "children": [
+    {
+      "role": "AXWebArea",
+      "children": [
+        {
+          "role": "AXGroup",
+          "domClassList": [
+            "oZRSLe"
+          ],
+          "children": [
+            {
+              "role": "AXButton",
+              "description": "Pin to your main screen"
+            },
+            {
+              "role": "AXButton",
+              "description": "Backgrounds and effects"
+            },
+            {
+              "role": "AXGroup",
+              "description": "Your video"
+            },
+            {
+              "role": "AXStaticText",
+              "value": "Turn off captions"
+            },
+            {
+              "role": "AXGroup",
+              "domClassList": [
+                "kssMZb"
+              ]
+            }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": [
+            "oZRSLe"
+          ],
+          "children": [
+            {
+              "role": "AXButton",
+              "description": "More options for Jo Lind"
+            },
+            {
+              "role": "AXButton",
+              "description": "Pin Jo Lind to your main screen"
+            },
+            {
+              "role": "AXStaticText",
+              "value": "Jo Lind"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -950,4 +950,45 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertEqual(parsed.utterances.count, 1)
         XCTAssertEqual(parsed.utterances.first?.text, "Well-formed entry still parses.")
     }
+
+    /// Promise: a speaker row's `name_source` (a shown but unconfirmed name,
+    /// e.g. from the call app) reaches tools; rows without it read nil.
+    func testSpeakerNameSourceIsParsedPerRow() throws {
+        let markdown = """
+        ---
+        date: 2026-04-18
+        time: 09:15:00
+        duration: "1:00"
+        speakers:
+          - id: "1"
+            channel: system
+            db_id: "80FB272B-6061-4FC4-8408-3F7A974C59DB"
+            name: "Alex Kim"
+            confidence: medium
+            source: db_pending
+            name_source: call_app
+          - id: "2"
+            channel: system
+            name: "Blair Ng"
+            confidence: high
+            source: db
+        title: "Fixture"
+        ---
+
+        ## Full Transcript
+
+        [00:00] [System/Alex Kim] Hello there
+
+        [00:05] [System/Blair Ng] Hi Alex
+        """
+
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
+        let alex = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "system_1" }))
+        XCTAssertEqual(alex.name, "Alex Kim")
+        XCTAssertEqual(alex.nameSource, "call_app")
+        XCTAssertEqual(alex.confidence, "medium")
+        let blair = try XCTUnwrap(parsed.speakers.first(where: { $0.id == "system_2" }))
+        XCTAssertNil(blair.nameSource)
+        XCTAssertEqual(blair.confidence, "high")
+    }
 }

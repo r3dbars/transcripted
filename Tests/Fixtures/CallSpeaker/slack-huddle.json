@@ -1,0 +1,49 @@
+{
+  "role": "AXWindow",
+  "title": "Huddle in #design-crit - Slack",
+  "children": [
+    {
+      "role": "AXGroup",
+      "domClassList": ["p-huddle_peer_grid"],
+      "children": [
+        {
+          "role": "AXGroup",
+          "domClassList": ["p-huddle_peer_tile"],
+          "children": [
+            { "role": "AXButton", "description": "View Dev Patel's profile" },
+            { "role": "AXGroup", "domClassList": ["p-huddle_peer_tile__overlay--active_speaker"] },
+            {
+              "role": "AXGroup",
+              "domClassList": ["p-huddle_peer_tile__name_overlay"],
+              "children": [{ "role": "AXStaticText", "value": "Dev Patel" }]
+            }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": ["p-huddle_peer_tile"],
+          "children": [
+            { "role": "AXButton", "description": "View Eli Novak’s profile" },
+            { "role": "AXGroup", "domClassList": ["p-huddle_peer_tile__overlay--active_speaker"] },
+            {
+              "role": "AXGroup",
+              "domClassList": ["p-huddle_peer_tile__name_overlay", "p-huddle_peer_tile__name_overlay--muted"],
+              "children": [{ "role": "AXStaticText", "value": "Eli Novak" }]
+            }
+          ]
+        },
+        {
+          "role": "AXGroup",
+          "domClassList": ["p-huddle_peer_tile"],
+          "children": [
+            {
+              "role": "AXGroup",
+              "domClassList": ["p-huddle_peer_tile__name_overlay"],
+              "children": [{ "role": "AXStaticText", "value": "Fay Lin" }]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -87,6 +87,8 @@ extension TranscriptSaver {
 
     struct FrontmatterSpeakerRow {
         var nameLineIndex: Int?
+        /// Line of the row's `name_source:` marker, if any (`call_app`).
+        var nameSourceLineIndex: Int?
         var channel: UtteranceChannel?
         var dbId: UUID?
         var name: String?
@@ -131,6 +133,8 @@ extension TranscriptSaver {
             } else if let value = extractYAMLQuotedString(from: line, prefix: "name: ") {
                 current?.name = value
                 current?.nameLineIndex = index
+            } else if trimmed.hasPrefix("name_source:") {
+                current?.nameSourceLineIndex = index
             } else if trimmed.hasPrefix("channel: ") {
                 let raw = String(trimmed.dropFirst("channel: ".count)).trimmingCharacters(in: .whitespaces)
                 current?.channel = UtteranceChannel(rawValue: raw)

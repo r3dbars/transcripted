@@ -1,0 +1,43 @@
+{
+  "role": "AXWindow",
+  "title": "Weekly sync | Microsoft Teams",
+  "children": [
+    {
+      "role": "AXGroup",
+      "children": [
+        {
+          "role": "AXButton",
+          "description": "Your profile, status Available",
+          "children": [{ "role": "AXImage", "description": "Profile picture of Cara Diaz." }]
+        },
+        { "role": "AXButton", "description": "Leave" }
+      ]
+    },
+    {
+      "role": "AXGroup",
+      "children": [
+        {
+          "role": "AXMenuItem",
+          "description": "Ana Ruiz, unmuted More options",
+          "children": [{ "role": "AXGroup", "domClassList": ["vdi-frame-occlusion"] }]
+        },
+        {
+          "role": "AXMenuItem",
+          "description": "Ben Okafor (External), muted, Video is off More options",
+          "children": [{ "role": "AXGroup", "domClassList": ["vdi-frame-occlusion"] }]
+        },
+        {
+          "role": "AXMenuItem",
+          "description": "Cara Diaz, unmuted More options",
+          "children": [{ "role": "AXGroup", "domClassList": ["bkg_self-video"] }]
+        }
+      ]
+    },
+    {
+      "role": "AXMenu",
+      "children": [
+        { "role": "AXMenuItem", "description": "Pin for everyone" }
+      ]
+    }
+  ]
+}
