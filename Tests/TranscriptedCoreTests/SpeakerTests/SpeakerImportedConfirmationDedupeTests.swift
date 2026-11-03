@@ -358,6 +358,9 @@ final class SpeakerImportedConfirmationDedupeTests: XCTestCase {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         }
         let speakerDB = SpeakerDatabase(path: paths.speakerDB.path)
+        // The database opens on its queue. These tests run raw SQL on `db`
+        // outside it, so wait for the open first, as every store call does.
+        speakerDB.queue.sync {}
         let manager = TranscriptionTaskManager(
             failedTranscriptionManager: FailedTranscriptionManager(paths: paths),
             speechToText: DedupeStubSpeechToTextEngine(),
