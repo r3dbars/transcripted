@@ -174,17 +174,86 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
         let fixture = try Fixture()
         defer { fixture.remove() }
         let moved = fixture.currentLibrary.appendingPathComponent("Finalized.md")
+        let finalizedBytes = try Data(contentsOf: fixture.original)
         try FileManager.default.moveItem(at: fixture.original, to: moved)
         fixture.directory.set(fixture.currentLibrary)
 
         let outcome = fixture.manager.finishNamingFlow(
-            didFinalizeTranscript: true, updatesCount: 1, transcriptId: fixture.transcriptID,
+            didFinalizeTranscript: true, finalizedTranscriptData: finalizedBytes,
+            updatesCount: 1, transcriptId: fixture.transcriptID,
             resolvedURL: fixture.original, micURL: fixture.mic, systemURL: fixture.system
         )
 
         guard case .completed = outcome else { return XCTFail("Publication must follow the authorized moved capture") }
         XCTAssertEqual(fixture.manager.lastSavedTranscriptURL, moved)
         XCTAssertTrue(fixture.failed.failedTranscriptions.isEmpty)
+    }
+
+    @MainActor
+    func testSwitchingToAPrecopiedLibraryCannotPublishStaleSpeakerNamesAsSaved() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let copy = fixture.currentLibrary.appendingPathComponent("Precopied.md")
+        try FileManager.default.copyItem(at: fixture.original, to: copy)
+        let directory = fixture.directory
+        let newLibrary = fixture.currentLibrary
+        fixture.store.setAfterMutation { directory.set(newLibrary) }
+
+        await save(fixture)
+
+        XCTAssertEqual(fixture.store.callbackCount, 1)
+        XCTAssertTrue(try String(contentsOf: fixture.original, encoding: .utf8).contains("[System/Synthetic Person]"))
+        XCTAssertTrue(try String(contentsOf: copy, encoding: .utf8).contains("[System/Speaker 1]"))
+        XCTAssertEqual(fixture.database.getSpeaker(id: fixture.profileID)?.displayName, "Synthetic Person")
+        XCTAssertNil(fixture.manager.lastSavedTranscriptURL)
+        if case .failed = fixture.manager.displayStatus {} else { XCTFail("A stale copy cannot be published as completed") }
+        XCTAssertEqual(fixture.failed.failedTranscriptions.map(\.id), [fixture.transcriptID])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.mic.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.system.path))
+    }
+
+    @MainActor
+    func testMovingFinalizedBytesBeforePublicationStillCompletesAndCleansScratch() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let moved = fixture.currentLibrary.appendingPathComponent("Moved after naming.md")
+        let original = fixture.original
+        let directory = fixture.directory
+        let newLibrary = fixture.currentLibrary
+        fixture.store.setAfterMutation {
+            try FileManager.default.moveItem(at: original, to: moved)
+            directory.set(newLibrary)
+        }
+
+        await save(fixture)
+
+        XCTAssertEqual(fixture.store.callbackCount, 1)
+        XCTAssertEqual(fixture.manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(fixture.manager.lastSavedTranscriptURL, moved)
+        XCTAssertTrue(try String(contentsOf: moved, encoding: .utf8).contains("[System/Synthetic Person]"))
+        XCTAssertTrue(fixture.failed.failedTranscriptions.isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.mic.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.system.path))
+    }
+
+    @MainActor
+    func testSameFolderStyleAndTitleRenameDoesNotRequireAnIdenticalPostimage() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let renamed = fixture.oldLibrary.appendingPathComponent("Styled title.md")
+        let original = fixture.original
+        fixture.store.setAfterMutation {
+            let named = try String(contentsOf: original, encoding: .utf8)
+            try FileManager.default.moveItem(at: original, to: renamed)
+            try (named + "\n\nSynthetic styling added after naming.\n").write(to: renamed, atomically: true, encoding: .utf8)
+        }
+
+        await save(fixture)
+
+        XCTAssertEqual(fixture.manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(fixture.manager.lastSavedTranscriptURL, renamed)
+        XCTAssertTrue(fixture.failed.failedTranscriptions.isEmpty)
+        XCTAssertTrue(try String(contentsOf: renamed, encoding: .utf8).contains("Synthetic styling added after naming."))
     }
 
     @MainActor
@@ -239,6 +308,7 @@ private final class Fixture {
     let transcriptID = UUID()
     let profileID: UUID
     let database: SpeakerDatabase
+    let store: ReviewMutationStore
     let failed: FailedTranscriptionManager
     let manager: TranscriptionTaskManager
     let directory: CurrentReviewDirectory
@@ -259,12 +329,13 @@ private final class Fixture {
                                     speakerClips: scratch, audioCaptures: scratch, logs: scratch)
         database = SpeakerDatabase(path: paths.speakerDB.path)
         profileID = database.addOrUpdateSpeaker(embedding: [Float](repeating: 0.4, count: 256), existingId: nil).id
+        store = ReviewMutationStore(database)
         failed = FailedTranscriptionManager(paths: paths)
         directory = CurrentReviewDirectory(oldLibrary)
         let currentDirectory = directory
         manager = TranscriptionTaskManager(failedTranscriptionManager: failed,
                                           speechToText: ReviewSTT(), diarization: ReviewDiarizer(),
-                                          speakerStore: database, speakerClipsDirectory: scratch,
+                                          speakerStore: store, speakerClipsDirectory: scratch,
                                           cleanupDirectories: [scratch],
                                           transcriptDirectoryProvider: { currentDirectory.get() })
         original = oldLibrary.appendingPathComponent("Original.md")
@@ -309,6 +380,43 @@ private final class Fixture {
         precondition(root.lastPathComponent.hasPrefix("SpeakerLibraryMove-"))
         try? FileManager.default.removeItem(at: root)
     }
+}
+
+private final class ReviewMutationStore: SpeakerStore, @unchecked Sendable {
+    private let base: SpeakerDatabase
+    private let lock = NSLock()
+    private var afterMutation: (@Sendable () throws -> Void)?
+    private var callbacks = 0
+    init(_ base: SpeakerDatabase) { self.base = base }
+    func setAfterMutation(_ callback: @escaping @Sendable () throws -> Void) { lock.withLock { afterMutation = callback } }
+    var callbackCount: Int { lock.withLock { callbacks } }
+    func performMutationBatch(_ mutations: () throws -> Void) throws {
+        try base.performMutationBatch(mutations)
+        let callback = lock.withLock { () -> (@Sendable () throws -> Void)? in
+            guard let callback = afterMutation else { return nil }
+            callbacks += 1
+            afterMutation = nil
+            return callback
+        }
+        try callback?()
+    }
+    func matchSpeaker(embedding: [Float], threshold: Double) -> SpeakerMatchResult? { base.matchSpeaker(embedding: embedding, threshold: threshold) }
+    func addOrUpdateSpeaker(embedding: [Float], existingId: UUID?) -> SpeakerProfile { base.addOrUpdateSpeaker(embedding: embedding, existingId: existingId) }
+    func getSpeaker(id: UUID) -> SpeakerProfile? { base.getSpeaker(id: id) }
+    func allSpeakers() -> [SpeakerProfile] { base.allSpeakers() }
+    func setDisplayName(id: UUID, name: String, source: String) { base.setDisplayName(id: id, name: name, source: source) }
+    func restoreProfile(_ profile: SpeakerProfile) { base.restoreProfile(profile) }
+    func deleteSpeaker(id: UUID) { base.deleteSpeaker(id: id) }
+    func mergeProfiles(sourceId: UUID, into targetId: UUID) throws { try base.mergeProfiles(sourceId: sourceId, into: targetId) }
+    func recordUserConfirmations(_ confirmations: [SpeakerUserConfirmation]) throws { try base.recordUserConfirmations(confirmations) }
+    func mergeDuplicates() { base.mergeDuplicates() }
+    func pruneWeakProfiles() { base.pruneWeakProfiles() }
+    func incrementDisputeCount(id: UUID) { base.incrementDisputeCount(id: id) }
+    func resetDisputeCount(id: UUID) { base.resetDisputeCount(id: id) }
+    func recordMatchOutcome(_ outcome: SpeakerMatchOutcome) { base.recordMatchOutcome(outcome) }
+    func recentMatchOutcomes(profileId: UUID, limit: Int) -> [SpeakerMatchOutcome] { base.recentMatchOutcomes(profileId: profileId, limit: limit) }
+    func recordNegativeExemplar(profileId: UUID, embedding: [Float]) { base.recordNegativeExemplar(profileId: profileId, embedding: embedding) }
+    func negativeExemplarsByProfile() -> [UUID: [[Float]]] { base.negativeExemplarsByProfile() }
 }
 
 @MainActor private final class ReviewSTT: SpeechToTextEngine {

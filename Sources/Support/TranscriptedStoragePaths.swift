@@ -58,6 +58,36 @@ enum TranscriptedStoragePreferences {
         return customPath
     }
 
+    static func speakerReviewMeetingsDirectory(
+        readConfiguredPath: () -> String? = { storedCustomCaptureLibraryPath() },
+        defaultLibrary: () -> URL = { FileManager.default.transcriptedDefaultCaptureLibraryDir },
+        fileManager: FileManager = .default
+    ) -> URL? {
+        // One authority snapshot: an unavailable configured root never grants
+        // permission to read or mutate a different default library.
+        let configuredPath = readConfiguredPath()
+        let root: URL
+        if let path = configuredPath {
+            root = URL(fileURLWithPath: path, isDirectory: true)
+            guard path.hasPrefix("/"), isSafeCaptureLibraryURL(root),
+                  isExistingCaptureLibraryURL(root, fileManager: fileManager) else { return nil }
+        } else {
+            root = defaultLibrary()
+        }
+        let meetings = FileManager.meetingsDirectory(in: root)
+        if !isExistingCaptureLibraryURL(meetings, fileManager: fileManager) {
+            do {
+                // The chosen root must still exist. Never recreate an offline
+                // or removed custom root while preparing its legitimate child.
+                try fileManager.createDirectory(at: meetings, withIntermediateDirectories: false,
+                                                attributes: [.posixPermissions: 0o700])
+            } catch { return nil }
+        }
+        guard isExistingCaptureLibraryURL(root, fileManager: fileManager),
+              isExistingCaptureLibraryURL(meetings, fileManager: fileManager) else { return nil }
+        return meetings
+    }
+
     static func unavailableCustomCaptureLibraryPath(
         userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default

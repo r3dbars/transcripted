@@ -6,6 +6,7 @@ extension TranscriptionTaskManager {
 
     @MainActor func finishNamingFlow(
         didFinalizeTranscript: Bool,
+        finalizedTranscriptData: Data? = nil,
         failure: SpeakerFinalizationFailure? = nil,
         updatesCount: Int,
         transcriptId: UUID,
@@ -49,6 +50,16 @@ extension TranscriptionTaskManager {
                             metadata: Optional<(resolvedURL: URL, didAlreadyPublish: Bool)>.none,
                             superseded: false
                         )
+                    }
+
+                    let crossedDirectories = currentURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+                        != resolvedURL.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+                    if crossedDirectories {
+                        guard let finalizedTranscriptData,
+                              let currentData = try? Data(contentsOf: currentURL),
+                              currentData == finalizedTranscriptData else {
+                            return (metadata: Optional<(resolvedURL: URL, didAlreadyPublish: Bool)>.none, superseded: false)
+                        }
                     }
 
                     let didAlreadyPublish = lastSavedTranscriptId == transcriptId
