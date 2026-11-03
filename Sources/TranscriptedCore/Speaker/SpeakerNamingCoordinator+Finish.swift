@@ -42,7 +42,8 @@ extension TranscriptionTaskManager {
                     }
                     guard let currentURL = TranscriptSaver.resolveTranscriptURL(
                         resolvedURL,
-                        transcriptId: transcriptId
+                        transcriptId: transcriptId,
+                        currentDirectoryProvider: transcriptDirectoryProvider
                     ) else {
                         return (
                             metadata: Optional<(resolvedURL: URL, didAlreadyPublish: Bool)>.none,
@@ -170,7 +171,9 @@ extension TranscriptionTaskManager {
         }
 
         let values = TranscriptSaver.serializeTranscriptFileUpdate {
-            let currentURL = TranscriptSaver.resolveTranscriptURL(transcriptURL, transcriptId: id)
+            let currentURL = TranscriptSaver.resolveTranscriptURL(
+                transcriptURL, transcriptId: id, currentDirectoryProvider: transcriptDirectoryProvider
+            )
                 ?? transcriptURL
             return (try? TranscriptFrontmatter.readValues(from: currentURL)) ?? [:]
         }

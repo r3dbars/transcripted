@@ -68,6 +68,7 @@ extension TranscriptionTaskManager {
         let removeMicAudio = shouldRemoveMicAudio ?? shouldRemoveTemporaryAudio
         let removeSystemAudio = shouldRemoveSystemAudio ?? shouldRemoveTemporaryAudio
         let speakerDB = transcription.speakerDB
+        let currentTranscriptDirectory = transcriptDirectoryProvider
         let clipsDirectory = transcription.speakerClipsDirectory
         let clipsBySpeakerId = Dictionary(uniqueKeysWithValues: clips.map {
             ($0.channel.speakerKey(diarizerSpeakerId: $0.diarizerSpeakerId), $0)
@@ -229,7 +230,8 @@ extension TranscriptionTaskManager {
                     }
                     guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
                         transcriptURL,
-                        transcriptId: transcriptId
+                        transcriptId: transcriptId,
+                        currentDirectoryProvider: currentTranscriptDirectory
                     ) else {
                         return (
                             didFinalize: false,

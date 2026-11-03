@@ -9,7 +9,40 @@ extension TranscriptSaver {
 
     /// Resolve a transcript URL that may have been renamed by MeetingTranscriptStyler.
     /// Uses the canonical stable-identity resolver shared with recovery flows.
-    static func resolveTranscriptURL(_ url: URL, transcriptId: UUID) -> URL? {
+    static func resolveTranscriptURL(
+        _ url: URL,
+        transcriptId: UUID,
+        currentDirectoryProvider: (@Sendable () -> URL?)? = nil
+    ) -> URL? {
+        if let currentDirectoryProvider {
+            // The app can move or copy its capture library while this review is
+            // open. Re-read its authority at each serialized save/publication.
+            guard let currentDirectory = currentDirectoryProvider() else { return nil }
+            let isOriginalDirectory = currentDirectory.standardizedFileURL.resolvingSymlinksInPath()
+                == url.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
+            if isOriginalDirectory, isRegularTranscript(url),
+               let values = try? TranscriptFrontmatter.readValues(from: url),
+               TranscriptFrontmatter.captureID(in: values) == transcriptId {
+                return isWritableTranscript(url) ? url : nil
+            }
+            switch uniqueReviewTranscript(in: currentDirectory, transcriptId: transcriptId) {
+            case .found(let currentURL):
+                return isWritableTranscript(currentURL) ? currentURL : nil
+            case .rejected:
+                // Never fall back to a stale original after an ambiguous or
+                // unavailable current lookup (including a read-only match).
+                return nil
+            case .missing:
+                guard !isOriginalDirectory else { return nil }
+                // Switch-without-copy leaves a pending review's capture in its
+                // original library. Only a complete, empty current lookup may
+                // fall back to that exact stable identity.
+                guard case .found(let originalURL) = uniqueReviewTranscript(
+                    in: url.deletingLastPathComponent(), transcriptId: transcriptId
+                ) else { return nil }
+                return isWritableTranscript(originalURL) ? originalURL : nil
+            }
+        }
         if let frontmatter = try? TranscriptFrontmatter.readValues(from: url),
            TranscriptFrontmatter.captureID(in: frontmatter) == transcriptId {
             return url
@@ -32,6 +65,48 @@ extension TranscriptSaver {
             ])
         }
         return logicalResolvedURL
+    }
+
+    private enum ReviewTranscriptLookup {
+        case found(URL)
+        case missing
+        case rejected
+    }
+
+    /// Exactly one non-recursive directory, chosen by the host. A copied
+    /// library is authoritative only when its stable identity is unambiguous.
+    private static func uniqueReviewTranscript(in directory: URL, transcriptId: UUID) -> ReviewTranscriptLookup {
+        guard FileManager.default.isReadableFile(atPath: directory.path),
+              let files = try? FileManager.default.contentsOfDirectory(
+                at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
+                options: [.skipsHiddenFiles]
+              ) else { return .rejected }
+        var match: URL?
+        for file in files where file.pathExtension.lowercased() == "md" {
+            guard let properties = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
+                return .rejected
+            }
+            guard properties.isRegularFile == true, properties.isSymbolicLink != true else { continue }
+            let values: [String: String]?
+            do { values = try TranscriptFrontmatter.readValues(from: file) }
+            catch { return .rejected }
+            guard let values, TranscriptFrontmatter.captureID(in: values) == transcriptId else { continue }
+            guard match == nil else { return .rejected }
+            // Directory enumeration can canonicalize /var to /private/var.
+            // Keep the host's logical library URL, as the legacy resolver does.
+            match = directory.appendingPathComponent(file.lastPathComponent)
+        }
+        return match.map(ReviewTranscriptLookup.found) ?? .missing
+    }
+
+    private static func isRegularTranscript(_ url: URL) -> Bool {
+        guard let values = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else { return false }
+        return values.isRegularFile == true && values.isSymbolicLink != true
+    }
+
+    private static func isWritableTranscript(_ url: URL) -> Bool {
+        FileManager.default.isWritableFile(atPath: url.path)
+            && FileManager.default.isWritableFile(atPath: url.deletingLastPathComponent().path)
     }
 
     /// Replace all occurrences of a speaker name throughout a transcript's YAML and body.
