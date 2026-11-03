@@ -350,6 +350,10 @@ cat >> "$GENERATED_RUNNER" <<'EOF'
         } else {
             summary += "ALL TESTS PASSED"
             print(summary)
+            // run-tests.sh fails a run that exits 0 without reaching here.
+            if let marker = ProcessInfo.processInfo.environment["TRANSCRIPTED_FAST_TEST_SUMMARY_FILE"] {
+                FileManager.default.createFile(atPath: marker, contents: Data("passed\n".utf8))
+            }
         }
     }
 
@@ -980,6 +984,20 @@ print_failure_rerun_hint() {
     echo "Re-run one suite with: bash run-tests.sh --filter <entryFn>"
 }
 
+# A test process can exit 0 before its summary (one did in CI and hid about
+# 2,200 suites). The runner writes this file only after "ALL TESTS PASSED".
+SUMMARY_MARKER="$TRANSCRIPTED_CONTAINER_DIR/fast-test-summary"
+rm -f "$SUMMARY_MARKER"
+export TRANSCRIPTED_FAST_TEST_SUMMARY_FILE="$SUMMARY_MARKER"
+require_summary() {
+    if [ ! -f "$SUMMARY_MARKER" ]; then
+        echo ""
+        echo "FAILED: the test process exited 0 before printing its summary; later suites never ran."
+        print_failure_rerun_hint
+        exit 1
+    fi
+}
+
 if [ "$coverage_requested" = true ]; then
     run_status=0
     LLVM_PROFILE_FILE="$COVERAGE_DIR/default-%p.profraw" TRANSCRIPTED_DISABLE_FILE_LOGGER=1 "$RUN_BINARY" || run_status=$?
@@ -987,6 +1005,7 @@ if [ "$coverage_requested" = true ]; then
         print_failure_rerun_hint
         exit "$run_status"
     fi
+    require_summary
 
     profraw_files=("$COVERAGE_DIR"/*.profraw)
     if [ ! -e "${profraw_files[0]}" ]; then
@@ -1026,4 +1045,5 @@ else
         print_failure_rerun_hint
         exit "$run_status"
     fi
+    require_summary
 fi
