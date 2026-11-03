@@ -15,6 +15,10 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
+- Writing > Edit setup can turn both features off and save the disabled state
+  without continuing through model, keyboard or permission setup.
+- Opened meeting cards keep Copy, Show in Finder and the more menu in the
+  header. Clicking the title closes the card without affecting its controls.
 - Speakers review cards reuse their measured height and coalesce changes,
   instead of laying out every voice row during each size query. Click-away
   handling sits behind the card so it does not compete with its buttons.

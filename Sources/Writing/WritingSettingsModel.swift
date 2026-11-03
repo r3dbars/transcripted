@@ -6,6 +6,8 @@ import Carbon
 import Combine
 import Foundation
 
+extension WritingController: WritingSetupFeatureControl {}
+
 /// The Writing tab's state and actions: which screen shows (intro, setup,
 /// everyday), the setup draft, and a read of `WritingController` refreshed
 /// while the tab is on screen. Replaces Tilde's `TildeSettingsViewModel` and
@@ -411,6 +413,21 @@ final class WritingSettingsModel: ObservableObject {
     func cancelSetup() {
         isEditingSetup = false
         screen = controller.setupCompleted ? .everyday : .intro(page: 1)
+    }
+
+    func finishSetupStep1() {
+        guard draft.canFinishStep1(isEditing: isEditingSetup) else { return }
+        switch Presentation.step1Primary(
+            saveMyWriting: draft.saveMyWriting, autocomplete: draft.autocomplete, isEditing: isEditingSetup
+        ) {
+        case .continueSetup:
+            showStep(2)
+        case .turnOffWriting:
+            Presentation.turnOffWriting(using: controller)
+            isEditingSetup = false
+            screen = .everyday
+            refreshLive()
+        }
     }
 
     func showStep(_ step: Int) {

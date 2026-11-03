@@ -84,7 +84,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `HomeMeetingSearchIndex.swift` / `HomeSearchMatching.swift` - Foundation-pure index over every saved meeting (title, date words, named speakers), built off-main from `RecentMeetingsScanner.loadSearchIndex`; audio is resolved only for shown matches.
 - `HomeView.swift` - row actions, the ⋯ menu, inline failed-meeting row, feedback sheet, Load more. Kept together because the contract test reads it.
 - `HomeCaptureList.swift`, `HomeScanWarningCard.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift` - list, warning card, value types, feedback types.
-- `QuietHomeLibrary.swift` - Meetings rows and in-place expansion.
+- `QuietHomeLibrary.swift` - Meetings rows and in-place expansion. `HomeMeetingExpansionLayout` keeps Copy/Finder/more in the expansion header; only its title/meta button collapses the card, leaving transcript selection and timestamp playback independent.
 - `Pages/FileTranscriptionSettingsPage.swift` - the sidebar's Transcribe a file entry: the existing import picker, injected shared activity, a Meetings link for transcripts/retries, and the public CLI instructions. No separate pipeline or model preferences.
 - `HomeMeetingSpeakerNamingViews.swift` - speaker label, picker, Name speakers sheet, and the transcript-only voiceprint notice.
 - `HomeMeetingAudioPlayer.swift` - meeting-audio player and speaker color palette.
