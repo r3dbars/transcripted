@@ -419,7 +419,7 @@ extension Audio {
             )
         } else if let unsettledGraph = preparedGraph {
             do {
-                _ = try MeetingMicGraphStartSequence.run(
+                _ = try MeetingMicGraphStartSequence.runRetryingOnceOnFreshGraph(
                     unsettledGraph,
                     settle: { unsettledGraph in
                         // AirPods can flip to their call profile after the
@@ -492,6 +492,39 @@ extension Audio {
                                 throw error
                             }
                         }
+                    },
+                    shouldRetry: { error in
+                        !(error is AudioCaptureStaleSessionError) && sessionIsCurrent()
+                    },
+                    rebuild: { failedGraph in
+                        // Starting again a moment later on the same mic
+                        // usually works, so give it one fresh graph here
+                        // instead of failing the meeting.
+                        AppLogger.audioMic.warning("Mic tap or engine start failed; retrying once on a fresh graph", [
+                            "operation": "start_recording"
+                        ])
+                        withAudioGraphLock {
+                            discardUnstartedInputGraph(
+                                engine: failedGraph.engine,
+                                inputNode: failedGraph.inputNode,
+                                operation: "start_recording_discard_failed_tap"
+                            )
+                        }
+                        Thread.sleep(forTimeInterval: 0.3)
+                        let freshGraph = try makeReadyMeetingInputGraph(
+                            operation: "start_recording_tap_retry",
+                            resetMeetingSelectionBeforeRetry: false,
+                            sessionGeneration: sessionGeneration
+                        )
+                        recordRecordingStartCapturedInput(deviceID: freshGraph.inputNode.auAudioUnit.deviceID)
+                        refreshRealtimeAGCForCurrentProcessingMode(resetExisting: true)
+                        return freshGraph
+                    },
+                    retryGraphFitsSegment: { segmentGraph, retryGraph in
+                        // The mic file and its write context were sized for
+                        // the first graph; a different format must not write
+                        // into it.
+                        retryGraph.recordingSnapshot == segmentGraph.recordingSnapshot
                     }
                 )
             } catch let failure as MeetingMicGraphStartSequence.Failure {
