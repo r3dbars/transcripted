@@ -15,6 +15,24 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
+- Speakers review cards reuse their measured height and coalesce changes,
+  instead of laying out every voice row during each size query. Click-away
+  handling sits behind the card so it does not compete with its buttons.
+- Whisper meeting batches decode one segment at a time. Dictation, meeting
+  decoding, language detection, model loading and unloading also share one
+  operation gate so they cannot use the same WhisperKit instance together.
+- Whisper checks silence separately for each decoder window. Speech elsewhere
+  in a long input no longer admits stock lines over a silent window; short
+  spoken words crossing a window boundary retain their detection context.
+- A meeting microphone start gets one fresh-graph retry after a failed format
+  check, tap installation or engine start, while preserving the recording's format.
+- The speaker database opens on its serial queue instead of blocking its
+  constructor on filesystem and SQLite work during launch.
+- Disabled hotkey taps recover outside the callback's state lock. Recovery
+  uses one worker and ignores callbacks from replaced taps.
+- Timed-out microphone work keeps its bounded worker slot until late cleanup
+  returns. Diagnostic reports distinguish the native work source and requested
+  stage using fixed categories.
 - Settings > Storage: picking a shorter "Delete meeting audio after" or
   "Keep dictation audio" window asks again before deleting old audio, instead
   of the choice snapping back with no prompt. The four Storage prompts now
