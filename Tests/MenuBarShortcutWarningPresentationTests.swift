@@ -44,4 +44,52 @@ func testMenuBarShortcutWarningPresentation() {
         )
         assertEqual(noFnConflict?.text, fnWarning, "without a live Fn conflict the same text is just another warning")
     }
+
+    runSuite("A Secure Keyboard Entry notice occupies the header when there is no hotkey warning") {
+        let notice = "Obsidian is blocking keyboard shortcuts (Secure Keyboard Entry)."
+        let shown = MenuBarShortcutWarningPresentation.resolve(
+            hotkeyWarning: nil,
+            secureKeyboardEntryNotice: notice
+        )
+        assertEqual(shown?.text, notice, "the secure-input copy should appear as-is")
+        assertEqual(shown?.action, nil, "there is no settings pane to open for another app's Secure Keyboard Entry")
+        assertEqual(
+            MenuBarShortcutWarningPresentation.resolve(
+                hotkeyWarning: nil,
+                secureKeyboardEntryNotice: nil
+            ),
+            nil,
+            "no notice and no hotkey warning should hide the row"
+        )
+        assertEqual(
+            MenuBarShortcutWarningPresentation.resolve(
+                hotkeyWarning: nil,
+                secureKeyboardEntryNotice: ""
+            ),
+            nil,
+            "an empty notice should hide the row"
+        )
+    }
+
+    runSuite("A hotkey warning wins over a Secure Keyboard Entry notice") {
+        let hotkey = MenuBarShortcutWarningPresentation(
+            text: "Shortcuts need Accessibility access. Click to turn it on.",
+            action: .openAccessibilitySettings
+        )
+        let shown = MenuBarShortcutWarningPresentation.resolve(
+            hotkeyWarning: hotkey,
+            secureKeyboardEntryNotice: "Obsidian is blocking keyboard shortcuts (Secure Keyboard Entry)."
+        )
+        assertEqual(shown, hotkey, "the tap has to work at all before Secure Keyboard Entry matters")
+    }
+
+    runSuite("A suppressed Fn conflict still lets a Secure Keyboard Entry notice through") {
+        assertEqual(resolve(fnWarning), nil, "setup: Fn stays out of the menu")
+        let notice = "Obsidian is blocking keyboard shortcuts (Secure Keyboard Entry)."
+        let shown = MenuBarShortcutWarningPresentation.resolve(
+            hotkeyWarning: resolve(fnWarning),
+            secureKeyboardEntryNotice: notice
+        )
+        assertEqual(shown?.text, notice, "hiding the Fn conflict must not hide a live Secure Keyboard Entry block")
+    }
 }

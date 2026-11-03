@@ -254,8 +254,9 @@ final class MenuBarPanelController: NSViewController {
             .store(in: &subscriptions)
 
         appState.contextCapture.$hotkeyError
+            .combineLatest(appState.contextCapture.$secureKeyboardEntryNotice)
             .receive(on: RunLoop.main)
-            .sink { [weak self] _ in
+            .sink { [weak self] _, _ in
                 self?.scheduleRefresh()
             }
             .store(in: &subscriptions)
@@ -279,17 +280,22 @@ final class MenuBarPanelController: NSViewController {
     }
 
     private func shortcutWarningPresentation() -> MenuBarShortcutWarningPresentation? {
-        // No warning is the usual case, and resolve() shows nothing then.
-        // Return before the Fn-key lookup below, which syncs system
-        // preferences on every popover refresh.
-        guard let hotkeyError = appState.contextCapture.hotkeyError, !hotkeyError.isEmpty else { return nil }
-        return MenuBarShortcutWarningPresentation.resolve(
-            hotkeyError: hotkeyError,
-            accessibilityErrorMessage: ContextCaptureEngine.accessibilityPermissionErrorMessage,
-            functionKeyConflictWarning: PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
-                for: PhysicalDictationTriggerPreferences.pushToTalkBinding(),
-                systemAction: PhysicalDictationTriggerPreferences.functionKeySystemAction()
+        // Skip the Fn-key lookup when there is no hotkeyError: it syncs
+        // system preferences on every popover refresh.
+        var hotkeyWarning: MenuBarShortcutWarningPresentation?
+        if let hotkeyError = appState.contextCapture.hotkeyError, !hotkeyError.isEmpty {
+            hotkeyWarning = MenuBarShortcutWarningPresentation.resolve(
+                hotkeyError: hotkeyError,
+                accessibilityErrorMessage: ContextCaptureEngine.accessibilityPermissionErrorMessage,
+                functionKeyConflictWarning: PhysicalDictationTriggerPreferences.functionKeyConflictWarning(
+                    for: PhysicalDictationTriggerPreferences.pushToTalkBinding(),
+                    systemAction: PhysicalDictationTriggerPreferences.functionKeySystemAction()
+                )
             )
+        }
+        return MenuBarShortcutWarningPresentation.resolve(
+            hotkeyWarning: hotkeyWarning,
+            secureKeyboardEntryNotice: appState.contextCapture.secureKeyboardEntryNotice
         )
     }
 

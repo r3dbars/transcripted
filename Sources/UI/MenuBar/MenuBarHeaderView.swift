@@ -69,7 +69,7 @@ final class MenuBarHeaderView: NSView {
 
         warningLabel.font = MenuTokens.Font.headerDetail
         warningLabel.textColor = MenuTokens.textSecondaryNS
-        warningLabel.maximumNumberOfLines = 2
+        warningLabel.maximumNumberOfLines = 4
         addSubview(warningLabel)
 
         warningButton.isBordered = false
@@ -124,18 +124,19 @@ final class MenuBarHeaderView: NSView {
         warningLabel.setAccessibilityElement(warningButton.isHidden)
         if hasWarning {
             let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady, showsStatus: showsStatus)
+            let warningHeight = warningTextHeight(forWidth: bounds.width)
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
             warningLabel.frame = NSRect(
                 x: 18,
                 y: warningY - 1,
                 width: bounds.width - 18,
-                height: MenuBarHeaderLayoutPolicy.warningTextHeight
+                height: warningHeight
             )
             warningButton.frame = NSRect(
                 x: 0,
                 y: warningY - 1,
                 width: bounds.width,
-                height: MenuBarHeaderLayoutPolicy.warningTextHeight
+                height: warningHeight
             )
         }
         window?.invalidateCursorRects(for: self)
@@ -192,6 +193,12 @@ final class MenuBarHeaderView: NSView {
     }
 
     var intrinsicHeight: CGFloat {
+        intrinsicHeight(forWidth: bounds.width)
+    }
+
+    /// The header's height when laid out `width` points wide. The warning row
+    /// grows with its text, so the height depends on the width.
+    func intrinsicHeight(forWidth width: CGFloat) -> CGFloat {
         let isReady = currentWarmupStatus.isReadyForMenuHeader
         let hasWarning = currentHotkeyError?.isEmpty == false
         // A ready header shows its one-line status row for recording and
@@ -200,8 +207,22 @@ final class MenuBarHeaderView: NSView {
         return MenuBarHeaderLayoutPolicy.intrinsicHeight(
             isReady: isReady,
             hasWarning: hasWarning,
-            isRecording: isReady && showsStatusRow
+            isRecording: isReady && showsStatusRow,
+            warningTextHeight: warningTextHeight(forWidth: width)
         )
+    }
+
+    /// How tall the warning text wraps to beside its icon. Before the first
+    /// layout (no width yet) it reserves the most it can need.
+    private func warningTextHeight(forWidth width: CGFloat) -> CGFloat {
+        let textWidth = width - 18
+        guard textWidth > 0, let cell = warningLabel.cell else {
+            return MenuBarHeaderLayoutPolicy.maxWarningTextHeight
+        }
+        let measured = cell.cellSize(
+            forBounds: NSRect(x: 0, y: 0, width: textWidth, height: .greatestFiniteMagnitude)
+        ).height
+        return MenuBarHeaderLayoutPolicy.warningTextHeight(measured: measured)
     }
 
     /// A steady recording has no status line: the red Stop button with its
