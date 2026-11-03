@@ -208,7 +208,7 @@ func testFocusOrderContract() async {
             .compactMap { page in page.navigationShortcutKey.map { (key: $0, identifier: page.automationIdentifier) } }
             .sorted { $0.key < $1.key }
             .map(\.identifier)
-        let numberedFocusOrder = FocusOrderContract.settingsSidebarOrder.filter { shortcutOrder.contains($0) }
+        let numberedFocusOrder = FocusOrderContract.settingsSidebarOrder.filter { $0 != TranscriptedSettingsPage.files.automationIdentifier }
         assertEqual(
             shortcutOrder,
             numberedFocusOrder,
