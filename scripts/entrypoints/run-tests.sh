@@ -486,6 +486,7 @@ APP_SOURCES=(
     "Sources/Speech/WhisperCachedModelPolicy.swift"
     "Sources/Speech/WhisperVoicedSpeechGate.swift"
     "Sources/Speech/WhisperHallucinationFilter.swift"
+    "Sources/Speech/WhisperMeetingBatchPolicy.swift"
     "Sources/Speech/ModelLoadProgressWaiter.swift"
     "Sources/Speech/ASRInferenceWaiterQueue.swift"
     "Sources/Speech/ParakeetASRInferenceGate.swift"

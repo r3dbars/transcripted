@@ -638,14 +638,14 @@ class STTRouter: ObservableObject {
     /// Batch limit for meeting segments, or nil when `model` transcribes them
     /// one call each. Parakeet packs a batch into its fixed 15 s window; one
     /// encoder frame (80 ms) of headroom keeps a pack inside it. Whisper
-    /// decodes a batch's segments side by side instead, so its limit is one
-    /// 30 s window per worker.
+    /// gets a batch of separate segments instead, up to
+    /// `WhisperMeetingBatchPolicy.windowsPerBatch` 30 s windows.
     func packedSegmentWindowSamples(for model: TranscriptionModelChoice) -> Int? {
         switch model {
         case .parakeetTDTv2, .parakeetTDTv3:
             return ASRConstants.maxModelSamples - ASRConstants.samplesPerEncoderFrame
         case .whisperLargeV3Turbo, .whisperLargeV3:
-            return Self.whisperWindowSamples * WhisperEngine.meetingBatchWorkerCount
+            return Self.whisperWindowSamples * WhisperMeetingBatchPolicy.windowsPerBatch
         case .parakeetUltraExperimental, .appleSpeech:
             return nil
         }
@@ -654,7 +654,7 @@ class STTRouter: ObservableObject {
     /// Whisper's fixed input window: 30 s at 16 kHz.
     private static let whisperWindowSamples = 480_000
 
-    /// Transcribes a batch of meeting segments side by side with Whisper, one
+    /// Transcribes a batch of meeting segments with Whisper, one at a time, one
     /// text per segment; nil when `model` isn't Whisper (the caller falls back).
     func transcribeWhisperMeetingSegments(
         _ segments: [[Float]],
