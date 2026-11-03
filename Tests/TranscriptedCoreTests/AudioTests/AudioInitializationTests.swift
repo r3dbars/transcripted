@@ -820,6 +820,89 @@ final class AudioInitializationTests: XCTestCase {
         }
     }
 
+    /// A tap install or engine start that fails on an otherwise ready mic
+    /// used to fail the whole meeting start, though starting again a few
+    /// seconds later on the same headset worked. Start now gets one fresh
+    /// graph and records into the mic file it already made.
+    func testMeetingMicStartRetriesARaisedTapOnceOnAFreshGraph() throws {
+        let recorder = MicStartStepRecorder()
+        recorder.tapRaises = 1
+
+        let started = try recorder.runRetryingOnFreshGraph(graph: 48_000)
+
+        XCTAssertEqual(recorder.steps, [
+            "settle", "createSegment", "lock", "checkFormat", "installTap", "unlock",
+            "rebuild", "settle", "lock", "checkFormat", "installTap", "unlock"
+        ])
+        XCTAssertEqual(recorder.rebuiltFrom, [48_000])
+        XCTAssertEqual(recorder.createdSegmentFor, [48_000], "the retry keeps the mic file it already made")
+        XCTAssertEqual(started.segment, "segment@48000")
+    }
+
+    func testMeetingMicStartRetriesARefusedEngineStartOnceOnAFreshGraph() throws {
+        let recorder = MicStartStepRecorder()
+        recorder.engineStartRefusals = 1
+
+        let started = try recorder.runRetryingOnFreshGraph(graph: 48_000)
+
+        XCTAssertEqual(recorder.rebuiltFrom, [48_000])
+        XCTAssertEqual(recorder.installedTapFor, [48_000, 48_000])
+        XCTAssertEqual(started.segment, "segment@48000")
+    }
+
+    func testMeetingMicStartRetriesAMovedFormatOnceOnAFreshGraph() throws {
+        let recorder = MicStartStepRecorder()
+        recorder.formatMoves = 1
+
+        let started = try recorder.runRetryingOnFreshGraph(graph: 48_000)
+
+        XCTAssertEqual(recorder.rebuiltFrom, [48_000])
+        XCTAssertEqual(recorder.installedTapFor, [48_000])
+        XCTAssertEqual(started.graph, 48_000)
+    }
+
+    func testMeetingMicStartFailsWhenTheFreshGraphNoLongerFitsTheMicFile() {
+        let recorder = MicStartStepRecorder()
+        recorder.tapRaises = 1
+        recorder.rebuiltGraph = 24_000
+
+        XCTAssertThrowsError(try recorder.runRetryingOnFreshGraph(graph: 48_000)) { error in
+            let failure = error as? MeetingMicGraphStartSequence.Failure
+            XCTAssertEqual(failure?.step, .installTap)
+            XCTAssertEqual(failure?.underlying as? MicStartTestError, .tapRaised)
+        }
+        XCTAssertEqual(recorder.createdSegmentFor, [48_000], "a 48 kHz file must not take 24 kHz frames")
+        XCTAssertTrue(recorder.installedTapFor.isEmpty)
+    }
+
+    func testMeetingMicStartRetriesOnlyOnce() {
+        let recorder = MicStartStepRecorder()
+        recorder.tapRaises = 2
+
+        XCTAssertThrowsError(try recorder.runRetryingOnFreshGraph(graph: 48_000)) { error in
+            XCTAssertEqual((error as? MeetingMicGraphStartSequence.Failure)?.step, .installTap)
+        }
+        XCTAssertEqual(recorder.rebuiltFrom, [48_000])
+        XCTAssertEqual(recorder.steps.filter { $0 == "installTap" }.count, 2)
+    }
+
+    func testMeetingMicStartDoesNotRetryAStoppedStartOrAnEarlierStep() {
+        let stopped = MicStartStepRecorder()
+        stopped.engineStartError = MicStartTestError.sessionEnded
+        XCTAssertThrowsError(try stopped.runRetryingOnFreshGraph(graph: 48_000))
+        XCTAssertTrue(stopped.rebuiltFrom.isEmpty, "a start the user already stopped must not rebuild")
+
+        let settleFails = MicStartStepRecorder()
+        settleFails.settleError = MicStartTestError.routeNeverSettled
+        XCTAssertThrowsError(try settleFails.runRetryingOnFreshGraph(graph: 48_000))
+        XCTAssertTrue(settleFails.rebuiltFrom.isEmpty)
+
+        let segmentFails = MicStartStepRecorder()
+        segmentFails.segmentError = MicStartTestError.diskFull
+        XCTAssertThrowsError(try segmentFails.runRetryingOnFreshGraph(graph: 48_000))
+        XCTAssertTrue(segmentFails.rebuiltFrom.isEmpty)
+    }
+
     func testInputTapTeardownStopsRunningEngineBeforeRemovingTap() {
         XCTAssertEqual(
             AudioInputTapTeardownPolicy.steps(engineIsRunning: true),
@@ -1479,6 +1562,8 @@ private enum MicStartTestError: Error, Equatable {
     case routeNeverSettled
     case diskFull
     case engineRefused
+    case tapRaised
+    case sessionEnded
 }
 
 /// Drives `MeetingMicGraphStartSequence` with sample rates standing in for
@@ -1489,8 +1574,13 @@ private final class MicStartStepRecorder {
     var segmentError: Error?
     var formatCheckError: Error?
     var engineStartError: Error?
+    var tapRaises = 0
+    var engineStartRefusals = 0
+    var formatMoves = 0
+    var rebuiltGraph: Double?
 
     private(set) var steps: [String] = []
+    private(set) var rebuiltFrom: [Double] = []
     private(set) var createdSegmentFor: [Double] = []
     private(set) var checkedFormatFor: [Double] = []
     private(set) var installedTapFor: [Double] = []
@@ -1509,21 +1599,66 @@ private final class MicStartStepRecorder {
                 self.createdSegmentFor.append(graph)
                 return "segment@\(Int(graph))"
             },
-            checkFormat: { graph in
-                self.steps.append("checkFormat")
-                self.checkedFormatFor.append(graph)
-                if let formatCheckError = self.formatCheckError { throw formatCheckError }
-            },
-            installTap: { graph, _ in
-                self.steps.append("installTap")
-                self.installedTapFor.append(graph)
-            },
-            withinGraphLock: { _, body in
-                self.steps.append("lock")
-                defer { self.steps.append("unlock") }
-                try body()
-                if let engineStartError = self.engineStartError { throw engineStartError }
-            }
+            checkFormat: checkFormat,
+            installTap: installTap,
+            withinGraphLock: withinGraphLock
         )
+    }
+
+    func runRetryingOnFreshGraph(graph: Double) throws -> (graph: Double, segment: String) {
+        try MeetingMicGraphStartSequence.runRetryingOnceOnFreshGraph(
+            graph,
+            settle: { graph in
+                self.steps.append("settle")
+                if let settleError = self.settleError { throw settleError }
+                return self.settledGraph ?? graph
+            },
+            createSegment: { graph in
+                self.steps.append("createSegment")
+                if let segmentError = self.segmentError { throw segmentError }
+                self.createdSegmentFor.append(graph)
+                return "segment@\(Int(graph))"
+            },
+            checkFormat: checkFormat,
+            installTap: installTap,
+            withinGraphLock: withinGraphLock,
+            shouldRetry: { ($0 as? MicStartTestError) != .sessionEnded },
+            rebuild: { failed in
+                self.steps.append("rebuild")
+                self.rebuiltFrom.append(failed)
+                return self.rebuiltGraph ?? failed
+            },
+            retryGraphFitsSegment: { segmentGraph, retryGraph in segmentGraph == retryGraph }
+        )
+    }
+
+    private func checkFormat(_ graph: Double) throws {
+        steps.append("checkFormat")
+        checkedFormatFor.append(graph)
+        if let formatCheckError { throw formatCheckError }
+        if formatMoves > 0 {
+            formatMoves -= 1
+            throw MicStartTestError.formatMoved
+        }
+    }
+
+    private func installTap(_ graph: Double, _ segment: String) throws {
+        steps.append("installTap")
+        if tapRaises > 0 {
+            tapRaises -= 1
+            throw MicStartTestError.tapRaised
+        }
+        installedTapFor.append(graph)
+    }
+
+    private func withinGraphLock(_ graph: Double, _ body: () throws -> Void) throws {
+        steps.append("lock")
+        defer { steps.append("unlock") }
+        try body()
+        if let engineStartError { throw engineStartError }
+        if engineStartRefusals > 0 {
+            engineStartRefusals -= 1
+            throw MicStartTestError.engineRefused
+        }
     }
 }
