@@ -96,57 +96,19 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 onLoadModelCacheSnapshot()
             }
         }
+        // One presenter for every Storage prompt. Four stacked alert modifiers
+        // shadowed each other, so picking a shorter "Delete meeting audio
+        // after" or "Keep dictation audio" window set its pending value, no
+        // alert appeared, and the segment snapped back. Routing and copy live
+        // in StorageConfirmationPolicy.
         .alert(
-            "Bring your saved captures along?",
-            isPresented: captureLibraryChoicePromptBinding,
-            presenting: pendingCaptureLibraryChoice
-        ) { choice in
-            Button(choice.moveButtonTitle) {
-                onMoveCapturesThenSwitchLibrary(choice)
-            }
-            .keyboardShortcut(.defaultAction)
-            Button("Copy Instead") {
-                onCopyCapturesThenSwitchLibrary(choice)
-            }
-            Button("Just Switch") {
-                onSwitchLibraryWithoutCopying(choice)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { choice in
-            Text(choice.promptMessage)
-        }
-        .alert(item: $pendingAudioRetentionWindow) { window in
-            Alert(
-                title: Text("Delete old meeting audio?"),
-                message: Text("Your transcripts stay. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."),
-                primaryButton: .cancel(),
-                secondaryButton: .destructive(Text("Delete Old Audio")) {
-                    onApplyAudioRetentionWindow(window)
-                }
-            )
-        }
-        .alert(item: $pendingDictationAudioKeepWindow) { window in
-            Alert(
-                title: Text(window == .off ? "Delete kept dictation audio?" : "Delete old dictation audio?"),
-                message: Text(window == .off
-                    ? "Your dictation text stays. All kept dictation audio is deleted now, and new dictations won't keep any."
-                    : "Your dictation text stays. Dictation audio older than \(window.title) is deleted now, and again automatically from then on."),
-                primaryButton: .cancel(),
-                secondaryButton: .destructive(Text("Delete Audio")) {
-                    onApplyDictationAudioKeepWindow(window)
-                }
-            )
-        }
-        .alert("Free up space?", isPresented: $showReclaimableCacheCleanupConfirmation) {
-            Button("Remove", role: .destructive) {
-                onRemoveReclaimableModelCaches()
-            }
-            Button("Cancel", role: .cancel) {}
-                .keyboardShortcut(.defaultAction)
-        } message: {
-            Text(effectiveTranscriptionModelIsWhisper
-                ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
-                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. The Parakeet model you use stays.")
+            Text(activeConfirmationTitle),
+            isPresented: storageConfirmationIsPresented,
+            presenting: activeConfirmationSlot
+        ) { slot in
+            storageConfirmationActions(for: slot)
+        } message: { slot in
+            storageConfirmationMessage(for: slot)
         }
     }
 
@@ -306,10 +268,13 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             get: { audioRetentionWindow },
             set: { window in
                 guard window != audioRetentionWindow else { return }
-                if window.days == nil {
-                    onApplyAudioRetentionWindow(window)
-                } else {
+                if StorageConfirmationPolicy.meetingChoiceNeedsConfirmation(
+                    from: audioRetentionWindow,
+                    to: window
+                ) {
                     pendingAudioRetentionWindow = window
+                } else {
+                    onApplyAudioRetentionWindow(window)
                 }
             }
         )
@@ -331,6 +296,108 @@ private extension StorageSettingsPage {
                 }
             }
         )
+    }
+}
+
+private extension StorageSettingsPage {
+    var confirmationStates: StorageConfirmationStates {
+        StorageConfirmationStates(
+            hasCaptureLibraryChoice: captureLibraryChoicePromptBinding.wrappedValue
+                && pendingCaptureLibraryChoice != nil,
+            pendingMeetingAudioWindow: pendingAudioRetentionWindow,
+            pendingDictationAudioWindow: pendingDictationAudioKeepWindow,
+            wantsFreeUpSpace: showReclaimableCacheCleanupConfirmation
+        )
+    }
+
+    var activeConfirmationSlot: StorageConfirmationSlot? {
+        StorageConfirmationPolicy.activeSlot(confirmationStates)
+    }
+
+    var activeConfirmationTitle: String {
+        activeConfirmationSlot.map {
+            StorageConfirmationPolicy.title(for: $0, states: confirmationStates)
+        } ?? ""
+    }
+
+    /// Dismissal clears only the prompt that was showing, so a second pending
+    /// prompt (rare) presents next instead of being wiped.
+    var storageConfirmationIsPresented: Binding<Bool> {
+        Binding(
+            get: { activeConfirmationSlot != nil },
+            set: { isPresented in
+                guard !isPresented, let slot = activeConfirmationSlot else { return }
+                switch slot {
+                case .captureLibrary:
+                    captureLibraryChoicePromptBinding.wrappedValue = false
+                case .meetingAudio:
+                    pendingAudioRetentionWindow = nil
+                case .dictationAudio:
+                    pendingDictationAudioKeepWindow = nil
+                case .freeUpSpace:
+                    showReclaimableCacheCleanupConfirmation = false
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    func storageConfirmationActions(for slot: StorageConfirmationSlot) -> some View {
+        switch slot {
+        case .captureLibrary:
+            if let choice = pendingCaptureLibraryChoice {
+                Button(choice.moveButtonTitle) {
+                    onMoveCapturesThenSwitchLibrary(choice)
+                }
+                .keyboardShortcut(.defaultAction)
+                Button("Copy Instead") {
+                    onCopyCapturesThenSwitchLibrary(choice)
+                }
+                Button("Just Switch") {
+                    onSwitchLibraryWithoutCopying(choice)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        case .meetingAudio:
+            if let window = pendingAudioRetentionWindow {
+                Button("Delete Old Audio", role: .destructive) {
+                    onApplyAudioRetentionWindow(window)
+                }
+            }
+            // Return lands on the safe choice, as before.
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        case .dictationAudio:
+            if let window = pendingDictationAudioKeepWindow {
+                Button("Delete Audio", role: .destructive) {
+                    onApplyDictationAudioKeepWindow(window)
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        case .freeUpSpace:
+            Button("Remove", role: .destructive) {
+                onRemoveReclaimableModelCaches()
+            }
+            Button("Cancel", role: .cancel) {}
+                .keyboardShortcut(.defaultAction)
+        }
+    }
+
+    @ViewBuilder
+    func storageConfirmationMessage(for slot: StorageConfirmationSlot) -> some View {
+        switch slot {
+        case .captureLibrary:
+            Text(pendingCaptureLibraryChoice?.promptMessage ?? "")
+        case .meetingAudio:
+            Text(pendingAudioRetentionWindow.map(StorageConfirmationPolicy.meetingAudioMessage(for:)) ?? "")
+        case .dictationAudio:
+            Text(pendingDictationAudioKeepWindow.map(StorageConfirmationPolicy.dictationAudioMessage(for:)) ?? "")
+        case .freeUpSpace:
+            Text(effectiveTranscriptionModelIsWhisper
+                ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
+                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. The Parakeet model you use stays.")
+        }
     }
 }
 

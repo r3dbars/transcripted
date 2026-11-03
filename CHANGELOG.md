@@ -14,6 +14,14 @@ force-installed by Sparkle so existing users recover from a regression.
 
 ## [Unreleased]
 
+### Fixed
+- Settings > Storage: picking a shorter "Delete meeting audio after" or
+  "Keep dictation audio" window asks again before deleting old audio, instead
+  of the choice snapping back with no prompt. The four Storage prompts now
+  share one presenter.
+- Meeting and dictation audio past its window is deleted every few hours while
+  Transcripted stays open, not only at the next launch.
+
 ### Added
 - The Dictations page has new cards: a bar on top with play, time, length,
   words, and app (delivery problems in amber), and the text below in italics,

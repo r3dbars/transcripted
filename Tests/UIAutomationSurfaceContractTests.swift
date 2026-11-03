@@ -317,9 +317,18 @@ func testUIAutomationSurfaceContract() async {
         // Re-stacking them as separate `.alert(item:)` modifiers, or a
         // hand-built failed-meeting NSAlert, is caught by
         // scripts/dev/check-banned-calls.py.
+        // The Storage page stacked four alert modifiers, which killed the
+        // "Delete meeting audio after" and "Keep dictation audio" prompts the
+        // same way. Its prompts share one presenter (StorageConfirmationPolicy).
+        let storageSource = contractSource("Sources/UI/Settings/Pages/StorageSettingsPage.swift")
         assertTrue(
-            contractSource("Sources/UI/Settings/Pages/StorageSettingsPage.swift").contains(".alert(item: $pendingAudioRetentionWindow)"),
-            "audio-retention confirmation should stay on the Storage page that owns the picker"
+            storageSource.contains("presenting: activeConfirmationSlot"),
+            "audio-retention confirmation should stay on the Storage page that owns the picker, through its one presenter"
+        )
+        assertEqual(
+            storageSource.components(separatedBy: ".alert(").count - 1,
+            1,
+            "the Storage page should present every prompt through one alert modifier so none is shadowed"
         )
         // The shared binding must dismiss only the active alert via
         // HomeRootAlertPolicy, never clear both. HomeRootAlertPolicyTests
