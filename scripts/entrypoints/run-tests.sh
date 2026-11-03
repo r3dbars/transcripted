@@ -413,7 +413,6 @@ APP_SOURCES=(
     "Sources/Support/QuitConfirmationPreferences.swift"
     "Sources/Support/AutoCallDetectionPreferences.swift"
     "Sources/Support/AudioStoragePreferences.swift"
-    "Sources/Support/AudioRetentionSweepPolicy.swift"
     "Sources/Support/CaptureLibraryChangeBroadcaster.swift"
     "Sources/Support/CaptureLibrarySize.swift"
     "Sources/Support/CaptureLibraryMigrationPlanner.swift"

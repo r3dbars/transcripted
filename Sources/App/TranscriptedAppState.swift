@@ -38,11 +38,6 @@ class TranscriptedAppState: ObservableObject {
     private var developerPreviewCancellable: AnyCancellable?
     private var existingInstallModelPrefetchTask: Task<Void, Never>?
     private var audioStorageMaintenanceTask: Task<Void, Never>?
-    /// Re-sweeps expired meeting and dictation audio while the app stays open
-    /// (AudioRetentionSweepPolicy). Launch maintenance counts as the first sweep.
-    private var audioRetentionSweepTimer: Timer?
-    private var audioRetentionSweepTask: Task<Void, Never>?
-    private var lastAudioRetentionSweep: Date?
     private var isInitialized = false
     private var isShutDown = false
     // Dictation and meetings should be ready the moment the app opens, so the
@@ -259,10 +254,6 @@ class TranscriptedAppState: ObservableObject {
         existingInstallModelPrefetchTask = nil
         audioStorageMaintenanceTask?.cancel()
         audioStorageMaintenanceTask = nil
-        audioRetentionSweepTimer?.invalidate()
-        audioRetentionSweepTimer = nil
-        audioRetentionSweepTask?.cancel()
-        audioRetentionSweepTask = nil
         sttRouter.cleanup()
         writingController.stop()
         nextSentence.stop()
@@ -509,8 +500,6 @@ class TranscriptedAppState: ObservableObject {
 
     private func startAudioStorageMaintenanceIfNeeded() {
         guard audioStorageMaintenanceTask == nil else { return }
-        lastAudioRetentionSweep = Date()
-        startAudioRetentionSweepTimerIfNeeded()
 
         audioStorageMaintenanceTask = Task.detached(priority: .utility) {
             // Kept dictation audio past its window (Settings → Storage). Launch
@@ -542,52 +531,6 @@ class TranscriptedAppState: ObservableObject {
                         ]
                     )
                 }
-            }
-        }
-    }
-
-    private func startAudioRetentionSweepTimerIfNeeded() {
-        guard audioRetentionSweepTimer == nil, !Self.isLaunchSmokeMode else { return }
-        let timer = Timer(timeInterval: AudioRetentionSweepPolicy.checkInterval, repeats: true) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                self?.sweepExpiredAudioIfDue()
-            }
-        }
-        timer.tolerance = 10 * 60
-        RunLoop.main.add(timer, forMode: .common)
-        audioRetentionSweepTimer = timer
-    }
-
-    /// Deletes only what the Storage settings already say to delete: meeting
-    /// audio and kept dictation audio older than their windows. No
-    /// recompression or playback-mix work; launch maintenance owns that.
-    func sweepExpiredAudioIfDue(now: Date = Date()) {
-        guard !isShutDown, audioRetentionSweepTask == nil else { return }
-        let meeting = AudioStoragePreferences.deleteAudioAfter()
-        let dictation = AudioStoragePreferences.dictationAudioKeepWindow()
-        guard AudioRetentionSweepPolicy.isDue(
-            lastSweep: lastAudioRetentionSweep,
-            now: now,
-            meeting: meeting,
-            dictation: dictation
-        ) else { return }
-        lastAudioRetentionSweep = now
-        let launchMaintenance = audioStorageMaintenanceTask
-
-        audioRetentionSweepTask = Task.detached(priority: .utility) { [weak self] in
-            // Never race launch maintenance's compression on the same folders.
-            await launchMaintenance?.value
-            guard !Task.isCancelled else { return }
-            // prune() reads the live dictation preference itself.
-            let removedDictations = DictationAudioArchive.prune(window: dictation)
-            let removedMeetings = MeetingAudioStorageManager.pruneRetainedAudio(
-                in: MeetingStoragePaths.transcriptsFolder
-            )
-            await MainActor.run { [weak self] in
-                if removedDictations + removedMeetings > 0 {
-                    CaptureLibraryChangeBroadcaster.shared.noteLibraryWideChange()
-                }
-                self?.audioRetentionSweepTask = nil
             }
         }
     }
