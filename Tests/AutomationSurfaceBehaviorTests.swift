@@ -164,10 +164,23 @@ func testAutomationSurfaceBehavior() async {
             guard case let .openPage(page) = item.action else { return nil }
             return (page, item.key, item.title)
         }
+        let numberedSidebarOrder = FocusOrderContract.settingsSidebarOrder.filter {
+            $0 != TranscriptedSettingsPage.files.automationIdentifier
+        }
         assertEqual(
             pageItems.map { $0.0.automationIdentifier },
-            FocusOrderContract.settingsSidebarOrder,
-            "Go should list the primary sidebar pages in sidebar order"
+            numberedSidebarOrder,
+            "Go should list the numbered sidebar pages in sidebar order"
+        )
+        assertEqual(
+            pageItems.map { $0.0 },
+            [.today, .home, .dictations, .writing, .people, .connectAgent],
+            "all six existing Go destinations keep their order"
+        )
+        assertEqual(
+            pageItems.map { String($0.1) },
+            ["1", "2", "3", "4", "5", "6"],
+            "the existing Go destinations keep their numbered keys"
         )
         for (page, key, title) in pageItems {
             assertEqual(page.navigationShortcutKey, String(key), "\(page) should use the same ⌘ key in Go as in its sidebar tooltip")
