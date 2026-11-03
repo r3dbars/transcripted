@@ -120,6 +120,7 @@ enum WritingSetupPresentation {
         static let autocompleteLine = "Suggests the next words. Hit Tab to accept."
         static let continueTitle = "Continue"
         static let needsOne = "Turn on at least one to continue."
+        static let turnOffTitle = ""
     }
 
     enum Step2 {
@@ -231,8 +232,18 @@ enum WritingSetupPresentation {
     }
 
     /// `nil` when step 1 can continue.
-    static func step1Message(saveMyWriting: Bool, autocomplete: Bool) -> String? {
+    static func step1Message(saveMyWriting: Bool, autocomplete: Bool, isEditing: Bool = false) -> String? {
         saveMyWriting || autocomplete ? nil : Step1.needsOne
+    }
+
+    /// What step 1's primary button does.
+    enum Step1Primary: Equatable {
+        case continueSetup
+        case turnOffWriting
+    }
+
+    static func step1Primary(saveMyWriting: Bool, autocomplete: Bool, isEditing: Bool) -> Step1Primary {
+        .continueSetup
     }
 
     /// `nil` when step 2 can continue.
@@ -257,6 +268,11 @@ enum WritingSetupPresentation {
 
         var canContinueStep1: Bool {
             step1Message(saveMyWriting: saveMyWriting, autocomplete: autocomplete) == nil
+        }
+
+        /// Whether step 1's primary button is enabled.
+        func canFinishStep1(isEditing: Bool) -> Bool {
+            canContinueStep1
         }
 
         var canContinueStep2: Bool {
