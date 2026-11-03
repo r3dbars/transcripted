@@ -2988,21 +2988,20 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
 
     @MainActor
     func testHandleNamingCompleteReconcilesRenameBeforeMetadataPublication() async throws {
-        var blockingStore: BlockingSpeakerStore?
+        let originalTranscriptURL = tempDirectory.appendingPathComponent("transcripts/Call_2026-04-10_15-01-24.md")
+        let renamedTranscriptURL = tempDirectory.appendingPathComponent("transcripts/2026-04-10 Published Planning Sync.md")
+        let relocation = FinalizedTranscriptRelocation(from: originalTranscriptURL, to: renamedTranscriptURL)
         let harness = try makeHarness { speakerDB in
-            let store = BlockingSpeakerStore(base: speakerDB, blockPoint: .displayNameMutation)
-            blockingStore = store
-            return store
+            BlockingSpeakerStore(base: speakerDB, blockPoint: .displayNameMutation, atBlockPoint: {
+                relocation.perform()
+            })
         }
-        let store = try XCTUnwrap(blockingStore)
         let transcriptId = UUID()
         let savedTaskId = UUID()
         let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
             embedding: [Float](repeating: 0.3, count: 256),
             existingId: nil
         ).id
-        let originalTranscriptURL = harness.paths.transcripts.appendingPathComponent("Call_2026-04-10_15-01-24.md")
-        let renamedTranscriptURL = harness.paths.transcripts.appendingPathComponent("2026-04-10 Published Planning Sync.md")
         let clipURL = harness.paths.speakerClips.appendingPathComponent("speaker-publication-rename.wav")
         let micURL = harness.paths.audioCaptures.appendingPathComponent("mic-publication-rename.wav")
         let systemURL = harness.paths.audioCaptures.appendingPathComponent("system-publication-rename.wav")
@@ -3081,29 +3080,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
 
         try await waitUntil {
-            store.hasReachedBlockPoint
-        }
-        guard store.hasReachedBlockPoint else {
-            store.resume()
-            XCTFail("Timed out waiting for post-finalization speaker mutation")
-            return
-        }
-        do {
-            try TranscriptSaver.serializeTranscriptFileUpdate {
-                let finalizedTranscript = try String(contentsOf: originalTranscriptURL, encoding: .utf8)
-                XCTAssertTrue(finalizedTranscript.contains("Sadie Greene"), finalizedTranscript)
-                try FileManager.default.moveItem(at: originalTranscriptURL, to: renamedTranscriptURL)
-            }
-        } catch {
-            store.resume()
-            throw error
-        }
-        store.resume()
-
-        try await waitUntil {
             harness.manager.speakerNamingRequest == nil
         }
 
+        try relocation.requireSuccess()
         XCTAssertEqual(harness.manager.lastSavedTranscriptURL, renamedTranscriptURL)
         XCTAssertEqual(harness.manager.lastSavedTranscriptId, transcriptId)
         XCTAssertEqual(harness.manager.lastSavedTranscriptTaskId, savedTaskId)
@@ -3732,23 +3712,20 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         sourceFailedTranscriptionId: UUID? = nil,
         blockQueuePersistence: Bool = false
     ) async throws -> MetadataPublicationFailureScenario {
-        var blockingStore: BlockingSpeakerStore?
-        let harness = try makeHarness { speakerDB in
-            let store = BlockingSpeakerStore(base: speakerDB, blockPoint: .displayNameMutation)
-            blockingStore = store
-            return store
-        }
-        let store = try XCTUnwrap(blockingStore)
         let transcriptId = UUID()
         let fileSuffix = String(transcriptId.uuidString.prefix(8))
+        let transcriptURL = tempDirectory.appendingPathComponent("transcripts/Call_2026-04-10_15-01-25_\(fileSuffix).md")
+        let unresolvedTranscriptURL = tempDirectory.appendingPathComponent("Unresolved finalized transcript \(fileSuffix).md")
+        let relocation = FinalizedTranscriptRelocation(from: transcriptURL, to: unresolvedTranscriptURL)
+        let harness = try makeHarness { speakerDB in
+            BlockingSpeakerStore(base: speakerDB, blockPoint: .displayNameMutation, atBlockPoint: {
+                relocation.perform()
+            })
+        }
         let persistentSpeakerId = harness.speakerDB.addOrUpdateSpeaker(
             embedding: [Float](repeating: 0.3, count: 256),
             existingId: nil
         ).id
-        let transcriptURL = harness.paths.transcripts
-            .appendingPathComponent("Call_2026-04-10_15-01-25_\(fileSuffix).md")
-        let unresolvedTranscriptURL = tempDirectory
-            .appendingPathComponent("Unresolved finalized transcript \(fileSuffix).md")
         let clipURL = harness.paths.speakerClips
             .appendingPathComponent("speaker-publication-missing-\(fileSuffix).wav")
         let micURL = harness.paths.audioCaptures
@@ -3843,27 +3820,10 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
         )
 
         try await waitUntil {
-            store.hasReachedBlockPoint
-        }
-        guard store.hasReachedBlockPoint else {
-            store.resume()
-            throw MetadataPublicationFailureScenarioError.blockPointTimeout
-        }
-        do {
-            try TranscriptSaver.serializeTranscriptFileUpdate {
-                let finalizedTranscript = try String(contentsOf: transcriptURL, encoding: .utf8)
-                XCTAssertTrue(finalizedTranscript.contains("Sadie Greene"), finalizedTranscript)
-                try FileManager.default.moveItem(at: transcriptURL, to: unresolvedTranscriptURL)
-            }
-        } catch {
-            store.resume()
-            throw error
-        }
-        store.resume()
-
-        try await waitUntil {
             harness.manager.speakerNamingRequest == nil
         }
+
+        try relocation.requireSuccess()
 
         return MetadataPublicationFailureScenario(
             harness: harness,
@@ -4124,8 +4084,42 @@ private struct MetadataPublicationFailureScenario {
     let systemURL: URL
 }
 
-private enum MetadataPublicationFailureScenarioError: Error {
-    case blockPointTimeout
+/// Relocate after names are written, before metadata is published. The mutation
+/// callback already owns the transcript serializer: do the move there instead
+/// of blocking it while the main test tries to acquire that same serializer.
+@available(macOS 14.0, *)
+private final class FinalizedTranscriptRelocation: @unchecked Sendable {
+    private enum Failure: Error { case didNotRun, transcriptNotFinalized }
+    private let source: URL
+    private let destination: URL
+    private let lock = NSLock()
+    private var result: Result<Void, Error>?
+
+    init(from source: URL, to destination: URL) {
+        self.source = source
+        self.destination = destination
+    }
+
+    func perform() {
+        let result = Result {
+            try TranscriptSaver.serializeTranscriptFileUpdate {
+                let transcript = try String(contentsOf: source, encoding: .utf8)
+                guard transcript.contains("Sadie Greene") else { throw Failure.transcriptNotFinalized }
+                try FileManager.default.moveItem(at: source, to: destination)
+            }
+        }
+        lock.lock()
+        self.result = result
+        lock.unlock()
+    }
+
+    func requireSuccess() throws {
+        lock.lock()
+        let result = result
+        lock.unlock()
+        guard let result else { throw Failure.didNotRun }
+        try result.get()
+    }
 }
 
 @available(macOS 14.0, *)
@@ -4137,6 +4131,7 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
 
     private let base: any SpeakerStore
     private let blockPoint: BlockPoint
+    private let atBlockPoint: (() -> Void)?
     private let mayContinue = DispatchSemaphore(value: 0)
     private let stateLock = NSLock()
     private var didReachBlockPoint = false
@@ -4147,9 +4142,10 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         return didReachBlockPoint
     }
 
-    init(base: any SpeakerStore, blockPoint: BlockPoint) {
+    init(base: any SpeakerStore, blockPoint: BlockPoint, atBlockPoint: (() -> Void)? = nil) {
         self.base = base
         self.blockPoint = blockPoint
+        self.atBlockPoint = atBlockPoint
     }
 
     func resume() {
@@ -4243,6 +4239,10 @@ private final class BlockingSpeakerStore: SpeakerStore, @unchecked Sendable {
         stateLock.unlock()
 
         if shouldBlock {
+            if let atBlockPoint {
+                atBlockPoint()
+                return
+            }
             // Deadlock escape only; the test always calls resume().
             _ = mayContinue.wait(timeout: .now() + 60)
         }
