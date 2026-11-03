@@ -6,20 +6,25 @@ import SwiftUI
 
 // MARK: - Background tap catcher
 
-/// Makes a container's full bounds hit-testable so a tap on otherwise-empty
-/// space (the gaps around rows, day-group padding, the space below the last
-/// row) can be caught by the shell — typically to collapse an open
-/// `QuietMeetingExpansion`. Apply to the list container, not individual
-/// rows: SwiftUI resolves gestures on the innermost view that recognizes
-/// them first, so a row's own `onTapGesture` (open/toggle) or a button
-/// inside the expansion still wins over this background catcher.
+/// Catches a tap on otherwise-empty space (the gaps around rows, day-group
+/// padding, the space below the last row) so the shell can collapse an open
+/// card, typically a `QuietMeetingExpansion`. Apply to the list container,
+/// not individual rows.
+///
+/// The tap target sits behind the content, not on it. A tap gesture on the
+/// container itself also competes for clicks on AppKit views inside it, such
+/// as the Speakers "Who spoke?" footer buttons (borderless NSButtons in an
+/// NSViewRepresentable), which a user saw answer only on their 1px edge.
+/// Behind the content, it sees only clicks nothing in front of it took.
 private struct HomeBackgroundTapCatcherModifier: ViewModifier {
     let onTap: () -> Void
 
     func body(content: Content) -> some View {
-        content
-            .contentShape(Rectangle())
-            .onTapGesture(perform: onTap)
+        content.background {
+            Color.clear
+                .contentShape(Rectangle())
+                .onTapGesture(perform: onTap)
+        }
     }
 }
 
