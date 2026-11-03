@@ -554,6 +554,7 @@ final class MeetingSessionController: ObservableObject {
             speakerClipsDirectory: storagePaths.speakerClips,
             cleanupDirectories: [storagePaths.audioCaptures, storagePaths.speakerClips],
             retainedAudioDirectoryProvider: { MeetingStoragePaths.audioArchiveFolder },
+            transcriptDirectoryProvider: { MeetingStoragePaths.speakerReviewTranscriptsFolder },
             // Obsidian metadata was retired with the Draft-era toggle
             // (docs/capture-format.md), but the bundle id never changed, so
             // a Draft-era `enableObsidianFormat = true` was still adding
