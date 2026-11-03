@@ -56,6 +56,73 @@ enum MeetingMicGraphStartSequence {
         return (settled, segment)
     }
 
+    /// Meeting start's version of `run`. A failed format check, tap install
+    /// or engine start (an `.checkFormat`/`.installTap` failure) gets one
+    /// `rebuild`: a fresh graph that runs settle and the locked steps again
+    /// into the segment already made. The retry is skipped when
+    /// `shouldRetry` rejects the error (a stopped start) or the settled
+    /// retry graph no longer fits that segment; the first failure is thrown.
+    /// Device recovery has its own retry and keeps using `run`.
+    static func runRetryingOnceOnFreshGraph<Graph, Segment>(
+        _ graph: Graph,
+        settle: (Graph) throws -> Graph,
+        createSegment: (Graph) throws -> Segment,
+        checkFormat: (Graph) throws -> Void,
+        installTap: (Graph, Segment) throws -> Void,
+        withinGraphLock: (Graph, () throws -> Void) throws -> Void,
+        shouldRetry: (Error) -> Bool,
+        rebuild: (_ failedGraph: Graph) throws -> Graph,
+        retryGraphFitsSegment: (_ segmentGraph: Graph, _ retryGraph: Graph) -> Bool
+    ) throws -> (graph: Graph, segment: Segment) {
+        var settledGraph: Graph?
+        var madeSegment: Segment?
+        do {
+            return try run(
+                graph,
+                settle: { graph in
+                    let settled = try settle(graph)
+                    settledGraph = settled
+                    return settled
+                },
+                createSegment: { graph in
+                    let segment = try createSegment(graph)
+                    madeSegment = segment
+                    return segment
+                },
+                checkFormat: checkFormat,
+                installTap: installTap,
+                withinGraphLock: withinGraphLock
+            )
+        } catch let failure as Failure {
+            guard failure.step == .checkFormat || failure.step == .installTap,
+                  shouldRetry(failure.underlying),
+                  let failedGraph = settledGraph,
+                  let segment = madeSegment else {
+                throw failure
+            }
+            let retryGraph: Graph
+            do {
+                retryGraph = try settle(try rebuild(failedGraph))
+            } catch {
+                throw failure
+            }
+            guard retryGraphFitsSegment(failedGraph, retryGraph) else {
+                throw failure
+            }
+            try withoutActuallyEscaping(checkFormat) { checkFormat in
+                try withoutActuallyEscaping(installTap) { installTap in
+                    try tagging(.installTap) {
+                        try withinGraphLock(retryGraph) {
+                            try tagging(.checkFormat) { try checkFormat(retryGraph) }
+                            try tagging(.installTap) { try installTap(retryGraph, segment) }
+                        }
+                    }
+                }
+            }
+            return (retryGraph, segment)
+        }
+    }
+
     private static func tagging<T>(_ step: Step, _ body: () throws -> T) throws -> T {
         do {
             return try body()
