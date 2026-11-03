@@ -322,6 +322,7 @@ private struct SpeakerWhoSpokeCardHost: NSViewRepresentable {
 final class SpeakerWhoSpokeContainer: NSView {
     private var review: NotchIslandSpeakerReviewView?
     private var invitees: [String]?
+    private var measurement = SpeakerWhoSpokeCardMeasurement()
     /// The review's height changed; reported after the current layout pass.
     var onHeight: ((CGFloat) -> Void)?
 
@@ -349,16 +350,20 @@ final class SpeakerWhoSpokeContainer: NSView {
             next.leadingAnchor.constraint(equalTo: leadingAnchor),
         ])
         next.onLayoutChange = { [weak self] in self?.reportHeight() }
+        measurement = SpeakerWhoSpokeCardMeasurement()
         reportHeight()
     }
 
     private func reportHeight() {
-        invalidateIntrinsicContentSize()
+        guard measurement.layoutChanged() else { return }
         // Out of the current layout pass, so SwiftUI isn't changed mid-update.
         DispatchQueue.main.async { [weak self] in
             guard let self, let review = self.review else { return }
             review.layoutSubtreeIfNeeded()
-            self.onHeight?(review.fittingHeight)
+            if let height = self.measurement.measured(review.fittingHeight) {
+                self.invalidateIntrinsicContentSize()
+                self.onHeight?(height)
+            }
         }
     }
 
@@ -367,11 +372,15 @@ final class SpeakerWhoSpokeContainer: NSView {
         invitees = names
         // No 1:1 prefill here: a saved meeting's other voices may be named.
         review.setInvitees(names, remoteVoicesInMeeting: nil)
+        // Invitee names can add a line under a voice, and the review only
+        // reports a change when it prefills one.
+        reportHeight()
     }
 
     override var intrinsicContentSize: NSSize {
         guard let review else { return NSSize(width: SpeakerWhoSpokeLayout.contentWidth, height: 10) }
-        review.layoutSubtreeIfNeeded()
-        return NSSize(width: review.width, height: review.fittingHeight)
+        // SwiftUI asks on every layout pass, scrolling included: answer from
+        // the last measurement instead of laying every voice row out again.
+        return NSSize(width: review.width, height: measurement.intrinsicHeight ?? 10)
     }
 }
