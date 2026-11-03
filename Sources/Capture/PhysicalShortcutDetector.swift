@@ -41,6 +41,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
 
     private let stateLock = NSRecursiveLock()
     private var eventTap: CFMachPort?
+    private var tapRecovery: PhysicalShortcutTapRecovery?
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
     private var tapThread: Thread?
@@ -125,6 +126,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         }
 
         eventTap = tap
+        tapRecovery = PhysicalShortcutTapRecovery()
         runLoopSource = source
         startTapThread(tap: tap, source: source)
         return nil
@@ -135,6 +137,8 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         let source = runLoopSource
         let eventTap = eventTap
         let tapRunLoop = tapRunLoop
+        tapRecovery?.invalidate()
+        tapRecovery = nil
         runLoopSource = nil
         self.eventTap = nil
         self.tapRunLoop = nil
@@ -205,21 +209,18 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
 
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reconcileActivePushToTalkAfterTapDisabled()
-            var reenabled = false
-            if let eventTap {
-                CGEvent.tapEnable(tap: eventTap, enable: true)
-                reenabled = CGEvent.tapIsEnabled(tap: eventTap)
-            }
-            if let reason = PhysicalShortcutTapPolicy.tapDisabledReason(for: type) {
-                emitLog(
-                    event: PhysicalShortcutDiagnosticEvent.tapDisabled,
-                    message: "Physical shortcut tap was disabled",
-                    context: PhysicalShortcutTapPolicy.tapDisabledContext(
-                        reason: reason,
-                        reenabled: reenabled
-                    ),
-                    rateLimited: false
-                )
+            if let tap = eventTap, let recovery = tapRecovery,
+               let reason = PhysicalShortcutTapPolicy.tapDisabledReason(for: type) {
+                // APPLE-MACOS-6H: WindowServer can stall this call. Doing it
+                // in the callback under stateLock also stranded wake's
+                // remove() on main. Each install owns its recovery lifetime;
+                // queued work for a removed tap cannot re-enable a new one.
+                recovery.request(enable: {
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                    return CGEvent.tapIsEnabled(tap: tap)
+                }, completed: { [weak self] reenabled in
+                    self?.reportTapRecovery(recovery, reason: reason, reenabled: reenabled)
+                })
             }
             return Unmanaged.passUnretained(event)
         }
@@ -457,6 +458,18 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
             message: "Configured dictation F-key arrived as a media key",
             context: PhysicalShortcutMediaKeyPolicy.mediaKeyContext(nxKeyType: parsed.nxKeyType),
             rateLimited: true
+        )
+    }
+
+    private func reportTapRecovery(_ recovery: PhysicalShortcutTapRecovery, reason: String, reenabled: Bool) {
+        stateLock.lock()
+        defer { stateLock.unlock() }
+        guard tapRecovery === recovery else { return }
+        emitLog(
+            event: PhysicalShortcutDiagnosticEvent.tapDisabled,
+            message: "Physical shortcut tap was disabled",
+            context: PhysicalShortcutTapPolicy.tapDisabledContext(reason: reason, reenabled: reenabled),
+            rateLimited: false
         )
     }
 
