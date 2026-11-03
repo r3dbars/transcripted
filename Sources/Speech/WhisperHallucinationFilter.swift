@@ -36,6 +36,24 @@ enum WhisperHallucinationFilter {
 
     static let decoderWindowSamples = 30 * 16_000
 
+    /// Reconstruct only results that actually lose a window. Full decoder text
+    /// can join tokens differently from separately rendered window text (for
+    /// example Japanese without spaces), so a no-op must keep it verbatim.
+    static func filterResults(
+        _ results: [(text: String, windows: [DecodedWindow])],
+        samples: [Float]
+    ) -> FilteredWindows {
+        var output = FilteredWindows()
+        for result in results {
+            let filtered = filterWindows(result.windows, samples: samples)
+            output.texts.append(contentsOf: filtered.droppedWindows == 0 ? [result.text] : filtered.texts)
+            output.droppedWindows += filtered.droppedWindows
+            output.voicedWindows += filtered.voicedWindows
+            output.unvoicedWindows += filtered.unvoicedWindows
+        }
+        return output
+    }
+
     /// Scope audio evidence to the window that produced the words, with one
     /// pitch run's context at its edges to preserve words cut by a boundary.
     /// Remote voice in another window never exempts this window's silence.

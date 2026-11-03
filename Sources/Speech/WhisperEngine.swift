@@ -277,15 +277,8 @@ final class WhisperEngine: ObservableObject {
         _ results: [(text: String, windows: [WhisperHallucinationFilter.DecodedWindow])],
         samples: [Float]
     ) async -> WhisperHallucinationFilter.FilteredWindows {
-        let windows = results.flatMap { result -> [WhisperHallucinationFilter.DecodedWindow] in
-            guard !result.windows.isEmpty else {
-                // No timing is not proof of silence. Preserve fallback text.
-                return [.init(text: result.text, seek: -1, start: .nan, end: .nan)]
-            }
-            return result.windows
-        }
         let kept = await Task.detached(priority: .userInitiated) {
-            WhisperHallucinationFilter.filterWindows(windows, samples: samples)
+            WhisperHallucinationFilter.filterResults(results, samples: samples)
         }.value
         if kept.droppedWindows > 0 {
             AppLogger.transcription.info("WHISPER | dropped \(kept.droppedWindows) silence line(s) from unvoiced windows")
