@@ -62,7 +62,7 @@ enum BrowserWindowTitleReader {
                     titles.append(contentsOf: windowTitles(
                         forPID: pid,
                         deadline: deadline,
-                        userFocused: isUserFocused(appPID: pid, frontmostPID: frontmostPID)
+                        frontmostPID: frontmostPID
                     ))
                 }
                 continuation.resume(returning: titles)
@@ -88,7 +88,7 @@ enum BrowserWindowTitleReader {
         return appPID == frontmostPID
     }
 
-    private static func windowTitles(forPID pid: pid_t, deadline: Date, userFocused: Bool) -> [BrowserWindowTitle] {
+    private static func windowTitles(forPID pid: pid_t, deadline: Date, frontmostPID: pid_t?) -> [BrowserWindowTitle] {
         let appElement = AXUIElementCreateApplication(pid)
 
         var focusedWindow: AXUIElement?
@@ -107,7 +107,13 @@ enum BrowserWindowTitleReader {
             // No window list (or no time left for it). The focused window
             // alone is still useful.
             guard let focusedWindow, let title = title(of: focusedWindow, deadline: deadline) else { return [] }
-            return [BrowserWindowTitle(title: title, isFocused: userFocused)]
+            return [BrowserWindowTitle(
+                title: title,
+                isFocused: isUserFocused(appPID: pid, frontmostPID: frontmostPID),
+                isSystemFront: BrowserWindowTitle.isSystemFront(
+                    appPID: pid, frontmostPID: frontmostPID, windowIsAppFocused: true
+                )
+            )]
         }
 
         var titles: [BrowserWindowTitle] = []
@@ -115,7 +121,15 @@ enum BrowserWindowTitleReader {
             guard Date() < deadline else { break }
             guard let title = title(of: window, deadline: deadline) else { continue }
             let isKeyWindow = focusedWindow.map { CFEqual($0, window) } ?? false
-            titles.append(BrowserWindowTitle(title: title, isFocused: userFocused && isKeyWindow))
+            titles.append(BrowserWindowTitle(
+                title: title,
+                isFocused: isUserFocused(appPID: pid, frontmostPID: frontmostPID) && isKeyWindow,
+                isSystemFront: BrowserWindowTitle.isSystemFront(
+                    appPID: pid,
+                    frontmostPID: frontmostPID,
+                    windowIsAppFocused: isKeyWindow
+                )
+            ))
         }
         return titles
     }

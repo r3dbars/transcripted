@@ -27,6 +27,7 @@ auto_send
 auto_send_block_reason
 auto_send_expected
 auto_send_key
+auto_started
 autocomplete_enabled
 automatic_downloads_enabled
 available

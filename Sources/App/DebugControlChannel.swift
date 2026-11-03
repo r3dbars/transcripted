@@ -276,11 +276,12 @@ final class DebugControlChannel {
             guard let plan = LabControlMeetingPolicy.stopPlan(meetingSession.state) else {
                 return .failure("meeting_not_recording")
             }
+            // Automation stop: must not count as a user decline of auto-start.
             switch plan {
             case .joinPendingStartThenStop:
-                await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton)
+                await meetingSession.stopRecordingJoiningPendingStart(reason: .debugControl)
             case .stop:
-                await meetingSession.stopRecording(reason: .menuBarStopButton)
+                await meetingSession.stopRecording(reason: .debugControl)
             }
             return .success()
 

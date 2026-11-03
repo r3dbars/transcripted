@@ -344,6 +344,16 @@ enum TranscriptedPermissionAccess {
         return status
     }
 
+    /// Live TCC preflight without writing the saved grant. Auto-record peeks
+    /// at meeting-prompt time so a denied or reset answer cannot rewrite
+    /// Settings while the island is deciding whether to start.
+    static func peekSystemAudioRecordingStatusFromSystem(
+        tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC
+    ) -> SystemAudioCaptureTCCStatus {
+        if isLaunchSmokeMode { return .unavailable }
+        return tcc.preflight()
+    }
+
     /// Shows the macOS "record your system audio" box when the decision is
     /// still open, and records the answer. Returns nil only when macOS's
     /// request API is unavailable.

@@ -192,6 +192,7 @@ struct GeneralToggleRow: View {
     var info: GeneralInfo? = nil
     var automationIdentifier: String? = nil
     var showsDivider = true
+    var isEnabled = true
 
     var body: some View {
         HStack(spacing: 10) {
@@ -205,6 +206,7 @@ struct GeneralToggleRow: View {
                 .controlSize(.regular)
                 .tint(.accentColor)
                 .help(help)
+                .disabled(!isEnabled)
                 .accessibilityLabel(Text(title))
                 .accessibilityValue(Text(isOn ? "On" : "Off"))
                 .accessibilityHint(Text(help))

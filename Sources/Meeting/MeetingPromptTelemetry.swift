@@ -13,6 +13,7 @@ enum MeetingPromptTelemetry {
         case record
         case dismiss
         case remindLater = "remind_later"
+        case autoStarted = "auto_started"
     }
 
     enum OutcomeKind: String {
@@ -216,6 +217,9 @@ extension MeetingPromptTelemetry {
         case shown(MeetingPromptDetector.Candidate, signals: MeetingPromptSignalSnapshot?)
         /// The user picked Record and the start was accepted.
         case record(MeetingPromptDetector.Candidate, elapsedSeconds: TimeInterval?, signals: MeetingPromptSignalSnapshot?)
+        /// Opt-in auto-start for a proven detected call. Counted separately
+        /// from a Record tap so the funnel can split the two.
+        case autoStart(MeetingPromptDetector.Candidate, signals: MeetingPromptSignalSnapshot?)
         /// The user picked Not now. `backoffKind`, `signals` and
         /// `dismissStreak` are read after the detector applies the dismissal.
         case dismiss(
@@ -265,6 +269,22 @@ extension MeetingPromptTelemetry {
                 ),
                 .analytics(
                     name: "meeting_prompt_record_selected",
+                    properties: properties(for: candidate, readiness: readiness, signals: signals)
+                ),
+            ]
+        case let .autoStart(candidate, signals):
+            return [
+                .analytics(
+                    name: "meeting_prompt_choice_made",
+                    properties: choiceProperties(
+                        for: candidate,
+                        readiness: readiness,
+                        choiceKind: .autoStarted,
+                        elapsedSeconds: nil
+                    )
+                ),
+                .analytics(
+                    name: "meeting_prompt_auto_started",
                     properties: properties(for: candidate, readiness: readiness, signals: signals)
                 ),
             ]
