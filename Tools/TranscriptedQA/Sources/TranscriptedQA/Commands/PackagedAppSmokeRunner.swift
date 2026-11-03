@@ -307,7 +307,7 @@ final class PackagedAppSmokeRunner {
 
     private func validateSparkleConfig(sourceInfo: [String: Any], builtInfo: [String: Any]) -> [PackagedAppSmokeCheck] {
         var checks: [PackagedAppSmokeCheck] = []
-        let keys = ["SUFeedURL", "SUPublicEDKey", "SUEnableAutomaticChecks", "SUAllowsAutomaticUpdates", "SUScheduledCheckInterval"]
+        let keys = ["SUFeedURL", "SUPublicEDKey", "SUEnableAutomaticChecks", "SUAllowsAutomaticUpdates", "SUScheduledCheckInterval", "SUVerifyUpdateBeforeExtraction"]
         let drift = keys.compactMap { key -> String? in
             plistValuesEqual(sourceInfo[key], builtInfo[key]) ? nil : "\(key) drifted"
         }
@@ -318,8 +318,8 @@ final class PackagedAppSmokeRunner {
         }
 
         let feedURL = stringValue(builtInfo["SUFeedURL"]) ?? ""
-        if feedURL == "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml" {
-            checks.append(.pass("sparkle-feed-url", target: feedURL, detail: "Updater points at the committed appcast feed."))
+        if feedURL == "https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml" {
+            checks.append(.pass("sparkle-feed-url", target: feedURL, detail: "Updater points at the appcast.xml asset of the latest GitHub release."))
         } else {
             checks.append(.fail("sparkle-feed-url", target: feedURL.isEmpty ? "missing" : feedURL, detail: "Expected the canonical Transcripted appcast URL."))
         }

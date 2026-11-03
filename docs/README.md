@@ -26,7 +26,7 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 
 - `docs/release-packaging.md` — building, signing, notarizing, and publishing a release
 - `docs/sparkle-updates.md` — the Sparkle update contract
-- `docs/appcast.xml` — the live Sparkle feed
+- `docs/appcast.xml` — the legacy Sparkle feed for builds that predate the release-asset feed (frozen after the first release on it; the live feed is the latest release's `appcast.xml`)
 - `docs/release-guardrails.md` — what may ship without an explicit publish decision
 - `docs/release-notes-template.md` — template for release notes
 

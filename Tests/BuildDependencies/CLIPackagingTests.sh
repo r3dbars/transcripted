@@ -80,11 +80,13 @@ from pathlib import Path
 import sys
 root = Path(sys.argv[1])
 for entrypoint, signing_call in [("build.sh", '    sign_embedded_code "$SIGN_HASH"'),
-                                 ("build-beta.sh", '    sign_embedded_payloads "$SIGNING_IDENTITY"')]:
+                                 ("build-beta.sh", 'sign_app_bundle "$SIGNING_IDENTITY"')]:
     source = (root / "scripts/entrypoints" / entrypoint).read_text()
     invocation = 'bundle_transcripted_cli "$REPO_ROOT" "$APP_BUNDLE"'
     assert source.count(invocation) == 1, entrypoint
     assert source.index(invocation) < source.index(signing_call), entrypoint
-    assert '"$APP_BUNDLE"/Contents/Helpers/*' in source, entrypoint
+    # build-beta.sh signs through lib/release-package.sh, which holds the helper loop.
+    shared = (root / "scripts/entrypoints/lib/release-package.sh").read_text()
+    assert '"$APP_BUNDLE"/Contents/Helpers/*' in source + shared, entrypoint
 print("CLI packaging contracts passed")
 PY

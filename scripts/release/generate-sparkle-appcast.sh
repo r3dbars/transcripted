@@ -9,7 +9,14 @@ fi
 
 UPDATES_DIR="$1"
 SPARKLE_APPCAST_TOOL="${SPARKLE_APPCAST_TOOL:-deps-tools/sparkle/bin/generate_appcast}"
-REPO_APPCAST_PATH="${REPO_APPCAST_PATH:-docs/appcast.xml}"
+# The working copy of the feed this release is merged into. There is no default
+# on purpose: docs/appcast.xml is the frozen legacy feed (see
+# docs/sparkle-updates.md), so the Release Candidate workflow copies the latest
+# published appcast.xml (or, for the first release on the new feed, the legacy
+# file) into a scratch folder and points this at the copy.
+REPO_APPCAST_PATH="${REPO_APPCAST_PATH:-}"
+# The URL installed apps fetch. Written into the feed's atom:link rel="self".
+APPCAST_FEED_URL="${APPCAST_FEED_URL:-https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml}"
 INFO_PLIST_PATH="${INFO_PLIST_PATH:-Info.plist}"
 REPO_SLUG="${REPO_SLUG:-r3dbars/transcripted}"
 # Sparkle builds a small delta update from each older release DMG that sits in
@@ -28,8 +35,22 @@ if [ ! -d "$UPDATES_DIR" ]; then
     exit 1
 fi
 
+if [ -z "$REPO_APPCAST_PATH" ]; then
+    echo "REPO_APPCAST_PATH is not set."
+    echo "Point it at a scratch copy of the feed to merge into (the latest published"
+    echo "appcast.xml, or a copy of the legacy docs/appcast.xml for the first release on"
+    echo "the new feed). Never merge into docs/appcast.xml itself: it is frozen."
+    exit 1
+fi
+
 if [ ! -f "$REPO_APPCAST_PATH" ]; then
     echo "Repo appcast not found: $REPO_APPCAST_PATH"
+    exit 1
+fi
+
+if [ -f "config/release/legacy-appcast-freeze.json" ] \
+    && [ "$(cd "$(dirname "$REPO_APPCAST_PATH")" && pwd -P)/$(basename "$REPO_APPCAST_PATH")" = "$(pwd -P)/docs/appcast.xml" ]; then
+    echo "docs/appcast.xml is the frozen legacy feed; merge into a scratch copy instead."
     exit 1
 fi
 
@@ -61,7 +82,7 @@ fi
 
 DELTA_MANIFEST="$UPDATES_DIR/sparkle-deltas.txt"
 
-python3 - "$GENERATED_APPCAST" "$REPO_APPCAST_PATH" "$INFO_PLIST_PATH" "$REPO_SLUG" "$UPDATES_DIR" "$DELTA_MANIFEST" <<'PY'
+python3 - "$GENERATED_APPCAST" "$REPO_APPCAST_PATH" "$INFO_PLIST_PATH" "$REPO_SLUG" "$UPDATES_DIR" "$DELTA_MANIFEST" "$APPCAST_FEED_URL" <<'PY'
 import os
 import plistlib
 import re
@@ -69,7 +90,7 @@ import sys
 import urllib.parse
 import xml.etree.ElementTree as ET
 
-generated_path, repo_path, info_plist_path, repo_slug, updates_dir, delta_manifest_path = sys.argv[1:7]
+generated_path, repo_path, info_plist_path, repo_slug, updates_dir, delta_manifest_path, feed_url = sys.argv[1:8]
 sparkle_ns = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 atom_ns = "http://www.w3.org/2005/Atom"
 namespaces = {"sparkle": sparkle_ns, "atom": atom_ns}
@@ -214,6 +235,12 @@ repo_channel = repo_root.find("channel")
 if repo_channel is None:
     raise SystemExit("repo appcast is missing a channel")
 
+# The merged feed is served from the new URL, so its self link says so. (The
+# legacy docs/appcast.xml keeps its own self link; it is never rewritten here.)
+for atom_link in repo_channel.findall("atom:link", namespaces=namespaces):
+    if atom_link.attrib.get("rel") == "self":
+        atom_link.attrib["href"] = feed_url
+
 existing_items = repo_channel.findall("item")
 for existing in existing_items:
     if item_version(existing) == version:
@@ -238,5 +265,5 @@ PY
 
 echo ""
 echo "Appcast generated inside: $UPDATES_DIR"
-echo "Updated: $REPO_APPCAST_PATH"
+echo "Updated: $REPO_APPCAST_PATH (unsigned; run scripts/release/sign-appcast.sh before publishing it)"
 echo "Delta files to upload are listed in: $DELTA_MANIFEST"

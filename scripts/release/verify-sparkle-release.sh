@@ -10,16 +10,17 @@ fi
 
 VERSION="$1"
 TAG="v${VERSION}"
-APPCAST_PATH="docs/appcast.xml"
+# The feed installed apps read: the appcast.xml asset of the latest release.
+# The host answers that URL with a 302 to the asset store; curl -L follows it
+# the way Sparkle's URLSession does. VERIFY_APPCAST_FILE checks a local copy
+# instead (for example the workflow artifact, before the release is published).
+FEED_URL="https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml"
+APPCAST_PATH="${VERIFY_APPCAST_FILE:-}"
+FETCHED_FEED=""
 DMG_NAME="Transcripted-${VERSION}.dmg"
 EXPECTED_URL="https://github.com/r3dbars/transcripted/releases/download/${TAG}/${DMG_NAME}"
 EXPECTED_MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist)"
 EXPECTED_HARDWARE_REQUIREMENTS="arm64"
-
-if [ ! -f "$APPCAST_PATH" ]; then
-    echo "Missing appcast: $APPCAST_PATH"
-    exit 1
-fi
 
 if ! command -v gh >/dev/null 2>&1; then
     echo "Missing gh CLI."
@@ -31,6 +32,16 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
+if [ -z "$APPCAST_PATH" ]; then
+    FETCHED_FEED="$(mktemp "${TMPDIR:-/tmp}/transcripted-appcast.XXXXXX")"
+    APPCAST_PATH="$FETCHED_FEED"
+    echo "Fetching the live feed..."
+    curl -fsSL --retry 3 "$FEED_URL" -o "$APPCAST_PATH"
+elif [ ! -f "$APPCAST_PATH" ]; then
+    echo "Missing appcast: $APPCAST_PATH"
+    exit 1
+fi
+
 echo "Checking GitHub release ${TAG}..."
 gh release view "$TAG" --repo r3dbars/transcripted >/dev/null
 
@@ -38,14 +49,21 @@ echo "Checking release asset URL..."
 curl -fsSIL --retry 3 "$EXPECTED_URL" >/dev/null
 
 echo "Checking Info.plist Sparkle settings..."
-/usr/libexec/PlistBuddy -c "Print :SUFeedURL" Info.plist | grep -F "docs/appcast.xml" >/dev/null
+/usr/libexec/PlistBuddy -c "Print :SUFeedURL" Info.plist | grep -Fx "$FEED_URL" >/dev/null
+/usr/libexec/PlistBuddy -c "Print :SUVerifyUpdateBeforeExtraction" Info.plist | grep -F "true" >/dev/null
 /usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" Info.plist | grep -E ".{20,}" >/dev/null
 /usr/libexec/PlistBuddy -c "Print :SUEnableAutomaticChecks" Info.plist | grep -F "true" >/dev/null
 /usr/libexec/PlistBuddy -c "Print :SUAllowsAutomaticUpdates" Info.plist | grep -F "true" >/dev/null
 
+echo "Checking feed signature..."
+if ! grep -q '<!-- sparkle-signatures:' "$APPCAST_PATH"; then
+    echo "The feed has no embedded EdDSA signature."
+    exit 1
+fi
+
 echo "Checking appcast entry..."
 DELTA_URLS_FILE="$(mktemp "${TMPDIR:-/tmp}/transcripted-delta-urls.XXXXXX")"
-trap 'rm -f "$DELTA_URLS_FILE"' EXIT
+trap 'rm -f "$DELTA_URLS_FILE" "$FETCHED_FEED"' EXIT
 python3 - "$APPCAST_PATH" "$VERSION" "$EXPECTED_URL" "$EXPECTED_MINIMUM_SYSTEM_VERSION" "$EXPECTED_HARDWARE_REQUIREMENTS" > "$DELTA_URLS_FILE" <<'PY'
 import sys
 import xml.etree.ElementTree as ET

@@ -49,9 +49,12 @@
 **/AGENTS.md                                @r3dbars
 **/CLAUDE.md                                @r3dbars
 /WORKFLOW.md                                @r3dbars
-# Live Sparkle feed: main IS the update channel (P0-5).
+# Legacy Sparkle feed, frozen after the first release on the release-asset feed
+# (the live feed is the latest release's appcast.xml, P0-5). The freeze record
+# pins its hash.
 /docs/appcast.xml                           @r3dbars
-# Runs inside the signing job (P0-6).
+/config/release/                            @r3dbars
+# Runs in the verify job, after signing, with no secrets (P0-6).
 /Tools/TranscriptedQA/                      @r3dbars
 /scripts/ops/privacy-leak-sweep.py          @r3dbars
 /scripts/entrypoints/                       @r3dbars

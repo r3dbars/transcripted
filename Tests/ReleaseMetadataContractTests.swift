@@ -73,20 +73,24 @@ func testReleaseMetadataContract() {
         let appcastSignature = releaseXMLAttribute("sparkle:edSignature", inFirstTagNamed: "enclosure", text: latestAppcastItem)
         let appcastLink = releaseXMLText("link", in: latestAppcastItem)
         let appcastReleaseNotesLink = releaseXMLText("sparkle:releaseNotesLink", in: latestAppcastItem)
-        let expectedReleaseURL = appVersion.map { "https://github.com/r3dbars/transcripted/releases/tag/v\($0)" }
+        // Once the legacy feed is frozen, docs/appcast.xml stays on its final
+        // entry while Info.plist keeps moving; the live feed is the signed
+        // appcast.xml release asset, which scripts/release/ checks at release time.
+        let legacyVersion = releaseFrozenLegacyVersion() ?? appVersion
+        let expectedReleaseURL = legacyVersion.map { "https://github.com/r3dbars/transcripted/releases/tag/v\($0)" }
 
         assertNotNil(appVersion, "Info.plist should expose CFBundleShortVersionString")
         assertEqual(buildVersion, appVersion, "marketing and build versions should move together for Sparkle")
         assertEqual(sentryReleasePrefix, "transcripted", "Sentry release names should stay on the transcripted@<version> format")
         assertEqual(caskVersion, appVersion, "Homebrew cask version should match the app bundle version")
-        assertEqual(appcastTitle, appVersion, "latest appcast title should name the release version")
-        assertEqual(appcastVersion, appVersion, "latest appcast item should match the app bundle version")
-        assertEqual(appcastShortVersion, appVersion, "Sparkle shortVersionString should match the app bundle version")
+        assertEqual(appcastTitle, legacyVersion, "latest appcast title should name the release version")
+        assertEqual(appcastVersion, legacyVersion, "latest appcast item should match the app bundle version (or the frozen final entry)")
+        assertEqual(appcastShortVersion, legacyVersion, "Sparkle shortVersionString should match the app bundle version (or the frozen final entry)")
         assertEqual(appcastMinimumSystemVersion, minimumSystemVersion, "Sparkle minimum macOS version should match Info.plist")
         assertEqual(appcastHardwareRequirements, "arm64", "Sparkle appcast should keep the release hardware requirement explicit")
         assertEqual(
             appcastEnclosureURL,
-            appVersion.map { "https://github.com/r3dbars/transcripted/releases/download/v\($0)/Transcripted-\($0).dmg" },
+            legacyVersion.map { "https://github.com/r3dbars/transcripted/releases/download/v\($0)/Transcripted-\($0).dmg" },
             "latest appcast enclosure should point at the matching GitHub DMG"
         )
         assertEqual(appcastLink, expectedReleaseURL, "latest appcast link should point at the matching GitHub release")
@@ -122,22 +126,30 @@ func testReleaseMetadataContract() {
         assertTrue(malformed.isEmpty, "missing-space or missing-colon separators must not parse as dependencies")
     }
 
-    runSuite("Release metadata - Sparkle app settings point at the committed appcast") {
+    runSuite("Release metadata - Sparkle app settings point at the release-asset feed") {
         let infoPlist = releaseContractFile("Info.plist")
         let appcast = releaseContractFile("docs/appcast.xml")
         let sparkleDocs = releaseContractFile("docs/sparkle-updates.md")
         let documentedPublicKey = releasePlistString("SUPublicEDKey", in: sparkleDocs)
 
         let feedURL = releasePlistString("SUFeedURL", in: infoPlist)
-        let appcastSelfURL = releaseXMLAttribute("href", inFirstTagNamed: "atom:link", text: appcast)
+        let legacySelfURL = releaseXMLAttribute("href", inFirstTagNamed: "atom:link", text: appcast)
         let publicKey = releasePlistString("SUPublicEDKey", in: infoPlist)
 
         assertEqual(
             feedURL,
-            "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",
-            "Info.plist should use the committed main-branch appcast feed"
+            "https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml",
+            "Info.plist should read the appcast.xml asset of the latest GitHub release, not a file on main"
         )
-        assertEqual(appcastSelfURL, feedURL, "appcast self link should match Info.plist SUFeedURL")
+        assertEqual(
+            legacySelfURL,
+            "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",
+            "docs/appcast.xml is the legacy feed for old installs and keeps its own self link"
+        )
+        assertTrue(
+            releasePlistBoolean("SUVerifyUpdateBeforeExtraction", in: infoPlist) == true,
+            "Sparkle should verify the download signature before extracting it"
+        )
         assertTrue(releasePlistBoolean("SUEnableAutomaticChecks", in: infoPlist) == true, "Sparkle automatic checks should stay enabled")
         assertTrue(releasePlistBoolean("SUAllowsAutomaticUpdates", in: infoPlist) == true, "Sparkle automatic downloads should stay available")
         assertTrue(
@@ -152,6 +164,14 @@ func testReleaseMetadataContract() {
             "docs/sparkle-updates.md should document the committed Sparkle public key"
         )
     }
+}
+
+/// The version the legacy docs/appcast.xml was frozen on, or nil before the
+/// freeze (config/release/legacy-appcast-freeze.json, written once by
+/// scripts/release/freeze-legacy-appcast.py).
+private func releaseFrozenLegacyVersion() -> String? {
+    let record = releaseContractJSON("config/release/legacy-appcast-freeze.json")
+    return (record as? [String: Any])?["frozen_version"] as? String
 }
 
 private func releaseContractRepoRoot() -> URL {

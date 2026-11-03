@@ -365,7 +365,7 @@ final class PackagedAppSmokeTests: XCTestCase {
             "CFBundleShortVersionString": "1.1.46",
             "CFBundleVersion": "1.1.46",
             "LSMinimumSystemVersion": "26.0",
-            "SUFeedURL": "https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml",
+            "SUFeedURL": "https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml",
             "SUPublicEDKey": publicKey,
             "SUEnableAutomaticChecks": true,
             "SUAllowsAutomaticUpdates": true,

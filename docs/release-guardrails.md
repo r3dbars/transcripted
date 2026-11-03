@@ -29,7 +29,7 @@ A user-facing Transcripted release needs all of these gates:
   `build/Transcripted-<version>.dmg` built from the intended source revision.
 - **Packaged app smoke:** the release candidate passes packaged-app smoke with
   the matching app, DMG, and dSYM.
-- **Release surface audit:** GitHub release, `docs/appcast.xml`, live appcast,
+- **Release surface audit:** GitHub release, its `appcast.xml` asset, live appcast,
   `/download/latest.dmg`, download page, Homebrew cask, Sentry release, and
   dSYM status are checked as separate rows.
 
@@ -116,7 +116,7 @@ Do not do any of these unless Justin explicitly asks:
 - create or push a release tag
 - run the final notarized publish path for a user-facing artifact
 - replace or upload the live DMG
-- update or push `docs/appcast.xml` for a new public version
+- upload the signed `appcast.xml` to a public release, or run `scripts/release/freeze-legacy-appcast.py` and push the frozen legacy feed
 - run `scripts/release/update-cask.sh` for a public version
 - update the Homebrew tap/cask
 - deploy website/download changes that point users at a new build

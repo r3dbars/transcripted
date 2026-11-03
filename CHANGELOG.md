@@ -6,8 +6,9 @@ the project uses semantic-ish versioning (`MAJOR.MINOR.PATCH`).
 
 Release downloads and signed DMGs live on the
 [GitHub Releases](https://github.com/r3dbars/transcripted/releases) page. The
-appcast for in-app Sparkle updates is at
-[`docs/appcast.xml`](docs/appcast.xml).
+appcast for in-app Sparkle updates is the `appcast.xml` asset of the latest
+release (older builds read the frozen legacy
+[`docs/appcast.xml`](docs/appcast.xml)).
 
 Entries marked **[CRITICAL]** are flagged as `sparkle:criticalUpdate` and are
 force-installed by Sparkle so existing users recover from a regression.

@@ -173,6 +173,12 @@ first_enclosure = first_item[first_item.index("<enclosure"):]
 assert first_enclosure.split(">", 1)[0].count("Transcripted-9.9.9.dmg") == 1
 PY
 
+# The merged feed is served from the release-asset URL, so its self link must
+# say so. The legacy docs/appcast.xml keeps its own link.
+grep -q 'href="https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml"' "$case_dir/appcast.xml" \
+    || fail "deltas: merged feed self link was not moved to the release-asset URL"
+grep -q 'raw.githubusercontent.com' "$case_dir/appcast.xml" && fail "deltas: merged feed still names the legacy feed URL"
+
 # 2. No deltas: the item has no sparkle:deltas and the manifest is empty.
 run_case none 9.9.9 STUB_MODE=none || { cat "$test_root/none/out.txt" >&2; fail "none: script failed"; }
 # Only the new 9.9.9 item: older real items (1.1.65 on) carry their own deltas.
@@ -203,5 +209,13 @@ expect_failure future-from 9.9.9 "invalid sparkle:deltaFrom" STUB_MODE=future-fr
 expect_failure newer-item 9.9.9 "newer than the release" STUB_MODE=newer-item
 expect_failure stale-plist 9.9.10 "Info.plist is 9.9.10"
 expect_failure bad-count 9.9.9 "SPARKLE_MAXIMUM_DELTAS must be a whole number" SPARKLE_MAXIMUM_DELTAS=five
+
+# 5. No default feed path: a bare run must not touch docs/appcast.xml.
+bare_dir="$test_root/bare"
+mkdir -p "$bare_dir/updates"
+if env -u REPO_APPCAST_PATH SPARKLE_APPCAST_TOOL="$stub" bash "$SCRIPT" "$bare_dir/updates" > "$bare_dir/out.txt" 2>&1; then
+    fail "bare: script ran without REPO_APPCAST_PATH"
+fi
+grep -q "REPO_APPCAST_PATH is not set" "$bare_dir/out.txt" || fail "bare: missing the REPO_APPCAST_PATH message"
 
 echo "Sparkle appcast delta tests passed"

@@ -83,8 +83,12 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/make_eres2net_swift_fixture.py` — regenerates the checked-in golden fixture `Tests/TranscriptedCoreTests/SpeakerTests/Fixtures/eres2net_swift_golden.json` used by the Swift ERes2NetEmbedder parity test
 - `scripts/release/generate-dmg-background.swift` — regenerate the committed DMG install background art
 - `scripts/release/bump-release-version.py` — bump `Info.plist` app/build version metadata for a release-prep branch without tagging, publishing, appcast, or Homebrew changes (`--version <x.y.z>`; `--dry-run` to preview)
-- `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into `docs/appcast.xml`; guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
-- `scripts/release/mark-appcast-critical.py` — mark the newest `docs/appcast.xml` item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; pushing it is publishing)
+- `scripts/release/generate-sparkle-appcast.sh` — generate a Sparkle appcast (with delta updates from any older DMGs in the folder) from an updates folder and merge the new item into a scratch copy of the current feed (`REPO_APPCAST_PATH`, no default); guarded by `Tests/BuildDependencies/SparkleAppcastDeltaTests.sh`
+- `scripts/release/sign-appcast.sh` — embed and read back the EdDSA feed signature in `appcast.xml` (last edit to the file); guarded by `Tests/BuildDependencies/SparkleAppcastSigningTests.sh`
+- `scripts/release/fetch-sparkle-tools.sh` — download the pinned, hash-checked Sparkle tools for the signing job (no build-deps.sh there)
+- `scripts/release/sign-release.sh` — sign an unsigned app and build/sign the DMG in the signing job; shares `scripts/entrypoints/lib/release-package.sh` with `build-beta.sh`
+- `scripts/release/freeze-legacy-appcast.py` — run once for the first release on the release-asset feed: writes the final entry into the legacy `docs/appcast.xml` and the freeze record that `check-known-traps.py` enforces
+- `scripts/release/mark-appcast-critical.py` — mark the newest appcast item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; the release workflow runs it before signing the feed)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release

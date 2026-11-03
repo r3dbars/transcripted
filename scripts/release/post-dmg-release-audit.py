@@ -199,9 +199,10 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
 
     checks: list[Check] = []
     commands = [
-        f"gh release create v{version} <artifact> $(find <artifact-dir>/build/sparkle-deltas -name '*.delta' 2>/dev/null) --repo {REPO}",
+        f"gh release create v{version} --draft <artifact> <artifact-dir>/build/appcast.xml $(find <artifact-dir>/build/sparkle-deltas -name '*.delta' 2>/dev/null) --repo {REPO}",
+        f"gh release edit v{version} --draft=false --latest --repo {REPO}",
         f"SENTRY_REQUIRE_DEBUG_FILES=1 bash scripts/release/register-sentry-release.sh {version}",
-        "bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder",
+        "REPO_APPCAST_PATH=/path/to/feed-copy/appcast.xml bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder",
         f"bash scripts/release/verify-sparkle-release.sh {version}",
         f"bash scripts/release/update-cask.sh {version}",
         "python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces",
@@ -239,7 +240,18 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
     elif args.artifact:
         checks.append(Check("local DMG", "UNKNOWN", f"No local DMG found at {artifact_path}; build/package proof is not available."))
 
-    appcast = latest_appcast(root / "docs/appcast.xml")
+    # The feed is the appcast.xml release asset now; docs/appcast.xml is the
+    # frozen legacy feed. Pass the workflow's generated feed with --appcast.
+    appcast_path = Path(args.appcast) if getattr(args, "appcast", None) else root / "docs/appcast.xml"
+    appcast = latest_appcast(appcast_path)
+    if getattr(args, "appcast", None):
+        add(
+            "<!-- sparkle-signatures:" in appcast_path.read_text(encoding="utf-8"),
+            checks,
+            "Sparkle feed signature",
+            "The feed file carries an embedded EdDSA feed signature.",
+            "The feed file has no embedded sparkle-signatures block; run scripts/release/sign-appcast.sh last.",
+        )
     add(appcast["version"] == version, checks, "appcast version", "Committed appcast latest item matches this version.", f"Committed appcast latest version is {appcast['version'] or 'missing'}, not {version}.", "PENDING")
     add(appcast["url"] == expected_url, checks, "appcast URL", "Committed appcast points at the expected GitHub release asset.", f"Committed appcast URL must become {expected_url}.", "PENDING")
     add(bool(appcast["signature"]), checks, "Sparkle signature", "Committed appcast latest item has a Sparkle signature.", "Committed appcast latest item is missing a Sparkle signature.", "PENDING")
@@ -255,7 +267,7 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
             "PENDING",
         )
 
-    deltas = appcast_latest_deltas(ET.parse(root / "docs/appcast.xml").getroot()) if appcast["version"] == version else []
+    deltas = appcast_latest_deltas(ET.parse(appcast_path).getroot()) if appcast["version"] == version else []
     if appcast["version"] == version:
         checks.append(Check(
             "Sparkle delta updates",
@@ -445,6 +457,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", help="Release version. Defaults to Info.plist CFBundleShortVersionString.")
     parser.add_argument("--artifact", help="Path to the local Transcripted-<version>.dmg.")
+    parser.add_argument("--appcast", help="Path to the generated, signed appcast.xml release asset. Default: the frozen legacy docs/appcast.xml.")
     parser.add_argument("--github-release-json", help="Fixture from `gh release view --json tagName,isDraft,isPrerelease,url,assets`.")
     parser.add_argument("--skip-live", action="store_true", help="Skip transcripted.app live appcast/download/crawler checks.")
     parser.add_argument("--skip-asset-head", action="store_true", help="Skip HEAD request for the expected GitHub release asset.")
