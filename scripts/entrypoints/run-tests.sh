@@ -326,7 +326,13 @@ import Foundation
 
 @main
 struct FastTestRunner {
-    static func main() async {
+    @MainActor
+    static func main() {
+        FastTestApplicationHost.run { await runSelectedTests() }
+    }
+
+    @MainActor
+    static func runSelectedTests() async {
         print("Transcripted Fast Test Suite\n")
         var executedFunctions = 0
 EOF
@@ -394,6 +400,7 @@ cat >> "$GENERATED_RUNNER" <<'EOF'
 EOF
 
 FAST_TEST_SOURCES=(
+    "Tests/FastTestApplicationHost.swift"
     "Tests/TestHelpers.swift"
     "$GENERATED_RUNNER"
 )
