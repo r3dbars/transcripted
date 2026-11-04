@@ -130,6 +130,93 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
 
     // MARK: - Helpers
 
+    func testReplacementAdmissionRejectsAnotherMeetingReusingTheSelectedPath() throws {
+        let url = directory.appendingPathComponent("Reused.md")
+        let selectedID = UUID(uuidString: "4F0C2B9E-6A55-4D7B-9E62-1B2C3D4E5F60")!
+        try existingMeetingMarkdown(starred: true).write(to: url, atomically: true, encoding: .utf8)
+        let replacement = existingMeetingMarkdown(starred: false)
+            .replacingOccurrences(of: selectedID.uuidString, with: UUID().uuidString)
+        // This is the model/snapshot wait: the selected file is removed and
+        // another saved meeting takes its filename before reservation starts.
+        try replacement.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertNil(TranscriptSaver.beginReplacingTranscript(at: url, expectedTranscriptID: selectedID))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), replacement)
+    }
+
+    func testReplacementAdmissionAcceptsTheSelectedIdentityAndRejectsMissingTargets() throws {
+        let url = directory.appendingPathComponent("Selected.md")
+        let selectedID = UUID(uuidString: "4F0C2B9E-6A55-4D7B-9E62-1B2C3D4E5F60")!
+        try existingMeetingMarkdown(starred: true).write(to: url, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url, expectedTranscriptID: selectedID))
+        TranscriptSaver.finishReplacingTranscript(reservation)
+        try FileManager.default.removeItem(at: url)
+        XCTAssertNil(TranscriptSaver.beginReplacingTranscript(at: url, expectedTranscriptID: selectedID))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path), "a deleted target is never recreated")
+    }
+
+    func testUnchangedLegacyMeetingCanStillBeReprocessedAndGainsAnIdentity() throws {
+        let url = directory.appendingPathComponent("Legacy.md")
+        let legacy = existingMeetingMarkdown(starred: true).components(separatedBy: "\n")
+            .filter { !$0.hasPrefix("capture_id:") && !$0.hasPrefix("transcript_id:") }.joined(separator: "\n")
+        try legacy.write(to: url, atomically: true, encoding: .utf8)
+        let early = try TranscriptReplacementExpectation.capture(at: url, requiringLegacy: true)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url, expectation: early))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        XCTAssertEqual(replace(url), url)
+        let values = try XCTUnwrap(TranscriptFrontmatter.readValues(from: url))
+        XCTAssertNotNil(TranscriptFrontmatter.captureID(in: values))
+        XCTAssertTrue(TranscriptFrontmatter.isStarred(values: values))
+    }
+
+    func testDefaultCoreReservationKeepsLegacyCompatibility() throws {
+        let url = directory.appendingPathComponent("LegacyDirect.md")
+        let legacy = existingMeetingMarkdown(starred: false).components(separatedBy: "\n")
+            .filter { !$0.hasPrefix("capture_id:") && !$0.hasPrefix("transcript_id:") }.joined(separator: "\n")
+        try legacy.write(to: url, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        XCTAssertEqual(replace(url), url)
+    }
+
+    func testLegacyAdmissionRejectsChangedNewlyIdentifiedAndRecreatedTargets() throws {
+        let url = directory.appendingPathComponent("LegacyChanged.md")
+        let legacy = existingMeetingMarkdown(starred: false).components(separatedBy: "\n")
+            .filter { !$0.hasPrefix("capture_id:") && !$0.hasPrefix("transcript_id:") }.joined(separator: "\n")
+        for replacement in [legacy + "\nChanged body", existingMeetingMarkdown(starred: true), legacy] {
+            try legacy.write(to: url, atomically: true, encoding: .utf8)
+            let early = try TranscriptReplacementExpectation.capture(at: url, requiringLegacy: true)
+            try FileManager.default.removeItem(at: url)
+            try replacement.write(to: url, atomically: true, encoding: .utf8)
+            XCTAssertNil(TranscriptSaver.beginReplacingTranscript(at: url, expectation: early))
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), replacement)
+        }
+        try existingMeetingMarkdown(starred: false).write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try TranscriptReplacementExpectation.capture(at: url, requiringLegacy: true),
+                             "a selected legacy row cannot silently become a different modern capture")
+    }
+
+    func testReservedLegacyWriteRechecksTheExactOriginalBytes() throws {
+        let url = directory.appendingPathComponent("LegacyWrite.md")
+        let legacy = existingMeetingMarkdown(starred: true).components(separatedBy: "\n")
+            .filter { !$0.hasPrefix("capture_id:") && !$0.hasPrefix("transcript_id:") }.joined(separator: "\n")
+        try legacy.write(to: url, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        let changed = legacy + "\nDifferent protected body."
+        try changed.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertNil(replace(url))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), changed)
+    }
+
+    func testLegacyExpectationCannotBypassMalformedProtectionMetadata() throws {
+        let url = directory.appendingPathComponent("MalformedLegacy.md")
+        let raw = "---\ncapture_type: meeting\nstarred: true\nUnclosed header"
+        try raw.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertThrowsError(try TranscriptReplacementExpectation.capture(at: url, requiringLegacy: true))
+        XCTAssertNil(TranscriptSaver.beginReplacingTranscript(at: url))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), raw)
+    }
+
     @discardableResult
     private func replace(_ transcriptURL: URL) -> URL? {
         TranscriptSaver.saveTranscript(

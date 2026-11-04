@@ -8,16 +8,18 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
     private struct Entry {
         let path: String
         let transcriptId: UUID?
+        let expectation: TranscriptReplacementExpectation
     }
 
     private let lock = NSLock()
     private var entries: [ReplacementTranscriptReservationToken: Entry] = [:]
 
-    func reserve(_ url: URL, transcriptId: UUID?) -> ReplacementTranscriptReservationToken? {
+    func reserve(_ url: URL, expectation: TranscriptReplacementExpectation) -> ReplacementTranscriptReservationToken? {
         lock.lock()
         defer { lock.unlock() }
 
         let path = key(for: url)
+        let transcriptId = expectation.captureID
         guard !entries.values.contains(where: {
             $0.path == path || (transcriptId != nil && $0.transcriptId == transcriptId)
         }) else {
@@ -25,7 +27,7 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         }
 
         let token = ReplacementTranscriptReservationToken(id: UUID())
-        entries[token] = Entry(path: path, transcriptId: transcriptId)
+        entries[token] = Entry(path: path, transcriptId: transcriptId, expectation: expectation)
         return token
     }
 
@@ -50,6 +52,13 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         defer { lock.unlock() }
         let path = key(for: url)
         return entries.values.first { $0.path == path }?.transcriptId
+    }
+
+    func reservedExpectation(at url: URL) -> TranscriptReplacementExpectation? {
+        let path = key(for: url)
+        lock.lock()
+        defer { lock.unlock() }
+        return entries.values.first { $0.path == path }?.expectation
     }
 
     func contains(transcriptId: UUID) -> Bool {
@@ -150,13 +159,17 @@ public class TranscriptSaver {
     /// established under the same serializer as speaker edits, so an edit either
     /// finishes before replacement starts or fails closed while it is active.
     @discardableResult
-    static func beginReplacingTranscript(at url: URL) -> ReplacementTranscriptReservationToken? {
+    static func beginReplacingTranscript(
+        at url: URL, expectedTranscriptID: UUID? = nil,
+        expectation: TranscriptReplacementExpectation? = nil
+    ) -> ReplacementTranscriptReservationToken? {
         serializeTranscriptFileUpdate {
             guard FileManager.default.fileExists(atPath: url.path) else { return nil }
-            return replacementReservations.reserve(
-                url,
-                transcriptId: transcriptIdentity(at: url)
-            )
+            guard let bound = expectation ?? (try? TranscriptReplacementExpectation.capture(
+                at: url, expectedCaptureID: expectedTranscriptID
+            )), expectedTranscriptID == nil || bound.captureID == expectedTranscriptID,
+                  (try? bound.matches(at: url)) == true else { return nil }
+            return replacementReservations.reserve(url, expectation: bound)
         }
     }
 
@@ -419,9 +432,13 @@ public class TranscriptSaver {
             do {
                 if let explicitFileURL {
                     let isReserved = replacementReservations.contains(explicitFileURL, transcriptId: nil)
-                    let reservedID = replacementReservations.reservedIdentity(at: explicitFileURL)
-                    if isReserved, reservedID == nil || reservedID != transcriptId {
-                        throw CocoaError(.fileReadCorruptFile)
+                    let bound = replacementReservations.reservedExpectation(at: explicitFileURL)
+                    let reservedID = bound?.captureID
+                    if isReserved {
+                        guard let bound, try bound.matches(at: explicitFileURL),
+                              reservedID == nil || reservedID == transcriptId else {
+                            throw CocoaError(.fileReadCorruptFile)
+                        }
                     }
                     if let currentStar = try replacedTranscriptStar(explicitFileURL, requiredCaptureID: reservedID),
                        currentStar != expectedStar { markdown = render(starred: currentStar) }

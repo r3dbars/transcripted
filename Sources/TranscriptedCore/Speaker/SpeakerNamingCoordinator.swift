@@ -63,7 +63,8 @@ extension TranscriptionTaskManager {
         sourceFailedTranscriptionId: UUID? = nil,
         clips: [SpeakerNamingEntry],
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
-        requestId: UUID? = nil
+        requestId: UUID? = nil,
+        inputSnapshot: RetainedAudioInputSnapshot? = nil
     ) {
         let removeMicAudio = shouldRemoveMicAudio ?? shouldRemoveTemporaryAudio
         let removeSystemAudio = shouldRemoveSystemAudio ?? shouldRemoveTemporaryAudio
@@ -172,7 +173,8 @@ extension TranscriptionTaskManager {
                         sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                         splitLocalSpeakers: splitLocalSpeakers,
                         importedRecoverySession: importedRecoverySession,
-                        requestId: requestId
+                        requestId: requestId,
+                        inputSnapshot: inputSnapshot
                     )
                     self.clearCompletedSpeakerNamingRequest(
                         transcriptId: transcriptId,
@@ -448,7 +450,8 @@ extension TranscriptionTaskManager {
                     splitLocalSpeakers: splitLocalSpeakers,
                     importedRecoverySession: importedRecoverySession,
                     shouldDeleteSourceFailedAudio: shouldRemoveTemporaryAudio,
-                    requestId: requestId
+                    requestId: requestId,
+                    inputSnapshot: inputSnapshot
                 )
                 switch outcome {
                 case .completed:

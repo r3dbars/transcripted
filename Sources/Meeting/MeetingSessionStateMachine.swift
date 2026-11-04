@@ -61,6 +61,21 @@
 // `mayReportUnrelatedFailureAsError` below is the callable, testable rule
 // call sites for THAT class of failure must consult before calling
 // `transition(to: .error(...))`.
+import Foundation
+
+/// A suspended saved-audio request belongs to the same action and selection.
+struct SavedAudioReprocessAdmission {
+    let actionID: UUID
+    let modelIdentifier: String
+
+    func mayResume(currentActionID: UUID, currentModelIdentifier: String,
+                   captureActive: Bool, dictationBusy: Bool, backgroundWork: Bool,
+                   cancelled: Bool) -> Bool {
+        actionID == currentActionID && modelIdentifier == currentModelIdentifier
+            && !captureActive && !dictationBusy && !backgroundWork && !cancelled
+    }
+}
+
 enum MeetingSessionStateMachine {
     static func isLegalTransition(from: MeetingSessionState, to: MeetingSessionState) -> Bool {
         if from == to { return true }
