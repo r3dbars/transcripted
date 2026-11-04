@@ -25,6 +25,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
     private let now: @Sendable () -> Date
     private let sender: @Sendable ([PersonalHistoryEvent]) async -> GhostBrainResponse
     private let maximumBufferedEvents: Int
+    private let flushScheduler: FlushScheduler
     private var pending: [PersonalHistoryEvent] = []
     private var scheduledFlush: DispatchWorkItem?
     private var sending = false
@@ -35,6 +36,19 @@ final class PersonalHistoryCapture: @unchecked Sendable {
     /// Transcripted: how many times the app has refused each event still
     /// waiting to be sent again.
     private var refusals: [String: Int] = [:]
+
+    /// Transcripted: runs a flush the capture scheduled for itself (after
+    /// typing, after an answer, or on retry). The default runs it on the
+    /// capture's queue once `delay` has passed. Tests pass one that never
+    /// runs it, so only `flushAndWait()` sends and attempt counts don't
+    /// depend on how busy the machine is.
+    struct FlushScheduler: Sendable {
+        let schedule: @Sendable (_ queue: DispatchQueue, _ delay: TimeInterval, _ work: DispatchWorkItem) -> Void
+
+        static let afterDelay = FlushScheduler { queue, delay, work in
+            queue.asyncAfter(deadline: .now() + delay, execute: work)
+        }
+    }
 
     struct Permit: Sendable {
         let appBundleIdentifier: String
@@ -68,6 +82,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         defaults: UserDefaults = .standard,
         now: @escaping @Sendable () -> Date = { Date() },
         maximumBufferedEvents: Int = PersonalHistoryCapture.defaultMaximumBufferedEvents,
+        flushScheduler: FlushScheduler = .afterDelay,
         sender: @escaping @Sendable ([PersonalHistoryEvent]) async -> GhostBrainResponse = {
             await GhostBrainClient.recordPersonalHistory($0)
         }
@@ -76,6 +91,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         self.appScope = WritingAppScopeReader(defaults: defaults)
         self.now = now
         self.maximumBufferedEvents = max(1, maximumBufferedEvents)
+        self.flushScheduler = flushScheduler
         self.sender = sender
     }
 
@@ -234,7 +250,7 @@ final class PersonalHistoryCapture: @unchecked Sendable {
         scheduledFlush?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.sendNextBatch() }
         scheduledFlush = work
-        queue.asyncAfter(deadline: .now() + delay, execute: work)
+        flushScheduler.schedule(queue, delay, work)
     }
 
     private func sendNextBatch() {
