@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CryptoKit
 import Foundation
 import SwiftUI
@@ -150,6 +151,12 @@ import TranscriptedCore
             setupFailed("\(scenario.label) should fill every section, got \(sections.map { "\($0.section)" })")
         }
 
+        let diagnostics = SpeakersScrollDiagnosticCapture(model: model)
+        let publications = model.objectWillChange.sink {
+            MainActor.assumeIsolated { diagnostics.notePublication() }
+        }
+        defer { publications.cancel() }
+
         let window = NSWindow(
             contentRect: NSRect(x: 80, y: 80, width: 900, height: 700),
             styleMask: [.borderless],
@@ -172,25 +179,42 @@ import TranscriptedCore
         var lastY = clip.bounds.origin.y
         var step = 0
         var worstLayouts = 0
+        weak var initialDocument = scroll.documentView
+        func record(_ phase: Int, requestedY: CGFloat, maximumY: CGFloat,
+                    beforeDocument: CGFloat, beforeViewport: CGFloat, layouts: Int) {
+            diagnostics.record(phase: phase, step: step, model: model,
+                scroll: scroll, clip: clip, initialDocument: initialDocument,
+                hosting: hosting, window: window, requestedY: requestedY,
+                maximumY: maximumY, beforeDocument: beforeDocument,
+                beforeViewport: beforeViewport, layouts: layouts)
+        }
+        record(0, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
+            beforeDocument: scroll.documentView?.frame.height ?? 0, beforeViewport: clip.bounds.height, layouts: 0)
         while true {
             let maxY = (scroll.documentView?.frame.height ?? 0) - clip.bounds.height
             if lastY >= maxY - 1 { break }
             if step >= maximumSteps {
-                return "\(scenario.label): after \(step) steps the scroll is at y=\(Int(lastY)) of \(Int(maxY)), never reaching the bottom"
+                return diagnostics.failure("\(scenario.label): after \(step) steps the scroll is at y=\(Int(lastY)) of \(Int(maxY)), never reaching the bottom")
             }
             guardian.note("\(scenario.label): step \(step) from y=\(Int(lastY))")
             let layoutsBefore = hosting.layoutPasses
-            clip.scroll(to: NSPoint(x: 0, y: min(lastY + stepPoints, maxY)))
+            let documentHeightBefore = scroll.documentView?.frame.height ?? 0
+            let viewportHeightBefore = clip.bounds.height
+            let requestedY = min(lastY + stepPoints, maxY)
+            clip.scroll(to: NSPoint(x: 0, y: requestedY))
             scroll.reflectScrolledClipView(clip)
             pump(0.03)
             let y = clip.bounds.origin.y
+            record(1, requestedY: requestedY, maximumY: maxY,
+                beforeDocument: documentHeightBefore, beforeViewport: viewportHeightBefore,
+                layouts: hosting.layoutPasses - layoutsBefore)
             if y < lastY - allowedBackwardPoints {
-                return "\(scenario.label): at step \(step) the scroll jumped back from y=\(Int(lastY)) to y=\(Int(y))"
+                return diagnostics.failure("\(scenario.label): at step \(step) the scroll jumped back from y=\(Int(lastY)) to y=\(Int(y))")
             }
             let layouts = hosting.layoutPasses - layoutsBefore
             worstLayouts = max(worstLayouts, layouts)
             if layouts > maximumLayoutsPerStep {
-                return "\(scenario.label): step \(step) at y=\(Int(y)) laid the page out \(layouts) times"
+                return diagnostics.failure("\(scenario.label): step \(step) at y=\(Int(y)) laid the page out \(layouts) times")
             }
             lastY = y
             step += 1
@@ -203,8 +227,10 @@ import TranscriptedCore
         let settled = hosting.layoutPasses
         pump(1.0)
         let idleLayouts = hosting.layoutPasses - settled
+        record(2, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
+            beforeDocument: scroll.documentView?.frame.height ?? 0, beforeViewport: clip.bounds.height, layouts: idleLayouts)
         if idleLayouts > maximumIdleLayouts {
-            return "\(scenario.label): the page kept laying out after scrolling stopped (\(idleLayouts) passes)"
+            return diagnostics.failure("\(scenario.label): the page kept laying out after scrolling stopped (\(idleLayouts) passes)")
         }
         print("ok: \(scenario.label): reached the bottom (y=\(Int(lastY))) in \(step) steps, at most \(worstLayouts) layouts per step")
         return nil
@@ -223,6 +249,52 @@ import TranscriptedCore
             if let found = firstScrollView(in: subview) { return found }
         }
         return nil
+    }
+}
+
+/// Read-only fixture observations; identities are compared locally and never printed.
+@MainActor private final class SpeakersScrollDiagnosticCapture {
+    private let profiles: [UUID]
+    private let directory: [UUID]
+    private let reviews: [String]
+    private var publications = 0
+    private var history = SpeakersScrollDiagnosticHistory()
+
+    init(model: SpeakerPeopleSettingsViewModel) {
+        profiles = model.profiles.map(\.id)
+        directory = model.directoryProfiles.map(\.id)
+        reviews = model.reviewStack.calls.map(\.id)
+    }
+
+    func notePublication() { publications += 1 }
+
+    func record(phase: Int, step: Int, model: SpeakerPeopleSettingsViewModel,
+                scroll: NSScrollView, clip: NSClipView, initialDocument: NSView?,
+                hosting: NSView, window: NSWindow, requestedY: CGFloat,
+                maximumY: CGFloat, beforeDocument: CGFloat, beforeViewport: CGFloat, layouts: Int) {
+        let currentProfiles = model.profiles.map(\.id)
+        let currentDirectory = model.directoryProfiles.map(\.id)
+        let currentReviews = model.reviewStack.calls.map(\.id)
+        history.append(.init(phase: phase, step: step, modelPublications: publications,
+            profileCount: currentProfiles.count, directoryCount: currentDirectory.count,
+            reviewCount: currentReviews.count, profileOrderUnchanged: currentProfiles == profiles,
+            directoryOrderUnchanged: currentDirectory == directory, reviewOrderUnchanged: currentReviews == reviews,
+            scrollAttached: scroll.window === window && scroll.isDescendant(of: hosting),
+            scrollStillFirst: SpeakersDirectoryScrollSmoke.firstScrollView(in: hosting) === scroll,
+            clipUnchanged: scroll.contentView === clip, documentUnchanged: initialDocument != nil && scroll.documentView === initialDocument,
+            documentHeightBefore: Double(beforeDocument), viewportHeightBefore: Double(beforeViewport),
+            maximumY: Double(maximumY), requestedY: Double(requestedY), actualY: Double(clip.bounds.origin.y),
+            documentHeightAfter: Double(scroll.documentView?.frame.height ?? 0),
+            viewportHeightAfter: Double(clip.bounds.height), layoutDelta: layouts))
+    }
+
+    func failure(_ message: String) -> String {
+        if let json = history.json() {
+            print("SCROLL_DIAGNOSTICS " + json)
+        } else {
+            print("SCROLL_DIAGNOSTICS_ENCODING_FAILED")
+        }
+        return message
     }
 }
 

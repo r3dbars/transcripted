@@ -400,6 +400,7 @@ cat >> "$GENERATED_RUNNER" <<'EOF'
 EOF
 
 FAST_TEST_SOURCES=(
+    "Tests/UI/SpeakersScrollDiagnostics.swift"
     "Tests/FastTestApplicationHost.swift"
     "Tests/TestHelpers.swift"
     "$GENERATED_RUNNER"
