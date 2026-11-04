@@ -96,7 +96,7 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
             let original = prefix + "starred: true\n"
             try original.write(to: url, atomically: true, encoding: .utf8)
             XCTAssertNil(replace(url))
-            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original)
+            XCTAssertEqual(try Data(contentsOf: url), Data(original.utf8))
         }
     }
 
