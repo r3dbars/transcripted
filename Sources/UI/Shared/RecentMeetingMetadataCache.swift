@@ -50,10 +50,13 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // model (and imports were listed by import time) miss once and reparse.
     var transcriptionEngine: String = ""
     var importedAt: Date? = nil
-    // Optional on purpose: payloads written before stars still decode (as
-    // not starred) instead of reparsing the whole library once. Starring
-    // rewrites the file, so its stamp changes and that row misses anyway.
+    // Starring rewrites the file, so its stamp changes. The separate required
+    // identity schema marker below invalidates older payloads once.
     var isStarred: Bool? = nil
+    // Required schema marker invalidates older cache rows once so stable
+    // identity comes from disk before a saved-row mutation is offered.
+    var captureIdentitySchemaVersion: Int = 1
+    var captureID: UUID? = nil
 }
 
 extension CachedRecentMeetingMetadata {
@@ -75,6 +78,7 @@ extension CachedRecentMeetingMetadata {
         self.transcriptionEngine = item.transcriptionEngine ?? ""
         self.importedAt = item.importedAt
         self.isStarred = item.isStarred
+        self.captureID = item.captureID
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -95,7 +99,8 @@ extension CachedRecentMeetingMetadata {
             speakerNames: speakerNames,
             transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
             importedAt: importedAt,
-            isStarred: isStarred ?? false
+            isStarred: isStarred ?? false,
+            captureID: captureID
         )
     }
 }

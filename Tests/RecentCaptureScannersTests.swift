@@ -38,7 +38,7 @@ func testRecentCaptureScanners() async {
                 try? writeRecentLoaderMeeting(
                     title: name, date: recentLoaderDate("2026-06-05T14:00:00Z"),
                     to: meetingsRoot.appendingPathComponent("\(name).md"),
-                    extraFrontmatterLines: lines
+                    extraFrontmatterLines: lines + ["transcript_id: \(UUID().uuidString)"]
                 )
             }
             let cache = RecentMeetingMetadataCache(databaseURL: nil)
@@ -46,10 +46,11 @@ func testRecentCaptureScanners() async {
                 let rows = RecentMeetingsScanner.loadRecent(limit: 10, cache: cache)
                 assertEqual(rows.first { $0.title == "Quarterly Planning" }?.isStarred, true, "\(pass) scan reads the star")
                 assertEqual(rows.first { $0.title == "Design Review" }?.isStarred, false, "\(pass) scan leaves unstarred rows unstarred")
+                assertNotNil(rows.first { $0.title == "Quarterly Planning" }?.captureID, "\(pass) row carries stable identity")
             }
         }
     }
-    runSuite("The Home cache keeps a meeting's star, and older cache rows still load") {
+    runSuite("The Home cache keeps star and capture identity and reparses older identity-free rows") {
         var item = RecentMeetingItem(
             title: "Quarterly Planning",
             date: Date(timeIntervalSinceReferenceDate: 0),
@@ -60,6 +61,7 @@ func testRecentCaptureScanners() async {
             speakerStatus: .ready
         )
         item.isStarred = true
+        item.captureID = UUID()
         let payload = CachedRecentMeetingMetadata(item: item)
         assertTrue(
             payload.makeItem(transcriptURL: item.transcriptURL, audio: nil).isStarred,
@@ -71,15 +73,11 @@ func testRecentCaptureScanners() async {
             assertTrue(false, "payload should encode")
             return
         }
-        object.removeValue(forKey: "isStarred")
+        assertEqual(payload.makeItem(transcriptURL: item.transcriptURL, audio: nil).captureID, item.captureID)
+        object.removeValue(forKey: "captureIdentitySchemaVersion")
         let legacy = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
         let decoded = try? JSONDecoder().decode(CachedRecentMeetingMetadata.self, from: legacy)
-        assertNotNil(decoded, "a cache row written before stars still decodes, so upgrading doesn't reparse the library")
-        assertEqual(
-            decoded?.makeItem(transcriptURL: item.transcriptURL, audio: nil).isStarred,
-            false,
-            "an older cache row reads as not starred"
-        )
+        assertNil(decoded, "an identity-free cached row must reparse before it can authorize a mutation")
     }
     runSuite("RecentMeetingSpeakerStatus.detect flags generic speaker labels") {
         let markdown = """

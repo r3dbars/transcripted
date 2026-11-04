@@ -310,7 +310,8 @@ enum RecentMeetingsScanner {
             speakerNames: RecentMeetingSpeakerStatus.speakerNames(fromLabels: speakerLabels),
             transcriptionEngine: frontmatter?.values["transcription_engine"].flatMap { $0.isEmpty ? nil : $0 },
             importedAt: frontmatter.flatMap { TranscriptFrontmatter.importedAt(values: $0.values) },
-            isStarred: frontmatter.map { MeetingStarFrontmatter.isStarred(values: $0.values) } ?? false
+            isStarred: frontmatter.map { MeetingStarFrontmatter.isStarred(values: $0.values) } ?? false,
+            captureID: frontmatter.flatMap { TranscriptFrontmatter.captureID(in: $0.values) }
         )
     }
 

@@ -3,6 +3,9 @@
 // library moves, and is what automatic meeting-audio deletion checks.
 
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 func testMeetingStarFrontmatter() {
     runSuite("Starring a meeting adds one frontmatter line and leaves the rest of the file alone") {
@@ -14,7 +17,7 @@ func testMeetingStarFrontmatter() {
             try? FileManager.default.setAttributes([.creationDate: createdAt], ofItemAtPath: url.path)
 
             do {
-                try MeetingStarFrontmatter.setStarred(true, transcriptAt: url)
+                try setFixtureStarred(true, transcriptAt: url)
             } catch {
                 assertTrue(false, "starring an app-owned meeting should succeed: \(error)")
             }
@@ -46,9 +49,9 @@ func testMeetingStarFrontmatter() {
         withStarFixtureDirectory { directory in
             let url = directory.appendingPathComponent("Design Review.md")
             try? starFixtureMarkdown(title: "Design Review").write(to: url, atomically: true, encoding: .utf8)
-            try? MeetingStarFrontmatter.setStarred(true, transcriptAt: url)
+            try? setFixtureStarred(true, transcriptAt: url)
             let once = try? Data(contentsOf: url)
-            try? MeetingStarFrontmatter.setStarred(true, transcriptAt: url)
+            try? setFixtureStarred(true, transcriptAt: url)
             assertEqual(try? Data(contentsOf: url), once, "a second star should leave the bytes unchanged")
         }
     }
@@ -58,9 +61,9 @@ func testMeetingStarFrontmatter() {
             let url = directory.appendingPathComponent("Design Review.md")
             let original = starFixtureMarkdown(title: "Design Review")
             try? original.write(to: url, atomically: true, encoding: .utf8)
-            try? MeetingStarFrontmatter.setStarred(true, transcriptAt: url)
+            try? setFixtureStarred(true, transcriptAt: url)
             do {
-                try MeetingStarFrontmatter.setStarred(false, transcriptAt: url)
+                try setFixtureStarred(false, transcriptAt: url)
             } catch {
                 assertTrue(false, "unstarring should succeed: \(error)")
             }
@@ -118,10 +121,11 @@ func testMeetingStarFrontmatter() {
 
 private func assertStarRefused(at url: URL, expected: String, _ label: String) {
     do {
-        try MeetingStarFrontmatter.setStarred(true, transcriptAt: url)
+        try MeetingStarFrontmatter.setStarred(true, transcriptAt: url, expectedCaptureID: UUID(),
+            authorizedDirectory: { url.deletingLastPathComponent() })
         assertTrue(false, "\(label) should be refused")
     } catch {
-        assertEqual(error as? MeetingStarError, .notOwnedMeeting, "\(label) is refused as not owned")
+        assertEqual(error as? MeetingStarError, .identityUnresolved, "\(label) has no matching owned capture identity")
     }
     assertEqual(try? String(contentsOf: url, encoding: .utf8), expected, "\(label) is left unchanged")
 }
@@ -153,4 +157,11 @@ private func starFixtureMarkdown(title: String) -> String {
     **[00:00] [Mic/You]**
     Let's start with the roadmap.
     """
+}
+
+private func setFixtureStarred(_ starred: Bool, transcriptAt url: URL) throws {
+    let id = (try? TranscriptFrontmatter.readValues(from: url)).flatMap { $0 }.flatMap { TranscriptFrontmatter.captureID(in: $0) }
+    guard let id else { throw MeetingStarError.notOwnedMeeting }
+    try MeetingStarFrontmatter.setStarred(starred, transcriptAt: url, expectedCaptureID: id,
+        authorizedDirectory: { url.deletingLastPathComponent() })
 }
