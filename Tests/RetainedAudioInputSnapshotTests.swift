@@ -194,7 +194,7 @@ func testRetainedAudioInputSnapshot() async {
                         }
                     )
                     assertTrue(snapshot.replacementExpectation != nil)
-                    assertTrue(try !snapshot.replacementExpectation!.matches(at: target),
+                    assertTrue((try? snapshot.replacementExpectation!.matches(at: target)) != true,
                                "a modern or legacy selection must not adopt a later target")
                 }
             } catch { assertTrue(false, "output expectation fixture failed: \(error)") }
