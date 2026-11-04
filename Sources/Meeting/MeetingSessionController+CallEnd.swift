@@ -37,12 +37,16 @@ extension MeetingSessionController {
         // like a released stream or hold up a countdown.
         let sampledAt = snapshot.sampledAt
         let activity: MeetingEndDetectionPolicy.Activity
+        var callAudioActive = false
         if let sampledAt, sampledAt <= now, now - sampledAt <= tracking.policy.maximumSampleGap {
             activity = snapshot.activity(in: tracking.families, cameraInUse: freshCallCameraActivity(at: now))
+            // The camera can't be attributed to an app, so only call-app
+            // audio counts as the call coming back.
+            callAudioActive = snapshot.activity(in: tracking.families, cameraInUse: false) == .active
         } else {
             activity = .unknown
         }
-        observeCallEnd(activity, sampledAt: sampledAt ?? now, at: now)
+        observeCallEnd(activity, sampledAt: sampledAt ?? now, at: now, callAudioReturned: callAudioActive)
     }
 
     func updateCallCameraInUse(_ inUse: Bool?, sampledAt: TimeInterval) {
@@ -56,7 +60,8 @@ extension MeetingSessionController {
     }
 
     private func observeCallEnd(_ activity: MeetingEndDetectionPolicy.Activity,
-                                sampledAt: TimeInterval, at now: TimeInterval) {
+                                sampledAt: TimeInterval, at now: TimeInterval,
+                                callAudioReturned: Bool = false) {
         guard var tracking = callEndTracking else { return }
         let event = tracking.policy.observe(activity, sampledAt: sampledAt, at: now)
         if event == .warningStarted || event == .warningCleared {
@@ -79,6 +84,10 @@ extension MeetingSessionController {
             recordCallEndDiagnostic("meeting_call_end_warning_started", "Call app stopped using audio; call-end countdown shown")
         case .warningCleared:
             clearCallEndWarning()
+            // The call app let go of its audio for the whole warning interval
+            // and came back: often the next back-to-back call, not the same
+            // one. Shorter releases never warn, so they never offer.
+            if callAudioReturned { offerMeetingSplit(candidate: nil) }
         }
     }
 
@@ -173,6 +182,7 @@ extension MeetingSessionController {
         callEndArming = MeetingCallEndArming()
         callEndTracking = nil
         latestCallActivity = .unknown
+        meetingSplitOffer = nil
         clearCallEndWarning(restoringSilenceWarning: restoringSilenceWarning)
     }
 

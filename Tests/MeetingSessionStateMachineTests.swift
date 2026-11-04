@@ -58,6 +58,10 @@ func testMeetingSessionStateMachine() {
             MeetingSessionStateMachine.isLegalTransition(from: .transcribing, to: .ready),
             "the transcription queue drains with no failure"
         )
+        assertTrue(
+            MeetingSessionStateMachine.isLegalTransition(from: .transcribing, to: .startingRecording),
+            "a split starts the next meeting while the last one transcribes"
+        )
     }
 
     runSuite("MeetingSessionStateMachine.isLegalTransition — recording cannot be skipped into") {

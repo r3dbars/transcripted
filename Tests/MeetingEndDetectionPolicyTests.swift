@@ -569,6 +569,28 @@ func testMeetingEndDetectionPolicy() {
         assertFalse(policy.canStop(at: 141), "a cancelled warning cannot stop the recording")
     }
 
+    runSuite("Meeting end detection — only a call that came back after the warning reads as a re-join") {
+        // The session offers a split on warningCleared when call-app audio
+        // (not the camera) is active again.
+        let teams: Set<String> = ["com.microsoft.teams2"]
+        let gone = MeetingCallActivitySnapshot(inputUsers: [], outputUsers: [], isReliable: true)
+        let back = MeetingCallActivitySnapshot(inputUsers: ["com.microsoft.teams2"], outputUsers: [], isReliable: true)
+        var brief = MeetingEndDetectionPolicy()
+        _ = brief.observe(gone.activity(in: teams, cameraInUse: false), sampledAt: 100, at: 100)
+        _ = brief.observe(gone.activity(in: teams, cameraInUse: false), sampledAt: 105, at: 105)
+        assertEqual(brief.observe(back.activity(in: teams, cameraInUse: false), sampledAt: 108, at: 108), .none,
+                    "a dropout shorter than the warning interval is the same call: nothing to offer")
+        var rejoin = MeetingEndDetectionPolicy()
+        _ = rejoin.observe(.inactive, sampledAt: 100, at: 100)
+        assertEqual(rejoin.observe(.inactive, sampledAt: 110, at: 110), .warningStarted, "the call app let go for the full interval")
+        assertEqual(rejoin.observe(back.activity(in: teams, cameraInUse: false), sampledAt: 118, at: 118), .warningCleared,
+                    "it came back during the countdown: a re-join, where a split is offered")
+        assertTrue(gone.activity(in: teams, cameraInUse: true) == .active,
+                   "the camera alone still holds off the stop")
+        assertTrue(gone.activity(in: teams, cameraInUse: false) == .inactive,
+                   "but without call-app audio it is not a re-join")
+    }
+
     runSuite("Meeting end detection — post-deadline inactivity is what permits the stop") {
         var policy = MeetingEndDetectionPolicy()
         _ = policy.observe(.inactive, sampledAt: 100, at: 100)
