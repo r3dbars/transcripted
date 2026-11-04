@@ -893,6 +893,76 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 2, "the next call must prompt once the recorded call has ended")
     }
 
+    await runSuite("MeetingPromptDetector.onSplitRequest — while recording, a different calendar meeting is offered, never the recorded one") {
+        let now = Date()
+        let detector = makeIsolatedDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [
+                makeMeetingPromptCalendarSnapshot(id: "a", provider: .teams, startsIn: 20, now: now),
+                makeMeetingPromptCalendarSnapshot(id: "b", provider: .teams, startsIn: 40, now: now),
+            ],
+            refreshesCalendarEventSnapshots: false
+        )
+        var recording = false
+        detector.shouldSkipPromptEvaluation = { recording }
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return .presented
+        }
+        var offered: [MeetingPromptDetector.Candidate] = []
+        detector.onSplitRequest = { candidate in
+            offered.append(candidate)
+            return true
+        }
+
+        await detector.evaluate()
+        guard let recorded = box.candidate else {
+            assertTrue(false, "the first meeting should prompt while nothing records")
+            return
+        }
+        assertEqual(recorded.id, "calendar:a", "the earlier meeting prompts first")
+        assertTrue(offered.isEmpty, "nothing is offered as a split while nothing records")
+        detector.markAccepted(candidate: recorded)
+        recording = true
+
+        await detector.evaluate()
+        assertEqual(offered.map(\.id), ["calendar:b"], "the other meeting is offered as a split; the recorded one is not")
+        assertEqual(offered.first?.suggestedTranscriptTitle, "Design review", "the split offer carries the meeting's title")
+        assertEqual(box.promptCount, 1, "a split offer never raises the normal record prompt")
+
+        // Keep recording: the meeting is not offered again, during or after.
+        detector.declineSplit(candidate: offered[0])
+        offered.removeAll()
+        await detector.evaluate()
+        assertTrue(offered.isEmpty, "a kept-recording meeting is not offered again")
+        recording = false
+        await detector.evaluate()
+        assertEqual(box.promptCount, 1, "nor does it prompt once the recording stops")
+    }
+
+    await runSuite("MeetingPromptDetector.onSplitRequest — a refused offer is still a held-back prompt") {
+        let now = Date()
+        let detector = makeIsolatedDetector(
+            calendarAccessGranted: { true },
+            calendarEventSnapshots: [makeMeetingPromptCalendarSnapshot(id: "a", provider: .teams, startsIn: 20, now: now)],
+            refreshesCalendarEventSnapshots: false
+        )
+        detector.shouldSkipPromptEvaluation = { true }
+        let box = CandidateBox()
+        detector.onPromptSuppressed = { box.suppression = $0 }
+        var offers = 0
+        detector.onSplitRequest = { _ in
+            offers += 1
+            return false
+        }
+
+        await detector.evaluate()
+        assertEqual(offers, 1, "the session is asked")
+        assertEqual(box.suppression?.reason, .presentationBlocked, "a meeting the session turned down (its own) reports as held back")
+    }
+
     await runSuite("MeetingPromptDetector.markAccepted — a mic flap as the recorded call ends stays quiet") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }

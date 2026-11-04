@@ -252,6 +252,16 @@ extension MeetingPromptDetector {
         recordedCallQuietCutPending = false
     }
 
+    /// Keep recording on a split offer: this event is not offered again,
+    /// before or after the recording stops. Not a Not now, so no provider
+    /// quiet and no dismiss streak.
+    func declineSplit(candidate: Candidate) {
+        let until = candidate.endDate.addingTimeInterval(MeetingPromptHeuristics.calendarReminderPostStartGrace)
+        snoozedUntil[candidate.id] = until
+        pendingUntil[candidate.id] = until
+        cooldownReasons[candidate.id] = "split_declined"
+    }
+
     /// Auto-start already reported `.autoStarted` but capture never began.
     /// Undo the early `markAccepted`, drop the 90-second pending window, then
     /// show the island prompt so the user is not left in a silent wait.

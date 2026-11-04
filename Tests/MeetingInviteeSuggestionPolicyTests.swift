@@ -32,6 +32,15 @@ func testMeetingInviteeSuggestionPolicy() {
         assertEqual(match(startedMinutesIntoEvent: 4, [hour]), hour, "starting a few minutes late should still match")
     }
 
+    runSuite("MeetingInviteeSuggestionPolicy.startsTogether tells a recording's own event from the next one") {
+        assertTrue(MeetingInviteeSuggestionPolicy.startsTogether(eventStart: start, recordingStart: start.addingTimeInterval(-30)),
+                   "a recording started from the pop-up is that event's")
+        assertTrue(MeetingInviteeSuggestionPolicy.startsTogether(eventStart: start, recordingStart: start.addingTimeInterval(4 * 60)),
+                   "a few minutes late is still that event's")
+        assertFalse(MeetingInviteeSuggestionPolicy.startsTogether(eventStart: start.addingTimeInterval(30 * 60), recordingStart: start),
+                    "a meeting starting half an hour into the recording is a new one")
+    }
+
     runSuite("MeetingInviteeSuggestionPolicy ignores a later call inside a long calendar slot") {
         let hour = event(from: 0, minutes: 60, names: ["Sam Lee", "Priya Shah"])
         assertNil(
