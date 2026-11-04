@@ -75,12 +75,14 @@ final class CallSpeakerActivityRecorder {
         var isAccessibilityTrusted: @MainActor () -> Bool
         var reader: CallSpeakerWindowReading
         var clock: CallSpeakerPollClock
+        var hostClock: CallSpeakerHostClock = .live
     }
 
     private let environment: Environment
     private var task: Task<Void, Never>?
     private var session: UUID?
     private var origin: ContinuousClock.Instant?
+    private var originHostTime: UInt64 = 0
     private var accumulator = CallSpeakerActivityAccumulator()
     private var gatedChecks = 0
     private var hasCurrentRoster = false
@@ -102,6 +104,7 @@ final class CallSpeakerActivityRecorder {
         self.session = session
         self.recordingStartedAt = recordingStartedAt
         origin = environment.clock.now()
+        originHostTime = environment.hostClock.now()
         accumulator = CallSpeakerActivityAccumulator()
         gatedChecks = 0
         hasCurrentRoster = false
@@ -112,7 +115,7 @@ final class CallSpeakerActivityRecorder {
     }
 
     /// Stops polling and returns what was seen, or nil when nothing was.
-    func stop() -> CallSpeakerActivity? {
+    func stop() -> CallSpeakerObservedActivity? {
         guard let task else { return nil }
         task.cancel()
         self.task = nil
@@ -127,7 +130,11 @@ final class CallSpeakerActivityRecorder {
             sawSpeakingIndicator: activity.sawSpeakingIndicator
         )
         guard !activity.isEmpty || activity.sawSpeakingIndicator || !activity.selfNames.isEmpty else { return nil }
-        return activity
+        return CallSpeakerObservedActivity(
+            originHostTime: originHostTime,
+            ticksPerSecond: environment.hostClock.ticksPerSecond,
+            relativeActivity: activity
+        )
     }
 
     private func elapsed() -> Double {
@@ -171,20 +178,30 @@ final class CallSpeakerActivityRecorder {
 
             let reader = environment.reader
             let readStart = elapsed()
+            let hostStart = environment.hostClock.now()
             let result = await Task.detached(priority: .utility) { () -> (Bool, CallSpeakerSnapshot) in
                 let read = await reader.read(session: session)
                 guard read.supportedAppRunning else { return (false, .empty(.noWindow)) }
                 return (true, CallSpeakerSnapshotBuilder.build(read.windows))
             }.value
             guard isCurrent(session) else { return }
-            let readEnd = elapsed()
+            let hostEnd = environment.hostClock.now()
 
             guard result.0 else {
                 accumulator.pause()
                 guard await sleep(seconds: Self.gatedRecheckInterval) else { return }
                 continue
             }
-            accumulator.add(result.1, at: readStart + (readEnd - readStart) / 2)
+            guard hostStart >= originHostTime, hostEnd >= hostStart,
+                  environment.hostClock.ticksPerSecond.isFinite,
+                  environment.hostClock.ticksPerSecond > 0 else {
+                accumulator.pause()
+                guard await sleep(seconds: Self.gatedRecheckInterval) else { return }
+                continue
+            }
+            let midpoint = hostStart + (hostEnd - hostStart) / 2
+            let observedSeconds = Double(midpoint - originHostTime) / environment.hostClock.ticksPerSecond
+            accumulator.add(result.1, at: observedSeconds)
             noteRoster(result.1)
 
             let interval = hasCurrentRoster ? Self.rosterPollInterval : Self.idlePollInterval

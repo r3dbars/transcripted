@@ -101,6 +101,7 @@ extension Audio {
         //
         // Returns nil for a mic-only recording, so it never builds the tap.
         if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+            let recordsTimeline = recordsSystemAudioTimeline
             let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
@@ -221,12 +222,16 @@ extension Audio {
                     )
                     FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                     let installed = strongSelf.systemAudioFileQueue.sync {
-                        strongSelf.systemAudioCaptureAttemptOwnership.install(
+                        let installed = strongSelf.systemAudioCaptureAttemptOwnership.install(
                             file,
                             generation: sessionGeneration,
                             capture: captureAttempt,
                             fileURL: fileURL
                         )
+                        if installed && recordsTimeline {
+                            captureAttempt.writeTimeline.install(writer: file, generation: sessionGeneration)
+                        }
+                        return installed
                     }
                     guard installed else {
                         file.close()
@@ -248,14 +253,14 @@ extension Audio {
 
                     // Step 4: Now start the I/O proc with a lightweight callback
                     // The file already exists, so callback only needs to copy+write
-                    let started = try captureAttempt.startIfNotCancelled { [weak self] systemBuffer in
+                    let started = try captureAttempt.startTimedIfNotCancelled { [weak self] systemBuffer, timing in
                         captureAttempt.observeSignal(systemBuffer)
                         guard let self = self else { return }
                         guard sessionGeneration == self.recordingSessionGeneration else {
                             // Only explicit synchronous finish can deliver the
                             // predecessor tail. Capture its writer, never look up
                             // a newer recording's mutable ownership or format.
-                            captureAttempt.enqueueFinishingBuffer(systemBuffer, writer: file, queue: self.systemAudioFileQueue) { error in
+                            captureAttempt.enqueueFinishingBuffer(systemBuffer, timing: timing, writer: file, queue: self.systemAudioFileQueue) { error in
                                     self.recordSystemWriteFailure(error, generation: sessionGeneration, bufferNumber: 0)
                             }
                             return
@@ -318,7 +323,7 @@ extension Audio {
                             )
                             return
                         case .closed:
-                            captureAttempt.enqueueFinishingBuffer(bufferForAsyncUse, writer: file, queue: self.systemAudioFileQueue) { error in
+                            captureAttempt.enqueueFinishingBuffer(bufferForAsyncUse, timing: timing, writer: file, queue: self.systemAudioFileQueue) { error in
                                 self.recordSystemWriteFailure(error, generation: sessionGeneration, bufferNumber: currentBufferCount)
                             }
                             return
@@ -343,7 +348,7 @@ extension Audio {
                                 // close. A successor can replace ownership while
                                 // this callback is in flight, so retain its exact
                                 // original writer instead of re-resolving it.
-                                try file.write(from: bufferForAsyncUse)
+                                try captureAttempt.writeTimeline.write(bufferForAsyncUse, to: file, timing: timing)
                                 self.recordSystemWriteSuccess(generation: sessionGeneration)
                             } catch {
                                 self.recordSystemWriteFailure(

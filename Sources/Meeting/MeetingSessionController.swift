@@ -350,6 +350,9 @@ extension MeetingSessionController {
         // the stopping state. Core retains this attempt's drained-tail signal;
         // a successor recording must not supply evidence for its predecessor.
         let stopEvidence = MeetingCaptureHealthEvidence.make(capture: capture)
+        callSpeakerNames.recordingFinalized(
+            timeline: stopResult.systemAudioTimeline, at: recordingSnapshot.recordingStartedAt
+        )
         let observedSystemSignal = recordingSnapshot.healthInfo.systemAudioSignalVerified == true
             || stopEvidence.systemAudioSignalVerified
         let finalizedSystemSignalVerified = recordingSnapshot.systemSignalEvidence(observed: observedSystemSignal)
@@ -675,6 +678,9 @@ extension MeetingSessionController {
 
         let recordingSnapshot = makeRecordingStopSnapshot()
         let snapshotTakenAt = Date()
+        callSpeakerNames.recordingFinalized(
+            timeline: stopResult.systemAudioTimeline, at: recordingSnapshot.recordingStartedAt
+        )
         unexpectedCaptureStopEvidence = nil
         let files = (micURL: stopResult.micURL, systemURL: stopResult.systemURL)
         let failureMessage = capture.errorMessage

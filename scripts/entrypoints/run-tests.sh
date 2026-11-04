@@ -610,6 +610,7 @@ APP_SOURCES=(
     "Sources/Meeting/CallSpeaker/CallSpeakerReadPlan.swift"
     "Sources/Meeting/CallSpeaker/CallSpeakerTileParser.swift"
     "Sources/Meeting/CallSpeaker/CallSpeakerActivityAccumulator.swift"
+    "Sources/Meeting/CallSpeaker/CallSpeakerObservedActivity.swift"
     "Sources/Meeting/CallSpeaker/CallSpeakerActivityStore.swift"
     "Sources/Meeting/CallSpeaker/CallSpeakerActivityRecorder.swift"
     "Sources/Meeting/MeetingPromptLearnedBackoff.swift"

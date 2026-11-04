@@ -18,7 +18,13 @@ struct CallSpeakerActivityStore: Sendable {
 
     struct Entry: Sendable {
         let recordingStartedAt: Date
-        let activity: CallSpeakerActivity
+        let activity: CallSpeakerActivity?
+        let observation: CallSpeakerObservedActivity?
+        var timeline: RecordedSystemAudioTimeline?
+
+        func alignedActivity() -> CallSpeakerActivity? {
+            observation?.aligned(to: timeline) ?? activity
+        }
     }
 
     let capacity: Int
@@ -32,16 +38,31 @@ struct CallSpeakerActivityStore: Sendable {
 
     mutating func put(_ activity: CallSpeakerActivity, recordingStartedAt: Date) {
         drop(recordingStartedAt: recordingStartedAt)
-        entries.append(Entry(recordingStartedAt: recordingStartedAt, activity: activity))
+        entries.append(Entry(recordingStartedAt: recordingStartedAt, activity: activity, observation: nil))
         if entries.count > capacity {
             entries.removeFirst(entries.count - capacity)
         }
     }
 
+    mutating func put(_ observation: CallSpeakerObservedActivity, recordingStartedAt: Date) {
+        drop(recordingStartedAt: recordingStartedAt)
+        entries.append(Entry(recordingStartedAt: recordingStartedAt, activity: nil, observation: observation))
+        if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
+    }
+
+    mutating func attach(_ timeline: RecordedSystemAudioTimeline?, recordingStartedAt: Date?) {
+        guard let index = index(for: recordingStartedAt) else { return }
+        entries[index].timeline = timeline
+    }
+
+    mutating func takeEntry(recordingStartedAt: Date?) -> Entry? {
+        guard let index = index(for: recordingStartedAt) else { return nil }
+        return entries.remove(at: index)
+    }
+
     /// The activity for a recording, removed so it is handed out once.
     mutating func take(recordingStartedAt: Date?) -> CallSpeakerActivity? {
-        guard let index = index(for: recordingStartedAt) else { return nil }
-        return entries.remove(at: index).activity
+        takeEntry(recordingStartedAt: recordingStartedAt)?.alignedActivity()
     }
 
     /// The pipeline's hand-out: the activity for a recording, or nil (and the

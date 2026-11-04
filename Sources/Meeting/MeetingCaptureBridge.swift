@@ -177,6 +177,7 @@ final class MeetingCaptureBridge: ObservableObject {
         if audio.isRecording { return true }
         audio.recordingLanguageSelection = languageSelection
         audio.capturesSystemAudio = capturesSystemAudio
+        audio.recordsSystemAudioTimeline = CallSpeakerNamesPreferences.isEnabled()
         pendingStartRequiresSystemAudio = capturesSystemAudio
 
         // Keep the immediately preceding timed-out stop across this start so
@@ -586,7 +587,7 @@ final class MeetingCaptureBridge: ObservableObject {
     }
 
     private func wireCallbacks() {
-        audio.onRecordingCompleteWithGeneration = { [weak self] generation, micURL, systemURL, disposition in
+        audio.onRecordingCompleteWithTimeline = { [weak self] generation, micURL, systemURL, disposition, timeline in
             // This closure fires on whichever queue Core's Audio dispatches from.
             // Hop to main and resume the continuation exactly once.
             Task { @MainActor [weak self] in
@@ -597,7 +598,8 @@ final class MeetingCaptureBridge: ObservableObject {
                     didTimeOut: false,
                     finalizationOwner: disposition == .journalRecoveryOwned
                         ? .recordingJournalRecovery
-                        : .audioFinalizer
+                        : .audioFinalizer,
+                    systemAudioTimeline: timeline
                 )
 
                 switch self.timedOutStopCompletions.resolve(generation: generation) {
