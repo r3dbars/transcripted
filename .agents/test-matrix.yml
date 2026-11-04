@@ -168,6 +168,20 @@ rules:
       - "bash -n scripts/dev/test-speaker-settings-model.sh"
       - "bash scripts/dev/test-speaker-settings-model.sh"
 
+  # The real Speakers page scrolled top to bottom over fictional people; fails
+  # on a hang, a scroll jump-back, or a list that never reaches its bottom.
+  - paths:
+      - "Sources/UI/Settings/SpeakerPeople*.swift"
+      - "Sources/UI/Settings/SpeakerWhoSpoke*.swift"
+      - "Sources/UI/Settings/SpeakerPrintDirectory.swift"
+      - "Sources/UI/Settings/Pages/PeopleSettingsPage.swift"
+      - "Sources/UI/Overlay/VoicePrint*.swift"
+      - "Tests/UI/SpeakersDirectoryScrollSmoke.swift"
+      - "scripts/dev/test-speakers-directory-scroll.sh"
+    checks:
+      - "bash -n scripts/dev/test-speakers-directory-scroll.sh"
+      - "bash scripts/dev/test-speakers-directory-scroll.sh"
+
   - paths:
       - "run-daily-audio-reliability.sh"
       - "scripts/ops/daily-audio-reliability-check.sh"

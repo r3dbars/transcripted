@@ -152,6 +152,35 @@ extension TranscriptedSettingsView {
         }
     }
 
+    /// Stars or unstars a saved meeting (its ⋯ menu or the opened card's
+    /// header). The star lives in the transcript's frontmatter; the silent
+    /// refresh rereads it (keeping the loaded pages and the open card), so
+    /// the row, the Starred filter and retention all agree with the file.
+    func toggleMeetingStar(_ item: RecentMeetingItem) {
+        let starred = !item.isStarred
+        trackSettingsAction(starred ? "star_meeting" : "unstar_meeting", page: .home)
+        let transcriptURL = item.transcriptURL
+        let starTask = Task.detached(priority: .userInitiated) {
+            guard let captureID = item.captureID else { throw MeetingStarError.identityUnresolved }
+            try MeetingStarFrontmatter.setStarred(starred, transcriptAt: transcriptURL,
+                expectedCaptureID: captureID,
+                authorizedDirectory: { MeetingStoragePaths.speakerReviewTranscriptsFolder })
+        }
+        Task { @MainActor in
+            do {
+                try await starTask.value
+                homeViewModel.refreshAfterCaptureArtifactsChanged()
+            } catch {
+                homeViewModel.refreshAfterCaptureArtifactsChanged()
+                presentHomeDeleteFailure(
+                    title: starred ? "Could not star meeting" : "Could not unstar meeting",
+                    error: error,
+                    retry: { toggleMeetingStar(item) }
+                )
+            }
+        }
+    }
+
     /// Applies the staged inline/batch picker result. Transcript-local rows are
     /// rewritten together in one file write; saved identities continue through
     /// the canonical transactional global rename/merge service.
@@ -493,15 +522,18 @@ extension TranscriptedSettingsView {
 
     var homeMeetingDaySections: [HomeDaySection<HomeMeetingListItem>] {
         let query = homeMeetingSearchQuery
-        // While searching, rows come from the full-library search. Until its
-        // first pass lands, filter the loaded slice so typing feels instant.
-        // Either way the current query is re-applied, so a pass that finished
-        // for an older query never shows rows that don't match.
-        let searchResults = HomeMeetingSearchPaging.isActive(query: query)
+        let starredOnly = homeStarredOnly
+        // While searching (or showing Starred), rows come from the
+        // full-library search. Until its first pass lands, filter the loaded
+        // slice so typing feels instant. Either way the current query and
+        // Starred filter are re-applied, so a pass that finished for an older
+        // query never shows rows that don't match.
+        let searchResults = HomeMeetingSearchPaging.isActive(query: query, starredOnly: starredOnly)
             ? homeViewModel.meetingSearchResults
             : nil
-        let savedSource = searchResults
-            ?? homeViewModel.meetingDaySections.flatMap { $0.items }
+        let savedSource = (searchResults
+            ?? homeViewModel.meetingDaySections.flatMap { $0.items })
+            .filter { !starredOnly || $0.isStarred }
         // This runs on every body pass of the window. With no query every row
         // matches, so skip building each row's date words; otherwise split the
         // query once instead of once per row.
@@ -515,9 +547,11 @@ extension TranscriptedSettingsView {
                 )
             })
             .map(HomeMeetingListItem.saved)
+        // Failed meetings can't be starred, so Starred hides them.
+        let failedSource = starredOnly ? [] : meetingSession.failedMeetings
         let failedMeetings = (tokens.isEmpty
-            ? meetingSession.failedMeetings
-            : meetingSession.failedMeetings.filter {
+            ? failedSource
+            : failedSource.filter {
                 HomeMeetingListFilter.matches(
                     tokens: tokens,
                     haystack: HomeMeetingListFilter.haystack(for: Self.searchFields(for: $0))
