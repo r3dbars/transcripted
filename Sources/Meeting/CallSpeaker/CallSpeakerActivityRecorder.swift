@@ -23,11 +23,18 @@ import TranscriptedCore
 
 /// What one read of the supported apps found.
 struct CallSpeakerReadResult: Sendable {
+    enum Completeness: Sendable, Equatable {
+        case complete
+        case incomplete
+    }
+
     /// False when no supported call app (or browser) is running.
     var supportedAppRunning: Bool
     var windows: [CallSpeakerWindowRead]
+    /// Incomplete scans may have omitted another call. Never name from them.
+    var completeness: Completeness
 
-    static let nothingRunning = CallSpeakerReadResult(supportedAppRunning: false, windows: [])
+    static let nothingRunning = CallSpeakerReadResult(supportedAppRunning: false, windows: [], completeness: .complete)
 }
 
 /// Reads the meeting windows of the running call apps. `session` changes
@@ -182,7 +189,7 @@ final class CallSpeakerActivityRecorder {
             let result = await Task.detached(priority: .utility) { () -> (Bool, CallSpeakerSnapshot) in
                 let read = await reader.read(session: session)
                 guard read.supportedAppRunning else { return (false, .empty(.noWindow)) }
-                return (true, CallSpeakerSnapshotBuilder.build(read.windows))
+                return (true, CallSpeakerSnapshotBuilder.build(read))
             }.value
             guard isCurrent(session) else { return }
             let hostEnd = environment.hostClock.now()

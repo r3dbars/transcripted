@@ -20,12 +20,13 @@ func testCallSpeakerWindowMatcher() {
         for title in meetTitles {
             assertEqual(
                 CallSpeakerWindowMatcher.match(title: title, host: .browser),
-                CallSpeakerWindowMatch(app: .browserMeet, meetingKey: "meet:abc-defg-hij"),
+                CallSpeakerWindowMatch(app: .browserMeet, meetingKey: "meet:abc-defg-hij", meetCode: "abc-defg-hij"),
                 "\"\(title)\" is the Meet call abc-defg-hij"
             )
         }
         let named = CallSpeakerWindowMatcher.match(title: "Meet - Design review - Google Chrome", host: .browser)
         assertEqual(named?.app, .browserMeet, "a Meet tab titled with the meeting name is still a Meet call")
+        assertEqual(named?.meetCode, nil, "a common meeting title is not an authoritative call code")
         assertTrue(
             named?.meetingKey != CallSpeakerWindowMatcher.match(title: "Meet - Budget review - Google Chrome", host: .browser)?.meetingKey,
             "two Meet tabs with different titles are different meetings"
@@ -57,7 +58,7 @@ func testCallSpeakerWindowMatcher() {
         assertEqual(
             CallSpeakerWindowMatcher.match(title: "Meeting compact view | Weekly sync | Microsoft Teams", host: .teamsDesktop),
             CallSpeakerWindowMatch(app: .teamsDesktop, meetingKey: "teams-desktop", isCompactView: true),
-            "the Teams compact view belongs to the same meeting as the main window, flagged as compact"
+            "the compact window is recognized; the provider key is not a call identity"
         )
         assertEqual(
             CallSpeakerWindowMatcher.match(title: "Weekly sync | Microsoft Teams", host: .teamsDesktop),
