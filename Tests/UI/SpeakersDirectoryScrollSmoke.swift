@@ -1,4 +1,5 @@
 import AppKit
+import CryptoKit
 import Foundation
 import SwiftUI
 import TranscriptedCore
@@ -48,8 +49,17 @@ import TranscriptedCore
     /// Layout passes allowed in a quiet second once scrolling stops (seen: 0).
     static let maximumIdleLayouts = 3
 
+    private static var scenarioManifest: String {
+        scenarios.map(\.label).joined(separator: "\n") + "\n"
+    }
+
     static func main() {
         precondition(ProcessInfo.processInfo.environment["TRANSCRIPTED_AUTOMATED_HARNESS"] == "1")
+        if CommandLine.arguments.dropFirst() == ["--list-scenarios"] {
+            print(scenarioManifest, terminator: "")
+            return
+        }
+        guard CommandLine.arguments.count == 1 else { exit(2) }
         setvbuf(stdout, nil, _IOLBF, 0)
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
@@ -58,7 +68,13 @@ import TranscriptedCore
         CFRunLoopPerformBlock(CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue) {
             MainActor.assumeIsolated {
                 // Every size runs, so one report names each size that breaks.
-                let failures = scenarios.compactMap { run($0, guardian: guardian) }
+                var completed = 0
+                let failures = scenarios.compactMap { scenario in
+                    let failure = run(scenario, guardian: guardian)
+                    completed += 1
+                    return failure
+                }
+                recordCompletion(completed: completed, failed: failures.count)
                 for failure in failures { print("FAIL: \(failure)") }
                 guard failures.isEmpty else { exit(1) }
                 print("PASS: Speakers directory scroll smoke (\(scenarios.count) list sizes)")
@@ -66,6 +82,34 @@ import TranscriptedCore
             }
         }
         app.run()
+        print("FAIL: AppKit returned before the scroll scenarios completed")
+        exit(1)
+    }
+
+    /// Each selected run() invocation reports one scenario outcome to the
+    /// shared completion guard. Exit zero alone is never completion proof.
+    private static func recordCompletion(completed: Int, failed: Int) {
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment["TRANSCRIPTED_FAST_TEST_COMPLETION_PATH"],
+              let runID = environment["TRANSCRIPTED_FAST_TEST_COMPLETION_RUN_ID"] else {
+            print("FAIL: scroll completion contract is missing")
+            exit(1)
+        }
+        let digest = SHA256.hash(data: Data(scenarioManifest.utf8))
+            .map { String(format: "%02x", $0) }.joined()
+        let receipt: [String: Any] = [
+            "version": 1, "run_id": runID, "selection_digest": digest,
+            "selected_functions": scenarios.count, "executed_functions": completed,
+            "assertions": completed, "passed_assertions": completed - failed,
+            "failed_assertions": failed, "quarantined_suites": 0,
+        ]
+        do {
+            let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+        } catch {
+            print("FAIL: scroll completion receipt could not be written")
+            exit(1)
+        }
     }
 
     /// The fixture itself is broken; nothing after this would mean anything.
