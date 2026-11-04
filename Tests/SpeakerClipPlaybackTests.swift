@@ -243,7 +243,7 @@ func testSpeakerClipPlayback() async {
 private final class FakeRetainedAudioPlayer: SpeakerRetainedAudioPlayer {
     private struct Seek {
         let time: Double
-        let completion: @MainActor (Bool) -> Void
+        let completion: @MainActor @Sendable (Bool) -> Void
     }
 
     let recordingDuration: Double
@@ -252,7 +252,7 @@ private final class FakeRetainedAudioPlayer: SpeakerRetainedAudioPlayer {
     private(set) var position = 0.0
     private(set) var furthestPosition = 0.0
     private(set) var isPlaying = false
-    private var endCallbacks: [@MainActor () -> Void] = []
+    private var endCallbacks: [@MainActor @Sendable () -> Void] = []
     private var pendingSeeks: [Seek] = []
 
     var pendingSeekTimes: [Double] { pendingSeeks.map(\.time) }
@@ -262,14 +262,14 @@ private final class FakeRetainedAudioPlayer: SpeakerRetainedAudioPlayer {
         self.recordingDuration = recordingDuration
     }
 
-    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor () -> Void) {
+    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor @Sendable () -> Void) {
         loadedURL = url
         self.endTime = endTime
         position = 0
         endCallbacks.append(onEnd)
     }
 
-    func seek(to time: Double, completion: @escaping @MainActor (Bool) -> Void) {
+    func seek(to time: Double, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
         pendingSeeks.append(Seek(time: time, completion: completion))
     }
 
