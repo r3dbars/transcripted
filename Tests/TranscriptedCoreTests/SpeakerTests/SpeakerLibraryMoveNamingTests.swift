@@ -337,7 +337,8 @@ private final class Fixture {
                                           speechToText: ReviewSTT(), diarization: ReviewDiarizer(),
                                           speakerStore: store, speakerClipsDirectory: scratch,
                                           cleanupDirectories: [scratch],
-                                          transcriptDirectoryProvider: { currentDirectory.get() })
+                                          transcriptDirectoryProvider: { currentDirectory.get() },
+                                          statsStore: StatsDatabase(path: paths.statsDB.path))
         original = oldLibrary.appendingPathComponent("Original.md")
         mic = scratch.appendingPathComponent("mic.wav")
         system = scratch.appendingPathComponent("system.wav")

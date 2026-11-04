@@ -1014,7 +1014,8 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             speakerStore: SpeakerDatabase(path: paths.speakerDB.path),
             speakerClipsDirectory: paths.speakerClips,
             cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
-            retainedAudioDirectory: retainedAudioDirectory
+            retainedAudioDirectory: retainedAudioDirectory,
+            statsStore: MetadataCapturingStatsStore()
         )
         return (manager, paths)
     }

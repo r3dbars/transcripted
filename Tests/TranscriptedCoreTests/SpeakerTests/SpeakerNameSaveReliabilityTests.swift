@@ -893,7 +893,8 @@ final class SpeakerNameSaveReliabilityTests: XCTestCase {
             diarization: SaveReliabilityDiarizationStub(),
             speakerStore: speakerDB,
             speakerClipsDirectory: paths.speakerClips,
-            cleanupDirectories: [paths.audioCaptures, paths.speakerClips]
+            cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
+            statsStore: StatsDatabase(path: paths.statsDB.path)
         )
         return SaveReliabilityHarness(paths: paths, speakerDB: speakerDB, failedManager: failedManager, manager: manager)
     }
