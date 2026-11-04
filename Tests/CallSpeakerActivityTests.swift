@@ -110,7 +110,8 @@ private func teamsCall(speaking speaker: String?, roster: [String] = ["Ana Ruiz"
             match: CallSpeakerWindowMatch(app: .teamsDesktop, meetingKey: "teams-desktop"),
             tree: CallSpeakerAXNode(role: "AXWindow", children: tiles),
             truncated: false
-        )]
+        )],
+        completeness: .complete
     )
 }
 
@@ -202,7 +203,7 @@ func testCallSpeakerActivity() async {
     }
 
     runSuite("CallSpeakerActivityAccumulator: withheld polls end evidence at the last trusted observation") {
-        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated] {
+        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated, .incompleteScan] {
             var accumulator = CallSpeakerActivityAccumulator()
             let withheld = CallSpeakerSnapshot(roster: ["Ana Ruiz"], speaking: [], selfNames: [], status: status)
             accumulator.add(speaking(["Ana Ruiz"]), at: 0)
@@ -221,7 +222,7 @@ func testCallSpeakerActivity() async {
     }
 
     runSuite("CallSpeakerActivityAccumulator: ambiguous gaps cannot clear the naming evidence bar") {
-        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated] {
+        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated, .incompleteScan] {
             var accumulator = CallSpeakerActivityAccumulator()
             for time in [0.0, 2.0, 4.0] {
                 accumulator.add(speaking(["Ana Ruiz"]), at: time)
@@ -365,13 +366,29 @@ func testCallSpeakerActivity() async {
 
     await runSuite("CallSpeakerActivityRecorder: polls every 3 s without a roster") {
         let clock = VirtualPollClock()
-        let empty = CallSpeakerReadResult(supportedAppRunning: true, windows: [])
+        let empty = CallSpeakerReadResult(supportedAppRunning: true, windows: [], completeness: .complete)
         let reader = FakeCallSpeakerReader(empty, clock: clock)
         let recorder = makeRecorder(reader: reader, clock: clock)
         recorder.start(recordingStartedAt: Date())
         await reader.waitForReads(3)
         _ = recorder.stop()
         assertEqual(Array(await reader.readTimes.prefix(3)), [0, 3, 6], "slow cadence with no meeting window")
+    }
+
+    await runSuite("CallSpeakerActivityRecorder: incomplete read results never become naming activity") {
+        let clock = VirtualPollClock()
+        var partial = teamsCall(speaking: "Ana Ruiz")
+        partial.completeness = .incomplete
+        let reader = FakeCallSpeakerReader(partial, clock: clock)
+        let recorder = makeRecorder(reader: reader, clock: clock)
+        recorder.start(recordingStartedAt: Date())
+        await runUntilVirtualTime(clock, passes: 12)
+        let activity = recorder.stop()
+        assertTrue((recorder.lastSummary?.polls ?? 0) > 0, "the reader actually returned partial windows")
+        assertTrue(activity == nil, "partial windows never provide a participant name or interval")
+        assertEqual(recorder.lastSummary?.statusCounts[.incompleteScan], recorder.lastSummary?.polls)
+        assertEqual(recorder.lastSummary?.intervalCount, 0)
+        assertEqual(recorder.lastSummary?.rosterCount, 0)
     }
 
     await runSuite("CallSpeakerActivityRecorder: polls every 1 s once a roster shows, into activity") {

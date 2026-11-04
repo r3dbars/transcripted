@@ -62,7 +62,7 @@ struct CallSpeakerActivityAccumulator: Sendable {
         pollCount += 1
         statusCounts[snapshot.status, default: 0] += 1
 
-        if snapshot.status != .multipleWindows {
+        if snapshot.status != .multipleWindows && snapshot.status != .incompleteScan {
             selfNames.formUnion(snapshot.selfNames)
             let rosterIsTrusted = (snapshot.app?.detectsSelf ?? true) || !snapshot.selfNames.isEmpty
             for name in snapshot.roster where rosterIsTrusted && !roster.contains(name) {
