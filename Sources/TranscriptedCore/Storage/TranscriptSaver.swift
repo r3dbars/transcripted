@@ -484,7 +484,11 @@ public class TranscriptSaver {
             // header could conceal a star and must not be treated as unstarred.
             let handle = try FileHandle(forReadingFrom: url)
             defer { try? handle.close() }
-            if try handle.read(upToCount: 4) == Data("---\n".utf8) { throw CocoaError(.fileReadCorruptFile) }
+            let prefix = try handle.read(upToCount: 8) ?? Data()
+            let headerPrefixes = ["---\n", "---\r\n", "\u{FEFF}---\n", "\u{FEFF}---\r\n"]
+            if headerPrefixes.contains(where: { prefix.starts(with: Data($0.utf8)) }) {
+                throw CocoaError(.fileReadCorruptFile)
+            }
             return nil
         }
         return TranscriptFrontmatter.isStarred(values: values)

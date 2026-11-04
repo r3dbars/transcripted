@@ -88,11 +88,16 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
     }
 
     func testMalformedReplacementMetadataDoesNotDropProtection() throws {
-        let url = directory.appendingPathComponent("Malformed.md")
-        let original = "---\nstarred: true\n"
-        try original.write(to: url, atomically: true, encoding: .utf8)
-        XCTAssertNil(replace(url))
-        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original)
+        // Shared parsing is LF-only. Other recognizable YAML prefixes remain
+        // unknown metadata rather than becoming permission to overwrite.
+        let prefixes = ["---\n", "---\r\n", "\u{FEFF}---\n", "\u{FEFF}---\r\n"]
+        for (index, prefix) in prefixes.enumerated() {
+            let url = directory.appendingPathComponent("Malformed-\(index).md")
+            let original = prefix + "starred: true\n"
+            try original.write(to: url, atomically: true, encoding: .utf8)
+            XCTAssertNil(replace(url))
+            XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original)
+        }
     }
 
     func testMissingReservedReplacementIsNotRecreated() throws {
