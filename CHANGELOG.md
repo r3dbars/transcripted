@@ -16,6 +16,9 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
+- Scrolling a long list on the Speakers page no longer freezes the app on
+  macOS 26 or jumps the list back on macOS 27. The whole list is now one lazy
+  stack instead of one per section.
 - Writing > Edit setup can turn both features off and save the disabled state
   without continuing through model, keyboard or permission setup.
 - Opened meeting cards keep Copy, Show in Finder and the more menu in the

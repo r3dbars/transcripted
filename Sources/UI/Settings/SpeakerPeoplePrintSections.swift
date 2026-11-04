@@ -16,17 +16,22 @@ struct SpeakerPrintSectionsView: View {
 
     var body: some View {
         let sections = SpeakerPrintDirectory.sections(profiles) { model.namingStanding(for: $0) }
-        VStack(alignment: .leading, spacing: 18) {
+        // One lazy stack for the whole directory, headers as Section headers.
+        // A LazyVStack per section inside a VStack never settles its lazy
+        // placement on a long list: macOS 26 hangs mid-scroll, macOS 27 jumps
+        // the scroll back (scripts/dev/test-speakers-directory-scroll.sh). The
+        // 16 pt header padding plus the 2 pt row spacing keeps the old 18 pt
+        // gap between sections. Headers stay VoiceOver headings (.isHeader).
+        LazyVStack(alignment: .leading, spacing: 2) {
             ForEach(sections, id: \.section) { entry in
-                VStack(alignment: .leading, spacing: 2) {
-                    SpeakerPrintSectionHeader(section: entry.section, members: entry.items)
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(entry.items, id: \.id) { profile in
-                            SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
-                        }
+                Section {
+                    ForEach(entry.items, id: \.id) { profile in
+                        SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
                     }
+                } header: {
+                    SpeakerPrintSectionHeader(section: entry.section, members: entry.items)
+                        .padding(.top, entry.section == sections.first?.section ? 0 : 16)
                 }
-                .accessibilityElement(children: .contain)
             }
         }
     }
