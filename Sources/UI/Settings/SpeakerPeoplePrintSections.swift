@@ -16,14 +16,19 @@ struct SpeakerPrintSectionsView: View {
 
     var body: some View {
         let sections = SpeakerPrintDirectory.sections(profiles) { model.namingStanding(for: $0) }
+        // Plain stacks, no LazyVStack: every row is laid out once, so the
+        // list's height is exact from the start. Each lazy layout tried here
+        // moved the scroll under the reader on macOS 26.6: a LazyVStack per
+        // section hung it mid-scroll (and jumped back on macOS 27), and one
+        // LazyVStack, with Section headers or with the titles as plain items,
+        // still jumped back about 1,400 pt now and then while it placed rows
+        // (scripts/dev/test-speakers-directory-scroll.sh).
         VStack(alignment: .leading, spacing: 18) {
             ForEach(sections, id: \.section) { entry in
                 VStack(alignment: .leading, spacing: 2) {
                     SpeakerPrintSectionHeader(section: entry.section, members: entry.items)
-                    LazyVStack(alignment: .leading, spacing: 2) {
-                        ForEach(entry.items, id: \.id) { profile in
-                            SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
-                        }
+                    ForEach(entry.items, id: \.id) { profile in
+                        SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
                     }
                 }
                 .accessibilityElement(children: .contain)
