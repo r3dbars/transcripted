@@ -58,10 +58,15 @@ enum MeetingMicGraphStartSequence {
 
     /// Meeting start's version of `run`. A failed format check, tap install
     /// or engine start (an `.checkFormat`/`.installTap` failure) gets one
-    /// `rebuild`: a fresh graph that runs settle and the locked steps again
-    /// into the segment already made. The retry is skipped when
-    /// `shouldRetry` rejects the error (a stopped start) or the settled
-    /// retry graph no longer fits that segment; the first failure is thrown.
+    /// `rebuild`: a fresh graph that runs settle and the locked steps again.
+    /// It records into the segment already made when `retryGraphFitsSegment`
+    /// says the formats match. Otherwise `remakeSegment` makes the segment
+    /// again for the retry graph. No tap has run, so the segment is still
+    /// empty, and a moved format is the usual reason the check failed:
+    /// AirPods switch to their 24 kHz call profile after the 48 kHz segment
+    /// was made, so the fresh graph comes back at 24 kHz. A failed remake is
+    /// a `.createSegment` failure. The retry is skipped when `shouldRetry`
+    /// rejects the error (a stopped start); the first failure is thrown.
     /// Device recovery has its own retry and keeps using `run`.
     static func runRetryingOnceOnFreshGraph<Graph, Segment>(
         _ graph: Graph,
@@ -72,7 +77,8 @@ enum MeetingMicGraphStartSequence {
         withinGraphLock: (Graph, () throws -> Void) throws -> Void,
         shouldRetry: (Error) -> Bool,
         rebuild: (_ failedGraph: Graph) throws -> Graph,
-        retryGraphFitsSegment: (_ segmentGraph: Graph, _ retryGraph: Graph) -> Bool
+        retryGraphFitsSegment: (_ segmentGraph: Graph, _ retryGraph: Graph) -> Bool,
+        remakeSegment: (_ retryGraph: Graph) throws -> Segment
     ) throws -> (graph: Graph, segment: Segment) {
         var settledGraph: Graph?
         var madeSegment: Segment?
@@ -106,20 +112,21 @@ enum MeetingMicGraphStartSequence {
             } catch {
                 throw failure
             }
-            guard retryGraphFitsSegment(failedGraph, retryGraph) else {
-                throw failure
+            var retrySegment = segment
+            if !retryGraphFitsSegment(failedGraph, retryGraph) {
+                retrySegment = try tagging(.createSegment) { try remakeSegment(retryGraph) }
             }
             try withoutActuallyEscaping(checkFormat) { checkFormat in
                 try withoutActuallyEscaping(installTap) { installTap in
                     try tagging(.installTap) {
                         try withinGraphLock(retryGraph) {
                             try tagging(.checkFormat) { try checkFormat(retryGraph) }
-                            try tagging(.installTap) { try installTap(retryGraph, segment) }
+                            try tagging(.installTap) { try installTap(retryGraph, retrySegment) }
                         }
                     }
                 }
             }
-            return (retryGraph, segment)
+            return (retryGraph, retrySegment)
         }
     }
 
