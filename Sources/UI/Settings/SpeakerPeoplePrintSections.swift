@@ -16,22 +16,22 @@ struct SpeakerPrintSectionsView: View {
 
     var body: some View {
         let sections = SpeakerPrintDirectory.sections(profiles) { model.namingStanding(for: $0) }
-        // One lazy stack for the whole directory, headers as Section headers.
-        // A LazyVStack per section inside a VStack never settles its lazy
-        // placement on a long list: macOS 26 hangs mid-scroll, macOS 27 jumps
-        // the scroll back (scripts/dev/test-speakers-directory-scroll.sh). The
-        // 16 pt header padding plus the 2 pt row spacing keeps the old 18 pt
-        // gap between sections. Headers stay VoiceOver headings (.isHeader).
-        LazyVStack(alignment: .leading, spacing: 2) {
+        // Plain stacks, no LazyVStack: every row is laid out once, so the
+        // list's height is exact from the start. Each lazy layout tried here
+        // moved the scroll under the reader on macOS 26.6: a LazyVStack per
+        // section hung it mid-scroll (and jumped back on macOS 27), and one
+        // LazyVStack, with Section headers or with the titles as plain items,
+        // still jumped back about 1,400 pt now and then while it placed rows
+        // (scripts/dev/test-speakers-directory-scroll.sh).
+        VStack(alignment: .leading, spacing: 18) {
             ForEach(sections, id: \.section) { entry in
-                Section {
+                VStack(alignment: .leading, spacing: 2) {
+                    SpeakerPrintSectionHeader(section: entry.section, members: entry.items)
                     ForEach(entry.items, id: \.id) { profile in
                         SpeakerPersonRow(profile: profile, model: model, expandedPersonID: $expandedPersonID)
                     }
-                } header: {
-                    SpeakerPrintSectionHeader(section: entry.section, members: entry.items)
-                        .padding(.top, entry.section == sections.first?.section ? 0 : 16)
                 }
+                .accessibilityElement(children: .contain)
             }
         }
     }

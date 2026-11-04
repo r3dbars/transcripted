@@ -37,6 +37,8 @@ import TranscriptedCore
         Scenario(named: 55, unnamed: 40, pendingMeetings: 4),
         Scenario(named: 55, unnamed: 18, pendingMeetings: 0),
         Scenario(named: 100, unnamed: 40, pendingMeetings: 0),
+        // Where one LazyVStack jumped back most often on macOS 26.6.2.
+        Scenario(named: 150, unnamed: 60, pendingMeetings: 6),
     ]
     static let stepPoints: CGFloat = 40
     /// Further than any real list here, so a stuck scroll fails instead of looping.
