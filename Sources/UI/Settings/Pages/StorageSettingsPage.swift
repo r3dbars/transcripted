@@ -39,8 +39,8 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let onApplyDictationAudioKeepWindow: (DictationAudioKeepWindow) -> Void
     let failureDetailsButton: (String?) -> FailureDetailsButton
 
-    @State private var pendingAudioRetentionWindow: AudioRetentionWindow?
-    @State private var pendingDictationAudioKeepWindow: DictationAudioKeepWindow?
+    /// Pending meeting and dictation audio windows, one slot each.
+    @State private var retentionPrompts = StorageRetentionPrompts()
     @State private var showReclaimableCacheCleanupConfirmation = false
 
     var body: some View {
@@ -267,15 +267,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         Binding(
             get: { audioRetentionWindow },
             set: { window in
-                guard window != audioRetentionWindow else { return }
-                if StorageConfirmationPolicy.meetingChoiceNeedsConfirmation(
-                    from: audioRetentionWindow,
-                    to: window
-                ) {
-                    pendingAudioRetentionWindow = window
-                } else {
-                    onApplyAudioRetentionWindow(window)
-                }
+                performRetention(retentionPrompts.pickMeeting(window, current: audioRetentionWindow))
             }
         )
     }
@@ -288,24 +280,25 @@ private extension StorageSettingsPage {
         Binding(
             get: { dictationAudioKeepWindow },
             set: { window in
-                guard window != dictationAudioKeepWindow else { return }
-                if dictationAudioKeepWindow.deletesKeptAudio(switchingTo: window) {
-                    pendingDictationAudioKeepWindow = window
-                } else {
-                    onApplyDictationAudioKeepWindow(window)
-                }
+                performRetention(retentionPrompts.pickDictation(window, current: dictationAudioKeepWindow))
             }
+        )
+    }
+
+    /// Routes an audio-window change to its own setting's callback only.
+    func performRetention(_ effect: StorageRetentionEffect) {
+        effect.perform(
+            applyMeeting: onApplyAudioRetentionWindow,
+            applyDictation: onApplyDictationAudioKeepWindow
         )
     }
 }
 
 private extension StorageSettingsPage {
     var confirmationStates: StorageConfirmationStates {
-        StorageConfirmationStates(
+        retentionPrompts.states(
             hasCaptureLibraryChoice: captureLibraryChoicePromptBinding.wrappedValue
                 && pendingCaptureLibraryChoice != nil,
-            pendingMeetingAudioWindow: pendingAudioRetentionWindow,
-            pendingDictationAudioWindow: pendingDictationAudioKeepWindow,
             wantsFreeUpSpace: showReclaimableCacheCleanupConfirmation
         )
     }
@@ -330,10 +323,8 @@ private extension StorageSettingsPage {
                 switch slot {
                 case .captureLibrary:
                     captureLibraryChoicePromptBinding.wrappedValue = false
-                case .meetingAudio:
-                    pendingAudioRetentionWindow = nil
-                case .dictationAudio:
-                    pendingDictationAudioKeepWindow = nil
+                case .meetingAudio, .dictationAudio:
+                    retentionPrompts.dismiss(slot)
                 case .freeUpSpace:
                     showReclaimableCacheCleanupConfirmation = false
                 }
@@ -359,18 +350,22 @@ private extension StorageSettingsPage {
             }
             Button("Cancel", role: .cancel) {}
         case .meetingAudio:
-            if let window = pendingAudioRetentionWindow {
+            // Built with the alert, so it holds this prompt's window whether
+            // SwiftUI runs the action before or after dismissal clears it.
+            let effect = retentionPrompts.confirmEffect(for: .meetingAudio)
+            if effect != .none {
                 Button("Delete Old Audio", role: .destructive) {
-                    onApplyAudioRetentionWindow(window)
+                    performRetention(effect)
                 }
             }
             // Return lands on the safe choice, as before.
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
         case .dictationAudio:
-            if let window = pendingDictationAudioKeepWindow {
+            let effect = retentionPrompts.confirmEffect(for: .dictationAudio)
+            if effect != .none {
                 Button("Delete Audio", role: .destructive) {
-                    onApplyDictationAudioKeepWindow(window)
+                    performRetention(effect)
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -390,9 +385,9 @@ private extension StorageSettingsPage {
         case .captureLibrary:
             Text(pendingCaptureLibraryChoice?.promptMessage ?? "")
         case .meetingAudio:
-            Text(pendingAudioRetentionWindow.map(StorageConfirmationPolicy.meetingAudioMessage(for:)) ?? "")
+            Text(retentionPrompts.pendingMeeting.map(StorageConfirmationPolicy.meetingAudioMessage(for:)) ?? "")
         case .dictationAudio:
-            Text(pendingDictationAudioKeepWindow.map(StorageConfirmationPolicy.dictationAudioMessage(for:)) ?? "")
+            Text(retentionPrompts.pendingDictation.map(StorageConfirmationPolicy.dictationAudioMessage(for:)) ?? "")
         case .freeUpSpace:
             Text(effectiveTranscriptionModelIsWhisper
                 ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."

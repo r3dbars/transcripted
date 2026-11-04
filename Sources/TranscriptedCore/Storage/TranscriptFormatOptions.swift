@@ -12,15 +12,21 @@ public struct TranscriptFormatOptions: Sendable, Equatable {
     /// library can list the import where the user expects it (today), while
     /// `date:`/`time:` keep the original recording time.
     public var importedAt: Date?
+    /// Written as `starred: true`. A replacement save sets it from the file it
+    /// replaces (`TranscriptSaver.saveTranscript(targetURL:)`), so
+    /// re-transcribing never drops a star.
+    public var starred: Bool
 
     public init(
         audioSources: [TranscriptAudioSource] = [.microphone, .systemAudio],
         includeObsidianMetadata: Bool = false,
-        importedAt: Date? = nil
+        importedAt: Date? = nil,
+        starred: Bool = false
     ) {
         self.audioSources = Self.normalizedAudioSources(audioSources)
         self.includeObsidianMetadata = includeObsidianMetadata
         self.importedAt = importedAt
+        self.starred = starred
     }
 
     public static let `default` = TranscriptFormatOptions()
@@ -29,7 +35,8 @@ public struct TranscriptFormatOptions: Sendable, Equatable {
         TranscriptFormatOptions(
             audioSources: sources,
             includeObsidianMetadata: includeObsidianMetadata,
-            importedAt: importedAt
+            importedAt: importedAt,
+            starred: starred
         )
     }
 

@@ -45,6 +45,13 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         }
     }
 
+    func reservedIdentity(at url: URL) -> UUID? {
+        lock.lock()
+        defer { lock.unlock() }
+        let path = key(for: url)
+        return entries.values.first { $0.path == path }?.transcriptId
+    }
+
     func contains(transcriptId: UUID) -> Bool {
         lock.lock()
         defer { lock.unlock() }
@@ -383,24 +390,42 @@ public class TranscriptSaver {
             fileURL = candidateURL
         }
 
-        let markdown = formatTranscriptMarkdown(
-            result: result,
-            transcriptId: transcriptId,
-            speakerMappings: speakerMappings,
-            speakerSources: speakerSources,
-            speakerDbIds: speakerDbIds,
-            date: transcriptDate,
-            meetingTitle: meetingTitle,
-            healthInfo: healthInfo,
-            transcriptionEngine: transcriptionEngine,
-            formatOptions: formatOptions
-        )
+        func render(starred: Bool) -> String {
+            var options = formatOptions
+            options.starred = starred
+            return formatTranscriptMarkdown(
+                result: result,
+                transcriptId: transcriptId,
+                speakerMappings: speakerMappings,
+                speakerSources: speakerSources,
+                speakerDbIds: speakerDbIds,
+                date: transcriptDate,
+                meetingTitle: meetingTitle,
+                healthInfo: healthInfo,
+                transcriptionEngine: transcriptionEngine,
+                formatOptions: options
+            )
+        }
+
+        // A replacement reads authoritative metadata inside the write transaction.
+        // Unknown metadata must abort before replacing any bytes or publishing success.
+        let expectedStar = formatOptions.starred
+        var markdown = render(starred: expectedStar)
 
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates.
         // Uses the reentrancy-safe wrapper (not a raw `.sync`) so this cannot deadlock if it is
         // ever invoked while already running inside a `serializeTranscriptFileUpdate` block.
         let savedURL: URL? = serializeTranscriptFileUpdate {
             do {
+                if let explicitFileURL {
+                    let isReserved = replacementReservations.contains(explicitFileURL, transcriptId: nil)
+                    let reservedID = replacementReservations.reservedIdentity(at: explicitFileURL)
+                    if isReserved, reservedID == nil || reservedID != transcriptId {
+                        throw CocoaError(.fileReadCorruptFile)
+                    }
+                    if let currentStar = try replacedTranscriptStar(explicitFileURL, requiredCaptureID: reservedID),
+                       currentStar != expectedStar { markdown = render(starred: currentStar) }
+                }
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
                 replacementFileDates?.restore(to: fileURL)
@@ -433,6 +458,40 @@ public class TranscriptSaver {
         }
 
         return savedURL
+    }
+
+    /// A leased replacement must retain its captured identity and protection.
+    /// The public explicit-target API also permits a new destination or a plain
+    /// readable file; neither claims to replace a reserved meeting capture.
+    private static func replacedTranscriptStar(_ url: URL, requiredCaptureID: UUID?) throws -> Bool? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            if requiredCaptureID != nil { throw CocoaError(.fileReadNoSuchFile) }
+            return nil
+        }
+        guard let properties = try? url.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+              properties.isRegularFile == true, properties.isSymbolicLink != true else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        let values = try TranscriptFrontmatter.readValues(from: url)
+        if let requiredCaptureID {
+            guard let values, values["capture_type"]?.lowercased() == "meeting",
+                  TranscriptFrontmatter.captureID(in: values) == requiredCaptureID else {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+        }
+        guard let values else {
+            // Preserve the existing plain-file API, but an incomplete YAML
+            // header could conceal a star and must not be treated as unstarred.
+            let handle = try FileHandle(forReadingFrom: url)
+            defer { try? handle.close() }
+            let prefix = try handle.read(upToCount: 8) ?? Data()
+            let headerPrefixes = ["---\n", "---\r\n", "\u{FEFF}---\n", "\u{FEFF}---\r\n"]
+            if headerPrefixes.contains(where: { prefix.starts(with: Data($0.utf8)) }) {
+                throw CocoaError(.fileReadCorruptFile)
+            }
+            return nil
+        }
+        return TranscriptFrontmatter.isStarred(values: values)
     }
 
     /// Keeps only the creation date: the new text must get a fresh mtime so mtime-keyed indexes pick it up.

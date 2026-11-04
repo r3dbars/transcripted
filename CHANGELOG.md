@@ -16,6 +16,11 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
+- Settings > Storage: "Delete meeting audio after" and "Keep dictation audio"
+  now run through one tested model that keeps their pending choices apart, so
+  a meeting choice can never change dictation audio or the other way around.
+  Behavior is unchanged. Dictation audio defaults to 30 days, which is why both
+  rows can show "30 days" without being linked.
 - Writing > Edit setup can turn both features off and save the disabled state
   without continuing through model, keyboard or permission setup.
 - Opened meeting cards keep Copy, Show in Finder and the more menu in the
@@ -50,6 +55,10 @@ force-installed by Sparkle so existing users recover from a regression.
   Settings stayed open.
 
 ### Added
+- Meetings can be starred from a row's ⋯ menu or an opened card. Starred
+  meetings show a small star, a Starred filter in the Meetings header lists
+  them across the whole library, and automatic meeting-audio deletion keeps
+  their audio. The star is saved in the transcript's frontmatter.
 - Transcribe a file has its own page in the sidebar, with the audio and video
   picker, import progress, and instructions for the command-line tool.
 - The menu bar warns when another app's Secure Keyboard Entry is blocking the

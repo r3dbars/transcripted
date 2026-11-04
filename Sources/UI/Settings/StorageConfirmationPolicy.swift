@@ -65,12 +65,107 @@ enum StorageConfirmationPolicy {
     /// Body copy for the meeting and dictation prompts. The capture-library and
     /// free-up-space prompts keep their own copy at the call site.
     static func meetingAudioMessage(for window: AudioRetentionWindow) -> String {
-        "Your transcripts and saved voices stay. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."
+        "Your transcripts and saved voices stay, and starred meetings keep their audio. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."
     }
 
     static func dictationAudioMessage(for window: DictationAudioKeepWindow) -> String {
         window == .off
             ? "Your dictation text stays. All kept dictation audio is deleted now, and new dictations won't keep any."
             : "Your dictation text stays. Dictation audio older than \(window.title) is deleted now, and again automatically from then on."
+    }
+}
+
+/// The one audio-window change a Storage pick or prompt answer makes. A meeting
+/// choice can only ever produce `.applyMeeting` and a dictation choice only
+/// `.applyDictation`, so one row can't change the other's window.
+enum StorageRetentionEffect: Equatable {
+    case none
+    case applyMeeting(AudioRetentionWindow)
+    case applyDictation(DictationAudioKeepWindow)
+
+    /// Hands the window to the matching setting's apply callback, and only that one.
+    func perform(
+        applyMeeting: (AudioRetentionWindow) -> Void,
+        applyDictation: (DictationAudioKeepWindow) -> Void
+    ) {
+        switch self {
+        case .none:
+            break
+        case .applyMeeting(let window):
+            applyMeeting(window)
+        case .applyDictation(let window):
+            applyDictation(window)
+        }
+    }
+}
+
+/// The Storage page's pending "Delete meeting audio after" and "Keep dictation
+/// audio" choices, each in its own slot. Foundation-pure so the pick → prompt →
+/// Delete/Cancel flow can be tested without SwiftUI.
+struct StorageRetentionPrompts: Equatable {
+    private(set) var pendingMeeting: AudioRetentionWindow?
+    private(set) var pendingDictation: DictationAudioKeepWindow?
+
+    init(pendingMeeting: AudioRetentionWindow? = nil, pendingDictation: DictationAudioKeepWindow? = nil) {
+        self.pendingMeeting = pendingMeeting
+        self.pendingDictation = pendingDictation
+    }
+
+    /// A pick on the meeting row. A window that can delete audio waits for the
+    /// prompt; any other change applies right away.
+    mutating func pickMeeting(_ window: AudioRetentionWindow, current: AudioRetentionWindow) -> StorageRetentionEffect {
+        guard window != current else { return .none }
+        if StorageConfirmationPolicy.meetingChoiceNeedsConfirmation(from: current, to: window) {
+            pendingMeeting = window
+            return .none
+        }
+        return .applyMeeting(window)
+    }
+
+    /// A pick on the dictation row. A shorter window (or Don't keep) can
+    /// delete audio already kept, so it waits for the prompt.
+    mutating func pickDictation(_ window: DictationAudioKeepWindow, current: DictationAudioKeepWindow) -> StorageRetentionEffect {
+        guard window != current else { return .none }
+        if current.deletesKeptAudio(switchingTo: window) {
+            pendingDictation = window
+            return .none
+        }
+        return .applyDictation(window)
+    }
+
+    /// What the destructive button on `slot`'s prompt applies. It reads only
+    /// that slot, and is built with the alert so it doesn't depend on whether
+    /// SwiftUI runs the button before or after dismissal.
+    func confirmEffect(for slot: StorageConfirmationSlot) -> StorageRetentionEffect {
+        switch slot {
+        case .meetingAudio:
+            return pendingMeeting.map(StorageRetentionEffect.applyMeeting) ?? .none
+        case .dictationAudio:
+            return pendingDictation.map(StorageRetentionEffect.applyDictation) ?? .none
+        case .captureLibrary, .freeUpSpace:
+            return .none
+        }
+    }
+
+    /// The prompt for `slot` closed (either button). Clears only that slot.
+    mutating func dismiss(_ slot: StorageConfirmationSlot) {
+        switch slot {
+        case .meetingAudio:
+            pendingMeeting = nil
+        case .dictationAudio:
+            pendingDictation = nil
+        case .captureLibrary, .freeUpSpace:
+            break
+        }
+    }
+
+    /// The presenter's view of these prompts, merged with the page's others.
+    func states(hasCaptureLibraryChoice: Bool = false, wantsFreeUpSpace: Bool = false) -> StorageConfirmationStates {
+        StorageConfirmationStates(
+            hasCaptureLibraryChoice: hasCaptureLibraryChoice,
+            pendingMeetingAudioWindow: pendingMeeting,
+            pendingDictationAudioWindow: pendingDictation,
+            wantsFreeUpSpace: wantsFreeUpSpace
+        )
     }
 }

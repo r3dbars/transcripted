@@ -13,6 +13,12 @@ enum HomeMeetingSearchPaging {
     static func isActive(query: String) -> Bool {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
+
+    /// The Starred filter searches the full library too, so old starred
+    /// meetings show even when they're outside the recent slice.
+    static func isActive(query: String, starredOnly: Bool) -> Bool {
+        starredOnly || isActive(query: query)
+    }
 }
 
 // MARK: - Meetings search index
@@ -97,16 +103,19 @@ struct HomeMeetingSearchIndex: Sendable {
         Dictionary(entries.map { ($0.scanned.path, $0) }, uniquingKeysWith: { first, _ in first })
     }
 
-    /// Meetings matching `query`, newest first, capped at `limit`. An empty
-    /// query matches nothing: the caller shows the normal list instead.
-    func search(query: String, limit: Int) -> SearchResult {
+    /// Meetings matching `query`, newest first, capped at `limit`. With
+    /// `starredOnly`, only starred meetings match, and an empty query lists
+    /// every starred one. Otherwise an empty query matches nothing: the
+    /// caller shows the normal list instead.
+    func search(query: String, limit: Int, starredOnly: Bool = false) -> SearchResult {
         let tokens = HomeMeetingListFilter.tokens(in: query)
-        guard !tokens.isEmpty, limit > 0 else {
+        guard !tokens.isEmpty || starredOnly, limit > 0 else {
             return SearchResult(items: [], hasMore: false)
         }
 
         var items: [RecentMeetingItem] = []
-        for entry in entries where HomeMeetingListFilter.matches(tokens: tokens, haystack: entry.haystack) {
+        for entry in entries where (!starredOnly || entry.item.isStarred)
+            && (tokens.isEmpty || HomeMeetingListFilter.matches(tokens: tokens, haystack: entry.haystack)) {
             if items.count == limit {
                 return SearchResult(items: items, hasMore: true)
             }

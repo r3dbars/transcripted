@@ -10,13 +10,15 @@ func testHomeRowControls() {
         review: Bool = false,
         boost: Bool = false,
         audio: Bool = false,
-        retranscribable: Bool = false
+        retranscribable: Bool = false,
+        starred: Bool = false
     ) -> [String?] {
         HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: review,
             offersMicBoost: boost,
             hasAudioRevealTarget: audio,
-            hasRetranscriptionInput: retranscribable
+            hasRetranscriptionInput: retranscribable,
+            isStarred: starred
         ).map(\.fixedTitle)
     }
 
@@ -29,11 +31,11 @@ func testHomeRowControls() {
         )
     }
 
-    runSuite("Every meeting row can be renamed, reported, revealed and deleted") {
+    runSuite("Every meeting row can be renamed, starred, reported, revealed and deleted") {
         assertEqual(
             meetingTitles(),
-            [HomeMeetingRenameAffordance.title, "Report issue", "Show transcript in Finder", "Delete meeting"],
-            "a plain meeting row should offer rename, Report issue, the transcript in Finder, and Delete meeting last"
+            [HomeMeetingRenameAffordance.title, "Star meeting", "Report issue", "Show transcript in Finder", "Delete meeting"],
+            "a plain meeting row should offer rename, Star meeting, Report issue, the transcript in Finder, and Delete meeting last"
         )
         let entries = HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: true,
@@ -43,6 +45,22 @@ func testHomeRowControls() {
         )
         assertEqual(entries.last, .deleteMeeting, "Delete meeting should stay the last item, whatever else the row offers")
         assertEqual(entries.filter(\.isDestructive), [.deleteMeeting], "only Delete meeting should be destructive")
+    }
+
+    runSuite("A starred meeting's row menu offers Remove star instead of Star meeting") {
+        let titles = meetingTitles(review: true, boost: true, audio: true, retranscribable: true, starred: true)
+        assertTrue(titles.contains("Remove star"), "a starred meeting can be unstarred from its menu")
+        assertFalse(titles.contains("Star meeting"), "a starred meeting doesn't offer Star meeting again")
+        assertFalse(meetingTitles().contains("Remove star"), "an unstarred meeting doesn't offer Remove star")
+        let entries = HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: true,
+            offersMicBoost: true,
+            hasAudioRevealTarget: true,
+            hasRetranscriptionInput: true,
+            isStarred: true
+        )
+        assertEqual(entries.last, .deleteMeeting, "Delete meeting stays last on a starred meeting")
+        assertEqual(entries.filter(\.isDestructive), [.deleteMeeting], "starring adds nothing destructive")
     }
 
     runSuite("A meeting with voices to name offers Who spoke? from its row menu") {
