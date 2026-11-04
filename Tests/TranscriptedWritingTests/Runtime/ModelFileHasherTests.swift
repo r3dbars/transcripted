@@ -9,7 +9,7 @@ import Testing
 /// hasher that keeps every chunk alive spikes the app by the model's size.
 @Suite("Model file hasher")
 struct ModelFileHasherTests {
-    private static func physicalFootprint() -> UInt64 {
+    private static func physicalFootprint() throws -> UInt64 {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
         let result = withUnsafeMutablePointer(to: &info) { pointer in
@@ -17,7 +17,8 @@ struct ModelFileHasherTests {
                 task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count)
             }
         }
-        return result == KERN_SUCCESS ? info.phys_footprint : 0
+        try #require(result == KERN_SUCCESS, "task_info must provide the memory measurement")
+        return info.phys_footprint
     }
 
     private static func makeFile(megabytes: Int) throws -> (url: URL, digest: String) {
@@ -48,20 +49,24 @@ struct ModelFileHasherTests {
     }
 
     @Test("Hashing a large file doesn't keep its chunks in memory")
-    func memoryStaysFlat() throws {
-        // Footprint is process-wide and other suites run in parallel, so the
-        // file is big enough that the no-pool case (~192 MB) can't hide under
-        // their noise, and the bar sits well clear of both.
+    func memoryStaysFlat() async {
+        // Footprint is process-wide. Keep other parallel tests' allocations
+        // out of both measurements without serializing the rest of the suite.
+        await #expect(processExitsWith: .success) {
+            try Self.checkMemoryStaysFlat()
+        }
+    }
+
+    private static func checkMemoryStaysFlat() throws {
         let megabytes = 192
         let (url, digest) = try Self.makeFile(megabytes: megabytes)
         defer { try? FileManager.default.removeItem(at: url) }
         let handle = try FileHandle(forReadingFrom: url)
         defer { try? handle.close() }
-        let before = Self.physicalFootprint()
+        let before = try Self.physicalFootprint()
         let result = try ModelFileHasher.sha256Hex(from: handle)
-        let after = Self.physicalFootprint()
-        // Parallel suites can free memory meanwhile; a shrink is zero growth,
-        // not an unsigned wrap.
+        let after = try Self.physicalFootprint()
+        // Allocator reclamation can shrink the footprint; avoid unsigned wrap.
         let grown = after > before ? after - before : 0
         #expect(result == digest)
         // Without a pool per chunk, all 192 chunks are still alive here
