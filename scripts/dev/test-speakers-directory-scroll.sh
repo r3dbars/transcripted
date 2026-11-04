@@ -36,7 +36,7 @@ for source in "${APP_SOURCE_FILES[@]}"; do
 done
 swiftc -Onone -j "$(sysctl -n hw.ncpu 2>/dev/null || printf 8)" -o "$OUT_DIR/scroll-smoke" \
     "${APP_SWIFTC_LINK_ARGS[@]}" "${smoke_sources[@]}" \
-    Tests/UI/SpeakersDirectoryScrollSmoke.swift "${APP_SWIFTC_TAIL_ARGS[@]}" \
+    Tests/UI/SpeakersDirectoryScrollSmoke.swift Tests/UI/SpeakersScrollDiagnostics.swift "${APP_SWIFTC_TAIL_ARGS[@]}" \
     -Xlinker -rpath -Xlinker "$PWD/deps-frameworks"
 fixture_home=$(mktemp -d "${TMPDIR:-/tmp}/transcripted-speakers-scroll.XXXXXX")
 case "$fixture_home" in
@@ -44,7 +44,27 @@ case "$fixture_home" in
     *) echo "Unexpected temporary HOME: $fixture_home"; exit 1 ;;
 esac
 # Child-only HOME override: no application delegate, captures, permission prompts, or telemetry.
-env HOME="$fixture_home" CFFIXED_USER_HOME="$fixture_home" TMPDIR="$fixture_home/" \
-    TRANSCRIPTED_AUTOMATED_HARNESS=1 TRANSCRIPTED_DISABLE_FILE_LOGGER=1 \
-    TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1 \
-    "$OUT_DIR/scroll-smoke"
+harness_environment=(env HOME="$fixture_home" CFFIXED_USER_HOME="$fixture_home" TMPDIR="$fixture_home/"
+    TRANSCRIPTED_AUTOMATED_HARNESS=1 TRANSCRIPTED_DISABLE_FILE_LOGGER=1
+    TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1)
+# The compiled scenario list owns selection; no second count/list can drift.
+manifest="$OUT_DIR/scenarios.txt"
+"${harness_environment[@]}" "$OUT_DIR/scroll-smoke" --list-scenarios > "$manifest"
+read -r scenario_count selection_digest < <(python3 - "$manifest" <<'PY'
+import hashlib
+from pathlib import Path
+import sys
+
+with Path(sys.argv[1]).open("rb") as handle:
+    data = handle.read(16385)
+if not data or len(data) > 16384:
+    raise SystemExit("Invalid scroll scenario manifest")
+scenarios = data.decode("utf-8").splitlines()
+if any(not scenario.strip() for scenario in scenarios) or len(set(scenarios)) != len(scenarios):
+    raise SystemExit("Invalid scroll scenario selection")
+print(len(scenarios), hashlib.sha256(data).hexdigest())
+PY
+)
+"${harness_environment[@]}" python3 scripts/entrypoints/lib/fast-test-completion.py \
+    --run-root "$fixture_home" --expected-functions "$scenario_count" \
+    --selection-digest "$selection_digest" -- "$OUT_DIR/scroll-smoke"

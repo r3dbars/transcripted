@@ -243,6 +243,15 @@ of fictional people, and scrolls it top to bottom at several list sizes. It
 fails if the scroll jumps back, never reaches the bottom, keeps laying out once
 it stops, or the main thread stops answering (a hang guard names the step).
 Swift CI runs it in the `spm-tests` job.
+The compiled scenario manifest drives the shared completion guard: every
+selected scenario must return and write a fresh receipt. An early AppKit
+event-loop return or exit zero without completion fails the smoke.
+Failures also emit the last 16 numeric/Boolean diagnostic records (phase 0:
+ready, 1: scroll step, 2: idle): model publication counts, profile/directory/review
+order comparisons, scroll/clip/document identity and geometry. Identities are
+compared locally; names, IDs, quotes and paths never enter the records. Scenarios,
+thresholds, pumps and completion receipts stay authoritative.
+`SpeakersScrollDiagnosticsTests` covers the bounded encoding helper.
 
 Parakeet model-lifecycle changes also have a deterministic executor harness:
 `bash scripts/dev/test-parakeet-lifecycle.sh`. It compiles the production
