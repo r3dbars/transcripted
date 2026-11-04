@@ -3887,7 +3887,8 @@ final class SpeakerNamingCoordinatorTests: XCTestCase {
             diarization: StubDiarizationEngine(),
             speakerStore: resolvedSpeakerStore,
             speakerClipsDirectory: paths.speakerClips,
-            cleanupDirectories: [paths.audioCaptures, paths.speakerClips]
+            cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
+            statsStore: StatsDatabase(path: paths.statsDB.path)
         )
 
         return TestHarness(

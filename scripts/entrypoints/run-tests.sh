@@ -607,6 +607,8 @@ APP_SOURCES=(
     "Sources/Meeting/BrowserWindowTitleReader.swift"
     "Sources/TranscriptedCore/Speaker/CallSpeakerActivity.swift"
     "Sources/TranscriptedCore/Audio/RecordedSystemAudioTimeline.swift"
+    "Sources/TranscriptedCore/Pipeline/RetainedAudioInputSnapshot.swift"
+    "Sources/TranscriptedCore/Storage/TranscriptReplacementExpectation.swift"
     "Sources/TranscriptedCore/Speaker/CallSpeakerAttributionPolicy.swift"
     "Sources/Meeting/CallSpeaker/CallSpeakerAXNode.swift"
     "Sources/Meeting/CallSpeaker/CallSpeakerAXTreeReader.swift"

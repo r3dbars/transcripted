@@ -86,13 +86,12 @@ final class CoreStoragePathsTests: XCTestCase {
     }
 
     func testRecordingValidatorRejectsRelativePathPreferencesBeforeURLConstruction() {
-        let original = UserDefaults.standard.object(forKey: "transcriptSaveLocation")
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var arguments = originalArguments
+        arguments["transcriptSaveLocation"] = "relative-capture-root"
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         defer {
-            if let original {
-                UserDefaults.standard.set(original, forKey: "transcriptSaveLocation")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
-            }
+            UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
         }
 
         let paths = CoreStoragePaths(
@@ -117,8 +116,6 @@ final class CoreStoragePathsTests: XCTestCase {
             try? FileManager.default.removeItem(at: paths.audioCaptures)
             try? FileManager.default.removeItem(at: paths.logs)
         }
-
-        UserDefaults.standard.set("relative-capture-root", forKey: "transcriptSaveLocation")
 
         let result = RecordingValidator.validateRecordingConditions(paths: paths)
 
