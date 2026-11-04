@@ -480,7 +480,22 @@ final class WritingSettingsModel: ObservableObject {
         let isFirstSetup = !controller.setupCompleted
         WritingSetupState.markCompleted(defaults: WritingController.appDefaults())
 
-        let keyboardSelected = controller.turnOnKeyboard(openSettingsOnFailure: false)
+        // The install's copy and signature checks run off the main thread;
+        // the keyboard row refreshes when it lands. Text Input Sources can
+        // take a moment to list a just-registered keyboard, so one retry;
+        // after that the guidance stays up. Writing turned off meanwhile
+        // ends it: neither try selects the keyboard after a stop.
+        Task { [weak self] in
+            guard let self else { return }
+            let stopsBefore = self.controller.runtimeStopCount
+            let selected = await self.controller.turnOnKeyboard(openSettingsOnFailure: false)
+            self.refreshKeyboard()
+            guard !selected, self.controller.runtimeStopCount == stopsBefore else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard self.controller.runtimeStopCount == stopsBefore else { return }
+            await self.controller.turnOnKeyboard(openSettingsOnFailure: false)
+            self.refreshKeyboard()
+        }
         controller.applyRunState()
         if Presentation.asksForScreenRecordingAfterSetup(
             autocomplete: choices.autocomplete,
@@ -503,16 +518,6 @@ final class WritingSettingsModel: ObservableObject {
 
         isEditingSetup = false
         screen = .everyday
-        if !keyboardSelected {
-            // Text Input Sources can take a moment to list a just-registered
-            // keyboard. One retry; after that the guidance stays up.
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(1))
-                guard let self else { return }
-                self.controller.turnOnKeyboard(openSettingsOnFailure: false)
-                self.refreshKeyboard()
-            }
-        }
         refreshLive()
         refreshKeyboard()
         reloadToday()
@@ -564,8 +569,11 @@ final class WritingSettingsModel: ObservableObject {
     /// more, then opens Keyboard settings if the keyboard still isn't the
     /// input source. The only path that opens System Settings for it.
     func openKeyboardSettings() {
-        controller.turnOnKeyboard(openSettingsOnFailure: true)
-        refreshKeyboard()
+        Task { [weak self] in
+            guard let self else { return }
+            await self.controller.turnOnKeyboard(openSettingsOnFailure: true)
+            self.refreshKeyboard()
+        }
     }
 
     /// Never while anything records (see `turnOnWriting`). After the one

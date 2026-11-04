@@ -164,8 +164,13 @@ extension WritingController {
     /// System Settings. `true` once the keyboard is the selected input
     /// source.
     @discardableResult
-    func turnOnKeyboard(openSettingsOnFailure: Bool = false) -> Bool {
-        guard installKeyboardRecordingFirstInstall() else {
+    func turnOnKeyboard(openSettingsOnFailure: Bool = false) async -> Bool {
+        let stopsBefore = runtimeStopCount
+        let installed = await installKeyboardRecordingFirstInstall()
+        // Writing was turned off while the install ran: leave the input
+        // source alone.
+        guard runtimeStopCount == stopsBefore else { return false }
+        guard installed else {
             if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
             return false
         }
@@ -179,18 +184,33 @@ extension WritingController {
     /// Install or update and register. When this copied the keyboard in
     /// where none was before, remembers the login session it happened in
     /// (`WritingKeyboardFirstInstall`). `true` when the keyboard is in place.
-    func installKeyboardRecordingFirstInstall() -> Bool {
-        let wasInstalled = Self.keyboardIsInstalled
-        let result = keyboardInstaller.installOrUpdateIfNeeded()
-        keyboardInstallResult = result
-        log("WRITING | keyboard install: \(result)")
-        if result == .installed, !wasInstalled {
-            WritingKeyboardFirstInstall.record(
-                currentSession: WritingLoginSession.currentIdentifier(),
-                defaults: Self.appDefaults()
-            )
-        }
+    /// The copy and signature checks run off the main thread; a call while
+    /// one is in flight waits for that one.
+    func installKeyboardRecordingFirstInstall() async -> Bool {
+        let task = keyboardInstallTask ?? startKeyboardInstall()
+        let result = await task.value
         return result == .installed || result == .alreadyInstalled
+    }
+
+    private func startKeyboardInstall() -> Task<GhostKeyboardInstallerHost.KeyboardInstallResult, Never> {
+        let installer = keyboardInstaller
+        let task = Task { @MainActor [weak self] () -> GhostKeyboardInstallerHost.KeyboardInstallResult in
+            let wasInstalled = Self.keyboardIsInstalled
+            let result = await installer.installOrUpdateIfNeeded()
+            guard let self else { return result }
+            self.keyboardInstallTask = nil
+            self.keyboardInstallResult = result
+            self.log("WRITING | keyboard install: \(result)")
+            if result == .installed, !wasInstalled {
+                WritingKeyboardFirstInstall.record(
+                    currentSession: WritingLoginSession.currentIdentifier(),
+                    defaults: Self.appDefaults()
+                )
+            }
+            return result
+        }
+        keyboardInstallTask = task
+        return task
     }
 
     /// Tries `TISEnableInputSource`, checks it took, and selects the
