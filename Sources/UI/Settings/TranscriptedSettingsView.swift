@@ -112,6 +112,8 @@ struct TranscriptedSettingsView: View {
     @ObservedObject var captureUndo = CaptureUndoManager.shared
     @State var homeDeletionIDs: Set<String> = []  // meeting ids and dictation undo ids being deleted
     @State var homeMeetingSearchQuery = ""
+    /// Home's Starred filter: only starred meetings, across the whole library.
+    @State var homeStarredOnly = false
     @State var homeMeetingPreviewLoadTask: Task<Void, Never>?
     @State var modelCacheCleanupStatusDetails: String?
     @State var captureLibraryMigrationStatusDetails: String?
@@ -514,7 +516,7 @@ struct TranscriptedSettingsView: View {
                         result: didReveal ? .success : .failed
                     )
                 }
-            case .renameMeeting, .reportIssue, .showTranscript, .reviewSpeakers, .boostMic, .retranscribe, .showAudio, .deleteMeeting:
+            case .renameMeeting, .starMeeting, .unstarMeeting, .reportIssue, .showTranscript, .reviewSpeakers, .boostMic, .retranscribe, .showAudio, .deleteMeeting:
                 return nil
             }
         }
@@ -531,7 +533,8 @@ struct TranscriptedSettingsView: View {
                 hintsHiddenThrough: micBoostHintsHiddenThrough
             ),
             hasAudioRevealTarget: !audioRevealURLs.isEmpty,
-            hasRetranscriptionInput: item.audio?.retranscriptionInput != nil
+            hasRetranscriptionInput: item.audio?.retranscriptionInput != nil,
+            isStarred: item.isStarred
         )
         return entries.compactMap { menuEntry in
             let title = menuEntry.fixedTitle ?? ""
@@ -540,6 +543,10 @@ struct TranscriptedSettingsView: View {
             case .renameMeeting:
                 return HomeRowMenuItem(title: title, symbolName: symbolName, automationIdentifier: HomeMeetingRenameAffordance.automationIdentifier) {
                     promptRenameMeeting(item)
+                }
+            case .starMeeting, .unstarMeeting:
+                return HomeRowMenuItem(title: title, symbolName: symbolName, automationIdentifier: "transcripted.home.meeting.star-toggle") {
+                    toggleMeetingStar(item)
                 }
             case .reportIssue:
                 return HomeRowMenuItem(title: title, symbolName: symbolName) {

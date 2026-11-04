@@ -349,6 +349,7 @@ extension TranscriptedSettingsView {
                 : nil,
             homeFindIsVisible: $homeFindIsVisible,
             homeMeetingSearchQuery: $homeMeetingSearchQuery,
+            homeStarredOnly: $homeStarredOnly,
             homeFindFieldFocusToken: homeFindFieldFocusToken,
             onAttention: {
                 if let issue = homeAttentionIssues.first {
@@ -401,7 +402,7 @@ extension TranscriptedSettingsView {
             },
             onLoadMoreMeetings: {
                 trackSettingsAction("load_more_meetings", page: navigation.selectedPage)
-                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery) {
+                if HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery, starredOnly: homeStarredOnly) {
                     homeViewModel.loadMoreMeetingSearchResults()
                 } else {
                     homeViewModel.loadMoreMeetings()
@@ -435,6 +436,7 @@ extension TranscriptedSettingsView {
                 assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
+            onToggleMeetingStar: { item in toggleMeetingStar(item) },
             meetingVoicesToName: { item in
                 speakerPeopleModel.hasLoadedProfiles ? speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) : 0
             },
@@ -466,10 +468,13 @@ extension TranscriptedSettingsView {
             collapseHomeMeetingExpansion()
         }
         .onAppear {
-            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery)
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery, starredOnly: homeStarredOnly)
         }
         .onChange(of: homeMeetingSearchQuery) { _, query in
-            homeViewModel.updateMeetingSearch(query: query)
+            homeViewModel.updateMeetingSearch(query: query, starredOnly: homeStarredOnly)
+        }
+        .onChange(of: homeStarredOnly) { _, starredOnly in
+            homeViewModel.updateMeetingSearch(query: homeMeetingSearchQuery, starredOnly: starredOnly)
         }
         .task(id: navigation.homeFindFocusToken) {
             guard navigation.homeFindFocusToken > homeFindConsumedFocusToken else { return }
@@ -522,10 +527,12 @@ extension TranscriptedSettingsView {
             return
         }
         homePendingRevealMeetingKey = nil
-        // A search that hides the row would expand something off-screen.
+        // A search or the Starred filter could hide the row, and it would
+        // expand off-screen.
         if !homeMeetingSearchQuery.isEmpty {
             homeMeetingSearchQuery = ""
         }
+        homeStarredOnly = false
         guard homeExpandedMeetingID != item.id else { return }
         toggleHomeMeetingExpansion(item)
     }
