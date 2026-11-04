@@ -534,19 +534,20 @@ enum CallSpeakerSnapshotBuilder {
             return CallSpeakerSnapshot(roster: [], speaking: [], selfNames: [], status: .truncated, app: app)
         }
 
-        // Window gates (unverified): more than one Meet code is ambiguous;
-        // Teams reads only its compact view when exactly one is open, and
-        // more than one compact view is ambiguous.
+        // Different Meet keys are ambiguous even when one view has no tiles.
+        // Provider buckets and common titles cannot correlate multiple calls;
+        // only a validated, matching Meet code proves a shared call here.
         if app == .browserMeet, Set(appWindows.map(\.window.match.meetingKey)).count > 1 {
             return .empty(.multipleWindows)
         }
-        if app.isTeams {
-            let compact = appWindows.filter(\.window.match.isCompactView)
-            if compact.count > 1 { return .empty(.multipleWindows) }
-            if compact.count == 1 { appWindows = compact }
-        }
         appWindows = appWindows.filter(\.parse.hasTiles)
         guard !appWindows.isEmpty else { return .empty(.noTiles) }
+        if appWindows.count > 1 {
+            guard let code = appWindows.first?.window.match.meetCode,
+                  appWindows.allSatisfy({ $0.window.match.app == .browserMeet && $0.window.match.meetCode == code }) else {
+                return .empty(.multipleWindows)
+            }
+        }
         if Set(appWindows.map(\.window.match.meetingKey)).count > 1 { return .empty(.multipleWindows) }
 
         var roster: [String] = []

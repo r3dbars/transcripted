@@ -37,6 +37,41 @@ private func teamsWindow(_ tiles: [CallSpeakerAXNode]) -> CallSpeakerAXNode {
     CallSpeakerAXNode(role: "AXWindow", children: tiles)
 }
 
+/// A fictional participant window through the real title matcher and app parser.
+private func matchedCallWindow(
+    host: CallSpeakerApp.Host,
+    title: String,
+    name: String,
+    speaking: Bool
+) -> CallSpeakerWindowRead {
+    let match = CallSpeakerWindowMatcher.match(title: title, host: host)!
+    let tree: CallSpeakerAXNode
+    switch match.app {
+    case .zoom:
+        tree = CallSpeakerAXNode(children: [
+            .init(roleDescription: "video render", description: name + (speaking ? ", active speaker" : "")),
+        ])
+    case .browserZoom:
+        tree = CallSpeakerAXNode(
+            domClassList: [speaking ? "speaker-view__video-frame--active" : "gallery__video-frame"],
+            children: [.init(domClassList: ["video-avatar__avatar-footer"], children: [.init(role: "AXStaticText", value: name)])]
+        )
+    case .slack:
+        tree = CallSpeakerAXNode(domClassList: ["p-huddle_peer_tile"], children: [
+            .init(description: "View \(name)'s profile"),
+            .init(domClassList: speaking ? ["p-huddle_peer_tile__overlay--active_speaker"] : []),
+        ])
+    case .browserMeet:
+        tree = CallSpeakerAXNode(domClassList: ["oZRSLe"], children: [
+            .init(description: "More options for \(name)"),
+            .init(description: speaking ? "\(name) is speaking" : nil),
+        ])
+    case .teamsDesktop, .browserTeams:
+        tree = teamsWindow([teamsTile(name, speaking: speaking)])
+    }
+    return CallSpeakerWindowRead(match: match, tree: tree, truncated: false)
+}
+
 func testCallSpeakerTileParser() {
     runSuite("CallSpeakerTileParser: Teams roster items, the speaking frame and the local user") {
         let parse = CallSpeakerSelectorTable.parser(for: .teamsDesktop).parse(callSpeakerFixture("teams-gallery"))
@@ -165,32 +200,80 @@ func testCallSpeakerTileParser() {
         assertEqual(withEmptyWindow.status, .speakingIndicator, "another app's window without tiles doesn't count")
     }
 
-    runSuite("CallSpeakerSnapshotBuilder: Teams reads only a single compact view") {
-        let main = teamsWindow([teamsTile("Ana Ruiz", speaking: true), teamsTile("Ben Okafor", speaking: false)])
+    runSuite("CallSpeakerSnapshotBuilder: uncorrelated Teams meeting windows never supply names") {
+        let main = teamsWindow([teamsTile("Ana Ruiz", speaking: true)])
         let compact = teamsWindow([teamsTile("Ben Okafor", speaking: true)])
-        let one = CallSpeakerSnapshotBuilder.build([
-            window(.teamsDesktop, main), window(.teamsDesktop, compact: true, compact),
-        ])
-        assertEqual(one.status, .speakingIndicator, "one compact view is trusted")
-        assertEqual(one.speaking, ["Ben Okafor"], "and read alone, ignoring the main window")
+        for app in [CallSpeakerApp.teamsDesktop, .browserTeams] {
+            let host: CallSpeakerApp.Host = app == .teamsDesktop ? .teamsDesktop : .browser
+            let first = CallSpeakerWindowMatcher.match(title: "Weekly sync | Microsoft Teams", host: host)!
+            let second = CallSpeakerWindowMatcher.match(title: "Other call | Microsoft Teams", host: host)!
+            let separateCalls = CallSpeakerSnapshotBuilder.build([
+                .init(match: first, tree: main, truncated: false),
+                .init(match: second, tree: teamsWindow([teamsTile("Ben Okafor", speaking: false)]), truncated: false),
+            ])
+            assertEqual(separateCalls.status, .multipleWindows, "same-provider keys cannot prove two windows share a call")
+            assertTrue(separateCalls.speaking.isEmpty && separateCalls.roster.isEmpty)
 
-        let two = CallSpeakerSnapshotBuilder.build([
-            window(.teamsDesktop, compact: true, compact), window(.teamsDesktop, compact: true, compact),
-        ])
-        assertEqual(two.status, .multipleWindows, "two compact views are ambiguous")
+            let mainAndCompact = CallSpeakerSnapshotBuilder.build([
+                window(app, main), window(app, compact: true, compact),
+            ])
+            assertEqual(mainAndCompact.status, .multipleWindows, "a compact window cannot silently override another call")
+            assertTrue(mainAndCompact.speaking.isEmpty)
+            let twoCompact = CallSpeakerSnapshotBuilder.build([
+                window(app, compact: true, compact), window(app, compact: true, compact),
+            ])
+            assertEqual(twoCompact.status, .multipleWindows)
+
+            for isCompact in [false, true] {
+                let single = CallSpeakerSnapshotBuilder.build([
+                    window(app, compact: isCompact, main),
+                    window(app, CallSpeakerAXNode(role: "AXWindow")),
+                ])
+                assertEqual(single.status, .speakingIndicator, "a single meeting and a tile-free chat window still work")
+                assertEqual(single.speaking, ["Ana Ruiz"])
+            }
+        }
     }
 
-    runSuite("CallSpeakerSnapshotBuilder: windows of one meeting that disagree are withheld") {
-        let main = teamsWindow([teamsTile("Ana Ruiz", speaking: true), teamsTile("Ben Okafor", speaking: false)])
-        let other = teamsWindow([teamsTile("Ana Ruiz", speaking: false)])
-        let disagree = CallSpeakerSnapshotBuilder.build([window(.teamsDesktop, main), window(.teamsDesktop, other)])
-        assertEqual(disagree.status, .windowsDisagree, "one window says Ana is speaking, the other says not")
-        assertTrue(disagree.speaking.isEmpty, "no speaking evidence from a disagreeing poll")
-        assertEqual(disagree.roster, ["Ana Ruiz", "Ben Okafor"], "the roster is still read")
+    runSuite("CallSpeakerSnapshotBuilder: provider or common-title keys never correlate separate calls") {
+        let cases: [(CallSpeakerApp.Host, String, String)] = [
+            (.zoom, "Zoom Meeting One", "Zoom Meeting Two"),
+            (.browser, "Zoom Meeting - Google Chrome", "Zoom Meeting - Microsoft Edge"),
+            (.slack, "Huddle in #design - Slack", "Huddle in #planning - Slack"),
+            (.browser, "Meet - Weekly sync - Google Chrome", "Meet - Weekly sync - Microsoft Edge"),
+        ]
+        for (host, firstTitle, secondTitle) in cases {
+            let first = matchedCallWindow(host: host, title: firstTitle, name: "Ana Ruiz", speaking: true)
+            let second = matchedCallWindow(host: host, title: secondTitle, name: "Ben Okafor", speaking: false)
+            let separate = CallSpeakerSnapshotBuilder.build([first, second])
+            assertEqual(separate.status, .multipleWindows, "disjoint calls may share provider or title keys")
+            assertTrue(separate.speaking.isEmpty && separate.roster.isEmpty)
 
-        let agreeing = teamsWindow([teamsTile("Ana Ruiz", speaking: true)])
-        let agree = CallSpeakerSnapshotBuilder.build([window(.teamsDesktop, main), window(.teamsDesktop, agreeing)])
-        assertEqual(agree.status, .speakingIndicator, "a window showing fewer people but the same speaker agrees")
+            let sameName = matchedCallWindow(host: host, title: secondTitle, name: "Ana Ruiz", speaking: true)
+            let agreeingNames = CallSpeakerSnapshotBuilder.build([first, sameName])
+            assertEqual(agreeingNames.status, .multipleWindows, "common participant names do not prove the same call")
+
+            let single = CallSpeakerSnapshotBuilder.build([first])
+            assertEqual(single.status, .speakingIndicator, "single-window naming remains available")
+            assertEqual(single.speaking, ["Ana Ruiz"])
+        }
+    }
+
+    runSuite("CallSpeakerSnapshotBuilder: matching Meet codes correlate views; disagreement still withholds") {
+        let first = matchedCallWindow(host: .browser, title: "Meet - abc-defg-hij - Google Chrome", name: "Ana Ruiz", speaking: true)
+        let agreeing = matchedCallWindow(host: .browser, title: "meet - ABC-DEFG-HIJ - Microsoft Edge", name: "Ana Ruiz", speaking: true)
+        let agree = CallSpeakerSnapshotBuilder.build([first, agreeing])
+        assertEqual(agree.status, .speakingIndicator, "a validated matching call code correlates the windows")
+        assertEqual(agree.speaking, ["Ana Ruiz"])
+
+        let quiet = matchedCallWindow(host: .browser, title: "Meet - abc-defg-hij - Google Chrome", name: "Ana Ruiz", speaking: false)
+        let disagree = CallSpeakerSnapshotBuilder.build([first, quiet])
+        assertEqual(disagree.status, .windowsDisagree, "the same call's windows can still disagree")
+        assertTrue(disagree.speaking.isEmpty, "a disagreement supplies no speaking evidence")
+        assertEqual(disagree.roster, ["Ana Ruiz"], "the correlated roster remains observational metadata")
+
+        let different = matchedCallWindow(host: .browser, title: "Meet - klm-nopq-rst - Google Chrome", name: "Ana Ruiz", speaking: true)
+        assertEqual(CallSpeakerSnapshotBuilder.build([first, different]).status, .multipleWindows)
     }
 
     runSuite("CallSpeakerSnapshotBuilder: a truncated meeting window is withheld") {
