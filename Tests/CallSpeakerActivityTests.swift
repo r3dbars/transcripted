@@ -87,7 +87,10 @@ private actor FakeCallSpeakerReader: CallSpeakerWindowReading {
         let ready = waiters.filter { $0.count <= readCount }
         waiters.removeAll { $0.count <= readCount }
         ready.forEach { $0.continuation.resume() }
-        return result
+        var read = result
+        let host = 1_000_000 + UInt64(clock.advancedSeconds * 1_000)
+        read.timing = .init(startHostTime: host, endHostTime: host)
+        return read
     }
 
     func waitForReads(_ count: Int) async {

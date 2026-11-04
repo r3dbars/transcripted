@@ -201,4 +201,26 @@ final class RecordedSystemAudioTimelineTests: XCTestCase {
         write(&journal, 0, 100, 102_000, 200)
         XCTAssertEqual(journal.finish().segmentCount, 0)
     }
+
+    func testNewSameRateTapCannotCloseThePrecedingTapsPendingBuffer() {
+        var journal = journal()
+        write(&journal, 0, 100, 100_000, 0, epoch: 1)
+        write(&journal, 100, 200, 101_000, 100, epoch: 2)
+        write(&journal, 200, 300, 102_000, 200, epoch: 2)
+        let timeline = journal.finish()
+        XCTAssertTrue(timeline.map(startHostTime: 100_000, endHostTime: 101_000).isEmpty)
+        XCTAssertEqual(timeline.map(startHostTime: 101_000, endHostTime: 102_000).first?.start, 1)
+    }
+
+    func testInvalidMappedNumericRangeNeverProducesInfiniteCoordinates() {
+        var journal = RecordedSystemAudioTimeline.Journal(
+            identity: identity, sampleRate: .leastNonzeroMagnitude, maximumSegments: 2
+        )!
+        for index in 0..<2 {
+            journal.recordWrite(identity: identity, startFrame: Int64(index), endFrame: Int64(index + 1),
+                                frameCount: 1, succeeded: true,
+                                timing: timing(UInt64(index + 1), Double(index), rate: .leastNonzeroMagnitude))
+        }
+        XCTAssertTrue(journal.finish().map(startHostTime: 1, endHostTime: 2).isEmpty)
+    }
 }

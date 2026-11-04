@@ -17,9 +17,10 @@ final class SystemAudioWriteTimeline: @unchecked Sendable {
         )
         self.writer = writer
         self.identity = identity
-        // Worst case ~40 MiB, released after transcription handoff. Exact
-        // slopes may not coalesce on real hardware. Saturation withholds the
-        // suffix; long-call capacity qualification remains necessary.
+        // At most 1,048,576 stored segments: 40 MiB payload plus allocation
+        // overhead, retained until transcription handoff. Exact slopes may
+        // not coalesce on hardware. Saturation withholds the suffix; native
+        // long-call capacity qualification remains necessary before release.
         journal = RecordedSystemAudioTimeline.Journal(
             identity: identity, sampleRate: writer.processingFormat.sampleRate,
             maximumSegments: 1_048_576

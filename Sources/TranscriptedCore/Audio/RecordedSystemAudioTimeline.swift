@@ -83,6 +83,7 @@ public struct RecordedSystemAudioTimeline: Sendable {
                 return (Double(segment.startFrame) + fraction * Double(segment.endFrame - segment.startFrame)) / sampleRate
             }
             let mapped = Span(start: seconds(at: start), end: seconds(at: end))
+            guard mapped.start.isFinite, mapped.end.isFinite, mapped.end > mapped.start else { continue }
             if let previous = result.last, previous.end == mapped.start,
                priorHostEnd == start, priorContinuity == segment.continuityID {
                 result[result.count - 1] = Span(start: previous.start, end: mapped.end)
@@ -119,7 +120,7 @@ public struct RecordedSystemAudioTimeline: Sendable {
 
         /// The cap is explicit: saturation withholds the suffix, never extends
         /// an old affine run across dropped receipts. Budget needs native
-        /// long-recording qualification before this is used by capture.
+        /// long-recording qualification before release.
         public init?(identity: Identity, sampleRate: Double, maximumSegments: Int) {
             guard sampleRate.isFinite, sampleRate > 0,
                   maximumSegments > 0, maximumSegments <= 1_048_576 else { return nil }

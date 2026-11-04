@@ -77,6 +77,14 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         return result
     }
 
+    private func timingStamp(host: UInt64, sample: Double) -> AudioTimeStamp {
+        var stamp = AudioTimeStamp()
+        stamp.mHostTime = host
+        stamp.mSampleTime = sample
+        stamp.mFlags = [.hostTimeValid, .sampleTimeValid]
+        return stamp
+    }
+
     private func makeTemporaryDirectory() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -248,6 +256,7 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         let url = directory.appendingPathComponent("system.wav")
         let writer = try AVAudioFile(forWriting: url, settings: Self.format.settings)
         audio.systemAudioFileQueue.sync {
+            attempt.writeTimeline.install(writer: writer, generation: generation)
             _ = audio.systemAudioCaptureAttemptOwnership.begin(
                 generation: generation,
                 capture: attempt
@@ -266,11 +275,12 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         let normalDeliveries = LockedCounter(0)
         let finishingDeliveries = LockedCounter(0)
         try attempt.prepare()
-        try attempt.startIfNotCancelled { [unowned audio] buffer in
+        try attempt.startTimedIfNotCancelled { [unowned audio] buffer, timing in
             guard generation == audio.recordingSessionGeneration else {
                 finishingDeliveries.advance()
                 attempt.enqueueFinishingBuffer(
                     buffer,
+                    timing: timing,
                     writer: writer,
                     queue: audio.systemAudioFileQueue
                 ) { error in
@@ -284,15 +294,22 @@ final class SystemAudioStopTailHandoffTests: XCTestCase {
         let advances = LockedCounter(0)
         audio.afterRecordingSessionGenerationAdvanceForTesting = { _ in
             advances.advance()
-            capture.receiveForTesting(self.makeBuffer(marker: 0.25))
+            capture.receiveForTesting(self.makeBuffer(marker: 0.25), timestamp: self.timingStamp(host: 1_000, sample: 0))
             capture.drainForTesting()
             // Left in the ring for the backend stop to drain.
-            capture.receiveForTesting(self.makeBuffer(marker: 0.5))
+            capture.receiveForTesting(self.makeBuffer(marker: 0.5), timestamp: self.timingStamp(host: 2_000, sample: 8))
         }
         defer { audio.afterRecordingSessionGenerationAdvanceForTesting = nil }
 
         let completed = expectation(description: "recording finalized")
-        audio.onRecordingComplete = { _, _ in completed.fulfill() }
+        audio.onRecordingCompleteWithTimeline = { stopGeneration, _, systemURL, _, timeline in
+            XCTAssertNotEqual(stopGeneration, generation, "stop advances its own lifecycle generation")
+            XCTAssertEqual(systemURL, url, "coordinates belong to the exact finalized system artifact")
+            XCTAssertEqual(timeline?.identity.generation, generation, "timeline keeps the capture generation")
+            XCTAssertEqual(timeline?.map(startHostTime: 1_000, endHostTime: 2_000).first?.end, 8.0 / 48_000)
+            XCTAssertEqual(timeline?.unmappedFrameCount, 8, "the final unbounded buffer is withheld")
+            completed.fulfill()
+        }
         audio.stop()
         audio.afterRecordingSessionGenerationAdvanceForTesting = nil
         XCTAssertEqual(advances.value, 1, "stop() must advance the generation exactly once")

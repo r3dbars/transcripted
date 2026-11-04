@@ -16,6 +16,24 @@ struct CallSpeakerHostClock: Sendable {
     )
 }
 
+struct CallSpeakerReadTiming: Sendable, Equatable {
+    let startHostTime: UInt64
+    let endHostTime: UInt64
+
+    var midpoint: UInt64? {
+        guard startHostTime > 0, endHostTime >= startHostTime else { return nil }
+        return startHostTime + (endHostTime - startHostTime) / 2
+    }
+
+    /// Called on the reader's serial queue around the AX operations only.
+    static func measure(clock: CallSpeakerHostClock, scan: () -> CallSpeakerReadResult) -> CallSpeakerReadResult {
+        let start = clock.now()
+        var result = scan()
+        result.timing = .init(startHostTime: start, endHostTime: clock.now())
+        return result
+    }
+}
+
 /// Typed unaligned evidence: its relative times start at AX observation,
 /// not frame zero of a recording. Only `aligned(to:)` produces pipeline data.
 struct CallSpeakerObservedActivity: Sendable {

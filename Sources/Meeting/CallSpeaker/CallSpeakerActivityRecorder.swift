@@ -33,6 +33,9 @@ struct CallSpeakerReadResult: Sendable {
     var windows: [CallSpeakerWindowRead]
     /// Incomplete scans may have omitted another call. Never name from them.
     var completeness: Completeness
+    /// Captured around the actual serialized AX scan, not caller scheduling,
+    /// application inventory, parsing, or delivery back to the main actor.
+    var timing: CallSpeakerReadTiming? = nil
 
     static let nothingRunning = CallSpeakerReadResult(supportedAppRunning: false, windows: [], completeness: .complete)
 }
@@ -185,28 +188,25 @@ final class CallSpeakerActivityRecorder {
 
             let reader = environment.reader
             let readStart = elapsed()
-            let hostStart = environment.hostClock.now()
-            let result = await Task.detached(priority: .utility) { () -> (Bool, CallSpeakerSnapshot) in
+            let result = await Task.detached(priority: .utility) { () -> (Bool, CallSpeakerSnapshot, CallSpeakerReadTiming?) in
                 let read = await reader.read(session: session)
-                guard read.supportedAppRunning else { return (false, .empty(.noWindow)) }
-                return (true, CallSpeakerSnapshotBuilder.build(read))
+                guard read.supportedAppRunning else { return (false, .empty(.noWindow), read.timing) }
+                return (true, CallSpeakerSnapshotBuilder.build(read), read.timing)
             }.value
             guard isCurrent(session) else { return }
-            let hostEnd = environment.hostClock.now()
 
             guard result.0 else {
                 accumulator.pause()
                 guard await sleep(seconds: Self.gatedRecheckInterval) else { return }
                 continue
             }
-            guard hostStart >= originHostTime, hostEnd >= hostStart,
+            guard let midpoint = result.2?.midpoint, midpoint >= originHostTime,
                   environment.hostClock.ticksPerSecond.isFinite,
                   environment.hostClock.ticksPerSecond > 0 else {
                 accumulator.pause()
                 guard await sleep(seconds: Self.gatedRecheckInterval) else { return }
                 continue
             }
-            let midpoint = hostStart + (hostEnd - hostStart) / 2
             let observedSeconds = Double(midpoint - originHostTime) / environment.hostClock.ticksPerSecond
             accumulator.add(result.1, at: observedSeconds)
             noteRoster(result.1)
