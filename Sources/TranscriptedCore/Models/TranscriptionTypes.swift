@@ -348,9 +348,11 @@ public struct SpeakerNamingEntry: Identifiable, Sendable {
     /// Transcripted names them on its own. Nil when there's nothing to show.
     public var confirmationProgress: SpeakerNamingConfirmationProgress?
     /// The name the call app showed while this voice was talking (Zoom, Meet,
-    /// Teams or Slack, read over Accessibility). Only a prefill for the name
-    /// field; nothing is learned until the user saves it. Local only.
-    public var callAppSuggestedName: String?
+    /// Teams or Slack, read over Accessibility). A hint the review shows next
+    /// to the voice: it never fills the name field on its own and is never
+    /// saved untouched; nothing is learned until the person picks or types
+    /// a name. Local only.
+    public var callAppShownName: String?
 
     public init(
         id: UUID,

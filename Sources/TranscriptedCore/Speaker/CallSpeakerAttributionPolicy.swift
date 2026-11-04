@@ -1,7 +1,9 @@
 import Foundation
 
-/// Names diarized call-audio voices from what the call app showed about who
-/// was talking (`CallSpeakerActivity`). Pure: no I/O, no logging, no clock.
+/// Reads what the call app showed about who was talking
+/// (`CallSpeakerActivity`) against the diarized call-audio voices. Pure: no
+/// I/O, no logging, no clock. The names it finds are evidence for the saved
+/// transcript and a hint in review; they never become a speaker's label.
 ///
 /// A voice gets a name only when the evidence clearly points at one person:
 /// 1. Intervals of the local user (`selfNames`) are ignored; the user is the
@@ -13,11 +15,9 @@ import Foundation
 ///    holds at least `minShare` of all overlapped evidence, and the evidence
 ///    covers at least `minCoveredFraction` of the voice's speech.
 /// 4. The policy may give one name to several voices (the diarizer split one
-///    person) when each passes on its own, but the pipeline then withholds
-///    all of them (`nameShared`), and also any voice whose name another
-///    voice already shows: body labels are `[System/<name>]`, so two voices
-///    under one name can't be told apart and a rename would hit both
-///    (`TranscriptionTaskManager.applyCallSpeakerNames`).
+///    person) when each passes on its own. That's fine: the name is only
+///    context saved next to each voice (`CallAppSpeakerEvidence`), never a
+///    label, so nothing gets renamed by it.
 /// 5. Roster-only observations never name a voice. Visible tiles do not prove
 ///    a complete participant roster or successful self identification; even
 ///    one observed name and one voice can belong to different people.
@@ -73,9 +73,29 @@ public enum CallSpeakerAttributionPolicy {
         case rosterNotSingle = "roster_not_single"
         /// Legacy reason retained for API compatibility; roster-only reads now yield `noEvidence`.
         case voicesNotSingle = "voices_not_single"
-        /// Another call-audio voice in the meeting shows, or would show, the
-        /// same name. Set by the pipeline after the policy, never by `attribute`.
+        /// Legacy reason retained for API compatibility: call-app names are
+        /// no longer labels, so two voices may carry the same one.
         case nameShared = "name_shared"
+    }
+
+    /// How strongly the call app pointed at a named voice's name. Numbers
+    /// only; safe to log in aggregate, never next to a name.
+    public struct Evidence: Sendable, Equatable {
+        /// Seconds of this voice's speech while the call app showed only
+        /// this name speaking.
+        public var seconds: Double
+        /// That name's share of all single-speaker evidence overlapping this
+        /// voice (0...1). 1 means no other name ever showed while it talked.
+        public var share: Double
+        /// Fraction of this voice's speech that any single-speaker evidence
+        /// covered (0...1).
+        public var coverage: Double
+
+        public init(seconds: Double, share: Double, coverage: Double) {
+            self.seconds = seconds
+            self.share = share
+            self.coverage = coverage
+        }
     }
 
     public struct Outcome: Sendable, Equatable {
@@ -83,10 +103,18 @@ public enum CallSpeakerAttributionPolicy {
         public var names: [String: String]
         /// Diarizer voice id to why it got no name.
         public var withheld: [String: WithheldReason]
+        /// Diarizer voice id to how strong the evidence for its name was.
+        /// Has an entry for every voice in `names`.
+        public var evidence: [String: Evidence]
 
-        public init(names: [String: String] = [:], withheld: [String: WithheldReason] = [:]) {
+        public init(
+            names: [String: String] = [:],
+            withheld: [String: WithheldReason] = [:],
+            evidence: [String: Evidence] = [:]
+        ) {
             self.names = names
             self.withheld = withheld
+            self.evidence = evidence
         }
     }
 
@@ -132,6 +160,11 @@ public enum CallSpeakerAttributionPolicy {
                 outcome.withheld[clusterId] = .lowCoverage
             } else {
                 outcome.names[clusterId] = spellings[best.key] ?? best.key
+                outcome.evidence[clusterId] = Evidence(
+                    seconds: best.value,
+                    share: best.value / evidenceTotal,
+                    coverage: totalSpeech > 0 ? min(1, evidenceTotal / totalSpeech) : 0
+                )
             }
         }
         return outcome

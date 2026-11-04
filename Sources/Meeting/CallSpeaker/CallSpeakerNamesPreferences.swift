@@ -1,5 +1,5 @@
 // CallSpeakerNamesPreferences.swift
-// Settings > Speakers "Name speakers from the call app". Default on. Read on
+// Settings > Speakers "Use call app names as hints". Default on. Read on
 // every poll, so turning it off mid-meeting stops the reads at once.
 
 import Foundation

@@ -68,10 +68,13 @@ force-installed by Sparkle so existing users recover from a regression.
   dictation shortcut.
 - Experiment, off by default: auto-record detected meetings. Turning it on
   asks once, because it records other people on the call without a prompt.
-- Speakers can be named from the call app's active-speaker tiles (Zoom,
-  Google Meet, Teams, Slack huddles) while a meeting records. Names still go
-  to review as "From the call" and nothing is learned until you save.
-  Settings › Speakers › "Name speakers from the call app" turns it off.
+- Call app names as hints: while a meeting records, Transcripted notes who
+  Zoom, Google Meet, Teams or Slack huddles show talking. It never renames a
+  voice. The transcript keeps that name next to each voice, along with how
+  strong the match was and whether it agrees with the voiceprint, and the
+  Who spoke? review shows "Call app showed: Maya" as a hint you can tap to
+  fill the name box. Nothing is saved or learned until you name the voice.
+  Settings › Speakers › "Use call app names as hints" turns it off.
 - The Dictations page has new cards: a bar on top with play, time, length,
   words, and app (delivery problems in amber), and the text below in italics,
   four lines with Show more. Press play to hear a kept take right there; a

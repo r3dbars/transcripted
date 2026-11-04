@@ -21,8 +21,6 @@ struct SpeakerVoiceToNameRow: View {
     @ObservedObject private var playback = SpeakerClipPlayback.shared
 
     @State private var nameDraft = ""
-    /// The call app's name while it sits in the box untouched.
-    @State private var draftFromCall: String?
     @State private var isSaving = false
     @State private var saveErrorMessage: String?
     @State private var showDeleteConfirmation = false
@@ -125,6 +123,21 @@ struct SpeakerVoiceToNameRow: View {
                 .accessibilityIdentifier("transcripted.speakers.voice-to-name.invitees")
             }
 
+            // The call app's name is a hint, never a draft: a tap puts it
+            // in the box, and only saving the row saves it.
+            if let callHint = NotchIslandSpeakerReviewPolicy.reviewRowCallAppHint(
+                callAppShownName: group.representative.callAppShownName,
+                savedName: group.representative.profile.displayName
+            ), let name = callHint.fillsName {
+                SpeakerQuietLinkButton(title: callHint.text) {
+                    nameDraft = name
+                }
+                .disabled(isSaving)
+                .help("Put \(name) in the name box. Nothing is saved until you press Return.")
+                .padding(.leading, 50)
+                .accessibilityIdentifier("transcripted.speakers.voice-to-name.call-app-hint")
+            }
+
             ViewThatFits(in: .horizontal) {
                 HStack(alignment: .top, spacing: 10) {
                     nameField
@@ -164,16 +177,13 @@ struct SpeakerVoiceToNameRow: View {
         .onAppear {
             if let draft = NotchIslandSpeakerReviewPolicy.reviewRowDraft(
                 currentDraft: nameDraft,
-                savedName: group.representative.profile.displayName,
-                callAppSuggestedName: group.representative.callAppSuggestedName
+                savedName: group.representative.profile.displayName
             ) {
-                nameDraft = draft.name
-                draftFromCall = draft.isFromCall ? draft.name : nil
+                nameDraft = draft
             }
         }
-        .onChange(of: nameDraft) { _, newValue in
+        .onChange(of: nameDraft) { _, _ in
             saveErrorMessage = nil
-            if newValue != draftFromCall { draftFromCall = nil }
         }
         .alert(
             SpeakerVoiceRowMenuPolicy.deleteConfirmationTitle,
@@ -237,8 +247,7 @@ struct SpeakerVoiceToNameRow: View {
     /// itself commits on Enter (`onSubmit: saveName`), matching the person
     /// card's "⏎ to rename" pattern.
     private var saveHint: some View {
-        Text(isSaving ? "Saving…" : draftFromCall != nil
-            ? "\(NotchIslandSpeakerReviewPolicy.callAppPrefillNote) · ⏎ to save" : "⏎ to save")
+        Text(isSaving ? "Saving…" : "⏎ to save")
             .font(.system(size: 11))
             .foregroundStyle(LibraryTokens.ink3)
             .fixedSize()
