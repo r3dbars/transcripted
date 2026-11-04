@@ -108,6 +108,26 @@ extension MeetingOverlayController {
         )
     }
 
+    // Split on new meeting. A calendar offer names the meeting that is
+    // starting; a call re-join has no title, so it asks.
+    func meetingSplitPromptDisplay(offer: MeetingSplitOffer) -> PromptDisplay {
+        let title: String
+        if let candidate = offer.candidate {
+            title = "\(candidate.suggestedTranscriptTitle ?? "Next meeting") is starting"
+        } else {
+            title = "New call?"
+        }
+        return PromptDisplay(
+            title: title,
+            detail: "Split saves this recording and starts a new one.",
+            countdownText: "",
+            secondaryTitle: "Keep recording",
+            secondaryAccessibilityLabel: "Keep recording into this meeting",
+            primaryTitle: "Split",
+            primaryAccessibilityLabel: "Stop and save this meeting, then record the new one"
+        )
+    }
+
     // Awareness, not blame: name the call surface and length, then point at the
     // two ways to capture next time. The panel renders `detail` as one
     // truncating line, so the copy stays short.

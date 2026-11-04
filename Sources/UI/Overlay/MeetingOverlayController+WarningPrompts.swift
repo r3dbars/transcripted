@@ -67,6 +67,10 @@ extension MeetingOverlayController {
         case .micBoost:
             // No schedulePromptCountdown(): expiry must never auto-enable VPIO.
             return (micBoostPromptDisplay(), 0, false)
+        case .meetingSplit:
+            // No countdown: a split only ever happens on a tap.
+            guard let meetingSplitOffer else { return nil }
+            return (meetingSplitPromptDisplay(offer: meetingSplitOffer), 0, false)
         case .missedCall:
             return nil
         }
@@ -74,7 +78,7 @@ extension MeetingOverlayController {
 
     func isWarningDrivenPromptKind(_ kind: PromptKind?) -> Bool {
         switch kind {
-        case .systemAudio, .audioInactivity, .audioRoute, .micBoost:
+        case .systemAudio, .audioInactivity, .audioRoute, .micBoost, .meetingSplit:
             return true
         case .missedCall, .none:
             return false
@@ -135,6 +139,10 @@ extension MeetingOverlayController {
             )
         case .micBoost:
             currentPrompt = micBoostPromptDisplay()
+        case .meetingSplit:
+            if let meetingSplitOffer {
+                currentPrompt = meetingSplitPromptDisplay(offer: meetingSplitOffer)
+            }
         case .audioRoute:
             if let outcome = audioRouteWarningOutcome {
                 currentPrompt = audioRouteWarningPromptDisplay(outcome: outcome)
@@ -156,7 +164,7 @@ extension MeetingOverlayController {
             // Defensive no-op: a countdown is never scheduled for this kind,
             // and expiry must never auto-enable VPIO.
             return
-        case .audioRoute:
+        case .audioRoute, .meetingSplit:
             return
         case .audioInactivity:
             guard let warning = meetingSession?.audioInactivityWarning else { return }

@@ -68,6 +68,7 @@ final class MeetingOverlayController: NSObject {
     var promptKind: PromptKind?
     var audioRouteWarningOutcome: MeetingRouteWarning?
     var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
+    var meetingSplitOffer: MeetingSplitOffer?
     var micOnlyNotice: MeetingMicOnlyNotice?
     // Audio inactivity drives its own per-second countdown Task
     // (schedulePromptCountdown). The combined warning subscription re-fires
@@ -333,13 +334,16 @@ final class MeetingOverlayController: NSObject {
             session.$isMicBoostPromptVisible,
             session.routeWarningPublisher
         )
+        .combineLatest(session.$meetingSplitOffer)
         .receive(on: DispatchQueue.main)
-        .sink { [weak self] inactivity, systemAudio, micBoostVisible, route in
+        .sink { [weak self] warnings, splitOffer in
+            let (inactivity, systemAudio, micBoostVisible, route) = warnings
             self?.applyWarningPrompt(
                 inactivity: inactivity,
                 systemAudio: systemAudio,
                 micBoostVisible: micBoostVisible,
-                route: route
+                route: route,
+                splitOffer: splitOffer
             )
         }
         .store(in: &subscriptions)
@@ -403,10 +407,12 @@ final class MeetingOverlayController: NSObject {
         inactivity: MeetingAudioInactivityWarning?,
         systemAudio: MeetingSystemAudioDegradationWarning?,
         micBoostVisible: Bool,
-        route: MeetingRouteWarning?
+        route: MeetingRouteWarning?,
+        splitOffer: MeetingSplitOffer?
     ) {
         systemAudioDegradationWarning = systemAudio
         audioRouteWarningOutcome = route
+        meetingSplitOffer = splitOffer
 
         let resolvedKind = MeetingPromptPriority.resolve(
             inactivity: inactivity,
@@ -414,7 +420,8 @@ final class MeetingOverlayController: NSObject {
             routeActive: route != nil,
             micBoostVisible: micBoostVisible,
             current: promptKind,
-            isRecording: meetingSession?.state == .recording
+            isRecording: meetingSession?.state == .recording,
+            splitOffered: splitOffer != nil
         )
 
         guard let resolvedKind else {
