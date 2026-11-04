@@ -29,22 +29,23 @@ public struct TranscriptReplacementExpectation: Equatable, Sendable {
             throw CocoaError(.fileReadCorruptFile)
         }
         var prefix = Data()
-        var hasher = SHA256()
-        while try autoreleasepool(invoking: { () throws -> Bool in
+        var values: [String: String]?
+        var raw = ""
+        let fences = ["---\n", "---\r\n", "\u{FEFF}---\n", "\u{FEFF}---\r\n"]
+        // Most headers fit the first small read. A modern UUID does not need
+        // the transcript body hashed while the file-update serializer is held.
+        while prefix.count < TranscriptFrontmatter.maximumFrontmatterByteLimit {
             try Task.checkCancellation()
-            guard let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty else { return false }
-            if prefix.count < TranscriptFrontmatter.maximumFrontmatterByteLimit {
-                prefix.append(chunk.prefix(TranscriptFrontmatter.maximumFrontmatterByteLimit - prefix.count))
-            }
-            hasher.update(data: chunk)
-            return true
-        }) {}
-        let raw = String(decoding: prefix, as: UTF8.self)
-        let values = TranscriptFrontmatter.values(in: raw)
+            let count = min(16_384, TranscriptFrontmatter.maximumFrontmatterByteLimit - prefix.count)
+            guard let chunk = try handle.read(upToCount: count), !chunk.isEmpty else { break }
+            prefix.append(chunk)
+            raw = String(decoding: prefix, as: UTF8.self)
+            values = TranscriptFrontmatter.values(in: raw)
+            if values != nil || !fences.contains(where: { raw.hasPrefix($0) }) { break }
+        }
         if values == nil {
             // A malformed/oversized YAML header may conceal protection metadata;
             // it must never acquire a legacy exemption from the write guard.
-            let fences = ["---\n", "---\r\n", "\u{FEFF}---\n", "\u{FEFF}---\r\n"]
             guard !fences.contains(where: { raw.hasPrefix($0) }) else { throw CocoaError(.fileReadCorruptFile) }
         }
         let actualID = values.flatMap(TranscriptFrontmatter.captureID(in:))
@@ -53,6 +54,14 @@ public struct TranscriptReplacementExpectation: Equatable, Sendable {
             throw CocoaError(.fileReadCorruptFile)
         }
         if let actualID { return Self(captureID: actualID, legacy: nil) }
+        var hasher = SHA256()
+        hasher.update(data: prefix)
+        while try autoreleasepool(invoking: { () throws -> Bool in
+            try Task.checkCancellation()
+            guard let chunk = try handle.read(upToCount: 1 << 20), !chunk.isEmpty else { return false }
+            hasher.update(data: chunk)
+            return true
+        }) {}
         return Self(captureID: nil, legacy: LegacyFingerprint(
             device: info.st_dev, inode: info.st_ino,
             bornSeconds: info.st_birthtimespec.tv_sec, bornNanos: info.st_birthtimespec.tv_nsec,

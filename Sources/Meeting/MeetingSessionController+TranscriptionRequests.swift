@@ -232,12 +232,7 @@ extension MeetingSessionController {
     /// use stopRecording() for that.
     func cancelActiveTranscription() {
         meetingActionIdentity = UUID()
-        let savedPreparation = savedAudioPreparation?.task
-        savedAudioPreparation = nil
-        savedPreparation?.cancel()
-        Task {
-            if let snapshot = try? await savedPreparation?.value { snapshot.discardUnstartedPreparation() }
-        }
+        cancelSavedAudioPreparation()
         // An in-flight imported-audio copy is cancellable too. Cancelling the
         // task makes the preparer interrupt the copy and remove the partial
         // scratch file; importAudioFile() then resets the visible state.
@@ -348,7 +343,7 @@ extension MeetingSessionController {
         )
         if admission == nil { meetingActionIdentity = ownedAdmission.actionID }
         if inputSnapshot == nil {
-            savedAudioPreparation?.task.cancel()
+            cancelSavedAudioPreparation()
             let preparation = Task {
                 try await RetainedAudioInputSnapshot.prepare(
                     microphoneURL: micAudioURL, systemURL: systemAudioURL,
@@ -473,6 +468,14 @@ extension MeetingSessionController {
             captureActive: isCaptureSessionActive, dictationBusy: sttRouter.isRecording || sttRouter.isTranscribing,
             backgroundWork: hasBackgroundTranscriptionWork, cancelled: Task.isCancelled
         )
+    }
+
+    @discardableResult
+    func cancelSavedAudioPreparation() -> Task<Void, Never>? {
+        guard let preparation = savedAudioPreparation?.task else { return nil }
+        savedAudioPreparation = nil
+        preparation.cancel()
+        return Task { await RetainedAudioInputSnapshot.cancelPreparation(preparation) }
     }
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {

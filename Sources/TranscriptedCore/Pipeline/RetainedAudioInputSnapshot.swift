@@ -81,6 +81,13 @@ public final class RetainedAudioInputSnapshot: @unchecked Sendable {
         return true
     }
 
+    /// Supersession, cancellation and termination share this same handoff. A
+    /// completed copy may still be retained by an older model/migration wait.
+    public static func cancelPreparation(_ task: Task<RetainedAudioInputSnapshot, Error>) async {
+        task.cancel()
+        if let snapshot = try? await task.value { snapshot.discardUnstartedPreparation() }
+    }
+
     func claimForTranscription(microphoneURL: URL?, systemURL: URL) -> Bool {
         lock.lock()
         defer { lock.unlock() }

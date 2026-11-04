@@ -217,6 +217,22 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), raw)
     }
 
+    func testLegacyExpectationIncludesInPlaceEditsBeyondTheFrontmatterPrefix() throws {
+        let url = directory.appendingPathComponent("LongLegacy.md")
+        let legacy = "---\ncapture_type: meeting\nstarred: true\n---\n\n" + String(repeating: "x", count: 2 << 20)
+        try legacy.write(to: url, atomically: true, encoding: .utf8)
+        let early = try TranscriptReplacementExpectation.capture(at: url, requiringLegacy: true)
+        // Preserve inode, birth identity, length and the entire header while
+        // changing a byte far beyond the bounded protection-metadata read.
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.seek(toOffset: UInt64(legacy.utf8.count - 1))
+        try handle.write(contentsOf: Data("y".utf8))
+        try handle.close()
+        XCTAssertFalse(try early.matches(at: url))
+        XCTAssertNil(TranscriptSaver.beginReplacingTranscript(at: url, expectation: early))
+        XCTAssertEqual(try Data(contentsOf: url).last, Character("y").asciiValue)
+    }
+
     @discardableResult
     private func replace(_ transcriptURL: URL) -> URL? {
         TranscriptSaver.saveTranscript(

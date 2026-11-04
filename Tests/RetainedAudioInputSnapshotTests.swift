@@ -199,6 +199,30 @@ func testRetainedAudioInputSnapshot() async {
                 }
             } catch { assertTrue(false, "output expectation fixture failed: \(error)") }
         }
+
+        await runSuite("Superseding a completed preparation cleans copies still held by an older wait") {
+            do {
+                let preparation = Task {
+                    try await RetainedAudioInputSnapshot.prepare(
+                        microphoneURL: nil, systemURL: source, scratchRoot: scratch
+                    )
+                }
+                let olderWait = try await preparation.value
+                assertTrue(fm.fileExists(atPath: olderWait.systemURL.path))
+                await RetainedAudioInputSnapshot.cancelPreparation(preparation)
+                assertTrue(!fm.fileExists(atPath: olderWait.systemURL.path), "a completed task's success result must not prevent supersession cleanup")
+                assertTrue(!olderWait.claimForTranscription(microphoneURL: nil, systemURL: olderWait.systemURL))
+                let activePreparation = Task {
+                    try await RetainedAudioInputSnapshot.prepare(
+                        microphoneURL: nil, systemURL: source, scratchRoot: scratch
+                    )
+                }
+                let active = try await activePreparation.value
+                assertTrue(active.claimForTranscription(microphoneURL: nil, systemURL: active.systemURL))
+                await RetainedAudioInputSnapshot.cancelPreparation(activePreparation)
+                assertEqual(try Data(contentsOf: active.systemURL), original, "the same cleanup cannot invalidate claimed Core reads")
+            } catch { assertTrue(false, "supersession fixture failed: \(error)") }
+        }
     } catch { assertTrue(false, "owned snapshot test setup failed: \(error)") }
 }
 
