@@ -660,6 +660,44 @@ func testMeetingAudioStorageManager() async {
         assertTrue(FileManager.default.fileExists(atPath: newAudio.path), "new audio directory should stay")
     }
 
+    runSuite("MeetingAudioStorageManager retention never touches saved voices") {
+        // The default library sits next to the app's state and tmp folders, so
+        // lay the fixture out the same way: captures/meetings beside the
+        // speaker databases and saved speaker clips.
+        let appSupport = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: appSupport) }
+        let meetings = appSupport.appendingPathComponent("captures/meetings", isDirectory: true)
+        let state = appSupport.appendingPathComponent("state", isDirectory: true)
+        let clips = appSupport.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true)
+        for folder in [meetings, state, clips] {
+            try! FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        }
+        let speakerDB = state.appendingPathComponent("speakers.sqlite")
+        let redimnetDB = state.appendingPathComponent("speakers_redimnet2-b4.sqlite")
+        let savedClip = clips.appendingPathComponent("maya-lindqvist.wav")
+        for file in [speakerDB, redimnetDB, savedClip] {
+            try! Data("voice".utf8).write(to: file)
+        }
+
+        let oldTranscript = try! makeTranscript(named: "Old Standup", in: meetings, ageDays: 40)
+        let oldAudio = makeAudioDirectory(for: oldTranscript)
+        try! Data("wav".utf8).write(to: oldAudio.appendingPathComponent("microphone.wav"))
+        try! Data("wav".utf8).write(to: oldAudio.appendingPathComponent("system_audio.wav"))
+
+        let removed = MeetingAudioStorageManager.pruneRetainedAudio(
+            in: meetings,
+            retentionWindow: .sevenDays,
+            now: Date()
+        )
+
+        assertEqual(removed, 1, "the old meeting's audio should be pruned")
+        assertFalse(FileManager.default.fileExists(atPath: oldAudio.path), "old meeting audio should be gone")
+        assertTrue(FileManager.default.fileExists(atPath: oldTranscript.path), "the transcript should stay")
+        assertTrue(FileManager.default.fileExists(atPath: speakerDB.path), "voiceprints should stay")
+        assertTrue(FileManager.default.fileExists(atPath: redimnetDB.path), "the ReDimNet2 voiceprints should stay")
+        assertTrue(FileManager.default.fileExists(atPath: savedClip.path), "saved speaker clips should stay")
+    }
+
     runSuite("MeetingAudioStorageManager prunes by transcript frontmatter date") {
         let directory = makeMeetingAudioStorageTestDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
