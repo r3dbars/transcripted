@@ -230,6 +230,7 @@ struct WritingDurabilityTests {
         defaults.set("consent", forKey: PersonalHistorySettingsContract.consentIdentifierKey)
         let attempts = Attempts()
         let capture = PersonalHistoryCapture(defaults: defaults,
+            flushScheduler: .neverOnItsOwn,
             sender: { events in
                 let response = await GhostBrainServerHost.personalHistoryResponse(events, ingest: ingest)
                 await attempts.record(events.map(\.id), response: response)
@@ -364,4 +365,11 @@ struct WritingDurabilityTests {
             set { lock.withLock { stored = newValue } }
         }
     }
+}
+
+private extension PersonalHistoryCapture.FlushScheduler {
+    /// Only `flushAndWait()` sends, so the test counts exactly the attempts
+    /// it asked for. The real 5 s retry timer fired between flushes on a
+    /// loaded CI runner and added attempts.
+    static let neverOnItsOwn = Self { _, _, _ in }
 }

@@ -69,6 +69,7 @@ SETTINGS_CLICK_FLOW_IDS = [
     "transcripted.settings.general.usage-stats",
     "transcripted.settings.storage.capture-library",
     "transcripted.settings.storage.delete-audio",
+    "transcripted.settings.storage.keep-dictation-audio",
     "transcripted.settings.storage.free-up-space",
     "transcripted.settings.storage.support-files",
     "transcripted.settings.about.automatic-updates",

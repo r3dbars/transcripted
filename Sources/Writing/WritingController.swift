@@ -109,6 +109,12 @@ final class WritingController {
     /// The socket server is up and the runtime is live.
     private(set) var isRunning = false
     var keyboardInstallResult: GhostKeyboardInstallerHost.KeyboardInstallResult?
+    /// The keyboard install in flight. Launch and the Writing tab can ask at
+    /// once; they share one copy instead of racing two into the same folder.
+    var keyboardInstallTask: Task<GhostKeyboardInstallerHost.KeyboardInstallResult, Never>?
+    /// Counts runtime stops, so a keyboard step that awaited the install can
+    /// tell Writing was turned off meanwhile and not select the keyboard.
+    private(set) var runtimeStopCount = 0
     /// What enabling the keyboard did on the last try, if it ran. On macOS
     /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
     /// and the source stays off.
@@ -448,6 +454,7 @@ final class WritingController {
         let abandoning = isTerminated && quitAbandonsUnsavedWriting
         guard abandoning || runtime?.dayFiles.stop() != false else { return }
         hasStarted = false
+        runtimeStopCount &+= 1
         autocompleteRuntimeActive = false
         let wasRunning = isRunning
         isRunning = false
@@ -646,9 +653,12 @@ final class WritingController {
     /// above and the app log. Never opens System Settings: the Writing tab
     /// shows the guidance and its button does that.
     private func installKeyboard() {
-        guard installKeyboardRecordingFirstInstall(),
-              !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey) else { return }
-        enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true)
+        Task { @MainActor [weak self] in
+            guard let self, await self.installKeyboardRecordingFirstInstall(),
+                  self.isRunning,
+                  !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey) else { return }
+            self.enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true)
+        }
     }
 
     private func enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: Bool) {

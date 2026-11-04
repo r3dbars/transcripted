@@ -41,44 +41,121 @@ final class GhostKeyboardInstallerHost {
             .path
     }
 
-    @discardableResult
-    func installOrUpdateIfNeeded() -> KeyboardInstallResult {
-        let bundled = URL(fileURLWithPath: Bundle.main.bundlePath).appendingPathComponent(Self.bundledPathInApp)
+    /// The file and signature half of an install.
+    enum InstallPreparation: Equatable, Sendable {
+        case unavailableInDevelopment
+        case failed
+        /// The installed keyboard checks out; `changed` when this copied a
+        /// fresh one in.
+        case ready(changed: Bool)
+    }
+
+    /// What `installOrUpdate(using:)` runs. `prepare` reads, signature-checks
+    /// and copies bundles, so it runs off the main thread. The rest are Text
+    /// Input Sources and NSWorkspace calls, which a UI app must make on the
+    /// main thread (TextInputSources.h, "Mac OS X threading").
+    struct InstallSteps {
+        var prepare: @Sendable () -> InstallPreparation
+        /// Whether Input Sources lists the keyboard now, enabled or not.
+        var isRegistered: @MainActor () -> Bool
+        /// `TISRegisterInputSource` on the installed bundle.
+        var register: @MainActor () -> Bool
+        /// Quits the running keyboard so it relaunches on the new binary.
+        var restartRunningKeyboard: @MainActor () -> Void
+    }
+
+    /// Installs or updates the keyboard and makes sure Input Sources lists it.
+    @MainActor
+    func installOrUpdateIfNeeded() async -> KeyboardInstallResult {
+        await Self.installOrUpdate(using: Self.systemSteps)
+    }
+
+    /// The file work runs detached; only the Text Input Sources calls come
+    /// back to the main thread. `TISRegisterInputSource` forces a rebuild of
+    /// the shared input-source cache under a file lock other processes also
+    /// take, and once blocked the main thread past 5 s at launch. So an
+    /// unchanged keyboard that Input Sources still lists isn't registered
+    /// again; one it lost (TextInputMenuAgent restarted) or a fresh copy is.
+    @MainActor
+    static func installOrUpdate(using steps: InstallSteps) async -> KeyboardInstallResult {
+        let prepare = steps.prepare
+        let preparation = await Task.detached(priority: .userInitiated) { prepare() }.value
+        let changed: Bool
+        switch preparation {
+        case .unavailableInDevelopment:
+            return .unavailableInDevelopment
+        case .failed:
+            return .failed
+        case let .ready(didChange):
+            changed = didChange
+        }
+        if changed {
+            steps.restartRunningKeyboard()
+        }
+        if changed || !steps.isRegistered() {
+            guard steps.register() else { return .failed }
+        }
+        return changed ? .installed : .alreadyInstalled
+    }
+
+    @MainActor
+    private static var systemSteps: InstallSteps {
+        InstallSteps(
+            prepare: { prepareSystemInstall() },
+            isRegistered: { registeredSourceIsListed() },
+            register: {
+                let installed = URL(fileURLWithPath: installedPath)
+                guard TISRegisterInputSource(installed as CFURL) == noErr else {
+                    DiagnosticsLog.shared.record("ime-register-failed", metadata: [:])
+                    return false
+                }
+                return true
+            },
+            restartRunningKeyboard: {
+                NSWorkspace.shared.runningApplications
+                    .filter { $0.bundleIdentifier == bundleIdentifier }
+                    .forEach { $0.terminate() }
+            }
+        )
+    }
+
+    /// Copies the bundled keyboard into ~/Library/Input Methods when it's
+    /// missing or outdated. Disk and code-signature work: never on main.
+    private static func prepareSystemInstall() -> InstallPreparation {
+        let bundled = URL(fileURLWithPath: Bundle.main.bundlePath).appendingPathComponent(bundledPathInApp)
         guard FileManager.default.fileExists(atPath: bundled.path) else {
             return .unavailableInDevelopment
         }
-        let installed = URL(fileURLWithPath: Self.installedPath)
-        var changed = false
-
         do {
-            guard let ownerTeam = Self.ownerTeamIdentifier else {
+            guard let ownerTeam = ownerTeamIdentifier else {
                 throw CocoaError(.fileReadNoPermission)
             }
-            changed = try Self.installIfNeeded(
+            let changed = try installIfNeeded(
                 bundled: bundled,
-                installed: installed,
+                installed: URL(fileURLWithPath: installedPath),
                 expectedTeamIdentifier: ownerTeam,
-                trust: { Self.strictSignatureTeamIdentifier(at: $0) }
+                trust: { strictSignatureTeamIdentifier(at: $0) }
             )
             if changed {
                 DiagnosticsLog.shared.record("ime-installed", metadata: [:])
-                // Live IME picks up the new binary on its next relaunch.
-                NSWorkspace.shared.runningApplications
-                    .filter { $0.bundleIdentifier == Self.bundleIdentifier }
-                    .forEach { $0.terminate() }
             }
+            return .ready(changed: changed)
         } catch {
             DiagnosticsLog.shared.record("ime-install-failed", metadata: [:])
             return .failed
         }
+    }
 
-        // Registration is wiped whenever TextInputMenuAgent restarts — re-run
-        // every launch; it is idempotent.
-        guard TISRegisterInputSource(installed as CFURL) == noErr else {
-            DiagnosticsLog.shared.record("ime-register-failed", metadata: [:])
-            return .failed
+    /// A list read by identifier, not the cache rebuild a register forces.
+    @MainActor
+    private static func registeredSourceIsListed() -> Bool {
+        guard let sources = TISCreateInputSourceList(
+            [kTISPropertyInputSourceID: bundleIdentifier] as CFDictionary,
+            true
+        )?.takeRetainedValue() as? [TISInputSource] else {
+            return false
         }
-        return changed ? .installed : .alreadyInstalled
+        return sources.contains { stringProperty(kTISPropertyBundleID, of: $0) == bundleIdentifier }
     }
 
     func inputSourceStatus() -> TildeInputSourceStatus {

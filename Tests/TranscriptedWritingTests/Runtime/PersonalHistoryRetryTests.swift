@@ -165,6 +165,7 @@ struct PersonalHistoryRetryTests {
         return PersonalHistoryCapture(
             defaults: defaults,
             now: { Date(timeIntervalSince1970: 1_786_600_000) },
+            flushScheduler: .neverOnItsOwn,
             sender: { await app.receive($0) }
         )
     }
@@ -194,4 +195,11 @@ struct PersonalHistoryRetryTests {
             "personalHistoryEvents": events,
         ])
     }
+}
+
+private extension PersonalHistoryCapture.FlushScheduler {
+    /// Only `flushAndWait()` sends, so each test counts exactly the attempts
+    /// it asked for. The real 0.75 s and 5 s timers fired between flushes on
+    /// a loaded CI runner and added attempts.
+    static let neverOnItsOwn = Self { _, _, _ in }
 }

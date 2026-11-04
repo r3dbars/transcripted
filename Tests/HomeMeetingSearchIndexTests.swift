@@ -292,6 +292,87 @@ func testHomeMeetingSearchIndex() async {
         }
     }
 
+    runSuite("The Starred filter finds every starred meeting in the library, newest first") {
+        let index = starredSearchIndex()
+
+        let starred = index.search(query: "", limit: 10, starredOnly: true)
+        assertEqual(
+            starred.items.map(\.title),
+            ["Design Review", "Quarterly Planning"],
+            "an empty query with Starred on lists only starred meetings, newest first"
+        )
+        assertFalse(starred.hasMore, "both starred meetings fit")
+
+        let designOnly = index.search(query: "design", limit: 10, starredOnly: true)
+        assertEqual(designOnly.items.map(\.title), ["Design Review"], "a query and Starred must both match")
+
+        let unstarredMatch = index.search(query: "standup", limit: 10, starredOnly: true)
+        assertTrue(unstarredMatch.items.isEmpty, "a text match that isn't starred stays hidden")
+
+        let plainQuery = index.search(query: "standup", limit: 10, starredOnly: false)
+        assertEqual(plainQuery.items.map(\.title), ["Team Standup"], "with Starred off, search ignores stars")
+
+        let nothing = index.search(query: "", limit: 10, starredOnly: false)
+        assertTrue(nothing.items.isEmpty, "an empty query with Starred off still matches nothing")
+    }
+
+    runSuite("The Starred filter pages like search") {
+        let firstPage = starredSearchIndex().search(query: "", limit: 1, starredOnly: true)
+        assertEqual(firstPage.items.map(\.title), ["Design Review"], "the first page holds the newest starred meeting")
+        assertTrue(firstPage.hasMore, "a second starred meeting reports more")
+    }
+
+    runSuite("Turning on Starred counts as an active search, even with an empty box") {
+        assertTrue(HomeMeetingSearchPaging.isActive(query: "", starredOnly: true), "Starred alone searches the full library")
+        assertTrue(HomeMeetingSearchPaging.isActive(query: "design", starredOnly: false), "a query alone is still a search")
+        assertFalse(HomeMeetingSearchPaging.isActive(query: "  ", starredOnly: false), "spaces with Starred off are not a search")
+    }
+
+    runSuite("An empty Starred list says how to star a meeting") {
+        assertEqual(
+            HomeCaptureListCopy.meetingsEmptyMessage(isSearching: true, starredOnly: true, query: "", isSearchPassRunning: false),
+            "No starred meetings yet. Star one from its \u{22EF} menu.",
+            "Starred with no query explains how to add one"
+        )
+        assertEqual(
+            HomeCaptureListCopy.meetingsEmptyMessage(isSearching: true, starredOnly: true, query: "design", isSearchPassRunning: false),
+            HomeCaptureListCopy.noMeetingMatches,
+            "Starred plus a query falls back to no matches"
+        )
+        assertEqual(
+            HomeCaptureListCopy.meetingsEmptyMessage(isSearching: true, starredOnly: true, query: "", isSearchPassRunning: true),
+            HomeCaptureListCopy.searchingMeetings,
+            "don't claim there are none before the pass has looked"
+        )
+        assertEqual(
+            HomeCaptureListCopy.meetingsEmptyMessage(isSearching: false, starredOnly: false, query: "", isSearchPassRunning: false),
+            HomeCaptureListCopy.emptyMeetings,
+            "the normal empty list is unchanged"
+        )
+    }
+}
+
+/// Three meetings, newest first; the newest and oldest are starred.
+private func starredSearchIndex() -> HomeMeetingSearchIndex {
+    let rows: [(title: String, starred: Bool)] = [
+        ("Design Review", true),
+        ("Team Standup", false),
+        ("Quarterly Planning", true)
+    ]
+    let scanned = rows.enumerated().map { offset, row in
+        var item = searchIndexSampleItem(
+            title: row.title,
+            path: "/tmp/starred-\(offset).md",
+            date: Date(timeIntervalSinceReferenceDate: Double(100 - offset))
+        )
+        item.isStarred = row.starred
+        return RecentMeetingIndexEntry(
+            path: "/tmp/starred-\(offset).md",
+            stamp: RecentMeetingCacheStamp(transcriptModified: Double(offset), transcriptSize: 1),
+            item: item
+        )
+    }
+    return HomeMeetingSearchIndex(scanned: scanned)
 }
 
 private func searchIndexSampleItem(

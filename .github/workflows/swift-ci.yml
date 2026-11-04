@@ -309,6 +309,13 @@ jobs:
         shell: bash
         run: bash scripts/dev/test-speaker-settings-model.sh
 
+      # The real Speakers page in a borderless window, scrolled top to bottom
+      # over fictional people at several list sizes. A user report on 1.1.75
+      # froze here; a frozen main thread fails through the smoke's hang guard.
+      - name: Speakers directory scroll smoke
+        shell: bash
+        run: bash scripts/dev/test-speakers-directory-scroll.sh
+
       # The Tools packages each resolve their own remote SwiftPM dependencies.
       # Cache the shared clone/checkout store so every push and PR doesn't
       # re-fetch them from the network. Keyed on the resolved pins, so a

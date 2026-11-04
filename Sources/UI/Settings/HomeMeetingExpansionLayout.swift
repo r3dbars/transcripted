@@ -3,6 +3,7 @@ import Foundation
 /// One action on an opened Meetings card (`QuietMeetingExpansion`).
 enum HomeMeetingExpansionAction: Hashable, CaseIterable {
     case copy
+    case star
     case revealInFinder
     case more
 }
@@ -18,7 +19,7 @@ enum HomeMeetingExpansionLayout {
     }
 
     /// Actions in the header row, top right.
-    static let headerActions: [HomeMeetingExpansionAction] = [.copy, .revealInFinder, .more]
+    static let headerActions: [HomeMeetingExpansionAction] = [.copy, .star, .revealInFinder, .more]
 
     /// Actions in the bar under the transcript.
     static let footerActions: [HomeMeetingExpansionAction] = []

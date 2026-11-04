@@ -309,7 +309,9 @@ enum RecentMeetingsScanner {
             systemAudioSignalVerified: frontmatter?.values["system_audio_signal_verified"].flatMap(Bool.init),
             speakerNames: RecentMeetingSpeakerStatus.speakerNames(fromLabels: speakerLabels),
             transcriptionEngine: frontmatter?.values["transcription_engine"].flatMap { $0.isEmpty ? nil : $0 },
-            importedAt: frontmatter.flatMap { TranscriptFrontmatter.importedAt(values: $0.values) }
+            importedAt: frontmatter.flatMap { TranscriptFrontmatter.importedAt(values: $0.values) },
+            isStarred: frontmatter.map { MeetingStarFrontmatter.isStarred(values: $0.values) } ?? false,
+            captureID: frontmatter.flatMap { TranscriptFrontmatter.captureID(in: $0.values) }
         )
     }
 
