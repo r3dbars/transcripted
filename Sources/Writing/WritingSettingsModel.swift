@@ -483,13 +483,16 @@ final class WritingSettingsModel: ObservableObject {
         // The install's copy and signature checks run off the main thread;
         // the keyboard row refreshes when it lands. Text Input Sources can
         // take a moment to list a just-registered keyboard, so one retry;
-        // after that the guidance stays up.
+        // after that the guidance stays up. Writing turned off meanwhile
+        // ends it: neither try selects the keyboard after a stop.
         Task { [weak self] in
             guard let self else { return }
+            let stopsBefore = self.controller.runtimeStopCount
             let selected = await self.controller.turnOnKeyboard(openSettingsOnFailure: false)
             self.refreshKeyboard()
-            guard !selected else { return }
+            guard !selected, self.controller.runtimeStopCount == stopsBefore else { return }
             try? await Task.sleep(for: .seconds(1))
+            guard self.controller.runtimeStopCount == stopsBefore else { return }
             await self.controller.turnOnKeyboard(openSettingsOnFailure: false)
             self.refreshKeyboard()
         }
