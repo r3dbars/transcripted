@@ -256,9 +256,16 @@ def _commits_after_freeze(root: Path) -> list[str]:
     return later.splitlines() if later else []
 
 
-def check_legacy_appcast(root: Path, base_record: str | None = None) -> list[str]:
+# "Look the base record up in git": distinct from None, which means origin/main
+# has no record. The self-test passes None explicitly, and its temp checkout can
+# sit inside this repo (linux-checks.sh sets TMPDIR under build/), where a git
+# lookup would find the real record.
+_LOOKUP_BASE_RECORD = object()
+
+
+def check_legacy_appcast(root: Path, base_record: "str | None | object" = _LOOKUP_BASE_RECORD) -> list[str]:
     record_path = root / FREEZE_RECORD
-    if base_record is None:
+    if base_record is _LOOKUP_BASE_RECORD:
         base_record = _base_freeze_record(root)
     if not record_path.is_file():
         if base_record is not None:
