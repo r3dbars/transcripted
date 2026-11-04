@@ -22,6 +22,8 @@ struct QuietHomeHeader: View {
     let onToggleFind: () -> Void
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
+    var isStarredOnly: Bool = false
+    var onToggleStarred: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -68,6 +70,18 @@ struct QuietHomeHeader: View {
                 .buttonStyle(.plain)
                 .help("Find meetings")
                 .accessibilityIdentifier("transcripted.home.find.toggle")
+                Button(action: onToggleStarred) {
+                    Image(systemName: isStarredOnly ? "star.fill" : "star")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(isStarredOnly ? LibraryTokens.accent : LibraryTokens.ink3)
+                        .frame(width: 26, height: 26)
+                        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
+                }
+                .buttonStyle(.plain)
+                .help(isStarredOnly ? "Show all meetings" : "Show starred meetings")
+                .accessibilityLabel(isStarredOnly ? "Show all meetings" : "Show starred meetings")
+                .accessibilityValue(isStarredOnly ? "On" : "Off")
+                .accessibilityIdentifier("transcripted.home.starred.toggle")
             }
 
             HStack(spacing: 0) {
@@ -125,6 +139,15 @@ struct QuietMeetingRow: View {
                     .fill(LibraryTokens.attention)
                     .frame(width: 6, height: 6)
                     .help("Your mic was muffled by another call app")
+            }
+
+            if item.isStarred {
+                Image(systemName: "star.fill")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .help("Starred")
+                    .accessibilityLabel("Starred")
+                    .accessibilityIdentifier("transcripted.home.meeting.starred")
             }
 
             Text(item.title)
@@ -330,6 +353,7 @@ struct QuietMeetingExpansion: View {
         @escaping (Bool) -> Void
     ) -> Void
     let menuItems: [HomeRowMenuItem]
+    var onToggleStar: () -> Void = {}
 
     @State private var showsFullTranscript = false
     @State private var showsSpeakerNamingSheet = false
@@ -581,6 +605,16 @@ struct QuietMeetingExpansion: View {
                 action: onCopy
             )
             .accessibilityIdentifier("transcripted.home.expansion.copy")
+        case .star:
+            quietAction(
+                title: item.isStarred ? "Starred" : "Star",
+                symbol: item.isStarred ? "star.fill" : "star",
+                tint: item.isStarred ? LibraryTokens.accent : LibraryTokens.ink2,
+                action: onToggleStar
+            )
+            .help(item.isStarred ? "Remove star" : "Star this meeting. Starred meetings keep their audio.")
+            .accessibilityValue(item.isStarred ? "Starred" : "Not starred")
+            .accessibilityIdentifier("transcripted.home.expansion.star")
         case .revealInFinder:
             quietAction(
                 title: "Show in Finder",

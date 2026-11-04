@@ -9,6 +9,21 @@ enum HomeCaptureListCopy {
     static let emptyDictations = "No recent dictations."
     static let noMeetingMatches = "No meetings match your search."
     static let searchingMeetings = "Searching all meetings…"
+    static let noStarredMeetings = "No starred meetings yet. Star one from its \u{22EF} menu."
+
+    /// What an empty Meetings list says. A search (or the Starred filter)
+    /// doesn't claim "none" before its pass over the library has looked.
+    static func meetingsEmptyMessage(
+        isSearching: Bool,
+        starredOnly: Bool,
+        query: String,
+        isSearchPassRunning: Bool
+    ) -> String {
+        guard isSearching else { return emptyMeetings }
+        if isSearchPassRunning { return searchingMeetings }
+        if starredOnly, !HomeMeetingSearchPaging.isActive(query: query) { return noStarredMeetings }
+        return noMeetingMatches
+    }
 
     /// The Settings row that opens the picker for an audio or video file to
     /// transcribe. The QA import smoke presses it by this identifier.

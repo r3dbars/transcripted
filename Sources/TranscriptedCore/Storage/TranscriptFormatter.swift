@@ -74,6 +74,10 @@ extension TranscriptSaver {
             yaml += "\nimported_at: \(TranscriptFrontmatter.formatImportedAt(importedAt))"
         }
 
+        if formatOptions.starred {
+            yaml += "\n\(TranscriptFrontmatter.starredKey): true"
+        }
+
         if let language = result.languageContext {
             yaml += "\ntranscription_language: \"\(Self.escapeYAML(language.selection.rawValue))\""
             yaml += "\ntranscription_language_resolution: \(language.resolution.rawValue)"
