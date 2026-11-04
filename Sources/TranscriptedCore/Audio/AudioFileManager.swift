@@ -669,7 +669,7 @@ extension Audio {
     /// a different format than the file was made for. No tap has run, so the
     /// file holds only its header. It is replaced at the same URL, which the
     /// recording journal already names, and the journal is left as it is.
-    private func remakeMeetingMicStartFile(
+    func remakeMeetingMicStartFile(
         recordingSnapshot: AudioRecordingFormatSnapshot,
         sessionGeneration: UInt64
     ) throws -> MicPCMWriteContext {
