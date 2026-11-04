@@ -9,7 +9,6 @@
     "Sources/Meeting/MicActivityMonitor.swift": 1
   },
   "harness-delete-outside-owned-root": {
-    "Tools/SpeakerEvalHarness/Sources/speaker-eval-harness/MeetingLab.swift": 1,
     "Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/GenerateFixtures.swift": 1,
     "scripts/ci/mac-runner.sh": 3,
     "scripts/dev/bench-all.sh": 2,
@@ -54,7 +53,6 @@
     "Tests/MeetingCaptureAttemptTests.swift": 1,
     "Tests/MeetingPromptDetectorTests.swift": 1,
     "Tests/ParakeetRecoveryStateTests.swift": 2,
-    "Tests/SpeakerClipPlaybackTests.swift": 1,
     "Tests/TranscriptedCoreTests/AudioTests/LiveCaptureSmokeTests.swift": 1,
     "Tests/TranscriptedCoreTests/AudioTests/SCKAudioCaptureInterleavingTests.swift": 4,
     "Tests/TranscriptedCoreTests/AudioTests/SystemAudioRecoveryParityTests.swift": 6,
