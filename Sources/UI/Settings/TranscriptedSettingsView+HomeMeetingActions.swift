@@ -161,7 +161,10 @@ extension TranscriptedSettingsView {
         trackSettingsAction(starred ? "star_meeting" : "unstar_meeting", page: .home)
         let transcriptURL = item.transcriptURL
         let starTask = Task.detached(priority: .userInitiated) {
-            try MeetingStarFrontmatter.setStarred(starred, transcriptAt: transcriptURL)
+            guard let captureID = item.captureID else { throw MeetingStarError.identityUnresolved }
+            try MeetingStarFrontmatter.setStarred(starred, transcriptAt: transcriptURL,
+                expectedCaptureID: captureID,
+                authorizedDirectory: { MeetingStoragePaths.speakerReviewTranscriptsFolder })
         }
         Task { @MainActor in
             do {

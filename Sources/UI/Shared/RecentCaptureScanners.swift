@@ -25,6 +25,8 @@ struct RecentMeetingItem: Identifiable, Sendable {
     /// `starred: true` in the frontmatter. Starred meetings show a star on
     /// Home, appear under the Starred filter, and keep their audio.
     var isStarred: Bool = false
+    /// Stable identity for mutations; a cached path alone is never authority.
+    var captureID: UUID? = nil
 
     /// Where Home lists the row: an import sits under the day it was
     /// imported, so it shows up at the top instead of weeks back. Everything

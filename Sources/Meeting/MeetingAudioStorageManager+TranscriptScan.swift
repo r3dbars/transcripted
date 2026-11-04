@@ -39,11 +39,12 @@ extension MeetingAudioStorageManager {
 
     struct TranscriptInfo {
         let referenceDate: Date
+        let captureID: UUID
         /// Starred meetings keep their audio past the retention window.
         let isStarred: Bool
     }
 
-    private static func transcriptInfo(
+    static func transcriptInfo(
         forAudioDirectory audioDirectory: URL,
         meetingsFolder: URL,
         fileManager: FileManager
@@ -52,14 +53,18 @@ extension MeetingAudioStorageManager {
         guard name.hasSuffix("_audio") else { return nil }
         let stem = String(name.dropLast("_audio".count))
         let transcriptURL = meetingsFolder.appendingPathComponent(stem).appendingPathExtension("md")
-        guard fileManager.fileExists(atPath: transcriptURL.path) else { return nil }
+        guard fileManager.fileExists(atPath: transcriptURL.path),
+              let properties = try? transcriptURL.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]),
+              properties.isRegularFile == true, properties.isSymbolicLink != true else { return nil }
         guard let raw = try? previewString(at: transcriptURL),
-              let values = transcriptedMeetingFrontmatterValues(raw) else {
+              let values = transcriptedMeetingFrontmatterValues(raw),
+              let captureID = TranscriptFrontmatter.captureID(in: values) else {
             return nil
         }
 
         return TranscriptInfo(
             referenceDate: transcriptReferenceDate(for: transcriptURL, raw: raw),
+            captureID: captureID,
             isStarred: MeetingStarFrontmatter.isStarred(values: values)
         )
     }

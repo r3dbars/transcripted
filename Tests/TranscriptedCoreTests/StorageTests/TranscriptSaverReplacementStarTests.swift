@@ -76,13 +76,65 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
         XCTAssertFalse(TranscriptFrontmatter.isStarred(values: [:]))
     }
 
+    func testUnreadableReplacementMetadataKeepsOriginalBytesAndRejectsSave() throws {
+        let url = directory.appendingPathComponent("Unreadable.md")
+        let original = existingMeetingMarkdown(starred: true)
+        try original.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: url.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
+        XCTAssertNil(replace(url), "unknown protection metadata cannot authorize replacement")
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), original)
+    }
+
+    func testMalformedReplacementMetadataDoesNotDropProtection() throws {
+        // Shared parsing is LF-only. Other recognizable YAML prefixes remain
+        // unknown metadata rather than becoming permission to overwrite.
+        let prefixes = ["---\n", "---\r\n", "\u{FEFF}---\n", "\u{FEFF}---\r\n"]
+        for (index, prefix) in prefixes.enumerated() {
+            let url = directory.appendingPathComponent("Malformed-\(index).md")
+            let original = prefix + "starred: true\n"
+            try original.write(to: url, atomically: true, encoding: .utf8)
+            XCTAssertNil(replace(url))
+            XCTAssertEqual(try Data(contentsOf: url), Data(original.utf8))
+        }
+    }
+
+    func testMissingReservedReplacementIsNotRecreated() throws {
+        let url = directory.appendingPathComponent("Deleted.md")
+        try existingMeetingMarkdown(starred: true).write(to: url, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        try FileManager.default.removeItem(at: url)
+        XCTAssertNil(replace(url))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testNewUnreservedExplicitDestinationCanBeCreated() {
+        let url = directory.appendingPathComponent("New.md")
+        XCTAssertEqual(replace(url), url)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
+    }
+
+    func testReservedReplacementRejectsChangedIdentityWithoutOverwriting() throws {
+        let url = directory.appendingPathComponent("Changed.md")
+        try existingMeetingMarkdown(starred: true).write(to: url, atomically: true, encoding: .utf8)
+        let reservation = try XCTUnwrap(TranscriptSaver.beginReplacingTranscript(at: url))
+        defer { TranscriptSaver.finishReplacingTranscript(reservation) }
+        let changed = existingMeetingMarkdown(starred: false)
+            .replacingOccurrences(of: "4F0C2B9E-6A55-4D7B-9E62-1B2C3D4E5F60", with: UUID().uuidString)
+        try changed.write(to: url, atomically: true, encoding: .utf8)
+        XCTAssertNil(replace(url))
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), changed)
+    }
+
     // MARK: - Helpers
 
     @discardableResult
     private func replace(_ transcriptURL: URL) -> URL? {
         TranscriptSaver.saveTranscript(
             syntheticResult(),
-            transcriptId: UUID(),
+            transcriptId: UUID(uuidString: "4F0C2B9E-6A55-4D7B-9E62-1B2C3D4E5F60")!,
             directory: directory,
             meetingTitle: "Quarterly Planning",
             statsStore: ReplacementStarNoopStatsStore(),

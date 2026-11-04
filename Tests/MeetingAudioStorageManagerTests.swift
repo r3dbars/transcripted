@@ -1317,7 +1317,9 @@ func testMeetingAudioStorageManager() async {
         _ = MeetingAudioStorageManager.pruneRetainedAudio(in: directory, retentionWindow: .thirtyDays, now: Date())
         assertTrue(FileManager.default.fileExists(atPath: pair.starredAudio.path), "starred audio survives the first sweep")
 
-        try! MeetingStarFrontmatter.setStarred(false, transcriptAt: pair.starredTranscript)
+        let captureID = TranscriptFrontmatter.captureID(in: try! TranscriptFrontmatter.readValues(from: pair.starredTranscript)!)!
+        try! MeetingStarFrontmatter.setStarred(false, transcriptAt: pair.starredTranscript,
+            expectedCaptureID: captureID, authorizedDirectory: { directory })
         let removed = MeetingAudioStorageManager.pruneRetainedAudio(in: directory, retentionWindow: .thirtyDays, now: Date())
 
         assertEqual(removed, 1, "the unstarred meeting is pruned on the next sweep")
