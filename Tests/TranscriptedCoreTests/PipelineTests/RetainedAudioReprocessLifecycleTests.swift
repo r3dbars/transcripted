@@ -18,7 +18,8 @@ extension TranscriptionTaskManagerMetadataTests {
     func testSavedReprocessCancellationKeepsInputsUntilNoncooperativeEngineReturns() async throws {
         let engine = SnapshotHeldSpeechEngine()
         let manager = makeManager(speechToText: engine,
-                                  diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 3)))
+                                  diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 3)),
+                                  statsStore: MetadataCapturingStatsStore())
         let original = tempDirectory.appendingPathComponent("retained.wav")
         try writeMonoWAV(to: original, duration: 3)
         var snapshot: RetainedAudioInputSnapshot? = try await .prepare(
@@ -47,7 +48,7 @@ extension TranscriptionTaskManagerMetadataTests {
     }
 
     func testRejectedSavedReprocessDropsOnlyItsOwnedSnapshot() async throws {
-        let manager = makeManager()
+        let manager = makeManager(statsStore: MetadataCapturingStatsStore())
         let occupiedID = UUID()
         manager.activeTasks[occupiedID] = Task {}
         defer { manager.activeTasks.removeValue(forKey: occupiedID) }
@@ -69,7 +70,7 @@ extension TranscriptionTaskManagerMetadataTests {
     }
 
     func testSavedReprocessModelPreparationFailureCleansOnlyItsSnapshot() async throws {
-        let manager = makeManager(speechToText: SnapshotUnreadySpeechEngine())
+        let manager = makeManager(speechToText: SnapshotUnreadySpeechEngine(), statsStore: MetadataCapturingStatsStore())
         let original = tempDirectory.appendingPathComponent("retained-unready.wav")
         try writeMonoWAV(to: original, duration: 3)
         var snapshot: RetainedAudioInputSnapshot? = try await .prepare(
@@ -92,7 +93,8 @@ extension TranscriptionTaskManagerMetadataTests {
     func testDualTrackReprocessReloadsOwnedMicrophoneAfterTheSystemPhase() async throws {
         let engine = SnapshotDualTrackSpeechEngine()
         let manager = makeManager(speechToText: engine,
-                                  diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 3)))
+                                  diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 3)),
+                                  statsStore: MetadataCapturingStatsStore())
         let observed = SnapshotResultRecorder()
         manager.pipelineResultObserver = { observed.record($0) }
         let originalMic = tempDirectory.appendingPathComponent("retained-microphone.wav")
@@ -134,7 +136,8 @@ extension TranscriptionTaskManagerMetadataTests {
     private func exerciseSnapshotReviewFailure(blockPersistence: Bool) async throws {
         let manager = makeManager(
             speechToText: MetadataStubSpeechToTextEngine(transcript: "Owned reprocess fixture words."),
-            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 3))
+            diarization: MetadataStubDiarizationEngine(segments: singleSpeakerSegments(duration: 3)),
+            statsStore: MetadataCapturingStatsStore()
         )
         let original = tempDirectory.appendingPathComponent("retained-review.wav")
         try writeMonoWAV(to: original, duration: 3)
