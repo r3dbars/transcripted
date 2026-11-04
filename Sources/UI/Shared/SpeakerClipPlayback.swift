@@ -193,9 +193,9 @@ protocol SpeakerRetainedAudioPlayer: AnyObject {
     /// Replace whatever is loaded with `url`, ending at `endTime` seconds.
     /// `onEnd` fires when playback reaches the end, the file fails to load,
     /// or playback fails partway.
-    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor () -> Void)
+    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor @Sendable () -> Void)
     /// Seek exactly to `time`. `completion(false)` means it was superseded or failed.
-    func seek(to time: Double, completion: @escaping @MainActor (Bool) -> Void)
+    func seek(to time: Double, completion: @escaping @MainActor @Sendable (Bool) -> Void)
     func play()
     /// Pause and release the loaded recording.
     func unload()
@@ -211,7 +211,7 @@ final class AVPlayerRetainedAudioPlayer: SpeakerRetainedAudioPlayer {
         self.player = player
     }
 
-    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor () -> Void) {
+    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor @Sendable () -> Void) {
         removeObservers()
         let item = AVPlayerItem(url: url)
         item.forwardPlaybackEndTime = CMTime(seconds: endTime, preferredTimescale: 600)
@@ -231,7 +231,7 @@ final class AVPlayerRetainedAudioPlayer: SpeakerRetainedAudioPlayer {
         }
     }
 
-    func seek(to time: Double, completion: @escaping @MainActor (Bool) -> Void) {
+    func seek(to time: Double, completion: @escaping @MainActor @Sendable (Bool) -> Void) {
         player.seek(
             to: CMTime(seconds: time, preferredTimescale: 600),
             toleranceBefore: .zero,
