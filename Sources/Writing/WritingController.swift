@@ -112,6 +112,9 @@ final class WritingController {
     /// The keyboard install in flight. Launch and the Writing tab can ask at
     /// once; they share one copy instead of racing two into the same folder.
     var keyboardInstallTask: Task<GhostKeyboardInstallerHost.KeyboardInstallResult, Never>?
+    /// Counts runtime stops, so a keyboard step that awaited the install can
+    /// tell Writing was turned off meanwhile and not select the keyboard.
+    private(set) var runtimeStopCount = 0
     /// What enabling the keyboard did on the last try, if it ran. On macOS
     /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
     /// and the source stays off.
@@ -451,6 +454,7 @@ final class WritingController {
         let abandoning = isTerminated && quitAbandonsUnsavedWriting
         guard abandoning || runtime?.dayFiles.stop() != false else { return }
         hasStarted = false
+        runtimeStopCount &+= 1
         autocompleteRuntimeActive = false
         let wasRunning = isRunning
         isRunning = false
