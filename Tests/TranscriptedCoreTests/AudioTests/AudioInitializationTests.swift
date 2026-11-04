@@ -859,17 +859,50 @@ final class AudioInitializationTests: XCTestCase {
         XCTAssertEqual(started.graph, 48_000)
     }
 
-    func testMeetingMicStartFailsWhenTheFreshGraphNoLongerFitsTheMicFile() {
+    /// The usual reason the format check fails is AirPods flipping to their
+    /// 24 kHz call profile after the 48 kHz mic file was made, so the fresh
+    /// graph comes back at 24 kHz. No tap has run yet, so the start remakes
+    /// the empty mic file at 24 kHz and records, instead of failing the
+    /// meeting with a mic error.
+    func testMeetingMicStartRemakesTheEmptyMicFileWhenTheFreshGraphMovedFormat() throws {
+        let recorder = MicStartStepRecorder()
+        recorder.formatMoves = 1
+        recorder.rebuiltGraph = 24_000
+
+        let started = try recorder.runRetryingOnFreshGraph(graph: 48_000)
+
+        XCTAssertEqual(recorder.steps, [
+            "settle", "createSegment", "lock", "checkFormat", "unlock",
+            "rebuild", "settle", "remakeSegment", "lock", "checkFormat", "installTap", "unlock"
+        ])
+        XCTAssertEqual(recorder.createdSegmentFor, [48_000])
+        XCTAssertEqual(recorder.remadeSegmentFor, [24_000])
+        XCTAssertEqual(recorder.tappedSegments, ["segment@24000"], "a 48 kHz file must not take 24 kHz frames")
+        XCTAssertEqual(started.graph, 24_000)
+        XCTAssertEqual(started.segment, "segment@24000")
+    }
+
+    func testMeetingMicStartKeepsTheMicFileWhenTheFreshGraphStillFitsIt() throws {
         let recorder = MicStartStepRecorder()
         recorder.tapRaises = 1
+
+        _ = try recorder.runRetryingOnFreshGraph(graph: 48_000)
+
+        XCTAssertTrue(recorder.remadeSegmentFor.isEmpty)
+        XCTAssertEqual(recorder.tappedSegments, ["segment@48000"])
+    }
+
+    func testMeetingMicStartFailsAtTheMicFileWhenRemakingItFails() {
+        let recorder = MicStartStepRecorder()
+        recorder.formatMoves = 1
         recorder.rebuiltGraph = 24_000
+        recorder.remakeSegmentError = MicStartTestError.diskFull
 
         XCTAssertThrowsError(try recorder.runRetryingOnFreshGraph(graph: 48_000)) { error in
             let failure = error as? MeetingMicGraphStartSequence.Failure
-            XCTAssertEqual(failure?.step, .installTap)
-            XCTAssertEqual(failure?.underlying as? MicStartTestError, .tapRaised)
+            XCTAssertEqual(failure?.step, .createSegment)
+            XCTAssertEqual(failure?.underlying as? MicStartTestError, .diskFull)
         }
-        XCTAssertEqual(recorder.createdSegmentFor, [48_000], "a 48 kHz file must not take 24 kHz frames")
         XCTAssertTrue(recorder.installedTapFor.isEmpty)
     }
 
@@ -1576,12 +1609,15 @@ private final class MicStartStepRecorder {
     var engineStartRefusals = 0
     var formatMoves = 0
     var rebuiltGraph: Double?
+    var remakeSegmentError: Error?
 
     private(set) var steps: [String] = []
     private(set) var rebuiltFrom: [Double] = []
     private(set) var createdSegmentFor: [Double] = []
     private(set) var checkedFormatFor: [Double] = []
     private(set) var installedTapFor: [Double] = []
+    private(set) var remadeSegmentFor: [Double] = []
+    private(set) var tappedSegments: [String] = []
 
     func run(graph: Double) throws -> (graph: Double, segment: String) {
         try MeetingMicGraphStartSequence.run(
@@ -1626,7 +1662,13 @@ private final class MicStartStepRecorder {
                 self.rebuiltFrom.append(failed)
                 return self.rebuiltGraph ?? failed
             },
-            retryGraphFitsSegment: { segmentGraph, retryGraph in segmentGraph == retryGraph }
+            retryGraphFitsSegment: { segmentGraph, retryGraph in segmentGraph == retryGraph },
+            remakeSegment: { retryGraph in
+                self.steps.append("remakeSegment")
+                if let remakeSegmentError = self.remakeSegmentError { throw remakeSegmentError }
+                self.remadeSegmentFor.append(retryGraph)
+                return "segment@\(Int(retryGraph))"
+            }
         )
     }
 
@@ -1647,6 +1689,7 @@ private final class MicStartStepRecorder {
             throw MicStartTestError.tapRaised
         }
         installedTapFor.append(graph)
+        tappedSegments.append(segment)
     }
 
     private func withinGraphLock(_ graph: Double, _ body: () throws -> Void) throws {
