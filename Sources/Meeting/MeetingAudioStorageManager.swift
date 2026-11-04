@@ -136,19 +136,27 @@ enum MeetingAudioStorageManager {
         )
 
         var removedCount = 0
-        for (directory, transcript) in directories {
-            guard transcript.referenceDate < cutoff else {
-                continue
+        for (directory, scanned) in directories {
+            let stem = String(directory.lastPathComponent.dropLast("_audio".count))
+            let transcriptURL = meetingsFolder.appendingPathComponent(stem).appendingPathExtension("md")
+            // Star changes, identity checks and deletion share the same queue.
+            // The initial inventory is only a candidate list, never permission
+            // to delete after a user has changed that transcript.
+            let removed = try? MeetingTranscriptFileUpdateSerializer.sync(protecting: [transcriptURL]) {
+                guard isSafeNonSymlinkDirectory(meetingsFolder, fileManager: fileManager),
+                      isSafeNonSymlinkDirectory(meetingsFolder.appendingPathComponent("audio", isDirectory: true),
+                        fileManager: fileManager),
+                      let current = transcriptInfo(forAudioDirectory: directory,
+                        meetingsFolder: meetingsFolder, fileManager: fileManager),
+                      current.captureID == scanned.captureID,
+                      current.referenceDate < cutoff, !current.isStarred else { return false }
+                guard pruneManagedAudioFiles(in: directory, fileManager: fileManager) else { return false }
+                if isDirectoryEmpty(directory, fileManager: fileManager) {
+                    try? fileManager.removeItem(at: directory)
+                }
+                return true
             }
-
-            guard pruneManagedAudioFiles(in: directory, fileManager: fileManager) else {
-                continue
-            }
-            removedCount += 1
-
-            if isDirectoryEmpty(directory, fileManager: fileManager) {
-                try? fileManager.removeItem(at: directory)
-            }
+            if removed == true { removedCount += 1 }
         }
 
         return removedCount

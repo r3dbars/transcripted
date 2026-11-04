@@ -22,6 +22,7 @@ The reusable meeting transcription library. The app links it as a prebuilt libra
 - `Audio+CaptureLifecycle.swift` (stop ordering) and `Audio+MeetingInputGraph.swift` (the AirPods-sensitive engine and `inputNode` touch) are the riskiest code in Core. Read the whole file first and add no new responsibility to them.
 - Keep `AudioPipelineDiagnosticsSnapshot` privacy-safe: bucketed device classes, rates, channel counts and recovery state only. Never raw device names, transcript text, titles, paths or audio.
 - Keep app-specific permission UX outside this directory.
+- A leased replacement reads identity and protection metadata under the transcript-file serializer. Missing, mismatched, malformed, unreadable or symlinked originals abort before replacing bytes; `starred: true` is preserved in the same atomic write, before the replacement lease is released. The public explicit-target API still permits new unreserved destinations and readable plain-file replacements.
 
 ## Threading
 

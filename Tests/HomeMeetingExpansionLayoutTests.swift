@@ -15,6 +15,10 @@ func testHomeMeetingExpansionLayout() {
             HomeMeetingExpansionLayout.footerActions.contains(.copy),
             "Copy doesn't move under the transcript"
         )
+        assertTrue(
+            HomeMeetingExpansionLayout.headerActions.contains(.star),
+            "an opened meeting can be starred from its header"
+        )
         assertEqual(
             Set(HomeMeetingExpansionLayout.headerActions + HomeMeetingExpansionLayout.footerActions).count,
             HomeMeetingExpansionAction.allCases.count,

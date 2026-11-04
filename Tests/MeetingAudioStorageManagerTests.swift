@@ -1254,6 +1254,91 @@ func testMeetingAudioStorageManager() async {
         assertFalse(FileManager.default.fileExists(atPath: audioDirectory.path), "old audio directory should be removed")
         assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "old transcript should stay")
     }
+
+    runSuite("Automatic meeting-audio deletion keeps a starred meeting's audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pair = try! makeStarRetentionPair(in: directory)
+
+        let removed = MeetingAudioStorageManager.pruneRetainedAudio(
+            in: directory,
+            retentionWindow: .thirtyDays,
+            now: Date()
+        )
+
+        assertEqual(removed, 1, "only the unstarred old meeting's audio is deleted")
+        assertFalse(FileManager.default.fileExists(atPath: pair.plainAudio.path), "old unstarred audio is removed")
+        assertTrue(FileManager.default.fileExists(atPath: pair.starredAudio.path), "old starred audio stays")
+        assertTrue(FileManager.default.fileExists(atPath: pair.starredAudio.deletingLastPathComponent().path), "the starred audio folder stays")
+    }
+
+    await runSuite("The after-save sweep keeps a starred meeting's audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pair = try! makeStarRetentionPair(in: directory)
+
+        await MeetingAudioStorageManager.processSavedTranscript(
+            at: pair.plainTranscript,
+            retentionWindow: .thirtyDays,
+            now: Date(),
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer()
+        )
+
+        assertFalse(FileManager.default.fileExists(atPath: pair.plainAudio.path), "the folder sweep removes old unstarred audio")
+        assertTrue(FileManager.default.fileExists(atPath: pair.starredAudio.path), "the folder sweep keeps old starred audio")
+    }
+
+    await runSuite("The launch sweep keeps a starred meeting's audio") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pair = try! makeStarRetentionPair(in: directory)
+
+        let result = await MeetingAudioStorageManager.processExistingRetainedAudio(
+            in: directory,
+            retentionWindow: .thirtyDays,
+            now: Date(),
+            converter: FakeMeetingAudioConverter(),
+            validator: FakeMeetingAudioValidator(),
+            playbackMixer: FakeMeetingAudioPlaybackMixer()
+        )
+
+        assertEqual(result.prunedDirectories, 1, "only the unstarred meeting is pruned")
+        assertFalse(FileManager.default.fileExists(atPath: pair.plainAudio.path), "old unstarred audio is removed")
+        assertTrue(FileManager.default.fileExists(atPath: pair.starredAudio.path), "old starred audio stays")
+    }
+
+    runSuite("Removing a star puts the meeting's audio back under automatic deletion") {
+        let directory = makeMeetingAudioStorageTestDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let pair = try! makeStarRetentionPair(in: directory)
+
+        _ = MeetingAudioStorageManager.pruneRetainedAudio(in: directory, retentionWindow: .thirtyDays, now: Date())
+        assertTrue(FileManager.default.fileExists(atPath: pair.starredAudio.path), "starred audio survives the first sweep")
+
+        let captureID = TranscriptFrontmatter.captureID(in: try! TranscriptFrontmatter.readValues(from: pair.starredTranscript)!)!
+        try! MeetingStarFrontmatter.setStarred(false, transcriptAt: pair.starredTranscript,
+            expectedCaptureID: captureID, authorizedDirectory: { directory })
+        let removed = MeetingAudioStorageManager.pruneRetainedAudio(in: directory, retentionWindow: .thirtyDays, now: Date())
+
+        assertEqual(removed, 1, "the unstarred meeting is pruned on the next sweep")
+        assertFalse(FileManager.default.fileExists(atPath: pair.starredAudio.path), "its audio is removed once unstarred")
+        assertTrue(FileManager.default.fileExists(atPath: pair.starredTranscript.path), "the transcript stays")
+    }
+}
+
+/// Two 40-day-old meetings with retained mic audio, one of them starred.
+private func makeStarRetentionPair(
+    in directory: URL
+) throws -> (plainTranscript: URL, plainAudio: URL, starredTranscript: URL, starredAudio: URL) {
+    let plainTranscript = try makeTranscript(named: "Design Review", in: directory, ageDays: 40)
+    let starredTranscript = try makeTranscript(named: "Quarterly Planning", in: directory, ageDays: 40, starred: true)
+    let plainAudio = makeAudioDirectory(for: plainTranscript).appendingPathComponent("microphone.m4a")
+    let starredAudio = makeAudioDirectory(for: starredTranscript).appendingPathComponent("microphone.m4a")
+    try Data("m4a".utf8).write(to: plainAudio)
+    try Data("m4a".utf8).write(to: starredAudio)
+    return (plainTranscript, plainAudio, starredTranscript, starredAudio)
 }
 
 private struct FakeMeetingAudioConverter: MeetingAudioFileConverting {
@@ -1335,11 +1420,12 @@ private func makeFailedMeetingAudioDirectory(in audioRoot: URL) -> URL {
     return directory
 }
 
-private func makeTranscript(named name: String, in directory: URL, ageDays: Int) throws -> URL {
+private func makeTranscript(named name: String, in directory: URL, ageDays: Int, starred: Bool = false) throws -> URL {
     let url = directory.appendingPathComponent(name).appendingPathExtension("md")
     let date = Calendar.current.date(byAdding: .day, value: -ageDays, to: Date())!
     let dateText = transcriptDateFormatter.string(from: date)
     let timeText = transcriptTimeFormatter.string(from: date)
+    let starLine = starred ? "\nstarred: true" : ""
     try """
     ---
     capture_id: "\(UUID().uuidString)"
@@ -1350,7 +1436,7 @@ private func makeTranscript(named name: String, in directory: URL, ageDays: Int)
     duration: "1:00"
     total_word_count: "4"
     mic_utterances: "1"
-    system_utterances: "0"
+    system_utterances: "0"\(starLine)
     ---
 
     ## Full Transcript

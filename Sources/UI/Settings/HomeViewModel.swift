@@ -39,6 +39,7 @@ final class HomeViewModel: ObservableObject {
     private var captureRefreshObserver: HomeCaptureRefreshObserver?
 
     private var meetingSearchQuery = ""
+    private var meetingSearchStarredOnly = false
     private var meetingSearchLimit = HomeMeetingSearchPaging.pageSize
     private var meetingSearchIndex: HomeMeetingSearchIndex?
     private var meetingSearchIndexIsStale = true
@@ -128,12 +129,14 @@ final class HomeViewModel: ObservableObject {
     // MARK: - Meetings search
 
     /// Search every saved meeting, not just the loaded slice. Called on each
-    /// edit of the Home search box; typing is debounced, and the index is
-    /// built once and then reused until captures change on disk.
-    func updateMeetingSearch(query: String) {
+    /// edit of the Home search box and each flip of the Starred filter;
+    /// typing is debounced, and the index is built once and then reused until
+    /// captures change on disk.
+    func updateMeetingSearch(query: String, starredOnly: Bool = false) {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed != meetingSearchQuery else { return }
+        guard trimmed != meetingSearchQuery || starredOnly != meetingSearchStarredOnly else { return }
         meetingSearchQuery = trimmed
+        meetingSearchStarredOnly = starredOnly
         meetingSearchLimit = HomeMeetingSearchPaging.pageSize
         // Keep the previous results on screen until this query's pass lands:
         // the view re-applies the current query to them, so they can't show a
@@ -145,7 +148,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func loadMoreMeetingSearchResults() {
-        guard !meetingSearchQuery.isEmpty, !isSearchingMeetings, canLoadMoreMeetingSearchResults else { return }
+        guard isMeetingSearchActive, !isSearchingMeetings, canLoadMoreMeetingSearchResults else { return }
         meetingSearchLimit += HomeMeetingSearchPaging.pageSize
         runMeetingSearch(debounce: false)
     }
@@ -154,15 +157,20 @@ final class HomeViewModel: ObservableObject {
     /// away if a search is showing, otherwise on the next search.
     private func invalidateMeetingSearchIndex() {
         meetingSearchIndexIsStale = true
-        if refreshState.isEnabled, !meetingSearchQuery.isEmpty {
+        if refreshState.isEnabled, isMeetingSearchActive {
             runMeetingSearch(debounce: false)
         }
+    }
+
+    private var isMeetingSearchActive: Bool {
+        HomeMeetingSearchPaging.isActive(query: meetingSearchQuery, starredOnly: meetingSearchStarredOnly)
     }
 
     private func runMeetingSearch(debounce: Bool) {
         meetingSearchTask?.cancel()
         let query = meetingSearchQuery
-        guard !query.isEmpty else {
+        let starredOnly = meetingSearchStarredOnly
+        guard isMeetingSearchActive else {
             meetingSearchTask = nil
             meetingSearchGeneration.invalidate()
             meetingSearchResults = nil
@@ -198,7 +206,7 @@ final class HomeViewModel: ObservableObject {
                     index = HomeMeetingSearchIndex(scanned: scanned, previous: existingIndex)
                 }
                 guard !Task.isCancelled else { return nil }
-                let found = index.search(query: query, limit: limit)
+                let found = index.search(query: query, limit: limit, starredOnly: starredOnly)
                 // Audio is resolved only for the rows that will show.
                 let withAudio = found.items.map { item in
                     item.withAudio(MeetingAudioArchiveResolver.attachment(forTranscript: item.transcriptURL))
@@ -286,6 +294,7 @@ final class HomeViewModel: ObservableObject {
         // Forget the query too: the view re-sends it on appear, and a stale
         // query here would swallow that call as "unchanged".
         meetingSearchQuery = ""
+        meetingSearchStarredOnly = false
         runMeetingSearch(debounce: false)
     }
 

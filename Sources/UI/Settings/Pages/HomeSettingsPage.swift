@@ -31,6 +31,7 @@ struct HomeSettingsPage: View {
 
     @Binding var homeFindIsVisible: Bool
     @Binding var homeMeetingSearchQuery: String
+    @Binding var homeStarredOnly: Bool
     let homeFindFieldFocusToken: Int
 
     let onAttention: () -> Void
@@ -55,6 +56,7 @@ struct HomeSettingsPage: View {
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     let meetingRowMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
+    let onToggleMeetingStar: (RecentMeetingItem) -> Void
     /// Voices a meeting still has to name, and opening its "Who spoke?" card.
     let meetingVoicesToName: (RecentMeetingItem) -> Int
     let onWhoSpoke: (RecentMeetingItem) -> Void
@@ -71,7 +73,11 @@ struct HomeSettingsPage: View {
                 onAttention: onAttention,
                 onToggleFind: onToggleFind,
                 onStartMeeting: onStartMeeting,
-                onImportAudioFile: onImportAudioFile
+                onImportAudioFile: onImportAudioFile,
+                isStarredOnly: homeStarredOnly,
+                onToggleStarred: {
+                    withAnimation(.snappy(duration: 0.18)) { homeStarredOnly.toggle() }
+                }
             )
 
             if let warning = homeViewModel.scanWarning {
@@ -135,17 +141,18 @@ struct HomeSettingsPage: View {
     }
 
     private var isSearchingMeetings: Bool {
-        HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery)
+        HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery, starredOnly: homeStarredOnly)
     }
 
     private var meetingsEmptyMessage: String {
-        guard isSearchingMeetings else { return HomeCaptureListCopy.emptyMeetings }
         // A pass over every meeting can take a moment on a big library;
         // don't claim "no matches" before it has looked.
-        if homeViewModel.isSearchingMeetings {
-            return HomeCaptureListCopy.searchingMeetings
-        }
-        return HomeCaptureListCopy.noMeetingMatches
+        HomeCaptureListCopy.meetingsEmptyMessage(
+            isSearching: isSearchingMeetings,
+            starredOnly: homeStarredOnly,
+            query: homeMeetingSearchQuery,
+            isSearchPassRunning: homeViewModel.isSearchingMeetings
+        )
     }
 
     private var homeMeetingsListSection: some View {
@@ -215,7 +222,8 @@ struct HomeSettingsPage: View {
                     onAssignSpeakers: { assignments, completion in
                         onAssignMeetingSpeakers(meeting, assignments, completion)
                     },
-                    menuItems: meetingRowMenuItems(meeting)
+                    menuItems: meetingRowMenuItems(meeting),
+                    onToggleStar: { onToggleMeetingStar(meeting) }
                 )
             } else {
                 QuietMeetingRow(
