@@ -55,11 +55,13 @@ final class SpeakerClipPlayback: ObservableObject {
 
     private let playbackDelegate = PlaybackDelegate()
     private var activeSound: NSSound?
-    private let retainedAudioPlayer: AVPlayer
-    private var retainedAudioObservers: [NSObjectProtocol] = []
-    private var retainedAudioStatusObserver: NSKeyValueObservation?
+    private let retainedAudioPlayer: SpeakerRetainedAudioPlayer
+    /// Bumped on every retained-range start and stop. Player callbacks carry
+    /// the value they were made under and are dropped once it moves on, so a
+    /// superseded seek or a late end never stops or restarts the current sample.
+    private var retainedPlaybackGeneration = 0
 
-    init(retainedAudioPlayer: AVPlayer = AVPlayer()) {
+    init(retainedAudioPlayer: SpeakerRetainedAudioPlayer = AVPlayerRetainedAudioPlayer()) {
         self.retainedAudioPlayer = retainedAudioPlayer
     }
 
@@ -127,44 +129,21 @@ final class SpeakerClipPlayback: ObservableObject {
               sample.duration.isFinite, sample.duration > 0, sample.duration <= 8,
               let url = OwnFileResolver.resolveExistingFile(candidateURLs: [sample.url]) else { return }
 
-        let item = AVPlayerItem(url: url)
-        item.forwardPlaybackEndTime = CMTime(seconds: sample.startTime + sample.duration, preferredTimescale: 600)
-        let player = retainedAudioPlayer
-        player.replaceCurrentItem(with: item)
+        retainedPlaybackGeneration += 1
+        let generation = retainedPlaybackGeneration
         activeRetainedSample = sample
-        retainedAudioStatusObserver = item.observe(\.status, options: [.initial, .new]) { [weak self, weak item] _, _ in
-            Task { @MainActor in
-                guard let self, let item, self.retainedAudioPlayer.currentItem === item,
-                      item.status == .failed else { return }
+        retainedAudioPlayer.load(url, endTime: sample.startTime + sample.duration) { [weak self] in
+            guard let self, self.retainedPlaybackGeneration == generation else { return }
+            self.stop()
+        }
+        retainedAudioPlayer.seek(to: sample.startTime) { [weak self] finished in
+            guard let self, self.retainedPlaybackGeneration == generation else { return }
+            guard finished else {
                 self.stop()
+                return
             }
-        }
-        for name in [Notification.Name.AVPlayerItemDidPlayToEndTime, .AVPlayerItemFailedToPlayToEndTime] {
-            retainedAudioObservers.append(NotificationCenter.default.addObserver(
-                forName: name,
-                object: item,
-                queue: .main
-            ) { [weak self, weak item] _ in
-                Task { @MainActor in
-                    guard let self, let item, self.retainedAudioPlayer.currentItem === item else { return }
-                    self.stop()
-                }
-            })
-        }
-        player.seek(
-            to: CMTime(seconds: sample.startTime, preferredTimescale: 600),
-            toleranceBefore: .zero,
-            toleranceAfter: .zero
-        ) { [weak self, weak item] finished in
-            Task { @MainActor in
-                guard let self, let item, self.retainedAudioPlayer.currentItem === item else { return }
-                guard finished else {
-                    self.stop()
-                    return
-                }
-                self.retainedAudioPlayer.play()
-                self.notifyStateDidChange()
-            }
+            self.retainedAudioPlayer.play()
+            self.notifyStateDidChange()
         }
     }
 
@@ -180,13 +159,9 @@ final class SpeakerClipPlayback: ObservableObject {
         activeValidatedQuote = nil
         activeWavSHA256 = nil
         lastLoadedPlay = nil
-        retainedAudioStatusObserver?.invalidate()
-        retainedAudioStatusObserver = nil
-        retainedAudioPlayer.pause()
-        retainedAudioPlayer.replaceCurrentItem(with: nil)
+        retainedPlaybackGeneration += 1
+        retainedAudioPlayer.unload()
         activeRetainedSample = nil
-        retainedAudioObservers.forEach(NotificationCenter.default.removeObserver)
-        retainedAudioObservers.removeAll()
         notifyStateDidChange()
     }
 
@@ -206,6 +181,81 @@ final class SpeakerClipPlayback: ObservableObject {
             name: Self.stateDidChangeNotification,
             object: activeURL
         )
+    }
+}
+
+/// Streams one range of a retained recording for `SpeakerClipPlayback`.
+/// Production uses `AVPlayerRetainedAudioPlayer`; tests drive a fake on a
+/// virtual clock. Callbacks arrive on the main actor and may be late: they
+/// can fire after a newer `load` or after `unload`, and the caller drops them.
+@MainActor
+protocol SpeakerRetainedAudioPlayer: AnyObject {
+    /// Replace whatever is loaded with `url`, ending at `endTime` seconds.
+    /// `onEnd` fires when playback reaches the end, the file fails to load,
+    /// or playback fails partway.
+    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor () -> Void)
+    /// Seek exactly to `time`. `completion(false)` means it was superseded or failed.
+    func seek(to time: Double, completion: @escaping @MainActor (Bool) -> Void)
+    func play()
+    /// Pause and release the loaded recording.
+    func unload()
+}
+
+@MainActor
+final class AVPlayerRetainedAudioPlayer: SpeakerRetainedAudioPlayer {
+    private let player: AVPlayer
+    private var observers: [NSObjectProtocol] = []
+    private var statusObserver: NSKeyValueObservation?
+
+    nonisolated init(player: AVPlayer = AVPlayer()) {
+        self.player = player
+    }
+
+    func load(_ url: URL, endTime: Double, onEnd: @escaping @MainActor () -> Void) {
+        removeObservers()
+        let item = AVPlayerItem(url: url)
+        item.forwardPlaybackEndTime = CMTime(seconds: endTime, preferredTimescale: 600)
+        player.replaceCurrentItem(with: item)
+        statusObserver = item.observe(\.status, options: [.initial, .new]) { item, _ in
+            guard item.status == .failed else { return }
+            Task { @MainActor in onEnd() }
+        }
+        for name in [Notification.Name.AVPlayerItemDidPlayToEndTime, .AVPlayerItemFailedToPlayToEndTime] {
+            observers.append(NotificationCenter.default.addObserver(
+                forName: name,
+                object: item,
+                queue: .main
+            ) { _ in
+                Task { @MainActor in onEnd() }
+            })
+        }
+    }
+
+    func seek(to time: Double, completion: @escaping @MainActor (Bool) -> Void) {
+        player.seek(
+            to: CMTime(seconds: time, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        ) { finished in
+            Task { @MainActor in completion(finished) }
+        }
+    }
+
+    func play() {
+        player.play()
+    }
+
+    func unload() {
+        removeObservers()
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+    }
+
+    private func removeObservers() {
+        statusObserver?.invalidate()
+        statusObserver = nil
+        observers.forEach(NotificationCenter.default.removeObserver)
+        observers.removeAll()
     }
 }
 
