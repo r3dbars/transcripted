@@ -804,7 +804,7 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
             cleanupDirectories: [paths.audioCaptures, paths.speakerClips],
             retainedAudioDirectory: retainedAudioDirectory,
             retainedAudioDirectoryProvider: retainedAudioDirectoryProvider,
-            statsStore: statsStore
+            statsStore: statsStore ?? MetadataCapturingStatsStore()
         )
     }
 
