@@ -32,18 +32,20 @@ enum MeetingAudioStorageManager {
     @discardableResult
     static func processExistingRetainedAudio(
         in meetingsFolder: URL,
-        retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
+        retentionWindow: AudioRetentionWindow? = nil,
         now: Date = Date(),
         fileManager: FileManager = .default,
         converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
         validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
-        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer()
+        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer(),
+        retentionWindowProvider: @Sendable () -> AudioRetentionWindow = { AudioStoragePreferences.deleteAudioAfter() }
     ) async -> MeetingAudioStorageMaintenanceResult {
         let prunedDirectories = pruneRetainedAudio(
             in: meetingsFolder,
             retentionWindow: retentionWindow,
             now: now,
-            fileManager: fileManager
+            fileManager: fileManager,
+            retentionWindowProvider: retentionWindowProvider
         )
 
         let directories = audioArchiveDirectoriesWithTranscripts(
@@ -87,12 +89,13 @@ enum MeetingAudioStorageManager {
     @discardableResult
     static func processSavedTranscript(
         at transcriptURL: URL,
-        retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
+        retentionWindow: AudioRetentionWindow? = nil,
         now: Date = Date(),
         fileManager: FileManager = .default,
         converter: MeetingAudioFileConverting = AVFoundationMeetingAudioConverter(),
         validator: MeetingAudioFileValidating = AVFoundationMeetingAudioValidator(),
-        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer()
+        playbackMixer: MeetingAudioPlaybackMixing = AVFoundationMeetingAudioPlaybackMixer(),
+        retentionWindowProvider: @Sendable () -> AudioRetentionWindow = { AudioStoragePreferences.deleteAudioAfter() }
     ) async -> Bool {
         let audioDirectory = audioDirectoryURL(forTranscript: transcriptURL)
         let didMix = await createPlaybackMixIfNeeded(
@@ -114,7 +117,8 @@ enum MeetingAudioStorageManager {
             in: transcriptURL.deletingLastPathComponent(),
             retentionWindow: retentionWindow,
             now: now,
-            fileManager: fileManager
+            fileManager: fileManager,
+            retentionWindowProvider: retentionWindowProvider
         )
 
         return didMix || convertedCount > 0 || prunedCount > 0
@@ -123,12 +127,15 @@ enum MeetingAudioStorageManager {
     @discardableResult
     static func pruneRetainedAudio(
         in meetingsFolder: URL,
-        retentionWindow: AudioRetentionWindow = AudioStoragePreferences.deleteAudioAfter(),
+        retentionWindow: AudioRetentionWindow? = nil,
         now: Date = Date(),
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        retentionWindowProvider: @Sendable () -> AudioRetentionWindow = { AudioStoragePreferences.deleteAudioAfter() }
     ) -> Int {
-        guard let days = retentionWindow.days else { return 0 }
-        guard let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: now) else { return 0 }
+        // An explicit window is an already-confirmed purge. Automatic callers
+        // omit it and authorize each deletion from the current preference.
+        // This early read only avoids an inventory when no deletion is due.
+        guard (retentionWindow ?? retentionWindowProvider()).days != nil else { return 0 }
 
         let directories = audioArchiveDirectoriesWithTranscripts(
             in: meetingsFolder,
@@ -148,8 +155,11 @@ enum MeetingAudioStorageManager {
                         fileManager: fileManager),
                       let current = transcriptInfo(forAudioDirectory: directory,
                         meetingsFolder: meetingsFolder, fileManager: fileManager),
-                      current.captureID == scanned.captureID,
-                      current.referenceDate < cutoff, !current.isStarred else { return false }
+                      current.captureID == scanned.captureID, !current.isStarred else { return false }
+                let window = retentionWindow ?? retentionWindowProvider()
+                guard let days = window.days,
+                      let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: now),
+                      current.referenceDate < cutoff else { return false }
                 guard pruneManagedAudioFiles(in: directory, fileManager: fileManager) else { return false }
                 if isDirectoryEmpty(directory, fileManager: fileManager) {
                     try? fileManager.removeItem(at: directory)
