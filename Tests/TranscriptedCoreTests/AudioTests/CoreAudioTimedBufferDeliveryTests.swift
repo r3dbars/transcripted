@@ -1,6 +1,7 @@
 import XCTest
 import AVFoundation
 import CoreAudio
+import Combine
 @testable import TranscriptedCore
 
 final class CoreAudioTimedBufferDeliveryTests: XCTestCase {
@@ -54,6 +55,29 @@ final class CoreAudioTimedBufferDeliveryTests: XCTestCase {
         XCTAssertEqual(timing.count, 2)
         XCTAssertEqual(timing.last?.firstSampleHostTime, 2_000)
         XCTAssertEqual(timing.first?.continuityID, timing.last?.continuityID)
+    }
+
+    func testReentrantGapSubscriberCannotRelabelThePCMSlot() throws {
+        let hal = HAL(), capture = hal.capture()
+        var delivered: [(Float, UInt64?)] = []
+        try capture.startTimed { buffer, timing in
+            delivered.append((buffer.floatChannelData![0][0], timing.firstSampleHostTime))
+        }
+        defer { capture.stopSync() }
+        let first = hal.buffer(), second = hal.buffer()
+        first.floatChannelData![0][0] = 0.25
+        second.floatChannelData![0][0] = 0.5
+        capture.receiveForTesting(first, timestamp: stamp(1_000, 0))
+        capture.receiveForTesting(second, timestamp: stamp(2_000, 128))
+        let subscriber = capture.recoveryEventPublisher.sink { event in
+            if case .gap = event { capture.drainForTesting() }
+        }
+        capture.queue.sync { capture.recoveryStarted = 99 }
+        capture.drainForTesting()
+        withExtendedLifetime(subscriber) {}
+        XCTAssertEqual(delivered.count, 2)
+        XCTAssertEqual(delivered.first { $0.0 == 0.25 }?.1, 1_000)
+        XCTAssertEqual(delivered.first { $0.0 == 0.5 }?.1, 2_000)
     }
 
     func testSleepTailKeepsItsEpochButRebuiltTapHasANewOne() throws {

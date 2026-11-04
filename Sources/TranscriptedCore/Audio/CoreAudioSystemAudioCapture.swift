@@ -480,6 +480,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // Bound work per tick even if a slow host lets the producer fill again.
         for _ in 0..<ring.capacity {
             guard let buffer = ring.pop(format: tapFormat) else { break }
+            // Publishers below can reenter drain on this same queue and pop
+            // another slot. Bind provenance to PCM before any such callback.
+            let timestamp = ring.lastPoppedTimestamp
+            let continuityID = ring.continuityID
             guard !ring.formatInvalidated.load(ordering: .acquiring) else {
                 reconnectAfterFormatChange()
                 return false
@@ -495,7 +499,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 }
             }
             lastTapBufferFrames = buffer.frameLength
-            let hostStart = Self.hostSeconds(ring.lastPoppedHostTime)
+            let hostStart = Self.hostSeconds(timestamp.mFlags.contains(.hostTimeValid) ? timestamp.mHostTime : 0)
             lastBuffer = now
             rebuildRetries = 0
             awaitingFirstBuffer = nil
@@ -515,7 +519,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 guard generation == drainGeneration else { return false }
             }
             lastDeliveredEnd = hostStart.map { $0 + Double(buffer.frameLength) / tapFormat.sampleRate }
-            deliver(buffer, timestamp: ring.lastPoppedTimestamp, continuityID: ring.continuityID)
+            deliver(buffer, timestamp: timestamp, continuityID: continuityID)
             guard running, generation == drainGeneration else { return false }
         }
         return true
