@@ -303,8 +303,7 @@ extension MeetingSessionController {
         systemAudioURL: URL,
         title: String?,
         transcriptURL: URL? = nil,
-        recordingDate: Date? = nil,
-        keepsStar: Bool = false
+        recordingDate: Date? = nil
     ) async -> Bool {
         // None of these rejections are about THIS controller's own capture
         // lifecycle, and a completely different meeting can be actively
@@ -343,8 +342,7 @@ extension MeetingSessionController {
                 systemAudioURL: systemAudioURL,
                 title: title,
                 transcriptURL: transcriptURL,
-                recordingDate: recordingDate,
-                keepsStar: keepsStar
+                recordingDate: recordingDate
             )
         }
         DiagnosticsTrail.record(
@@ -406,17 +404,13 @@ extension MeetingSessionController {
             replacementTranscriptURL: request.replacementTranscriptURL,
             recordingDate: request.recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
-                self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL, keepsStar: keepsStar)
+                self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
             }
         )
         return true
     }
 
-    private func handleReplacementTranscriptCommitted(for transcriptURL: URL, keepsStar: Bool) {
-        // The replacement is a fresh file without the star. Put it back before
-        // the save is published, since that starts the post-save retention
-        // sweep, which must still see the meeting as starred.
-        MeetingStarFrontmatter.restoreAfterReplacement(keepsStar: keepsStar, transcriptAt: transcriptURL)
+    private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {
         clearGeneratedSummaryAfterReplacementRetranscription(for: transcriptURL)
         noteSavedMeetingReplacementCommit()
     }

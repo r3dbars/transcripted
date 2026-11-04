@@ -114,31 +114,6 @@ func testMeetingStarFrontmatter() {
             assertStarRefused(at: noIDURL, expected: noID, "a meeting without a UUID identifier")
         }
     }
-
-    runSuite("Re-transcribing a starred meeting puts its star back on the new file") {
-        withStarFixtureDirectory { directory in
-            let url = directory.appendingPathComponent("Quarterly Planning.md")
-            // Stands in for the freshly written replacement transcript, which
-            // never carries keys the formatter doesn't know.
-            try? starFixtureMarkdown(title: "Quarterly Planning").write(to: url, atomically: true, encoding: .utf8)
-
-            assertTrue(
-                MeetingStarFrontmatter.restoreAfterReplacement(keepsStar: true, transcriptAt: url),
-                "a meeting that was starred before the replacement gets its star back"
-            )
-            let values = try? TranscriptFrontmatter.readValues(from: url)
-            assertTrue(MeetingStarFrontmatter.isStarred(values: values ?? [:]), "the replacement reads as starred")
-
-            let otherURL = directory.appendingPathComponent("Design Review.md")
-            let other = starFixtureMarkdown(title: "Design Review")
-            try? other.write(to: otherURL, atomically: true, encoding: .utf8)
-            assertFalse(
-                MeetingStarFrontmatter.restoreAfterReplacement(keepsStar: false, transcriptAt: otherURL),
-                "an unstarred meeting is left alone"
-            )
-            assertEqual(try? String(contentsOf: otherURL, encoding: .utf8), other, "no write for an unstarred meeting")
-        }
-    }
 }
 
 private func assertStarRefused(at url: URL, expected: String, _ label: String) {

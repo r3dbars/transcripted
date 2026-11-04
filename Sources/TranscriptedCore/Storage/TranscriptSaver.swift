@@ -383,23 +383,44 @@ public class TranscriptSaver {
             fileURL = candidateURL
         }
 
-        let markdown = formatTranscriptMarkdown(
-            result: result,
-            transcriptId: transcriptId,
-            speakerMappings: speakerMappings,
-            speakerSources: speakerSources,
-            speakerDbIds: speakerDbIds,
-            date: transcriptDate,
-            meetingTitle: meetingTitle,
-            healthInfo: healthInfo,
-            transcriptionEngine: transcriptionEngine,
-            formatOptions: formatOptions
-        )
+        func render(starred: Bool) -> String {
+            var options = formatOptions
+            options.starred = starred
+            return formatTranscriptMarkdown(
+                result: result,
+                transcriptId: transcriptId,
+                speakerMappings: speakerMappings,
+                speakerSources: speakerSources,
+                speakerDbIds: speakerDbIds,
+                date: transcriptDate,
+                meetingTitle: meetingTitle,
+                healthInfo: healthInfo,
+                transcriptionEngine: transcriptionEngine,
+                formatOptions: options
+            )
+        }
+
+        // A replacement keeps the star of the file it replaces, read from that
+        // file rather than from whatever the caller saw when it started: a star
+        // set or cleared while the re-transcription ran is what the new file
+        // carries. Format outside the serializer with the current star, then
+        // check it again under the serializer, right before the write, and only
+        // re-render in the rare case it changed in between.
+        let readsReplacedStar = !formatOptions.starred && explicitFileURL != nil
+        let expectedStar = formatOptions.starred
+            || (readsReplacedStar && replacedTranscriptIsStarred(explicitFileURL))
+        var markdown = render(starred: expectedStar)
 
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates.
         // Uses the reentrancy-safe wrapper (not a raw `.sync`) so this cannot deadlock if it is
         // ever invoked while already running inside a `serializeTranscriptFileUpdate` block.
         let savedURL: URL? = serializeTranscriptFileUpdate {
+            if readsReplacedStar {
+                let currentStar = replacedTranscriptIsStarred(explicitFileURL)
+                if currentStar != expectedStar {
+                    markdown = render(starred: currentStar)
+                }
+            }
             do {
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
@@ -433,6 +454,22 @@ public class TranscriptSaver {
         }
 
         return savedURL
+    }
+
+    /// Whether the transcript a replacement save is about to overwrite is
+    /// starred. An unreadable file can't say, so it counts as unstarred, and
+    /// that is logged (no path) so a dropped star isn't silent.
+    private static func replacedTranscriptIsStarred(_ url: URL?) -> Bool {
+        guard let url, FileManager.default.fileExists(atPath: url.path) else { return false }
+        do {
+            guard let values = try TranscriptFrontmatter.readValues(from: url) else { return false }
+            return TranscriptFrontmatter.isStarred(values: values)
+        } catch {
+            AppLogger.pipeline.warning("Could not read the replaced transcript's star", [
+                "error_type": String(describing: type(of: error))
+            ])
+            return false
+        }
     }
 
     /// Keeps only the creation date: the new text must get a fresh mtime so mtime-keyed indexes pick it up.

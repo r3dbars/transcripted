@@ -30,13 +30,14 @@ enum MeetingStarError: Error, Equatable, LocalizedError {
 ///
 /// Writes go through `MeetingTranscriptFileUpdateSerializer`, like title
 /// renames, so a star can't be lost to a concurrent restyle or speaker edit.
-/// Re-transcribing rebuilds the file from scratch, so the replacement hook
-/// puts the star back (`restoreAfterReplacement`).
+/// Re-transcribing rebuilds the file from scratch; Core's replacement save
+/// (`TranscriptSaver.saveTranscript(targetURL:)`) reads the star from the file
+/// it overwrites, under the same serializer, and writes it into the new one.
 enum MeetingStarFrontmatter {
-    static let key = "starred"
+    static let key = TranscriptFrontmatter.starredKey
 
     static func isStarred(values: [String: String]) -> Bool {
-        values[key]?.lowercased() == "true"
+        TranscriptFrontmatter.isStarred(values: values)
     }
 
     /// The same Markdown with the star set or cleared, or nil when it has no
@@ -83,25 +84,6 @@ enum MeetingStarFrontmatter {
             }
         } catch MeetingTranscriptFileUpdateError.replacementInProgress {
             throw MeetingStarError.retranscriptionInProgress
-        }
-    }
-
-    /// Called once a re-transcription has replaced the meeting's file. The
-    /// new file never carries `starred`, so a meeting that was starred before
-    /// gets its star back here, before the post-save sweep can see it.
-    /// - Returns: true when the star was put back.
-    @discardableResult
-    static func restoreAfterReplacement(
-        keepsStar: Bool,
-        transcriptAt url: URL,
-        fileManager: FileManager = .default
-    ) -> Bool {
-        guard keepsStar else { return false }
-        do {
-            try setStarred(true, transcriptAt: url, fileManager: fileManager)
-            return true
-        } catch {
-            return false
         }
     }
 

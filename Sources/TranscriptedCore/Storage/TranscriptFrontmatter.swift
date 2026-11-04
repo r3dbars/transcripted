@@ -42,6 +42,14 @@ public enum TranscriptFrontmatter {
         formatterQueue.sync { importedAtFormatter.string(from: date) }
     }
 
+    /// The flat key a saved meeting's star is written under (`starred: true`).
+    /// Absent, or anything other than `true`, means not starred.
+    public static let starredKey = "starred"
+
+    public static func isStarred(values: [String: String]) -> Bool {
+        values[starredKey]?.lowercased() == "true"
+    }
+
     /// When an imported file was transcribed, or nil for live meetings and
     /// files saved before the key existed.
     public static func importedAt(values: [String: String]) -> Date? {
