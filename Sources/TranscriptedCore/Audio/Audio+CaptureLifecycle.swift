@@ -477,6 +477,7 @@ extension Audio {
                 )
                 if let systemAudioAttempt {
                     if let systemAudioFileRef = systemAudioAttempt.writer {
+                        systemAudioAttempt.capture.writeTimeline.finish(writer: systemAudioFileRef)
                         systemAudioFileRef.close()
                         AppLogger.audioSystem.info("Audio file closed", ["file": finalSystemURL?.lastPathComponent ?? "unknown"])
                     }
@@ -490,6 +491,7 @@ extension Audio {
                     segments: micSegmentsSnapshot,
                     generation: stopGeneration
                 )
+                let systemTimeline = systemAudioCapture?.writeTimeline.takeFinished()
                 DispatchQueue.main.async {
                     if self.recordingSessionGeneration == stopGeneration {
                         self.inFlightStopGeneration = nil
@@ -502,6 +504,10 @@ extension Audio {
                             "currentGeneration": "\(self.recordingSessionGeneration)"
                         ])
                     }
+                    self.onRecordingCompleteWithTimeline?(
+                        stopGeneration, micFinalization.micURL, finalSystemURL,
+                        micFinalization.disposition, systemTimeline
+                    )
                     self.onRecordingCompleteWithGeneration?(
                         stopGeneration,
                         micFinalization.micURL,

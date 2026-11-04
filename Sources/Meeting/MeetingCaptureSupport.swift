@@ -18,17 +18,20 @@ struct CaptureStopResult {
     let systemURL: URL?
     let didTimeOut: Bool
     let finalizationOwner: CaptureStopFinalizationOwner
+    let systemAudioTimeline: RecordedSystemAudioTimeline?
 
     init(
         micURL: URL?,
         systemURL: URL?,
         didTimeOut: Bool,
-        finalizationOwner: CaptureStopFinalizationOwner = .audioFinalizer
+        finalizationOwner: CaptureStopFinalizationOwner = .audioFinalizer,
+        systemAudioTimeline: RecordedSystemAudioTimeline? = nil
     ) {
         self.micURL = micURL
         self.systemURL = systemURL
         self.didTimeOut = didTimeOut
         self.finalizationOwner = finalizationOwner
+        self.systemAudioTimeline = systemAudioTimeline
     }
 }
 

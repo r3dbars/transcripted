@@ -36,12 +36,13 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var converter: AVAudioConverter?
     var formatReconnects = 0
     static let maxFormatReconnects = 5
-    var callback: ((AVAudioPCMBuffer) -> Void)?
+    var callback: ((AVAudioPCMBuffer, SystemAudioBufferTiming) -> Void)?
     var timer: DispatchSourceTimer?
     private var drainCadence = CoreAudioTapDrainCadence()
     var running = false
     private var tearingDown = false
     var generation: UInt64 = 0
+    private var sourceEpoch: UInt64 = 0
     var recoveryUsed = false
     var recoveryStarted: TimeInterval?
     var sleepPendingSince: TimeInterval?
@@ -182,10 +183,11 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
 
     func createHardware() throws {
+        sourceEpoch &+= 1
         if let hardwareHooks {
             let current = try hardwareHooks.prepare()
             try acceptFormat(current)
-            ring = CoreAudioTapBufferRing(format: current)
+            ring = CoreAudioTapBufferRing(format: current, continuityID: sourceEpoch)
             return
         }
         var pid = getpid()
@@ -213,7 +215,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         var rate = current.sampleRate
         var rateAddress = AudioObjectPropertyAddress(mSelector: kAudioDevicePropertyNominalSampleRate, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         try check(AudioObjectSetPropertyData(device, &rateAddress, 0, nil, UInt32(MemoryLayout<Double>.size), &rate), "aggregate clock setup")
-        let ring = CoreAudioTapBufferRing(format: current)
+        let ring = CoreAudioTapBufferRing(format: current, continuityID: sourceEpoch)
         self.ring = ring
         var formatAddress = AudioObjectPropertyAddress(mSelector: kAudioTapPropertyFormat, mScope: kAudioObjectPropertyScopeGlobal, mElement: kAudioObjectPropertyElementMain)
         let listenerContext = Unmanaged.passRetained(ring).toOpaque()
@@ -228,7 +230,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 let stamp = inputTime.pointee
                 Unmanaged<CoreAudioTapBufferRing>.fromOpaque(context).takeUnretainedValue().push(
                     input,
-                    hostTime: stamp.mFlags.contains(.hostTimeValid) ? stamp.mHostTime : 0
+                    timestamp: stamp
                 )
             }
             return noErr
@@ -290,6 +292,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     }
 
     public func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws {
+        try startTimed { buffer, _ in bufferCallback(buffer) }
+    }
+
+    public func startTimed(bufferCallback: @escaping (AVAudioPCMBuffer, SystemAudioBufferTiming) -> Void) throws {
         try serialized {
             guard !tearingDown else {
                 throw NSError(domain: "CoreAudioSystemAudioCapture", code: -4, userInfo: [NSLocalizedDescriptionKey: "System audio is stopping."])
@@ -474,6 +480,10 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         // Bound work per tick even if a slow host lets the producer fill again.
         for _ in 0..<ring.capacity {
             guard let buffer = ring.pop(format: tapFormat) else { break }
+            // Publishers below can reenter drain on this same queue and pop
+            // another slot. Bind provenance to PCM before any such callback.
+            let timestamp = ring.lastPoppedTimestamp
+            let continuityID = ring.continuityID
             guard !ring.formatInvalidated.load(ordering: .acquiring) else {
                 reconnectAfterFormatChange()
                 return false
@@ -489,7 +499,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 }
             }
             lastTapBufferFrames = buffer.frameLength
-            let hostStart = Self.hostSeconds(ring.lastPoppedHostTime)
+            let hostStart = Self.hostSeconds(timestamp.mFlags.contains(.hostTimeValid) ? timestamp.mHostTime : 0)
             lastBuffer = now
             rebuildRetries = 0
             awaitingFirstBuffer = nil
@@ -509,7 +519,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                 guard generation == drainGeneration else { return false }
             }
             lastDeliveredEnd = hostStart.map { $0 + Double(buffer.frameLength) / tapFormat.sampleRate }
-            if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+            deliver(buffer, timestamp: timestamp, continuityID: continuityID)
             guard running, generation == drainGeneration else { return false }
         }
         return true
@@ -528,6 +538,20 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     static func hostSeconds(_ hostTime: UInt64) -> TimeInterval? {
         hostTime == 0 ? nil : TimeInterval(AudioConvertHostTimeToNanos(hostTime)) / 1_000_000_000
+    }
+
+    /// Consumer queue only. Converter output may include earlier input and
+    /// priming; its first output frame must not inherit this input's stamp.
+    func deliver(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp, continuityID: UInt64) {
+        let direct = converter == nil && format?.isEqual(buffer.format) == true
+        guard let output = convertToRecordingFormat(buffer) else { return }
+        let timing = direct ? SystemAudioBufferTiming(
+            firstSampleHostTime: timestamp.mFlags.contains(.hostTimeValid) ? timestamp.mHostTime : nil,
+            sampleTime: timestamp.mFlags.contains(.sampleTimeValid) ? timestamp.mSampleTime : nil,
+            sampleRate: buffer.format.sampleRate,
+            continuityID: continuityID
+        ) : .unavailable
+        callback?(output, timing)
     }
 
     /// The silence a reconnect pads. Drain ticks bracket the hole only to a tick
@@ -626,7 +650,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                         for _ in 0..<tail.capacity {
                             guard generation == finishGeneration,
                                   let buffer = tail.pop(format: tailFormat) else { break }
-                            if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+                            deliver(buffer, timestamp: tail.lastPoppedTimestamp, continuityID: tail.continuityID)
                         }
                     }
                     continuityFailed = true
@@ -638,7 +662,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
                     for _ in 0..<tail.capacity {
                         guard generation == finishGeneration,
                               let buffer = tail.pop(format: tailFormat) else { break }
-                        if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+                        deliver(buffer, timestamp: tail.lastPoppedTimestamp, continuityID: tail.continuityID)
                     }
                     if tail.overflowed.load(ordering: .acquiring) {
                         continuityFailed = true
@@ -681,6 +705,9 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     static let sleepReleaseWaitSeconds: TimeInterval = 1
     func receiveForTesting(_ buffer: AVAudioPCMBuffer, hostTime: UInt64 = 0) {
         serialized { ring?.push(buffer.audioBufferList, hostTime: hostTime) }
+    }
+    func receiveForTesting(_ buffer: AVAudioPCMBuffer, timestamp: AudioTimeStamp) {
+        serialized { ring?.push(buffer.audioBufferList, timestamp: timestamp) }
     }
     func drainForTesting() { serialized { drainAndCheck() } }
     func defaultOutputChangedForTesting() { serialized { defaultOutputDidChange() } }

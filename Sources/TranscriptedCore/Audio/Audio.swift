@@ -639,6 +639,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// timed-out stop with a newer recording. The legacy callback remains for
     /// embedders that do not need stale-session filtering.
     public var onRecordingCompleteWithGeneration: ((UInt64, URL?, URL?, RecordingStopFinalizationDisposition) -> Void)?
+    /// Includes finalized system-WAV coordinates, never capture-readiness time.
+    public var onRecordingCompleteWithTimeline: ((UInt64, URL?, URL?, RecordingStopFinalizationDisposition, RecordedSystemAudioTimeline?) -> Void)?
+    /// Set before start. Hosts opt in only when call-app naming is enabled.
+    public var recordsSystemAudioTimeline = false
 
     /// Monotonic capture-session generation visible to host lifecycle bridges.
     /// It changes synchronously at each start/stop boundary.

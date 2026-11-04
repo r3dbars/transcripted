@@ -69,6 +69,10 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     /// Calls `prepare()` automatically if not already called.
     func start(bufferCallback: @escaping (AVAudioPCMBuffer) -> Void) throws
 
+    /// The same owned/borrowed PCM contract, carrying source provenance when
+    /// a backend can prove it. Timing-unaware backends never invent a clock.
+    func startTimed(bufferCallback: @escaping (AVAudioPCMBuffer, SystemAudioBufferTiming) -> Void) throws
+
     /// Stop capture with a short delay to let the pipeline settle.
     func stop()
 
@@ -93,6 +97,9 @@ public protocol SystemAudioCaptureEngine: AnyObject {
 }
 
 extension SystemAudioCaptureEngine {
+    public func startTimed(bufferCallback: @escaping (AVAudioPCMBuffer, SystemAudioBufferTiming) -> Void) throws {
+        try start { buffer in bufferCallback(buffer, .unavailable) }
+    }
     public func finishAndDrain() { stopSync() }
     public var recoveryEventPublisher: AnyPublisher<SystemAudioRecoveryEvent, Never> {
         Empty().eraseToAnyPublisher()
