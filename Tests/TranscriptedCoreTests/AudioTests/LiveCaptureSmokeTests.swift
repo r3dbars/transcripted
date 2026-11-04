@@ -48,14 +48,12 @@ final class LiveCaptureSmokeTests: XCTestCase {
             }
         }
 
-        let previousSaveLocation = UserDefaults.standard.object(forKey: "transcriptSaveLocation")
-        UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var arguments = originalArguments
+        arguments["transcriptSaveLocation"] = ""
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         defer {
-            if let previousSaveLocation {
-                UserDefaults.standard.set(previousSaveLocation, forKey: "transcriptSaveLocation")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
-            }
+            UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
         }
 
         try assertMicrophoneIsReadyForNonInteractiveSmoke()
