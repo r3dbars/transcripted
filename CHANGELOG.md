@@ -21,6 +21,7 @@ force-installed by Sparkle so existing users recover from a regression.
   a meeting choice can never change dictation audio or the other way around.
   Behavior is unchanged. Dictation audio defaults to 30 days, which is why both
   rows can show "30 days" without being linked.
+- The Speakers directory uses one lazy stack across all sections.
 - Writing > Edit setup can turn both features off and save the disabled state
   without continuing through model, keyboard or permission setup.
 - Opened meeting cards keep Copy, Show in Finder and the more menu in the

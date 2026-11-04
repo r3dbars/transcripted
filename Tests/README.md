@@ -234,6 +234,19 @@ prove native card animation or live voice identity; those remain UI checks.
 `bash run-tests.sh --filter SpeakerMeetingReview` covers the "Who spoke?"
 cards' visit state (Done, Undo, Skip, focus) and save plans with pure fixtures.
 
+The Speakers page has a scroll smoke:
+`bash scripts/dev/test-speakers-directory-scroll.sh` (requires `bash build-deps.sh`
+and a GUI session). It compiles the app's sources with
+`Tests/UI/SpeakersDirectoryScrollSmoke.swift` as the entry point, hosts the real
+`PeopleSettingsPage` in a borderless window over a temporary speaker database
+of fictional people, and scrolls it top to bottom at several list sizes. It
+fails if the scroll jumps back, never reaches the bottom, keeps laying out once
+it stops, or the main thread stops answering (a hang guard names the step).
+Swift CI runs it in the `spm-tests` job.
+The compiled scenario manifest drives the shared completion guard: every
+selected scenario must return and write a fresh receipt. An early AppKit
+event-loop return or exit zero without completion fails the smoke.
+
 Parakeet model-lifecycle changes also have a deterministic executor harness:
 `bash scripts/dev/test-parakeet-lifecycle.sh`. It compiles the production
 lifecycle extension against delayed fake models (no network, cache writes, or
