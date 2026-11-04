@@ -720,15 +720,13 @@ final class TranscriptionTaskManagerMetadataTests: XCTestCase {
     }
 
     func testTranscriptFormatterUsesExplicitFormatOptionsForSourcesAndObsidianMetadata() throws {
-        let originalObsidianDefault = UserDefaults.standard.object(forKey: "enableObsidianFormat")
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var arguments = originalArguments
+        arguments["enableObsidianFormat"] = true
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         defer {
-            if let originalObsidianDefault {
-                UserDefaults.standard.set(originalObsidianDefault, forKey: "enableObsidianFormat")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "enableObsidianFormat")
-            }
+            UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
         }
-        UserDefaults.standard.set(true, forKey: "enableObsidianFormat")
 
         let result = TranscriptionResult(
             micUtterances: [],

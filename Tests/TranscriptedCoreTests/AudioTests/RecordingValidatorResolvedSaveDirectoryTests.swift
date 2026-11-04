@@ -10,13 +10,14 @@ import XCTest
 final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
 
     private let preferenceKey = "transcriptSaveLocation"
-    private var originalPreference: Any?
+    private var originalArguments: [String: Any] = [:]
     private var paths: CoreStoragePaths!
 
     override func setUp() {
         super.setUp()
-        originalPreference = UserDefaults.standard.object(forKey: preferenceKey)
-        UserDefaults.standard.removeObject(forKey: preferenceKey)
+        originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        // An empty value masks any persistent location without changing it.
+        setPreference("")
 
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("RecordingValidatorResolvedSaveDirectoryTests-\(UUID().uuidString)", isDirectory: true)
@@ -32,12 +33,51 @@ final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
     }
 
     override func tearDown() {
-        if let originalPreference {
-            UserDefaults.standard.set(originalPreference, forKey: preferenceKey)
-        } else {
-            UserDefaults.standard.removeObject(forKey: preferenceKey)
-        }
+        UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
         super.tearDown()
+    }
+
+    // XCTest runs these cases serially within this test process. Keep each
+    // override scoped to setUp/tearDown; parallel workers have separate processes.
+    private func setPreference(_ value: String) {
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments[preferenceKey] = value
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+    }
+
+    func testVolatileLocationReachesDefaultAccessorWithoutPersistentWrites() throws {
+        let processName = ProcessInfo.processInfo.processName
+        let bundleID = Bundle.main.bundleIdentifier
+        let domain = bundleID.flatMap { $0.isEmpty ? nil : $0 } ?? processName
+        // Never inspect a product preference domain, even if this fixture is
+        // accidentally linked into the app instead of a test executable.
+        guard !["Transcripted", "Draft"].contains(processName),
+              bundleID != "com.justinbetker.draft",
+              domain == "swiftpm-testing-helper" || domain == "com.apple.dt.xctest.tool"
+                || domain.hasSuffix("Tests") else {
+            XCTFail("Preference isolation proof requires a test-process domain")
+            return
+        }
+        let persistentBefore = UserDefaults.standard.persistentDomain(forName: domain)
+        let argumentsBefore = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer {
+            UserDefaults.standard.setVolatileDomain(argumentsBefore, forName: UserDefaults.argumentDomain)
+        }
+        let customRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("VolatileLocation-\(UUID().uuidString)", isDirectory: true)
+        setPreference(customRoot.path)
+        XCTAssertEqual(RecordingValidator.resolvedSaveDirectory(paths: paths), customRoot.appendingPathComponent("meetings", isDirectory: true))
+        // Blank is the no-custom-location control, without exposing an
+        // underlying persistent location as removeObject would.
+        setPreference("")
+        XCTAssertEqual(RecordingValidator.resolvedSaveDirectory(paths: paths), paths.transcripts)
+        let persistentAfter = UserDefaults.standard.persistentDomain(forName: domain)
+        XCTAssertTrue((persistentBefore as NSDictionary?) == (persistentAfter as NSDictionary?),
+                      "Volatile overrides must not alter persistent preferences")
+        UserDefaults.standard.setVolatileDomain(argumentsBefore, forName: UserDefaults.argumentDomain)
+        XCTAssertTrue((argumentsBefore as NSDictionary).isEqual(
+            UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)),
+            "The complete prior argument domain must be restored")
     }
 
     func testReturnsPathsTranscriptsWhenNoCustomLocation() {
@@ -48,7 +88,7 @@ final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
     }
 
     func testReturnsPathsTranscriptsWhenCustomLocationBlank() {
-        UserDefaults.standard.set("   ", forKey: preferenceKey)
+        setPreference("   ")
 
         XCTAssertEqual(
             RecordingValidator.resolvedSaveDirectory(paths: paths),
@@ -62,7 +102,7 @@ final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: customRoot) }
         try? FileManager.default.createDirectory(at: customRoot, withIntermediateDirectories: true)
 
-        UserDefaults.standard.set(customRoot.path, forKey: preferenceKey)
+        setPreference(customRoot.path)
 
         XCTAssertEqual(
             RecordingValidator.resolvedSaveDirectory(paths: paths),
@@ -71,7 +111,7 @@ final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
     }
 
     func testRelativeCustomLocationFallsBackToPathsTranscripts() {
-        UserDefaults.standard.set("relative/path", forKey: preferenceKey)
+        setPreference("relative/path")
 
         XCTAssertEqual(
             RecordingValidator.resolvedSaveDirectory(paths: paths),
@@ -80,7 +120,7 @@ final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
     }
 
     func testTraversalCustomLocationFallsBackToPathsTranscripts() {
-        UserDefaults.standard.set("/tmp/foo/../../etc", forKey: preferenceKey)
+        setPreference("/tmp/foo/../../etc")
 
         XCTAssertEqual(
             RecordingValidator.resolvedSaveDirectory(paths: paths),
@@ -89,7 +129,7 @@ final class RecordingValidatorResolvedSaveDirectoryTests: XCTestCase {
     }
 
     func testSystemCustomLocationFallsBackToPathsTranscripts() {
-        UserDefaults.standard.set("/System/Library/Transcripted", forKey: preferenceKey)
+        setPreference("/System/Library/Transcripted")
 
         XCTAssertEqual(
             RecordingValidator.resolvedSaveDirectory(paths: paths),
