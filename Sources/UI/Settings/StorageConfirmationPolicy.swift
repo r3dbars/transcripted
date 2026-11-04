@@ -92,7 +92,8 @@ enum StorageRetentionEffect: Equatable {
         case .none:
             break
         case .applyMeeting(let window):
-            applyMeeting(window)        case .applyDictation(let window):
+            applyMeeting(window)
+        case .applyDictation(let window):
             applyDictation(window)
         }
     }
@@ -150,7 +151,8 @@ struct StorageRetentionPrompts: Equatable {
     mutating func dismiss(_ slot: StorageConfirmationSlot) {
         switch slot {
         case .meetingAudio:
-            pendingMeeting = nil        case .dictationAudio:
+            pendingMeeting = nil
+        case .dictationAudio:
             pendingDictation = nil
         case .captureLibrary, .freeUpSpace:
             break
