@@ -36,7 +36,7 @@ for source in "${APP_SOURCE_FILES[@]}"; do
 done
 swiftc -Onone -j "$(sysctl -n hw.ncpu 2>/dev/null || printf 8)" -o "$OUT_DIR/scroll-smoke" \
     "${APP_SWIFTC_LINK_ARGS[@]}" "${smoke_sources[@]}" \
-    Tests/UI/SpeakersDirectoryScrollSmoke.swift "${APP_SWIFTC_TAIL_ARGS[@]}" \
+    Tests/UI/SpeakersDirectoryScrollSmoke.swift Tests/UI/SpeakersScrollDiagnostics.swift "${APP_SWIFTC_TAIL_ARGS[@]}" \
     -Xlinker -rpath -Xlinker "$PWD/deps-frameworks"
 fixture_home=$(mktemp -d "${TMPDIR:-/tmp}/transcripted-speakers-scroll.XXXXXX")
 case "$fixture_home" in
