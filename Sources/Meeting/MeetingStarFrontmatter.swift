@@ -91,7 +91,8 @@ enum MeetingStarFrontmatter {
             return try MeetingTranscriptFileUpdateSerializer.sync {
                 // Resolve authority at execution, not when a cached row was built.
                 guard let directory = authorizedDirectory(),
-                      MeetingAudioStorageManager.isSafeNonSymlinkDirectory(directory, fileManager: fileManager),
+                      let properties = try? directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]),
+                      properties.isDirectory == true, properties.isSymbolicLink != true,
                       fileManager.isReadableFile(atPath: directory.path),
                       fileManager.isWritableFile(atPath: directory.path) else {
                     throw MeetingStarError.currentLibraryUnavailable
