@@ -111,7 +111,13 @@ After a successful transcript save, app-managed retained `.wav` audio is
 converted to `.m4a` and the original `.wav` is removed only after conversion
 succeeds. The Storage settings page controls whether retained audio is deleted
 after 7 days, 30 days, or never. Markdown transcripts are not removed by audio
-retention cleanup.
+retention cleanup, and neither are saved voices: retention only walks
+`<capture-library>/meetings/audio/*_audio/` and never touches the speaker
+databases under `state/` or the saved clips in `tmp/recordings/speaker_clips/`,
+so existing saved voiceprints and clips remain available. This preserves the
+stored voices; it does not guarantee recognition accuracy. Retention does take
+away the old meeting's own audio, so naming a voice in a meeting whose audio
+was deleted saves the name but can't teach its voiceprint.
 
 On launch, Transcripted also performs best-effort compression for existing
 retained audio folders that already have matching Markdown transcripts. Failed

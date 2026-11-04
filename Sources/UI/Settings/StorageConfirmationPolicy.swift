@@ -65,7 +65,7 @@ enum StorageConfirmationPolicy {
     /// Body copy for the meeting and dictation prompts. The capture-library and
     /// free-up-space prompts keep their own copy at the call site.
     static func meetingAudioMessage(for window: AudioRetentionWindow) -> String {
-        "Your transcripts stay, and starred meetings keep their audio. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."
+        "Your transcripts and saved voices stay, and starred meetings keep their audio. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."
     }
 
     static func dictationAudioMessage(for window: DictationAudioKeepWindow) -> String {
