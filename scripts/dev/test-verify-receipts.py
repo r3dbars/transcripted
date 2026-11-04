@@ -6,13 +6,24 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
 
 SCRIPT = Path(os.environ.get("VERIFY_RECEIPTS_SCRIPT", Path(__file__).with_name("verify-change.sh")))
+
+
+def fixture_environment():
+    # A temporary cwd does not override Git's repository/index/config controls.
+    # Neither fixture setup nor the wrapper's Git reads may inherit those.
+    environment = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    environment.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
+                       GIT_CONFIG_SYSTEM=os.devnull)
+    return environment
 
 
 class VerifyReceiptTests(unittest.TestCase):
@@ -40,7 +51,7 @@ if status == 0:
     report.write_text(json.dumps({'ownedFixture': 'current'}))
 sys.exit(status)
 """)
-        self.env = {**os.environ, "PATH": f"{self.bin}:{os.environ['PATH']}",
+        self.env = {**fixture_environment(), "PATH": f"{self.bin}:{os.environ['PATH']}",
                     "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"}
         self.git("init", "-q")
         self.git("add", ".")
@@ -58,7 +69,8 @@ sys.exit(status)
         path.chmod(0o700)
 
     def git(self, *args):
-        subprocess.run(["git", *args], cwd=self.root, check=True, capture_output=True)
+        subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false", *args],
+                       cwd=self.root, env=self.env, check=True, capture_output=True)
 
     def run_verify(self, *arguments, **environment):
         return subprocess.run(["bash", "scripts/dev/verify-change.sh", "--base", "HEAD", *arguments],
@@ -97,11 +109,14 @@ sys.exit(status)
         self.assertIn("| meetings | FAIL |", (self.output / "summary.md").read_text())
 
     def test_success_keeps_only_reports_produced_by_this_selection(self):
+        own_head = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"],
+                                           cwd=self.root, env=self.env, text=True).strip()
         result = self.run_verify("--only", "meetings")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads((self.output / "meetings.json").read_text()), {"ownedFixture": "current"})
         self.assertFalse((self.output / "ui.json").exists())
         self.assertIn("| meetings | PASS |", (self.output / "summary.md").read_text())
+        self.assertIn(f"head: `{own_head}`", (self.output / "summary.md").read_text())
         self.assert_no_old_reports()
 
     def test_isolation_preflight_skip_removes_previous_launch_samples(self):
@@ -162,6 +177,48 @@ sys.exit(status)
         self.assertEqual(result.returncode, 1)
         self.assertIn("Refusing", result.stderr)
         self.assertEqual((outside / "ui.json").read_text(), "OLD PASS")
+
+    def test_inherited_git_controls_cannot_redirect_fixture_or_wrapper(self):
+        external = self.root / "second-owned-repo"
+        external.mkdir()
+
+        def external_git(*args):
+            return subprocess.check_output(
+                ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgSign=false",
+                 "-C", str(external), *args], env=self.env, stderr=subprocess.STDOUT)
+
+        external_git("init", "-q")
+        (external / "sentinel").write_text("unrelated owned repository")
+        external_git("add", ".")
+        external_git("-c", "user.name=Owned fixture", "-c", "user.email=fixture@example.invalid",
+                     "commit", "-qm", "Owned redirection sentinel")
+        head = external_git("rev-parse", "HEAD")
+        index = (external / ".git/index").read_bytes()
+        hooks = self.root / "owned-hooks"
+        marker = self.root / "hook-ran"
+        self.write("owned-hooks/pre-commit", f"#!/bin/sh\ntouch {shlex.quote(str(marker))}\n")
+        configuration = self.root / "owned-gitconfig"
+        configuration.write_text(f"[core]\n hooksPath = {hooks}\n[commit]\n gpgSign = true\n")
+        malformed = self.root / "owned-malformed-gitconfig"
+        malformed.write_text("[malformed configuration\n")
+        controls = [
+            {"GIT_DIR": str(external / ".git")},
+            {"GIT_DIR": str(external / ".git"), "GIT_WORK_TREE": str(external),
+             "GIT_INDEX_FILE": str(external / ".git/index"), "GIT_CONFIG_GLOBAL": str(configuration),
+             "GIT_CONFIG_SYSTEM": str(configuration), "GIT_CONFIG_COUNT": "1",
+             "GIT_CONFIG_KEY_0": "commit.gpgSign", "GIT_CONFIG_VALUE_0": "true"},
+            {"GIT_CONFIG_GLOBAL": str(malformed), "GIT_CONFIG_SYSTEM": str(malformed)},
+        ]
+        for injected in controls:
+            with self.subTest(controls=sorted(injected)):
+                child = subprocess.run(
+                    [sys.executable, str(Path(__file__).resolve()),
+                     "VerifyReceiptTests.test_success_keeps_only_reports_produced_by_this_selection"],
+                    env={**self.env, **injected}, capture_output=True, text=True, timeout=15)
+                self.assertEqual(child.returncode, 0, child.stderr)
+                self.assertEqual(external_git("rev-parse", "HEAD"), head)
+                self.assertEqual((external / ".git/index").read_bytes(), index)
+                self.assertFalse(marker.exists(), "inherited hooks must never run")
 
 
 if __name__ == "__main__":
