@@ -137,7 +137,9 @@ enum MeetingAudioStorageManager {
 
         var removedCount = 0
         for (directory, transcript) in directories {
-            guard transcript.referenceDate < cutoff else {
+            // Starred meetings keep their audio; every automatic sweep comes
+            // through here, so this one check covers them all.
+            guard transcript.referenceDate < cutoff, !transcript.isStarred else {
                 continue
             }
 

@@ -39,6 +39,8 @@ extension MeetingAudioStorageManager {
 
     struct TranscriptInfo {
         let referenceDate: Date
+        /// Starred meetings keep their audio past the retention window.
+        let isStarred: Bool
     }
 
     private static func transcriptInfo(
@@ -52,11 +54,14 @@ extension MeetingAudioStorageManager {
         let transcriptURL = meetingsFolder.appendingPathComponent(stem).appendingPathExtension("md")
         guard fileManager.fileExists(atPath: transcriptURL.path) else { return nil }
         guard let raw = try? previewString(at: transcriptURL),
-              isTranscriptedMeetingTranscript(raw) else {
+              let values = transcriptedMeetingFrontmatterValues(raw) else {
             return nil
         }
 
-        return TranscriptInfo(referenceDate: transcriptReferenceDate(for: transcriptURL, raw: raw))
+        return TranscriptInfo(
+            referenceDate: transcriptReferenceDate(for: transcriptURL, raw: raw),
+            isStarred: MeetingStarFrontmatter.isStarred(values: values)
+        )
     }
 
     private static func previewString(at url: URL) throws -> String {
@@ -66,15 +71,20 @@ extension MeetingAudioStorageManager {
         return String(decoding: data, as: UTF8.self)
     }
 
-    private static func isTranscriptedMeetingTranscript(_ raw: String) -> Bool {
+    /// The frontmatter of an app-owned meeting transcript, or nil for any
+    /// other Markdown.
+    private static func transcriptedMeetingFrontmatterValues(_ raw: String) -> [String: String]? {
         guard raw.contains("\n## Full Transcript") || raw.contains("\n## Transcript"),
               let values = TranscriptFrontmatter.values(in: raw),
               values["capture_type"]?.lowercased() == "meeting" else {
-            return false
+            return nil
         }
 
-        return isValidTranscriptIdentifier(values["transcript_id"])
-            || isValidTranscriptIdentifier(values["capture_id"])
+        guard isValidTranscriptIdentifier(values["transcript_id"])
+            || isValidTranscriptIdentifier(values["capture_id"]) else {
+            return nil
+        }
+        return values
     }
 
     private static func transcriptReferenceDate(for url: URL, raw: String) -> Date {

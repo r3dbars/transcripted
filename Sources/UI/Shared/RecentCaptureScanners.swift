@@ -22,6 +22,9 @@ struct RecentMeetingItem: Identifiable, Sendable {
     var transcriptionEngine: String? = nil
     /// When an imported file was transcribed (`imported_at`), nil otherwise.
     var importedAt: Date? = nil
+    /// `starred: true` in the frontmatter. Starred meetings show a star on
+    /// Home, appear under the Starred filter, and keep their audio.
+    var isStarred: Bool = false
 
     /// Where Home lists the row: an import sits under the day it was
     /// imported, so it shows up at the top instead of weeks back. Everything

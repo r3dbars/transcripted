@@ -50,6 +50,10 @@ force-installed by Sparkle so existing users recover from a regression.
   Settings stayed open.
 
 ### Added
+- Meetings can be starred from a row's ⋯ menu or an opened card. Starred
+  meetings show a small star, a Starred filter in the Meetings header lists
+  them across the whole library, and automatic meeting-audio deletion keeps
+  their audio. The star is saved in the transcript's frontmatter.
 - Transcribe a file has its own page in the sidebar, with the audio and video
   picker, import progress, and instructions for the command-line tool.
 - The menu bar warns when another app's Secure Keyboard Entry is blocking the

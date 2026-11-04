@@ -95,7 +95,7 @@ The app-side adapter for the meeting feature. It keeps app UI, storage and STT o
 
 ## Storage
 
-- Capture library: `<capture-library>/meetings/*.md` and `audio/*_audio/` retained audio, WAV compressed to M4A after save. Retention cleanup uses the transcript's frontmatter date, not edit time. Backfill skips orphaned, non-Transcripted and symlinked folders. Failed audio is compressed only while the failed-meeting queue references it.
+- Capture library: `<capture-library>/meetings/*.md` and `audio/*_audio/` retained audio, WAV compressed to M4A after save. Retention cleanup uses the transcript's frontmatter date, not edit time, and skips meetings with `starred: true` (`MeetingStarFrontmatter`; the one check lives in `pruneRetainedAudio`, so every sweep inherits it). Re-transcribing puts the star back in `handleReplacementTranscriptCommitted`, before the save is published. Backfill skips orphaned, non-Transcripted and symlinked folders. Failed audio is compressed only while the failed-meeting queue references it.
 - State, under `~/Library/Application Support/Transcripted/state/`: `speakers.sqlite`, `stats.sqlite`, `failed_transcriptions.json`, and `imported_transcription_queue/import-job-*.json` crash-recovery journals for imports waiting behind another transcript.
 - Scratch, under `.../tmp/recordings/`: raw captures, imported copies, `speaker_clips/`.
 - Successful live and imported recordings are retained in the capture library before scratch cleanup. Failed live ones also copy their audio there while scratch stays for retry. Explicit discard removes scratch and saves nothing.

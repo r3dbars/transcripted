@@ -5,6 +5,8 @@ enum HomeRowMenuEntry: Equatable, CaseIterable {
     case openMarkdown
     case revealDictation
     case renameMeeting
+    case starMeeting
+    case unstarMeeting
     case reportIssue
     case showTranscript
     case reviewSpeakers
@@ -19,6 +21,8 @@ enum HomeRowMenuEntry: Equatable, CaseIterable {
         switch self {
         case .openMarkdown: return "Open Markdown"
         case .revealDictation: return "Reveal in Finder"
+        case .starMeeting: return "Star meeting"
+        case .unstarMeeting: return "Remove star"
         case .reportIssue: return "Report issue"
         case .showTranscript: return "Show transcript in Finder"
         case .reviewSpeakers: return "Who spoke?"
@@ -35,6 +39,8 @@ enum HomeRowMenuEntry: Equatable, CaseIterable {
         case .openMarkdown, .showTranscript: return "doc.text"
         case .revealDictation: return "folder"
         case .renameMeeting: return HomeMeetingRenameAffordance.symbolName
+        case .starMeeting: return "star"
+        case .unstarMeeting: return "star.slash"
         case .reportIssue: return "flag"
         case .reviewSpeakers: return "person.crop.circle.badge.questionmark"
         case .boostMic: return "mic.badge.plus"
@@ -63,13 +69,20 @@ enum HomeRowMenuPolicy {
 
     /// Re-transcribe and Show audio need retained audio with a Finder target;
     /// re-transcribe also needs audio it can feed back through the pipeline.
+    /// Star or Remove star sits right after Rename.
     static func meetingEntries(
         hasPendingSpeakerReview: Bool,
         offersMicBoost: Bool,
         hasAudioRevealTarget: Bool,
-        hasRetranscriptionInput: Bool
+        hasRetranscriptionInput: Bool,
+        isStarred: Bool = false
     ) -> [HomeRowMenuEntry] {
-        var entries: [HomeRowMenuEntry] = [.renameMeeting, .reportIssue, .showTranscript]
+        var entries: [HomeRowMenuEntry] = [
+            .renameMeeting,
+            isStarred ? .unstarMeeting : .starMeeting,
+            .reportIssue,
+            .showTranscript
+        ]
         if hasPendingSpeakerReview {
             entries.append(.reviewSpeakers)
         }

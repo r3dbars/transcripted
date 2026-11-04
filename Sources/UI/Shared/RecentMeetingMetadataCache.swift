@@ -50,6 +50,10 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // model (and imports were listed by import time) miss once and reparse.
     var transcriptionEngine: String = ""
     var importedAt: Date? = nil
+    // Optional on purpose: payloads written before stars still decode (as
+    // not starred) instead of reparsing the whole library once. Starring
+    // rewrites the file, so its stamp changes and that row misses anyway.
+    var isStarred: Bool? = nil
 }
 
 extension CachedRecentMeetingMetadata {
@@ -70,6 +74,7 @@ extension CachedRecentMeetingMetadata {
         self.speakerNames = item.speakerNames
         self.transcriptionEngine = item.transcriptionEngine ?? ""
         self.importedAt = item.importedAt
+        self.isStarred = item.isStarred
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -89,7 +94,8 @@ extension CachedRecentMeetingMetadata {
             systemAudioSignalVerified: systemAudioSignalVerified,
             speakerNames: speakerNames,
             transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
-            importedAt: importedAt
+            importedAt: importedAt,
+            isStarred: isStarred ?? false
         )
     }
 }
