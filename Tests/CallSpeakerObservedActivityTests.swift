@@ -72,4 +72,38 @@ func testCallSpeakerObservedActivity() {
         store.attach(timeline(), recordingStartedAt: first)
         assertTrue(store.take(recordingStartedAt: first, enabled: false) == nil, "setting off before handout drops evidence")
     }
+    runSuite("CallSpeakerActivityStore: queued recordings share a bounded map budget and keep metadata after eviction") {
+        let first = Date(timeIntervalSince1970: 100), second = Date(timeIntervalSince1970: 200)
+        var store = CallSpeakerActivityStore(maximumTimelineSegments: 1)
+        store.put(observation(), recordingStartedAt: first)
+        store.put(observation(), recordingStartedAt: second)
+        store.attach(timeline(), recordingStartedAt: first)
+        store.attach(timeline(), recordingStartedAt: second)
+        assertEqual(store.storedTimelineSegmentCount, 1, "the quota covers all queued rows together")
+        let older = store.take(recordingStartedAt: first)
+        assertTrue(older?.intervals.isEmpty == true && older?.coverage.isEmpty == true, "old timing is withheld after map eviction")
+        assertEqual(older?.rosterNames, ["Test Participant"], "metadata remains available")
+        assertEqual(older?.selfNames, ["Test Local"], "self metadata survives too")
+        assertEqual(store.take(recordingStartedAt: second)?.intervals.first?.start, 8, "the newest retained map still aligns")
+        assertEqual(store.storedTimelineSegmentCount, 0, "handoff releases the retained map")
+    }
+    runSuite("CallSpeakerActivityStore: oversized or replaced mappings cannot exceed the shared quota") {
+        let first = Date(timeIntervalSince1970: 100), second = Date(timeIntervalSince1970: 200)
+        var store = CallSpeakerActivityStore(maximumTimelineSegments: 1)
+        store.put(observation(), recordingStartedAt: first)
+        store.put(observation(), recordingStartedAt: second)
+        store.attach(timeline(), recordingStartedAt: first)
+        store.attach(timeline(pad: true), recordingStartedAt: second)
+        assertEqual(store.storedTimelineSegmentCount, 1, "an oversized arrival cannot displace useful existing timing")
+        assertTrue(store.take(recordingStartedAt: second)?.intervals.isEmpty == true)
+        store.attach(timeline(), recordingStartedAt: first)
+        assertEqual(store.storedTimelineSegmentCount, 1, "replacement does not count a map twice")
+        store.attach(nil, recordingStartedAt: first)
+        assertEqual(store.storedTimelineSegmentCount, 0, "unknown completion removes obsolete coordinates")
+        store.put(observation(), recordingStartedAt: second)
+        store.attach(timeline(), recordingStartedAt: second)
+        store.attach(timeline(), recordingStartedAt: first)
+        assertTrue(store.take(recordingStartedAt: first)?.intervals.isEmpty == true, "late old finalization cannot evict a newer recording's map")
+        assertEqual(store.take(recordingStartedAt: second)?.intervals.first?.start, 8)
+    }
 }

@@ -11,6 +11,8 @@ import TranscriptedCore
 
 struct CallSpeakerActivityStore: Sendable {
     static let defaultCapacity = 8
+    /// Shared across queued recordings, not a separate 40 MiB journal per row.
+    static let defaultMaximumTimelineSegments = 1_048_576
     /// Dates match within this much. The key is passed through in memory, so
     /// it should be exact; the slack only absorbs a round trip through a
     /// serialized queue entry.
@@ -28,13 +30,16 @@ struct CallSpeakerActivityStore: Sendable {
     }
 
     let capacity: Int
+    let maximumTimelineSegments: Int
     private(set) var entries: [Entry] = []
 
-    init(capacity: Int = defaultCapacity) {
+    init(capacity: Int = defaultCapacity, maximumTimelineSegments: Int = defaultMaximumTimelineSegments) {
         self.capacity = max(1, capacity)
+        self.maximumTimelineSegments = max(0, min(maximumTimelineSegments, Self.defaultMaximumTimelineSegments))
     }
 
     var count: Int { entries.count }
+    var storedTimelineSegmentCount: Int { entries.reduce(0) { $0 + ($1.timeline?.segmentCount ?? 0) } }
 
     mutating func put(_ activity: CallSpeakerActivity, recordingStartedAt: Date) {
         drop(recordingStartedAt: recordingStartedAt)
@@ -52,7 +57,16 @@ struct CallSpeakerActivityStore: Sendable {
 
     mutating func attach(_ timeline: RecordedSystemAudioTimeline?, recordingStartedAt: Date?) {
         guard let index = index(for: recordingStartedAt) else { return }
+        entries[index].timeline = nil
+        guard let timeline, timeline.segmentCount <= maximumTimelineSegments else { return }
         entries[index].timeline = timeline
+        var storedSegments = storedTimelineSegmentCount
+        // Capture artifacts and observed metadata survive. Only optional old
+        // coordinate maps are evicted, so their queued jobs withhold names.
+        for older in entries.indices where storedSegments > maximumTimelineSegments {
+            storedSegments -= entries[older].timeline?.segmentCount ?? 0
+            entries[older].timeline = nil
+        }
     }
 
     mutating func takeEntry(recordingStartedAt: Date?) -> Entry? {
