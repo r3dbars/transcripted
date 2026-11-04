@@ -48,9 +48,9 @@ import ApplicationServices
 final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendable {
     static let readDeadline: TimeInterval = 1.5
     static let messagingTimeout: TimeInterval = 0.25
-    static let maxWindowsPerApp = 8
-    static let maxSlackWindows = 32
-    static let maxNodesPerWindow = 4000
+    static let maxWindowsPerApp = CallSpeakerReadPlan.maxWindowsPerApp
+    static let maxSlackWindows = CallSpeakerReadPlan.maxSlackWindows
+    static let maxNodesPerWindow = CallSpeakerReadPlan.maxNodesPerWindow
     static let maxDepth = 60
     /// How long a "does Slack hold the mic" answer is reused.
     static let slackMicrophoneRecheckInterval: TimeInterval = 3
@@ -135,67 +135,47 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
             manualAccessibilitySession = session
             manualAccessibilityPIDs = []
         }
-        let deadline = Date().addingTimeInterval(Self.readDeadline)
-        let ordered = CallSpeakerReadPlan.ordered(apps) { $0.host }
-        var windows: [CallSpeakerWindowRead] = []
-        for (index, app) in ordered.enumerated() {
-            let now = Date()
-            guard now < deadline else { break }
-            let appDeadline = CallSpeakerReadPlan.appDeadline(now: now, pollDeadline: deadline, appsLeft: ordered.count - index)
-            windows.append(contentsOf: meetingWindows(of: app, deadline: appDeadline))
-        }
-        return CallSpeakerReadResult(supportedAppRunning: true, windows: windows)
+        return CallSpeakerReadPlan.scanApps(
+            apps,
+            host: { $0.host },
+            deadline: Date().addingTimeInterval(Self.readDeadline),
+            now: { Date() },
+            read: { self.meetingWindows(of: $0, deadline: $1) }
+        )
     }
 
-    private func meetingWindows(of app: HostApp, deadline: Date) -> [CallSpeakerWindowRead] {
+    private func meetingWindows(of app: HostApp, deadline: Date) -> CallSpeakerReadPlan.WindowScan {
         let appElement = AXUIElementCreateApplication(app.pid)
         var windowsRef: AnyObject?
         guard setTimeout(on: appElement, deadline: deadline),
               AXUIElementCopyAttributeValue(appElement, kAXWindowsAttribute as CFString, &windowsRef) == .success,
-              let windows = windowsRef as? [AXUIElement] else { return [] }
+              let windows = windowsRef as? [AXUIElement] else { return .incomplete }
 
-        // Titles first, so only meeting windows are walked.
-        let isSlack = app.host == .slack
-        var candidates: [(window: AXUIElement, match: CallSpeakerWindowMatch, huddle: Bool)] = []
-        var titles: [String] = []
-        for window in windows.prefix(isSlack ? Self.maxSlackWindows : Self.maxWindowsPerApp) {
-            guard Date() < deadline else { break }
-            let title = title(of: window, deadline: deadline) ?? ""
-            guard let match = CallSpeakerWindowMatcher.match(title: title, host: app.host) else { continue }
-            if isSlack { titles.append(title) }
-            candidates.append((window, match, CallSpeakerWindowMatcher.isLikelyHuddleTitle(title)))
-        }
-        guard !candidates.isEmpty else { return [] }
-        if isSlack {
-            // Not in a likely huddle: no walk, and no AXManualAccessibility.
-            guard CallSpeakerReadPlan.isSlackHuddleLikely(
-                windowTitles: titles,
-                holdsMicrophone: { isSlackHoldingMicrophone() }
-            ) else { return [] }
-            candidates.sort { $0.huddle && !$1.huddle }
-        }
-
-        if CallSpeakerApp.needsManualAccessibility(bundleID: app.bundleID),
-           !manualAccessibilityPIDs.contains(app.pid),
-           setTimeout(on: appElement, deadline: deadline) {
-            AXUIElementSetAttributeValue(appElement, Self.manualAccessibilityAttribute as CFString, kCFBooleanTrue)
-            manualAccessibilityPIDs.insert(app.pid)
-        }
-
-        var reads: [CallSpeakerWindowRead] = []
-        // Slack windows share one node budget; other apps get one per window.
-        var shared = WalkBudget(deadline: deadline, descendLeaves: true)
-        for candidate in candidates {
-            guard Date() < deadline else { break }
-            var budget = isSlack ? shared : WalkBudget(deadline: deadline, descendLeaves: app.host != .zoom)
-            let tree = walk(candidate.window, depth: 0, budget: &budget) ?? CallSpeakerAXNode()
-            reads.append(CallSpeakerWindowRead(match: candidate.match, tree: tree, truncated: budget.truncated))
-            if isSlack {
-                shared.nodes = budget.nodes
-                if budget.nodes >= Self.maxNodesPerWindow { break }
+        return CallSpeakerReadPlan.scanWindows(
+            windows,
+            host: app.host,
+            deadline: deadline,
+            now: { Date() },
+            title: { self.title(of: $0, deadline: $1) },
+            slackHoldsMicrophone: { self.isSlackHoldingMicrophone() },
+            prepareForWalk: { deadline in
+                if CallSpeakerApp.needsManualAccessibility(bundleID: app.bundleID),
+                   !self.manualAccessibilityPIDs.contains(app.pid),
+                   self.setTimeout(on: appElement, deadline: deadline) {
+                    AXUIElementSetAttributeValue(appElement, Self.manualAccessibilityAttribute as CFString, kCFBooleanTrue)
+                    self.manualAccessibilityPIDs.insert(app.pid)
+                }
+            },
+            readTree: { window, deadline, initialNodes in
+                var budget = WalkBudget(nodes: initialNodes, deadline: deadline, descendLeaves: app.host != .zoom)
+                let tree = self.walk(window, depth: 0, budget: &budget)
+                return CallSpeakerReadPlan.TreeRead(
+                    tree: tree ?? CallSpeakerAXNode(),
+                    truncated: budget.truncated || tree == nil,
+                    visitedNodes: budget.nodes
+                )
             }
-        }
-        return reads
+        )
     }
 
     /// Confined to `queue`; the answer is reused for a few seconds.
@@ -227,8 +207,15 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
         guard status == .success,
               let values = valuesRef as? [AnyObject],
               values.count == Self.attributes.count else {
-            // A timeout means part of the window went unread.
-            if status == .cannotComplete { budget.truncated = true }
+            // Any failed element read can hide another participant. Normal
+            // unsupported individual attributes arrive inside a successful
+            // multiple-attribute result and are ignored below.
+            budget.truncated = true
+            return nil
+        }
+
+        guard !Self.hasFailedAttributes(values) else {
+            budget.truncated = true
             return nil
         }
 
@@ -272,9 +259,37 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
     private func title(of window: AXUIElement, deadline: Date) -> String? {
         guard setTimeout(on: window, deadline: deadline) else { return nil }
         var titleRef: AnyObject?
-        guard AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef) == .success,
-              let title = titleRef as? String, !title.isEmpty else { return nil }
-        return title
+        let status = AXUIElementCopyAttributeValue(window, kAXTitleAttribute as CFString, &titleRef)
+        return Self.titleValue(status: status, value: titleRef)
+    }
+
+    /// Native AX error decoding is separately testable without reading any app.
+    static func titleValue(status: AXError, value: AnyObject?) -> String? {
+        switch status {
+        case .success:
+            if value == nil { return "" }
+            return value as? String
+        case .noValue, .attributeUnsupported:
+            return ""
+        default:
+            return nil
+        }
+    }
+
+    /// Missing attributes are normal; a failed individual read is not. AX can
+    /// return these placeholders inside an otherwise successful batch read.
+    static func hasFailedAttributes(_ values: [AnyObject]) -> Bool {
+        for value in values where CFGetTypeID(value) == AXValueGetTypeID() {
+            let boxed = value as! AXValue
+            guard AXValueGetType(boxed) == .axError else { continue }
+            var error = AXError.success
+            guard AXValueGetValue(boxed, .axError, &error) else { return true }
+            switch error {
+            case .success, .noValue, .attributeUnsupported: continue
+            default: return true
+            }
+        }
+        return false
     }
 
     /// Bounds the next round trip on `element` by the messaging timeout and
@@ -282,7 +297,6 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
     private func setTimeout(on element: AXUIElement, deadline: Date) -> Bool {
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 0.005 else { return false }
-        AXUIElementSetMessagingTimeout(element, Float(min(remaining, Self.messagingTimeout)))
-        return true
+        return AXUIElementSetMessagingTimeout(element, Float(min(remaining, Self.messagingTimeout))) == .success
     }
 }

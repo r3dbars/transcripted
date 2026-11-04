@@ -32,11 +32,13 @@ struct CallSpeakerSnapshot: Equatable, Sendable {
         case windowsDisagree
         /// A meeting window was cut short by a read cap. Withheld.
         case truncated
+        /// An app/window/title or candidate was not fully examined. Withheld.
+        case incompleteScan = "incomplete_scan"
 
         /// Speaking evidence from this poll can't be trusted either way.
         var isWithheld: Bool {
             switch self {
-            case .multipleWindows, .windowsDisagree, .truncated: return true
+            case .multipleWindows, .windowsDisagree, .truncated, .incompleteScan: return true
             default: return false
             }
         }
@@ -508,6 +510,13 @@ enum CallSpeakerSnapshotBuilder {
     private struct Parsed {
         let window: CallSpeakerWindowRead
         let parse: CallSpeakerWindowParse
+    }
+
+    /// A partial scan cannot rule out a second call, even when its returned
+    /// windows appear unambiguous. Discard partial names before parsing.
+    static func build(_ read: CallSpeakerReadResult) -> CallSpeakerSnapshot {
+        guard read.completeness == .complete else { return .empty(.incompleteScan) }
+        return build(read.windows)
     }
 
     /// Folds every meeting window of one poll into one snapshot, withholding
