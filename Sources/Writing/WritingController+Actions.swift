@@ -165,11 +165,11 @@ extension WritingController {
     /// source.
     @discardableResult
     func turnOnKeyboard(openSettingsOnFailure: Bool = false) async -> Bool {
-        let stopsBefore = runtimeStopCount
+        guard !Task.isCancelled, let admission = keyboardActionAdmission else { return false }
         let installed = await installKeyboardRecordingFirstInstall()
         // Writing was turned off while the install ran: leave the input
         // source alone.
-        guard runtimeStopCount == stopsBefore else { return false }
+        guard !Task.isCancelled, keyboardActionAdmission == admission else { return false }
         guard installed else {
             if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
             return false
