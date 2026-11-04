@@ -58,7 +58,7 @@ func testStorageConfirmationPolicy() {
         assertEqual(StorageConfirmationPolicy.title(for: .dictationAudio, states: week), "Delete old dictation audio?")
         assertEqual(
             StorageConfirmationPolicy.meetingAudioMessage(for: .sevenDays),
-            "Your transcripts stay, and starred meetings keep their audio. Meeting audio older than 7 days is deleted now, and again automatically from then on."
+            "Your transcripts and saved voices stay, and starred meetings keep their audio. Meeting audio older than 7 days is deleted now, and again automatically from then on."
         )
         assertEqual(
             StorageConfirmationPolicy.dictationAudioMessage(for: .off),
