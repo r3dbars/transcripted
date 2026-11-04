@@ -13,6 +13,7 @@
 //   activity on virtual time.
 // Every name is fictional.
 
+import ApplicationServices
 import Foundation
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -379,6 +380,7 @@ func testCallSpeakerActivity() async {
         let clock = VirtualPollClock()
         var partial = teamsCall(speaking: "Ana Ruiz")
         partial.completeness = .incomplete
+        partial.diagnostics.incompleteness[.ax(.cannotComplete)] = 1
         let reader = FakeCallSpeakerReader(partial, clock: clock)
         let recorder = makeRecorder(reader: reader, clock: clock)
         recorder.start(recordingStartedAt: Date())
@@ -389,6 +391,8 @@ func testCallSpeakerActivity() async {
         assertEqual(recorder.lastSummary?.statusCounts[.incompleteScan], recorder.lastSummary?.polls)
         assertEqual(recorder.lastSummary?.intervalCount, 0)
         assertEqual(recorder.lastSummary?.rosterCount, 0)
+        assertEqual(recorder.lastSummary?.scanDiagnostics.incompleteness[.ax(.cannotComplete)], recorder.lastSummary?.polls,
+                    "the summary counts the AX code behind every incomplete poll")
     }
 
     await runSuite("CallSpeakerActivityRecorder: polls every 1 s once a roster shows, into activity") {
