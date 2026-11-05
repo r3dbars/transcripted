@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Sparkle 1.1.68 -> 1.1.69 install/relaunch proof; hosted CI only.
+"""Real Sparkle 1.1.75 -> 1.1.76 install/relaunch proof; hosted CI only.
 
 Never changes a release surface or signed app. The CLI owns installation; Python
 only downloads, stages, observes and verifies. Not a customer prompt/UI test.
@@ -18,21 +18,35 @@ import pwd
 import re
 import subprocess
 import sys
+import stat
+import zipfile
 import threading
 import time
 import urllib.parse
 import xml.etree.ElementTree as ET
 
-SOURCE_SHA = 'e42ad0f759612e0080f2d11bb5de12fda6b590bd'
+SOURCE_SHA = 'caa17f1bb522324bf8f756239347fb4c6308ab52'
 SPARKLE_SHA = '066e75a8b3e99962685d6a90cdd5293ebffd9261'
 TOOLKIT_SHA = 'c0dde519fd2a43ddfc6a1eb76aec284d7d888fe281414f9177de3164d98ba4c7'
 PUBLIC_KEY = 'Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q='
 BUNDLE_ID = 'com.justinbetker.draft'
 NS = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
 ASSETS = {
- 'Transcripted-1.1.68.dmg': ('1.1.68', '9bc3dd71ecfdc059d621399cec918da6b8282cff7c530ea9739cb7686d99b3f6', 692040650),
- 'Transcripted-1.1.69.dmg': ('1.1.69', '5f48ce802783ab64a8a9fc7185c27697d52ae9d6bf52826fc1b3196e9b06b49d', 701604387),
- 'Transcripted1.1.69-1.1.68.delta': ('1.1.69', '7112638b25cfadbf1c445cd2e77c4ac1dd91010639b3067886fc39d53490b2e2', 12314150),
+ 'Transcripted-1.1.75.dmg': ('1.1.75', '9e297c6c4154a5a6623c0fd711374fb45233faefab20bf718ded5b83068f6cca', 703372192),
+ 'Transcripted-1.1.76.dmg': ('1.1.76', 'c9c59dd56244592c200cccbc659ec103fda9a3a2cf06b1c6200369a9ef83c913', 703576924),
+ 'Transcripted1.1.76-1.1.75.delta': ('1.1.76', '18bdf4fc7e303435d5f906291a6f52fa1de0beac561731306ff7c57b4002cb0c', 3046518),
+}
+RC_RUN = 41978929739
+RC_ARTIFACT = 13394641882
+RC_WORKFLOW_SHA = '9f7076de5ae5e98cadf90b43975161db667fc175'
+RC_ZIP_SHA = '0dc7201ebfb1fb60a88672c8d2d6bb4bb44ee87ba262fc90cbbf44189bb12348'
+RC_ZIP_SIZE = 743785306
+FEED_SHA = '2e8855adf7899bf57dc9235b5f5a62076d521c1b18e4b77138505be539ad27ae'
+FEED_SIZE = 86820
+RC_MEMBERS = {
+ 'build/Transcripted-1.1.76.dSYM.zip', 'build/Transcripted-1.1.76.dmg', 'build/appcast.xml',
+ 'build/packaged-app-smoke.json', 'build/privacy-leak-sweep-report.json', 'Casks/transcripted.rb',
+ *{f'build/sparkle-deltas/Transcripted1.1.76-1.1.{v}.delta' for v in range(71, 76)},
 }
 CLI_FILES = {
  'Info.plist': '0d04f5392050cf6ecd2f50ea7c06799f77878328ca3838fc707a4439cb17b852',
@@ -93,6 +107,40 @@ def workflow_provenance(value, actual):
     return value
 
 
+def candidate_provenance(actual, clean):
+    require(actual == SOURCE_SHA and clean, 'Wrong or dirty candidate revision')
+
+
+def finalize_receipt(receipt, cleanup_errors):
+    if cleanup_errors:
+        receipt.update(status='FAIL', cleanup_errors=cleanup_errors)
+    return receipt
+
+
+def launch_value(key, read=None):
+    result = (read or (lambda name: subprocess.run(['launchctl', 'getenv', name],
+        text=True, capture_output=True)))(key)
+    # Older launchctl returns zero even for absence. Preserve its terminating
+    # newline distinction too: absent is '', present-empty is '\n'. Never strip
+    # all newlines, since a real variable value can itself end with a newline.
+    require(result.returncode in (0, 1) and not result.stderr, 'Cannot capture launch environment')
+    require(result.returncode == 0 or result.stdout == '', 'Malformed launch environment result')
+    present = result.returncode == 0 and result.stdout != ''
+    require(not present or result.stdout.endswith('\n'), 'Malformed launch environment value')
+    return {'present': present, 'value': result.stdout[:-1] if present else None,
+            'getenv_exit': result.returncode}
+
+
+def restore_launch_value(key, prior, write=run, read=None):
+    if prior['present']:
+        write('launchctl', 'setenv', key, prior['value'])
+    else:
+        write('launchctl', 'unsetenv', key)
+    actual = launch_value(key, read)
+    require((actual['present'], actual['value']) == (prior['present'], prior['value']),
+            'Launch environment restoration mismatch')
+
+
 def launch_status(report):
     fields = ('appLaunched', 'statusItemExists', 'popoverConfigured')
     status = {key: report.get(key) is True for key in fields}
@@ -125,7 +173,8 @@ def staged_feed(original, base, mode):
     channel = root.find('channel')
     require(channel is not None, 'Missing channel')
     items = channel.findall('item')
-    require(items and items[0].findtext(NS+'version') == '1.1.69', 'Wrong candidate version')
+    require(mode in ('full', 'delta'), 'Unknown update mode')
+    require(items and items[0].findtext(NS+'version') == '1.1.76', 'Wrong candidate version')
     item = copy.deepcopy(items[0])
     for old in items:
         channel.remove(old)
@@ -139,8 +188,8 @@ def staged_feed(original, base, mode):
             item.remove(deltas)
     else:
         require(deltas is not None, 'Missing candidate deltas')
-        matches = [e for e in deltas if e.get(NS+'deltaFrom') == '1.1.68']
-        require(len(matches) == 1, 'Missing or duplicate 1.1.68 delta')
+        matches = [e for e in deltas if e.get(NS+'deltaFrom') == '1.1.75']
+        require(len(matches) == 1, 'Missing or duplicate 1.1.75 delta')
         for delta in list(deltas):
             if delta not in matches:
                 deltas.remove(delta)
@@ -148,7 +197,7 @@ def staged_feed(original, base, mode):
     for entry in selected:
         url = entry.get('url', '')
         name = url.rsplit('/', 1)[-1]
-        require(name in ASSETS and ASSETS[name][0] == '1.1.69', 'Unexpected artifact')
+        require(name in ASSETS and ASSETS[name][0] == '1.1.76', 'Unexpected artifact')
         version, _, size = ASSETS[name]
         require(url == f'https://github.com/r3dbars/transcripted/releases/download/v{version}/{name}', 'Unexpected artifact URL')
         require(entry.get('length') == str(size) and bool(entry.get(NS+'edSignature')), 'Missing signed artifact metadata')
@@ -157,8 +206,8 @@ def staged_feed(original, base, mode):
 
 
 def selected_transport(mode, paths):
-    full = '/Transcripted-1.1.69.dmg' in paths
-    delta = '/Transcripted1.1.69-1.1.68.delta' in paths
+    full = '/Transcripted-1.1.76.dmg' in paths
+    delta = '/Transcripted1.1.76-1.1.75.delta' in paths
     if mode == 'full':
         require(full and not delta, 'Full run did not download the full artifact alone')
     else:
@@ -167,14 +216,74 @@ def selected_transport(mode, paths):
 
 
 def tree_digest(bundle):
-    entries = []
-    for p in sorted(Path(bundle).rglob('*')):
-        name = p.relative_to(bundle).as_posix()
-        if p.is_symlink():
-            entries.append((name, 'link', os.readlink(p)))
-        elif p.is_file():
-            entries.append((name, 'file', sha(p)))
-    return hashlib.sha256(json.dumps(entries, separators=(',', ':')).encode()).hexdigest()
+    # Every enclosed entry: bytes, modes, directories and literal symlink targets.
+    require(bundle.is_dir() and not bundle.is_symlink(), 'Invalid bundle root')
+    rows = [['.', stat.S_IMODE(bundle.lstat().st_mode), 'directory']]
+    for path in sorted(bundle.rglob('*')):
+        info = path.lstat()
+        row = [path.relative_to(bundle).as_posix(), stat.S_IMODE(info.st_mode)]
+        if path.is_symlink():
+            row += ['symlink', os.readlink(path)]
+        elif path.is_file():
+            row += ['file', sha(path)]
+        elif path.is_dir():
+            row += ['directory']
+        else:
+            raise HarnessFailure('Unsupported bundle entry')
+        rows.append(row)
+    return hashlib.sha256(json.dumps(rows, separators=(',', ':')).encode()).hexdigest()
+
+
+def rc_metadata(metadata):
+    require(metadata.get('id') == RC_ARTIFACT and metadata.get('expired') is False
+            and metadata.get('name') == 'Transcripted-1.1.76-release-candidate'
+            and metadata.get('size_in_bytes') == RC_ZIP_SIZE
+            and metadata.get('digest') == 'sha256:'+RC_ZIP_SHA
+            and metadata.get('workflow_run', {}).get('id') == RC_RUN
+            and metadata.get('workflow_run', {}).get('head_sha') == RC_WORKFLOW_SHA,
+            'Wrong final RC artifact metadata')
+
+
+def rc_members(infos):
+    names = [i.filename for i in infos]
+    require(len(names) == len(set(names)) and set(names) == RC_MEMBERS, 'Unexpected RC ZIP members')
+    require(all(not i.is_dir() and not stat.S_ISLNK(i.external_attr >> 16) for i in infos),
+            'Unsafe RC ZIP member')
+
+
+def stage_rc(archive, metadata, assets):
+    rc_metadata(json.loads(metadata.read_text()))
+    require(archive.is_file() and archive.stat().st_size == RC_ZIP_SIZE and sha(archive) == RC_ZIP_SHA,
+            'Wrong final RC ZIP bytes')
+    selected = {'build/appcast.xml': assets/'signed-appcast.xml',
+                'build/Transcripted-1.1.76.dmg': assets/'Transcripted-1.1.76.dmg',
+                'build/sparkle-deltas/Transcripted1.1.76-1.1.75.delta': assets/'Transcripted1.1.76-1.1.75.delta'}
+    with zipfile.ZipFile(archive) as z:
+        rc_members(z.infolist())
+        for member, target in selected.items():
+            with z.open(member) as src, target.open('xb') as dst:
+                import shutil
+                shutil.copyfileobj(src, dst)
+    for name in ('Transcripted-1.1.76.dmg', 'Transcripted1.1.76-1.1.75.delta'):
+        _, digest, size = ASSETS[name]
+        require((assets/name).stat().st_size == size and sha(assets/name) == digest, 'Wrong final candidate bytes')
+    feed = (assets/'signed-appcast.xml').read_bytes()
+    require(len(feed) == FEED_SIZE and hashlib.sha256(feed).hexdigest() == FEED_SHA, 'Wrong signed candidate feed')
+    return feed
+
+
+def fresh_account(home):
+    # These are all alternate model/app/state roots used by the packaged CLI.
+    roots = ['/Applications/Transcripted.app', str(home/'Applications/Transcripted.app')]
+    roots += [str(home/'Library/Application Support'/name) for name in ('Transcripted', 'Draft', 'FluidAudio')]
+    require(not any(Path(p).exists() for p in roots), 'Hosted account contains alternate product state or models')
+
+
+def product_preferences_absent(home):
+    domains = {s.strip() for s in run('defaults', 'domains').split(',')}
+    return (BUNDLE_ID not in domains
+            and not (home/'Library/Preferences'/f'{BUNDLE_ID}.plist').exists()
+            and not list((home/'Library/Preferences/ByHost').glob(BUNDLE_ID+'.*.plist')))
 
 
 def verify_app(app, version):
@@ -264,45 +373,66 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--candidate-root', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--rc-archive', type=Path, required=True)
+    parser.add_argument('--rc-metadata', type=Path, required=True)
     args = parser.parse_args()
     user = pwd.getpwuid(os.getuid())
     require(sys.platform == 'darwin' and hosted_account(os.environ, user.pw_name, user.pw_dir, os.getuid(), os.geteuid()),
             'Refusing native execution outside a verified GitHub-hosted runner account')
     candidate = args.candidate_root.resolve()
-    require(run('git', '-C', candidate, 'rev-parse', 'HEAD').strip() == SOURCE_SHA, 'Wrong candidate revision')
-    require(not run('git', '-C', candidate, 'status', '--porcelain').strip(), 'Candidate checkout must be clean')
+    candidate_provenance(run('git', '-C', candidate, 'rev-parse', 'HEAD').strip(),
+                         not run('git', '-C', candidate, 'status', '--porcelain').strip())
     workflow_sha = workflow_provenance(os.environ.get('WORKFLOW_SHA'),
         run('git', '-C', Path(__file__).resolve().parents[2], 'rev-parse', 'HEAD').strip())
     out = output_path(args.output, os.environ.get('RUNNER_TEMP'))
-    out.mkdir(parents=True)
+    os.umask(0o077)
+    out.mkdir(parents=True, mode=0o700)
     receipt = {'status': 'INCOMPLETE', 'candidate_sha': SOURCE_SHA, 'workflow_sha': workflow_sha, 'sparkle_source_sha': SPARKLE_SHA,
-               'scope': 'Real external Sparkle CLI install/relaunch; native customer update prompt NOT TESTED', 'runs': []}
+               'scope': 'External Sparkle install/relaunch and signed CLI synthetic import; native customer update prompt NOT TESTED',
+               'rc_run': RC_RUN, 'rc_artifact': RC_ARTIFACT, 'rc_zip_sha256': RC_ZIP_SHA, 'runs': []}
     cli = observer = None
     server = None
-    launch_keys = ['TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT', 'TRANSCRIPTED_DISABLE_FILE_LOGGER']
+    launch_keys = ['TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT', 'TRANSCRIPTED_DISABLE_FILE_LOGGER', 'TRANSCRIPTED_CONTAINER_DIR']
     prior_env = {}
+    owns_preferences = False
     try:
+        receipt['host'] = {'os': run('sw_vers', '-productVersion').strip(),
+                           'build': run('sw_vers', '-buildVersion').strip(),
+                           'architecture': run('uname', '-m').strip(), 'account': 'fresh_github_hosted_runner'}
         cli, observer = build_cli(out)
         require(json.loads(run(observer)) == [], 'Existing Transcripted process on runner; refusing')
-        # Fresh hosted user only. Persist opt-outs before either version launches.
+        fresh_account(Path(user.pw_dir))
+        require(product_preferences_absent(Path(user.pw_dir)), 'Product preferences already exist')
+        owns_preferences = True
+        # Only a proven absent product domain in this disposable hosted account.
         for key in ('observability-anonymous-analytics-enabled', 'observability-crash-reporting-enabled',
                     'SUEnableAutomaticChecks', 'SUAutomaticallyUpdate', 'SUSendProfileInfo'):
             run('defaults', 'write', BUNDLE_ID, key, '-bool', 'false')
         for key in launch_keys:
-            prior_env[key] = subprocess.run(['launchctl', 'getenv', key], text=True, capture_output=True).stdout.rstrip('\n')
+            prior_env[key] = launch_value(key)
         run('launchctl', 'setenv', 'TRANSCRIPTED_DISABLE_FILE_LOGGER', '1')
+        container = out/'app-container'
+        container.mkdir(mode=0o700)
+        run('launchctl', 'setenv', 'TRANSCRIPTED_CONTAINER_DIR', container)
         assets = out/'assets'
         assets.mkdir()
-        for name, (version, digest, size) in ASSETS.items():
-            download(f'https://github.com/r3dbars/transcripted/releases/download/v{version}/{name}', assets/name, digest, size)
+        original = stage_rc(args.rc_archive, args.rc_metadata, assets)
+        name = 'Transcripted-1.1.75.dmg'
+        version, digest, size = ASSETS[name]
+        download(f'https://github.com/r3dbars/transcripted/releases/download/v{version}/{name}', assets/name, digest, size)
         receipt['assets'] = {name: {'sha256': sha(assets/name), 'size': (assets/name).stat().st_size} for name in ASSETS}
-        for version in ('1.1.68', '1.1.69'):
+        for version in ('1.1.75', '1.1.76'):
             run('xcrun', 'stapler', 'validate', assets/f'Transcripted-{version}.dmg', log=out/f'notarization-{version}.log')
             copy_from_dmg(assets/f'Transcripted-{version}.dmg', out/f'original-{version}.app', out/f'mount-{version}')
-        old_digest = verify_app(out/'original-1.1.68.app', '1.1.68')
-        new_digest = verify_app(out/'original-1.1.69.app', '1.1.69')
-        receipt['original_bundle_digests'] = {'1.1.68': old_digest, '1.1.69': new_digest}
-        original = (candidate/'docs/appcast.xml').read_bytes()
+        old_digest = verify_app(out/'original-1.1.75.app', '1.1.75')
+        new_digest = verify_app(out/'original-1.1.76.app', '1.1.76')
+        receipt['original_bundle_digests'] = {'1.1.75': old_digest, '1.1.76': new_digest}
+        # Exercise CLI before any app launch can seed a model cache.
+        import runpy
+        cli_proof = runpy.run_path(str(Path(__file__).with_name('test-signed-candidate-cli.py')))
+        fresh_account(Path(user.pw_dir))
+        receipt['cli_import'] = cli_proof['qualify'](out/'original-1.1.76.app', out/'cli-import',
+                                                   SOURCE_SHA, run, require, tree_digest, sha)
         receipt['original_feed_sha256'] = hashlib.sha256(original).hexdigest()
         (out/'candidate-appcast.xml').write_bytes(original)
         requests = []
@@ -324,7 +454,7 @@ def main():
             target = case/'Transcripted.app'
             requests.clear()
             try:
-                run('ditto', out/'original-1.1.68.app', target)
+                run('ditto', out/'original-1.1.75.app', target)
                 require(tree_digest(target) == old_digest, 'Copied old bundle changed')
                 feed = staged_feed(original, base, mode)
                 (assets/'appcast.xml').write_bytes(feed)
@@ -351,7 +481,7 @@ def main():
                 after = wait_for(relaunched)
                 require(not any(r['pid'] == old_pid for r in json.loads(run(observer))), 'Original process still running')
                 entry['new_pid'] = after[0]['pid']
-                actual_digest = verify_app(target, '1.1.69')
+                actual_digest = verify_app(target, '1.1.76')
                 require(actual_digest == new_digest, 'Installed app differs from published new app bytes/symlinks')
                 entry['new_launch'] = launch_status(json.loads(new_report.read_text()))
                 entry.update(status='PASS', installed_bundle_sha256=actual_digest, relaunch_report='relaunched.json')
@@ -366,7 +496,9 @@ def main():
                 except Exception as error:
                     entry.update(status='FAIL', cleanup_error=bounded_error(error))
                     raise
-        require(all(r['status'] == 'PASS' for r in receipt['runs']), 'At least one real update route failed')
+        require(len(receipt['runs']) == 2 and all(r['status'] == 'PASS' for r in receipt['runs']),
+                'At least one real update route failed')
+        require(receipt['cli_import']['status'] == 'PASS', 'Candidate CLI import incomplete')
         receipt['status'] = 'PASS'
     except Exception as error:
         receipt.update(status='FAIL', error=bounded_error(error))
@@ -380,11 +512,18 @@ def main():
                 cleanup_errors.append(bounded_error(error))
         for key, value in prior_env.items():
             try:
-                run('launchctl', 'setenv', key, value) if value else run('launchctl', 'unsetenv', key)
+                restore_launch_value(key, value)
             except Exception as error:
                 cleanup_errors.append(bounded_error(error))
-        if cleanup_errors:
-            receipt.update(status='FAIL', cleanup_errors=cleanup_errors)
+        if owns_preferences:
+            try:
+                require(json.loads(run(observer)) == [], 'App still running before preference restoration')
+                run('defaults', 'delete', BUNDLE_ID)
+                require(product_preferences_absent(Path(user.pw_dir)), 'Product preference absence not restored')
+                receipt['preferences_restored_to_original_absence'] = True
+            except Exception as error:
+                cleanup_errors.append(bounded_error(error))
+        finalize_receipt(receipt, cleanup_errors)
         (out/'receipt.json').write_text(json.dumps(receipt, indent=2)+'\n')
     print(json.dumps(receipt, indent=2))
     return 0 if receipt['status'] == 'PASS' else 1
