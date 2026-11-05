@@ -20,6 +20,8 @@ func testParakeetStopSingleFlight() async {
 @MainActor
 private final class StopOrderLog {
     var entries: [String] = []
+    /// The stand-in drain parks here until main-queue work releases it.
+    var parkedDrain: CheckedContinuation<Void, Never>?
 }
 
 @MainActor
@@ -37,12 +39,24 @@ private func runInlineStopOrderSuites() async {
         let lifecycle = ParakeetSingleFlightLifecycle()
         let log = StopOrderLog()
         DispatchQueue.main.async {
-            MainActor.assumeIsolated { log.entries.append("queued") }
+            MainActor.assumeIsolated {
+                log.entries.append("queued")
+                log.parkedDrain?.resume()
+                log.parkedDrain = nil
+            }
         }
         await lifecycle.run {
             log.entries.append("work")
-            // Like the pinned drain: wait on detached work, then come back.
-            await Task.detached {}.value
+            // Like the pinned drain: suspend, then come back. The drain parks
+            // until the already-queued main work releases it, so the stop
+            // really gives up the main actor here. Awaiting an empty detached
+            // task doesn't promise that: when the task finishes before the
+            // await, nothing suspends, and on a loaded Mac "caller" then
+            // landed ahead of "queued". If the work didn't start inline,
+            // "queued" already ran and there is nothing to wait for.
+            if !log.entries.contains("queued") {
+                await withCheckedContinuation { log.parkedDrain = $0 }
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated { log.entries.append("sink") }
             }
