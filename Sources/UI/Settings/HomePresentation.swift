@@ -109,6 +109,50 @@ enum HomeStableReferenceID {
 /// underlying decision — which stable palette slot a speaker name maps to — is
 /// deterministic and Foundation-only. That selection lives here so it can be
 /// fast-tested; `color(for:)` keeps the slot -> `Color` mapping in `HomeView`.
+// MARK: - Day-grouped row identity
+
+/// Identity and divider flags for one row in a Home / Dictations day section.
+///
+/// Meetings and Dictations share `HomeDayGroupedList`. Each row's `ForEach`
+/// identity must be the capture's own id: Load More appends older rows, a
+/// refresh can insert a newer one at the top, and two day sections both have
+/// an item at offset 0. Offset keys collide across those cases.
+enum HomeDayGroupedRows {
+    struct Row<Item>: Identifiable {
+        let id: AnyHashable
+        let item: Item
+        let showsDividerAfter: Bool
+    }
+
+    /// The identity `ForEach` should use for a row. Must be the item's own
+    /// id, never the offset in the current page.
+    static func rowID<Item>(
+        offset: Int,
+        item: Item,
+        id: (Item) -> AnyHashable
+    ) -> AnyHashable {
+        // Today's list still keys ForEach by offset and stamps the item id
+        // on the child. That is the identity the Load More tests pin.
+        _ = id(item)
+        return AnyHashable(offset)
+    }
+
+    static func make<Item>(
+        items: [Item],
+        id: (Item) -> AnyHashable,
+        showsRowDividers: Bool
+    ) -> [Row<Item>] {
+        let lastIndex = items.count - 1
+        return items.enumerated().map { offset, item in
+            Row(
+                id: rowID(offset: offset, item: item, id: id),
+                item: item,
+                showsDividerAfter: showsRowDividers && offset < lastIndex
+            )
+        }
+    }
+}
+
 enum HomeMeetingSpeakerPalette {
     /// Number of palette slots the speaker-color mapping spreads names across.
     static let slotCount = 8
