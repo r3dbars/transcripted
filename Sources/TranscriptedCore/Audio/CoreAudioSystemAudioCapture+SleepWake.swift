@@ -69,7 +69,7 @@ extension CoreAudioSystemAudioCapture {
                 lastDeliveredEnd = Self.hostSeconds(tail.lastPoppedHostTime).map {
                     $0 + Double(buffer.frameLength) / tailFormat.sampleRate
                 }
-                if let converted = convertToRecordingFormat(buffer) { callback?(converted) }
+                deliver(buffer, timestamp: tail.lastPoppedTimestamp, continuityID: tail.continuityID)
             }
         }
         // The host may have stopped from inside the tail callback.

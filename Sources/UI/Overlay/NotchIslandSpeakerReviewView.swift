@@ -192,14 +192,9 @@ final class NotchIslandSpeakerReviewView: NSView {
         // Doubtful suggestions first: the first answer teaches the matcher most.
         let ranked = SpeakerReviewBridge.ranked(input.speakers.filter { $0.channel == .system })
             + SpeakerReviewBridge.ranked(input.speakers.filter { $0.channel == .mic })
+        // A name the call app showed is only a hint on its row (tap to fill);
+        // it never fills a box here.
         rows = ranked.map { makeRow(for: $0, recognized: false) }
-        // A name the call app showed for an unnamed voice fills its box now;
-        // the calendar 1:1 name (later) never replaces it.
-        for row in rows {
-            guard let prefill = NotchIslandSpeakerReviewPolicy.prefillName(for: row.entry, typed: row.nameField.stringValue),
-                  prefill.source == .callApp else { continue }
-            row.prefill(prefill.name, source: .callApp)
-        }
         recognizedRows = input.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
         let correctable = Set(input.recognizedSpeakers.compactMap {
             $0.currentName.map(SpeakerNameSelectionPolicy.normalizedSearchText)
@@ -284,11 +279,10 @@ final class NotchIslandSpeakerReviewView: NSView {
             askedRemoteVoicesHaveSuggestion: askedRemote.map { $0.hasSuggestedName }
         )
         guard let row = askedRemote.first,
-              let prefill = NotchIslandSpeakerReviewPolicy.prefillName(
+              let name = NotchIslandSpeakerReviewPolicy.prefillName(
                   for: row.entry, oneOnOneName: oneOnOneName, typed: row.nameField.stringValue
               ),
-              prefill.source == .calendar,
-              row.prefill(prefill.name, source: .calendar) else { return }
+              row.prefill(name) else { return }
         refreshInvitees()
         onLayoutChange?()
     }

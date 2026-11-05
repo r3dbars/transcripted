@@ -51,10 +51,29 @@ Exit: 0 when nothing failed (skips are listed), 1 when a check failed, 2 on bad 
 EOF
 }
 
+initialize_receipts() {
+    # A real invocation owns these fixed output names, even if it skips before
+    # a smoke produces its report. Never reuse an older PASS as current proof.
+    if [ -L "$REPO_ROOT/.build" ] || [ -L "$OUT_DIR" ]; then
+        echo "Refusing to reset verification receipts through a symlink" >&2
+        return 1
+    fi
+    mkdir -p "$OUT_DIR" || return 1
+    # Unlink an old summary entry rather than following a receipt-file symlink.
+    rm -f -- "$OUT_DIR/summary.md" || return 1
+    cat >"$OUT_DIR/summary.md" <<'EOF' || return 1
+## App verification
+
+INCOMPLETE: this verification has not finished. Previous check reports do not apply.
+EOF
+    rm -f -- "$OUT_DIR"/{paste.log,meetings.log,meetings.json,ui.log,ui.json,speed.log,launch-latency.json,speed-preflight.log,build.log,deps.log}
+}
+
 need_value() {
     if [ $# -lt 2 ] || [ -z "$2" ]; then
         echo "$1 needs a value" >&2
         usage >&2
+        initialize_receipts || exit 1
         exit 2
     fi
 }
@@ -67,9 +86,14 @@ while [ $# -gt 0 ]; do
         --list) LIST_ONLY=1; shift ;;
         --samples) need_value "$@"; LAUNCH_SAMPLES="$2"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
-        *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+        *) echo "Unknown option: $1" >&2; usage >&2; initialize_receipts || exit 1; exit 2 ;;
     esac
 done
+
+# Listing/help are read-only and leave the last verification alone.
+if [ "$LIST_ONLY" != "1" ]; then
+    initialize_receipts || exit 1
+fi
 
 if ! git rev-parse --verify --quiet "$BASE^{commit}" >/dev/null; then
     echo "Base ref '$BASE' doesn't exist here. Run 'git fetch origin main' or pass --base." >&2

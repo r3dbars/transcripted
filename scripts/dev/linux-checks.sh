@@ -243,6 +243,8 @@ check "privacy leak sweep" "python3 scripts/ops/privacy-leak-sweep.py --write-re
 # the current bundle version; compute it from Info.plist so this never goes stale.
 app_version="$(python3 -c 'import plistlib; print(plistlib.load(open("Info.plist", "rb"))["CFBundleShortVersionString"])' 2>/dev/null || true)"
 release_fixture="Tests/Fixtures/release-health-github-release-${app_version}.json"
+active_appcast="${NIGHTLY_ACTIVE_APPCAST:-Tests/Fixtures/release-health-appcast-${app_version}.xml}"
+printf -v active_appcast_arg '%q' "$active_appcast"
 
 # Paths whose change makes the tag-dependent release-health gate the PR's business.
 RELEASE_SURFACE_RE='^(Info\.plist|docs/appcast\.xml|Casks/|Tests/Fixtures/release-health-|scripts/ops/nightly-security-check\.py)'
@@ -288,11 +290,11 @@ if [ "$run_nightly_strict" = false ]; then
         printf '%-44s SKIP: %s\n' "nightly security strict" "$nightly_skip_reason"
     fi
 elif [ -n "$app_version" ] && [ -f "$release_fixture" ]; then
-    check "nightly security strict ($app_version fixture)" "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json $release_fixture --write-report $OUT_DIR/nightly-security-report.json"
+    check "nightly security strict ($app_version fixture)" "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast $active_appcast_arg --github-release-json $release_fixture --write-report $OUT_DIR/nightly-security-report.json"
 else
     # No fixture for this version yet (e.g. mid version bump): still run the
     # rest of the strict gate, just without the GitHub asset-digest comparison.
-    check "nightly security strict (no ${app_version:-?} GitHub fixture)" "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --write-report $OUT_DIR/nightly-security-report.json"
+    check "nightly security strict (no ${app_version:-?} GitHub fixture)" "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast $active_appcast_arg --write-report $OUT_DIR/nightly-security-report.json"
 fi
 
 # ---------------------------------------------------------------- syntax
@@ -335,6 +337,8 @@ SELF_TEST_SCRIPTS=(
     scripts/dev/check-commit-credit.py
 )
 PY_TEST_SUITES=(
+    scripts/dev/test-verify-receipts.py
+    scripts/dev/test-call-app-hint-harness.py
     scripts/ops/test-native-smoke-isolation.py
     scripts/ops/test-launch-benchmark-isolation.py
     scripts/ops/test-nightly-security-check.py

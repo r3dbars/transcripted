@@ -8,12 +8,14 @@ rules:
   - paths:
       - "scripts/dev/bench-launch-latency.sh"
       - "scripts/dev/verify-change.sh"
+      - "scripts/dev/test-verify-receipts.py"
       - "scripts/ops/native-smoke-isolation.py"
       - "scripts/ops/test-launch-benchmark-isolation.py"
       - ".claude/skills/verify/SKILL.md"
     checks:
       - "bash -n scripts/dev/bench-launch-latency.sh"
       - "bash -n scripts/dev/verify-change.sh"
+      - "python3 scripts/dev/test-verify-receipts.py"
       - "python3 scripts/ops/test-native-smoke-isolation.py"
       - "python3 scripts/ops/test-launch-benchmark-isolation.py"
 
@@ -130,6 +132,15 @@ rules:
       - "bash -n build.sh"
       - "bash -n scripts/entrypoints/build.sh"
       - "bash build.sh --no-open"
+
+  - paths:
+      - "scripts/dev/run-call-app-hint-harness.sh"
+      - "scripts/dev/test-call-app-hint-harness.py"
+      - "Tests/UI/CallAppHintHarness.swift"
+      - "Tests/UI/CallAppHintHarnessIsolation.swift"
+    checks:
+      - "python3 scripts/dev/test-call-app-hint-harness.py"
+      - "bash -n scripts/dev/run-call-app-hint-harness.sh"
 
   - paths:
       - "run-tests.sh"
@@ -552,10 +563,11 @@ rules:
   - paths:
       - "scripts/ops/nightly-security-check.py"
       - "Tests/Fixtures/release-health-github-release-*.json"
+      - "Tests/Fixtures/release-health-appcast-*.xml"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.75.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast Tests/Fixtures/release-health-appcast-1.1.75.xml --github-release-json Tests/Fixtures/release-health-github-release-1.1.75.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"

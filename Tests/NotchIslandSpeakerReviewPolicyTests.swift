@@ -511,32 +511,6 @@ func testNotchIslandSpeakerReviewPolicy() {
         )
     }
 
-    runSuite("A call-app name nobody touched saves on neither Done nor Later") {
-        typealias Policy = NotchIslandSpeakerReviewPolicy
-        assertNil(
-            Policy.answerOnFinish(committed: nil, typed: "Dana Kim", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, prefillSource: .callApp, finish: .done),
-            "Done on another row must not confirm every call-app guess on the list"
-        )
-        assertNil(
-            Policy.answerOnFinish(committed: nil, typed: "Dana Kim", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, prefillSource: .callApp, finish: .later),
-            "Later never saves a call-app guess"
-        )
-        assertEqual(
-            Policy.answerOnFinish(committed: "Dana Kim", typed: "", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, prefillSource: .callApp, finish: .done),
-            "Dana Kim",
-            "a call-app name the person submitted with Return stands"
-        )
-        assertEqual(
-            Policy.answerOnFinish(committed: nil, typed: "Dana Kimball", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: false, prefillSource: .callApp, finish: .done),
-            "Dana Kimball",
-            "an edited call-app name is the person's own and saves on Done"
-        )
-        assertEqual(
-            Policy.answerOnFinish(committed: nil, typed: "Dana Kim", suggestions: [], highlighted: nil, typedIsUntouchedPrefill: true, prefillSource: .calendar, finish: .done),
-            "Dana Kim",
-            "the calendar 1:1 name keeps saving on Done"
-        )
-    }
 
     runSuite("Keep Local Mic as You covers every local mic voice and wins over a discard") {
         typealias Policy = NotchIslandSpeakerReviewPolicy

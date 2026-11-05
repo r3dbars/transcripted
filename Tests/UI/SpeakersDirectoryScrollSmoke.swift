@@ -148,6 +148,9 @@ import TranscriptedCore
         model.setShown(true)
         guardian.note("loading \(scenario.label)")
         while !model.hasLoadedProfiles || model.reviewStack.calls.count < scenario.pendingMeetings { pump(0.02) }
+        guard model.reviewStack.calls.allSatisfy(\.isImported) else {
+            setupFailed("synthetic review cards must exclude Calendar before mounting the page")
+        }
         let sections = SpeakerPrintDirectory.sections(model.directoryProfiles) { model.namingStanding(for: $0) }
         guard Set(sections.map(\.section)) == Set(SpeakerPrintDirectory.Section.allCases) else {
             setupFailed("\(scenario.label) should fill every section, got \(sections.map { "\($0.section)" })")
@@ -468,6 +471,7 @@ final class HangGuard: @unchecked Sendable {
 
     /// A saved meeting whose voices wait in "Who spoke?" (`db_pending`).
     private func writeMeeting(voices: [SpeakerProfile], filename: String, title: String) throws {
+        // Synthetic imports exercise review and scrolling without querying Calendar.
         let url = transcripts.appendingPathComponent(filename).appendingPathExtension("md")
         let speakers = voices.enumerated().map { index, voice in
             """
@@ -487,6 +491,7 @@ final class HangGuard: @unchecked Sendable {
         transcript_id: "\(UUID().uuidString)"
         capture_type: meeting
         date: "2026-10-2\(filename.count % 9)"
+        imported_at: 2026-11-05T00:00:00Z
         duration: "00:30"
         speakers:
         \(speakers)

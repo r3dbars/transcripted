@@ -24,6 +24,7 @@ enum SystemAudioCaptureFailureCopy {
 /// `start()` waits and then tears it down.
 final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     let capture: any SystemAudioCaptureEngine & Sendable
+    let writeTimeline = SystemAudioWriteTimeline()
     private let lifecycleLock = NSLock()
     private var cancelled = false
     private var startRequested = false
@@ -82,6 +83,13 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
     func startIfNotCancelled(
         bufferCallback: @escaping (AVAudioPCMBuffer) -> Void
     ) throws -> Bool {
+        try startTimedIfNotCancelled { buffer, _ in bufferCallback(buffer) }
+    }
+
+    @discardableResult
+    func startTimedIfNotCancelled(
+        bufferCallback: @escaping (AVAudioPCMBuffer, SystemAudioBufferTiming) -> Void
+    ) throws -> Bool {
         lifecycleLock.lock()
         guard !cancelled else {
             lifecycleLock.unlock()
@@ -92,7 +100,7 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
 
         // Do not hold lifecycleLock across start() — cancel() shares that
         // lock and must not block behind a ScreenCaptureKit start callback.
-        try capture.start(bufferCallback: bufferCallback)
+        try capture.startTimed(bufferCallback: bufferCallback)
 
         lifecycleLock.lock()
         let wasCancelled = cancelled
@@ -174,7 +182,7 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
         return true
     }
 
-    func enqueueFinishingBuffer(_ buffer: AVAudioPCMBuffer, writer: AVAudioFile,
+    func enqueueFinishingBuffer(_ buffer: AVAudioPCMBuffer, timing: SystemAudioBufferTiming = .unavailable, writer: AVAudioFile,
                                 queue: DispatchQueue, onError: @escaping (Error) -> Void) {
         guard isDraining else { return }
         let bytes = PCMBufferBackpressureGate.retainedByteCount(for: buffer)
@@ -202,7 +210,7 @@ final class SystemAudioCaptureStartAttempt: @unchecked Sendable {
         }
         queue.async {
             defer { self.tailAdmission.release(bytes: bytes) }
-            do { try writer.write(from: owned) } catch {
+            do { try self.writeTimeline.write(owned, to: writer, timing: timing) } catch {
                 self.lifecycleLock.lock(); self.finalizationFailed = true; self.lifecycleLock.unlock()
                 onError(error)
             }

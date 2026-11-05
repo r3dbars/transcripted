@@ -60,8 +60,13 @@ final class MeetingCallSpeakerNames {
     }
 
     /// Nil when the setting is off by the time the pipeline asks.
-    func take(recordingDate: Date?) -> CallSpeakerActivity? {
-        store.take(recordingStartedAt: recordingDate, enabled: isEnabled())
+    func take(recordingDate: Date?) async -> CallSpeakerActivity? {
+        guard let entry = store.takeEntry(recordingStartedAt: recordingDate), isEnabled() else { return nil }
+        return await Task.detached(priority: .utility) { entry.alignedActivity() }.value
+    }
+
+    func recordingFinalized(timeline: RecordedSystemAudioTimeline?, at recordingDate: Date?) {
+        store.attach(timeline, recordingStartedAt: recordingDate)
     }
 
     private static func logSummary(_ summary: CallSpeakerRecorderSummary?, kept: Bool) {

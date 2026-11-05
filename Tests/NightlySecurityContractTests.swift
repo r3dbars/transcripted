@@ -196,21 +196,25 @@ func testNightlySecurityContract() {
         )
     }
 
-    runSuite("Nightly security checker fails stale GitHub release asset metadata") {
-        let passing = runRepoPythonScript("scripts/ops/nightly-security-check.py", arguments: [
-            "--strict",
-            "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
-            "--github-release-json", "Tests/Fixtures/release-health-github-release-1.1.75.json"
-        ])
-        let staleCask = runRepoPythonScript("scripts/ops/nightly-security-check.py", arguments: [
-            "--strict",
-            "--automation-toml", "Tests/Fixtures/nightly-security-automation.toml",
-            "--github-release-json", "Tests/Fixtures/release-health-github-release-stale-cask.json"
-        ])
+    runSuite("Nightly security checksum fixtures are independent of the source release candidate") {
+        do {
+            let fixture = try NightlyReleaseFixture()
+            defer { fixture.removeOwnedRoot() }
+            let passing = try fixture.check(releaseFixture: "release.json")
+            assertEqual(passing.status, 0, "aligned owned release fixture should pass: \(passing.output)")
 
-        assertEqual(passing.status, 0, "matching release fixture should keep the strict checker green")
-        assertEqual(staleCask.status, 1, "stale GitHub asset checksum fixture should fail the strict checker")
-        assertTrue(staleCask.output.contains("github-release-asset-digest"), "stale fixture should fail on cask vs GitHub asset digest drift")
+            let stale = try fixture.check(releaseFixture: "stale-release.json")
+            assertEqual(stale.status, 1, "stale asset digest should fail the real checker")
+            assertEqual(stale.findings, ["github-release-asset-digest"], "stale fixture should identify only digest drift: \(stale.output)")
+
+            try fixture.prepareNextPatch()
+            let candidate = try fixture.check(releaseFixture: "release.json")
+            assertEqual(candidate.status, 1, "an unpublished candidate must remain blocked in release-health mode")
+            assertEqual(candidate.watchItems, ["appcast-release-candidate"], "candidate should retain its explicit watch diagnostic: \(candidate.output)")
+            assertTrue(candidate.findings.isEmpty, "the candidate watch must not conceal an unrelated finding")
+        } catch {
+            assertTrue(false, "owned nightly release fixture failed: \(error)")
+        }
     }
 }
 
@@ -232,6 +236,10 @@ private struct ShellResult {
 }
 
 private func runRepoPythonScript(_ script: String, arguments: [String]) -> ShellResult {
+    runNightlyFixtureCommand(["python3", repoFixtureURL(script).path] + arguments, at: repoFixtureURL("."))
+}
+
+private func runNightlyFixtureCommand(_ arguments: [String], at directory: URL) -> ShellResult {
     let process = Process()
     let outputURL = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true)
         .appendingPathComponent("nightly-security-contract-\(UUID().uuidString).log")
@@ -244,8 +252,14 @@ private func runRepoPythonScript(_ script: String, arguments: [String]) -> Shell
     }
 
     process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-    process.arguments = ["python3", script] + arguments
-    process.currentDirectoryURL = repoFixtureURL(".")
+    process.arguments = arguments
+    process.currentDirectoryURL = directory
+    var environment = ProcessInfo.processInfo.environment.filter { !$0.key.hasPrefix("GIT_") }
+    environment["GIT_CONFIG_NOSYSTEM"] = "1"
+    environment["GIT_CONFIG_GLOBAL"] = "/dev/null"
+    environment["PYTHONDONTWRITEBYTECODE"] = "1"
+    environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
+    process.environment = environment
     process.standardOutput = outputHandle
     process.standardError = outputHandle
 
@@ -258,6 +272,105 @@ private func runRepoPythonScript(_ script: String, arguments: [String]) -> Shell
     } catch {
         try? outputHandle.close()
         return ShellResult(status: -127, output: String(describing: error))
+    }
+}
+
+/// A small checker-input repository. Source release metadata and the real Git
+/// index are never changed; each command is anchored to this owned root.
+private final class NightlyReleaseFixture {
+    let root: URL
+    private let version: String
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("nightly-release-fixture-\(UUID().uuidString)", isDirectory: true)
+        version = "1.1.75"
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        do {
+            let manifestData = try Data(contentsOf: repoFixtureURL("config/security/nightly-security-manifest.json"))
+            let manifest = try JSONSerialization.jsonObject(with: manifestData) as! [String: Any]
+            let paths = manifest["paths"] as! [String: Any]
+            var inputs = Set(paths.values.compactMap { $0 as? String })
+            for value in paths.values { inputs.formUnion(value as? [String] ?? []) }
+            inputs.formUnion((manifest["required_build_script_substrings"] as! [String: Any]).keys)
+            inputs.formUnion([
+                "config/security/nightly-security-manifest.json",
+                ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/bug_report.md",
+                ".github/ISSUE_TEMPLATE/feature_request.md", "docs/qa-test-bench.md",
+                "docs/privacy-first-observability.md", "docs/release-packaging.md", "scripts/README.md"
+            ])
+            for relative in inputs where !relative.hasPrefix("build/") {
+                let destination = root.appendingPathComponent(relative)
+                try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.copyItem(at: repoFixtureURL(relative), to: destination)
+            }
+            for (source, destination) in [
+                ("release-health-github-release-1.1.75.json", "release.json"),
+                ("release-health-github-release-stale-cask.json", "stale-release.json")
+            ] {
+                try FileManager.default.copyItem(at: repoFixtureURL("Tests/Fixtures/" + source), to: root.appendingPathComponent(destination))
+            }
+            let release = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("release.json"))) as! [String: Any]
+            guard release["tagName"] as? String == "v" + version,
+                  let asset = (release["assets"] as? [[String: Any]])?.first(where: { $0["name"] as? String == "Transcripted-\(version).dmg" }),
+                  let digest = asset["digest"] as? String, digest.hasPrefix("sha256:") else {
+                throw NSError(domain: "NightlyReleaseFixture", code: 1)
+            }
+            try writeInfo(version: version)
+            let caskURL = root.appendingPathComponent("Casks/transcripted.rb")
+            let cask = try String(contentsOf: caskURL, encoding: .utf8)
+                .replacingOccurrences(of: #"(?m)^(\s*version\s+)"[^"]+""#, with: "$1\"\(version)\"", options: .regularExpression)
+                .replacingOccurrences(of: #"(?m)^(\s*sha256\s+)"[^"]+""#, with: "$1\"\(digest.dropFirst(7))\"", options: .regularExpression)
+            try cask.write(to: caskURL, atomically: true, encoding: .utf8)
+            for args in [
+                ["git", "init", "--quiet"],
+                ["git", "-c", "core.hooksPath=/dev/null", "-c", "commit.gpgsign=false", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "--allow-empty", "-m", "Owned fixture"],
+                ["git", "-c", "tag.gpgsign=false", "tag", "v" + version]
+            ] {
+                let result = runNightlyFixtureCommand(args, at: root)
+                guard result.status == 0 else { throw NSError(domain: "NightlyReleaseFixtureGit", code: Int(result.status)) }
+            }
+        } catch {
+            removeOwnedRoot()
+            throw error
+        }
+    }
+
+    func check(releaseFixture: String) throws -> (status: Int32, output: String, findings: [String], watchItems: [String]) {
+        let report = root.appendingPathComponent("report-\(UUID().uuidString).json")
+        let result = runNightlyFixtureCommand([
+            "python3", repoFixtureURL("scripts/ops/nightly-security-check.py").path,
+            "--root", root.path, "--appcast", "docs/appcast.xml", "--strict",
+            "--github-release-json", releaseFixture,
+            "--write-report", report.path
+        ], at: root)
+        let value = try JSONSerialization.jsonObject(with: Data(contentsOf: report)) as! [String: Any]
+        guard let findings = value["findings"] as? [[String: Any]],
+              let watch = value["watch_items"] as? [[String: Any]] else {
+            throw NSError(domain: "NightlyReleaseFixtureReport", code: 1)
+        }
+        return (result.status, result.output,
+                findings.compactMap { $0["check_id"] as? String }.sorted(),
+                watch.compactMap { $0["check_id"] as? String }.sorted())
+    }
+
+    func prepareNextPatch() throws {
+        let parts = version.split(separator: ".").map(String.init)
+        try writeInfo(version: parts[0] + "." + parts[1] + "." + String(Int(parts[2])! + 1))
+    }
+
+    private func writeInfo(version: String) throws {
+        let url = root.appendingPathComponent("Info.plist")
+        var info = try PropertyListSerialization.propertyList(from: Data(contentsOf: url), format: nil) as! [String: Any]
+        info["CFBundleShortVersionString"] = version
+        info["CFBundleVersion"] = version
+        try PropertyListSerialization.data(fromPropertyList: info, format: .xml, options: 0).write(to: url)
+    }
+
+    func removeOwnedRoot() {
+        guard root.deletingLastPathComponent().standardizedFileURL == FileManager.default.temporaryDirectory.standardizedFileURL,
+              root.lastPathComponent.hasPrefix("nightly-release-fixture-") else { return }
+        try? FileManager.default.removeItem(at: root)
     }
 }
 

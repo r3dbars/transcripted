@@ -88,7 +88,10 @@ private actor FakeCallSpeakerReader: CallSpeakerWindowReading {
         let ready = waiters.filter { $0.count <= readCount }
         waiters.removeAll { $0.count <= readCount }
         ready.forEach { $0.continuation.resume() }
-        return result
+        var read = result
+        let host = 1_000_000 + UInt64(clock.advancedSeconds * 1_000)
+        read.timing = .init(startHostTime: host, endHostTime: host)
+        return read
     }
 
     func waitForReads(_ count: Int) async {
@@ -127,7 +130,8 @@ private func makeRecorder(
         isEnabled: { enabled },
         isAccessibilityTrusted: { trusted },
         reader: reader,
-        clock: clock.clock
+        clock: clock.clock,
+        hostClock: .init(now: { 1_000_000 + UInt64(clock.advancedSeconds * 1_000) }, ticksPerSecond: 1_000)
     ))
 }
 
@@ -336,7 +340,7 @@ func testCallSpeakerActivity() async {
         let recorder = makeRecorder(reader: reader, clock: clock, enabled: false)
         recorder.start(recordingStartedAt: Date())
         await runUntilVirtualTime(clock, passes: 30)
-        let activity = recorder.stop()
+        let activity = recorder.stop()?.relativeActivity
         assertTrue(clock.advancedSeconds >= 30, "the loop kept re-checking on virtual time")
         assertEqual(await reader.readCount, 0, "the call app is never read with the setting off")
         assertTrue(activity == nil, "nothing recorded")
@@ -401,7 +405,7 @@ func testCallSpeakerActivity() async {
         let recorder = makeRecorder(reader: reader, clock: clock)
         recorder.start(recordingStartedAt: Date())
         await reader.waitForReads(6)
-        let activity = recorder.stop()
+        let activity = recorder.stop()?.relativeActivity
         assertEqual(Array(await reader.readTimes.prefix(5)), [0, 1, 2, 3, 4], "fast cadence while the roster shows")
         assertTrue(activity?.sawSpeakingIndicator == true, "the speaking indicator was seen")
         assertEqual(activity?.intervals.map(\.name), ["Ana Ruiz"], "one unbroken span for the speaker")

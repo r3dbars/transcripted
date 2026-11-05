@@ -16,14 +16,13 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
-- Scrolling a long list on the Speakers page no longer freezes the app on
-  macOS 26 or jumps the list back on macOS 26 and 27. The list is no longer
-  lazy: every row is laid out up front, so its height never shifts mid-scroll.
 - Settings > Storage: "Delete meeting audio after" and "Keep dictation audio"
   now run through one tested model that keeps their pending choices apart, so
   a meeting choice can never change dictation audio or the other way around.
   Behavior is unchanged. Dictation audio defaults to 30 days, which is why both
   rows can show "30 days" without being linked.
+- The Speakers directory lays out rows up front to avoid lazy-layout hangs
+  and scroll resets.
 - Writing > Edit setup can turn both features off and save the disabled state
   without continuing through model, keyboard or permission setup.
 - Opened meeting cards keep Copy, Show in Finder and the more menu in the
@@ -68,10 +67,13 @@ force-installed by Sparkle so existing users recover from a regression.
   dictation shortcut.
 - Experiment, off by default: auto-record detected meetings. Turning it on
   asks once, because it records other people on the call without a prompt.
-- Speakers can be named from the call app's active-speaker tiles (Zoom,
-  Google Meet, Teams, Slack huddles) while a meeting records. Names still go
-  to review as "From the call" and nothing is learned until you save.
-  Settings › Speakers › "Name speakers from the call app" turns it off.
+- Call app names as hints: while a meeting records, Transcripted notes who
+  Zoom, Google Meet, Teams or Slack huddles show talking. It never renames a
+  voice. The transcript keeps that name next to each voice, along with how
+  strong the match was and whether it agrees with the voiceprint, and the
+  Who spoke? review shows "Call app showed: Maya" as a hint you can tap to
+  fill the name box. Nothing is saved or learned until you name the voice.
+  Settings › Speakers › "Use call app names as hints" turns it off.
 - The Dictations page has new cards: a bar on top with play, time, length,
   words, and app (delivery problems in amber), and the text below in italics,
   four lines with Show more. Press play to hear a kept take right there; a

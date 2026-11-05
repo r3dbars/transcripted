@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import importlib.util
 import json
 import os
 import plistlib
@@ -90,6 +92,8 @@ SPARKLE_NS = "http://www.andymatuschak.org/xml-namespaces/sparkle"
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Deterministic nightly security checks for Transcripted.")
+    parser.add_argument("--root", type=Path, help="Explicit repository/owned fixture root; defaults to this script's repository.")
+    parser.add_argument("--appcast", help="Active release-asset appcast snapshot. Required offline after the legacy feed is frozen.")
     parser.add_argument(
         "--manifest",
         default="config/security/nightly-security-manifest.json",
@@ -395,16 +399,142 @@ def check_info_plist(root: Path, manifest: dict) -> list[dict]:
     return findings
 
 
+def check_frozen_legacy_appcast(root: Path, manifest: dict) -> list[dict]:
+    # Check history even if the local record was deleted. Never discover the
+    # parent repository of a non-Git temp fixture through Git's upward search.
+    checkout = run(["git", "rev-parse", "--show-toplevel"], cwd=root)
+    if checkout.returncode == 0 and Path(checkout.stdout.strip()).resolve() == root.resolve():
+        guard_path = Path(__file__).resolve().parents[1] / "dev/check-known-traps.py"
+        spec = importlib.util.spec_from_file_location("nightly_legacy_guard", guard_path)
+        guard = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(guard)
+        if guard.check_legacy_appcast(root):
+            return [make_finding("release_integrity", "high", "legacy-appcast-history",
+                                 "The legacy feed freeze changed in Git history or against origin/main.",
+                                 "The existing legacy-appcast guard must pass; do not rewrite the freeze.",
+                                 "config/release/legacy-appcast-freeze.json")]
+    record_path = root / "config/release/legacy-appcast-freeze.json"
+    if not record_path.exists():
+        return []
+    try:
+        record = json.loads(record_path.read_text(encoding="utf-8"))
+        legacy_path = manifest["paths"]["appcast"]
+        payload = (root / legacy_path).read_bytes()
+        item = ET.fromstring(payload).find("./channel/item")
+        ns = {"sparkle": SPARKLE_NS}
+        valid = (
+            record["legacy_appcast"] == legacy_path
+            and re.fullmatch(r"[0-9a-f]{64}", record["legacy_appcast_sha256"]) is not None
+            and hashlib.sha256(payload).hexdigest() == record["legacy_appcast_sha256"]
+            and isinstance(record["frozen_version"], str)
+            and parse_release_version(record["frozen_version"]) is not None
+            and item is not None
+            and item.findtext("sparkle:shortVersionString", namespaces=ns) == record["frozen_version"]
+            and item.findtext("sparkle:version", namespaces=ns) == record["frozen_version"]
+            and record["new_feed_url"] == manifest["expected_info_plist"]["SUFeedURL"]
+        )
+    except (OSError, ValueError, TypeError, KeyError, ET.ParseError):
+        valid = False
+    if valid:
+        return []
+    return [make_finding("release_integrity", "high", "legacy-appcast-freeze",
+                         "The frozen legacy feed or freeze record changed.",
+                         "Validate its recorded version, bytes and destination independently of the active release.",
+                         "config/release/legacy-appcast-freeze.json")]
+
+
+def paired_fixture_appcast(root: Path, manifest: dict, fixture: str) -> tuple[str, bytes]:
+    """Bind an explicitly selected archived GitHub fixture to its exact feed bytes."""
+    path = Path(fixture)
+    match = re.fullmatch(r"release-health-github-release-(\d+\.\d+\.\d+)\.json", path.name)
+    if not match:
+        raise ValueError("a versioned fixture is required")
+    version = match.group(1)
+    if version != ".".join(str(part) for part in parse_release_version(version)):
+        raise ValueError("the version must be canonical")
+    release = json.loads((root / path).read_bytes())
+    if not isinstance(release, dict) or release.get("tagName") != "v" + version:
+        raise ValueError("fixture version mismatch")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("fixture assets missing")
+    feeds = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == "appcast.xml"]
+    if len(feeds) != 1:
+        raise ValueError("one feed asset is required")
+    asset = feeds[0]
+    expected_url = f"https://github.com/{manifest['repo_slug']}/releases/download/v{version}/appcast.xml"
+    snapshot = path.with_name(f"release-health-appcast-{version}.xml")
+    raw = (root / snapshot).read_bytes()
+    if (asset.get("url") != expected_url or type(asset.get("size")) is not int
+            or asset["size"] <= 0 or asset["size"] != len(raw)
+            or normalized_sha256_digest(asset.get("digest")) != hashlib.sha256(raw).hexdigest()):
+        raise ValueError("feed asset identity or bytes mismatch")
+    item = ET.fromstring(raw).find("./channel/item")
+    if item is None or any((item.findtext("{" + SPARKLE_NS + "}" + key) or "").strip() != version
+                           for key in ["shortVersionString", "version"]):
+        raise ValueError("feed version mismatch")
+    return normalize_path(snapshot), raw
+
+
+def select_active_appcast(root: Path, manifest: dict, args: argparse.Namespace) -> list[dict]:
+    """Select one explicit snapshot or the existing live caller; never use a frozen feed as latest."""
+    manifest.pop("_active_appcast_xml", None)
+    manifest.pop("_active_appcast_source", None)
+    manifest.pop("_active_appcast_fixture", None)
+    frozen = (root / "config/release/legacy-appcast-freeze.json").exists()
+    snapshot = getattr(args, "appcast", None)
+    if not snapshot and not frozen:
+        return []  # Before migration the committed feed is still authoritative.
+    paired_fixture = None
+    paired_bytes = None
+    if not snapshot and not args.live_release_surfaces and getattr(args, "github_release_json", None):
+        try:
+            snapshot, paired_bytes = paired_fixture_appcast(root, manifest, args.github_release_json)
+            paired_fixture = args.github_release_json
+        except (OSError, ValueError, TypeError, ET.ParseError):
+            return [make_finding("release_integrity", "high", "active-appcast-pair-invalid",
+                                 "The explicit GitHub fixture has no valid integrity-bound active feed companion.",
+                                 "Supply its same-version snapshot with matching asset URL, size, digest and feed version, or use --appcast.")]
+    if not snapshot and not args.live_release_surfaces:
+        return [make_finding("release_integrity", "high", "active-appcast-required",
+                             "The frozen legacy feed cannot establish the active release.",
+                             "Supply --appcast <release-asset snapshot>, or use --live-release-surfaces.")]
+    try:
+        if snapshot:
+            payload = (paired_bytes if paired_bytes is not None else (root / snapshot).read_bytes()).decode("utf-8")
+        else:
+            result = curl_stdout(root, ["-fsSL", manifest["expected_info_plist"]["SUFeedURL"]])
+            if result.returncode != 0:
+                raise ValueError("active feed fetch failed")
+            payload = result.stdout
+        if ET.fromstring(payload).find("./channel/item") is None:
+            raise ValueError("active feed has no release item")
+    except (OSError, ValueError, ET.ParseError):
+        return [make_finding("release_integrity", "high", "active-appcast-unavailable",
+                             "The selected active feed could not be read.",
+                             "No fallback to the frozen legacy feed is permitted.")]
+    manifest["_active_appcast_xml"] = payload
+    manifest["_active_appcast_source"] = normalize_path(snapshot) if snapshot else manifest["expected_info_plist"]["SUFeedURL"]
+    manifest["_active_appcast_fixture"] = paired_fixture
+    return []
+
+
+def appcast_tree(root: Path, manifest: dict) -> ET.Element:
+    payload = manifest.get("_active_appcast_xml")
+    if payload is not None:
+        return ET.fromstring(payload)
+    return ET.parse(root / manifest["paths"]["appcast"]).getroot()
+
+
 def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
-    appcast_path = root / manifest["paths"]["appcast"]
+    appcast_source = manifest.get("_active_appcast_source", manifest["paths"]["appcast"])
     info_path = root / manifest["paths"]["info_plist"]
     with info_path.open("rb") as handle:
         plist = plistlib.load(handle)
 
     namespaces = {"sparkle": SPARKLE_NS}
-    tree = ET.parse(appcast_path)
-    channel = tree.getroot().find("channel")
-    findings: list[dict] = []
+    channel = appcast_tree(root, manifest).find("channel")
+    findings: list[dict] = check_frozen_legacy_appcast(root, manifest)
     watch_items: list[dict] = []
     if channel is None:
         findings.append(
@@ -414,7 +544,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-missing-channel",
                 "Appcast is missing its RSS channel.",
                 "docs/appcast.xml should have a channel with at least one item.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
         return findings, watch_items
@@ -428,7 +558,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-missing-item",
                 "Appcast is missing its latest item.",
                 "docs/appcast.xml should have at least one release item.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
         return findings, watch_items
@@ -444,7 +574,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-version-field-missing",
                 "Latest appcast item is missing a Sparkle version field.",
                 "Both sparkle:shortVersionString and sparkle:version should be present.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
     elif short_version != build_version:
@@ -455,7 +585,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-version-build-mismatch",
                 "Latest appcast release version drifted from its build version.",
                 f"sparkle:shortVersionString={short_version!r}, sparkle:version={build_version!r}.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
 
@@ -468,7 +598,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                     "appcast-release-candidate",
                     "Info.plist is one unreleased patch version ahead of the appcast.",
                     f"Appcast remains on published version {version!r}; Info.plist is prepared for {info_version!r}.",
-                    manifest["paths"]["appcast"],
+                    appcast_source,
                 )
             )
         else:
@@ -479,7 +609,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                     "appcast-version-mismatch",
                     "Latest appcast version drifted from Info.plist.",
                     f"Appcast has {version!r}, Info.plist has {info_version!r}.",
-                    manifest["paths"]["appcast"],
+                    appcast_source,
                 )
             )
 
@@ -492,7 +622,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-minimum-system-version",
                 "Latest appcast minimum macOS version drifted from Info.plist.",
                 f"Appcast has {minimum_version!r}, Info.plist has {plist.get('LSMinimumSystemVersion')!r}.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
 
@@ -505,7 +635,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-hardware-requirements",
                 "Latest appcast hardware requirement should stay arm64.",
                 f"Got {hardware!r}.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
 
@@ -518,7 +648,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-missing-enclosure",
                 "Latest appcast item is missing its enclosure.",
                 "Sparkle cannot download an update without an enclosure.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
         return findings, watch_items
@@ -533,7 +663,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-enclosure-url",
                 "Latest appcast enclosure URL drifted from the GitHub release asset shape.",
                 f"Expected {expected_url!r}, got {actual_url!r}.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
 
@@ -546,7 +676,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-signature",
                 "Latest appcast item is missing a Sparkle signature.",
                 "sparkle:edSignature should be present on the enclosure.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
 
@@ -559,7 +689,7 @@ def check_appcast(root: Path, manifest: dict) -> tuple[list[dict], list[dict]]:
                 "appcast-length",
                 "Latest appcast item has an invalid enclosure length.",
                 f"Got {length!r}.",
-                manifest["paths"]["appcast"],
+                appcast_source,
             )
         )
 
@@ -592,8 +722,7 @@ def appcast_item_metadata(item: ET.Element | None) -> dict[str, str] | None:
 
 
 def latest_appcast_metadata(root: Path, manifest: dict) -> dict[str, str] | None:
-    appcast_path = root / manifest["paths"]["appcast"]
-    latest = ET.parse(appcast_path).getroot().find("./channel/item")
+    latest = appcast_tree(root, manifest).find("./channel/item")
     return appcast_item_metadata(latest)
 
 
@@ -1843,6 +1972,9 @@ def build_report(
         "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "repo_root": normalize_path(root),
         "manifest_path": manifest["_path"],
+        "active_appcast_source": manifest.get("_active_appcast_source"),
+        "active_appcast_fixture": manifest.get("_active_appcast_fixture"),
+        "active_appcast_sha256": hashlib.sha256(manifest["_active_appcast_xml"].encode("utf-8")).hexdigest() if "_active_appcast_xml" in manifest else None,
         "automation_toml": normalize_path(automation_path),
         "app_bundle_checked": app_bundle,
         "status": status,
@@ -1900,6 +2032,7 @@ def release_health_mode(args: argparse.Namespace) -> bool:
     return any(
         [
             args.live_release_surfaces,
+            bool(getattr(args, "appcast", None)),
             bool(args.github_release_json),
             args.sentry_release_health,
             args.require_sentry_release_health,
@@ -1914,24 +2047,41 @@ def should_check_automation_prompt(args: argparse.Namespace) -> bool:
 
 def main() -> int:
     args = parse_args()
-    root = repo_root()
+    root = args.root.resolve() if args.root else repo_root()
+    if args.root:
+        for key in list(os.environ):
+            if key.startswith("GIT_"):
+                os.environ.pop(key)
+        os.environ.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull)
+        checkout = run(["git", "rev-parse", "--show-toplevel"], cwd=root)
+        if checkout.returncode != 0 or Path(checkout.stdout.strip()).resolve() != root:
+            print("error: --root must name the exact Git checkout root", file=sys.stderr)
+            return 2
     manifest = load_manifest(root, args.manifest)
     automation_path = Path(args.automation_toml) if args.automation_toml else default_automation_path()
+    if not automation_path.is_absolute():
+        automation_path = root / automation_path
 
     findings: list[dict] = []
     findings.extend(scan_tracked_files(root, manifest))
     findings.extend(scan_recent_history(root, manifest))
     findings.extend(scan_shell_scripts(root))
     findings.extend(check_info_plist(root, manifest))
-    appcast_findings, watch_items = check_appcast(root, manifest)
-    findings.extend(appcast_findings)
-    findings.extend(check_cask(root, manifest))
+    active_findings = select_active_appcast(root, manifest, args)
+    findings.extend(active_findings)
+    watch_items: list[dict] = []
+    if active_findings:
+        findings.extend(check_frozen_legacy_appcast(root, manifest))
+    else:
+        appcast_findings, watch_items = check_appcast(root, manifest)
+        findings.extend(appcast_findings)
+        findings.extend(check_cask(root, manifest))
+        findings.extend(check_live_release_surfaces(root, manifest, args.live_release_surfaces))
+        findings.extend(
+            check_github_release_metadata(root, manifest, args.live_release_surfaces, args.github_release_json)
+        )
     findings.extend(check_observability_payload_keys(root, manifest))
     findings.extend(check_posthog_health_schema(root, manifest))
-    findings.extend(check_live_release_surfaces(root, manifest, args.live_release_surfaces))
-    findings.extend(
-        check_github_release_metadata(root, manifest, args.live_release_surfaces, args.github_release_json)
-    )
     sentry_findings, sentry_watch_items = check_sentry_release_health(
         root,
         manifest,
@@ -1960,7 +2110,8 @@ def main() -> int:
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     if (
-        (args.strict and findings)
+        active_findings
+        or (args.strict and findings)
         or has_required_release_health_failure(args, findings)
         or has_blocking_release_health_watch_item(args, watch_items)
     ):

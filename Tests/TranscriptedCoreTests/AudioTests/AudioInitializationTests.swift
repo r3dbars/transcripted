@@ -433,15 +433,13 @@ final class AudioInitializationTests: XCTestCase {
         // `transcriptSaveLocation` default before it looks at the injected
         // paths, so on a machine with a relocated capture library the blocked
         // path below would never be consulted and `audio.start()` would reach
-        // real CoreAudio capture. Neutralize it the way LiveCaptureSmokeTests does.
-        let previousSaveLocation = UserDefaults.standard.object(forKey: "transcriptSaveLocation")
-        UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
+        // real CoreAudio capture. Mask it in process-local arguments, as LiveCaptureSmokeTests does.
+        let originalArguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        var arguments = originalArguments
+        arguments["transcriptSaveLocation"] = ""
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
         defer {
-            if let previousSaveLocation {
-                UserDefaults.standard.set(previousSaveLocation, forKey: "transcriptSaveLocation")
-            } else {
-                UserDefaults.standard.removeObject(forKey: "transcriptSaveLocation")
-            }
+            UserDefaults.standard.setVolatileDomain(originalArguments, forName: UserDefaults.argumentDomain)
         }
 
         // The blocker must really exist. Without `root`, createFile quietly

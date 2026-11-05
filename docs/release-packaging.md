@@ -270,11 +270,18 @@ local `build-beta.sh` only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
    release on the new feed only, also run
    `scripts/release/freeze-legacy-appcast.py` ("Legacy feed" in
    `docs/sparkle-updates.md`). Land the cask, a new
-   `Tests/Fixtures/release-health-github-release-<version>.json` and (first
+   `Tests/Fixtures/release-health-github-release-<version>.json`, an archived
+   `Tests/Fixtures/release-health-appcast-<version>.xml` copied from the signed
+   release asset, and (first
    new-feed release only) the freeze's two files on main in one change (#1863
    is the example). Until the freeze lands, installs older than this release
    keep reading `docs/appcast.xml` and see no update. No release step commits an appcast to main any
    more.
+   Advance the explicit feed and GitHub fixture paths in the test matrix and
+   QA bench together. They are offline snapshots of that publication, not
+   permanent aliases for latest. The nightly checker validates the legacy
+   freeze separately and uses `--appcast <snapshot>` for active metadata;
+   `--live-release-surfaces` obtains the active feed from `SUFeedURL` instead.
 5. Sync and deploy the website. It's the separate repo
    `r3dbars/transcripted-webapp` (clone at `~/transcripted-webapp`, Cloudflare
    Pages project `transcripted-web`); its README has the sync and deploy
@@ -292,7 +299,7 @@ NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
 Before you publish a user-facing release note, sanity-check the release state:
 
 - compare `Info.plist` `CFBundleShortVersionString` against the latest GitHub release tag
-- run `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --github-release-json Tests/Fixtures/release-health-github-release-1.1.62.json --write-report build/nightly-security-report.json` (use the fixture that matches `CFBundleShortVersionString` in `Info.plist`; an older fixture fails the gate on purpose, and `.agents/test-matrix.yml` names the current one) before a preparatory version bump so bundle version fields, the latest appcast item, and the Homebrew cask cannot silently drift
+- run `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast Tests/Fixtures/release-health-appcast-1.1.75.xml --github-release-json Tests/Fixtures/release-health-github-release-1.1.75.json --write-report build/nightly-security-report.json` (these archived inputs describe the published75 baseline; advance both snapshots with each real promotion, and supply the explicitly selected active feed when auditing a prepared next version) before a preparatory version bump so bundle version fields, the latest appcast item, and the Homebrew cask cannot silently drift
 - confirm the build output prints the expected Sentry release and dist
 - review the merged PRs since that latest published release so the note reflects shipped changes, not just local branch state
 - if the latest release has no `appcast.xml` asset, or its feed still lists the older release, say plainly that existing installs will not discover the new build in-app yet
@@ -306,7 +313,7 @@ Use the strict release-health gate when validating release surfaces:
 ```bash
 python3 scripts/release/post-dmg-release-audit.py --version <version> --artifact build/Transcripted-<version>.dmg
 python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces
-python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces --require-sentry-release-health
 ```
 
 The live surface gate compares the latest appcast item against the live appcast,
@@ -319,7 +326,7 @@ before the second release on the new feed (see "Not done yet" in
 After a packaging build, add local dSYM verification:
 
 ```bash
-python3 scripts/ops/nightly-security-check.py --strict --require-release-debug-files
+python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces --require-release-debug-files
 ```
 
 The packaged-app smoke above also checks the same local app/dSYM UUID pair when
