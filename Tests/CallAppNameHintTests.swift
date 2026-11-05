@@ -216,6 +216,67 @@ func testCallAppNameHint() {
         assertEqual(items.count, 1)
         assertNil(items.first?.callAppShownName)
     }
+
+    runSuite("Saved call-app hints round-trip quotes and literal escapes before an explicit naming choice") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("CallAppHintRoundtrip-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let names = ["Ana \"AJ\" Doe", #"Ana\Ops"#, #"Ana\nDoe"#, #"Ana "AJ""#, #""Ana""#]
+        for name in names {
+            let id = UUID()
+            let evidence = CallAppSpeakerEvidence.named(name, strength: nil, voiceprintName: nil)
+            let evidenceLines = evidence.frontmatterLines(escape: TranscriptFrontmatter.escapeYAML)
+                .joined(separator: "\n")
+            let markdown = """
+            ---
+            title: "Owned round-trip fixture"
+            capture_type: meeting
+            speakers:
+              - id: "1"
+                channel: system
+                db_id: "\(id.uuidString)"
+                name: "Speaker 1"
+                source: db_pending
+            \(evidenceLines)
+            ---
+
+            [00:00] [System/Speaker 1] Synthetic speech.
+            """
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown,
+                transcriptURL: root.appendingPathComponent("synthetic.md"),
+                profilesById: [id: callAppHintProfile(id: id)],
+                clipURLsByProfileID: [id: root.appendingPathComponent("synthetic.wav")]
+            )
+            let calls = SpeakerReviewQueueScanner.groupedByMeeting(SpeakerReviewQueueScanner.groupedByVoice(items))
+            let item = calls.first?.voices.first?.representative
+            assertEqual(item?.callAppShownName, name, "saved evidence reaches the actual meeting card unchanged")
+            assertEqual(item?.sourceName, "Speaker 1", "the saved label is independent of the hint")
+            let hint = Policy.callAppHint(callAppShownName: item?.callAppShownName, state: .naming(.unknownVoice), currentName: nil)
+            for finish in [Policy.Finish.done, .later] {
+                assertNil(Policy.answerOnFinish(committed: nil, typed: "", suggestions: [], highlighted: nil, finish: finish),
+                          "an untouched hint produces no naming answer")
+            }
+            guard let selected = hint?.fillsName,
+                  let answer = Policy.answerOnFinish(committed: nil, typed: selected, suggestions: [], highlighted: nil) else {
+                assertTrue(false, "an explicit hint choice must produce an answer")
+                continue
+            }
+            let entry = SpeakerNamingEntry(
+                id: id, diarizerSpeakerId: "1", channel: .system,
+                clipURL: root.appendingPathComponent("synthetic.wav"), sampleText: "Synthetic speech.",
+                currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false
+            )
+            let update = SpeakerReviewBridge.typedNameUpdate(entry: entry, typedName: answer, optionsByLabel: [:])
+            assertEqual(update?.newName, name, "explicit choice saves the original spelling, never YAML escapes")
+            assertEqual(update?.persistentSpeakerId, id)
+            assertEqual(item?.sourceName, "Speaker 1", "building an update never mutates the saved label")
+            let guessed = Policy.callAppHint(callAppShownName: item?.callAppShownName, state: .asking, currentName: "Voiceprint Person")
+            assertEqual(guessed, .differs(name: name), "a voiceprint question keeps its own identity")
+            assertNil(guessed?.fillsName, "a conflicting hint cannot replace an unanswered voiceprint question")
+        }
+    }
 }
 
 private func callAppHintEntry(callAppName: String?) -> SpeakerNamingEntry {

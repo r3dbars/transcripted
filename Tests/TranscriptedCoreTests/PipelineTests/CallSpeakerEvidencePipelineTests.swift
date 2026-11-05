@@ -274,6 +274,32 @@ final class CallSpeakerEvidencePipelineTests: XCTestCase {
         XCTAssertFalse(markdown.contains("call_app_"), markdown)
     }
 
+    func testFormatterEscapesCallAppEvidenceWithoutChangingTheVoiceprintLabel() {
+        for name in ["Ana \"AJ\" Doe", #"Ana\Ops"#, #"Ana\nDoe"#, #"Ana "AJ""#, #""Ana""#] {
+            let evidence = CallAppSpeakerEvidence.named(name, strength: nil, voiceprintName: "Voiceprint Person")
+            let mapping = SpeakerMapping(
+                speakerId: "1", identifiedName: "Voiceprint Person", confidence: .high,
+                isConfirmedIdentity: true, callAppEvidence: evidence
+            )
+            let markdown = TranscriptSaver.formatTranscriptMarkdown(
+                result: TranscriptionResult(micUtterances: [], systemUtterances: utterances(), duration: 20, processingTime: 1),
+                transcriptId: UUID(), speakerMappings: ["system_1": mapping],
+                speakerSources: ["system_1": "db"], date: Date(timeIntervalSince1970: 1_775_000_000)
+            )
+            let row = speakerRow(id: "1", in: markdown)
+            let writtenScalar = row.components(separatedBy: "\n")
+                .first { $0.trimmingCharacters(in: .whitespaces).hasPrefix("call_app_name:") }?
+                .split(separator: ":", maxSplits: 1).last.map(String.init)
+            XCTAssertEqual(writtenScalar.map(TranscriptFrontmatter.unquoteYAMLScalar), name)
+            XCTAssertTrue(row.contains(#"name: "Voiceprint Person""#))
+            XCTAssertTrue(row.contains("source: db"))
+            XCTAssertTrue(markdown.contains("[System/Voiceprint Person] one"))
+            XCTAssertEqual(mapping.displayName, "Voiceprint Person")
+            XCTAssertEqual(mapping.confidence, .high)
+            XCTAssertTrue(mapping.isConfirmedIdentity)
+        }
+    }
+
     func testDeferredReviewKeepsPlaceholderAndEvidence() throws {
         let url = try savedTranscript()
         let clip = temporaryDirectory.appendingPathComponent("clip.wav")
