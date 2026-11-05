@@ -336,6 +336,7 @@ SELF_TEST_SCRIPTS=(
 )
 PY_TEST_SUITES=(
     scripts/dev/test-verify-receipts.py
+    scripts/dev/test-call-app-hint-harness.py
     scripts/ops/test-native-smoke-isolation.py
     scripts/ops/test-launch-benchmark-isolation.py
     scripts/ops/test-nightly-security-check.py
