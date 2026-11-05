@@ -443,21 +443,65 @@ def check_frozen_legacy_appcast(root: Path, manifest: dict) -> list[dict]:
                          "config/release/legacy-appcast-freeze.json")]
 
 
+def paired_fixture_appcast(root: Path, manifest: dict, fixture: str) -> tuple[str, bytes]:
+    """Bind an explicitly selected archived GitHub fixture to its exact feed bytes."""
+    path = Path(fixture)
+    match = re.fullmatch(r"release-health-github-release-(\d+\.\d+\.\d+)\.json", path.name)
+    if not match:
+        raise ValueError("a versioned fixture is required")
+    version = match.group(1)
+    if version != ".".join(str(part) for part in parse_release_version(version)):
+        raise ValueError("the version must be canonical")
+    release = json.loads((root / path).read_bytes())
+    if not isinstance(release, dict) or release.get("tagName") != "v" + version:
+        raise ValueError("fixture version mismatch")
+    assets = release.get("assets")
+    if not isinstance(assets, list):
+        raise ValueError("fixture assets missing")
+    feeds = [asset for asset in assets if isinstance(asset, dict) and asset.get("name") == "appcast.xml"]
+    if len(feeds) != 1:
+        raise ValueError("one feed asset is required")
+    asset = feeds[0]
+    expected_url = f"https://github.com/{manifest['repo_slug']}/releases/download/v{version}/appcast.xml"
+    snapshot = path.with_name(f"release-health-appcast-{version}.xml")
+    raw = (root / snapshot).read_bytes()
+    if (asset.get("url") != expected_url or type(asset.get("size")) is not int
+            or asset["size"] <= 0 or asset["size"] != len(raw)
+            or normalized_sha256_digest(asset.get("digest")) != hashlib.sha256(raw).hexdigest()):
+        raise ValueError("feed asset identity or bytes mismatch")
+    item = ET.fromstring(raw).find("./channel/item")
+    if item is None or any((item.findtext("{" + SPARKLE_NS + "}" + key) or "").strip() != version
+                           for key in ["shortVersionString", "version"]):
+        raise ValueError("feed version mismatch")
+    return normalize_path(snapshot), raw
+
+
 def select_active_appcast(root: Path, manifest: dict, args: argparse.Namespace) -> list[dict]:
     """Select one explicit snapshot or the existing live caller; never use a frozen feed as latest."""
     manifest.pop("_active_appcast_xml", None)
     manifest.pop("_active_appcast_source", None)
+    manifest.pop("_active_appcast_fixture", None)
     frozen = (root / "config/release/legacy-appcast-freeze.json").exists()
     snapshot = getattr(args, "appcast", None)
     if not snapshot and not frozen:
         return []  # Before migration the committed feed is still authoritative.
+    paired_fixture = None
+    paired_bytes = None
+    if not snapshot and not args.live_release_surfaces and getattr(args, "github_release_json", None):
+        try:
+            snapshot, paired_bytes = paired_fixture_appcast(root, manifest, args.github_release_json)
+            paired_fixture = args.github_release_json
+        except (OSError, ValueError, TypeError, ET.ParseError):
+            return [make_finding("release_integrity", "high", "active-appcast-pair-invalid",
+                                 "The explicit GitHub fixture has no valid integrity-bound active feed companion.",
+                                 "Supply its same-version snapshot with matching asset URL, size, digest and feed version, or use --appcast.")]
     if not snapshot and not args.live_release_surfaces:
         return [make_finding("release_integrity", "high", "active-appcast-required",
                              "The frozen legacy feed cannot establish the active release.",
                              "Supply --appcast <release-asset snapshot>, or use --live-release-surfaces.")]
     try:
         if snapshot:
-            payload = (root / snapshot).read_text(encoding="utf-8")
+            payload = (paired_bytes if paired_bytes is not None else (root / snapshot).read_bytes()).decode("utf-8")
         else:
             result = curl_stdout(root, ["-fsSL", manifest["expected_info_plist"]["SUFeedURL"]])
             if result.returncode != 0:
@@ -471,6 +515,7 @@ def select_active_appcast(root: Path, manifest: dict, args: argparse.Namespace) 
                              "No fallback to the frozen legacy feed is permitted.")]
     manifest["_active_appcast_xml"] = payload
     manifest["_active_appcast_source"] = normalize_path(snapshot) if snapshot else manifest["expected_info_plist"]["SUFeedURL"]
+    manifest["_active_appcast_fixture"] = paired_fixture
     return []
 
 
@@ -1928,6 +1973,7 @@ def build_report(
         "repo_root": normalize_path(root),
         "manifest_path": manifest["_path"],
         "active_appcast_source": manifest.get("_active_appcast_source"),
+        "active_appcast_fixture": manifest.get("_active_appcast_fixture"),
         "active_appcast_sha256": hashlib.sha256(manifest["_active_appcast_xml"].encode("utf-8")).hexdigest() if "_active_appcast_xml" in manifest else None,
         "automation_toml": normalize_path(automation_path),
         "app_bundle_checked": app_bundle,

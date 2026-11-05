@@ -313,6 +313,9 @@ class FrozenFeedTests(TempRootTestCase):
 
     def setUp(self):
         super().setUp()
+        network = patch.object(CHECKER, "curl_stdout", side_effect=AssertionError("offline fixture test cannot contact the network"))
+        network.start()
+        self.addCleanup(network.stop)
         self.write_info("1.1.76", "1.1.76")
         self.write_appcast("1.1.75", "1.1.75")
         legacy = self.root / self.manifest["paths"]["appcast"]
@@ -450,6 +453,112 @@ class FrozenFeedTests(TempRootTestCase):
             fixture_git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
             (self.root / "config/release/legacy-appcast-freeze.json").unlink()
             self.assertIn("legacy-appcast-history", self.checks()[0])
+
+    def write_pair(self, version="1.1.76", payload=None):
+        raw = (payload if payload is not None else self.active).encode("utf-8")
+        snapshot = f"release-health-appcast-{version}.xml"
+        fixture = f"release-health-github-release-{version}.json"
+        self.write(snapshot, raw)
+        self.write(fixture, json.dumps({
+            "tagName": "v" + version, "isDraft": False, "isPrerelease": False,
+            "assets": [
+                {"name": f"Transcripted-{version}.dmg", "size": 42, "digest": "sha256:" + "a" * 64,
+                 "url": f"https://github.com/r3dbars/transcripted/releases/download/v{version}/Transcripted-{version}.dmg"},
+                {"name": "appcast.xml", "size": len(raw), "digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+                 "url": f"https://github.com/r3dbars/transcripted/releases/download/v{version}/appcast.xml"},
+            ],
+        }))
+        return namespace(appcast=None, github_release_json=fixture), self.root / fixture, self.root / snapshot
+
+    def test_explicit_versioned_fixture_selects_its_integrity_bound_active_companion(self):
+        args, _, snapshot = self.write_pair()
+        with patch.object(CHECKER, "curl_stdout", side_effect=AssertionError("offline means no network")):
+            self.assertEqual(CHECKER.select_active_appcast(self.root, self.manifest, args), [])
+        self.assertEqual(self.manifest["_active_appcast_source"], snapshot.name)
+        self.assertEqual(self.manifest["_active_appcast_fixture"], args.github_release_json)
+        self.assertEqual(self.checks(), (set(), set()))
+
+    def test_companion_missing_or_changed_bytes_cannot_fall_back_to_legacy(self):
+        for mutation in ["missing", "bytes"]:
+            args, _, snapshot = self.write_pair()
+            if mutation == "missing":
+                snapshot.unlink()
+            else:
+                snapshot.write_bytes(snapshot.read_bytes() + b"\n")
+            with self.subTest(mutation=mutation), patch.object(CHECKER, "curl_stdout", side_effect=AssertionError("no network")):
+                findings = CHECKER.select_active_appcast(self.root, self.manifest, args)
+            self.assertEqual(check_ids(findings), {"active-appcast-pair-invalid"})
+            self.assertNotIn("_active_appcast_xml", self.manifest)
+
+    def test_companion_tag_asset_identity_size_and_digest_must_all_agree(self):
+        for mutation in ["tag", "url", "size", "bool-size", "digest", "duplicate"]:
+            args, fixture, _ = self.write_pair()
+            value = json.loads(fixture.read_text())
+            asset = value["assets"][1]
+            if mutation == "tag":
+                value["tagName"] = "v1.1.75"
+            elif mutation == "url":
+                asset["url"] = asset["url"].replace("v1.1.76", "v1.1.75")
+            elif mutation == "size":
+                asset["size"] += 1
+            elif mutation == "bool-size":
+                asset["size"] = True
+            elif mutation == "digest":
+                asset["digest"] = "sha256:" + "b" * 64
+            else:
+                value["assets"].append(dict(asset))
+            fixture.write_text(json.dumps(value))
+            with self.subTest(mutation=mutation):
+                self.assertEqual(check_ids(CHECKER.select_active_appcast(self.root, self.manifest, args)), {"active-appcast-pair-invalid"})
+
+    def test_integrity_matching_stale_feed_top_still_fails_pair_identity(self):
+        stale = (self.root / "docs/appcast.xml").read_text()
+        args, _, _ = self.write_pair(payload=stale)
+        self.assertEqual(check_ids(CHECKER.select_active_appcast(self.root, self.manifest, args)), {"active-appcast-pair-invalid"})
+
+    def test_paired_published_75_keeps_prepared_76_strict_watch_and_checksums(self):
+        args, fixture, _ = self.write_pair("1.1.75", (self.root / "docs/appcast.xml").read_text())
+        self.write_cask("1.1.75")
+        self.assertEqual(CHECKER.select_active_appcast(self.root, self.manifest, args), [])
+        with patch.object(CHECKER, "git_tag_exists", side_effect=lambda root, tag: tag == "v1.1.75"):
+            findings, watch = CHECKER.check_appcast(self.root, self.manifest)
+        findings += CHECKER.check_cask(self.root, self.manifest)
+        findings += CHECKER.check_github_release_metadata(self.root, self.manifest, False, str(fixture))
+        self.assertEqual(findings, [])
+        self.assertEqual(check_ids(watch), {"appcast-release-candidate"})
+        self.assertTrue(CHECKER.has_blocking_release_health_watch_item(args, watch))
+        value = json.loads(fixture.read_text())
+        value["assets"][0]["digest"] = "sha256:" + "b" * 64
+        fixture.write_text(json.dumps(value))
+        self.assertEqual(check_ids(CHECKER.check_github_release_metadata(self.root, self.manifest, False, str(fixture))), {"github-release-asset-digest"})
+
+    def test_explicit_snapshot_and_live_mode_keep_precedence_over_companion(self):
+        args, fixture, _ = self.write_pair()
+        fixture.write_text("{invalid")
+        args.appcast = "active.xml"
+        self.assertEqual(CHECKER.select_active_appcast(self.root, self.manifest, args), [])
+        self.assertEqual(self.manifest["_active_appcast_source"], "active.xml")
+        args.appcast = None
+        args.live_release_surfaces = True
+        result = subprocess.CompletedProcess([], 0, self.active, "")
+        with patch.object(CHECKER, "curl_stdout", return_value=result) as fetch:
+            self.assertEqual(CHECKER.select_active_appcast(self.root, self.manifest, args), [])
+            fetch.assert_called_once()
+
+    def test_paired_snapshot_uses_the_same_bytes_once_for_validation_and_selection(self):
+        args, _, snapshot = self.write_pair()
+        original = Path.read_bytes
+        reads = []
+        def read(path):
+            if path == snapshot:
+                reads.append(path)
+                if len(reads) > 1:
+                    return b"<changed-after-validation>"
+            return original(path)
+        with patch.object(Path, "read_bytes", autospec=True, side_effect=read):
+            self.assertEqual(CHECKER.select_active_appcast(self.root, self.manifest, args), [])
+        self.assertEqual(len(reads), 1)
+        self.assertEqual(self.manifest["_active_appcast_xml"], self.active)
 
 
 def fixture_git_environment():
