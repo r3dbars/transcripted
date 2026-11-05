@@ -2,6 +2,8 @@
 """Offline contract tests: no app launch, network, defaults, or signing changes."""
 import copy
 import json
+import os
+import plistlib
 import subprocess
 import struct
 import zipfile
@@ -9,6 +11,7 @@ from pathlib import Path
 import runpy
 import tempfile
 import unittest
+from unittest import mock
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -251,6 +254,154 @@ class StagedUpdateTests(unittest.TestCase):
         self.assertEqual(calls,[('defaults','delete',M['BUNDLE_ID'])])
         self.assertEqual(proof['delete_commands'],1)
         self.assertEqual(len(reads),1)
+
+    def preference_fixture(self,root,data=None):
+        root=root.resolve(); home=root/'home'; output=root/'output'
+        (home/'Library/Preferences').mkdir(parents=True)
+        output.mkdir()
+        for directory in [home,home/'Library',home/'Library/Preferences',output]: directory.chmod(0o700)
+        source=home/'Library/Preferences'/(M['BUNDLE_ID']+'.plist')
+        source.write_bytes(plistlib.dumps({}) if data is None else data); source.chmod(0o600)
+        return home,output,source
+
+    def test_empty_claim_retains_exact_inode_and_any_late_open_writer_bytes(self):
+        with tempfile.TemporaryDirectory() as name:
+            home,output,source=self.preference_fixture(Path(name))
+            inode=source.stat().st_ino; proof={}
+            with source.open('r+b') as writer:
+                M['retain_empty_preference'](home,output,proof)
+                retained=list(output.rglob('retained.plist'))
+                self.assertFalse(source.exists()); self.assertEqual(len(retained),1)
+                self.assertEqual(retained[0].stat().st_ino,inode)
+                self.assertTrue(proof['empty_claim_revalidated']); self.assertTrue(proof['quarantine_retained'])
+                self.assertEqual(proof['before_claim']['key_count'],0)
+                late=plistlib.dumps({'controlled late data':True})
+                writer.seek(0); writer.write(late); writer.truncate(); writer.flush()
+                self.assertEqual(retained[0].read_bytes(),late)
+
+    def test_nonempty_malformed_wrong_type_unsafe_size_and_links_are_never_claimed(self):
+        cases=[plistlib.dumps({'controlled':True}),b'malformed',plistlib.dumps([]),b'',b'x'*(1024*1024+1)]
+        for data in cases:
+            with self.subTest(size=len(data)),tempfile.TemporaryDirectory() as name:
+                home,output,source=self.preference_fixture(Path(name),data)
+                with self.assertRaises(RuntimeError): M['retain_empty_preference'](home,output,{})
+                self.assertEqual(source.read_bytes(),data); self.assertEqual(list(output.iterdir()),[])
+        for kind in ['hardlink','symlink','writable','wrong-owner']:
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as name:
+                home,output,source=self.preference_fixture(Path(name)); before=source.read_bytes()
+                if kind=='hardlink': os.link(source,home/'second-link')
+                if kind=='symlink':
+                    target=home/'unrelated.plist'; target.write_bytes(before)
+                    source.unlink(); source.symlink_to(target)
+                if kind=='writable': source.chmod(0o666)
+                uid=os.getuid()+1 if kind=='wrong-owner' else os.getuid()
+                with self.assertRaises((RuntimeError,OSError)):
+                    M['retain_empty_preference'](home,output,{},expected_uid=uid)
+                self.assertEqual(source.read_bytes(),before); self.assertEqual(list(output.iterdir()),[])
+
+    def test_preference_parent_and_output_symlinks_cannot_redirect_claim(self):
+        for kind in ['parent','output']:
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as name:
+                home,output,source=self.preference_fixture(Path(name)); before=source.read_bytes()
+                if kind=='parent':
+                    real=home/'actual-preferences'; source.parent.rename(real)
+                    (home/'Library/Preferences').symlink_to(real,target_is_directory=True)
+                else:
+                    real=output.with_name('actual-output'); output.rename(real)
+                    output.symlink_to(real,target_is_directory=True)
+                with self.assertRaises((RuntimeError,OSError)): M['retain_empty_preference'](home,output,{})
+                self.assertEqual(source.read_bytes(),before)
+
+    def test_wrong_file_owner_and_directory_type_fail_before_claim(self):
+        with tempfile.TemporaryDirectory() as name:
+            home,output,source=self.preference_fixture(Path(name))
+            with source.open('rb') as stream:
+                with self.assertRaises(RuntimeError): M['inspect_empty_preference'](stream.fileno(),os.getuid()+1,{})
+            source.unlink(); source.mkdir()
+            with self.assertRaises(RuntimeError): M['retain_empty_preference'](home,output,{})
+            self.assertTrue(source.is_dir()); self.assertEqual(list(output.iterdir()),[])
+
+    def test_source_inode_swap_before_claim_fails_without_moving_replacement(self):
+        with tempfile.TemporaryDirectory() as name:
+            home,output,source=self.preference_fixture(Path(name)); proof={}; original=os.stat; replaced=False
+            unexpected=plistlib.dumps({'controlled replacement':True})
+            def stat_entry(path,*args,**kwargs):
+                nonlocal replaced
+                if path==M['BUNDLE_ID']+'.plist' and kwargs.get('dir_fd') is not None and not replaced:
+                    source.unlink(); source.write_bytes(unexpected); source.chmod(0o600); replaced=True
+                return original(path,*args,**kwargs)
+            with mock.patch.object(M['os'],'stat',side_effect=stat_entry):
+                with self.assertRaises(RuntimeError): M['retain_empty_preference'](home,output,proof)
+            self.assertEqual(source.read_bytes(),unexpected); self.assertFalse(proof['claimed'])
+            self.assertFalse(list(output.rglob('retained.plist')))
+
+    def test_existing_quarantine_is_never_reused_or_overwritten(self):
+        with tempfile.TemporaryDirectory() as name:
+            home,output,source=self.preference_fixture(Path(name)); before=source.read_bytes()
+            identifier=M['uuid'].UUID(int=1)
+            existing=output/('.preference-quarantine-'+identifier.hex); existing.mkdir(mode=0o700)
+            sentinel=existing/'retained.plist'; sentinel.write_bytes(b'controlled existing sentinel')
+            with mock.patch.object(M['uuid'],'uuid4',return_value=identifier):
+                with self.assertRaises(OSError): M['retain_empty_preference'](home,output,{})
+            self.assertEqual(source.read_bytes(),before)
+            self.assertEqual(sentinel.read_bytes(),b'controlled existing sentinel')
+
+    def test_raced_source_replacement_is_restored_or_retained_without_overwrite(self):
+        for kind in ['different-inode','late-write','new-source']:
+            with self.subTest(kind=kind),tempfile.TemporaryDirectory() as name:
+                home,output,source=self.preference_fixture(Path(name)); proof={}; original=os.rename
+                unexpected=plistlib.dumps({'controlled unexpected':True})
+                def rename(*args,**kwargs):
+                    if kind=='different-inode':
+                        source.unlink(); source.write_bytes(plistlib.dumps({})); source.chmod(0o600)
+                    original(*args,**kwargs)
+                    retained=next(output.rglob('retained.plist'))
+                    if kind=='late-write': retained.write_bytes(unexpected)
+                    if kind=='new-source': source.write_bytes(unexpected)
+                with mock.patch.object(M['os'],'rename',side_effect=rename):
+                    with self.assertRaises(RuntimeError): M['retain_empty_preference'](home,output,proof)
+                retained=next(output.rglob('retained.plist'))
+                self.assertTrue(proof['quarantine_retained']); self.assertFalse(proof['empty_claim_revalidated'])
+                if kind=='new-source':
+                    self.assertEqual(source.read_bytes(),unexpected)
+                    self.assertFalse(proof['restored_without_overwrite'])
+                else:
+                    self.assertTrue(proof['restored_without_overwrite'])
+                    self.assertEqual(source.read_bytes(),retained.read_bytes())
+                    if kind=='late-write': self.assertEqual(retained.read_bytes(),unexpected)
+
+    def test_one_delete_can_restore_absence_by_retaining_only_proven_empty_residue(self):
+        with tempfile.TemporaryDirectory() as name:
+            home,output,source=self.preference_fixture(Path(name)); clock=self.Clock(); calls=[]; proof={}
+            def state():
+                return {'domain_listed':source.exists(),'standard_plist_present':source.exists(),
+                        'by_host_plist_present':False}
+            M['restore_product_preferences'](home,{42},proof,lambda *args:calls.append(args),state,
+                lambda pid:False,clock.read,clock.pause,output=output)
+            self.assertEqual(calls,[('defaults','delete',M['BUNDLE_ID'])])
+            self.assertTrue(proof['absence_restored']); self.assertFalse(source.exists())
+            self.assertTrue(proof['residual_plist']['quarantine_retained'])
+            self.assertEqual(len(list(output.rglob('retained.plist'))),1)
+
+    def test_post_claim_domain_byhost_or_new_standard_residue_still_fails(self):
+        for residue in ['domain','byhost','standard']:
+            with self.subTest(residue=residue),tempfile.TemporaryDirectory() as name:
+                home,output,source=self.preference_fixture(Path(name)); clock=self.Clock(); calls=[]; proof={}
+                recreated=False
+                def state():
+                    nonlocal recreated
+                    claimed=bool(list(output.rglob('retained.plist')))
+                    if claimed and residue=='standard' and not recreated:
+                        source.write_bytes(plistlib.dumps({'unexpected new source':True})); recreated=True
+                    return {'domain_listed':source.exists() or (claimed and residue=='domain'),
+                            'standard_plist_present':source.exists(),
+                            'by_host_plist_present':claimed and residue=='byhost'}
+                with self.assertRaises(RuntimeError):
+                    M['restore_product_preferences'](home,{42},proof,lambda *args:calls.append(args),state,
+                        lambda pid:False,clock.read,clock.pause,output=output)
+                self.assertEqual(len(calls),1); self.assertFalse(proof['absence_restored'])
+                self.assertTrue(proof['residual_plist']['quarantine_retained'])
+                if residue=='standard': self.assertEqual(plistlib.loads(source.read_bytes()),{'unexpected new source':True})
 
     def test_only_exact_final_rc_metadata_is_accepted(self):
         good={'id':13394641882,'expired':False,'name':'Transcripted-1.1.76-release-candidate',

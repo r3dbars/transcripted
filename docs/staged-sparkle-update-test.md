@@ -83,9 +83,16 @@ only by its exact owned path. Before deleting the admitted fresh domain once,
 cleanup independently waits for every recorded owned app PID to exit. It then
 observes the unchanged domain/standard-plist/ByHost-plist absence conditions for
 at most thirty seconds, without repeated deletion. Only presence booleans and
-counts enter the receipt. Any remaining condition still fails cleanup. This
-addresses a lifecycle-proof gap; it does not establish which condition caused
-the preserved first hosted run's cleanup failure.
+counts enter the receipt. If a standard plist remains without a ByHost plist, cleanup may claim
+that exact file into a new private quarantine only after descriptor-based
+parent/file ownership, regular single-link type, bounded valid dictionary and
+zero-key checks. The same inode and empty contents are revalidated after the
+atomic move; all claimed bytes remain privately retained, even on success.
+Races restore without overwriting a new source or remain retained and fail.
+The unchanged three absence conditions must still pass afterward. No preference
+bytes are unlinked and no additional domain deletion is attempted. Both earlier
+hosted cleanup failures remain preserved; empty residue is not established as
+their cause until an actual receipt supplies that metadata.
 
 Only bounded `receipt.json` is uploaded (seven-day retention). Downloaded apps,
 feeds, raw logs, transcript/audio and preference content stay on the disposable

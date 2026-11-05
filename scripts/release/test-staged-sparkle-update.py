@@ -23,6 +23,7 @@ import zipfile
 import threading
 import time
 import urllib.parse
+import uuid
 import xml.etree.ElementTree as ET
 
 SOURCE_SHA = 'caa17f1bb522324bf8f756239347fb4c6308ab52'
@@ -313,31 +314,132 @@ def wait_owned_pids_exit(pids, proof, alive=process_alive, clock=time.monotonic,
     proof['owned_pids_exited'] = True
 
 
+def preference_file_identity(info):
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def inspect_empty_preference(fd, expected_uid, proof):
+    info = os.fstat(fd)
+    proof.update(regular_file=stat.S_ISREG(info.st_mode), owned_by_runner=info.st_uid == expected_uid,
+                 single_link=info.st_nlink == 1, bytes=info.st_size,
+                 plist_parseable=False, root_is_dictionary=False, key_count=None)
+    require(proof['regular_file'] and proof['owned_by_runner'] and proof['single_link']
+            and not info.st_mode & 0o022 and 0 < info.st_size <= 1024 * 1024,
+            'Unexpected residual preference file metadata')
+    data = os.pread(fd, 1024 * 1024 + 1, 0)
+    require(len(data) == info.st_size, 'Residual preference file changed during read')
+    try:
+        value = plistlib.loads(data)
+    except Exception:
+        raise HarnessFailure('Residual preference file is not a valid plist') from None
+    proof.update(plist_parseable=True, root_is_dictionary=type(value) is dict,
+                 key_count=len(value) if type(value) is dict else None)
+    require(type(value) is dict and not value, 'Residual preference plist is not an empty dictionary')
+    require(preference_file_identity(info) == preference_file_identity(os.fstat(fd)),
+            'Residual preference file changed during inspection')
+    return info
+
+
+def retain_empty_preference(home, output, proof, expected_uid=None):
+    # The only source entry allowed is the exact domain admitted as absent.
+    # Descriptor-relative traversal rejects every symlink/foreign parent. No
+    # preference bytes are ever unlinked, including on the empty-success path.
+    expected_uid = os.getuid() if expected_uid is None else expected_uid
+    proof.update(claimed=False, quarantine_retained=False, empty_claim_revalidated=False)
+    require(home.is_absolute() and home.resolve() == home and output.is_absolute()
+            and output.resolve() == output, 'Preference cleanup root is not canonical')
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    file_flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    descriptors = []
+    name = BUNDLE_ID+'.plist'
+    def own_directory(fd):
+        info = os.fstat(fd)
+        require(stat.S_ISDIR(info.st_mode) and info.st_uid == expected_uid and not info.st_mode & 0o022,
+                'Unexpected preference cleanup directory owner or type')
+        return info
+    try:
+        home_fd = os.open(home, directory_flags); descriptors.append(home_fd); own_directory(home_fd)
+        library_fd = os.open('Library', directory_flags, dir_fd=home_fd)
+        descriptors.append(library_fd); own_directory(library_fd)
+        parent_fd = os.open('Preferences', directory_flags, dir_fd=library_fd)
+        descriptors.append(parent_fd); parent_info = own_directory(parent_fd)
+        fd = os.open(name, file_flags, dir_fd=parent_fd); descriptors.append(fd)
+        before = inspect_empty_preference(fd, expected_uid, proof.setdefault('before_claim', {}))
+        output_fd = os.open(output, directory_flags); descriptors.append(output_fd)
+        require(own_directory(output_fd).st_dev == parent_info.st_dev, 'Preference quarantine crosses filesystems')
+        quarantine = '.preference-quarantine-'+uuid.uuid4().hex
+        os.mkdir(quarantine, mode=0o700, dir_fd=output_fd)
+        quarantine_fd = os.open(quarantine, directory_flags, dir_fd=output_fd)
+        descriptors.append(quarantine_fd); own_directory(quarantine_fd)
+        require(preference_file_identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False))
+                == preference_file_identity(before), 'Preference source entry changed before claim')
+        os.rename(name, 'retained.plist', src_dir_fd=parent_fd, dst_dir_fd=quarantine_fd)
+        proof.update(claimed=True, quarantine_retained=True)
+        try:
+            claimed_fd = os.open('retained.plist', file_flags, dir_fd=quarantine_fd)
+            descriptors.append(claimed_fd)
+            after = inspect_empty_preference(claimed_fd, expected_uid, proof.setdefault('after_claim', {}))
+            # rename may update ctime; every other identity/content attribute
+            # must still match the inspected source. Late writes remain retained.
+            require(preference_file_identity(after)[:-1] == preference_file_identity(before)[:-1],
+                    'Claimed preference file changed identity')
+            try:
+                os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+            except FileNotFoundError:
+                pass
+            else:
+                raise HarnessFailure('Preference source entry was recreated during claim')
+            proof['empty_claim_revalidated'] = True
+        except Exception:
+            # link is atomic no-overwrite. Keep quarantine even after a restore:
+            # no unexpected late bytes are destroyed and no new source is replaced.
+            proof['empty_claim_revalidated'] = False
+            try:
+                os.link('retained.plist', name, src_dir_fd=quarantine_fd,
+                        dst_dir_fd=parent_fd, follow_symlinks=False)
+                proof['restored_without_overwrite'] = True
+            except OSError:
+                proof['restored_without_overwrite'] = False
+            raise HarnessFailure('Preference quarantine revalidation failed; bytes retained') from None
+    finally:
+        for fd in reversed(descriptors):
+            os.close(fd)
+
+
 def restore_product_preferences(home, pids, proof, command=run, read=None,
-                                alive=process_alive, clock=time.monotonic, pause=time.sleep):
+                                alive=process_alive, clock=time.monotonic, pause=time.sleep, output=None):
     # Only called after admission proved the domain and both file classes absent.
     # NSRunningApplication removal alone is not BSD process-exit proof.
     read = read or (lambda: product_preferences_state(home))
     proof['delete_commands'] = 0
+    proof['absence_restored'] = False
     wait_owned_pids_exit(pids, proof, alive, clock, pause)
     proof['before_delete'] = read()
     proof['delete_commands'] = 1
     command('defaults', 'delete', BUNDLE_ID)
     # CFPreferences persistence may complete after the command returns. Observe
     # convergence; never repeat deletion or relax any absence condition.
-    deadline = clock() + 30
     proof['observations'] = 0
-    while True:
-        state = read()
-        proof['observations'] += 1
-        proof['after_delete'] = state
-        if not any(state.values()):
-            proof['absence_restored'] = True
-            return
-        if clock() >= deadline:
-            proof['absence_restored'] = False
-            raise HarnessFailure('Product preference absence not restored')
-        pause(0.25)
+    def observe():
+        deadline = clock() + 30
+        while True:
+            state = read()
+            proof['observations'] += 1
+            proof['after_delete'] = state
+            if not any(state.values()):
+                return True
+            if clock() >= deadline:
+                return False
+            pause(0.25)
+    if not observe():
+        state = proof['after_delete']
+        require(output is not None and state['standard_plist_present'] and not state['by_host_plist_present'],
+                'Product preference absence not restored')
+        retain_empty_preference(home, output, proof.setdefault('residual_plist', {}))
+        proof['absence_restored'] = observe()
+        require(proof['absence_restored'], 'Product preference absence not restored after empty claim')
+    proof['absence_restored'] = True
 
 
 def verify_app(app, version):
@@ -577,7 +679,7 @@ def main():
             try:
                 require(json.loads(run(observer)) == [], 'App still running before preference restoration')
                 receipt['preference_cleanup'] = {}
-                restore_product_preferences(Path(user.pw_dir), owned_pids, receipt['preference_cleanup'])
+                restore_product_preferences(Path(user.pw_dir), owned_pids, receipt['preference_cleanup'], output=out)
                 receipt['preferences_restored_to_original_absence'] = True
             except Exception as error:
                 cleanup_errors.append(bounded_error(error))
