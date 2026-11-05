@@ -151,7 +151,7 @@ recommended_gates:
     default:
       - "repo hygiene workflow or equivalent local syntax/preflight pass"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode quick"
-      - "python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --live-release-surfaces --write-report build/nightly-security-report.json"
     rotate_or_schedule:
       - "bash scripts/ops/transcripted-qa-bench.sh --mode deep"
       - "bash scripts/ops/transcripted-qa-bench.sh --mode audio-synthetic"

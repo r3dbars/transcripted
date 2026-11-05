@@ -355,7 +355,7 @@ Never add analytics properties for:
 The nightly security automation should start with the deterministic checker:
 
 ```bash
-python3 scripts/ops/nightly-security-check.py --write-report build/nightly-security-report.json
+python3 scripts/ops/nightly-security-check.py --live-release-surfaces --write-report build/nightly-security-report.json
 ```
 
 That report is the first pass, not the whole job. It should score the current
@@ -370,7 +370,7 @@ a release-integrity failure.
 If the run built a fresh app or needs build-output verification, rerun it with:
 
 ```bash
-python3 scripts/ops/nightly-security-check.py --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json
+python3 scripts/ops/nightly-security-check.py --live-release-surfaces --app-bundle build/Transcripted.app --write-report build/nightly-security-report.json
 ```
 
 For a focused local privacy sweep, run:

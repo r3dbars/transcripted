@@ -206,7 +206,7 @@ def audit(args: argparse.Namespace, root: Path) -> tuple[list[Check], list[str]]
         f"bash scripts/release/verify-sparkle-release.sh {version}",
         f"bash scripts/release/update-cask.sh {version}",
         "python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces",
-        "python3 scripts/ops/nightly-security-check.py --strict --require-sentry-release-health",
+        "python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces --require-sentry-release-health",
     ]
 
     expected_url = expected_asset_url(version)
