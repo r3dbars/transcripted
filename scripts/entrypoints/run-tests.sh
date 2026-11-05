@@ -401,6 +401,7 @@ EOF
 
 FAST_TEST_SOURCES=(
     "Tests/UI/SpeakersScrollDiagnostics.swift"
+    "Tests/UI/CaptureListScrollDiagnostics.swift"
     "Tests/FastTestApplicationHost.swift"
     "Tests/TestHelpers.swift"
     "Tests/UI/CallAppHintHarnessIsolation.swift"

@@ -193,6 +193,22 @@ rules:
       - "bash -n scripts/dev/test-speakers-directory-scroll.sh"
       - "bash scripts/dev/test-speakers-directory-scroll.sh"
 
+  # Dictations and Meetings Load More: the shared day-grouped list in the
+  # Settings detail column, scrolled and paged over a temporary library.
+  # Fails on a hang, a scroll jump-back, or a Load More that does not add a page.
+  - paths:
+      - "Sources/UI/Settings/HomeCaptureList.swift"
+      - "Sources/UI/Settings/HomePresentation.swift"
+      - "Sources/UI/Settings/HomeViewModel.swift"
+      - "Sources/UI/Settings/Pages/DictationsSettingsPage.swift"
+      - "Sources/UI/Settings/Pages/HomeSettingsPage.swift"
+      - "Tests/UI/CaptureListLoadMoreScrollSmoke.swift"
+      - "Tests/UI/CaptureListScrollDiagnostics.swift"
+      - "scripts/dev/test-capture-list-load-more-scroll.sh"
+    checks:
+      - "bash -n scripts/dev/test-capture-list-load-more-scroll.sh"
+      - "bash scripts/dev/test-capture-list-load-more-scroll.sh"
+
   - paths:
       - "run-daily-audio-reliability.sh"
       - "scripts/ops/daily-audio-reliability-check.sh"
