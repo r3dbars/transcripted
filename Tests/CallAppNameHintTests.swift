@@ -277,6 +277,103 @@ func testCallAppNameHint() {
             assertNil(guessed?.fillsName, "a conflicting hint cannot replace an unanswered voiceprint question")
         }
     }
+
+    runSuite("Legacy call-app writer spellings stay exact through an explicit hint choice") {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("LegacyCallAppHint-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        for name in ["Ana \"AJ\"", #"Ana\Ops"#, #"Ana\nDoe"#, #""Ana""#] {
+            let id = UUID()
+            // The old formatter writes this exact scalar using the same
+            // unchanged production escapeYAML function, then name_source.
+            let escaped = TranscriptFrontmatter.escapeYAML(name)
+            let markdown = """
+            ---
+            title: "Owned legacy fixture"
+            capture_type: meeting
+            speakers:
+              - id: "1"
+                channel: system
+                db_id: "\(id.uuidString)"
+                name: "\(escaped)"
+                confidence: medium
+                source: db_pending
+                name_source: call_app
+            ---
+
+            [00:00] [System/\(name)] Synthetic speech.
+            """
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: root.appendingPathComponent("synthetic.md"),
+                profilesById: [id: callAppHintProfile(id: id)],
+                clipURLsByProfileID: [id: root.appendingPathComponent("synthetic.wav")]
+            )
+            let item = SpeakerReviewQueueScanner.groupedByMeeting(SpeakerReviewQueueScanner.groupedByVoice(items))
+                .first?.voices.first?.representative
+            assertEqual(items.count, 1)
+            assertEqual(item?.sourceName, name, "the decoded label matches the old writer’s literal body label")
+            assertEqual(item?.speakerId, id)
+            assertEqual(item?.diarizerSpeakerId, "1")
+            assertEqual(item?.channel, .system)
+            assertEqual(item?.callAppShownName, name, "old-writer spelling must decode for the hint")
+            let hint = Policy.callAppHint(callAppShownName: item?.callAppShownName, state: .naming(.unknownVoice), currentName: nil)
+            let answer = Policy.answerOnFinish(committed: nil, typed: hint?.fillsName ?? "", suggestions: [], highlighted: nil)
+            let entry = SpeakerNamingEntry(id: id, diarizerSpeakerId: "1", channel: .system,
+                clipURL: root.appendingPathComponent("synthetic.wav"), sampleText: "Synthetic speech.",
+                currentName: nil, matchSimilarity: nil, needsNaming: true, needsConfirmation: false)
+            let update = answer.flatMap { SpeakerReviewBridge.typedNameUpdate(entry: entry, typedName: $0, optionsByLabel: [:]) }
+            assertEqual(update?.newName, name, "explicit legacy hint choice must not save escapes or strip quoted names")
+        }
+    }
+
+
+    runSuite("Ordinary speaker labels decode once without becoming hints; the new hint key takes precedence") {
+        let root = FileManager.default.temporaryDirectory.resolvingSymlinksInPath()
+            .appendingPathComponent("SpeakerLabelRoundtrip-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fixtures: [(String, Bool, String?, String?)] = [
+            ("Ana Plain", false, nil, nil),
+            ("Ana \"AJ\"", true, nil, nil),
+            (#"\n"#, true, nil, nil),
+            ("Old Name", true, "call_app", #""New Name""#)
+        ]
+        for (label, quoted, legacyMarker, newHint) in fixtures {
+            let id = UUID()
+            let scalar = quoted ? "\"\(TranscriptFrontmatter.escapeYAML(label))\"" : label
+            let markerLine = legacyMarker.map { "    name_source: \($0)" } ?? ""
+            let hintLine = newHint.map { "    call_app_name: \"\(TranscriptFrontmatter.escapeYAML($0))\"" } ?? ""
+            let markdown = """
+            ---
+            title: "Owned speaker label fixture"
+            capture_type: meeting
+            speakers:
+              - id: "1"
+                channel: system
+                db_id: "\(id.uuidString)"
+                name: \(scalar)
+                source: db_pending
+            \(markerLine)
+            \(hintLine)
+            ---
+
+            [00:00] [System/\(label)] Synthetic speech.
+            """
+            let items = SpeakerReviewQueueScanner.pendingItems(
+                in: markdown, transcriptURL: root.appendingPathComponent("synthetic.md"),
+                profilesById: [id: callAppHintProfile(id: id)],
+                clipURLsByProfileID: [id: root.appendingPathComponent("synthetic.wav")]
+            )
+            assertEqual(items.count, 1, "source/status still admits the same pending identity")
+            assertEqual(items.first?.sourceName, label)
+            assertEqual(items.first?.callAppShownName, newHint, "a normal label is not a hint; an explicit new hint beats the legacy label")
+            assertEqual(items.first?.speakerId, id)
+            assertEqual(items.first?.diarizerSpeakerId, "1")
+            assertEqual(items.first?.channel, .system)
+        }
+    }
+
 }
 
 private func callAppHintEntry(callAppName: String?) -> SpeakerNamingEntry {
