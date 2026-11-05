@@ -13,15 +13,15 @@
 //
 // Limits and filters (unverified, not yet checked against live calls):
 // - 0.25 s messaging timeout, 1.5 s deadline per poll, 4000 nodes and depth
-//   60 per window. Running out marks the window truncated, which withholds it
-//   when it shows tiles (a cut-short window with no tiles doesn't count).
+//   60 per window. Running out marks the window truncated and withholds the
+//   poll even before tiles appear: unread content may contain another call.
 // - Up to 64 window titles and 8 meeting windows per app. Slack: up to 32
 //   windows sharing one 4000-node budget, huddle-titled windows first (a
 //   huddle can be in any), stopping at the first full read showing a huddle.
-// - AX errors: only "couldn't finish" (`cannotComplete`) cuts a window
-//   short. A destroyed element (`invalidUIElement`) or another failed batch
-//   read is skipped; failed reads of the custom DOM attributes count as
-//   absent. A windowless app (`noValue` window list) is empty, not unknown.
+// - AX errors: a failed whole batch or malformed success cuts a window short.
+//   A destroyed element (`invalidUIElement`) is skipped; unsupported custom
+//   DOM attributes inside a successful full batch count as absent. A
+//   windowless app (`noValue` window list) is empty, not unknown.
 //   The codes are counted for the run's summary log.
 // - Apps are read in `CallSpeakerReadPlan` order (native call apps, then
 //   browsers, Slack last), each within a fair share of the poll's deadline.
@@ -132,9 +132,9 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
     enum ElementReadOutcome: Equatable {
         case usable
         /// The element is gone or unreadable; leave it out, the walk goes on.
-        case skip(AXError)
+        case skip(CallSpeakerScanIssue)
         /// Part of the window couldn't be read; the window is cut short.
-        case truncate(AXError)
+        case truncate(CallSpeakerScanIssue)
     }
 
     /// One window-list read: the windows (none for a windowless app), or why
@@ -247,23 +247,18 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
             AXCopyMultipleAttributeOptions(rawValue: 0),
             &valuesRef
         )
-        guard status == .success else {
-            // Only a timeout means part of the window went unread. Any other
-            // failed element read (destroyed mid-walk, unsupported) skips it.
-            if status == .cannotComplete { budget.truncate(.ax(status)) } else { budget.skip(.ax(status)) }
-            return nil
-        }
-        guard let values = valuesRef as? [AnyObject], values.count == Self.attributes.count else {
-            budget.skip(.unexpectedValue)
-            return nil
-        }
-        switch Self.elementReadOutcome(values) {
+        let values = valuesRef as? [AnyObject]
+        switch Self.batchReadOutcome(status: status, values: values) {
         case .usable: break
-        case .skip(let error):
-            budget.skip(.ax(error))
+        case .skip(let issue):
+            budget.skip(issue)
             return nil
-        case .truncate(let error):
-            budget.truncate(.ax(error))
+        case .truncate(let issue):
+            budget.truncate(issue)
+            return nil
+        }
+        guard let values else {
+            budget.truncate(.unexpectedValue)
             return nil
         }
 
@@ -351,6 +346,15 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
         attributes.firstIndex(of: domClassListAttribute)!,
     ]
 
+    /// The live walk uses this decoder before interpreting any batch values.
+    static func batchReadOutcome(status: AXError, values: [AnyObject]?) -> ElementReadOutcome {
+        guard status == .success else {
+            return status == .invalidUIElement ? .skip(.ax(status)) : .truncate(.ax(status))
+        }
+        guard let values, values.count == attributes.count else { return .truncate(.unexpectedValue) }
+        return elementReadOutcome(values)
+    }
+
     /// Decodes the per-attribute error placeholders AX puts inside an
     /// otherwise successful batch read. Missing attributes are normal.
     /// - `cannotComplete` on any attribute: the element couldn't be read in
@@ -377,15 +381,15 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
             case .success, .noValue, .attributeUnsupported:
                 continue
             case .cannotComplete:
-                return .truncate(.cannotComplete)
+                return .truncate(.ax(.cannotComplete))
             case .invalidUIElement:
                 destroyed = true
             default:
                 if !customAttributeIndices.contains(index) { standardFailure = standardFailure ?? error }
             }
         }
-        if destroyed { return .skip(.invalidUIElement) }
-        if let standardFailure { return .truncate(standardFailure) }
+        if destroyed { return .skip(.ax(.invalidUIElement)) }
+        if let standardFailure { return .truncate(.ax(standardFailure)) }
         return .usable
     }
 

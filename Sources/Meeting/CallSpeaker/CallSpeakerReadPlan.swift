@@ -9,8 +9,8 @@
 // - Time: each app gets an even share of what is left of the poll's
 //   deadline across the apps not read yet. An app that finishes early (no
 //   meeting window) passes its unused time on; one that runs out is cut off
-//   at its share (its window comes back truncated, which withholds it if it
-//   shows tiles) instead of starving the apps after it.
+//   at its share. A truncated meeting candidate withholds the poll, since
+//   its unread content may contain another call or speaking participant.
 // - Slack: its windows are walked, and `AXManualAccessibility` is set on it,
 //   only when a huddle is likely: a window title says "huddle", or Slack
 //   holds the mic input right now. Otherwise only its window titles are read.
@@ -158,11 +158,9 @@ extension CallSpeakerReadPlan {
     /// left unread are not.
     ///
     /// A candidate whose walk was cut short (node cap, depth, deadline, or
-    /// an AX "couldn't finish") is still returned, marked truncated, and the
-    /// scan goes on: `CallSpeakerSnapshotBuilder` withholds a cut-short
-    /// window that shows tiles, and ignores one that shows none (a Teams
-    /// chat or a big Slack main window). Only candidates never read make the
-    /// scan incomplete.
+    /// an AX failure) makes the scan incomplete even before any tile was
+    /// found: unseen content cannot establish that the candidate is ambient.
+    /// Completely examined tile-free candidates remain ordinary.
     ///
     /// Slack holds one huddle at a time, so once one Slack window has been
     /// read in full and shows huddle tiles, the rest aren't walked.
@@ -219,9 +217,13 @@ extension CallSpeakerReadPlan {
             diagnostics.merge(result.diagnostics)
             let read = CallSpeakerWindowRead(match: candidate.match, tree: result.tree, truncated: result.truncated)
             reads.append(read)
+            guard !result.truncated else {
+                diagnostics.incompleteness.merge(result.diagnostics.truncations, uniquingKeysWith: +)
+                return WindowScan(windows: reads, completeness: .incomplete, diagnostics: diagnostics)
+            }
             if isSlack {
                 sharedNodes = result.visitedNodes
-                if !result.truncated && showsTiles(read) { break }
+                if showsTiles(read) { break }
             }
         }
         return WindowScan(windows: reads, completeness: .complete, diagnostics: diagnostics)
