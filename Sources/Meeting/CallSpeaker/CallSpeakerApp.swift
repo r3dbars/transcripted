@@ -191,9 +191,17 @@ enum CallSpeakerWindowMatcher {
         title.lowercased().hasPrefix("meeting compact view | ")
     }
 
+    /// Teams' own navigation surfaces ("Chat | General | Microsoft Teams",
+    /// "Activity | Microsoft Teams"). A meeting window is titled after the
+    /// meeting, or is the compact view (unverified, English UI only).
+    static let teamsNavigationSurfaces: Set<String> = ["chat", "activity", "calendar", "teams"]
+
     static func isTeamsMeetingTitle(_ title: String) -> Bool {
         let lowered = title.lowercased()
-        return isTeamsCompactView(title) || lowered.contains("| microsoft teams")
+        if isTeamsCompactView(title) { return true }
+        guard lowered.contains("| microsoft teams") else { return false }
+        let surface = lowered.split(separator: "|", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        return !teamsNavigationSurfaces.contains(surface)
     }
 
     private static func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {
