@@ -151,8 +151,12 @@ extension TranscriptSaver {
                 yaml += "\n    name: \"\(Self.escapeYAML(name))\""
                 yaml += "\n    confidence: \(confidence)"
                 yaml += "\n    source: \(source)"
-                if let nameSource = mapping.shownNameSource {
-                    yaml += "\n    name_source: \(nameSource.rawValue)"
+                // Call-app evidence is context next to the row, never the
+                // name above it (`CallAppSpeakerEvidence`).
+                if channel == "system", let evidence = mapping.callAppEvidence {
+                    for line in evidence.frontmatterLines(escape: Self.escapeYAML) {
+                        yaml += "\n" + line
+                    }
                 }
             }
         }

@@ -82,6 +82,8 @@ final class MeetingCallSpeakerNames {
         for (status, count) in summary.statusCounts {
             context["status_\(status.rawValue)"] = "\(count)"
         }
+        // AX error codes and limit reasons only, never titles or names.
+        context.merge(summary.scanDiagnostics.logContext) { current, _ in current }
         AppLogger.pipeline.info("Call app activity finished", context)
     }
 }

@@ -38,27 +38,43 @@ extension NotchIslandVoiceRowView {
         )
     }
 
-    /// Fills the open, empty name field with the call app's name or the
-    /// calendar 1:1 name, as the review window did: under a saved person's
-    /// label when exactly one saved person has that name, else as typed.
-    /// Still editable; it saves on Done like a typed name. Returns whether
-    /// the field was filled.
+    /// Fills the open, empty name field with the calendar 1:1 name, as the
+    /// review window did: under a saved person's label when exactly one
+    /// saved person has that name, else as typed. Still editable; it saves
+    /// on Done like a typed name. Returns whether the field was filled.
     @discardableResult
-    func prefill(_ name: String, source: Policy.PrefillSource = .calendar) -> Bool {
+    func prefill(_ name: String) -> Bool {
         guard !isRecognized, isEditing, answer == .none, lock == nil,
               nameField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        let label = MeetingInviteeSuggestionPolicy.suggestionLabels(
+        nameField.stringValue = savedLabel(for: name)
+        highlightedRow = nil
+        prefilledUntouched = true
+        rebuild(animated: false)
+        return true
+    }
+
+    /// The call app's hint was tapped: its name goes in the box as if the
+    /// person typed it (replacing what was there), with the keyboard, so
+    /// Return or Done saves it and an edit changes it. Only a tap gets here.
+    func fillFromCallAppHint(_ name: String) {
+        guard isEditing, answer == .none || answer == .rejected, lock == nil else { return }
+        onInteract?()
+        nameField.stringValue = savedLabel(for: name)
+        highlightedRow = nil
+        prefilledUntouched = false
+        rebuild(animated: false)
+        onChange?()
+        focusField()
+    }
+
+    /// A saved person's label when exactly one saved person has `name`.
+    private func savedLabel(for name: String) -> String {
+        MeetingInviteeSuggestionPolicy.suggestionLabels(
             inviteeNames: [name],
             labels: knownPeople.map { $0.label },
             optionsByLabel: knownPeopleByLabel,
             displayName: { $0.displayName }
         ).first ?? name
-        nameField.stringValue = label
-        highlightedRow = nil
-        prefilledUntouched = true
-        prefillSource = source
-        rebuild(animated: false)
-        return true
     }
 
     /// A chip, a suggestion, or Return: name the voice. Picking the
@@ -148,7 +164,6 @@ extension NotchIslandVoiceRowView {
                     suggestions: currentSuggestions,
                     highlighted: highlightedRow,
                     typedIsUntouchedPrefill: prefilledUntouched,
-                    prefillSource: prefillSource,
                     finish: finish
                   ) else { return nil }
             if isRecognized, Self.sameName(pending, entry.currentName) { return nil }

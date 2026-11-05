@@ -1,3 +1,11 @@
+// CallSpeakerReadCompletenessTests.swift
+// Promise: a poll names nobody unless every supported app, window title and
+// meeting candidate was examined. Candidates never read (deadline, caps,
+// failed title or window-list reads) withhold the whole poll. A window cut
+// short cannot exclude unseen participants or another call, even before it
+// shows tiles. Complete ambient windows and destroyed elements are ordinary;
+// failed whole-batch reads are unknown. All names and titles are fictional.
+
 import Foundation
 import ApplicationServices
 
@@ -6,6 +14,7 @@ private struct ScanFixtureWindow {
     var title: String?
     var tree = CallSpeakerAXNode()
     var truncated = false
+    var truncationIssue: CallSpeakerScanIssue = .nodeCap
     var visitedNodes = 1
     var titleCost: TimeInterval = 0
     var treeCost: TimeInterval = 0
@@ -36,7 +45,7 @@ private final class ScanFixture {
             now: { self.time },
             read: { app, deadline in
                 self.visitedApps.append(app.id)
-                guard let windows = app.windows else { return .incomplete }
+                guard let windows = app.windows else { return .incomplete(.ax(.cannotComplete)) }
                 return CallSpeakerReadPlan.scanWindows(
                     windows,
                     host: app.host,
@@ -45,7 +54,7 @@ private final class ScanFixture {
                     title: { window, _ in
                         self.visitedTitles.append(window.id)
                         self.time.addTimeInterval(window.titleCost)
-                        return window.title
+                        return window.title.map { .text($0) } ?? .failed(.ax(.cannotComplete))
                     },
                     slackHoldsMicrophone: {
                         self.slackMicChecks += 1
@@ -56,10 +65,13 @@ private final class ScanFixture {
                         self.visitedTrees.append(window.id)
                         self.initialNodeCounts.append(initialNodes)
                         self.time.addTimeInterval(window.treeCost)
+                        var diagnostics = CallSpeakerScanDiagnostics()
+                        if window.truncated { diagnostics.truncations[window.truncationIssue] = 1 }
                         return CallSpeakerReadPlan.TreeRead(
                             tree: window.tree,
                             truncated: window.truncated,
-                            visitedNodes: initialNodes + window.visitedNodes
+                            visitedNodes: initialNodes + window.visitedNodes,
+                            diagnostics: diagnostics
                         )
                     }
                 )
@@ -74,14 +86,44 @@ private func zoomScanWindow(_ id: Int, name: String = "Ana Ruiz") -> ScanFixture
     ]))
 }
 
-private func slackScanWindow(_ id: Int) -> ScanFixtureWindow {
-    ScanFixtureWindow(id: id, title: "Huddle in #planning - Slack", tree: CallSpeakerAXNode(
+private func slackScanWindow(_ id: Int, title: String = "Huddle in #planning - Slack") -> ScanFixtureWindow {
+    ScanFixtureWindow(id: id, title: title, tree: CallSpeakerAXNode(
         domClassList: ["p-huddle_peer_tile"],
         children: [
             .init(description: "View Ana Ruiz's profile"),
             .init(domClassList: ["p-huddle_peer_tile__overlay--active_speaker"]),
         ]
     ))
+}
+
+/// A Slack window with channel content but no huddle tiles.
+private func slackMainWindow(_ id: Int, visitedNodes: Int, truncated: Bool) -> ScanFixtureWindow {
+    ScanFixtureWindow(
+        id: id,
+        title: "general (Channel) - Acme - Slack",
+        tree: CallSpeakerAXNode(role: "AXWindow", children: [.init(role: "AXStaticText", value: "Channel messages")]),
+        truncated: truncated,
+        visitedNodes: visitedNodes
+    )
+}
+
+private func teamsTile(_ name: String, speaking: Bool) -> CallSpeakerAXNode {
+    CallSpeakerAXNode(
+        role: "AXMenuItem",
+        description: "\(name), unmuted More options",
+        children: speaking ? [CallSpeakerAXNode(role: "AXGroup", domClassList: ["vdi-frame-occlusion"])] : []
+    )
+}
+
+private func axErrorPlaceholder(_ error: AXError) -> AnyObject {
+    var error = error
+    return AXValueCreate(.axError, &error)!
+}
+
+/// A batch-read result shaped like the reader's attribute list, with one
+/// placeholder at `index`.
+private func batchValues(placeholder: AXError, at index: Int, count: Int = 10) -> [AnyObject] {
+    (0..<count).map { $0 == index ? axErrorPlaceholder(placeholder) : ("AXGroup" as NSString) }
 }
 
 private func assertIncompleteScan(_ read: CallSpeakerReadResult) {
@@ -93,31 +135,88 @@ private func assertIncompleteScan(_ read: CallSpeakerReadResult) {
     assertTrue(snapshot.status.isWithheld)
 }
 
+private func assertNamesAna(_ read: CallSpeakerReadResult, _ message: String) {
+    assertEqual(read.completeness, .complete, message)
+    let snapshot = CallSpeakerSnapshotBuilder.build(read)
+    assertEqual(snapshot.status, .speakingIndicator, message)
+    assertEqual(snapshot.speaking, ["Ana Ruiz"], message)
+}
+
 func testCallSpeakerReadCompleteness() {
     runSuite("CallSpeakerReadCompleteness: native AX absence and failures remain distinct") {
-        for status in [AXError.success, .noValue, .attributeUnsupported] {
-            assertEqual(CallSpeakerAXTreeReader.titleValue(status: status, value: nil), "")
+        for status in [AXError.success, .noValue, .attributeUnsupported, .invalidUIElement] {
+            assertEqual(CallSpeakerAXTreeReader.titleValue(status: status, value: nil), .text(""),
+                        "no title, or a window closed mid-scan, is an untitled window")
         }
-        assertEqual(CallSpeakerAXTreeReader.titleValue(status: .success, value: "" as NSString), "")
-        assertEqual(CallSpeakerAXTreeReader.titleValue(status: .success, value: "Settings" as NSString), "Settings")
-        for status in [AXError.cannotComplete, .invalidUIElement, .failure] {
-            assertEqual(CallSpeakerAXTreeReader.titleValue(status: status, value: nil), nil)
+        assertEqual(CallSpeakerAXTreeReader.titleValue(status: .success, value: "" as NSString), .text(""))
+        assertEqual(CallSpeakerAXTreeReader.titleValue(status: .success, value: "Settings" as NSString), .text("Settings"))
+        for status in [AXError.cannotComplete, .failure] {
+            assertEqual(CallSpeakerAXTreeReader.titleValue(status: status, value: nil), .failed(.ax(status)))
         }
-        assertEqual(CallSpeakerAXTreeReader.titleValue(status: .success, value: NSNumber(value: 1)), nil)
+        assertEqual(CallSpeakerAXTreeReader.titleValue(status: .success, value: NSNumber(value: 1)), .failed(.unexpectedValue))
+    }
 
-        for status in [AXError.noValue, .attributeUnsupported, .cannotComplete, .invalidUIElement] {
-            var error = status
-            guard let boxed = AXValueCreate(.axError, &error) else {
-                assertTrue(false, "the local AX error fixture must be constructible")
+    runSuite("CallSpeakerReadCompleteness: a windowless app is an empty, complete read") {
+        for (status, value) in [(AXError.noValue, nil), (.success, nil), (.success, [] as NSArray)] as [(AXError, AnyObject?)] {
+            guard case .windows(let windows) = CallSpeakerAXTreeReader.windowListValue(status: status, value: value) else {
+                assertTrue(false, "a windowless app answering \(status.rawValue) has no windows to read")
                 continue
             }
-            assertEqual(
-                CallSpeakerAXTreeReader.hasFailedAttributes(["AXGroup" as NSString, boxed]),
-                status != .noValue && status != .attributeUnsupported,
-                "a batch placeholder must not hide a failed read"
-            )
+            assertTrue(windows.isEmpty)
         }
-        assertFalse(CallSpeakerAXTreeReader.hasFailedAttributes(["AXGroup" as NSString]))
+        for status in [AXError.cannotComplete, .failure, .invalidUIElement] {
+            guard case .failed(let issue) = CallSpeakerAXTreeReader.windowListValue(status: status, value: nil) else {
+                assertTrue(false, "a failed window list (\(status.rawValue)) leaves the app unexamined")
+                continue
+            }
+            assertEqual(issue, .ax(status))
+        }
+
+        let scan = ScanFixture()
+        let read = scan.read([
+            ScanFixtureApp(id: 1, host: .zoom, windows: [zoomScanWindow(1)]),
+            ScanFixtureApp(id: 2, host: .zoom, windows: []),
+        ])
+        assertNamesAna(read, "a windowless second app doesn't withhold the call")
+    }
+
+    runSuite("CallSpeakerReadCompleteness: individual missing custom attributes and destroyed elements stay ordinary") {
+        let domIdentifier = 7, domClassList = 8, role = 0, children = 9
+        for index in [domIdentifier, domClassList] {
+            for error in [AXError.failure, .illegalArgument, .noValue, .attributeUnsupported] {
+                assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: error, at: index)), .usable,
+                            "a native app's \(error.rawValue) for a web-only attribute means it is absent")
+            }
+        }
+        for index in [role, domIdentifier, children] {
+            assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: .cannotComplete, at: index)),
+                        .truncate(.ax(.cannotComplete)), "a timeout on any attribute leaves part of the window unread")
+            assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: .invalidUIElement, at: index)),
+                        .skip(.ax(.invalidUIElement)), "an element destroyed mid-walk is skipped, not a cut-short window")
+        }
+        assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: .failure, at: children)),
+                    .truncate(.ax(.failure)), "a failed children read hides a subtree")
+        for error in [AXError.noValue, .attributeUnsupported] {
+            assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: error, at: role)), .usable)
+        }
+        assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(["AXGroup" as NSString]), .usable)
+    }
+
+    runSuite("CallSpeakerReadCompleteness: failed whole batches cannot hide a participant subtree") {
+        for error in [AXError.cannotComplete, .failure, .illegalArgument, .notImplemented, .apiDisabled] {
+            assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: error, values: nil), .truncate(.ax(error)),
+                        "a whole-call error does not establish an absent or destroyed element")
+        }
+        assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .invalidUIElement, values: nil),
+                    .skip(.ax(.invalidUIElement)), "a documented invalid element can be skipped")
+        for values in [nil, [], ["AXGroup" as NSString]] as [[AnyObject]?] {
+            assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .success, values: values),
+                        .truncate(.unexpectedValue), "a successful but malformed batch is still unread")
+        }
+        assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .success, values: batchValues(placeholder: .attributeUnsupported, at: 7)),
+                    .usable, "unsupported individual attributes in a successful full batch remain ordinary")
+        assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .success, values: batchValues(placeholder: .failure, at: 9)),
+                    .truncate(.ax(.failure)), "standard per-attribute and whole-batch failures both withhold")
     }
 
     runSuite("CallSpeakerReadCompleteness: a deadline cannot hide an unvisited supported app") {
@@ -131,6 +230,7 @@ func testCallSpeakerReadCompleteness() {
         assertEqual(scan.visitedApps, [1], "the deadline keeps the second app unvisited")
         assertEqual(read.windows.count, 1, "the first call alone would look nameable")
         assertIncompleteScan(read)
+        assertEqual(read.diagnostics.incompleteness, [.deadline: 1], "the summary says why the scan stopped")
 
         let beforeFirst = ScanFixture()
         assertIncompleteScan(beforeFirst.read([ScanFixtureApp(id: 1, host: .zoom, windows: [])], budget: 0))
@@ -146,20 +246,28 @@ func testCallSpeakerReadCompleteness() {
             ])
             assertEqual(scan.visitedApps, [1, 2])
             assertIncompleteScan(read)
+            assertEqual(read.diagnostics.incompleteness, [.ax(.cannotComplete): 1], "the AX code behind it is counted")
         }
     }
 
-    runSuite("CallSpeakerReadCompleteness: window caps never turn a prefix into the only call") {
+    runSuite("CallSpeakerReadCompleteness: window caps count meeting candidates, never a prefix of them") {
         for (host, limit) in [(CallSpeakerApp.Host.zoom, 8), (.slack, 32)] {
             let scan = ScanFixture()
-            let windows = (0...limit).map { id in
-                id == 0 ? (host == .slack ? slackScanWindow(id) : zoomScanWindow(id))
-                    : ScanFixtureWindow(id: id, title: host == .slack ? "Planning - Slack" : "Settings")
-            }
+            let windows = (0...limit).map { id in host == .slack ? slackScanWindow(id) : zoomScanWindow(id) }
             assertIncompleteScan(scan.read([ScanFixtureApp(id: 1, host: host, windows: windows)]))
-            assertTrue(scan.visitedTitles.isEmpty && scan.visitedTrees.isEmpty,
-                       "a known oversized list cannot justify reading partial candidate trees")
+            assertTrue(scan.visitedTrees.isEmpty, "more candidates than a poll walks can't justify reading some of them")
         }
+
+        let manyWindows = ScanFixture()
+        let windows = [zoomScanWindow(0)] + (1...12).map { ScanFixtureWindow(id: $0, title: "Settings") }
+        assertNamesAna(manyWindows.read([ScanFixtureApp(id: 1, host: .zoom, windows: windows)]),
+                       "windows that aren't meetings don't count against the candidate cap")
+        assertEqual(manyWindows.visitedTrees, [0])
+
+        let tooManyTitles = ScanFixture()
+        let huge = [zoomScanWindow(0)] + (1...CallSpeakerReadPlan.maxTitleReadsPerApp).map { ScanFixtureWindow(id: $0, title: "Settings") }
+        assertIncompleteScan(tooManyTitles.read([ScanFixtureApp(id: 1, host: .zoom, windows: huge)]))
+        assertTrue(tooManyTitles.visitedTitles.isEmpty, "a list too long to read every title of is not examined at all")
     }
 
     runSuite("CallSpeakerReadCompleteness: title and candidate deadlines preserve incompleteness") {
@@ -179,28 +287,113 @@ func testCallSpeakerReadCompleteness() {
         assertIncompleteScan(read)
     }
 
-    runSuite("CallSpeakerReadCompleteness: Slack shared node exhaustion cannot hide another huddle") {
-        let scan = ScanFixture()
-        var first = slackScanWindow(1)
-        first.visitedNodes = 4000
-        let read = scan.read([ScanFixtureApp(id: 1, host: .slack, windows: [first, slackScanWindow(2)])])
-        assertEqual(scan.visitedTrees, [1])
-        assertIncompleteScan(read)
+    runSuite("CallSpeakerReadCompleteness: a cut-short meeting candidate cannot exclude another call") {
+        var teams = ScanFixtureWindow(id: 1, title: "Weekly sync | Microsoft Teams",
+                                      tree: CallSpeakerAXNode(role: "AXWindow"))
+        teams.truncated = true
+        for issue in [CallSpeakerScanIssue.nodeCap, .deadline, .ax(.cannotComplete)] {
+            teams.truncationIssue = issue
+            let apps = [
+                ScanFixtureApp(id: 1, host: .teamsDesktop, windows: [teams]),
+                ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
+            ]
+            for orderedApps in [apps, Array(apps.reversed())] {
+                let scan = ScanFixture()
+                let read = scan.read(orderedApps)
+                assertIncompleteScan(read)
+                assertEqual(read.diagnostics.truncations, [issue: 1], "the actual cutoff reason survives")
+            }
+        }
 
-        let complete = ScanFixture()
-        let single = complete.read([ScanFixtureApp(id: 1, host: .slack, windows: [first])])
-        assertEqual(single.completeness, .complete, "exactly consuming the budget is fine when no candidate remains")
-        assertEqual(CallSpeakerSnapshotBuilder.build(single).status, .speakingIndicator)
+        // The same cut window showing a tile is a second call that can't be read.
+        let tiles = ScanFixture()
+        var teamsWithTiles = teams
+        teamsWithTiles.tree = CallSpeakerAXNode(role: "AXWindow", children: [teamsTile("Ben Okafor", speaking: true)])
+        let withTiles = tiles.read([
+            ScanFixtureApp(id: 1, host: .teamsDesktop, windows: [teamsWithTiles]),
+            ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
+        ])
+        let snapshot = CallSpeakerSnapshotBuilder.build(withTiles)
+        assertTrue(snapshot.status.isWithheld, "a cut-short window with tiles withholds the poll")
+        assertTrue(snapshot.speaking.isEmpty)
+
+        let alone = ScanFixture()
+        var cutZoom = zoomScanWindow(1)
+        cutZoom.truncated = true
+        let cutRead = alone.read([ScanFixtureApp(id: 1, host: .zoom, windows: [cutZoom])])
+        assertEqual(CallSpeakerSnapshotBuilder.build(cutRead).status, .incompleteScan,
+                    "the call's own window cut short may have missed a speaking tile")
     }
 
-    runSuite("CallSpeakerReadCompleteness: a truncated tree with no tiles can conceal a second call") {
+    runSuite("CallSpeakerReadCompleteness: a complete tile-free candidate doesn't hide the complete call") {
         let scan = ScanFixture()
-        var hiddenCall = ScanFixtureWindow(id: 2, title: "Huddle in #other - Slack")
-        hiddenCall.truncated = true
-        let read = scan.read([ScanFixtureApp(id: 1, host: .slack, windows: [slackScanWindow(1), hiddenCall])])
+        let read = scan.read([
+            ScanFixtureApp(id: 1, host: .teamsDesktop, windows: [
+                ScanFixtureWindow(id: 1, title: "Weekly sync | Microsoft Teams", tree: CallSpeakerAXNode(role: "AXWindow")),
+            ]),
+            ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
+        ])
         assertEqual(scan.visitedTrees, [1, 2])
-        assertEqual(scan.initialNodeCounts, [0, 1], "Slack shares the consumed node count")
+        assertNamesAna(read, "a completely examined tile-free window doesn't withhold Zoom")
+    }
+
+    runSuite("CallSpeakerReadCompleteness: a Teams chat beside a Zoom call never withholds the call") {
+        for host in [CallSpeakerApp.Host.teamsDesktop, .browser] {
+            let scan = ScanFixture()
+            var chat = ScanFixtureWindow(id: 1, title: "Chat | General | Microsoft Teams" + (host == .browser ? " - Microsoft Edge" : ""),
+                                         tree: CallSpeakerAXNode(role: "AXWindow"))
+            chat.truncated = true
+            chat.treeCost = 1.3
+            let read = scan.read([
+                ScanFixtureApp(id: 1, host: host, windows: [chat]),
+                ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
+            ])
+            assertEqual(scan.visitedTrees, [2], "the chat page isn't walked, so it can't eat the call's time")
+            assertNamesAna(read, "Zoom names survive a Teams chat open in \(host)")
+        }
+    }
+
+    runSuite("CallSpeakerReadCompleteness: a Slack huddle is read beside a large main window") {
+        let scan = ScanFixture()
+        scan.slackHoldsMicrophone = true
+        let main = slackMainWindow(1, visitedNodes: 4000, truncated: true)
+        let read = scan.read([ScanFixtureApp(id: 1, host: .slack, windows: [main, slackScanWindow(2)])])
+        assertEqual(scan.visitedTrees, [2], "the huddle is read first and is the one call; the main window isn't walked")
+        assertNamesAna(read, "huddle names survive a big Slack main window")
+
+        // A matched main window cut short cannot exclude unseen huddle tiles.
+        let late = ScanFixture()
+        late.slackHoldsMicrophone = true
+        let afterMain = late.read([ScanFixtureApp(id: 1, host: .slack, windows: [
+            slackMainWindow(1, visitedNodes: 1500, truncated: true),
+            slackScanWindow(2, title: "Acme - Slack"),
+            slackScanWindow(3, title: "Design - Slack"),
+        ])])
+        assertEqual(late.visitedTrees, [1], "the incomplete candidate ends the scan")
+        assertEqual(late.initialNodeCounts, [0])
+        assertIncompleteScan(afterMain)
+    }
+
+    runSuite("CallSpeakerReadCompleteness: Slack's spent node budget cannot hide an unread huddle") {
+        let scan = ScanFixture()
+        scan.slackHoldsMicrophone = true
+        let read = scan.read([
+            ScanFixtureApp(id: 1, host: .zoom, windows: [zoomScanWindow(1)]),
+            ScanFixtureApp(id: 2, host: .slack, windows: [
+                slackMainWindow(1, visitedNodes: 4000, truncated: true),
+                slackScanWindow(2, title: "Acme - Slack"),
+            ]),
+        ])
+        assertEqual(scan.visitedTrees, [1, 1], "Zoom's window, then only Slack's main window")
         assertIncompleteScan(read)
+        assertEqual(read.diagnostics.incompleteness, [.nodeCap: 1])
+
+        let complete = ScanFixture()
+        var exact = slackScanWindow(1)
+        exact.visitedNodes = 4000
+        let single = complete.read([ScanFixtureApp(id: 1, host: .slack, windows: [exact])])
+        assertEqual(single.completeness, .complete, "exactly consuming the budget is fine when no candidate remains")
+        assertEqual(CallSpeakerSnapshotBuilder.build(single).status, .speakingIndicator)
     }
 
     runSuite("CallSpeakerReadCompleteness: complete empty and untitled scans stay ordinary") {
@@ -235,5 +428,20 @@ func testCallSpeakerReadCompleteness() {
         assertEqual(active.completeness, .complete)
         assertEqual(allowed.preparations, 1)
         assertEqual(CallSpeakerSnapshotBuilder.build(active).status, .speakingIndicator)
+    }
+
+    runSuite("CallSpeakerReadCompleteness: the summary log carries codes and counts only") {
+        var diagnostics = CallSpeakerScanDiagnostics()
+        diagnostics.truncations[.ax(.cannotComplete)] = 2
+        diagnostics.incompleteness[.deadline] = 1
+        diagnostics.skippedElements[.ax(.invalidUIElement)] = 3
+        assertEqual(diagnostics.logContext, [
+            "truncated_ax_25204": "2",
+            "incomplete_deadline": "1",
+            "skipped_ax_25202": "3",
+        ])
+        var total = diagnostics
+        total.merge(diagnostics)
+        assertEqual(total.truncations[.ax(.cannotComplete)], 4)
     }
 }

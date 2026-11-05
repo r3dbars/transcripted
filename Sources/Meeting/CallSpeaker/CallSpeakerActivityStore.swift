@@ -80,7 +80,7 @@ struct CallSpeakerActivityStore: Sendable {
     }
 
     /// The pipeline's hand-out: the activity for a recording, or nil (and the
-    /// activity dropped) when "Name speakers from the call app" is off now.
+    /// activity dropped) when "Use call app names as hints" is off now.
     /// Turning the setting off after a meeting, before its transcription
     /// runs, keeps call-app names out of that meeting too.
     mutating func take(recordingStartedAt: Date?, enabled: Bool) -> CallSpeakerActivity? {

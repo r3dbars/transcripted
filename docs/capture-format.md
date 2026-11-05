@@ -168,24 +168,52 @@ speakers:
     name: "Justin"
     confidence: high      # high | medium | manual | unknown
     source: db_scan
-    name_source: call_app # optional; see below
+  - id: "1"
+    channel: system
+    db_id: "2222…"
+    name: "Speaker 1"
+    confidence: unknown
+    source: db_pending
+    call_app_name: "Maya Lindqvist"   # optional; see below
+    call_app_agreement: no_voiceprint_guess  # agrees | conflicts | no_voiceprint_guess
+    call_app_seconds: 42.5
+    call_app_share: 0.92
+    call_app_coverage: 0.61
 ```
 
-`name_source` is optional and only appears on a row whose name is shown but
-not confirmed. Today the one value is `call_app`: the call app (Zoom, Meet,
-Teams, Slack) showed this person as the one talking while this voice spoke, so
-the body and breakdown use that name, but the voice is still waiting for review
-(`source: db_pending`, `confidence: medium`). Deferring the review keeps the
-name and the key; naming or confirming the voice through review (or Settings ›
-Speakers) rewrites the row with `source: user_manual` and drops `name_source`,
-and renaming or merging that person in Settings › Speakers drops it from every
-row it renames. A call-app name is only ever shown on a voice that has a review
-row, and never when another call-audio voice in the same meeting shows the same
-name. Readers that don't know the key can ignore it; treat the name as a hint,
-not an identity, while it is present. Call-app attribution requires timed
-active-speaker evidence overlapping that voice's speech. A roster alone never
-assigns a name, even with one visible participant and one diarized voice: the
-visible tiles do not prove a complete roster or reliable self identification.
+The `call_app_*` keys are optional context on a `channel: system` row. They
+never change `name`, `confidence`, `source` or the body labels: a speaker's
+name comes only from the voiceprint or from the person naming the voice.
+While a meeting records, Transcripted reads who the call app (Zoom, Meet,
+Teams, Slack huddles) shows as the one talking; after the meeting, timed
+active-speaker evidence that overlaps a voice's speech is saved next to it:
+
+- `call_app_name`: the name the call app showed while this voice talked.
+- `call_app_agreement`: `agrees` when it's the same person as the
+  voiceprint's name or suggestion (compared trimmed, case-insensitively,
+  ignoring a ` (likely)` hedge), `conflicts` when the voiceprint says
+  someone else (both are kept; `name` stays the voiceprint's), and
+  `no_voiceprint_guess` when the voiceprint had no name for the voice.
+- `call_app_seconds`: seconds of this voice's speech while the call app
+  showed only that name speaking. `call_app_share`: that name's share of all
+  single-speaker evidence overlapping the voice (0–1). `call_app_coverage`:
+  how much of the voice's speech any single-speaker evidence covered (0–1).
+- `call_app_withheld`: written instead of a name when the call app showed
+  something but not enough to point at one person (`too_little_evidence`,
+  `names_disagree`, `low_coverage`).
+
+Treat them as a second opinion. Two voices can carry the same
+`call_app_name` (the diarizer may split one person). The keys stay when the
+voice is later named or the review is put off. A roster alone never gives a
+name: visible tiles do not prove a complete roster or reliable self
+identification.
+
+`name_source` (legacy, read-only): files saved before 2026-11-04 may have
+`name_source: call_app` on a row whose `name` (and body labels) came from
+the call app while the voice waited for review (`source: db_pending`). Treat
+that name as a hint, not an identity. Naming or confirming the voice, or
+renaming or merging that person in Settings › Speakers, rewrites the row
+with the real name and drops `name_source`. New files never write it.
 
 Obsidian metadata (legacy, read-only): older transcripts written while the
 retired `enableObsidianFormat` flag existed may carry nested `tags:`,

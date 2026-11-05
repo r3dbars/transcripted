@@ -501,9 +501,9 @@ extension TranscriptSaver {
 
     /// Preserve a deferred speaker review without applying a name.
     /// This keeps transcript labels as saved, but refreshes frontmatter db_id/source
-    /// so Settings > People can safely name the right local profile later. A row
-    /// shown under its call-app name (`callAppSuggestedName`) keeps that name and
-    /// `name_source: call_app`; every other row goes back to "Speaker N".
+    /// so Settings > People can safely name the right local profile later. Every
+    /// row goes back to "Speaker N" (a call-app name is never a label) and keeps
+    /// its `call_app_*` evidence lines.
     @discardableResult
     static func markSpeakerReviewDeferred(
         transcriptURL: URL,
@@ -526,9 +526,8 @@ extension TranscriptSaver {
                     diarizerSpeakerId: entry.diarizerSpeakerId,
                     channel: entry.channel,
                     persistentSpeakerId: speakerId,
-                    name: entry.callAppSuggestedName ?? "Speaker \(entry.diarizerSpeakerId)",
-                    source: "db_pending",
-                    nameSource: entry.callAppSuggestedName == nil ? nil : SpeakerMapping.ShownNameSource.callApp.rawValue
+                    name: "Speaker \(entry.diarizerSpeakerId)",
+                    source: "db_pending"
                 )
             }
 

@@ -95,8 +95,12 @@ extension NotchIslandVoiceRowView {
     }
 
     func refreshAccessibility() {
-        let hint = Policy.rowHint(rowState, progress: progress, prefilledUntouched: prefilledUntouched, prefillSource: prefillSource)
-        setAccessibilityLabel(Policy.rowAccessibilityLabel(rowState, name: shownName, hint: hint?.text, corrected: isRecognized))
+        let hint = Policy.rowHint(rowState, progress: progress, prefilledUntouched: prefilledUntouched)
+        let callHint = callAppHint?.text
+        let hints = [hint?.text, callHint].compactMap { $0 }.filter { !$0.isEmpty }
+        setAccessibilityLabel(Policy.rowAccessibilityLabel(
+            rowState, name: shownName, hint: hints.isEmpty ? nil : hints.joined(separator: ". "), corrected: isRecognized
+        ))
         setAccessibilityHelp(printExplanation)
     }
 
@@ -120,7 +124,7 @@ extension NotchIslandVoiceRowView {
             titleFieldHolder.widthAnchor.constraint(equalTo: textColumn.widthAnchor).isActive = true
         }
         hintLabel = nil
-        let hint = Policy.rowHint(state, progress: progress, prefilledUntouched: prefilledUntouched, prefillSource: prefillSource)
+        let hint = Policy.rowHint(state, progress: progress, prefilledUntouched: prefilledUntouched)
         if let hint {
             let label = NotchIslandPalette.label(hint.text, font: .systemFont(ofSize: 12, weight: .medium), color: NSColor(white: 1, alpha: 0.45))
             label.lineBreakMode = .byTruncatingTail
@@ -134,6 +138,9 @@ extension NotchIslandVoiceRowView {
             }
         }
         shownHint = hint?.text
+        if let callHint = callAppHint {
+            textColumn.addArrangedSubview(callAppHintView(callHint))
+        }
         quoteLabel = nil
         if showsQuote, let quote = Policy.quoteLine(entry.sampleText) {
             let label = NotchIslandPalette.label(quote, font: .systemFont(ofSize: 12), color: NSColor(white: 1, alpha: 0.55))
@@ -162,6 +169,31 @@ extension NotchIslandVoiceRowView {
         let line = Policy.quoteLine(text)
         quoteLabel.stringValue = line ?? ""
         quoteLabel.isHidden = line == nil
+    }
+
+    /// The call app's name for this voice, if the row has a hint to show
+    /// (`Policy.callAppHint`). Never in the name field unless tapped.
+    var callAppHint: Policy.CallAppHint? {
+        Policy.callAppHint(callAppShownName: entry.callAppShownName, state: rowState, currentName: entry.currentName)
+    }
+
+    /// "Call app showed: Maya" under the title. On a row that asks for a
+    /// name it's a quiet button that puts the name in the box; otherwise
+    /// it's a plain line.
+    private func callAppHintView(_ hint: Policy.CallAppHint) -> NSView {
+        if let name = hint.fillsName {
+            let button = NotchIslandTextButton(title: hint.text, restAlpha: 0.55)
+            button.setAccessibilityHelp("Put \(name) in the name box. Nothing is saved until you save this voice.")
+            button.onPress = { [weak self] in self?.fillFromCallAppHint(name) }
+            // A long name truncates instead of widening the row.
+            button.cell?.lineBreakMode = .byTruncatingTail
+            button.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+            return button
+        }
+        let label = NotchIslandPalette.label(hint.text, font: .systemFont(ofSize: 12, weight: .medium), color: NSColor(white: 1, alpha: 0.45))
+        label.lineBreakMode = .byTruncatingTail
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return label
     }
 
     func updateHintColor() {

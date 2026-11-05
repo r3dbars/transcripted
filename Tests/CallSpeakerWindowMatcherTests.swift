@@ -69,6 +69,23 @@ func testCallSpeakerWindowMatcher() {
             CallSpeakerWindowMatcher.match(title: "Settings", host: .teamsDesktop) == nil,
             "a Teams window that isn't titled as Teams content"
         )
+        let navigationSurfaces = [
+            "Chat | General | Microsoft Teams",
+            "Activity | Microsoft Teams",
+            "Calendar | Calendar | Microsoft Teams",
+            "Teams | Design | Microsoft Teams",
+        ]
+        for title in navigationSurfaces {
+            assertTrue(CallSpeakerWindowMatcher.match(title: title, host: .teamsDesktop) == nil,
+                       "\"\(title)\" is a Teams navigation page, not a meeting the reader walks")
+            assertTrue(CallSpeakerWindowMatcher.match(title: title + " - Google Chrome", host: .browser) == nil,
+                       "\"\(title)\" in a browser tab is not a meeting either")
+        }
+        assertEqual(
+            CallSpeakerWindowMatcher.match(title: "Chat review | Microsoft Teams", host: .teamsDesktop)?.app,
+            .teamsDesktop,
+            "a meeting whose title only starts with a surface word still matches"
+        )
     }
 
     runSuite("CallSpeakerWindowMatcher: Zoom meeting windows and Slack huddles") {

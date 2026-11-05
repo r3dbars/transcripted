@@ -31,9 +31,10 @@ struct SpeakerPendingReviewItem: Identifiable, Sendable {
     var meetingDurationSeconds: Int? = nil
     /// Imported recordings have no calendar slot, so no invitees.
     var isImported = false
-    /// The name the call app showed for this voice (`name_source: call_app`
-    /// in the frontmatter). Only fills the name box; still pending until saved.
-    var callAppSuggestedName: String? = nil
+    /// The name the call app showed for this voice (`call_app_name`, or a
+    /// legacy `name_source: call_app` row's name). A hint the review shows;
+    /// it never fills the name box on its own. Still pending until saved.
+    var callAppShownName: String? = nil
     /// Remote voices this meeting named on its own, for the glowing dots in
     /// the footer of its "Who spoke?" card.
     var recognizedNames: [String] = []
@@ -426,7 +427,7 @@ enum SpeakerReviewQueueScanner {
                 sourceName: speaker.name,
                 meetingDurationSeconds: summary.meetingDuration,
                 isImported: summary.isImported,
-                callAppSuggestedName: speaker.callAppSuggestedName,
+                callAppShownName: speaker.callAppShownName,
                 recognizedNames: summary.recognizedNames
             )
         }
@@ -513,12 +514,21 @@ enum SpeakerReviewQueueScanner {
         let dbId: UUID?
         let name: String
         let source: String
-        /// `name_source`, when the frontmatter says where `name` came from.
+        /// Legacy `name_source`: transcripts saved before call-app names
+        /// became evidence-only showed the call app's name as `name` with
+        /// `name_source: call_app`.
         var nameSource: String? = nil
+        /// `call_app_name`: what the call app showed while this voice talked.
+        var callAppName: String? = nil
 
-        /// `name` when the call app supplied it (`name_source: call_app`).
-        /// Without that key, `name` is the plain transcript label.
-        var callAppSuggestedName: String? {
+        /// The call app's name for this voice, as a review hint:
+        /// `call_app_name`, else a legacy `name_source: call_app` row's
+        /// `name`. Without either, `name` is the plain transcript label.
+        var callAppShownName: String? {
+            if let callAppName {
+                let trimmed = callAppName.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty { return trimmed }
+            }
             guard nameSource == "call_app" else { return nil }
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             return trimmed.isEmpty ? nil : trimmed
@@ -578,7 +588,8 @@ enum SpeakerReviewQueueScanner {
                 dbId: current["db_id"].flatMap(UUID.init(uuidString:)),
                 name: name,
                 source: source,
-                nameSource: current["name_source"]
+                nameSource: current["name_source"],
+                callAppName: current["call_app_name"]
             ))
         }
 
@@ -615,7 +626,11 @@ enum SpeakerReviewQueueScanner {
         let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
         let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalizeFrontmatterValue(parts[1])
+        // Keep the complete quoted scalar for the evidence writer's escapes.
+        // Other keys retain their existing parsing and legacy-name behavior.
+        let value = key == "call_app_name"
+            ? TranscriptFrontmatter.unquoteYAMLScalar(parts[1])
+            : normalizeFrontmatterValue(parts[1])
         current?[key] = value
     }
 
