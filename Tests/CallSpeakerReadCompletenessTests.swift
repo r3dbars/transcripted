@@ -2,10 +2,9 @@
 // Promise: a poll names nobody unless every supported app, window title and
 // meeting candidate was examined. Candidates never read (deadline, caps,
 // failed title or window-list reads) withhold the whole poll. A window cut
-// short that shows no tiles (a Teams chat, a big Slack main window) doesn't
-// count; one that shows tiles still withholds. Windowless apps and elements
-// destroyed mid-walk are ordinary, and only "couldn't finish" AX errors cut a
-// window short. All names and titles are fictional.
+// short cannot exclude unseen participants or another call, even before it
+// shows tiles. Complete ambient windows and destroyed elements are ordinary;
+// failed whole-batch reads are unknown. All names and titles are fictional.
 
 import Foundation
 import ApplicationServices
@@ -15,6 +14,7 @@ private struct ScanFixtureWindow {
     var title: String?
     var tree = CallSpeakerAXNode()
     var truncated = false
+    var truncationIssue: CallSpeakerScanIssue = .nodeCap
     var visitedNodes = 1
     var titleCost: TimeInterval = 0
     var treeCost: TimeInterval = 0
@@ -66,7 +66,7 @@ private final class ScanFixture {
                         self.initialNodeCounts.append(initialNodes)
                         self.time.addTimeInterval(window.treeCost)
                         var diagnostics = CallSpeakerScanDiagnostics()
-                        if window.truncated { diagnostics.truncations[.nodeCap] = 1 }
+                        if window.truncated { diagnostics.truncations[window.truncationIssue] = 1 }
                         return CallSpeakerReadPlan.TreeRead(
                             tree: window.tree,
                             truncated: window.truncated,
@@ -180,7 +180,7 @@ func testCallSpeakerReadCompleteness() {
         assertNamesAna(read, "a windowless second app doesn't withhold the call")
     }
 
-    runSuite("CallSpeakerReadCompleteness: only couldn't-finish errors cut an element read short") {
+    runSuite("CallSpeakerReadCompleteness: individual missing custom attributes and destroyed elements stay ordinary") {
         let domIdentifier = 7, domClassList = 8, role = 0, children = 9
         for index in [domIdentifier, domClassList] {
             for error in [AXError.failure, .illegalArgument, .noValue, .attributeUnsupported] {
@@ -190,16 +190,33 @@ func testCallSpeakerReadCompleteness() {
         }
         for index in [role, domIdentifier, children] {
             assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: .cannotComplete, at: index)),
-                        .truncate(.cannotComplete), "a timeout on any attribute leaves part of the window unread")
+                        .truncate(.ax(.cannotComplete)), "a timeout on any attribute leaves part of the window unread")
             assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: .invalidUIElement, at: index)),
-                        .skip(.invalidUIElement), "an element destroyed mid-walk is skipped, not a cut-short window")
+                        .skip(.ax(.invalidUIElement)), "an element destroyed mid-walk is skipped, not a cut-short window")
         }
         assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: .failure, at: children)),
-                    .truncate(.failure), "a failed children read hides a subtree")
+                    .truncate(.ax(.failure)), "a failed children read hides a subtree")
         for error in [AXError.noValue, .attributeUnsupported] {
             assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(batchValues(placeholder: error, at: role)), .usable)
         }
         assertEqual(CallSpeakerAXTreeReader.elementReadOutcome(["AXGroup" as NSString]), .usable)
+    }
+
+    runSuite("CallSpeakerReadCompleteness: failed whole batches cannot hide a participant subtree") {
+        for error in [AXError.cannotComplete, .failure, .illegalArgument, .notImplemented, .apiDisabled] {
+            assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: error, values: nil), .truncate(.ax(error)),
+                        "a whole-call error does not establish an absent or destroyed element")
+        }
+        assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .invalidUIElement, values: nil),
+                    .skip(.ax(.invalidUIElement)), "a documented invalid element can be skipped")
+        for values in [nil, [], ["AXGroup" as NSString]] as [[AnyObject]?] {
+            assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .success, values: values),
+                        .truncate(.unexpectedValue), "a successful but malformed batch is still unread")
+        }
+        assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .success, values: batchValues(placeholder: .attributeUnsupported, at: 7)),
+                    .usable, "unsupported individual attributes in a successful full batch remain ordinary")
+        assertEqual(CallSpeakerAXTreeReader.batchReadOutcome(status: .success, values: batchValues(placeholder: .failure, at: 9)),
+                    .truncate(.ax(.failure)), "standard per-attribute and whole-batch failures both withhold")
     }
 
     runSuite("CallSpeakerReadCompleteness: a deadline cannot hide an unvisited supported app") {
@@ -270,19 +287,23 @@ func testCallSpeakerReadCompleteness() {
         assertIncompleteScan(read)
     }
 
-    runSuite("CallSpeakerReadCompleteness: a cut-short window with no tiles doesn't count; one with tiles withholds") {
-        // A Teams window cut short before any tile, beside a complete Zoom call.
-        let scan = ScanFixture()
+    runSuite("CallSpeakerReadCompleteness: a cut-short meeting candidate cannot exclude another call") {
         var teams = ScanFixtureWindow(id: 1, title: "Weekly sync | Microsoft Teams",
                                       tree: CallSpeakerAXNode(role: "AXWindow"))
         teams.truncated = true
-        let read = scan.read([
-            ScanFixtureApp(id: 1, host: .teamsDesktop, windows: [teams]),
-            ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
-        ])
-        assertEqual(scan.visitedTrees, [1, 2], "the scan goes on past the cut-short window")
-        assertNamesAna(read, "the Zoom call is still named")
-        assertEqual(read.diagnostics.truncations, [.nodeCap: 1], "the cut is still counted for the summary")
+        for issue in [CallSpeakerScanIssue.nodeCap, .deadline, .ax(.cannotComplete)] {
+            teams.truncationIssue = issue
+            let apps = [
+                ScanFixtureApp(id: 1, host: .teamsDesktop, windows: [teams]),
+                ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
+            ]
+            for orderedApps in [apps, Array(apps.reversed())] {
+                let scan = ScanFixture()
+                let read = scan.read(orderedApps)
+                assertIncompleteScan(read)
+                assertEqual(read.diagnostics.truncations, [issue: 1], "the actual cutoff reason survives")
+            }
+        }
 
         // The same cut window showing a tile is a second call that can't be read.
         let tiles = ScanFixture()
@@ -300,8 +321,20 @@ func testCallSpeakerReadCompleteness() {
         var cutZoom = zoomScanWindow(1)
         cutZoom.truncated = true
         let cutRead = alone.read([ScanFixtureApp(id: 1, host: .zoom, windows: [cutZoom])])
-        assertEqual(CallSpeakerSnapshotBuilder.build(cutRead).status, .truncated,
+        assertEqual(CallSpeakerSnapshotBuilder.build(cutRead).status, .incompleteScan,
                     "the call's own window cut short may have missed a speaking tile")
+    }
+
+    runSuite("CallSpeakerReadCompleteness: a complete tile-free candidate doesn't hide the complete call") {
+        let scan = ScanFixture()
+        let read = scan.read([
+            ScanFixtureApp(id: 1, host: .teamsDesktop, windows: [
+                ScanFixtureWindow(id: 1, title: "Weekly sync | Microsoft Teams", tree: CallSpeakerAXNode(role: "AXWindow")),
+            ]),
+            ScanFixtureApp(id: 2, host: .zoom, windows: [zoomScanWindow(2)]),
+        ])
+        assertEqual(scan.visitedTrees, [1, 2])
+        assertNamesAna(read, "a completely examined tile-free window doesn't withhold Zoom")
     }
 
     runSuite("CallSpeakerReadCompleteness: a Teams chat beside a Zoom call never withholds the call") {
@@ -328,7 +361,7 @@ func testCallSpeakerReadCompleteness() {
         assertEqual(scan.visitedTrees, [2], "the huddle is read first and is the one call; the main window isn't walked")
         assertNamesAna(read, "huddle names survive a big Slack main window")
 
-        // Untitled huddle behind a main window cut short with budget to spare.
+        // A matched main window cut short cannot exclude unseen huddle tiles.
         let late = ScanFixture()
         late.slackHoldsMicrophone = true
         let afterMain = late.read([ScanFixtureApp(id: 1, host: .slack, windows: [
@@ -336,9 +369,9 @@ func testCallSpeakerReadCompleteness() {
             slackScanWindow(2, title: "Acme - Slack"),
             slackScanWindow(3, title: "Design - Slack"),
         ])])
-        assertEqual(late.visitedTrees, [1, 2], "the walk stops at the first full huddle read")
-        assertEqual(late.initialNodeCounts, [0, 1500], "Slack shares the consumed node count")
-        assertNamesAna(afterMain, "a cut-short Slack window without tiles doesn't withhold the huddle")
+        assertEqual(late.visitedTrees, [1], "the incomplete candidate ends the scan")
+        assertEqual(late.initialNodeCounts, [0])
+        assertIncompleteScan(afterMain)
     }
 
     runSuite("CallSpeakerReadCompleteness: Slack's spent node budget cannot hide an unread huddle") {
