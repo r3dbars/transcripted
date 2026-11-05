@@ -136,7 +136,7 @@ class StagedUpdateTests(unittest.TestCase):
             file.chmod(0o755)
             self.assertNotEqual(original,M['tree_digest'](root))
             file.chmod(0o644)
-            empty=root/'empty'; empty.mkdir()
+            empty=root/'empty'; empty.mkdir(); empty.chmod(0o755)
             added=M['tree_digest'](root)
             self.assertNotEqual(original,added)
             empty.chmod(0o700)
@@ -176,6 +176,81 @@ class StagedUpdateTests(unittest.TestCase):
         for status,out,err in [(2,'','failure'),(0,'unterminated',''),(1,'unexpected','')]:
             with self.assertRaises(RuntimeError):
                 M['launch_value']('KEY',lambda key:subprocess.CompletedProcess([],status,out,err))
+
+    def test_preference_presence_reports_all_three_strict_conditions_without_values(self):
+        with tempfile.TemporaryDirectory() as name:
+            home=Path(name); standard=home/'Library/Preferences'; by_host=standard/'ByHost'
+            by_host.mkdir(parents=True)
+            (standard/(M['BUNDLE_ID']+'.plist')).write_bytes(b'private preference values')
+            (by_host/(M['BUNDLE_ID']+'.controlled-host.plist')).write_bytes(b'private host values')
+            state=M['product_preferences_state'](home,lambda *args:M['BUNDLE_ID'])
+            self.assertEqual(state,{'domain_listed':True,'standard_plist_present':True,'by_host_plist_present':True})
+            self.assertNotIn('private',json.dumps(state))
+
+    class Clock:
+        def __init__(self): self.now=0
+        def read(self): return self.now
+        def pause(self,seconds): self.now+=seconds
+
+    def test_preference_cleanup_waits_owned_process_exit_then_deletes_exactly_once(self):
+        clock=self.Clock(); events=[]; proof={}
+        present={'domain_listed':True,'standard_plist_present':True,'by_host_plist_present':False}
+        absent=dict.fromkeys(present,False)
+        states=iter([present,present,{**present,'domain_listed':False},absent])
+        def alive(pid):
+            self.assertEqual(pid,42)
+            events.append(('alive',clock.now))
+            return clock.now < 1
+        def command(*args):
+            self.assertGreaterEqual(clock.now,1)
+            events.append(('delete',args))
+        M['restore_product_preferences'](Path('/unused'),{42},proof,command,lambda:next(states),
+                                          alive,clock.read,clock.pause)
+        self.assertEqual(sum(e[0]=='delete' for e in events),1)
+        self.assertEqual(proof['delete_commands'],1)
+        self.assertEqual(proof['owned_pid_count'],1)
+        self.assertTrue(proof['owned_pids_exited'])
+        self.assertTrue(proof['absence_restored'])
+        self.assertEqual(proof['observations'],3)
+        self.assertEqual(proof['after_delete'],absent)
+
+    def test_live_owned_process_blocks_preference_deletion(self):
+        clock=self.Clock(); proof={}; calls=[]
+        with self.assertRaises(RuntimeError):
+            M['restore_product_preferences'](Path('/unused'),{42},proof,lambda *args:calls.append(args),
+                lambda:self.fail('preference reads must wait for process exit'),
+                lambda pid:True,clock.read,clock.pause)
+        self.assertEqual(calls,[])
+        self.assertEqual(proof['delete_commands'],0)
+        self.assertFalse(proof['owned_pids_exited'])
+
+    def test_each_permanent_preference_residue_fails_without_repeating_delete(self):
+        for residue in ['domain_listed','standard_plist_present','by_host_plist_present']:
+            with self.subTest(residue=residue):
+                clock=self.Clock(); proof={}; calls=[]
+                state={k:k==residue for k in ['domain_listed','standard_plist_present','by_host_plist_present']}
+                with self.assertRaises(RuntimeError):
+                    M['restore_product_preferences'](Path('/unused'),{42},proof,lambda *args:calls.append(args),
+                        lambda:dict(state),lambda pid:False,clock.read,clock.pause)
+                self.assertEqual(calls,[('defaults','delete',M['BUNDLE_ID'])])
+                self.assertEqual(proof['delete_commands'],1)
+                self.assertFalse(proof['absence_restored'])
+                self.assertEqual(proof['after_delete'],state)
+
+    def test_delete_command_failure_stops_without_convergence_or_second_delete(self):
+        clock=self.Clock(); proof={}; calls=[]; reads=[]
+        def command(*args):
+            calls.append(args)
+            raise RuntimeError('controlled deletion failure')
+        def read():
+            reads.append(True)
+            return {'domain_listed':True,'standard_plist_present':True,'by_host_plist_present':False}
+        with self.assertRaises(RuntimeError):
+            M['restore_product_preferences'](Path('/unused'),{42},proof,command,read,
+                lambda pid:False,clock.read,clock.pause)
+        self.assertEqual(calls,[('defaults','delete',M['BUNDLE_ID'])])
+        self.assertEqual(proof['delete_commands'],1)
+        self.assertEqual(len(reads),1)
 
     def test_only_exact_final_rc_metadata_is_accepted(self):
         good={'id':13394641882,'expired':False,'name':'Transcripted-1.1.76-release-candidate',

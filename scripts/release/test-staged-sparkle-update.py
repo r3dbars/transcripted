@@ -279,11 +279,65 @@ def fresh_account(home):
     require(not any(Path(p).exists() for p in roots), 'Hosted account contains alternate product state or models')
 
 
+def product_preferences_state(home, query=run):
+    # Bounded presence only: never serialize preference keys, values or paths.
+    domains = {s.strip() for s in query('defaults', 'domains').split(',')}
+    return {'domain_listed': BUNDLE_ID in domains,
+            'standard_plist_present': (home/'Library/Preferences'/f'{BUNDLE_ID}.plist').exists(),
+            'by_host_plist_present': bool(list((home/'Library/Preferences/ByHost').glob(BUNDLE_ID+'.*.plist')))}
+
+
 def product_preferences_absent(home):
-    domains = {s.strip() for s in run('defaults', 'domains').split(',')}
-    return (BUNDLE_ID not in domains
-            and not (home/'Library/Preferences'/f'{BUNDLE_ID}.plist').exists()
-            and not list((home/'Library/Preferences/ByHost').glob(BUNDLE_ID+'.*.plist')))
+    return not any(product_preferences_state(home).values())
+
+
+def process_alive(pid):
+    try:
+        os.kill(pid, 0)  # Existence check only, never a termination signal.
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        raise HarnessFailure('Cannot establish owned process exit') from None
+    return True
+
+
+def wait_owned_pids_exit(pids, proof, alive=process_alive, clock=time.monotonic,
+                         pause=time.sleep, timeout=90):
+    require(all(type(pid) is int and pid > 0 for pid in pids), 'Invalid owned process identifier')
+    proof['owned_pid_count'] = len(pids)
+    proof['owned_pids_exited'] = False
+    deadline = clock() + timeout
+    while any(alive(pid) for pid in pids):
+        require(clock() < deadline, 'Owned process did not exit before preference cleanup')
+        pause(0.25)
+    proof['owned_pids_exited'] = True
+
+
+def restore_product_preferences(home, pids, proof, command=run, read=None,
+                                alive=process_alive, clock=time.monotonic, pause=time.sleep):
+    # Only called after admission proved the domain and both file classes absent.
+    # NSRunningApplication removal alone is not BSD process-exit proof.
+    read = read or (lambda: product_preferences_state(home))
+    proof['delete_commands'] = 0
+    wait_owned_pids_exit(pids, proof, alive, clock, pause)
+    proof['before_delete'] = read()
+    proof['delete_commands'] = 1
+    command('defaults', 'delete', BUNDLE_ID)
+    # CFPreferences persistence may complete after the command returns. Observe
+    # convergence; never repeat deletion or relax any absence condition.
+    deadline = clock() + 30
+    proof['observations'] = 0
+    while True:
+        state = read()
+        proof['observations'] += 1
+        proof['after_delete'] = state
+        if not any(state.values()):
+            proof['absence_restored'] = True
+            return
+        if clock() >= deadline:
+            proof['absence_restored'] = False
+            raise HarnessFailure('Product preference absence not restored')
+        pause(0.25)
 
 
 def verify_app(app, version):
@@ -395,6 +449,7 @@ def main():
     launch_keys = ['TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT', 'TRANSCRIPTED_DISABLE_FILE_LOGGER', 'TRANSCRIPTED_CONTAINER_DIR']
     prior_env = {}
     owns_preferences = False
+    owned_pids = set()
     try:
         receipt['host'] = {'os': run('sw_vers', '-productVersion').strip(),
                            'build': run('sw_vers', '-buildVersion').strip(),
@@ -467,6 +522,7 @@ def main():
                 before = wait_for(lambda: target_processes() if old_report.exists() else None)
                 require(len(before) == 1, 'Ambiguous old app process')
                 old_pid = before[0]['pid']
+                owned_pids.add(old_pid)
                 entry['old_pid'] = old_pid
                 entry['old_launch'] = launch_status(json.loads(old_report.read_text()))
                 run('launchctl', 'setenv', 'TRANSCRIPTED_LAUNCH_UI_SMOKE_REPORT', new_report)
@@ -481,6 +537,7 @@ def main():
                 after = wait_for(relaunched)
                 require(not any(r['pid'] == old_pid for r in json.loads(run(observer))), 'Original process still running')
                 entry['new_pid'] = after[0]['pid']
+                owned_pids.add(after[0]['pid'])
                 actual_digest = verify_app(target, '1.1.76')
                 require(actual_digest == new_digest, 'Installed app differs from published new app bytes/symlinks')
                 entry['new_launch'] = launch_status(json.loads(new_report.read_text()))
@@ -491,7 +548,8 @@ def main():
                 entry['http_gets'] = list(requests)
                 (case/'requests.json').write_text(json.dumps(requests, indent=2))
                 try:
-                    run(observer, 'terminate', target)
+                    terminating = json.loads(run(observer, 'terminate', target))
+                    owned_pids.update(r['pid'] for r in terminating if r['bundle'] == str(target))
                     wait_for(lambda: not [r for r in json.loads(run(observer)) if r['bundle'] == str(target)])
                 except Exception as error:
                     entry.update(status='FAIL', cleanup_error=bounded_error(error))
@@ -518,8 +576,8 @@ def main():
         if owns_preferences:
             try:
                 require(json.loads(run(observer)) == [], 'App still running before preference restoration')
-                run('defaults', 'delete', BUNDLE_ID)
-                require(product_preferences_absent(Path(user.pw_dir)), 'Product preference absence not restored')
+                receipt['preference_cleanup'] = {}
+                restore_product_preferences(Path(user.pw_dir), owned_pids, receipt['preference_cleanup'])
                 receipt['preferences_restored_to_original_absence'] = True
             except Exception as error:
                 cleanup_errors.append(bounded_error(error))

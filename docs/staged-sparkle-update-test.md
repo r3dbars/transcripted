@@ -79,7 +79,13 @@ product domain of this disposable account. App launches receive an owned
 container plus the AutomatedLaunchEnvironment runtime-report flag; the CLI
 also uses its explicit owned paths. The prior launch environment and original
 preference-domain absence must be restored. Every launched app is terminated
-only by its exact owned path. Cleanup failure makes the receipt fail.
+only by its exact owned path. Before deleting the admitted fresh domain once,
+cleanup independently waits for every recorded owned app PID to exit. It then
+observes the unchanged domain/standard-plist/ByHost-plist absence conditions for
+at most thirty seconds, without repeated deletion. Only presence booleans and
+counts enter the receipt. Any remaining condition still fails cleanup. This
+addresses a lifecycle-proof gap; it does not establish which condition caused
+the preserved first hosted run's cleanup failure.
 
 Only bounded `receipt.json` is uploaded (seven-day retention). Downloaded apps,
 feeds, raw logs, transcript/audio and preference content stay on the disposable
