@@ -626,9 +626,9 @@ enum SpeakerReviewQueueScanner {
         let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
         let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        // Keep the complete quoted scalar for the evidence writer's escapes.
-        // Other keys retain their existing parsing and legacy-name behavior.
-        let value = key == "call_app_name"
+        // Labels and hints share the writer's YAML escaping, including legacy
+        // call-app labels. Decode each complete scalar once; other keys stay as before.
+        let value = key == "name" || key == "call_app_name"
             ? TranscriptFrontmatter.unquoteYAMLScalar(parts[1])
             : normalizeFrontmatterValue(parts[1])
         current?[key] = value
