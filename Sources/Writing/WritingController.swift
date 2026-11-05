@@ -115,6 +115,8 @@ final class WritingController {
     /// Counts runtime stops, so a keyboard step that awaited the install can
     /// tell Writing was turned off meanwhile and not select the keyboard.
     private(set) var runtimeStopCount = 0
+    /// Quit invalidates keyboard work even before a runtime has ever started.
+    var keyboardActionAdmission: Int? { isTerminated ? nil : runtimeStopCount }
     /// What enabling the keyboard did on the last try, if it ran. On macOS
     /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
     /// and the source stays off.

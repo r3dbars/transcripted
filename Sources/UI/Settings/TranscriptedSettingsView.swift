@@ -382,7 +382,8 @@ struct TranscriptedSettingsView: View {
                 systemAudioURL: systemURL,
                 title: item.title,
                 transcriptURL: item.transcriptURL,
-                recordingDate: item.startDate ?? item.date
+                recordingDate: item.startDate ?? item.date,
+                expectedTranscriptID: item.captureID
             )
             if !didStart {
                 presentHomeActionFailure(

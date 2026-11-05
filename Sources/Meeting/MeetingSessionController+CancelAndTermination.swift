@@ -144,6 +144,10 @@ extension MeetingSessionController {
     }
 
     func prepareForTermination() async {
+        meetingActionIdentity = UUID()
+        // Let an admitted copy close its descriptors and remove partial output.
+        // A model wait is fenced by the invalidated action before any Core launch.
+        await cancelSavedAudioPreparation()?.value
         var didPreserveRecording = false
         var recordingTrigger = activeRecordingTrigger
         var stoppedFiles: (micURL: URL?, systemURL: URL?) = (nil, nil)

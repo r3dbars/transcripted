@@ -94,18 +94,34 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
     private static let offscreenClass = "offscreen"
     private static let videoRenderRoleDescription = "video render"
 
-    private let queue = DispatchQueue(label: "com.transcripted.call-speaker-ax", qos: .utility)
+    private let queue: DispatchQueue
+    private let hostClock: CallSpeakerHostClock
+    private let readOperations: ReadOperations?
+
+    /// Native operations are injected only by deterministic owned fixtures;
+    /// queueing, timestamp capture and result delivery remain the real path.
+    struct ReadOperations: Sendable {
+        var isTrusted: @Sendable () -> Bool
+        var applications: @Sendable () async -> [HostApp]
+        var scan: @Sendable ([HostApp], UUID) -> CallSpeakerReadResult
+    }
     // Confined to `queue`.
     private var manualAccessibilitySession: UUID?
     private var manualAccessibilityPIDs = Set<pid_t>()
     private var slackMicrophoneAnswer: (holds: Bool, at: Date)?
     private let slackHoldsMicrophone: @Sendable () -> Bool
 
-    init(slackHoldsMicrophone: @escaping @Sendable () -> Bool = CallSpeakerAXTreeReader.liveSlackMicrophoneCheck) {
+    init(slackHoldsMicrophone: @escaping @Sendable () -> Bool = CallSpeakerAXTreeReader.liveSlackMicrophoneCheck,
+         hostClock: CallSpeakerHostClock = .live,
+         readOperations: ReadOperations? = nil,
+         queue: DispatchQueue = DispatchQueue(label: "com.transcripted.call-speaker-ax", qos: .utility)) {
         self.slackHoldsMicrophone = slackHoldsMicrophone
+        self.hostClock = hostClock
+        self.readOperations = readOperations
+        self.queue = queue
     }
 
-    private struct HostApp: Sendable {
+    struct HostApp: Sendable {
         let pid: pid_t
         let bundleID: String
         let host: CallSpeakerApp.Host
@@ -145,14 +161,19 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
     }
 
     func read(session: UUID) async -> CallSpeakerReadResult {
-        guard AXIsProcessTrusted() else { return .nothingRunning }
+        guard readOperations?.isTrusted() ?? AXIsProcessTrusted() else { return .nothingRunning }
         // Bundle IDs are read off the main thread: that read can block on
         // LaunchServices.
-        let apps: [HostApp] = await RunningApplicationsReader.applications().compactMap { app in
-            guard app.isRegularApp,
-                  let bundleID = app.bundleIdentifier,
-                  let host = CallSpeakerApp.host(forBundleID: bundleID) else { return nil }
-            return HostApp(pid: app.processIdentifier, bundleID: bundleID, host: host)
+        let apps: [HostApp]
+        if let readOperations {
+            apps = await readOperations.applications()
+        } else {
+            apps = await RunningApplicationsReader.applications().compactMap { app in
+                guard app.isRegularApp,
+                      let bundleID = app.bundleIdentifier,
+                      let host = CallSpeakerApp.host(forBundleID: bundleID) else { return nil }
+                return HostApp(pid: app.processIdentifier, bundleID: bundleID, host: host)
+            }
         }
         guard !apps.isEmpty else { return .nothingRunning }
 
@@ -168,13 +189,16 @@ final class CallSpeakerAXTreeReader: CallSpeakerWindowReading, @unchecked Sendab
             manualAccessibilitySession = session
             manualAccessibilityPIDs = []
         }
-        return CallSpeakerReadPlan.scanApps(
-            apps,
-            host: { $0.host },
-            deadline: Date().addingTimeInterval(Self.readDeadline),
-            now: { Date() },
-            read: { self.meetingWindows(of: $0, deadline: $1) }
-        )
+        return CallSpeakerReadTiming.measure(clock: hostClock) {
+            if let readOperations { return readOperations.scan(apps, session) }
+            return CallSpeakerReadPlan.scanApps(
+                apps,
+                host: { $0.host },
+                deadline: Date().addingTimeInterval(Self.readDeadline),
+                now: { Date() },
+                read: { self.meetingWindows(of: $0, deadline: $1) }
+            )
+        }
     }
 
     private func meetingWindows(of app: HostApp, deadline: Date) -> CallSpeakerReadPlan.WindowScan {

@@ -330,7 +330,6 @@ enum DictationStoppedAudioRecoveryStore {
     ) -> Int {
         DictationAudioArchive.lockStorageMutation()
         defer { DictationAudioArchive.unlockStorageMutation() }
-        let window = currentKeepWindow?() ?? window
         let folder = directory ?? defaultDirectory
         guard let contents = try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil) else { return 0 }
         var retired = 0
@@ -340,6 +339,7 @@ enum DictationStoppedAudioRecoveryStore {
                   metadata.archiveIntent?.transcriptCommitted == true else { continue }
             if let dictationsFolder, let intent = metadata.archiveIntent,
                intent.dictationsFolder != dictationsFolder.standardizedFileURL { continue }
+            let window = currentKeepWindow?() ?? window
             let recovery = DictationStoppedAudioRecovery(url: url, sessionID: metadata.sessionID, createdAt: metadata.createdAt)
             if let days = window.days, days == 0 || metadata.createdAt < now.addingTimeInterval(-Double(days) * 86_400) {
                 if cleanup(recovery, explicitDiscard: true, fileManager: fileManager) {

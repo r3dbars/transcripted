@@ -275,33 +275,41 @@ enum DictationAudioArchive {
         window: DictationAudioKeepWindow,
         now: Date = Date(),
         dictationsFolder: URL? = nil,
-        fileManager: FileManager = .default
+        fileManager: FileManager = .default,
+        currentKeepWindow: (() -> DictationAudioKeepWindow)? = nil
     ) -> Int {
         lockStorageMutation()
         defer { unlockStorageMutation() }
         // This front door already runs at launch and after a retention change.
         // Custom-library fixtures do not read the real recovery directory.
-        let window = dictationsFolder == nil ? AudioStoragePreferences.dictationAudioKeepWindow() : window
+        let policy = currentKeepWindow ?? {
+            dictationsFolder == nil ? AudioStoragePreferences.dictationAudioKeepWindow() : window
+        }
+        let initialWindow = policy()
         var pendingRemoved = 0
         if dictationsFolder == nil {
             DictationStoppedAudioRecoveryStore.retryPendingAudioRetention(
-                window: window, currentKeepWindow: { AudioStoragePreferences.dictationAudioKeepWindow() },
+                window: initialWindow, currentKeepWindow: policy,
                 now: now, fileManager: fileManager,
                 onDiscard: { _ in pendingRemoved += 1 }
             )
         }
-        guard let days = window.days else { return pendingRemoved }
+        guard initialWindow.days != nil else { return pendingRemoved }
         let folder = dictationsFolder ?? DictationStoragePaths.transcriptsFolder
         let audioFolder = audioFolder(in: folder)
         guard isPlainDirectory(audioFolder, fileManager: fileManager),
               let names = try? fileManager.contentsOfDirectory(atPath: audioFolder.path) else { return pendingRemoved }
-        let cutoff = now.addingTimeInterval(-TimeInterval(days) * 86_400)
         var removed = pendingRemoved
         for name in names where isOurFileName(name) {
             let url = audioFolder.appendingPathComponent(name, isDirectory: false)
             guard let attributes = try? fileManager.attributesOfItem(atPath: url.path),
                   attributes[.type] as? FileAttributeType == .typeRegular else { continue }
             let date = (attributes[.creationDate] as? Date) ?? (attributes[.modificationDate] as? Date)
+            // Production maintenance follows the current setting, including
+            // a relaxation made while this directory was being inventoried.
+            // An explicit custom-folder window remains fixed unless injected.
+            guard let days = policy().days else { continue }
+            let cutoff = now.addingTimeInterval(-TimeInterval(days) * 86_400)
             guard days == 0 || (date.map { $0 < cutoff } ?? false) else { continue }
             if (try? fileManager.removeItem(at: url)) != nil {
                 removed += 1

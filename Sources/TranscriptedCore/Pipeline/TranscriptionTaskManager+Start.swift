@@ -531,7 +531,10 @@ extension TranscriptionTaskManager {
         replacementTranscriptURL: URL? = nil,
         recordingDate: Date? = nil,
         onReplacementTranscriptCommitted: (@MainActor @Sendable (URL) -> Void)? = nil,
-        languageSelection: TranscriptionLanguageSelection? = nil
+        languageSelection: TranscriptionLanguageSelection? = nil,
+        inputSnapshot: RetainedAudioInputSnapshot? = nil,
+        expectedReplacementTranscriptID: UUID? = nil,
+        replacementExpectation: TranscriptReplacementExpectation? = nil
     ) {
         if !activeTasks.isEmpty {
             AppLogger.pipeline.warning("Rejecting saved-audio retranscription — another pipeline is already active", ["activeCount": "\(activeTasks.count)"])
@@ -540,6 +543,13 @@ extension TranscriptionTaskManager {
                 diagnosticMessage: "Transcription already in progress"
             )
             scheduleStatusReset(delay: 4)
+            return
+        }
+
+        if let inputSnapshot,
+           !inputSnapshot.claimForTranscription(microphoneURL: micURL, systemURL: systemURL) {
+            publishFailure(displayMessage: "This saved-audio request was cancelled. Refresh and try again.",
+                           diagnosticMessage: "Saved-audio input ownership unavailable")
             return
         }
 
@@ -576,6 +586,9 @@ extension TranscriptionTaskManager {
         ])
 
         let asyncTask = Task {
+            // Cancellation changes status before non-cooperative native work
+            // returns. Keep owned inputs until this actual task body has exited.
+            defer { withExtendedLifetime(inputSnapshot) {} }
             // Reserve off the main actor. `beginReplacingTranscript` blocks on the shared
             // transcript-file serializer, which a library-wide speaker rename can hold for
             // as long as it takes to rewrite every referencing transcript. Taking that wait
@@ -599,7 +612,10 @@ extension TranscriptionTaskManager {
 
             if let replacementTranscriptURL {
                 let reservation = await Task.detached(priority: .userInitiated) {
-                    TranscriptSaver.beginReplacingTranscript(at: replacementTranscriptURL)
+                    TranscriptSaver.beginReplacingTranscript(
+                        at: replacementTranscriptURL, expectedTranscriptID: expectedReplacementTranscriptID,
+                        expectation: replacementExpectation
+                    )
                 }.value
 
                 guard let reservation else {
@@ -646,7 +662,8 @@ extension TranscriptionTaskManager {
                     removeSourceAudioAfterArchive: false,
                     targetTranscriptURL: replacementTranscriptURL,
                     archiveRecordingAudio: replacementTranscriptURL == nil,
-                    languageSelection: languageSelection ?? Self.savedLanguageSelection(from: replacementTranscriptURL)
+                    languageSelection: languageSelection ?? Self.savedLanguageSelection(from: replacementTranscriptURL),
+                    inputSnapshot: inputSnapshot
                 )
 
                 if replacementTranscriptURL != nil {

@@ -385,8 +385,8 @@
     },
     {
       "id": "nightly-security-check",
-      "enforces": "repo, release and update drift, cask/appcast parity, PostHog schema drift, raw observability keys, entitlements, shell hazards and recent-history secrets all pass; strict release-health fixture matches Info.plist",
-      "enforcer": "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml",
+      "enforces": "repo, release and update drift, cask/appcast parity, PostHog schema drift, raw observability keys, entitlements, shell hazards and recent-history secrets all pass; frozen legacy integrity and the selected active release feed remain distinct; candidate readiness stays blocked until publication",
+      "enforcer": "python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces --automation-toml Tests/Fixtures/nightly-security-automation.toml",
       "level": "test",
       "owner_doc": "docs/privacy-first-observability.md",
       "why": "the nightly security checker had gone missing and was restored with a shared sanitizer corpus (68e84492c, PR #584); 6 of 10 red Swift CI runs before PR #1884 were it tripping on half-finished release PRs, so linux-checks now runs it only when release surfaces change",

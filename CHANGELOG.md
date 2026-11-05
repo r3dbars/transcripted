@@ -16,14 +16,13 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
-- Scrolling a long list on the Speakers page no longer freezes the app on
-  macOS 26 or jumps the list back on macOS 26 and 27. The list is no longer
-  lazy: every row is laid out up front, so its height never shifts mid-scroll.
 - Settings > Storage: "Delete meeting audio after" and "Keep dictation audio"
   now run through one tested model that keeps their pending choices apart, so
   a meeting choice can never change dictation audio or the other way around.
   Behavior is unchanged. Dictation audio defaults to 30 days, which is why both
   rows can show "30 days" without being linked.
+- The Speakers directory lays out rows up front to avoid lazy-layout hangs
+  and scroll resets.
 - Writing > Edit setup can turn both features off and save the disabled state
   without continuing through model, keyboard or permission setup.
 - Opened meeting cards keep Copy, Show in Finder and the more menu in the

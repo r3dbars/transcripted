@@ -17,7 +17,8 @@ extension TranscriptionTaskManager {
         splitLocalSpeakers: Bool = false,
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
         shouldDeleteSourceFailedAudio: Bool = true,
-        requestId: UUID? = nil
+        requestId: UUID? = nil,
+        inputSnapshot: RetainedAudioInputSnapshot? = nil
     ) -> NamingFlowFinishOutcome {
         // Failure publication also belongs to the request generation. A replacement
         // can finish between the background attempt and this MainActor handoff.
@@ -90,7 +91,8 @@ extension TranscriptionTaskManager {
                     micURL: micURL,
                     systemURL: systemURL,
                     splitLocalSpeakers: splitLocalSpeakers,
-                    errorMessage: retryError
+                    errorMessage: retryError,
+                    inputSnapshot: inputSnapshot
                 )
                 if didPersistRetry {
                     importedRecoverySession?.failedQueueHandoffConfirmed()
@@ -142,7 +144,8 @@ extension TranscriptionTaskManager {
                 micURL: micURL,
                 systemURL: systemURL,
                 splitLocalSpeakers: splitLocalSpeakers,
-                errorMessage: "Speaker names could not be saved. Retry to rebuild the meeting and save the names."
+                errorMessage: "Speaker names could not be saved. Retry to rebuild the meeting and save the names.",
+                inputSnapshot: inputSnapshot
             )
             if didPersistRetry {
                 importedRecoverySession?.failedQueueHandoffConfirmed()
@@ -164,8 +167,13 @@ extension TranscriptionTaskManager {
         micURL: URL?,
         systemURL: URL,
         splitLocalSpeakers: Bool,
-        errorMessage: String
+        errorMessage: String,
+        inputSnapshot: RetainedAudioInputSnapshot?
     ) -> Bool {
+        // This handoff intentionally stores these persistent managed scratch
+        // paths, not a promise of a later archive copy. Even a failed queue
+        // write must leave their bytes in place for recovery.
+        inputSnapshot?.preserveForRecovery()
         if failedTranscriptionManager.failedTranscriptions.contains(where: { $0.id == id }) {
             let didUpdate = failedTranscriptionManager.updateFailedTranscriptionError(
                 id: id,

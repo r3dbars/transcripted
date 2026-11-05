@@ -44,6 +44,7 @@ final class MeetingSessionController: ObservableObject {
     /// Ownership follows meeting actions, not incidental model-warmup state.
     /// An older archive must not settle a newer recording/import/retry.
     var meetingActionIdentity = UUID()
+    var savedAudioPreparation: (id: UUID, task: Task<RetainedAudioInputSnapshot, Error>)?
     @Published private(set) var state: State = .idle {
         didSet {
             guard state != oldValue else { return }

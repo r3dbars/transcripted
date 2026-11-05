@@ -232,6 +232,7 @@ extension MeetingSessionController {
     /// use stopRecording() for that.
     func cancelActiveTranscription() {
         meetingActionIdentity = UUID()
+        cancelSavedAudioPreparation()
         // An in-flight imported-audio copy is cancellable too. Cancelling the
         // task makes the preparer interrupt the copy and remove the partial
         // scratch file; importAudioFile() then resets the visible state.
@@ -303,8 +304,13 @@ extension MeetingSessionController {
         systemAudioURL: URL,
         title: String?,
         transcriptURL: URL? = nil,
-        recordingDate: Date? = nil
+        recordingDate: Date? = nil,
+        inputSnapshot: RetainedAudioInputSnapshot? = nil,
+        admission: SavedAudioReprocessAdmission? = nil,
+        expectedTranscriptID: UUID? = nil
     ) async -> Bool {
+        guard !Task.isCancelled else { return false }
+        if let admission, !mayResumeSavedAudio(admission) { return false }
         // None of these rejections are about THIS controller's own capture
         // lifecycle, and a completely different meeting can be actively
         // recording while any of them fires — route the message-bearing
@@ -332,7 +338,46 @@ extension MeetingSessionController {
             reportUnrelatedFailure("Wait for the current meeting to finish saving or transcribing before re-transcribing saved audio.", reason: "retranscribe_blocked_background_work")
             return false
         }
-        meetingActionIdentity = UUID()
+        let ownedAdmission = admission ?? SavedAudioReprocessAdmission(
+            actionID: UUID(), modelIdentifier: sttRouter.selectedModel.rawValue
+        )
+        if admission == nil { meetingActionIdentity = ownedAdmission.actionID }
+        if inputSnapshot == nil {
+            cancelSavedAudioPreparation()
+            let preparation = Task {
+                try await RetainedAudioInputSnapshot.prepare(
+                    microphoneURL: micAudioURL, systemURL: systemAudioURL,
+                    scratchRoot: MeetingStoragePaths.recordingsScratch,
+                    replacementURL: transcriptURL, expectedTranscriptID: expectedTranscriptID
+                )
+            }
+            savedAudioPreparation = (ownedAdmission.actionID, preparation)
+            defer {
+                if savedAudioPreparation?.id == ownedAdmission.actionID { savedAudioPreparation = nil }
+            }
+            do {
+                let snapshot = try await withTaskCancellationHandler {
+                    try await preparation.value
+                } onCancel: { preparation.cancel() }
+                try Task.checkCancellation()
+                guard mayResumeSavedAudio(ownedAdmission) else { return false }
+                // Recheck admission after the off-main copy, then carry these
+                // immutable inputs through every model/migration wait and read.
+                return await retranscribeSavedMeeting(
+                    micAudioURL: snapshot.microphoneURL, systemAudioURL: snapshot.systemURL,
+                    title: title, transcriptURL: transcriptURL, recordingDate: recordingDate,
+                    inputSnapshot: snapshot, admission: ownedAdmission,
+                    expectedTranscriptID: expectedTranscriptID
+                )
+            } catch is CancellationError {
+                return false
+            } catch {
+                guard mayResumeSavedAudio(ownedAdmission) else { return false }
+                reportUnrelatedFailure("Transcripted couldn't prepare this meeting's saved audio. Refresh and try again.",
+                                       reason: "retranscribe_audio_snapshot_failed")
+                return false
+            }
+        }
         if !voiceprintMigrationGate.isOpen {
             // Saved people are still moving to the new voiceprint model. Hold,
             // then check everything again: other work may have started since.
@@ -342,7 +387,9 @@ extension MeetingSessionController {
                 systemAudioURL: systemAudioURL,
                 title: title,
                 transcriptURL: transcriptURL,
-                recordingDate: recordingDate
+                recordingDate: recordingDate,
+                inputSnapshot: inputSnapshot, admission: ownedAdmission,
+                expectedTranscriptID: expectedTranscriptID
             )
         }
         DiagnosticsTrail.record(
@@ -377,16 +424,18 @@ extension MeetingSessionController {
         } else if case .error = state {
             await prepareModels()
         }
+        guard mayResumeSavedAudio(ownedAdmission) else { return false }
         if case .ready = state, !isSpeechModelPreparedForSelection {
             await prepareModels()
         }
 
-        guard case .ready = state else {
+        guard mayResumeSavedAudio(ownedAdmission), case .ready = state else {
             return false
         }
 
         activeTranscriptionTrigger = .savedMeetingRetranscription
         transition(to: .transcribing, reason: "retranscribe_started")
+        if savedAudioPreparation?.id == ownedAdmission.actionID { savedAudioPreparation = nil }
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "saved_audio_retranscribing")
         let request = transcriptionQueue.requestBuilder.savedAudioRetranscription(
             micURL: micAudioURL,
@@ -405,9 +454,28 @@ extension MeetingSessionController {
             recordingDate: request.recordingDate,
             onReplacementTranscriptCommitted: { [weak self] committedTranscriptURL in
                 self?.handleReplacementTranscriptCommitted(for: committedTranscriptURL)
-            }
+            },
+            inputSnapshot: inputSnapshot,
+            expectedReplacementTranscriptID: expectedTranscriptID,
+            replacementExpectation: inputSnapshot?.replacementExpectation
         )
         return true
+    }
+
+    private func mayResumeSavedAudio(_ admission: SavedAudioReprocessAdmission) -> Bool {
+        admission.mayResume(
+            currentActionID: meetingActionIdentity, currentModelIdentifier: sttRouter.selectedModel.rawValue,
+            captureActive: isCaptureSessionActive, dictationBusy: sttRouter.isRecording || sttRouter.isTranscribing,
+            backgroundWork: hasBackgroundTranscriptionWork, cancelled: Task.isCancelled
+        )
+    }
+
+    @discardableResult
+    func cancelSavedAudioPreparation() -> Task<Void, Never>? {
+        guard let preparation = savedAudioPreparation?.task else { return nil }
+        savedAudioPreparation = nil
+        preparation.cancel()
+        return Task { await RetainedAudioInputSnapshot.cancelPreparation(preparation) }
     }
 
     private func handleReplacementTranscriptCommitted(for transcriptURL: URL) {

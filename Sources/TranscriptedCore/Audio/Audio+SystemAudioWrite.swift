@@ -92,7 +92,7 @@ extension Audio {
                     }
                 }
                 do {
-                    try writer.write(from: buffer)
+                    try attempt.capture.writeTimeline.write(buffer, to: writer)
                     self.recordSystemWriteSuccess(generation: generation)
                 } catch {
                     AppLogger.audioSystem.warning("Failed to write system recovery silence pad", [

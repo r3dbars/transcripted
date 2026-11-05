@@ -24,7 +24,8 @@ extension TranscriptionTaskManager {
         archiveRecordingAudio: Bool = true,
         stableTranscriptId: UUID? = nil,
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        importedAt: Date? = nil
+        importedAt: Date? = nil,
+        inputSnapshot: RetainedAudioInputSnapshot? = nil
     ) async throws -> URL {
 
         let transcription = await MainActor.run { self.transcription }
@@ -639,7 +640,8 @@ extension TranscriptionTaskManager {
                             sourceFailedTranscriptionId: sourceFailedTranscriptionId,
                             clips: reviewed.finalize,
                             importedRecoverySession: importedRecoverySession,
-                            requestId: speakerNamingRequestId
+                            requestId: speakerNamingRequestId,
+                            inputSnapshot: inputSnapshot
                         )
                     }
                 ))
