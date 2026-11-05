@@ -1,0 +1,91 @@
+{
+  "assets": [
+    {
+      "contentType": "application/xml",
+      "digest": "sha256:2e8855adf7899bf57dc9235b5f5a62076d521c1b18e4b77138505be539ad27ae",
+      "name": "appcast.xml",
+      "size": 86820,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/appcast.xml"
+    },
+    {
+      "contentType": "application/x-apple-diskimage",
+      "digest": "sha256:c9c59dd56244592c200cccbc659ec103fda9a3a2cf06b1c6200369a9ef83c913",
+      "name": "Transcripted-1.1.76.dmg",
+      "size": 703576924,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted-1.1.76.dmg"
+    },
+    {
+      "contentType": "application/zip",
+      "digest": "sha256:253291133f7f9fb03ef0f781f5e6d3f6670558da32fc371c86d9dfd7f1c51d92",
+      "name": "Transcripted-1.1.76.dSYM.zip",
+      "size": 17984852,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted-1.1.76.dSYM.zip"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:8e48316876ab411414484d1215b2cbd334ee25733d3175c2341cf86d51929787",
+      "name": "transcripted-mcp.mcpb",
+      "size": 2796291,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/transcripted-mcp.mcpb"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:ce1d9073a78f51bd9eef07d799a7acab9f5cb0d65fd8829de45c651df5886a18",
+      "name": "Transcripted1.1.76-1.1.71.delta",
+      "size": 5693006,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted1.1.76-1.1.71.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:5fdbd27341fb54a2ec9465b230a9f06c0be04da28731b2b0148033ba47ab67e2",
+      "name": "Transcripted1.1.76-1.1.72.delta",
+      "size": 5472994,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted1.1.76-1.1.72.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:2749ad9b5a045f228e73790efda7995a4ea9b28160784a2578f48eb7eb8d9f7c",
+      "name": "Transcripted1.1.76-1.1.73.delta",
+      "size": 4123150,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted1.1.76-1.1.73.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:2d12a167efbaab636a23abd622227389aaf5c9ef39ffb962e347d8b042745e66",
+      "name": "Transcripted1.1.76-1.1.74.delta",
+      "size": 3768022,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted1.1.76-1.1.74.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:18bdf4fc7e303435d5f906291a6f52fa1de0beac561731306ff7c57b4002cb0c",
+      "name": "Transcripted1.1.76-1.1.75.delta",
+      "size": 3046518,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted1.1.76-1.1.75.delta"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": false,
+  "tagName": "v1.1.76",
+  "url": "https://github.com/r3dbars/transcripted/releases/tag/v1.1.76",
+  "_fixture": {
+    "kind": "Archived live GitHub release metadata; offline test input, not current live release proof",
+    "release_id": 435461415,
+    "captured_at_utc": "2026-11-05T16:52:04.322Z",
+    "published_at_utc": "2026-11-05T16:46:20Z",
+    "candidate_run_id": 41978929739,
+    "signed_artifact_id": 13394641882,
+    "built_source_sha": "caa17f1bb522324bf8f756239347fb4c6308ab52",
+    "workflow_sha": "9f7076de5ae5e98cadf90b43975161db667fc175",
+    "publication_note": "These asset IDs, sizes and digests were read from the public release after publication. This archived snapshot must not replace independent live release-surface verification."
+  }
+}
