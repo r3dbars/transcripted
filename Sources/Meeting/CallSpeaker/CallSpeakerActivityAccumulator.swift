@@ -11,8 +11,9 @@
 //   speaker, or a gap of more than `maxObservationGap` between polls. Polls
 //   run every 1 s and a read can take up to 1.5 s; each is timed at its read's
 //   midpoint, so back-to-back polls can land up to about 2.5 s apart.
-// - A withheld poll (truncated, ambiguous or disagreeing windows) adds no
-//   evidence either way; it only closes a span when the gap check would.
+// - A withheld poll (truncated, ambiguous or disagreeing windows) ends
+//   evidence and coverage at the last trustworthy poll; later evidence
+//   starts a new run, even when the same speaker reappears.
 // - Spans shorter than `minSpanSeconds` are dropped; at most `maxSpans` kept.
 // - Teams spans move `teamsLagSeconds` earlier (its indicator lags).
 // - Coverage spans run alongside: open while polls show exactly one other
@@ -61,7 +62,7 @@ struct CallSpeakerActivityAccumulator: Sendable {
         pollCount += 1
         statusCounts[snapshot.status, default: 0] += 1
 
-        if snapshot.status != .multipleWindows {
+        if snapshot.status != .multipleWindows && snapshot.status != .incompleteScan {
             selfNames.formUnion(snapshot.selfNames)
             let rosterIsTrusted = (snapshot.app?.detectsSelf ?? true) || !snapshot.selfNames.isEmpty
             for name in snapshot.roster where rosterIsTrusted && !roster.contains(name) {
@@ -72,8 +73,11 @@ struct CallSpeakerActivityAccumulator: Sendable {
         if let last = lastObservation, time - last > Self.maxObservationGap {
             closeAll(at: last)
         }
-        // Withheld: no evidence either way.
-        guard !snapshot.status.isWithheld else { return }
+        // Known ambiguity cannot be interpolated into speaker evidence.
+        guard !snapshot.status.isWithheld else {
+            pause()
+            return
+        }
         lastObservation = time
 
         if snapshot.status == .speakingIndicator { sawSpeakingIndicator = true }

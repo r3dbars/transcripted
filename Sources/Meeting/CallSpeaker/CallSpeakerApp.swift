@@ -72,14 +72,17 @@ enum CallSpeakerApp: String, Sendable, CaseIterable {
     }
 }
 
-/// One meeting window the matcher recognized. `meetingKey` tells windows of
-/// the same meeting (Zoom's main and floating windows, Teams' compact view)
-/// from windows of different meetings.
+/// One meeting window the matcher recognized. Provider/common-title keys
+/// are grouping hints, not proof that windows belong to the same call.
+/// Only a validated Meet code currently correlates multiple meeting views.
 struct CallSpeakerWindowMatch: Equatable, Sendable {
     let app: CallSpeakerApp
     let meetingKey: String
-    /// Teams' "Meeting compact view | ..." window. When exactly one is open,
-    /// it alone is read (unverified Teams window gate).
+    /// Populated only by the matcher's validated Meet-code path. Nil for
+    /// provider buckets and title-only matches, which cannot correlate calls.
+    var meetCode: String? = nil
+    /// Teams' "Meeting compact view | ..." window. This does not prove it
+    /// belongs to another full or compact meeting window.
     var isCompactView = false
 }
 
@@ -134,7 +137,7 @@ enum CallSpeakerWindowMatcher {
             guard !title.isEmpty else { return nil }
             let tab = strippedBrowserTitle(title)
             if let code = meetCode(in: tab) {
-                return CallSpeakerWindowMatch(app: .browserMeet, meetingKey: "meet:" + code.lowercased())
+                return CallSpeakerWindowMatch(app: .browserMeet, meetingKey: "meet:" + code.lowercased(), meetCode: code.lowercased())
             }
             if matches(meetTitlePrefixPattern, tab) {
                 return CallSpeakerWindowMatch(app: .browserMeet, meetingKey: "meet-title:" + tab.lowercased())
@@ -188,9 +191,17 @@ enum CallSpeakerWindowMatcher {
         title.lowercased().hasPrefix("meeting compact view | ")
     }
 
+    /// Teams' own navigation surfaces ("Chat | General | Microsoft Teams",
+    /// "Activity | Microsoft Teams"). A meeting window is titled after the
+    /// meeting, or is the compact view (unverified, English UI only).
+    static let teamsNavigationSurfaces: Set<String> = ["chat", "activity", "calendar", "teams"]
+
     static func isTeamsMeetingTitle(_ title: String) -> Bool {
         let lowered = title.lowercased()
-        return isTeamsCompactView(title) || lowered.contains("| microsoft teams")
+        if isTeamsCompactView(title) { return true }
+        guard lowered.contains("| microsoft teams") else { return false }
+        let surface = lowered.split(separator: "|", maxSplits: 1).first.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+        return !teamsNavigationSurfaces.contains(surface)
     }
 
     private static func matches(_ regex: NSRegularExpression, _ text: String) -> Bool {

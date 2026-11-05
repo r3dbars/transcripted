@@ -32,11 +32,13 @@ struct CallSpeakerSnapshot: Equatable, Sendable {
         case windowsDisagree
         /// A meeting window was cut short by a read cap. Withheld.
         case truncated
+        /// An app/window/title or candidate was not fully examined. Withheld.
+        case incompleteScan = "incomplete_scan"
 
         /// Speaking evidence from this poll can't be trusted either way.
         var isWithheld: Bool {
             switch self {
-            case .multipleWindows, .windowsDisagree, .truncated: return true
+            case .multipleWindows, .windowsDisagree, .truncated, .incompleteScan: return true
             default: return false
             }
         }
@@ -510,6 +512,13 @@ enum CallSpeakerSnapshotBuilder {
         let parse: CallSpeakerWindowParse
     }
 
+    /// A partial scan cannot rule out a second call, even when its returned
+    /// windows appear unambiguous. Discard partial names before parsing.
+    static func build(_ read: CallSpeakerReadResult) -> CallSpeakerSnapshot {
+        guard read.completeness == .complete else { return .empty(.incompleteScan) }
+        return build(read.windows)
+    }
+
     /// Folds every meeting window of one poll into one snapshot, withholding
     /// speaking evidence whenever the windows can't be trusted together.
     /// Status order: more than one app,
@@ -534,19 +543,20 @@ enum CallSpeakerSnapshotBuilder {
             return CallSpeakerSnapshot(roster: [], speaking: [], selfNames: [], status: .truncated, app: app)
         }
 
-        // Window gates (unverified): more than one Meet code is ambiguous;
-        // Teams reads only its compact view when exactly one is open, and
-        // more than one compact view is ambiguous.
+        // Different Meet keys are ambiguous even when one view has no tiles.
+        // Provider buckets and common titles cannot correlate multiple calls;
+        // only a validated, matching Meet code proves a shared call here.
         if app == .browserMeet, Set(appWindows.map(\.window.match.meetingKey)).count > 1 {
             return .empty(.multipleWindows)
         }
-        if app.isTeams {
-            let compact = appWindows.filter(\.window.match.isCompactView)
-            if compact.count > 1 { return .empty(.multipleWindows) }
-            if compact.count == 1 { appWindows = compact }
-        }
         appWindows = appWindows.filter(\.parse.hasTiles)
         guard !appWindows.isEmpty else { return .empty(.noTiles) }
+        if appWindows.count > 1 {
+            guard let code = appWindows.first?.window.match.meetCode,
+                  appWindows.allSatisfy({ $0.window.match.app == .browserMeet && $0.window.match.meetCode == code }) else {
+                return .empty(.multipleWindows)
+            }
+        }
         if Set(appWindows.map(\.window.match.meetingKey)).count > 1 { return .empty(.multipleWindows) }
 
         var roster: [String] = []

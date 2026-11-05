@@ -23,11 +23,20 @@ import TranscriptedCore
 
 /// What one read of the supported apps found.
 struct CallSpeakerReadResult: Sendable {
+    enum Completeness: Sendable, Equatable {
+        case complete
+        case incomplete
+    }
+
     /// False when no supported call app (or browser) is running.
     var supportedAppRunning: Bool
     var windows: [CallSpeakerWindowRead]
+    /// Incomplete scans may have omitted another call. Never name from them.
+    var completeness: Completeness
+    /// Why windows were cut short or the scan stopped early. Codes only.
+    var diagnostics = CallSpeakerScanDiagnostics()
 
-    static let nothingRunning = CallSpeakerReadResult(supportedAppRunning: false, windows: [])
+    static let nothingRunning = CallSpeakerReadResult(supportedAppRunning: false, windows: [], completeness: .complete)
 }
 
 /// Reads the meeting windows of the running call apps. `session` changes
@@ -57,6 +66,9 @@ struct CallSpeakerRecorderSummary: Equatable, Sendable {
     var intervalCount = 0
     var rosterCount = 0
     var sawSpeakingIndicator = false
+    /// AX error codes and limits behind truncated windows, incomplete scans
+    /// and skipped elements, summed over the recording.
+    var scanDiagnostics = CallSpeakerScanDiagnostics()
 }
 
 @MainActor
@@ -85,6 +97,7 @@ final class CallSpeakerActivityRecorder {
     private var gatedChecks = 0
     private var hasCurrentRoster = false
     private var consecutiveEmptyPolls = 0
+    private var scanDiagnostics = CallSpeakerScanDiagnostics()
 
     /// The recording being watched (the key the pipeline asks with).
     private(set) var recordingStartedAt: Date?
@@ -106,6 +119,7 @@ final class CallSpeakerActivityRecorder {
         gatedChecks = 0
         hasCurrentRoster = false
         consecutiveEmptyPolls = 0
+        scanDiagnostics = CallSpeakerScanDiagnostics()
         task = Task { [weak self] in
             await self?.run(session: session)
         }
@@ -124,7 +138,8 @@ final class CallSpeakerActivityRecorder {
             statusCounts: accumulator.statusCounts,
             intervalCount: activity.intervals.count,
             rosterCount: activity.rosterNames.count,
-            sawSpeakingIndicator: activity.sawSpeakingIndicator
+            sawSpeakingIndicator: activity.sawSpeakingIndicator,
+            scanDiagnostics: scanDiagnostics
         )
         guard !activity.isEmpty || activity.sawSpeakingIndicator || !activity.selfNames.isEmpty else { return nil }
         return activity
@@ -171,13 +186,14 @@ final class CallSpeakerActivityRecorder {
 
             let reader = environment.reader
             let readStart = elapsed()
-            let result = await Task.detached(priority: .utility) { () -> (Bool, CallSpeakerSnapshot) in
+            let result = await Task.detached(priority: .utility) { () -> (Bool, CallSpeakerSnapshot, CallSpeakerScanDiagnostics) in
                 let read = await reader.read(session: session)
-                guard read.supportedAppRunning else { return (false, .empty(.noWindow)) }
-                return (true, CallSpeakerSnapshotBuilder.build(read.windows))
+                guard read.supportedAppRunning else { return (false, .empty(.noWindow), read.diagnostics) }
+                return (true, CallSpeakerSnapshotBuilder.build(read), read.diagnostics)
             }.value
             guard isCurrent(session) else { return }
             let readEnd = elapsed()
+            scanDiagnostics.merge(result.2)
 
             guard result.0 else {
                 accumulator.pause()

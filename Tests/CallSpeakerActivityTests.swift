@@ -13,6 +13,7 @@
 //   activity on virtual time.
 // Every name is fictional.
 
+import ApplicationServices
 import Foundation
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -110,7 +111,8 @@ private func teamsCall(speaking speaker: String?, roster: [String] = ["Ana Ruiz"
             match: CallSpeakerWindowMatch(app: .teamsDesktop, meetingKey: "teams-desktop"),
             tree: CallSpeakerAXNode(role: "AXWindow", children: tiles),
             truncated: false
-        )]
+        )],
+        completeness: .complete
     )
 }
 
@@ -201,8 +203,8 @@ func testCallSpeakerActivity() async {
         assertTrue(!activity.rosterNames.contains("Cara Diaz"), "self is never on the roster")
     }
 
-    runSuite("CallSpeakerActivityAccumulator: withheld polls add no evidence and close only on a gap") {
-        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated] {
+    runSuite("CallSpeakerActivityAccumulator: withheld polls end evidence at the last trusted observation") {
+        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated, .incompleteScan] {
             var accumulator = CallSpeakerActivityAccumulator()
             let withheld = CallSpeakerSnapshot(roster: ["Ana Ruiz"], speaking: [], selfNames: [], status: status)
             accumulator.add(speaking(["Ana Ruiz"]), at: 0)
@@ -213,9 +215,39 @@ func testCallSpeakerActivity() async {
             accumulator.add(speaking(["Ana Ruiz"]), at: 4.5)
             accumulator.add(speaking(["Ana Ruiz"]), at: 5.5)
             let activity = accumulator.finished()
-            assertEqual(activity.intervals, [interval("Ana Ruiz", 0, 1.5), interval("Ana Ruiz", 4.5, 5.5)],
-                        "\(status.rawValue): a short withheld stretch keeps the span, a long one ends it at the last real poll")
+            assertEqual(activity.intervals, [interval("Ana Ruiz", 4.5, 5.5)],
+                        "\(status.rawValue): an ambiguous poll ends the prior run even when the same speaker returns soon")
+            assertEqual(activity.coverage, [span(4.5, 5.5)], "isolated observations add no covered duration")
             assertTrue(everyIntervalIsCovered(activity), "\(status.rawValue): intervals inside coverage")
+        }
+    }
+
+    runSuite("CallSpeakerActivityAccumulator: ambiguous gaps cannot clear the naming evidence bar") {
+        for status in [CallSpeakerSnapshot.Status.windowsDisagree, .multipleWindows, .truncated, .incompleteScan] {
+            var accumulator = CallSpeakerActivityAccumulator()
+            for time in [0.0, 2.0, 4.0] {
+                accumulator.add(speaking(["Ana Ruiz"]), at: time)
+                if time < 4 { accumulator.add(.empty(status), at: time + 1) }
+            }
+            let activity = accumulator.finished()
+            assertTrue(activity.intervals.isEmpty, "isolated trusted polls cannot bridge known ambiguity")
+            assertTrue(activity.coverage.isEmpty, "ambiguous time is never trustworthy coverage")
+            let outcome = CallSpeakerAttributionPolicy.attribute(
+                activity: activity,
+                clusters: ["1": [.init(start: 0, end: 4)]]
+            )
+            assertTrue(outcome.names.isEmpty, "ambiguous gaps must not turn a provisional name into saved labels")
+            assertEqual(outcome.withheld["1"], .noEvidence)
+
+            // A later continuous run still supplies enough real evidence.
+            for time in [5.0, 6.0, 7.0, 8.0] {
+                accumulator.add(speaking(["Ana Ruiz"]), at: time)
+            }
+            let resumed = CallSpeakerAttributionPolicy.attribute(
+                activity: accumulator.finished(),
+                clusters: ["1": [.init(start: 5, end: 8)]]
+            )
+            assertEqual(resumed.names["1"], "Ana Ruiz", "trustworthy observations resume normal naming")
         }
     }
 
@@ -335,13 +367,32 @@ func testCallSpeakerActivity() async {
 
     await runSuite("CallSpeakerActivityRecorder: polls every 3 s without a roster") {
         let clock = VirtualPollClock()
-        let empty = CallSpeakerReadResult(supportedAppRunning: true, windows: [])
+        let empty = CallSpeakerReadResult(supportedAppRunning: true, windows: [], completeness: .complete)
         let reader = FakeCallSpeakerReader(empty, clock: clock)
         let recorder = makeRecorder(reader: reader, clock: clock)
         recorder.start(recordingStartedAt: Date())
         await reader.waitForReads(3)
         _ = recorder.stop()
         assertEqual(Array(await reader.readTimes.prefix(3)), [0, 3, 6], "slow cadence with no meeting window")
+    }
+
+    await runSuite("CallSpeakerActivityRecorder: incomplete read results never become naming activity") {
+        let clock = VirtualPollClock()
+        var partial = teamsCall(speaking: "Ana Ruiz")
+        partial.completeness = .incomplete
+        partial.diagnostics.incompleteness[.ax(.cannotComplete)] = 1
+        let reader = FakeCallSpeakerReader(partial, clock: clock)
+        let recorder = makeRecorder(reader: reader, clock: clock)
+        recorder.start(recordingStartedAt: Date())
+        await runUntilVirtualTime(clock, passes: 12)
+        let activity = recorder.stop()
+        assertTrue((recorder.lastSummary?.polls ?? 0) > 0, "the reader actually returned partial windows")
+        assertTrue(activity == nil, "partial windows never provide a participant name or interval")
+        assertEqual(recorder.lastSummary?.statusCounts[.incompleteScan], recorder.lastSummary?.polls)
+        assertEqual(recorder.lastSummary?.intervalCount, 0)
+        assertEqual(recorder.lastSummary?.rosterCount, 0)
+        assertEqual(recorder.lastSummary?.scanDiagnostics.incompleteness[.ax(.cannotComplete)], recorder.lastSummary?.polls,
+                    "the summary counts the AX code behind every incomplete poll")
     }
 
     await runSuite("CallSpeakerActivityRecorder: polls every 1 s once a roster shows, into activity") {
