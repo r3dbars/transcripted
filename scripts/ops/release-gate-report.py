@@ -409,6 +409,8 @@ def run_release_surfaces(args: argparse.Namespace, root: Path, out_dir: Path, co
         command.append("--require-release-debug-files")
     if args.github_release_json:
         command.extend(["--github-release-json", args.github_release_json])
+    if args.appcast:
+        command.extend(["--appcast", args.appcast])
 
     record, _ = run_command(
         title="Release surfaces",
@@ -986,6 +988,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-sentry-release-health", action="store_true", help="Make missing Sentry release metadata a red release failure.")
     parser.add_argument("--require-release-debug-files", action="store_true", help="Require build/Transcripted.app.dSYM to match the built app binary.")
     parser.add_argument("--github-release-json", help="Optional GitHub release JSON fixture for deterministic release checks.")
+    parser.add_argument("--appcast", help="Active release-asset feed snapshot for offline release checks after the legacy freeze.")
     parser.add_argument("--out-root", default="/tmp/transcripted-release-gate", help="Output root. Default: /tmp/transcripted-release-gate")
     parser.add_argument("--run-id", default=f"release-gate-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}")
     parser.add_argument("--log-lines", type=int, default=400, help="Tail lines to inspect per local log file. Default: 400.")
