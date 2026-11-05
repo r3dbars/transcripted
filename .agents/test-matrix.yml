@@ -132,6 +132,15 @@ rules:
       - "bash build.sh --no-open"
 
   - paths:
+      - "scripts/dev/run-call-app-hint-harness.sh"
+      - "scripts/dev/test-call-app-hint-harness.py"
+      - "Tests/UI/CallAppHintHarness.swift"
+      - "Tests/UI/CallAppHintHarnessIsolation.swift"
+    checks:
+      - "python3 scripts/dev/test-call-app-hint-harness.py"
+      - "bash -n scripts/dev/run-call-app-hint-harness.sh"
+
+  - paths:
       - "run-tests.sh"
       - "scripts/entrypoints/run-tests.sh"
       - "scripts/entrypoints/lib/fast-test-completion.py"

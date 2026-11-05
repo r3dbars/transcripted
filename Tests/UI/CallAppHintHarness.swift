@@ -1,17 +1,23 @@
 import AppKit
 import TranscriptedCore
 
-/// Drives the real island review view with call-app hints (fictional names)
+/// Drives the real review page component with call-app hints (fictional names)
 /// and checks: the name box is never filled by the call app, Done with an
 /// untouched hint saves nothing, a tap on the hint fills the box and then
 /// Done saves it, and guessed rows keep their question. Renders PNGs to
-/// .agent-review/visuals for a look by eye.
+/// the owned output directory. This is page-component action/render proof,
+/// not island timers, telemetry, physical gestures or whole-app acceptance.
 @main
 struct CallAppHintHarness {
-    @MainActor static func main() async throws {
-        precondition(ProcessInfo.processInfo.environment["TRANSCRIPTED_AUTOMATED_HARNESS"] == "1")
+    @MainActor static func main() throws {
+        let isolation = try CallAppHintHarnessIsolation(environment: ProcessInfo.processInfo.environment)
+        try isolation.withPreferences(.standard) { try run(isolation) }
+    }
+
+    @MainActor private static func run(_ isolation: CallAppHintHarnessIsolation) throws {
+        precondition(FileManager.default.transcriptedAppSupportRootURL == isolation.container)
         _ = NSApplication.shared
-        let fixture = URL(fileURLWithPath: ProcessInfo.processInfo.environment["CALL_APP_HINT_FIXTURE_ROOT"]!)
+        let fixture = isolation.fixture
         let clip = fixture.appendingPathComponent("synthetic.wav")
         var unknown = SpeakerNamingEntry(id: UUID(), diarizerSpeakerId: "1", clipURL: clip,
             sampleText: "Let's start with the budget.", currentName: nil, matchSimilarity: nil,
@@ -29,8 +35,12 @@ struct CallAppHintHarness {
             transcriptURL: fixture.appendingPathComponent("synthetic.md"),
             transcriptId: UUID(), systemAudioURL: clip, micAudioURL: nil,
             onComplete: { _ in fatalError("Harness must not submit Core naming answers") })
-        let view = NotchIslandSpeakerReviewView(request: request)
-        view.setMeetingTitle("Synthetic planning call")
+        // Page chrome skips trackShown and island timers entirely. No shared
+        // reporter, store, calendar reader or real submit callback is reached.
+        let input = NotchIslandSpeakerReviewView.Input(id: request.id, speakers: request.speakers, knownPeople: [])
+        let view = NotchIslandSpeakerReviewView(input: input, chrome: .page(.init(
+            title: "Synthetic planning call", detail: nil, doneTitle: "Done", skipTitle: "Skip", skipHelp: "Synthetic only"
+        )))
         view.onDone = { _, _ in fatalError("Harness never presses Done") }
         view.onLater = { _ in fatalError("Harness never presses Later") }
         let host = NSView(frame: NSRect(x: 0, y: 0, width: 620, height: 620))
@@ -41,6 +51,7 @@ struct CallAppHintHarness {
                                      view.topAnchor.constraint(equalTo: host.topAnchor, constant: 28)])
         let window = NSWindow(contentRect: host.bounds, styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
+        window.isRestorable = false
         window.contentView = host
         window.appearance = NSAppearance(named: .darkAqua)
         func descendants(_ node: NSView) -> [NSView] { [node] + node.subviews.flatMap(descendants) }
@@ -57,30 +68,54 @@ struct CallAppHintHarness {
             guard let bitmap = host.bitmapImageRepForCachingDisplay(in: host.bounds) else { fatalError("No bitmap") }
             host.cacheDisplay(in: host.bounds, to: bitmap)
             try bitmap.representation(using: .png, properties: [:])!.write(to:
-                URL(fileURLWithPath: ".agent-review/visuals/call-app-hint-\(name).png"))
+                isolation.output.appendingPathComponent("call-app-hint-\(name).png"))
+        }
+        var completed = 0
+        var assertions = 0
+        @MainActor func check(_ value: @autoclosure () -> Bool, _ message: String) {
+            precondition(value(), message)
+            assertions += 1
+        }
+        func finishGroup(_ name: String) {
+            completed += 1
+            print("PASS: \(name)")
         }
         guard let unknownRow = view.rows.first(where: { $0.entry.diarizerSpeakerId == "1" }) else { fatalError("Missing row") }
 
-        precondition(unknownRow.nameField.stringValue.isEmpty, "the call app's name must never fill the box on its own")
-        precondition(view.collectUpdates(finish: .done).updates.isEmpty, "Done with only hints saves nothing")
-        precondition(view.collectUpdates(finish: .later).updates.isEmpty, "Later with only hints saves nothing")
+        check(unknownRow.nameField.stringValue.isEmpty, "the call app's name must never fill the box on its own")
+        check(view.collectUpdates(finish: .done).updates.isEmpty, "Done with only hints saves nothing")
+        check(view.collectUpdates(finish: .later).updates.isEmpty, "Later with only hints saves nothing")
+        finishGroup("untouched hint stays empty on Done and Later")
         let shown = texts()
-        precondition(shown.contains("Call app showed: Maya Lindqvist"), "unnamed voice shows the hint: \(shown)")
-        precondition(shown.contains("Call app showed Marcus Reed too"), "agreement shows as corroboration: \(shown)")
-        precondition(shown.contains("Call app showed: Rina Okafor"), "a different name is shown next to the guess: \(shown)")
-        precondition(shown.contains("Marcus Reed?") && shown.contains("Ana Lima?"), "voiceprint questions stay: \(shown)")
+        check(shown.contains("Call app showed: Maya Lindqvist"), "unnamed voice shows the hint: \(shown)")
+        check(shown.contains("Call app showed Marcus Reed too"), "agreement shows as corroboration: \(shown)")
+        check(shown.contains("Call app showed: Rina Okafor"), "a different name is shown next to the guess: \(shown)")
+        check(shown.contains("Marcus Reed?") && shown.contains("Ana Lima?"), "voiceprint questions stay: \(shown)")
+        finishGroup("voiceprint questions and corroborating hints stay independent")
         try render("before")
 
         guard let hint = descendants(view).compactMap({ $0 as? NSButton })
             .first(where: { $0.title == "Call app showed: Maya Lindqvist" }) else { fatalError("Missing hint button") }
-        precondition(descendants(view).compactMap({ $0 as? NSButton })
+        check(descendants(view).compactMap({ $0 as? NSButton })
             .first(where: { $0.title == "Call app showed: Rina Okafor" }) == nil, "a conflicting name is not a button")
         hint.performClick(nil)
-        precondition(unknownRow.nameField.stringValue == "Maya Lindqvist", "a tap fills the box")
+        check(unknownRow.nameField.stringValue == "Maya Lindqvist", "a tap fills the box")
+        finishGroup("explicit hint button fills the name box")
         let updates = view.collectUpdates(finish: .done).updates
-        precondition(updates.count == 1 && updates[0].newName == "Maya Lindqvist", "after a tap, Done saves it like a typed name")
+        check(updates.count == 1 && updates[0].newName == "Maya Lindqvist", "after a tap, Done saves it like a typed name")
+        finishGroup("explicit hint choice creates only its selected update")
         try render("after-tap")
-        print("PASS: call-app hint never prefills or saves untouched; tap fills the box; guessed rows keep their question. Two synthetic PNGs generated.")
         window.close()
+        let environment = ProcessInfo.processInfo.environment
+        guard let completionPath = environment["TRANSCRIPTED_FAST_TEST_COMPLETION_PATH"],
+              let runID = environment["TRANSCRIPTED_FAST_TEST_COMPLETION_RUN_ID"],
+              let selection = environment["CALL_APP_HINT_SELECTION_DIGEST"] else { fatalError("Missing completion contract") }
+        let receipt: [String: Any] = ["version": 1, "run_id": runID, "selection_digest": selection,
+            "selected_functions": 4, "executed_functions": completed, "assertions": assertions,
+            "passed_assertions": assertions, "failed_assertions": 0, "quarantined_suites": 0]
+        let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+        try data.write(to: URL(fileURLWithPath: completionPath), options: .atomic)
+        try data.write(to: isolation.output.appendingPathComponent("completion.json"), options: .atomic)
+        print("PASS: call-app hint page component completed all four checks; two owned PNGs generated.")
     }
 }
