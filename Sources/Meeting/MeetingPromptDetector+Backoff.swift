@@ -432,7 +432,6 @@ extension MeetingPromptDetector {
     ) -> Bool {
         guard !snapshot.isAllDay else { return false }
         guard snapshot.provider == targetProvider else { return false }
-        guard snapshot.meetingURL != nil else { return false }
         return snapshot.endDate > now
     }
 }

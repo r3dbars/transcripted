@@ -83,6 +83,14 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
         return nil
     }
 
+    /// The call app an invite's location names when the invite has no join
+    /// link. Exchange writes "Microsoft Teams Meeting" (French: "Réunion
+    /// Microsoft Teams") as the location of Teams invites whose body carries
+    /// no link, and those invites otherwise never prompt or offer a split.
+    static func provider(forLocation location: String) -> MeetingPromptProvider? {
+        location.localizedCaseInsensitiveContains("microsoft teams") ? .teams : nil
+    }
+
     private static func hostMatches(_ host: String, domain: String) -> Bool {
         host == domain || host.hasSuffix(".\(domain)")
     }
