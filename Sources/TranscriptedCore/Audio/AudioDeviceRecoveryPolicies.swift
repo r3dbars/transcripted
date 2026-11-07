@@ -266,3 +266,45 @@ enum MicWatchdogSessionPolicy {
             && !isSystemSleepPending
     }
 }
+
+/// What the mic watchdog does once `maxRecoveryAttempts` recoveries in a row
+/// have failed. Before this policy it always stopped the whole recording,
+/// which ended a meeting whose system audio (the other people on the call)
+/// was still recording fine: the main cause of
+/// `meeting_capture_stopped_under_controller` with `quality_reason`
+/// `device_switches` and a `recovery_attempt_bucket` of `4_9`.
+///
+/// Now a lost mic only ends the recording when there is no healthy system
+/// audio left to keep. Otherwise the meeting carries on with system audio
+/// and the watchdog keeps trying to bring the mic back on a slower cooldown,
+/// so a headset that reconnects (or the built-in mic, which recovery tries
+/// first from the second attempt on) rejoins the recording.
+enum MicWatchdogGiveUpPolicy {
+    enum Decision: Equatable {
+        /// Under the attempt limit: retry on the normal cooldown.
+        case retry(cooldown: TimeInterval)
+        /// Over the limit with system audio still capturing: keep recording
+        /// and retry the mic on the slow cooldown.
+        case keepRecordingWithoutMic(retryCooldown: TimeInterval)
+        /// Over the limit with nothing else capturing: end the recording.
+        case stopRecording
+    }
+
+    static let slowRetryCooldownSeconds: TimeInterval = 30
+
+    static func decision(
+        recoveryAttemptsUsed: Int,
+        maxRecoveryAttempts: Int,
+        normalCooldown: TimeInterval,
+        recordingCapturesSystemAudio: Bool,
+        systemAudioFailed: Bool
+    ) -> Decision {
+        guard recoveryAttemptsUsed >= maxRecoveryAttempts else {
+            return .retry(cooldown: normalCooldown)
+        }
+        guard recordingCapturesSystemAudio, !systemAudioFailed else {
+            return .stopRecording
+        }
+        return .keepRecordingWithoutMic(retryCooldown: slowRetryCooldownSeconds)
+    }
+}
