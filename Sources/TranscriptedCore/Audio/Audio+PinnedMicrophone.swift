@@ -368,6 +368,7 @@ extension Audio {
                   self.recordingSessionGeneration == sessionGeneration,
                   self.isRecording else { return }
             let expectedStopGeneration = self.predictedNextRecordingSessionGeneration()
+            self.internalStopCause = .pinnedMicFailed
             self.stop()
             guard self.recordingSessionGeneration == expectedStopGeneration else { return }
             self.error = "Microphone recovery failed. Reconnect your audio device or try quitting and reopening Transcripted."

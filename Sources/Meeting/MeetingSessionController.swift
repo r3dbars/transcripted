@@ -701,6 +701,7 @@ extension MeetingSessionController {
                 "failure_kind": files.micURL == nil && files.systemURL == nil ? "no_audio" : "unexpected_capture_stop",
                 "failure_stage": "capture_stop", "capture_outcome": failureOutcome.rawValue,
                 "trigger": recordingSnapshot.trigger.rawValue,
+                "stop_cause": capture.internalStopCause ?? "unrecorded",
             ], uniquingKeysWith: { _, new in new }), isFailure: true)
         DiagnosticsTrail.record(
             level: .error,

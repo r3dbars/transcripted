@@ -146,6 +146,7 @@ extension Audio {
                               self.isRecording,
                               !self.isMicRecovering else { return }
                         let expectedStopGeneration = self.predictedNextRecordingSessionGeneration()
+                        self.internalStopCause = .micRecoveryGaveUp
                         self.stop()
                         guard self.recordingSessionGeneration == expectedStopGeneration else { return }
                         // Re-apply error after stop() clears it

@@ -138,6 +138,7 @@ extension Audio {
             self.systemAudioFailed = true
             self.systemAudioStatus = .failed
             self.error = "Recording stopped \u{2014} Transcripted couldn't keep up while saving system audio. Your partial recording is preserved. Check the save location, then start a new recording."
+            self.internalStopCause = .systemWriteBackpressure
             self.stop()
         }
     }

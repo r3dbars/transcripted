@@ -258,6 +258,7 @@ extension Audio {
                   self.recordingSessionGeneration == generation,
                   self.isRecording else { return }
             self.error = "Recording stopped \u{2014} Transcripted couldn't save audio to disk. Check that there's free space and the save location is still available, then start a new recording."
+            self.internalStopCause = .micWriteFailed
             self.stop()
         }
     }
@@ -269,6 +270,7 @@ extension Audio {
                   self.recordingSessionGeneration == generation,
                   self.isRecording else { return }
             self.error = "Recording stopped \u{2014} Transcripted couldn't keep up while saving microphone audio. Your partial recording is preserved. Check the save location, then start a new recording."
+            self.internalStopCause = .micWriteBackpressure
             self.stop()
         }
     }

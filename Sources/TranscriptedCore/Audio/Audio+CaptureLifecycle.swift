@@ -15,6 +15,7 @@ extension Audio {
         // and buffer timestamp.
         stopWatchdog()
         error = nil
+        internalStopCause = nil
         systemAudioStartPermissionExplicitlyDenied = false
         startFailureStage = .unknown
         systemBufferCount = 0  // Reset debug counter (lock-protected)
