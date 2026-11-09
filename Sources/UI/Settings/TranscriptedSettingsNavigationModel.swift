@@ -14,6 +14,8 @@ final class TranscriptedSettingsNavigationModel {
     /// When `present()` last ran. The app activation it causes would only
     /// repeat reads the presentation's full refresh already does.
     @ObservationIgnored var lastPresentedAt: Date?
+    /// Told after every `select`, so hang reports can name the open page.
+    @ObservationIgnored var onSelect: (() -> Void)?
 
     /// Bumped by ⌘F (Find Meetings). Home reveals and focuses its find bar
     /// via `.task(id:)` on this token, which also fires on mount — so the
@@ -43,6 +45,7 @@ final class TranscriptedSettingsNavigationModel {
             destination: page.telemetryDestination, previous: selectedPage.telemetryDestination, source: source
         )
         selectedPage = page
+        onSelect?()
     }
 
     init(selectedPage: TranscriptedSettingsPage = .today) {

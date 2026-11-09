@@ -28,6 +28,7 @@
 - `TranscriptedAppDelegate+SettingsActions.swift` - Settings actions, the audio-import queue, the auto call detection preference.
 - `TranscriptedAppDelegate+Lifecycle.swift` - login-item launch detection and the Quit confirmation dialogs.
 - `TranscriptedAppDelegate+LaunchReports.swift` - launch UI smoke and first-run reliability reports for automated launches.
+- `TranscriptedAppDelegate+OpenScreenDiagnostics.swift` - feeds the `open_screen` hang-report tag: finds visible Transcripted windows through `NSApp.windows` (never the lazy controllers) and refreshes on window, popover and Settings page changes.
 - `TranscriptedMenuCommands.swift` - app-active command menus for capture, import, navigation, speaker search. The shortcut lists live in `Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift`.
 - `TranscriptedAppState.swift` - module `AppState` (card in `Sources/AGENTS.md`): the service container.
 - `TranscriptedSupportActions.swift` - Email Support and Send diagnostics: builds the diagnostics snapshot from `TranscriptedAppState` and hands it to `SupportDiagnosticsBundle`.
