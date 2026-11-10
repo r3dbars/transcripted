@@ -19,7 +19,7 @@ enum DictationTrigger: String {
 
 /// When a Push to Talk press counts as a tap rather than a hold. With the
 /// dictation key set to Hold or tap, a tap keeps the take going hands-free,
-/// so the one key does both (Handy calls this Auto). Under the threshold is well
+/// so the one key does both. Under the threshold is well
 /// above a real tap (tens of milliseconds, see #1743) and below a deliberate
 /// hold. A key typed while it was held makes it a chord (Fn+arrow), never a
 /// tap.

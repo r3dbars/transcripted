@@ -14,8 +14,6 @@ final class NextSentenceKeyTap: @unchecked Sendable {
         self.onAction = onAction
     }
 
-    var isActive: Bool { tap != nil }
-
     @discardableResult
     func start() -> Bool {
         guard tap == nil else { return true }

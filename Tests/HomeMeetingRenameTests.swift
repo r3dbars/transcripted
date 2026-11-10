@@ -46,7 +46,7 @@ func testHomeMeetingRename() {
                     "legacy summary display title should follow the explicit user rename"
                 )
             } catch {
-                assertionFailure("rename should not throw: \(error)")
+                assertTrue(false,"rename should not throw: \(error)")
             }
         }
     }
@@ -73,7 +73,7 @@ func testHomeMeetingRename() {
                     recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot),
                     logFailure: { event, _ in loggedEvents.append(event) }
                 )
-                assertionFailure("a failed audio move should throw")
+                assertTrue(false,"a failed audio move should throw")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -81,7 +81,7 @@ func testHomeMeetingRename() {
                     "the failure should preserve the safe audio location"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the transcript should not move alone")
@@ -120,7 +120,7 @@ func testHomeMeetingRename() {
                         }
                     }
                 )
-                assertionFailure("a failed transcript move should throw")
+                assertTrue(false,"a failed transcript move should throw")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -128,7 +128,7 @@ func testHomeMeetingRename() {
                     "the failure should report restored audio"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
@@ -159,7 +159,7 @@ func testHomeMeetingRename() {
                     },
                     recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
                 )
-                assertionFailure("a failed transcript move should throw")
+                assertTrue(false,"a failed transcript move should throw")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -167,7 +167,7 @@ func testHomeMeetingRename() {
                     "copy recovery should report restored audio"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
@@ -202,7 +202,7 @@ func testHomeMeetingRename() {
                     recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot),
                     logFailure: { event, _ in loggedEvents.append(event) }
                 )
-                assertionFailure("an unrecovered transcript move should throw")
+                assertTrue(false,"an unrecovered transcript move should throw")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -210,7 +210,7 @@ func testHomeMeetingRename() {
                     "the unrecovered location should be explicit"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
@@ -247,7 +247,7 @@ func testHomeMeetingRename() {
                 )
                 assertEqual(result, targetURL, "the transcript should complete forward beside stranded audio")
             } catch {
-                assertionFailure("forward recovery should succeed: \(error)")
+                assertTrue(false,"forward recovery should succeed: \(error)")
             }
 
             assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "forward recovery should retire the original transcript")
@@ -282,7 +282,7 @@ func testHomeMeetingRename() {
                     },
                     recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
                 )
-                assertionFailure("duplicate target audio should remain an explicit failure")
+                assertTrue(false,"duplicate target audio should remain an explicit failure")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -290,7 +290,7 @@ func testHomeMeetingRename() {
                     "cleanup failure should be distinct from a safe rollback"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "the original transcript should remain")
@@ -318,11 +318,11 @@ func testHomeMeetingRename() {
                     },
                     recoveryStoreDirectory: renameRecoveryStoreDirectory(for: meetingsRoot)
                 )
-                assertionFailure("the Home rename should surface the artifact failure")
+                assertTrue(false,"the Home rename should surface the artifact failure")
             } catch let error as HomeMeetingRenameError {
                 assertEqual(error, .artifactRenameFailed, "the caller should receive a user-facing rename failure")
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             let restored = try String(contentsOf: transcriptURL, encoding: .utf8)
@@ -361,7 +361,7 @@ func testHomeMeetingRename() {
                     },
                     recoveryStoreDirectory: recoveryStoreDirectory
                 )
-                assertionFailure("the Home rename should surface the recovery location")
+                assertTrue(false,"the Home rename should surface the recovery location")
             } catch let error as HomeMeetingRenameError {
                 assertEqual(
                     error,
@@ -369,7 +369,7 @@ func testHomeMeetingRename() {
                     "the caller should block blind retry and preserve the audio location"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             let restored = try String(contentsOf: transcriptURL, encoding: .utf8)
@@ -398,7 +398,7 @@ func testHomeMeetingRename() {
                     },
                     recoveryStoreDirectory: recoveryStoreDirectory
                 )
-                assertionFailure("a later rename should remain blocked until the artifacts are coherent")
+                assertTrue(false,"a later rename should remain blocked until the artifacts are coherent")
             } catch let error as HomeMeetingRenameError {
                 assertEqual(
                     error,
@@ -406,7 +406,7 @@ func testHomeMeetingRename() {
                     "a persisted recovery record should block a suffix-producing retry"
                 )
             } catch {
-                assertionFailure("unexpected retry error: \(error)")
+                assertTrue(false,"unexpected retry error: \(error)")
             }
             assertFalse(attemptedArtifactMove, "the durable recovery guard should run before any new artifact move")
             assertEqual(
@@ -463,12 +463,12 @@ func testHomeMeetingRename() {
 
             do {
                 _ = try HomeMeetingRename.rename(transcriptAt: transcriptURL, to: "   ")
-                assertionFailure("empty title should throw")
+                assertTrue(false,"empty title should throw")
             } catch let error as HomeMeetingRenameError {
                 assertEqual(error, .emptyTitle, "empty title should map to .emptyTitle")
                 assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "transcript should be untouched on cancel")
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
         }
     }
@@ -480,12 +480,12 @@ func testHomeMeetingRename() {
 
             do {
                 _ = try HomeMeetingRename.rename(transcriptAt: transcriptURL, to: "Renamed")
-                assertionFailure("non-owned transcript should throw")
+                assertTrue(false,"non-owned transcript should throw")
             } catch let error as HomeMeetingRenameError {
                 assertEqual(error, .notOwnedMeeting, "transcripts without owner IDs are not ours to rename")
                 assertTrue(FileManager.default.fileExists(atPath: transcriptURL.path), "non-owned transcript should be untouched")
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
         }
     }
@@ -510,7 +510,7 @@ func testHomeMeetingRename() {
                 )
                 assertTrue(FileManager.default.fileExists(atPath: blockerURL.path), "existing transcript should not be overwritten")
             } catch {
-                assertionFailure("rename should not throw: \(error)")
+                assertTrue(false,"rename should not throw: \(error)")
             }
         }
     }
@@ -575,7 +575,7 @@ func testHomeMeetingRename() {
             """
             try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
             guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
-                assertionFailure("fixture should expose a speaker identity")
+                assertTrue(false,"fixture should expose a speaker identity")
                 return
             }
 
@@ -591,7 +591,7 @@ func testHomeMeetingRename() {
                 assertTrue(updated.contains("name: \"Justin\""), "the matching frontmatter row should be renamed")
                 assertTrue(updated.contains("source: user_manual"), "the matching metadata should record the manual edit")
             } catch {
-                assertionFailure("speaker rename should not throw: \(error)")
+                assertTrue(false,"speaker rename should not throw: \(error)")
             }
         }
     }
@@ -608,7 +608,7 @@ func testHomeMeetingRename() {
             """
             try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
             guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
-                assertionFailure("fixture should expose a legacy speaker identity")
+                assertTrue(false,"fixture should expose a legacy speaker identity")
                 return
             }
 
@@ -622,7 +622,7 @@ func testHomeMeetingRename() {
                 assertTrue(updated.contains("[System/[[Morgan]]]"), "legacy link syntax should be preserved")
                 assertFalse(updated.contains("[[Alex]]"), "the old linked name should be removed")
             } catch {
-                assertionFailure("legacy speaker rename should not throw: \(error)")
+                assertTrue(false,"legacy speaker rename should not throw: \(error)")
             }
         }
     }
@@ -633,7 +633,7 @@ func testHomeMeetingRename() {
             let markdown = "[00:00] [Mic/You] Hello."
             try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
             guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
-                assertionFailure("fixture should expose a speaker identity")
+                assertTrue(false,"fixture should expose a speaker identity")
                 return
             }
 
@@ -643,13 +643,13 @@ func testHomeMeetingRename() {
                     identity: identity,
                     to: "   "
                 )
-                assertionFailure("empty speaker name should throw")
+                assertTrue(false,"empty speaker name should throw")
             } catch let error as HomeMeetingSpeakerRenameError {
                 assertEqual(error, .emptyName, "empty names should map to .emptyName")
                 let unchanged = (try? String(contentsOf: transcriptURL, encoding: .utf8)) ?? ""
                 assertEqual(unchanged, markdown, "empty rename should leave the transcript untouched")
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
         }
     }
@@ -686,7 +686,7 @@ func testHomeMeetingRename() {
             let identities = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.map(\.identity)
             guard let alex = identities.first(where: { $0.displayName == "Alex" }),
                   let jordan = identities.first(where: { $0.displayName == "Jordan" }) else {
-                assertionFailure("fixture should expose both identities")
+                assertTrue(false,"fixture should expose both identities")
                 return
             }
 
@@ -710,7 +710,7 @@ func testHomeMeetingRename() {
                     "The original Jordan row alone should become Morgan"
                 )
             } catch {
-                assertionFailure("batch rename should not throw: \(error)")
+                assertTrue(false,"batch rename should not throw: \(error)")
             }
         }
     }
@@ -736,7 +736,7 @@ func testHomeMeetingRename() {
             """
             try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
             guard let identity = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first?.identity else {
-                assertionFailure("fixture should expose an unlinked identity")
+                assertTrue(false,"fixture should expose an unlinked identity")
                 return
             }
 
@@ -753,7 +753,7 @@ func testHomeMeetingRename() {
                 assertTrue(updated.contains("source: user_manual"), "manual assignment should record its source")
                 assertTrue(updated.contains("[System/Alex]"), "visible transcript rows should update together")
             } catch {
-                assertionFailure("link assignment should not throw: \(error)")
+                assertTrue(false,"link assignment should not throw: \(error)")
             }
         }
     }
@@ -789,7 +789,7 @@ func testHomeMeetingRename() {
             try markdown.write(to: transcriptURL, atomically: true, encoding: .utf8)
             let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
             guard let identity = lines.first?.identity else {
-                assertionFailure("fixture should expose a stale saved identity")
+                assertTrue(false,"fixture should expose a stale saved identity")
                 return
             }
             let assignment = HomeMeetingSpeakerAssignment(
@@ -803,7 +803,7 @@ func testHomeMeetingRename() {
                 transcriptLines: lines,
                 availableProfileIDs: []
             ) else {
-                assertionFailure("a missing source profile should have a local recovery plan")
+                assertTrue(false,"a missing source profile should have a local recovery plan")
                 return
             }
             assertTrue(plan.savedAssignments.isEmpty, "a deleted profile must not use the global rename path")
@@ -827,7 +827,7 @@ func testHomeMeetingRename() {
                 )
                 assertTrue(updated.contains("[System/Patrick]"), "visible transcript labels should be corrected")
             } catch {
-                assertionFailure("stale speaker recovery should not throw: \(error)")
+                assertTrue(false,"stale speaker recovery should not throw: \(error)")
             }
         }
     }
@@ -844,7 +844,7 @@ private func withTemporaryHomeMeetingRenameLibrary(_ body: (URL) throws -> Void)
         try fm.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
         try body(meetingsRoot)
     } catch {
-        assertionFailure("temporary rename fixture failed: \(error)")
+        assertTrue(false,"temporary rename fixture failed: \(error)")
     }
     try? fm.removeItem(at: root)
 }

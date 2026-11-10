@@ -1,13 +1,10 @@
 import Foundation
 
-/// What Tilde's Screen Memory state means for the menu's status line AND,
-/// since the 2026-08-16 owner directive, for whether Tilde is allowed to
-/// answer a completion request at all. Pure and deterministic so both call
-/// sites — `AppDelegate`'s live suggestion gate and `StatusMenuHost`'s
-/// status line — read the exact same decision and can never disagree about
-/// why suggestions did or didn't fire; before this type existed, that
-/// decision was two separately hand-written `guard` chains with no test
-/// covering either.
+/// What the Screen Memory state means for whether Writing is allowed to
+/// answer a completion request at all (2026-08-16 owner directive). Pure and
+/// deterministic. The one production caller is `WritingSuggestionsGate`,
+/// which passes only `enabled` and `permissionGranted`, so the two
+/// capture-paused cases below are reached only from tests.
 ///
 /// Owner directive, in full: Screen Recording permission is required for
 /// Tilde to suggest at all, not merely to enrich a suggestion with screen

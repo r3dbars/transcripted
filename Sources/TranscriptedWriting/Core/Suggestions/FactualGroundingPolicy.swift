@@ -9,9 +9,7 @@ import Foundation
 /// This was Tilde Lab's `LabOutputJudge` grounding rule first; Q12 measured
 /// it offline and on the development partition (35 unsupported-fact wrongs
 /// removed at zero useful displays lost) and nominated it as a validation
-/// candidate. The rule lives here so the product path and the Lab judge
-/// share one implementation rather than two that can drift; the Lab judge
-/// calls straight into it.
+/// candidate.
 public enum FactualGroundingPolicy {
     public enum Mode: String, Codable, Equatable, Sendable {
         case off

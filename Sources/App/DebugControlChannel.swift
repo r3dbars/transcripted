@@ -1,5 +1,5 @@
 // DebugControlChannel.swift
-// File-drop + URL-scheme hook that lets a local harness drive a debug
+// File-drop hook that lets a local harness drive a debug
 // build: start/stop dictation and meetings, import audio, open screens,
 // change allowlisted settings, and read app state as JSON.
 // Protocol: docs/debug-control-surface.md.

@@ -630,7 +630,8 @@ final class SpeakerVoiceprintMigrationTests: XCTestCase {
         var db: OpaquePointer?
         guard sqlite3_open(path, &db) == SQLITE_OK else {
             sqlite3_close(db)
-            throw XCTSkip("could not open the temp target database")
+            XCTFail("could not open the temp target database")
+            throw CocoaError(.fileReadUnknown)
         }
         defer { sqlite3_close(db) }
         sqlite3_busy_timeout(db, 5_000)

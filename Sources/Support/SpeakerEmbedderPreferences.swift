@@ -18,33 +18,6 @@ enum SpeakerEmbedderChoice: String, CaseIterable, Identifiable {
     case reDimNet2 = "redimnet2"
 
     var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .weSpeaker: return "WeSpeaker (built-in)"
-        case .eRes2Net: return "ERes2Net (codec-robust)"
-        case .reDimNet2: return "ReDimNet2 (default)"
-        }
-    }
-
-    var shortTitle: String {
-        switch self {
-        case .weSpeaker: return "WeSpeaker"
-        case .eRes2Net: return "ERes2Net"
-        case .reDimNet2: return "ReDimNet2"
-        }
-    }
-
-    var summary: String {
-        switch self {
-        case .weSpeaker:
-            return "The diarizer's default 256-dim voiceprint."
-        case .eRes2Net:
-            return "On-device 192-dim voiceprint; better at keeping different people apart on compressed call audio. Uses a separate speaker memory."
-        case .reDimNet2:
-            return "On-device 192-dim voiceprint; recognizes more people on call audio. Uses a separate speaker memory, filled from your saved people on first use."
-        }
-    }
 }
 
 enum SpeakerEmbedderPreferences {
@@ -57,10 +30,5 @@ enum SpeakerEmbedderPreferences {
 
     static func setPreferredChoice(_ choice: SpeakerEmbedderChoice, userDefaults: UserDefaults = .standard) {
         userDefaults.set(choice.rawValue, forKey: preferenceKey)
-        NotificationCenter.default.post(name: .speakerEmbedderPreferenceDidChange, object: nil)
     }
-}
-
-extension Notification.Name {
-    static let speakerEmbedderPreferenceDidChange = Notification.Name("speakerEmbedderPreferenceDidChange")
 }

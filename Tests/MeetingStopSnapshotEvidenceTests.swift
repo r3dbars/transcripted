@@ -124,7 +124,7 @@ func testMeetingStopSnapshotEvidence() {
 
     runSuite("Capture stop — an expected stop stashes nothing and the snapshot reads live values") {
         var events: [String] = []
-        _ = MeetingCaptureHealthTelemetry.captureStopped(
+        MeetingCaptureHealthTelemetry.captureStopped(
             whileRecording: false,
             readEvidence: { () -> MeetingCaptureStopEvidence<Status> in
                 events.append("read")

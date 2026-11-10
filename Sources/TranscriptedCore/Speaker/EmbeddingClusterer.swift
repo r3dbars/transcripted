@@ -59,10 +59,10 @@ public enum EmbeddingClusterer {
     ///   `nil` because VBx already handles the base merge/fragmentation case.
     /// - Parameter consolidationThreshold: Cosine similarity threshold for the
     ///   same-voice consolidation pass that collapses over-segmented large
-    ///   clusters of one speaker. Pass `nil` to skip it. Defaults to the
-    ///   `SpeakerNamingPolicy` auto-accept bar (0.88) so two clusters only merge
-    ///   when they are more similar than we'd demand to auto-accept them as the
-    ///   same known person.
+    ///   clusters of one speaker. Pass `nil` to skip it. The pipeline passes the
+    ///   active model's `SpeakerEmbeddingThresholds.consolidation`. The default,
+    ///   `sameVoiceConsolidationThreshold`, is the WeSpeaker value (0.88), which
+    ///   sits at or below the auto-accept bar (see its doc).
     public static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
@@ -341,8 +341,8 @@ public enum EmbeddingClusterer {
     /// This pass compares the mean embedding of every surviving cluster pair and
     /// merges those above `threshold`. Two safeguards keep genuine
     /// multi-speaker meetings intact:
-    /// - The threshold is high (0.88 by default — the `SpeakerNamingPolicy`
-    ///   auto-accept bar). Distinct speakers rarely exceed ~0.6 cosine
+    /// - The threshold is high (the active model's `consolidation`; 0.88 for
+    ///   WeSpeaker). Distinct speakers rarely exceed ~0.6 cosine
     ///   similarity, so only near-identical voices merge.
     /// - Merging is agglomerative with recomputed centroids: after A and B
     ///   merge, the combined centroid must still clear `threshold` against C

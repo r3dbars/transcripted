@@ -77,10 +77,6 @@ final class NotchIslandDropView: NSView {
         return height
     }
 
-    /// Nothing in the drop-down reads a live value today: the call prompt's
-    /// countdown is the ring around Skip, which runs by itself.
-    func updateLive(_ live: NotchIslandLiveValues) {}
-
     /// A meeting prompt that only changed its "Stops in 12s" line is updated
     /// in place, so its buttons are not rebuilt under the pointer each second.
     func adoptIfOnlyCountdownChanged(_ newDrop: NotchIslandDrop) -> Bool {

@@ -120,7 +120,6 @@ struct QuietHomeHeader: View {
 struct QuietMeetingRow: View {
     let item: RecentMeetingItem
     let isCopied: Bool
-    let isExpanded: Bool
     let onOpen: () -> Void
     let onCopy: () -> Void
     let menuItems: [HomeRowMenuItem]
@@ -196,7 +195,7 @@ struct QuietMeetingRow: View {
         .contentShape(Rectangle())
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 1, style: .continuous)
-                .fill((isHovering || isExpanded) ? LibraryTokens.rowHover : Color.clear)
+                .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
         )
         .padding(.horizontal, -10)
         .onHover { hovering in

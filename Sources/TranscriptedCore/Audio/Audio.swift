@@ -35,10 +35,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // `systemAudioStatus`/`systemAudioSilenceThreshold` further down, plus
     // the mirrored `calculateLevel`/`calculateSystemLevel` and
     // `updateSilenceTracking`/`updateSystemAudioSilenceTracking` pairs in
-    // AudioLevelMonitor.swift). They read genuinely different signals
-    // (normalized RMS vs. linear peak), use different thresholds and output
-    // shapes (continuous Bool+TimeInterval here vs. a hysteresis-gated
-    // `SystemAudioStatus` enum for system), and the mic path runs
+    // AudioLevelMonitor.swift). Both read normalized RMS, but they use
+    // different thresholds and output shapes (continuous Bool+TimeInterval
+    // here vs. a hysteresis-gated `SystemAudioStatus` enum for system),
+    // and the mic path runs
     // synchronously on the AVAudioEngine tap callback thread under
     // `micLevelPublishLock`/`systemLevelLock` — see the threading note above
     // `levelPublishInterval`. Collapsing both into one generic track-state
@@ -199,7 +199,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     /// Whether to arm Apple's AUVoiceProcessingIO (VPIO) on the meeting mic
     /// engine. Default off because VPIO causes macOS to duck audio output
-    /// from other apps (Zoom plays Katie's voice quieter while we're
+    /// from other apps (a call app plays the other side quieter while we're
     /// recording — observed in production after PR #523). Set this BEFORE
     /// calling `start()`; toggling mid-session has no effect until the next
     /// recording begins. The app reads `MicrophoneProcessingPreferences`

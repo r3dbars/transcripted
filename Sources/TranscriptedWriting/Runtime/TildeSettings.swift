@@ -12,7 +12,6 @@ struct TildeSettings {
         case launchAtLogin = "LaunchAtLoginEnabled"
         case setupVersion = "SetupVersion"
         case screenRecordingRequested = "ScreenRecordingRequested"
-        case accessibilityRequested = "AccessibilityRequested"
     }
 
     static let currentSetupVersion = 2
@@ -54,13 +53,6 @@ struct TildeSettings {
     var screenRecordingRequested: Bool {
         get { app.bool(forKey: AppKey.screenRecordingRequested.rawValue) }
         nonmutating set { app.set(newValue, forKey: AppKey.screenRecordingRequested.rawValue) }
-    }
-
-    /// Whether the one-time Accessibility (exact screen text) prompt has
-    /// been shown. The menu can always ask again; launch asks once.
-    var accessibilityRequested: Bool {
-        get { app.bool(forKey: AppKey.accessibilityRequested.rawValue) }
-        nonmutating set { app.set(newValue, forKey: AppKey.accessibilityRequested.rawValue) }
     }
 
     var suggestionsEnabled: Bool {

@@ -212,7 +212,8 @@ final class LiveCaptureSmokeTests: XCTestCase {
         if let size = attributes[.size] as? NSNumber {
             return size.uint64Value
         }
-        throw XCTSkip("Could not read file size for \(url.path)")
+        XCTFail("Could not read file size for \(url.path)")
+        throw CocoaError(.fileReadUnknown)
     }
 }
 

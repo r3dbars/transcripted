@@ -148,17 +148,13 @@ private enum MeetingSummaryTimestampParsing {
 
 /// Always-on, dependency-free meeting field extraction.
 ///
-/// The heavy local summarizer (`LocalMeetingSummarizer`) only runs when a user
-/// opts into the ~12GB Gemma / Apple beta path, so structured fields
-/// (Decisions / Action Items / Open Questions) historically existed for a
-/// subset of meetings. That left the "ask my history" index covering only that
-/// subset.
-///
-/// `MeetingQuickSummaryExtractor` is the cheap baseline that ships on every
-/// save: a rule/heuristic pass over the already-styled transcript that fills a
-/// basic version of the same `LocalMeetingSummarySections` shape with no model
-/// dependency. The heavy summarizer remains the high-quality path; this only
-/// guarantees coverage so the index can reach 100% of captures.
+/// `MeetingQuickSummaryExtractor` runs on every save: a rule/heuristic pass
+/// over the already-styled transcript that fills the
+/// `LocalMeetingSummarySections` shape (Decisions / Action Items / Open
+/// Questions and the rest) with no model dependency, so the search index
+/// covers every capture. It is the only summary Transcripted writes now; the
+/// removed local AI summarizer's output survives only in meetings saved before
+/// 2026-08.
 ///
 /// It is intentionally precision-leaning: a curated cue list, sentence-level
 /// matching, dedupe, and per-section caps. Better to under-extract a soft

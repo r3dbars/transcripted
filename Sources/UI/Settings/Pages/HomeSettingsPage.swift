@@ -229,7 +229,6 @@ struct HomeSettingsPage: View {
                 QuietMeetingRow(
                     item: meeting,
                     isCopied: homeCopiedRowID == meeting.id,
-                    isExpanded: false,
                     onOpen: { onOpenMeeting(meeting) },
                     onCopy: { onCopyMeeting(meeting) },
                     menuItems: meetingRowMenuItems(meeting),

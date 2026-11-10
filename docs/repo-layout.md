@@ -74,10 +74,16 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.agents/` — machine-readable agent maps for path verification and QA gates
 - `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
 - `.github/` — issue templates, PR template, and repository workflows
+- `.githooks/` — git hooks (`commit-msg`, `pre-push`, the public-repo guard); see the Docs Map entry below
+- `.claude/` — Claude Code settings, skills, slash commands, subagents and the stop-lint hook (see "Historical Zones" below)
+- `.claude-plugin/` — `marketplace.json` for the `transcripted-live` Claude Code plugin (source in `Tools/TranscriptedLive/claude-mod`)
+- `.codex/` — the Codex environment; its Run action calls `script/build_and_run.sh --verify`
+- `script/` — `build_and_run.sh`, the companion build-and-launch script: it runs `build.sh --no-open`, packages `Tools/TranscriptedCompanion/`, and opens the app; it refuses while a Transcripted copy is running
+- `AppIcon/` — the app icon source (`Transcripted.icon`)
+- `glama.json`, `server.json` — MCP registry manifests for the read-only MCP server
 - `Sources/` — macOS app target
-- `Sources/App/` — app-shell helpers: the lab control channel, the debug test control surface, and Email Support / Send diagnostics
 - `Sources/Accessibility/` — AX helpers for overlay positioning
-- `Sources/App/` — app shell: `TranscriptedApp`, the delegate extensions, command menus
+- `Sources/App/` — app shell: `TranscriptedApp`, the delegate extensions, command menus, the lab control channel, the debug test control surface, and Email Support / Send diagnostics
 - `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
 - `Sources/Dictation/` — dictation persistence
 - `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`
@@ -182,7 +188,7 @@ Each module's `AGENTS.md` (named in the manifest) says what it owns, its public 
 
 ## Hotspots
 
-Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 37 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, empty today: no Swift file is over 800 lines). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
 python3 scripts/dev/check-file-size.py --hotspots
@@ -199,7 +205,7 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/TranscriptedCore/Pipeline/TranscriptionPipeline.swift` (orchestrator) plus `+MicrophoneOnly`, `+MicDiarization`, `+Stages`, `+LastChanceSweep`, `+SystemSpeakerIdentity` — per-meeting work: resample, diarize system audio, Parakeet STT per segment, mic-channel handling, speaker matching (in `+SystemSpeakerIdentity`), utterance merging. `TranscriptionPipelineRunner.swift` runs it and resolves partial-success channels before save.
 - `Sources/TranscriptedCore/Speaker/SpeakerNamingCoordinator.swift` plus `+Planning`, `+Apply`, `+RequestQueue`, `+Finish`, and the two lock registries `SpeakerNamingRequestOwnership.swift` and `SpeakerReviewProfileProtection.swift` — post-meeting speaker naming: auto-accept, review ownership, and saving name/merge/discard decisions.
 - `Sources/Meeting/MeetingSessionController.swift` (the recording lifecycle) plus `+State.swift` (declares the class) and its other `+*.swift` extensions — the meeting state machine.
-- `Sources/App/TranscriptedApp.swift` (app entry, the delegate's stored state, launch wiring, detected-meeting prompts, Quit, status item) plus `TranscriptedAppDelegate+LaunchReports`, `+Lifecycle`, `+MenuBar`, `+SettingsActions`. The most source-pinned file: its pins still read `TranscriptedApp.swift` only, so pinned code stays there.
+- `Sources/App/TranscriptedApp.swift` (app entry, the delegate's stored state, launch wiring, detected-meeting prompts, Quit, status item) plus `TranscriptedAppDelegate+LaunchReports`, `+Lifecycle`, `+MenuBar`, `+SettingsActions`, `+CallActivity`, `+NextSentence`. Its one remaining source pin reads `TranscriptedApp.swift`.
 - `Sources/Meeting/MeetingPromptDetector.swift` plus `+Backoff`, `+CalendarRuntime`, `+AdHocCalls`, `+BrowserEvidence` and `MeetingPromptCalendarReader.swift` — decides when to offer "record this meeting?".
 - `Sources/Speech/ParakeetEngine.swift` (core state, native AVAudioEngine calls; the graph itself, with rebuild/retire, is `ParakeetAudioGraph`) plus `ParakeetInputReadiness`, `ParakeetInputRoute`, `ParakeetAudioTap`, `ParakeetRecordingStart`, `ParakeetRecordingTeardown`, `ParakeetDictationTranscription`, `ParakeetASRInference` — the dictation STT engine and `@MainActor` home for recording state. Engine and `inputNode` code here is AirPods-sensitive; read `Sources/Speech/AGENTS.md` first.
 - `Sources/UI/Overlay/MeetingOverlayController.swift` (stored state, subscriptions, session-state mapping, show/hide) plus `+Island` (the island snapshot, taps, right-click Discard), `+WarningPrompts` (prompt countdown and system-audio auto-hide) and `+PromptCopy` — the island's meeting. Its source pins in `Tests/UIAutomationSurfaceContractTests.swift` read `+Island.swift`.
@@ -207,7 +213,7 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
 - `Sources/UI/Settings/TranscriptedSettingsView.swift` (stored state, `init`, `body`, Home row actions) plus `+Pages`, `+HomeMeetingActions`, `+GeneralEditors`, `+Refresh`, `+Preferences` — the Settings window shell, page routing, and every Home side effect. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings. The Home row actions in the core file are still pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `Sources/UI/Settings/HomeView.swift` plus `HomeViewModel.swift`, `HomeModels.swift`, `HomeFeedbackModels.swift`, `HomeScanWarningCard.swift`, `HomeCaptureList.swift` — the Meetings page (page id `home`).
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeopleRows.swift` (the voice-to-name and person rows), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete).
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeoplePersonRow.swift` (the person row; `SpeakerPeopleRows.swift` holds the undrawn voice-to-name row), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete).
 - `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` plus `PackagedAppSmokeRunner.swift`, the `FirstRunReliability*.swift` files and `PrivacyLogScanner.swift` — the packaged-app release smoke; a break here blocks shipping.
 - `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+SummaryRollups`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
 
@@ -218,4 +224,4 @@ The old beta backend (`archive/`) was removed on 2026-09-25. It's still in git h
 
 `docs/archive/` holds finished records that no code, script, or test reads.
 
-`.claude/` is live tooling, not a historical zone: `skills/` holds the `transcripted-qa` skill, `commands/` the `humanize`/`tests`/`push` slash commands, and `agents/` subagent definitions (`test-writer` and the `writing-*` agents used for the Tilde port).
+`.claude/` is live tooling, not a historical zone: `skills/` holds the `correct`, `transcripted-qa` and `verify` skills, `hooks/` the `stop-lint.sh` Stop hook, `commands/` the `humanize`/`tests`/`push` slash commands, and `agents/` subagent definitions (`test-writer` and the `writing-*` agents used for the Tilde port).

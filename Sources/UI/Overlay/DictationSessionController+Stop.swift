@@ -282,7 +282,6 @@ extension DictationSessionController {
                     },
                     startTranscribing: {
                         overlayController.state = .drafting
-                        overlayController.resizePanelToCompact()
                         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "transcribing")
                     },
                     transcribe: { preparedRecording in

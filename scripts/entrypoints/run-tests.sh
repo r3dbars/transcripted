@@ -18,8 +18,6 @@ export TZ="${TZ:-America/Chicago}"
 source "$ENTRYPOINT_DIR/lib/shared-smoke-sources.sh"
 
 BUILD_DIR="build"
-# Keep this path stable so Swift's incremental dependency graph can recognize
-# the generated runner across filtered invocations.
 # PID-suffixed so two concurrent invocations cannot clobber each other's
 # generated runner source. Trade-off: this one generated file is never
 # incremental-compile-warm across invocations; the (much larger) APP_SOURCES
@@ -120,8 +118,8 @@ TEST_DEFAULTS_DOMAIN="transcripted-fast-tests.${TRANSCRIPTED_CONTAINER_DIR##*.}"
 # The shared app-object cache is mutated and compiled into in place, so two
 # overlapping run-tests.sh invocations in one worktree must not interleave.
 # mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
-# 30 minutes are treated as crashed holders and stolen.
-# One full object directory (~184 objects) per distinct APP_SOURCES content hash,
+# 60 minutes are treated as crashed holders and stolen.
+# One full object directory (one object per APP_SOURCES file) per distinct APP_SOURCES content hash,
 # and nothing in the repo ever evicted them. Growth is bounded per editing window
 # — any Sources/** change needs build.sh, which rm -rf's build/ — but within one
 # window the loop is also the no-benefit loop: an app-source edit produces a fresh
@@ -485,6 +483,7 @@ APP_SOURCES=(
     "Sources/Writing/NextSentence/NextSentencePrivacy.swift"
     "Sources/Writing/NextSentence/NextSentenceWarmPool.swift"
     "Sources/Writing/NextSentence/NextSentenceTetheredProcess.swift"
+    "Sources/Writing/NextSentence/NextSentenceLineProcess.swift"
     "Sources/Writing/NextSentence/NextSentenceSemanticIndex.swift"
     "Sources/TranscriptedWriting/Core/ScreenMemory/DefaultExcludedApps.swift"
     "Sources/TranscriptedWriting/Core/Text/SecretRules.swift"

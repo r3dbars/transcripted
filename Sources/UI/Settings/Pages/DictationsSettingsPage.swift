@@ -2,7 +2,7 @@ import SwiftUI
 
 /// The Settings > Dictations page. One card per saved dictation, grouped by
 /// day (`QuietDictationCard` in `QuietDictationLibrary.swift`; the 2026-10
-/// redesign after Handy's history page). The daily Markdown file stays the
+/// redesign). The daily Markdown file stays the
 /// storage shape; this is presentation plus inline playback. Copy, reveal,
 /// delete, and the STT call stay owned by the parent and arrive as closures.
 ///

@@ -120,9 +120,6 @@ public enum SpeakerNamingPolicy {
                 needsRunnerUpBelowStandardBar: true
             )
         }
-
-        /// The no-invite lineup bars at WeSpeaker scale.
-        public static let recentLineup = recentLineup(for: .weSpeaker)
     }
 
     /// Who counts as "expected" in a meeting for lineup naming: the calendar invite,

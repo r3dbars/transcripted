@@ -222,7 +222,7 @@ func testHomeMeetingDeletion() {
                 micBytes: "mic one"
             )
             guard let item = deletionMeetingItem(transcriptURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -236,7 +236,7 @@ func testHomeMeetingDeletion() {
                 assertEqual(payload.plan.transcriptURLs.map(\.lastPathComponent), ["Quick notes.md"], "result should report selected transcript")
                 assertEqual(payload.plan.summaryURLs.map(\.lastPathComponent), ["Quick notes.summary.md"], "result should report selected summary")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -253,7 +253,7 @@ func testHomeMeetingDeletion() {
                 micBytes: "mic one"
             )
             guard let item = deletionMeetingItem(transcriptURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -265,7 +265,7 @@ func testHomeMeetingDeletion() {
                 assertTrue(FileManager.default.fileExists(atPath: summaryURL.path), "summary for a different source transcript should stay")
                 assertTrue(payload.plan.summaryURLs.isEmpty, "result should not report unrelated summaries")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -281,7 +281,7 @@ func testHomeMeetingDeletion() {
             try writeDeletionMeeting(title: "Conversación técnica Observabilidad", transcriptURL: transcriptURL)
 
             guard let item = deletionMeetingItem(transcriptURL) else {
-                assertionFailure("accented meeting should scan")
+                assertTrue(false,"accented meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -293,7 +293,7 @@ func testHomeMeetingDeletion() {
                 _ = try HomeMeetingDeletion.trash(item, fileManager: fm)
                 assertFalse(FileManager.default.fileExists(atPath: transcriptURL.path), "accented transcript should be deleted")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -316,7 +316,7 @@ func testHomeMeetingDeletion() {
             assertNotNil(duplicateValues?["transcript_id"], "duplicate fixture should be app-owned")
             assertNotNil(MeetingAudioArchiveResolver.attachment(forTranscript: duplicateURL), "duplicate fixture should have retained audio")
             guard let item = deletionMeetingItem(firstURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -344,7 +344,7 @@ func testHomeMeetingDeletion() {
                     "result should include selected and duplicate transcripts"
                 )
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -358,7 +358,7 @@ func testHomeMeetingDeletion() {
             try writeDeletionAudio(for: selectedURL, systemBytes: "same system", micBytes: "same mic")
             let nonOwnedAudio = try writeDeletionAudio(for: nonOwnedURL, systemBytes: "same system", micBytes: "same mic")
             guard let item = deletionMeetingItem(selectedURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -369,7 +369,7 @@ func testHomeMeetingDeletion() {
                 assertTrue(FileManager.default.fileExists(atPath: nonOwnedURL.path), "manual transcript without IDs should stay")
                 assertTrue(FileManager.default.fileExists(atPath: nonOwnedAudio.path), "manual retained audio should stay")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -383,7 +383,7 @@ func testHomeMeetingDeletion() {
             try writeDeletionAudio(for: selectedURL, systemBytes: "same system", micBytes: "same mic")
             let ownedAudio = try writeDeletionAudio(for: ownedURL, systemBytes: "same system", micBytes: "same mic")
             guard let item = deletionMeetingItem(selectedURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -395,7 +395,7 @@ func testHomeMeetingDeletion() {
                 assertTrue(FileManager.default.fileExists(atPath: ownedURL.path), "owned sibling should stay when the selected row is not app-owned")
                 assertTrue(FileManager.default.fileExists(atPath: ownedAudio.path), "owned sibling audio should stay when the selected row is not app-owned")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -409,7 +409,7 @@ func testHomeMeetingDeletion() {
             try writeDeletionAudio(for: selectedURL, systemBytes: "same system", micBytes: "same mic")
             let otherAudio = try writeDeletionAudio(for: otherURL, systemBytes: "same system", micBytes: "same mic")
             guard let item = deletionMeetingItem(selectedURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -421,7 +421,7 @@ func testHomeMeetingDeletion() {
                 assertTrue(FileManager.default.fileExists(atPath: otherURL.path), "same-audio transcript with a different title should stay")
                 assertTrue(FileManager.default.fileExists(atPath: otherAudio.path), "same-audio directory with a different title should stay")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -431,7 +431,7 @@ func testHomeMeetingDeletion() {
             let transcriptURL = meetingsRoot.appendingPathComponent("Pricing memo.md")
             try writeDeletionMeeting(title: "Pricing memo", transcriptURL: transcriptURL)
             guard let item = deletionMeetingItem(transcriptURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let clipsDirectory = meetingsRoot
@@ -485,7 +485,7 @@ func testHomeMeetingDeletion() {
             let sameSizeAudio = try writeDeletionAudio(for: sameSizeURL, systemBytes: "system bbbb", micBytes: "mic bbbb")
             let otherSizeAudio = try writeDeletionAudio(for: otherSizeURL, systemBytes: "system longer", micBytes: "mic longer")
             guard let item = deletionMeetingItem(selectedURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -500,7 +500,7 @@ func testHomeMeetingDeletion() {
                 assertTrue(FileManager.default.fileExists(atPath: otherSizeAudio.path), "different-size audio directory should stay")
                 assertEqual(payload.plan.transcriptURLs.map(\.lastPathComponent), ["Weekly sync.md"], "result should only include the selected transcript")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -514,7 +514,7 @@ func testHomeMeetingDeletion() {
             try writeDeletionAudio(for: selectedURL, systemBytes: "system stream", micBytes: "mic stream")
             let swappedAudio = try writeDeletionAudio(for: swappedURL, systemBytes: "mic stream", micBytes: "system stream")
             guard let item = deletionMeetingItem(selectedURL) else {
-                assertionFailure("synthetic meeting should scan")
+                assertTrue(false,"synthetic meeting should scan")
                 return
             }
             let fm = try FixtureTrashFileManager(meetingsRoot: meetingsRoot)
@@ -527,7 +527,7 @@ func testHomeMeetingDeletion() {
                 assertTrue(FileManager.default.fileExists(atPath: swappedAudio.path), "swapped-role audio directory should stay")
                 assertEqual(payload.plan.transcriptURLs.map(\.lastPathComponent), ["Quick notes.md"], "result should only include the selected transcript")
             } catch {
-                assertionFailure("Trash should not throw: \(error)")
+                assertTrue(false,"Trash should not throw: \(error)")
             }
         }
     }
@@ -588,7 +588,7 @@ private func withTemporaryHomeMeetingDeletionLibrary(_ body: (URL) throws -> Voi
         try fm.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
         try body(meetingsRoot)
     } catch {
-        assertionFailure("temporary deletion fixture failed: \(error)")
+        assertTrue(false,"temporary deletion fixture failed: \(error)")
     }
     try? fm.removeItem(at: root)
 }

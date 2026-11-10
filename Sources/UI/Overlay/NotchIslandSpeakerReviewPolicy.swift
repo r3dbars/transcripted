@@ -95,7 +95,7 @@ enum NotchIslandSpeakerReviewPolicy {
     enum NamedAs: Equatable {
         /// Typed: someone new, saved under this voice.
         case newPerson
-        /// A person already in Speakers (their progress isn't in the request).
+        /// A person already in Speakers, picked in place (their count comes from Speakers).
         case savedPerson
         /// "Me" on a local mic voice.
         case owner
@@ -153,8 +153,8 @@ enum NotchIslandSpeakerReviewPolicy {
 
     /// Rings lit in the row's print. ✓ shows the count this answer earns; a
     /// voice the row no longer claims (a name field, All me, Not a person)
-    /// shows an empty print. A name picked from Speakers keeps that person's
-    /// print empty because the request doesn't carry their count.
+    /// shows an empty print. A name picked from Speakers counts as a yes for
+    /// that person: their rings plus this one (empty when their count isn't known).
     static func litRings(_ state: RowState, progress: Progress?) -> Int {
         switch state {
         case .asking: return progress?.litRings ?? 0

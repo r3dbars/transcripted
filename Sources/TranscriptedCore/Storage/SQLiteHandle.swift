@@ -44,6 +44,9 @@ public enum SQLiteHandle {
         var db: OpaquePointer?
         guard sqlite3_open(url.path, &db) == SQLITE_OK else {
             let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown"
+            // SQLite usually hands back a handle even when the open fails, and
+            // it must still be closed (closing nil is a no-op).
+            sqlite3_close(db)
             onOpenFailure(message)
             return nil
         }

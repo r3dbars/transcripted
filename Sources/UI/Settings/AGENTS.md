@@ -53,8 +53,8 @@ The combined settings page is card-based: every setting is an always-visible row
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected page, the ⌘F Home find-focus token, `isWindowOpen`, `requestHomeRevealMeeting`.
 - `TranscriptedSettingsGeneralControls.swift` - `SettingsCard`, label/control/toggle/action rows, the dictation overlay mode picker, `GeneralInfo` popovers.
 - `DeveloperPreviewSettingsRows.swift` - the Developer Preview card at the bottom of the settings page: one tagged row per `DeveloperPreview.all` feature, with what it sends in the ⓘ popover; turning one on asks first. No analytics for these toggles.
-- `TranscriptedSettingsComponents.swift` - `persistedSettingsBinding`, `SettingsPageIntro`, button styles, `SettingsStatusCard`, permission rows, hotkey recorder container.
-- `TranscriptedSettingsRows.swift` - rows for model choices, custom corrections, Auto Enter apps.
+- `TranscriptedSettingsComponents.swift` - `persistedSettingsBinding`, `SettingsPageIntro`, button styles, `SettingsStatusCard`, permission rows.
+- `TranscriptedSettingsRows.swift` - Auto Enter app candidates and the custom corrections editor row. The model picker is inline in `+GeneralEditors.swift`.
 - `ShortcutSettingsRows.swift` - key rows for the dictation key and meetings, and `ShortcutRecorderModel`, which records a shortcut in place (the dictation key is one key with hold/tap behavior; no Hands-Free or paste-last rows). A stored F8 vs Fn+F8 clash shows under the meeting row even while idle, so it isn't left silently dead.
 - `MeetingLanguageSettingRow.swift` / `MeetingMicrophoneSettingRow.swift` / `MicrophoneSettingsPolicy.swift` - meeting language picker, Mac-selected-mic toggle, and which mic rows General shows (Foundation-pure).
 - `TranscriptedSettingsActions.swift` - app-level closures injected into the shell (start dictation/meeting, import audio, feedback, diagnostics).
@@ -94,7 +94,7 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Agent page
 
-- `AgentConnectionSettingsPage.swift` - one connect row per detected agent (via `AgentMCPConnector`), the universal copy-prompt row, the `CompanionSettingsCard()`, and the Advanced disclosure (folders, Codex inbox, config).
+- `AgentConnectionSettingsPage.swift` - one connect row per detected agent (via `AgentMCPConnector`), the universal copy-prompt row, the `CompanionSettingsCard()`, and the Advanced disclosure (the three capture folders and Copy Paths). The Codex inbox setup (`codexInboxDetails`) is implemented but off the view tree.
 - `CompanionSettingsCard.swift` - ChatGPT companion plugin card. Readiness describes the local bridge; it never implies ChatGPT has connected.
 - Onboarding has no agent step; connection lives only here.
 
@@ -113,7 +113,7 @@ The combined settings page is card-based: every setting is an always-visible row
 - `SpeakerReviewStack.swift` - Foundation-pure card stack: call order (skipped out, Later last, a finished card held out while it can be undone or saves, a card asked for from Meetings on top), which voices Everyone hides (the top card's and a held-out card's, never during a search, so deeper voices stay reachable with a "Waiting in review" badge), Home's "speakers need names" count (skipped calls don't count), and each saved meeting's voices to name and the card that holds them (`meetingNaming`, for the Meetings row's "2 to name" pill and its ⋯ "Who spoke? · 2 to name"; both open that card via `openHomeSpeakerReview(transcriptURL:)`). The model rebuilds it when the queue, a skip, Later, or the visit changes.
 - `SpeakerNamingSheet.swift` - presenter for the post-meeting review. Held while a meeting records (`SpeakerReviewPresentationGate.swift`), then asks in the Notch island (`Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift`). Later saves what was answered and the rest waits in Speakers. Calendar invitees come from `MeetingInviteeSuggestionPolicy`. There is no review window.
 - `SpeakerVoiceRowPresentation.swift`, `SpeakerMergeTargets.swift`, `SpeakerDuplicateNameMatching.swift`, `SpeakerDuplicateDetection.swift` - Foundation-pure row policies, merge-target index (built once per snapshot), duplicate-name rule, and a whole-profile duplicate cache (only unchanged profiles reuse the all-pairs result; clips, review rows, undo reload).
-- `SpeakerNameAutocompleteField.swift` - SwiftUI suggestion list under an `NSTextField`; ranking is `SpeakerNameTypingSuggestionPolicy`. Keyboard highlight (arrows + Return) is separate from hover paint; Return never takes the hovered row. After an arrow, hover paint is cleared and the keyboard row is painted, so the highlight matches what Return saves. `untouchedPrefill` hides the list while the current label is still untouched. A chevron next to the field toggles the full sorted saved-people list (scrollable, still excluding this voice). Inline combo completion stays off. `RetainedDataSourceComboBox.swift` still owns the crash fix for any leftover combo box (`assign` data source).
+- `SpeakerNameAutocompleteField.swift` - SwiftUI suggestion list under an `NSTextField`; ranking is `SpeakerNameTypingSuggestionPolicy`. Keyboard highlight (arrows + Return) is separate from hover paint; Return never takes the hovered row. After an arrow, hover paint is cleared and the keyboard row is painted, so the highlight matches what Return saves. `untouchedPrefill` hides the list while the current label is still untouched. A chevron next to the field toggles the full sorted saved-people list (scrollable, still excluding this voice). Inline combo completion stays off. `RetainedDataSourceComboBox.swift` (the `assign` data-source crash fix) has no app user since the name field became an `NSTextField`; only its own test uses it.
 - `AutoEnterDisplayNameResolver.swift` - fallback chain for Auto Enter app names.
 
 ### Pages/
@@ -137,6 +137,6 @@ Then open Settings and check by hand:
 - failed meeting retry, reveal, delete, and retained-audio playback work
 - custom dictionary edits persist and preview
 - Auto Enter app add/remove works
-- Agent page connects detected agents, copies the universal prompt, reveals config and folders, sets up the Codex inbox from Advanced
+- Agent page connects detected agents, copies the universal prompt, and reveals and copies the capture folders from Advanced
 
 Core engine types stay behind Meeting seams. The module boundary check has no grandfathered crossings.

@@ -20,7 +20,7 @@ func testTimedOutFailedMeetingFinalization() {
         if case .buffered = handoff.receive(result, for: failedID, failedMeetingIsPersisted: false) {
             // Expected.
         } else {
-            assertionFailure("a completion cannot promote audio before its durable failed row exists")
+            assertTrue(false,"a completion cannot promote audio before its durable failed row exists")
         }
         assertEqual(
             handoff.failedMeetingDidPersist(id: failedID)?.micURL,
@@ -83,7 +83,7 @@ func testTimedOutFailedMeetingFinalization() {
             assertEqual(deliverable.micURL, finalizedMicURL)
             assertEqual(deliverable.systemURL, finalizedSystemURL)
         } else {
-            assertionFailure("row-first completion should promote immediately")
+            assertTrue(false,"row-first completion should promote immediately")
         }
 
         handoff.markDeliverySucceeded(id: failedID)
@@ -102,7 +102,7 @@ func testTimedOutFailedMeetingFinalization() {
         if case .promote = handoff.receive(result, for: failedID, failedMeetingIsPersisted: true) {
             // Expected.
         } else {
-            assertionFailure("persisted row should own immediate promotion")
+            assertTrue(false,"persisted row should own immediate promotion")
         }
         assertEqual(
             handoff.failedMeetingDidPersist(id: failedID)?.systemURL,
@@ -132,11 +132,11 @@ func testTimedOutFailedMeetingFinalization() {
             generation: 8,
             owner: .failedMeeting(failedID)
         ) { _ in
-            assertionFailure("expiry must release the row-specific closure")
+            assertTrue(false,"expiry must release the row-specific closure")
         }
         assertTrue(registry.expire(generation: 8))
         guard case .expired(.failedMeeting(let expiredID)) = registry.resolve(generation: 8) else {
-            assertionFailure("expiry must retain closure-free failed-row identity")
+            assertTrue(false,"expiry must retain closure-free failed-row identity")
             return
         }
         if case .discard(let discarded) = handoff.receive(
@@ -146,7 +146,7 @@ func testTimedOutFailedMeetingFinalization() {
         ) {
             assertEqual(discarded.micURL, lateResult.micURL)
         } else {
-            assertionFailure("a terminal delete or retry must own its late callback as cleanup-only")
+            assertTrue(false,"a terminal delete or retry must own its late callback as cleanup-only")
         }
         assertEqual(handoff.terminalOwnershipCount, 0)
     }
@@ -169,7 +169,7 @@ func testTimedOutFailedMeetingFinalization() {
         ) {
             // The persisted row disappeared before the callback reached Home.
         } else {
-            assertionFailure("a Core-side row removal must make its late callback cleanup-only")
+            assertTrue(false,"a Core-side row removal must make its late callback cleanup-only")
         }
         assertFalse(handoff.persistedOwnershipIDs.contains(failedID))
     }
@@ -188,7 +188,7 @@ func testTimedOutFailedMeetingFinalization() {
         if case .journalOwned = action {
             // Expected: keep disk recovery artifacts, but retain no callback result.
         } else {
-            assertionFailure("failed row persistence should leave the durable journal in charge")
+            assertTrue(false,"failed row persistence should leave the durable journal in charge")
         }
         assertEqual(handoff.terminalOwnershipCount, 0)
     }
@@ -211,7 +211,7 @@ func testTimedOutFailedMeetingFinalization() {
         if case .journalOwned = action {
             // Expected: promotion must not clear the multi-segment journal.
         } else {
-            assertionFailure("an abandoned finalizer must never promote the provisional failed-row audio")
+            assertTrue(false,"an abandoned finalizer must never promote the provisional failed-row audio")
         }
         assertNil(
             handoff.failedMeetingDidPersist(id: failedID),
@@ -235,7 +235,7 @@ func testTimedOutFailedMeetingFinalization() {
         if case .journalOwned = action {
             // Expected: the durable journal owns the callback-first result.
         } else {
-            assertionFailure("callback-first abandonment must stay on the journal recovery path")
+            assertTrue(false,"callback-first abandonment must stay on the journal recovery path")
         }
         assertNil(
             handoff.failedMeetingDidPersist(id: failedID),
@@ -302,13 +302,13 @@ func testTimedOutFailedMeetingFinalization() {
         assertFalse(registry.generations.contains(12), "an older never-completing stop must not retain its generation")
         assertEqual(registry.handlerCount, 1, "pruning must release the older stop's closure")
         guard case .expired(.failedMeeting(let prunedID)) = registry.resolve(generation: 12) else {
-            assertionFailure("pruning must preserve value-only failed-row identity")
+            assertTrue(false,"pruning must preserve value-only failed-row identity")
             return
         }
         assertEqual(prunedID, failedID)
 
         guard case .pending(let handler) = registry.resolve(generation: 14) else {
-            assertionFailure("the current timed-out stop should retain its callback")
+            assertTrue(false,"the current timed-out stop should retain its callback")
             return
         }
         handler?(CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false))
@@ -320,14 +320,14 @@ func testTimedOutFailedMeetingFinalization() {
     runSuite("Timed-out completion ownership expires without a later recording") {
         var registry = TimedOutStopCompletionRegistry()
         registry.register(generation: 22, owner: .discard) { _ in
-            assertionFailure("an expired per-stop closure must never be delivered")
+            assertTrue(false,"an expired per-stop closure must never be delivered")
         }
 
         assertTrue(registry.expire(generation: 22))
         assertTrue(registry.generations.isEmpty)
         assertEqual(registry.handlerCount, 0, "expiry must release the retained closure")
         guard case .expired(.discard) = registry.resolve(generation: 22) else {
-            assertionFailure("expiry must retain explicit cleanup disposition without retaining a closure")
+            assertTrue(false,"expiry must retain explicit cleanup disposition without retaining a closure")
             return
         }
         assertFalse(registry.expire(generation: 22), "expiry must be idempotent")
@@ -343,7 +343,7 @@ func testTimedOutFailedMeetingFinalization() {
         assertEqual(registry.handlerCount, 0)
         assertEqual(registry.expiredOwnerCount, 4)
         guard case .expired(nil) = registry.resolve(generation: 1) else {
-            assertionFailure("an evicted value tombstone must keep the stable expired fallback")
+            assertTrue(false,"an evicted value tombstone must keep the stable expired fallback")
             return
         }
         assertEqual(
@@ -357,7 +357,7 @@ func testTimedOutFailedMeetingFinalization() {
             "an evicted callback-first owner must keep journal recovery intact"
         )
         guard case .expired(.discard) = registry.resolve(generation: 6) else {
-            assertionFailure("the newest bounded tombstone must retain its terminal disposition")
+            assertTrue(false,"the newest bounded tombstone must retain its terminal disposition")
             return
         }
     }

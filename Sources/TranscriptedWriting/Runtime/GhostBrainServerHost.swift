@@ -43,20 +43,18 @@ final class GhostBrainServerHost: @unchecked Sendable {
     /// 2026-08-16 owner directive: Screen Recording permission is required
     /// for Tilde to suggest at all, not merely to enrich suggestions with
     /// screen context. `nil` means "always allowed" (release-proof mode and
-    /// tests that don't care about this gate); `AppDelegate` wires the real
-    /// closure to `ScreenMemoryStatus.evaluate(...).allowsSuggestions` (Core,
-    /// pure, tested — the same decision `StatusMenuHost`'s status line
-    /// reads, so the menu and the actual suggestion behavior can never
-    /// disagree), read fresh on every request so a permission revoked or a
+    /// tests that don't care about this gate); `WritingController` wires the
+    /// real closure to `WritingSuggestionsGate.allows` (which ends in
+    /// `ScreenMemoryStatus.evaluate(...).allowsSuggestions`, Core, pure,
+    /// tested), read fresh on every request so a permission revoked or a
     /// toggle flipped mid-session takes effect on the very next completion,
     /// and a permission granted mid-session resumes suggestions on the next
     /// completion too — no restart, no cached state to go stale.
     /// Transcripted: takes the request's app, so the Writing app scope and
     /// the exclusion list silence suggestions too (a Tilde bug fix).
     private let suggestionsGate: (@Sendable (String?) -> Bool)?
-    /// "Personal suggestions (experimental)" (`docs/plans/road-to-paid.md`
-    /// Phase 3). Read fresh on every completion request, same shape and
-    /// contract as `suggestionsGate`: `nil` means "always off" (release-
+    /// "Personal suggestions (experimental)". Read fresh on every completion
+    /// request, same shape and contract as `suggestionsGate`: `nil` means "always off" (release-
     /// proof mode and tests that don't care about this feature), so
     /// existing call sites are unaffected by this feature's addition.
     private let personalSuggestionsGate: (@Sendable () -> Bool)?
@@ -370,7 +368,7 @@ final class GhostBrainServerHost: @unchecked Sendable {
 
             // Read fresh, before either task starts, so the personal lookup
             // (if any) runs CONCURRENTLY with the llama call, not after it —
-            // "never lengthen latency" (docs/plans/road-to-paid.md Phase 3).
+            // "never lengthen latency".
             let personalSuggestionsEnabled = self.personalSuggestionsGate?() ?? false
             // The register the generator composes with: the same pure
             // function of the same scene and host the engine applies, sent
@@ -387,7 +385,7 @@ final class GhostBrainServerHost: @unchecked Sendable {
             // the race and can be released by its own deadline; nothing is
             // ever left blocked on the provider's task.
             let personalRace: PersonalLookupRace? = {
-                guard personalSuggestionsEnabled, let provider = self.personalNextWordProvider else {
+                guard personalSuggestionsEnabled, self.personalNextWordProvider != nil else {
                     return nil
                 }
                 let tailWords = Self.personalTailWords(fromContext: completionRequest.context)

@@ -206,7 +206,7 @@ enum SpeakerReviewSamplePolicy {
         in lines: [HomeMeetingTranscriptLine]
     ) -> TimeInterval {
         guard let start = line.startSeconds else { return 0 }
-        let nextStart = lines.dropFirst(index + 1).compactMap(\.startSeconds).first
+        let nextStart = lines.dropFirst(index + 1).lazy.compactMap(\.startSeconds).first
         guard let nextStart, nextStart > start else { return 0 }
         return nextStart - start
     }

@@ -9,7 +9,7 @@
 - **Owns:** app entry, the delegate's stored state and launch wiring, detected-meeting prompts, the status item and popover, Quit, the app-active command menus, the lab control channel, and the debug test control surface.
 - **May depend on:** anything. Nothing may depend on it (the manifest check enforces that).
 - **Tests:** `bash run-tests.sh --filter StatusItem`, `bash run-tests.sh --filter LabControlCommand`, `bash run-tests.sh --filter DebugControlCommand`, `bash run-e2e-smoke.sh`.
-- **Start at:** `TranscriptedApp.swift`. It is the most source-pinned file in the repo, so run `python3 scripts/dev/check-source-pins.py --changed-only` before editing it or moving code between the delegate extensions.
+- **Start at:** `TranscriptedApp.swift`. It still has a source pin, so run `python3 scripts/dev/check-source-pins.py --changed-only` before editing it or moving code between the delegate extensions.
 
 ## Rules
 
@@ -28,10 +28,12 @@
 - `TranscriptedAppDelegate+SettingsActions.swift` - Settings actions, the audio-import queue, the auto call detection preference.
 - `TranscriptedAppDelegate+Lifecycle.swift` - login-item launch detection and the Quit confirmation dialogs.
 - `TranscriptedAppDelegate+LaunchReports.swift` - launch UI smoke and first-run reliability reports for automated launches.
+- `TranscriptedAppDelegate+CallActivity.swift` - wires the mic, output and camera activity monitors into `MeetingPromptDetector` and the meeting session.
+- `TranscriptedAppDelegate+NextSentence.swift` - runs Write for Me's voice (holding fn, or saying a change) on Transcripted's own dictation as a hand-off take, and feeds the card its mic level and live words.
 - `TranscriptedMenuCommands.swift` - app-active command menus for capture, import, navigation, speaker search. The shortcut lists live in `Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift`.
 - `TranscriptedAppState.swift` - module `AppState` (card in `Sources/AGENTS.md`): the service container.
 - `TranscriptedSupportActions.swift` - Email Support and Send diagnostics: builds the diagnostics snapshot from `TranscriptedAppState` and hands it to `SupportDiagnosticsBundle`.
 - `LabControlChannel.swift` - lab builds only (`#if TRANSCRIPTED_LAB_CONTROL`, set by `build.sh --lab`, never by `build-beta.sh`). File-drop channel the hill-climb lab uses to drive the real app (start/stop dictation and meetings, import audio, status) when launched with `TRANSCRIPTED_LAB_CONTROL_DIR`. It refuses non-0700, foreign, or symlinked control dirs and reads commands `O_NOFOLLOW|O_NONBLOCK` plus `fstat`. Its hook is one `#if` line in `applicationDidFinishLaunching`. See `docs/lab-control-channel.md`.
 - `LabControlCommand.swift` - the pure, always-compiled half: command parsing and validation (`stop_dictation` paste defaults to false), meeting-state gates, response encoding, `LabControlFilePolicy` (stat-based accept rules). Must not contain the env var name as a literal. Tested by `Tests/LabControlCommandTests.swift`.
 - `DebugControlChannel.swift` - local `build.sh` only (`#if TRANSCRIPTED_DEBUG_CONTROL`, never `build-beta.sh`). File-drop only (no URL scheme) so a harness can start/stop dictation and meetings, import audio, open screens, set allowlisted bools, and read JSON state. Stays off unless `AutomatedLaunchEnvironment` is active and `TRANSCRIPTED_DEBUG_CONTROL_DIR` is an absolute path. See `docs/debug-control-surface.md`.
-- `DebugControlCommand.swift` - the pure, always-compiled half: JSON / argv / URL parsing, settings and screen allowlists, session policy, dictation settle wait, state JSON (`schema_version` 1). Must not contain `TRANSCRIPTED_DEBUG_CONTROL_DIR`. Tested by `Tests/DebugControlCommandTests.swift`.
+- `DebugControlCommand.swift` - the pure, always-compiled half: JSON / argv parsing, settings and screen allowlists, session policy, dictation settle wait, state JSON (`schema_version` 1). Must not contain `TRANSCRIPTED_DEBUG_CONTROL_DIR`. Tested by `Tests/DebugControlCommandTests.swift`.

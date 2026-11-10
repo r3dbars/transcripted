@@ -36,8 +36,12 @@ What each smoke does and does not prove:
 cd Tools/TranscriptedQA
 swift build && swift test
 swift run transcripted-qa validate-all
-swift run transcripted-qa packaged-app-smoke --app ../../build/Transcripted.app --dsym ../../build/Transcripted.app.dSYM --run-ui-smoke
 swift run transcripted-qa <subcommand> --help   # per-command flags
+
+# packaged-app-smoke reads Info.plist, docs/appcast.xml and build/ relative to
+# the current folder, so run it from the repo root:
+cd ../..
+swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke --app build/Transcripted.app --dsym build/Transcripted.app.dSYM --run-ui-smoke
 ```
 
 ## Gotchas

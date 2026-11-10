@@ -132,7 +132,6 @@ extension DictationSessionController {
                         if !overlayController.isVisible {
                             overlayController.showPanel(near: sourceApp, anchorRect: self.sessionAnchorRect)
                         }
-                        self.resizePanelToCompact()
                         self.finishRecordingStart(appState: appState) {
                             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
                             appState.logger.log("DICTATION | started (parakeet, \(appState.sttRouter.inputDeviceName))")
@@ -260,7 +259,6 @@ extension DictationSessionController {
                 // to .listening first and only logged afterward.
                 guard let self else { return }
                 self.overlayController?.state = .listening
-                self.resizePanelToCompact()
             }
         )
 
@@ -272,7 +270,7 @@ extension DictationSessionController {
             return
 
         case .started:
-            // overlayController.state/resizePanelToCompact() already ran via
+            // overlayController.state already ran via
             // onRecordingStarted above, before DictationSession's telemetry.
             // Drops the finished start handle like the fast path does.
             finishRecordingStart(appState: appState)
@@ -542,12 +540,6 @@ extension DictationSessionController {
             inputFormatReady: inputFormatReady,
             routeContext: routeContext
         )
-    }
-
-    /// Shrink the panel to compact (header-only) height without animation.
-    /// Called after loading → listening transition to undo showLoadingState()'s expansion.
-    func resizePanelToCompact() {
-        overlayController?.resizePanelToCompact()
     }
 
     private func shouldOfferMicrophoneRecoveryAction(for status: AVAuthorizationStatus) -> Bool {

@@ -120,7 +120,10 @@ func testParakeetZombieEngineRecoverySequence() async {
 
     await runSuite("Stop or a route change while recovery goes idle keeps it out of graph recreation") {
         let harness = ZombieRecoveryHarness()
-        guard let generation = harness.detect("no_sample_callbacks") else { return }
+        guard let generation = harness.detect("no_sample_callbacks") else {
+            assertTrue(false, "detection should start a recovery")
+            return
+        }
         harness.onPublishIdle = { harness.takeGraphAndCancel() }
         await harness.run(generation)
 
@@ -131,7 +134,10 @@ func testParakeetZombieEngineRecoverySequence() async {
 
     await runSuite("A newer graph owner stops recovery even when the attempt is still current") {
         let harness = ZombieRecoveryHarness()
-        guard let generation = harness.detect("silent_hfp_callbacks") else { return }
+        guard let generation = harness.detect("silent_hfp_callbacks") else {
+            assertTrue(false, "detection should start a recovery")
+            return
+        }
         harness.onPublishIdle = { harness.graphGeneration += 1 }
         await harness.run(generation)
 
@@ -143,7 +149,10 @@ func testParakeetZombieEngineRecoverySequence() async {
 
     await runSuite("A failed graph replacement ends the attempt without settling or restarting") {
         let harness = ZombieRecoveryHarness()
-        guard let generation = harness.detect("no_sample_callbacks") else { return }
+        guard let generation = harness.detect("no_sample_callbacks") else {
+            assertTrue(false, "detection should start a recovery")
+            return
+        }
         harness.recreateSucceeds = false
         await harness.run(generation)
 
@@ -152,7 +161,10 @@ func testParakeetZombieEngineRecoverySequence() async {
 
     await runSuite("Cancellation during the settle delay never restarts the mic") {
         let harness = ZombieRecoveryHarness()
-        guard let generation = harness.detect("no_sample_callbacks") else { return }
+        guard let generation = harness.detect("no_sample_callbacks") else {
+            assertTrue(false, "detection should start a recovery")
+            return
+        }
         harness.onSettle = {
             harness.takeGraphAndCancel()
             throw CancellationError()
@@ -165,7 +177,10 @@ func testParakeetZombieEngineRecoverySequence() async {
 
     await runSuite("A failed restart surfaces the interruption and reports failure once") {
         let harness = ZombieRecoveryHarness()
-        guard let generation = harness.detect("no_sample_callbacks") else { return }
+        guard let generation = harness.detect("no_sample_callbacks") else {
+            assertTrue(false, "detection should start a recovery")
+            return
+        }
         harness.restartSucceeds = false
         await harness.run(generation)
 
@@ -180,7 +195,10 @@ func testParakeetZombieEngineRecoverySequence() async {
 
     await runSuite("A restart that returns after the attempt was cancelled reports nothing more") {
         let harness = ZombieRecoveryHarness()
-        guard let generation = harness.detect("no_sample_callbacks") else { return }
+        guard let generation = harness.detect("no_sample_callbacks") else {
+            assertTrue(false, "detection should start a recovery")
+            return
+        }
         harness.onRestart = { harness.takeGraphAndCancel() }
         await harness.run(generation)
 

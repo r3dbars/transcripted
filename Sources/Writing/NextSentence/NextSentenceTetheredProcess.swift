@@ -27,9 +27,6 @@ final class NextSentenceTetheredProcess: @unchecked Sendable {
         try? tether.fileHandleForReading.close()
     }
 
-    /// The watchdog's own process id. The helper is its only child.
-    var processIdentifier: pid_t { process.processIdentifier }
-
     /// The helper is still up (the watchdog exits as soon as it does).
     var isRunning: Bool { process.isRunning }
 

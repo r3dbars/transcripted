@@ -1,6 +1,7 @@
 import Foundation
 
-/// Writes structured log entries as JSON Lines to ~/Library/Logs/Transcripted/app.jsonl
+/// Writes structured log entries as JSON Lines to `app.jsonl` in `CoreStoragePaths.logs`
+/// (by default ~/Library/Application Support/Transcripted/logs/app.jsonl)
 ///
 /// Design decisions:
 /// - JSON Lines format: one JSON object per line, machine-parseable, grep-friendly
@@ -55,7 +56,7 @@ final class FileLogger: @unchecked Sendable {
         fileHandle = try? FileHandle(forWritingTo: logFileURL)
         // seekToEnd() (error-returning) instead of the legacy seekToEndOfFile(),
         // which raises an uncatchable ObjC NSException on failure and hard-crashes.
-        try? fileHandle?.seekToEnd()
+        _ = try? fileHandle?.seekToEnd()
 
         // Heal oversized inherited logs on startup even if this process never reaches 100 writes.
         trimIfNeeded()
@@ -161,16 +162,28 @@ final class FileLogger: @unchecked Sendable {
             fileHandle = try? FileHandle(forWritingTo: logFileURL)
         }
         // seekToEnd() (error-returning) instead of the crash-prone seekToEndOfFile().
-        try? fileHandle?.seekToEnd()
+        _ = try? fileHandle?.seekToEnd()
     }
 
     private func escapeJSON(_ string: String) -> String {
-        string
+        let escaped = string
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
             .replacingOccurrences(of: "\t", with: "\\t")
+        // JSON forbids every raw U+0000-U+001F, not just the three above
+        // (an ANSI escape from a subprocess, a NUL, a form feed).
+        guard escaped.unicodeScalars.contains(where: { $0.value < 0x20 }) else { return escaped }
+        var result = String.UnicodeScalarView()
+        for scalar in escaped.unicodeScalars {
+            if scalar.value < 0x20 {
+                result.append(contentsOf: String(format: "\\u%04x", scalar.value).unicodeScalars)
+            } else {
+                result.append(scalar)
+            }
+        }
+        return String(result)
     }
 
     deinit {

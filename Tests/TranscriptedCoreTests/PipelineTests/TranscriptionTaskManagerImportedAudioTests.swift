@@ -146,7 +146,6 @@ extension TranscriptionTaskManagerMetadataTests {
         manager.speakerNamingRequest = SpeakerNamingRequest(
             speakers: [],
             knownPeople: [],
-            recognizedPeopleCount: 0,
             transcriptURL: tempDirectory.appendingPathComponent("precommit.md"),
             transcriptId: taskId,
             systemAudioURL: copiedImportURL,

@@ -36,10 +36,10 @@ final class NextSentenceLineProcess: @unchecked Sendable {
         errors.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
             guard let self else { return }
-            self.queue.async {
-                self.errorTail.append(data)
-                if self.errorTail.count > 4_096 { self.errorTail = self.errorTail.suffix(4_096) }
-            }
+            self.lock.lock()
+            self.errorTail.append(data)
+            if self.errorTail.count > 4_096 { self.errorTail = self.errorTail.suffix(4_096) }
+            self.lock.unlock()
         }
         try process.run()
     }
@@ -55,8 +55,10 @@ final class NextSentenceLineProcess: @unchecked Sendable {
     }
 
     /// The last few KB the process wrote to stderr, for error messages.
+    /// Guarded by `lock`, not the I/O queue, so a line handler (which runs on that queue) can call it.
     func stderrTail() -> String {
-        queue.sync { String(decoding: errorTail, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines) }
+        lock.lock(); defer { lock.unlock() }
+        return String(decoding: errorTail, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     func terminate() {

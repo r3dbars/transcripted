@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-// Dictations page cards (2026-10 redesign, after Handy's history page).
+// Dictations page cards (2026-10 redesign).
 //
 // The daily `Dictations_YYYY-MM-DD.md` file stays the storage shape (see
 // `Sources/Dictation/AGENTS.md`); the page shows one card per entry. The bar

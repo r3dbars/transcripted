@@ -40,42 +40,6 @@ public enum DisplayStatus: Equatable {
         }
     }
 
-    /// User-friendly status text (outcome-oriented, not technical)
-    public var statusText: String {
-        switch self {
-        case .idle:
-            return "Ready"
-        case .gettingReady:
-            return "Preparing..."
-        case .transcribing:
-            return "Transcribing..."
-        case .finishing:
-            return "Almost done..."
-        case .transcriptSaved:
-            return "Saved"
-        case .failed(let message):
-            return message
-        case .discardedAccidentalStart:
-            return "Too short to save"
-        }
-    }
-
-    /// Icon for the status (SF Symbol name)
-    public var icon: String {
-        switch self {
-        case .idle:
-            return "circle"
-        case .gettingReady, .transcribing, .finishing:
-            return "arrow.triangle.2.circlepath"
-        case .transcriptSaved:
-            return "checkmark.circle.fill"
-        case .failed:
-            return "exclamationmark.triangle.fill"
-        case .discardedAccidentalStart:
-            return "xmark.circle"
-        }
-    }
-
     /// Whether this is a "processing" state (show progress indicator)
     public var isProcessing: Bool {
         switch self {

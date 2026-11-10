@@ -187,19 +187,12 @@ extension ParakeetEngine {
         defer {
             audioStartAdmission.finish(owner: startOwner)
         }
-        func failAudioStart() async -> Bool {
-            // Keep the temporary built-in input selected across the controller's
-            // bounded retry loop. The final failure reset, explicit cancel,
-            // cleanup, or a successful recording stop owns restoration.
-            return false
-        }
-
         scheduleInputDeviceNameRefresh()
         let micStatus = AVCaptureDevice.authorizationStatus(for: .audio)
         guard micStatus == .authorized else {
             EventReporter.shared.capture(level: .error, engine: "parakeet", event: "mic_not_authorized",
                 message: "Microphone permission status: \(micStatus.rawValue)")
-            return await failAudioStart()
+            return false
         }
 
         installAudioObserversIfNeeded()
@@ -218,7 +211,7 @@ extension ParakeetEngine {
             if !recoveryState.isRecovering {
                 schedulePrewarmRetry()
             }
-            return await failAudioStart()
+            return false
         }
 
         recordingInterrupted = false
@@ -265,7 +258,7 @@ extension ParakeetEngine {
             )
             markFormatUnreadyAndPublish()
             schedulePrewarmRetry()
-            return await failAudioStart()
+            return false
         }
         if let pinnedStarted = await startPinnedDictationRecordingIfEnabled(owner: startOwner) {
             return pinnedStarted
@@ -284,7 +277,7 @@ extension ParakeetEngine {
                     message: "Audio start aborted because the audio graph changed before startup finished",
                     context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                 )
-                return await failAudioStart()
+                return false
             }
 
             // The format reads below use the same serial engine queue as tap
@@ -303,7 +296,7 @@ extension ParakeetEngine {
                     )
                 }
             } catch {
-                guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
+                guard ownsAudioEngineQueue(attemptOwner) else { return false }
                 let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
                 let systemInputWorkError = error as? ParakeetSystemInputWorkError
                 let operationTimedOut = audioEngineWorkError?.isTimedOut == true
@@ -347,7 +340,7 @@ extension ParakeetEngine {
                     guard abandonBlockedAudioEngine(
                         reason: "audio_format_read_timeout",
                         expectedOwner: attemptOwner
-                    ) else { return await failAudioStart() }
+                    ) else { return false }
                 } else if audioEngineWorkError?.isCircuitOpen != true && !inputBindingFailed {
                     // Only an audio-engine circuit-open means the engine graph
                     // itself is blocked. A system-input circuit-open comes from
@@ -357,14 +350,14 @@ extension ParakeetEngine {
                     guard await resetAudioGraphAfterStartFailure(
                         reason: "audio_format_read_failed",
                         rebuildEngine: true
-                    ) != nil else { return await failAudioStart() }
+                    ) != nil else { return false }
                 }
                 // A circuit-open failure did not schedule work on this graph,
                 // so leave it in place and fail closed. Retiring it would
                 // create graph churn without freeing any blocked worker lease.
                 markFormatUnreadyAndPublish()
                 schedulePrewarmRetry()
-                return await failAudioStart()
+                return false
             }
             guard ownsAudioEngineQueue(attemptOwner) else {
                 EventReporter.shared.capture(
@@ -374,7 +367,7 @@ extension ParakeetEngine {
                     message: "Audio start aborted because the audio graph changed while reading input format",
                     context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                 )
-                return await failAudioStart()
+                return false
             }
 
             let readiness = audioFormatReadiness(
@@ -415,14 +408,14 @@ extension ParakeetEngine {
                 guard await resetAudioGraphAfterStartFailure(
                     reason: readiness == .routeNotSettled ? "audio_route_not_settled" : "invalid_audio_format",
                     rebuildEngine: startFailureAction.rebuildAudioEngine
-                ) != nil else { return await failAudioStart() }
+                ) != nil else { return false }
                 if startFailureAction.markFormatUnready {
                     markFormatUnreadyAndPublish()
                 }
                 if startFailureAction.schedulePrewarmRetry {
                     schedulePrewarmRetry()
                 }
-                return await failAudioStart()
+                return false
             }
 
             updateNativeSampleRate(snapshot.outputFormat.sampleRate)
@@ -434,7 +427,7 @@ extension ParakeetEngine {
             )
             if let generation = zombieRecoveryStartGeneration {
                 guard zombieRecoveryState.canContinue(generation: generation) else {
-                    return await failAudioStart()
+                    return false
                 }
             }
 
@@ -457,9 +450,9 @@ extension ParakeetEngine {
                         message: "Audio start aborted because the audio graph changed while starting",
                         context: ["audio_graph_generation": "\(audioGraphGeneration)"]
                     )
-                    return await failAudioStart()
+                    return false
                 case .cancelled:
-                    return await failAudioStart()
+                    return false
                 }
                 inputTapInstalled = true
                 isEnginePrewarmed = true
@@ -494,7 +487,7 @@ extension ParakeetEngine {
                         ])
                 }
             } catch {
-                guard ownsAudioEngineQueue(attemptOwner) else { return await failAudioStart() }
+                guard ownsAudioEngineQueue(attemptOwner) else { return false }
                 let audioEngineWorkError = error as? ParakeetAudioEngineWorkError
                 let operationTimedOut = audioEngineWorkError?.isTimedOut == true
                 let workCircuitOpen = audioEngineWorkError?.isCircuitOpen == true
@@ -532,19 +525,19 @@ extension ParakeetEngine {
                         guard abandonBlockedAudioEngine(
                             reason: "audio_engine_start_timeout",
                             expectedOwner: attemptOwner
-                        ) else { return await failAudioStart() }
+                        ) else { return false }
                     }
                 } else {
                     guard await resetAudioGraphAfterStartFailure(
                         reason: failureReason == .audioRouteNotSettled ? "audio_route_not_settled" : "audio_engine_start_failed",
                         rebuildEngine: startFailureAction.rebuildAudioEngine
-                    ) != nil else { return await failAudioStart() }
+                    ) != nil else { return false }
                 }
 
                 if shouldRetry {
                     let retryOwner = currentAudioEngineQueueOwnerToken()
                     guard audioStartAdmission.transfer(from: startOwner, to: retryOwner) else {
-                        return await failAudioStart()
+                        return false
                     }
                     startOwner = retryOwner
                     startEngine = audioEngine
@@ -575,7 +568,7 @@ extension ParakeetEngine {
                     if startFailureAction.schedulePrewarmRetry {
                         schedulePrewarmRetry()
                     }
-                    return await failAudioStart()
+                    return false
                 }
 
                 if workCircuitOpen {
@@ -590,7 +583,7 @@ extension ParakeetEngine {
                     if startFailureAction.schedulePrewarmRetry {
                         schedulePrewarmRetry()
                     }
-                    return await failAudioStart()
+                    return false
                 }
 
                 if operationTimedOut {
@@ -608,7 +601,7 @@ extension ParakeetEngine {
                     if startFailureAction.schedulePrewarmRetry {
                         schedulePrewarmRetry()
                     }
-                    return await failAudioStart()
+                    return false
                 }
 
                 AppLogger.transcription.error("PARAKEET | audio engine failed after \(attempt) attempt(s): \(error.localizedDescription)")
@@ -619,7 +612,7 @@ extension ParakeetEngine {
                 if startFailureAction.schedulePrewarmRetry {
                     schedulePrewarmRetry()
                 }
-                return await failAudioStart()
+                return false
             }
 
             if attempt > 1 {

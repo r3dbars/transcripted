@@ -2,7 +2,7 @@ import Foundation
 import SQLite3
 
 /// SQLite database for persistent stats tracking
-/// Stores recording history, action items, and daily activity for the dashboard
+/// Stores recording history, action items, and daily activity
 @available(macOS 14.0, *)
 public final class StatsDatabase {
 

@@ -24,7 +24,11 @@ case "$mode" in
             echo "git hooks: core.hooksPath = $want"
             exit 0
         fi
-        echo "git hooks: not installed (core.hooksPath = '${current:-unset}'). Run: bash scripts/dev/install-git-hooks.sh"
+        if [ -n "$current" ]; then
+            echo "git hooks: not installed (core.hooksPath = '$current', want '$want'). Run: bash scripts/dev/install-git-hooks.sh --force"
+        else
+            echo "git hooks: not installed (core.hooksPath is unset). Run: bash scripts/dev/install-git-hooks.sh"
+        fi
         exit 1
         ;;
     install|--force) ;;

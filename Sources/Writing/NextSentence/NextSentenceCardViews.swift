@@ -31,7 +31,6 @@ enum NextSentenceCardStyle {
     static var titleFont: NSFont { .systemFont(ofSize: 12, weight: .semibold) }
     static var bodyFont: NSFont { .systemFont(ofSize: 16, weight: .regular) }
     static var hintFont: NSFont { .systemFont(ofSize: 11, weight: .medium) }
-    static var keyFont: NSFont { .monospacedSystemFont(ofSize: 10, weight: .semibold) }
 
     @MainActor static func label(_ font: NSFont, _ color: NSColor) -> NSTextField {
         let label = NSTextField(labelWithString: "")
@@ -437,39 +436,6 @@ final class NextSentenceRing: NSView {
         progressLayer.strokeEnd = progress
         progressLayer.isHidden = progress <= 0
         CATransaction.commit()
-    }
-
-    /// One pass of light around the edge, then gone. For the card's arrival.
-    func sweepOnce(color: NSColor) {
-        let sweepLayer = CAShapeLayer()
-        sweepLayer.frame = bounds
-        sweepLayer.path = Self.path(in: bounds.insetBy(dx: 1.5, dy: 1.5), radius: NextSentenceCardStyle.cornerRadius + 2)
-        sweepLayer.fillColor = nil
-        sweepLayer.strokeColor = color.cgColor
-        sweepLayer.lineWidth = 1.5
-        sweepLayer.lineCap = .round
-        sweepLayer.strokeStart = 0
-        sweepLayer.strokeEnd = 0
-        layer?.addSublayer(sweepLayer)
-        let head = CABasicAnimation(keyPath: "strokeEnd")
-        head.fromValue = 0
-        head.toValue = 1
-        head.duration = 0.55
-        head.timingFunction = CAMediaTimingFunction(controlPoints: 0.3, 0.1, 0.2, 1)
-        let tail = CABasicAnimation(keyPath: "strokeStart")
-        tail.fromValue = 0
-        tail.toValue = 1
-        tail.beginTime = 0.12
-        tail.duration = 0.55
-        tail.timingFunction = head.timingFunction
-        let group = CAAnimationGroup()
-        group.animations = [head, tail]
-        group.duration = 0.67
-        group.beginTime = CACurrentMediaTime() + 0.18
-        group.fillMode = .both
-        group.isRemovedOnCompletion = false
-        sweepLayer.add(group, forKey: "sweep")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { sweepLayer.removeFromSuperlayer() }
     }
 
     func set(listening: Bool) {

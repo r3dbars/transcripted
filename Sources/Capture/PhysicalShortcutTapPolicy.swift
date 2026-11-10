@@ -26,10 +26,6 @@ enum PhysicalShortcutTapPolicy {
     /// How long to wait before logging the same diagnostic again.
     static let diagnosticLogInterval: TimeInterval = 5
 
-    static var systemDefinedEventType: CGEventType {
-        CGEventType(rawValue: systemDefinedEventTypeRawValue)!
-    }
-
     static func eventsOfInterestMask() -> CGEventMask {
         (CGEventMask(1) << CGEventType.keyDown.rawValue)
             | (CGEventMask(1) << CGEventType.keyUp.rawValue)

@@ -192,10 +192,6 @@ final class MenuBarHeaderView: NSView {
         applyStatusDotColor()
     }
 
-    var intrinsicHeight: CGFloat {
-        intrinsicHeight(forWidth: bounds.width)
-    }
-
     /// The header's height when laid out `width` points wide. The warning row
     /// grows with its text, so the height depends on the width.
     func intrinsicHeight(forWidth width: CGFloat) -> CGFloat {

@@ -28,17 +28,6 @@ enum AudioRetentionWindow: String, CaseIterable, Identifiable {
             return "Never"
         }
     }
-
-    var detail: String {
-        switch self {
-        case .sevenDays:
-            return "Retained audio is removed after one week. Markdown transcripts stay."
-        case .thirtyDays:
-            return "Retained audio is removed after one month. Markdown transcripts stay."
-        case .never:
-            return "Retained compressed audio stays until you delete it."
-        }
-    }
 }
 
 enum AudioStoragePreferences {
@@ -57,12 +46,7 @@ enum AudioStoragePreferences {
         userDefaults: UserDefaults = .standard
     ) {
         userDefaults.set(window.rawValue, forKey: deleteAudioAfterKey)
-        NotificationCenter.default.post(name: .audioStoragePreferencesDidChange, object: nil)
     }
-}
-
-extension Notification.Name {
-    static let audioStoragePreferencesDidChange = Notification.Name("audioStoragePreferencesDidChange")
 }
 
 /// How long a dictation's audio is kept after its transcript saves. Separate
@@ -124,6 +108,5 @@ extension AudioStoragePreferences {
         userDefaults: UserDefaults = .standard
     ) {
         userDefaults.set(window.rawValue, forKey: dictationAudioKeepKey)
-        NotificationCenter.default.post(name: .audioStoragePreferencesDidChange, object: nil)
     }
 }

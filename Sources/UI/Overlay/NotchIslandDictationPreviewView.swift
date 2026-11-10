@@ -115,6 +115,9 @@ final class NotchIslandDictationPreviewView: NSView {
         guard hasWords, finalText != text else { return }
         finalText = text
         pending = nil
+        // `apply` only hides the placeholder while the view is in a window, so
+        // a take spoken with the drop-down closed would leave it over the text.
+        placeholder.isHidden = true
         setAccessibilityValue(text)
         guard window != nil, !NotchIslandPalette.reduceMotion else {
             setText(NSAttributedString(string: text, attributes: Self.attributes(Self.settledColor)), forceFollow: true)

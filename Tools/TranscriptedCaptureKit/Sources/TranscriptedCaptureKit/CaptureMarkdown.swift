@@ -9,9 +9,9 @@ public enum CaptureFileLimits {
     /// How much of a file `looksLikeCaptureMarkdown` reads to classify it.
     /// Classification only needs the frontmatter fences, so there is no reason
     /// to pull a whole transcript into memory — the MCP index watcher calls it
-    /// once per file on every reconcile tick. 64 KB is far past any real
-    /// frontmatter block (the largest is a speakers list of a few hundred
-    /// entries) while keeping the read cheap.
+    /// once per file on every reconcile tick. 512 KB matches
+    /// `TranscriptFrontmatter.maximumFrontmatterByteLimit`, so a valid file
+    /// with a large speakers block still classifies, while the read stays bounded.
     public static let classificationPrefixBytes = 512 * 1024
 }
 

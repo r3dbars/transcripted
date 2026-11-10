@@ -80,6 +80,7 @@ All under `Sources/TranscriptedCLI/`:
 | `BuildInfoCommand.swift` | Read-only compiled-capability JSON for packaging validation |
 | `ImportAudioCommand.swift`, `ImportAudioProcess.swift` | `import-audio` options, validation, stdout routing, signals |
 | `MeetingImportWorkflow.swift` | Input validation, private scratch job, WAV decode, model resolution, Core run |
+| `MeetingImportDiarization.swift` | `import-audio` engine choice (Core's `DiarizationBackend` rule, same as the app) and the per-engine model bundle provider |
 | `MeetingImportPublisher.swift` | No-clobber publish, returns `MeetingImportReceipt` |
 | `MeetingImportVoiceprint.swift` | Voiceprint model + speaker DB choice (via Core's `SpeakerVoiceprintSelection`), model loading and fallback |
 | `MeetingImportSpeakerMapping.swift`, `SpeakerDatabaseSnapshot.swift` | Silent-recognition policy, numbered-speaker reasons, `--name-likely-speakers`, read-only DB snapshot |

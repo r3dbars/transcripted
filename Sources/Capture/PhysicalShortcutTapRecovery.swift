@@ -33,6 +33,11 @@ final class PhysicalShortcutTapRecovery: @unchecked Sendable {
         enqueue { [self] in
             lock.lock()
             let shouldEnable = active
+            // Cleared before the OS call, not after it. macOS sends no second
+            // "disabled" event for a tap that stays disabled, so a disable that
+            // lands while this re-enable is in flight must queue one more
+            // attempt behind it instead of being dropped.
+            pending = false
             lock.unlock()
             guard shouldEnable else { return }
 
@@ -40,7 +45,6 @@ final class PhysicalShortcutTapRecovery: @unchecked Sendable {
             let enabled = enable()
 
             lock.lock()
-            pending = false
             let shouldComplete = active
             lock.unlock()
             if shouldComplete { completed(enabled) }

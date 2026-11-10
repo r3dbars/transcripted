@@ -34,8 +34,6 @@ enum NotchIslandPalette {
     static func color(for tint: NotchIslandTint) -> NSColor {
         switch tint {
         case .accent: return accent
-        case .primary: return primaryText
-        case .secondary: return secondaryText
         case .warning: return warning
         }
     }
@@ -58,7 +56,7 @@ enum NotchIslandPalette {
     nonisolated(unsafe) static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold) // immutable, never mutated
 
     static var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        AccessibilityDisplayPolicy.reduceMotion
     }
 
     @MainActor static func label(_ text: String, font: NSFont, color: NSColor, wraps: Bool = false, width: CGFloat = 0) -> NSTextField {
@@ -135,7 +133,7 @@ final class NotchIslandRingView: NSView {
     }
 }
 
-/// A plain dot; `pulsing` breathes gently.
+/// A plain dot; `glow` adds a soft halo twice its size.
 final class NotchIslandDotView: NSView {
     private let size: CGFloat
     private let glow: Bool
@@ -277,8 +275,7 @@ final class NotchIslandView: NSView {
     private var edgeProgress: Double?
     /// Where the finished island sits in this view (flipped coordinates).
     private(set) var islandRect: CGRect = .zero
-    /// The shape the mask is heading to, and its corner radius.
-    private var shapeRect: CGRect = .zero
+    /// The corner radius of the shape the mask is heading to.
     private var shapeRadius: CGFloat = 0
     private var morphGeneration = 0
     private var cachedLayerIsYDown: Bool?
@@ -402,7 +399,6 @@ final class NotchIslandView: NSView {
     func updateLive(_ live: NotchIslandLiveValues) {
         leftWing.updateLive(live)
         rightWing.updateLive(live)
-        dropView?.updateLive(live)
     }
 
     func setGeometry(screen: NotchIslandScreenInfo, hasDrop: Bool, edgeProgress: Double?) {
@@ -552,7 +548,6 @@ final class NotchIslandView: NSView {
     ) {
         morphGeneration += 1
         let generation = morphGeneration
-        shapeRect = end
         shapeRadius = radius
         let yDown = layerIsYDown
         let endFrame = layerRect(end)

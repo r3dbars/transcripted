@@ -36,6 +36,7 @@ It uses a native macOS sidebar with these pages (`TranscriptedSettingsPage`):
 
 - `Today` (the default page, ⌘1)
 - `Meetings` (raw value `home`, kept so automation ids and analytics stay stable, ⌘2)
+- `Transcribe a file` (raw value `files`, no ⌘ number shortcut)
 - `Dictations` (⌘3)
 - `Writing` (⌘4)
 - `Speakers` (raw value `people`, ⌘5)
@@ -214,7 +215,7 @@ This page should reuse the simple "prompt first, manual setup second" mental mod
 The combined settings page has no disclosures: every setting is an
 always-visible row inside a rounded card, grouped under plain gray section
 labels (Dictation, Microphone, Send after dictation, Meetings,
-Speakers, Transcription, App, Permissions, Privacy, Storage, About, Support).
+Speakers, Transcription, App, Permissions, Privacy, Developer Preview, Storage, About, Support).
 Rows carry at most a few words; each row's explanation lives in its ⓘ info
 popover. The page ends with the privacy line "Transcripts and audio never
 leave this Mac." Corrections open in a sheet; permissions render as status

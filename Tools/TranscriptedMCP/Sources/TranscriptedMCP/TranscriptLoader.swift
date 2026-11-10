@@ -57,9 +57,10 @@ enum TranscriptLoader {
         )
     }
 
-    /// Structured summary for a legacy saved meeting. It prefers an inline
-    /// summary block, then falls back to a `<stem>.summary.md` sidecar so old
-    /// artifacts remain readable. Current capture does not create new summaries.
+    /// Structured summary for a saved meeting. It prefers the summary inside the
+    /// transcript (current meetings carry `auto_summary_*` frontmatter; older ones
+    /// may carry a local summary block), then falls back to a legacy
+    /// `<stem>.summary.md` sidecar so old artifacts remain readable.
     ///
     /// The sidecar branch is a legacy-compat fallback; a sidecar edited in
     /// isolation does not bump the parent transcript's mtime, so its items only

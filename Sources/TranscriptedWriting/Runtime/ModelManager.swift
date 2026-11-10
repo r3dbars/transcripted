@@ -35,7 +35,6 @@ final class ModelManager: @unchecked Sendable {
     let partialURL: URL
 
     var state: ModelState { stateQueue.sync { stateStorage } }
-    var currentState: ModelState { state }
 
     /// Revalidates the exact bytes at the runtime handoff. A prior `.ready`
     /// state is not enough because the external file can be replaced after the
@@ -223,7 +222,6 @@ final class ModelManager: @unchecked Sendable {
     }
 
     func prepare() { _ = start() }
-    func refresh() { _ = start() }
 
     /// Waits for the lifecycle generation active at admission. Manager
     /// cancellation settles that generation even if its transport is still

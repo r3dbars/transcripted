@@ -25,6 +25,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$(pwd)"
+# The harness runs the app's pipeline; keep it out of the real app log.
+export TRANSCRIPTED_DISABLE_FILE_LOGGER=1
 
 CORPUS="${CORPUS:-ami}"
 

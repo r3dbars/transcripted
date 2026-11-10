@@ -53,20 +53,26 @@ final class LiveMeetingTranscriptService {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateDelivery() }
             }
-        // Turning "Live transcript" on or off mid-meeting applies at once.
+        // Turning "Live transcript" on or off mid-meeting applies on the next
+        // main-queue turn. Delivered on the posting thread and hopped to main
+        // asynchronously on purpose: a `queue: .main` observer makes every
+        // background UserDefaults write wait for the main thread, and a writer
+        // holding a lock that main is waiting on then hangs the app for good.
         settingsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+            forName: UserDefaults.didChangeNotification, object: nil, queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let setting = NotchIslandPreferences.showsLiveTranscript()
-                guard setting != self.captionsSetting else { return }
-                self.captionsSetting = setting
-                self.refreshCaptions()
-                if setting {
-                    LiveMeetingCaptions.shared.prewarm()
-                } else {
-                    LiveMeetingCaptions.shared.cancelPrewarm()
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let setting = NotchIslandPreferences.showsLiveTranscript()
+                    guard setting != self.captionsSetting else { return }
+                    self.captionsSetting = setting
+                    self.refreshCaptions()
+                    if setting {
+                        LiveMeetingCaptions.shared.prewarm()
+                    } else {
+                        LiveMeetingCaptions.shared.cancelPrewarm()
+                    }
                 }
             }
         }

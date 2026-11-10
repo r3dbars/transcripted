@@ -7,7 +7,7 @@ struct GeneralInfo {
     let message: String
 }
 
-/// Klack-style settings card: a rounded fill that groups rows, with the rows'
+/// Settings card: a rounded fill that groups rows, with the rows'
 /// own hairline dividers separating them. Rows keep their flat styling; the
 /// card provides the only chrome on the page.
 struct SettingsCard<Content: View>: View {

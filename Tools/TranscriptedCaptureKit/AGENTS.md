@@ -1,6 +1,6 @@
 # TranscriptedCaptureKit
 
-Shared, dependency-free library behind `Tools/TranscriptedCLI` and `Tools/TranscriptedMCP` (both depend on it via `.package(path: "../TranscriptedCaptureKit")`). It is the single source of truth for:
+Shared, dependency-free library behind `Tools/TranscriptedCLI`, `Tools/TranscriptedMCP` and `Tools/TranscriptedQA` (each depends on it via `.package(path: "../TranscriptedCaptureKit")`). It is the single source of truth for:
 
 - capture-library directory resolution (env overrides, app manifest, `transcriptSaveLocation`, legacy Draft / `~/Documents/Transcripted` fallback) for meetings, dictations, writing
 - capture-Markdown detection, frontmatter title extraction, and parsing (meeting transcripts, dictation day files, writing day files)
@@ -36,7 +36,7 @@ The e2e smoke matters: `scripts/entrypoints/run-e2e-smoke.sh` compiles `Sources/
 ## Rules
 
 - Parsers take Markdown content (plus the source URL for filename-derived fallbacks) and never write. No filesystem-layout opinions beyond resolution.
-- `ParsedMeetingCapture` and the day-capture types carry the superset of fields both tools need; each tool maps them to its own output models. Add fields here rather than re-parsing in a tool.
+- `ParsedMeetingCapture` and the day-capture types carry the superset of fields the tools need; each tool maps them to its own output models. Add fields here rather than re-parsing in a tool.
 - Stay dependency-free so the raw-`swiftc` compile stays simple. Do not link this into the app target.
 
 ## Gotchas

@@ -64,7 +64,7 @@ final class DiagnosticsLog: @unchecked Sendable {
 
     func record(_ event: String, metadata: [String: String] = [:]) {
         guard enabled else { return }
-        queue.async { [self, logURL] in
+        queue.async { [self] in
             do {
                 let line = format(event: event, metadata: metadata)
                 guard let handle = openRollingIfNeeded() else { return }

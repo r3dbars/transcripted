@@ -497,7 +497,7 @@ force-installed by Sparkle so existing users recover from a regression.
 ### Added
 - Transcripted now has a permanent Dock presence (Dock icon always visible; clicking opens Settings Home).
 - Dock visibility setting to opt out of the permanent Dock icon.
-- Redesigned Settings Home as a Wispr Flow-style activity dashboard: welcome header, single hero CTA, tabbed day-grouped timeline of recent dictations and meetings, lifetime stats rail (words, dictations, meetings, hours, streak), with per-row copy/flag/menu actions including Reveal in Finder, Show audio in Finder, and Delete (single-entry delete without nuking the day file).
+- Redesigned Settings Home as an activity dashboard: welcome header, single hero CTA, tabbed day-grouped timeline of recent dictations and meetings, lifetime stats rail (words, dictations, meetings, hours, streak), with per-row copy/flag/menu actions including Reveal in Finder, Show audio in Finder, and Delete (single-entry delete without nuking the day file).
 - "Typing time saved" stat surfaced on Home.
 - Meeting audio route diagnostics; tracking of failed dictation starts.
 - Load more on settings home; settings home stats polished.

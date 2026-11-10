@@ -6,7 +6,7 @@
 // including a spontaneous Google Meet with no calendar invite. See
 // docs/auto-call-detection-spec.md.
 //
-// Default ON (product decision 2026-06-14), matching Notion/Plaud. Everything
+// Default ON (product decision 2026-06-14). Everything
 // stays on-device — we read which app holds the mic (metadata), never audio —
 // but it is still surfaced behind a clear Settings toggle so it can be turned off.
 

@@ -283,7 +283,7 @@ public enum SpeakerIdentityMutationService {
         // merge before anything is written.
         var reviewedRowsByPath: [String: [TranscriptSaver.DeferredSpeakerNameUpdate]] = [:]
         if !reviewedRows.isEmpty {
-            guard let resolvedName, reviewedRows.allSatisfy({ $0.dbId == sourceId }) else {
+            guard resolvedName != nil, reviewedRows.allSatisfy({ $0.dbId == sourceId }) else {
                 AppLogger.speakers.error("Reviewed voice merge has no name or a row for another profile", [
                     "sourceId": sourceId.uuidString,
                     "targetId": targetId.uuidString

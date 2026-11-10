@@ -132,10 +132,14 @@ func clusterMeanEmbedding(_ segs: [SegmentDump]) -> (embedding: [Float], count: 
 @main
 struct Main {
     static func main() async {
+        // Every subcommand runs the app's pipeline, which logs through AppLogger.
+        // Set this before anything can touch the shared file logger so a harness
+        // run never writes into the real app.jsonl.
+        setenv("TRANSCRIPTED_DISABLE_FILE_LOGGER", "1", 1)
         let args = Array(CommandLine.arguments.dropFirst())
         guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
         guard let cmd = args.first else {
-            die("usage: speaker-eval-harness <dump|replay|embedding-parity|autoeval|autoeval-self-test|meeting-series|dump-e2e|dump-set> ...")
+            die("usage: speaker-eval-harness <dump|replay|embedding-parity|autoeval|autoeval-self-test|meeting-series|dump-e2e|embedder-debug|dump-set> ...")
         }
         switch cmd {
         case "dump": await runDump(Array(args.dropFirst()))

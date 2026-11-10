@@ -95,6 +95,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
 - `scripts/release/sentry-release-dry-run.py` — read-only Sentry release/dSYM readiness check; it never creates/finalizes releases, sets commits, or uploads debug files
 - `scripts/release/register-sentry-release.sh` — create/finalize the matching Sentry release, verify the release dSYM matches the app binary, and upload it after a GitHub release is published
+- `scripts/release/provision-release-models.sh` — put the pinned Nemotron diarizer and ReDimNet2 voiceprint models into a FluidAudio model cache, byte for byte what `build-beta.sh` bundles; every file is checked against its sha256 pin. Run by `.github/workflows/release-candidate.yml`
+- `scripts/release/test-staged-sparkle-update.py` — real Sparkle install-and-relaunch proof for a candidate build; hosted CI only (Swift CI's manual `staged-update-proof` job), never changes a release surface
 - `scripts/stt-shootout/run.sh` — speech-to-text model shootout on an Apple Silicon Mac: runs Parakeet V3 (the app's model) and other on-device models over an hour-long human-captioned video and reports speed, latency, peak memory, and word error rate; see `scripts/stt-shootout/README.md`
 - `scripts/dev/onboarding.sh` — inspect, reset, or force the first-run onboarding state while iterating on copy and layout
 
@@ -122,6 +124,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - See `docs/ops-credentials.md` for credential setup and privacy guidelines
 - `scripts/ops/release-health-card.py` — print a compact release-health card for one app version by combining local release metadata, GitHub downloads, live public release surfaces, and PostHog update/workflow counts when credentials are present; installed workflow rows are grouped by `app_version`, `build_version`, `build_channel`, and `build_revision` so local/current-main builds cannot be counted as shipped-release proof
   - Usage: `python3 scripts/ops/release-health-card.py --version 1.1.47`
+- `scripts/ops/release-watch.py` — read-only side-by-side of a new release against the previous one over the same window (Sentry crash-free rates and new issues, PostHog health); see `docs/release-guardrails.md`
+  - Usage: `python3 scripts/ops/release-watch.py --new <version> --old <previous version>`
 - `scripts/ops/check-crash-free-rate.py` — crash-free-rate release gate: query Sentry Release Health (Sessions) for a release's crash-free session/user rate and exit non-zero if it is below threshold (red) or unverifiable (yellow, e.g. credentials absent or no session data), so it can be a go/no-go gate; read-only, never publishes
   - Usage: `python3 scripts/ops/check-crash-free-rate.py --version 1.1.48`
   - Verdicts: exit 0 green (>= threshold), exit 1 red (below threshold), exit 3 yellow (cannot verify; never auto-green)
@@ -164,7 +168,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/nightly-security-check.py` — deterministic nightly security/privacy guardrail checker for repo drift, release/update drift, Homebrew cask/appcast parity, PostHog schema drift, raw observability payload keys, entitlements, shell hazards, recent-history secret leaks, and shared sanitizer coverage
   - Usage: `python3 scripts/ops/nightly-security-check.py --live-release-surfaces --write-report build/nightly-security-report.json`
   - Strict gate: `python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces --write-report build/nightly-security-report.json`
-  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast Tests/Fixtures/release-health-appcast-1.1.75.xml --github-release-json Tests/Fixtures/release-health-github-release-1.1.75.json --write-report build/nightly-security-report.json`. These are archived 1.1.75 inputs, not a live/latest alias. After the legacy freeze, offline runs require an explicit active release-asset feed snapshot; live runs obtain it from the installed app's feed URL. Frozen legacy bytes/version/destination are checked separately. A prepared next-version Info with an older published active feed still blocks release readiness.
+  - Deterministic release-health fixture gate: `python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast Tests/Fixtures/release-health-appcast-1.1.76.xml --github-release-json Tests/Fixtures/release-health-github-release-1.1.76.json --write-report build/nightly-security-report.json`. These are archived 1.1.76 inputs, not a live/latest alias. After the legacy freeze, offline runs require an explicit active release-asset feed snapshot; live runs obtain it from the installed app's feed URL. Frozen legacy bytes/version/destination are checked separately. A prepared next-version Info with an older published active feed still blocks release readiness.
   - On each promotion, archive the new signed release-asset feed and matching GitHub metadata, then advance both explicit inputs in the matrix and QA bench with the published cask. Linux derives its default snapshot name from Info; `NIGHTLY_ACTIVE_APPCAST` can select an explicit per-run snapshot, without changing candidate-watch or checksum requirements. Never replace the frozen legacy feed to make these checks pass.
   - Older trusted commands that explicitly supply `release-health-github-release-<version>.json` can select its same-directory `release-health-appcast-<version>.xml` companion offline. This requires matching filename/tag/feed versions and one expected versioned feed asset whose positive integer size and SHA-256 match the snapshot bytes. The report names both inputs. Missing or mismatched companions fail; this never selects the frozen feed or latest implicitly, never contacts the network, and never clears a candidate watch. Explicit `--appcast` and live-mode selection retain precedence.
   - Owned fixture roots: `--root <directory>` requires the exact Git checkout root before any scans; inherited Git overrides are discarded. Checker reads, Git operations and relative report paths then use the explicit fixture instead of the source checkout. This does not disable any check. Offline checksum fixtures should use aligned owned metadata rather than the changing source checkout.
@@ -242,11 +246,26 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state
   - Usage: `python3 scripts/ops/generate-nightly-digest.py --open`
   - Self-test: `python3 scripts/ops/generate-nightly-digest.py --self-test`
-  - Writes:
-    - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.html`
-    - `/Users/redbars/Delance/transcripted-nightly-digest-latest.html`
-    - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.json`
-    - `/Users/redbars/Delance/transcripted-nightly-digest-latest.json`
+  - Writes, under `build/nightly-digest/` in the checkout (override with `--output-dir`):
+    - `transcripted-nightly-digest-YYYY-MM-DD.html`
+    - `transcripted-nightly-digest-latest.html`
+    - `transcripted-nightly-digest-YYYY-MM-DD.json`
+    - `transcripted-nightly-digest-latest.json`
+- `scripts/ops/nightly-hardware-smokes.sh` — run `bash check.sh hardware` and `bash run-daily-audio-reliability.sh --synthetic` on this Mac unattended and keep a dated log; `--install HH:MM` adds a daily LaunchAgent, `--uninstall`, `--status`
+- `scripts/ops/native-smoke-isolation.py` — refuses an app-launch smoke unless it runs as a separate OS account, on a verified hosted CI runner, or inside the Mac runner's throwaway VM, so a smoke can't use the owner's preferences. Called by `build.sh`, `scripts/dev/bench-launch-latency.sh`, `scripts/dev/verify-change.sh` and Swift CI
+- `scripts/ops/risk-triage.py` — PR risk labels, AI review and the trusted `risk-gate` check run, run by `.github/workflows/risk-triage.yml`; `classify FILE...` works offline. See `docs/agent-merge-policy.md`
+- `scripts/ops/auto-merge-gate.py` — merges open PRs that fit an enabled lane in `.agents/auto-merge-lanes.json`; dry run by default, `--apply` merges. Owner-only; see `docs/auto-merge-gate.md`
+- Offline test suites for these, run by `scripts/dev/linux-checks.sh`: `scripts/ops/test-risk-triage.py`, `scripts/ops/test-nightly-security-check.py`, `scripts/ops/test-native-smoke-isolation.py`, `scripts/ops/test-launch-benchmark-isolation.py`
+
+## Labs and model tooling
+
+Not part of the app build or release. Each folder's doc says how to run it.
+
+- `scripts/hillclimb/` — the hill-climb lab, which tunes app settings against scored benches (knob registry, locked holdout, search loop, ledger; config in `config/hillclimb/`); see `docs/hill-climb-lab.md`
+- `scripts/speaker_lab/` — the YODAS3 speaker lab (voice bank, simulated meetings, scoring and replays); see `Tools/SpeakerEvalHarness/AGENTS.md`
+- `scripts/run_speaker_autoresearch.py` with `scripts/speaker_autoresearch_contract.py`, `scripts/speaker_autoresearch_runtime.py` and `scripts/test_speaker_autoresearch.py` — the speaker-identification auto-research loop over the harness's `autoeval`; see `Tools/SpeakerEvalHarness/AGENTS.md`
+- `scripts/voiceprint/` — converts voiceprint bake-off models to one fused Core ML model (`convert_coreml.py`)
+- `scripts/models/redimnet2/`, `scripts/models/parakeet-ultra/` — install or build the ReDimNet2 voiceprint model and the experimental Parakeet Ultra model; see each folder's `README.md`
 
 
 ## Rule of thumb

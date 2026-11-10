@@ -26,21 +26,27 @@ Data stored locally today:
 | Data | Location | Format |
 |------|----------|--------|
 | Meeting transcripts | `<capture-library>/meetings/*.md` | Markdown |
-| Meeting sidecars + index | `<capture-library>/meetings/*.json`, `<capture-library>/meetings/transcripted.json` | JSON |
+| Retained meeting audio | `<capture-library>/meetings/audio/*_audio/` | M4A / WAV |
 | Speaker database | `~/Library/Application Support/Transcripted/state/speakers.sqlite` | SQLite |
 | Stats database | `~/Library/Application Support/Transcripted/state/stats.sqlite` | SQLite |
 | Failed transcription queue | `~/Library/Application Support/Transcripted/state/failed_transcriptions.json` | JSON |
 | Dictation logs | `<capture-library>/dictations/*.md` | Markdown |
+| Kept dictation audio | `<capture-library>/dictations/audio/` | M4A / WAV |
+| Writing day files | `<capture-library>/writing/*.md` | Markdown |
+| Writing state | `~/Library/Application Support/Transcripted/writing/` | JSON Lines, encrypted history |
 | App debug log | `~/Library/Application Support/Transcripted/logs/debug.log` | Text |
 | App events | `~/Library/Application Support/Transcripted/logs/events.jsonl` | JSON Lines |
 | Temporary speaker clips + raw recordings | `~/Library/Application Support/Transcripted/tmp/recordings/` | WAV |
-| Model cache | `~/Library/Caches/models/mlx-community/` | MLX / CoreML |
+| MCP search index | `~/Library/Application Support/Transcripted/cache/` | SQLite |
+| WhisperKit models | `~/Library/Application Support/Transcripted/cache/whisperkit/` | CoreML |
+| FluidAudio models | `~/Library/Application Support/FluidAudio/Models/` | CoreML |
+
+The full map is `docs/storage-paths.md`.
 
 Operational caveats:
 
 - first launch may download local models from HuggingFace if they are not already cached
 - signed builds can optionally fetch the Sparkle appcast for in-app updates
-- beta builds can optionally contact the update/log proxy for update checks and diagnostics shipping
 - core dictation and transcription do not require cloud APIs
 
 ## Model integrity

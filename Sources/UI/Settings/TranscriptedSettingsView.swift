@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject var sttRouter: STTRouter
     /// Not observed (it publishes every tick): `meetingRender` redraws only
     /// on what the shell shows, `recordingClock` feeds Home's elapsed label.
@@ -146,7 +145,7 @@ struct TranscriptedSettingsView: View {
     var body: some View {
         // Things-style two-tone split: solid darker sidebar, solid lighter
         // content, no toolbar chrome. The sidebar is permanent and narrow —
-        // four destinations plus one quiet bottom line need no more.
+        // seven destinations plus one quiet bottom line need no more.
         HStack(spacing: 0) {
             sidebarColumn
                 .frame(width: 184)

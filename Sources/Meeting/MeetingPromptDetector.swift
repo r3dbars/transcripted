@@ -140,7 +140,7 @@ final class MeetingPromptDetector {
     private let fetchCalendarEventSnapshots: (Date, Date) async -> [MeetingPromptCalendarEventSnapshot]
     private let refreshesCalendarEventSnapshots: Bool
     // Cache of upcoming meeting-link events refreshed off-main on a TTL or
-    // EventKit invalidation. The 20s prompt loop should stay in-memory while idle.
+    // EventKit invalidation. The prompt loop should stay in-memory while idle.
     // Dismiss/markAccepted/title paths must stay synchronous (overlay callbacks and
     // the recording-start title closure), so they read this cache instead of querying
     // EKEventStore on the main actor.
@@ -265,7 +265,7 @@ final class MeetingPromptDetector {
     // Single fetch window covering both the near-term prompt window and the
     // farthest lookahead used for runtime-dismiss resume dates.
     private let calendarLookaheadInterval: TimeInterval = 12 * 60 * 60
-    // Calendar queries are synchronous XPC work behind EventKit. Keep the 20s
+    // Calendar queries are synchronous XPC work behind EventKit. Keep the
     // prompt loop in-memory most of the time and refresh the EventKit snapshot
     // on a minutes-scale TTL or when EventKit tells us the calendar changed.
     private let calendarSnapshotRefreshInterval: TimeInterval = 5 * 60

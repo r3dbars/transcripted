@@ -71,10 +71,10 @@ enum TranscriptedSupportActions {
         let queuedMeetingCount: Int
         let meetingShortcut: String
         if #available(macOS 14.0, *) {
-            meetingState = meetingStateName(appState.meetingSession.state)
+            meetingState = appState.meetingSession.state.diagnosticName
             meetingRecording = appState.meetingSession.isRecording
             meetingDurationBucket = AnalyticsReporter.durationBucket(seconds: appState.meetingSession.recordingDuration)
-            meetingDisplayStatus = displayStatusName(appState.meetingSession.displayStatus)
+            meetingDisplayStatus = appState.meetingSession.displayStatus.diagnosticName
             speakerReviewPending = appState.meetingSession.isSpeakerReviewPending
             queuedMeetingCount = appState.meetingSession.queuedTranscriptionCount
             meetingShortcut = appState.contextCapture.meetingShortcutDisplay
@@ -129,39 +129,6 @@ enum TranscriptedSupportActions {
             return "not_determined"
         @unknown default:
             return "unknown"
-        }
-    }
-
-    @available(macOS 14.0, *)
-    private static func meetingStateName(_ state: MeetingSessionController.State) -> String {
-        switch state {
-        case .idle: return "idle"
-        case .loadingModels: return "loading_models"
-        case .ready: return "ready"
-        case .startingRecording: return "starting_recording"
-        case .recording: return "recording"
-        case .stoppingRecording: return "stopping_recording"
-        case .transcribing: return "transcribing"
-        case .error: return "error"
-        }
-    }
-
-    private static func displayStatusName(_ status: DisplayStatus) -> String {
-        switch status {
-        case .idle:
-            return "idle"
-        case .gettingReady:
-            return "getting_ready"
-        case .transcribing:
-            return "transcribing"
-        case .finishing:
-            return "finishing"
-        case .transcriptSaved:
-            return "transcript_saved"
-        case .discardedAccidentalStart:
-            return "discarded_accidental_start"
-        case .failed:
-            return "failed"
         }
     }
 }

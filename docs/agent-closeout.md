@@ -8,7 +8,7 @@ agent.
 End delegated work with one line:
 
 ```text
-COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action
+COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action
 ```
 
 Status meanings:

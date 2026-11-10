@@ -1,6 +1,7 @@
 // AppLogSink.swift
 // Shared logging service — tracks every user action with timestamps.
-// Writes to both the in-app debug panel and the app-owned logs folder.
+// Writes debug.log in the app-owned logs folder. `entries` keeps the last 200
+// lines in memory; nothing in the app reads it.
 //
 // See docs/observability.md for how this fits alongside TranscriptedCore's
 // AppLogger, FileLogger, EventReporter, and ReliabilityPacketRecorder.
@@ -29,9 +30,10 @@ private actor AppLogSinkFileWriter {
             do {
                 let attrs = try fm.attributesOfItem(atPath: path)
                 if let size = attrs[.size] as? UInt64, size > TranscriptedConstants.logRotationThreshold {
-                    // Trigger (byte size, checked once here at session start) stays
-                    // local; the actual read/trim/rewrite mechanics are shared with
-                    // TranscriptedCore's FileLogger via LogTailTrimmer.
+                    // Trigger (byte size, checked here at session start and again
+                    // after each append) stays local; the actual read/trim/rewrite
+                    // mechanics are shared with TranscriptedCore's FileLogger via
+                    // LogTailTrimmer.
                     LogTailTrimmer.trimIfNeeded(
                         at: path,
                         maxLines: nil,

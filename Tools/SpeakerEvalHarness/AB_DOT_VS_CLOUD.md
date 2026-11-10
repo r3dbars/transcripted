@@ -1,5 +1,7 @@
 # Speaker-Matcher A/B: DOT vs CLOUD — Final Verdict
 
+> **Finished, script removed.** `scripts/ab_dot_vs_cloud.py` was deleted in cee9f1121. To rerun the A/B below, restore it with `git checkout cee9f1121^ -- scripts/ab_dot_vs_cloud.py`.
+
 Adversarially-verified A/B (4 explore variants + 3 independent skeptic passes, every number
 re-run and reproduced) comparing the production-style **DOT** matcher against a proposed
 **CLOUD** matcher for cross-meeting speaker re-identification.
