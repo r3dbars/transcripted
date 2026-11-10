@@ -10,11 +10,11 @@ These used to be Swift fast tests that read Sources/ as text (Tests/README.md,
 test can check through inputs and outputs, so it lives here with the other
 consistency checks. Stdlib only, offline, writes nothing.
 
+Mac-wide default-input ownership is enforced by lint.py rule
+`coreaudio-default-input-owner` (including unqualified setter calls).
+
 Rules:
 
-  * Dictation never writes the Mac-wide default input. The only legitimate
-    writes are PersistentDictationInputController's, through
-    DefaultInputDeviceMonitor. (was Tests/BluetoothRouteContractTests.swift)
   * Diagnostic file writers avoid the legacy FileHandle APIs that raise
     uncatchable ObjC NSExceptions on I/O failure. `//` comments are ignored so
     the notes that name those APIs don't trip it.
@@ -136,16 +136,6 @@ HOME_MEETING_TELEMETRY_WHY = (
 
 
 RULES: tuple[Rule, ...] = (
-    Rule(
-        name="dictation never writes the Mac-wide default input",
-        folder="Sources/Speech",
-        prefix="Parakeet",
-        # Declares the CoreAudio setter that PersistentDictationInputController uses.
-        exclude=("ParakeetAudioDeviceLookup.swift",),
-        min_files=10,
-        banned=("setDefaultInputDeviceID(", "setDefaultInputDevice("),
-        why="the dictation engine must not write the Mac-wide default input",
-    ),
     Rule(
         name="diagnostic file writers avoid the NSException-throwing legacy FileHandle APIs",
         files=(
@@ -494,11 +484,7 @@ def self_test() -> None:
         return tmp
 
     good: dict[str, str] = {}
-    for index in range(11):
-        good[f"Sources/Speech/ParakeetPart{index}.swift"] = "let ok = 1\n"
-    good["Sources/Speech/ParakeetAudioDeviceLookup.swift"] = "func setDefaultInputDeviceID(_ id: UInt32) {}\n"
-    good["Sources/Speech/OtherThing.swift"] = "setDefaultInputDevice(1)\n"
-    for rel in RULES[1].files:
+    for rel in RULES[0].files:
         good[rel] = "// seekToEndOfFile() is banned; use seekToEnd()\ntry handle.seekToEnd()\n"
     good["Sources/App/TranscriptedSupportActions.swift"] = "func sendFeedback() { open(url) }\n"
     good["Sources/UI/Settings/TranscriptedSettingsView.swift"] = (
@@ -617,11 +603,9 @@ def self_test() -> None:
     copy_emit = "HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.copyEvents(for: .missingFile), artifactDate: d)"
     preview_emit = "HomeMeetingActionTelemetry.emit(HomeMeetingActionTelemetry.previewEvents(loaded: true), artifactDate: d)"
     breaks = [
-        ("Sources/Speech/ParakeetPart3.swift", "let ok = 1\n", "device.setDefaultInputDeviceID(id)\n"),
-        ("Sources/Speech/ParakeetPart4.swift", "let ok = 1\n", "setDefaultInputDevice(id)\n"),
-        (RULES[1].files[0], "try handle.seekToEnd()", "handle.seekToEndOfFile()"),
-        (RULES[1].files[5], "try handle.seekToEnd()", "handle.closeFile()"),
-        (RULES[1].files[2], "try handle.seekToEnd()", "handle.write(data) // fine?"),
+        (RULES[0].files[0], "try handle.seekToEnd()", "handle.seekToEndOfFile()"),
+        (RULES[0].files[5], "try handle.seekToEnd()", "handle.closeFile()"),
+        (RULES[0].files[2], "try handle.seekToEnd()", "handle.write(data) // fine?"),
         ("Sources/App/TranscriptedSupportActions.swift", "open(url)", "NSSound.beep()"),
         ("Sources/App/TranscriptedSupportActions.swift", "open(url)", "AppSoundPlayer.shared.play(.done)"),
         ("Sources/UI/Settings/TranscriptedSettingsView.swift", "{ open(url) }", "{ AppSoundPlayer.shared.play(.x) }"),
@@ -796,9 +780,6 @@ def self_test() -> None:
         broken[rel] = broken[rel].replace(old, new)
         assert check(build(broken)), (rel, new)
 
-    # A scan that finds too few engine files fails.
-    sparse = {k: v for k, v in good.items() if "ParakeetPart" not in k}
-    assert any("expected more than" in p for p in check(build(sparse)))
     # So does a Settings shell scan that loses its files.
     sparse = {k: v for k, v in good.items() if "TranscriptedSettingsView+" not in k}
     assert any("expected more than" in p for p in check(build(sparse)))
