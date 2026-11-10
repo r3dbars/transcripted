@@ -21,20 +21,29 @@ state, logs, cache, and temporary recordings stay under
 Historic `Draft` paths remain in the repo for migration, validation, and
 standalone-tool fallback when older artifacts are the only data on disk.
 
-Data stored locally today:
+Default local storage locations (capture paths follow the selected library):
 
 | Data | Location | Format |
 |------|----------|--------|
 | Meeting transcripts | `<capture-library>/meetings/*.md` | Markdown |
-| Meeting sidecars + index | `<capture-library>/meetings/*.json`, `<capture-library>/meetings/transcripted.json` | JSON |
-| Speaker database | `~/Library/Application Support/Transcripted/state/speakers.sqlite` | SQLite |
+| Retained meeting audio | `<capture-library>/meetings/audio/*_audio/` | M4A / WAV |
+| Speaker databases | `~/Library/Application Support/Transcripted/state/speakers.sqlite`, `~/Library/Application Support/Transcripted/state/speakers_<embedder-id>.sqlite` | SQLite |
 | Stats database | `~/Library/Application Support/Transcripted/state/stats.sqlite` | SQLite |
 | Failed transcription queue | `~/Library/Application Support/Transcripted/state/failed_transcriptions.json` | JSON |
-| Dictation logs | `<capture-library>/dictations/*.md` | Markdown |
+| Dictation day files | `<capture-library>/dictations/Dictations_*.md` | Markdown |
+| Kept dictation audio | `<capture-library>/dictations/audio/` | M4A / WAV |
+| Writing day files | `<capture-library>/writing/Writing_*.md` | Markdown |
+| Writing runtime state | `~/Library/Application Support/Transcripted/writing/` | State files and Unix socket |
 | App debug log | `~/Library/Application Support/Transcripted/logs/debug.log` | Text |
 | App events | `~/Library/Application Support/Transcripted/logs/events.jsonl` | JSON Lines |
-| Temporary speaker clips + raw recordings | `~/Library/Application Support/Transcripted/tmp/recordings/` | WAV |
-| Model cache | `~/Library/Caches/models/mlx-community/` | MLX / CoreML |
+| Raw recording scratch | `~/Library/Application Support/Transcripted/tmp/recordings/` | WAV |
+| Saved speaker samples and metadata | `~/Library/Application Support/Transcripted/tmp/recordings/speaker_clips/` | WAV / JSON |
+| MCP search index | `~/Library/Application Support/Transcripted/cache/mcp_index.sqlite` | SQLite |
+| WhisperKit models | `~/Library/Application Support/Transcripted/cache/whisperkit/` | Core ML model assets |
+| FluidAudio models | `~/Library/Application Support/FluidAudio/Models/` | Core ML model assets |
+| Writing models | `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf` | GGUF |
+
+See [Storage paths](docs/storage-paths.md) for the detailed layout, overrides, and legacy locations.
 
 Operational caveats:
 
