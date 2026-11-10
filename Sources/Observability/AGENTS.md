@@ -70,7 +70,7 @@ Emit with a literal name (`AnalyticsReporter.track("event_name", ...)`) so `pyth
 - Sanitizers: `PayloadSanitizationCore` (shared `shouldDrop(key:)` and `redactAndCap`), `SentryPayloadSanitizer`, `AnalyticsPayloadSanitizer`, `LocalObservabilityPayloadSanitizer`. Policies: `SentryEventPolicy`, `AnalyticsEventPolicy`.
 - Reporters: `CrashReporter`, `CrashReportingPreferences`, `AnalyticsReporter` (its retry buffer is `AnalyticsDeliveryBufferStore`, its config `AnalyticsRuntimeConfiguration`), `SentryRuntimeConfiguration`.
 - Support and runtime state: `SupportDiagnosticsBundle` (privacy-safe summary for feedback emails and manual diagnostic events, with coarse recent reliability packets), `ReliabilityPacketRecorder`, `RuntimeDiagnostics*`.
-- Telemetry helpers: `ActivationTelemetry`, `AgentSetupLifecycleTelemetry`, `FeatureDiscoveryTelemetry` (`settingsFeatureDiscovered.` prefix), `ProductUsageTelemetry`, `RetentionTelemetry`, `SpeakerRecognitionTelemetry` (buckets aligned with the matcher's thresholds), `DictationPasteRetryTelemetry`, `WorkflowRecoveryTelemetry` (takes a `track` closure so tests record), `UsageHealthModels`.
+- Telemetry helpers: `ActivationTelemetry`, `AgentSetupLifecycleTelemetry`, `FeatureDiscoveryTelemetry` (`settingsFeatureDiscovered.` prefix), `ProductUsageTelemetry`, `RetentionTelemetry`, `SpeakerRecognitionTelemetry` (buckets aligned with the matcher's thresholds), `WorkflowRecoveryTelemetry` (takes a `track` closure so tests record), `UsageHealthModels`.
 - Updates: `SparkleUpdaterController` (plus `+UpdateStatus`, `+Telemetry`, `+SparkleDelegates`), `UpdateFailureKind`, `UpdateActionSafetyPolicy`, `UpdateInstallDetection`.
 
 ## Verification
