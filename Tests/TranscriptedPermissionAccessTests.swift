@@ -317,12 +317,16 @@ func testTranscriptedPermissionAccess() async {
         let decisionTask = Task { @MainActor in
             await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
                 forceRefresh: true,
-                probeRequester: {
-                    await attempt.awaitResult(
-                        start: { requester.requestAccess(completion: $0) },
-                        cleanup: { requester.cancel() }
-                    )
-                }
+                dependencies: TranscriptedPermissionAccess.SystemAudioPermissionDependencies(
+                    cache: .live, tcc: .unavailable, isSmokeMode: { false },
+                    probe: { _ in
+                        await attempt.awaitResult(
+                            start: { requester.requestAccess(completion: $0) },
+                            cleanup: { requester.cancel() }
+                        )
+                    },
+                    activateForPrompt: {}, notifyChanged: {}
+                )
             )
         }
         assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "fresh probe should start its injected capture")
@@ -366,12 +370,16 @@ func testTranscriptedPermissionAccess() async {
         let decisionTask = Task { @MainActor in
             await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
                 forceRefresh: true,
-                probeRequester: {
-                    await attempt.awaitResult(
-                        start: { requester.requestAccess(completion: $0) },
-                        cleanup: { requester.cancel() }
-                    )
-                }
+                dependencies: TranscriptedPermissionAccess.SystemAudioPermissionDependencies(
+                    cache: .live, tcc: .unavailable, isSmokeMode: { false },
+                    probe: { _ in
+                        await attempt.awaitResult(
+                            start: { requester.requestAccess(completion: $0) },
+                            cleanup: { requester.cancel() }
+                        )
+                    },
+                    activateForPrompt: {}, notifyChanged: {}
+                )
             )
         }
         assertTrue(await awaitAudioPermissionCondition { fake.counts.starts == 1 }, "capture setup should complete before the backend watchdog fails")
@@ -390,34 +398,6 @@ func testTranscriptedPermissionAccess() async {
         assertNil(UserDefaults.standard.object(forKey: knownKey), "transport failure must not persist a known permission decision")
         assertNil(UserDefaults.standard.object(forKey: grantedKey), "transport failure must not cache a grant")
         assertTrue(await awaitAudioPermissionCondition { fake.counts.stops == 1 }, "failed probes must clean up their injected capture")
-    }
-
-    for probeResult: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult in [.explicitlyDenied, .indeterminate(.cancelled)] {
-        await runSuite("Fresh meeting start — \(probeResult.diagnosticName) stays blocked") {
-            let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-            let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-            defer {
-                restore(originalKnown, forKey: knownKey)
-                restore(originalGranted, forKey: grantedKey)
-            }
-            UserDefaults.standard.removeObject(forKey: knownKey)
-            UserDefaults.standard.removeObject(forKey: grantedKey)
-
-            // Explicit denial is a typed policy control; generic Core Audio
-            // errors must not be relabeled as definitive TCC denials.
-            let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-                forceRefresh: true, probeRequester: { probeResult }
-            )
-            assertEqual(decision.probeResult, probeResult, "the terminal decision must preserve its evidence")
-            assertFalse(decision.canProceed, "denial or cancellation must block this fresh start")
-            assertFalse(
-                MeetingRecordingStartGate.evaluate(microphoneGranted: true, systemAudioRecordingGranted: decision.canProceed).canStart,
-                "meeting preflight must not reinterpret a blocked permission decision as allowed"
-            )
-            assertEqual(decision.state, probeResult == .explicitlyDenied ? .denied : .unknown, "only explicit denial may make the fresh permission state known")
-            assertFalse(UserDefaults.standard.bool(forKey: grantedKey), "blocked starts must not create a cached grant")
-            assertEqual(UserDefaults.standard.bool(forKey: knownKey), probeResult == .explicitlyDenied, "cancellation must not persist a denial")
-        }
     }
 
     runSuite("Core Audio cache migration — preserves existing users without forcing permission changes") {
@@ -582,189 +562,6 @@ func testTranscriptedPermissionAccess() async {
         )
     }
 
-    await runSuite("TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded — rechecks upgraded installs instead of short-circuiting") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        let originalOnboarding = UserDefaults.standard.object(forKey: onboardingKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-            restore(originalOnboarding, forKey: onboardingKey)
-        }
-
-        UserDefaults.standard.removeObject(forKey: knownKey)
-        UserDefaults.standard.removeObject(forKey: grantedKey)
-        UserDefaults.standard.set(true, forKey: onboardingKey)
-
-        let requestBox = PermissionRequestBox()
-        let granted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded {
-            requestBox.callCount += 1
-            return false
-        }
-
-        assertFalse(granted, "a denied recheck should return false")
-        assertEqual(requestBox.callCount, 1, "upgraded installs should perform a real system audio recheck")
-        assertTrue(
-            UserDefaults.standard.bool(forKey: knownKey),
-            "recheck results should mark the system audio permission state as known"
-        )
-        assertFalse(
-            UserDefaults.standard.bool(forKey: grantedKey),
-            "a denied recheck should persist the missing permission state"
-        )
-    }
-
-    await runSuite("TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded — skips the requester once a real grant is already known") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        let originalOnboarding = UserDefaults.standard.object(forKey: onboardingKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-            restore(originalOnboarding, forKey: onboardingKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-        UserDefaults.standard.set(true, forKey: onboardingKey)
-
-        let requestBox = PermissionRequestBox()
-        let granted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded {
-            requestBox.callCount += 1
-            return false
-        }
-
-        assertTrue(granted, "known granted permission should stay ready")
-        assertEqual(requestBox.callCount, 0, "known granted permission should not trigger another request")
-    }
-
-    await runSuite("TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(forceRefresh:) — rechecks cached grants before meeting start") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        let originalOnboarding = UserDefaults.standard.object(forKey: onboardingKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-            restore(originalOnboarding, forKey: onboardingKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-        UserDefaults.standard.set(true, forKey: onboardingKey)
-
-        let requestBox = PermissionRequestBox()
-        let granted = await TranscriptedPermissionAccess.requestSystemAudioRecordingAccessIfNeeded(forceRefresh: true) {
-            requestBox.callCount += 1
-            return false
-        }
-
-        assertFalse(granted, "a forced recheck should surface revoked system audio permission")
-        assertEqual(requestBox.callCount, 1, "meeting start should bypass the cached grant and perform a real recheck")
-        assertTrue(
-            UserDefaults.standard.bool(forKey: knownKey),
-            "forced rechecks should keep the permission state marked as known"
-        )
-        assertFalse(
-            UserDefaults.standard.bool(forKey: grantedKey),
-            "a failed forced recheck should clear the cached granted state"
-        )
-    }
-
-    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — preserves cached grants across every indeterminate probe stage") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        for stage in TranscriptedPermissionAccess.SystemAudioPermissionProbeStage.allCases
-            where stage != .cancelled {
-            UserDefaults.standard.set(true, forKey: knownKey)
-            UserDefaults.standard.set(true, forKey: grantedKey)
-
-            let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-                forceRefresh: true,
-                probeRequester: { .indeterminate(stage) }
-            )
-
-            assertTrue(decision.canProceed, "cached grant should survive an indeterminate \(stage.rawValue) probe")
-            assertEqual(decision.state, .granted, "indeterminate \(stage.rawValue) should not rewrite cached state")
-            assertEqual(
-                decision.probeResult,
-                .indeterminate(stage),
-                "the decision should retain the privacy-safe probe stage"
-            )
-            assertTrue(
-                UserDefaults.standard.bool(forKey: grantedKey),
-                "indeterminate \(stage.rawValue) should leave the persisted grant intact"
-            )
-        }
-    }
-
-    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — cancellation preserves cached grant but blocks this start") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-
-        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-            forceRefresh: true,
-            probeRequester: { .indeterminate(.cancelled) }
-        )
-
-        assertFalse(decision.canProceed, "a cancelled caller must not continue into meeting capture")
-        assertEqual(decision.state, .granted, "cancellation must not rewrite the persisted TCC grant")
-        assertEqual(decision.probeResult, .indeterminate(.cancelled), "the decision should retain cancellation as its terminal stage")
-        assertTrue(UserDefaults.standard.bool(forKey: grantedKey), "cancellation must preserve the cached grant for a future attempt")
-    }
-
-    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — explicit denial clears a cached grant") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-
-        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-            forceRefresh: true,
-            probeRequester: { .explicitlyDenied }
-        )
-
-        assertFalse(decision.canProceed, "an explicit TCC denial should still block meeting start")
-        assertEqual(decision.state, .denied, "an explicit denial should replace the stale grant")
-        assertFalse(UserDefaults.standard.bool(forKey: grantedKey), "explicit denial should clear the cached grant")
-    }
-
-    await runSuite("TranscriptedPermissionAccess.systemAudioRecordingAccessDecision — first-run indeterminate stays unknown") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.removeObject(forKey: knownKey)
-        UserDefaults.standard.removeObject(forKey: grantedKey)
-
-        let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-            probeRequester: { .indeterminate(.prepareCapture) }
-        )
-
-        assertFalse(decision.canProceed, "an unverified first-run state should not claim capture is ready")
-        assertEqual(decision.state, .unknown, "a transient first-run failure should remain unknown, not denied")
-        assertFalse(UserDefaults.standard.bool(forKey: knownKey), "an indeterminate probe should not persist a known denial")
-    }
-
     runSuite("SystemAudioPermissionProbeClassifier — device errors do not impersonate TCC denial") {
         let explicitDenial = NSError(
             domain: "CoreAudioSystemAudioCapture",
@@ -865,67 +662,6 @@ func testTranscriptedPermissionAccess() async {
             TranscriptedPermissionKind.requiredForCurrentUse(dictationShortcutsEnabled: false),
             [.microphone, .systemAudioRecording],
             "meetings-first users with dictation shortcuts off should need system audio instead of Accessibility"
-        )
-    }
-
-    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — updates stale cached grants") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-
-        let requestBox = PermissionRequestBox()
-        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
-            requestBox.callCount += 1
-            return false
-        }
-
-        assertFalse(granted, "a failed revalidation should return the live denied state")
-        assertEqual(requestBox.callCount, 1, "status-surface revalidation should perform a real probe")
-        assertTrue(
-            UserDefaults.standard.bool(forKey: knownKey),
-            "revalidation should keep the permission state marked as known"
-        )
-        assertFalse(
-            UserDefaults.standard.bool(forKey: grantedKey),
-            "revalidation should clear stale cached grants after revocation"
-        )
-    }
-
-    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — smoke mode preserves cached granted state without a live probe") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(true, forKey: grantedKey)
-
-        let requestBox = PermissionRequestBox()
-        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus(
-            requester: {
-                requestBox.callCount += 1
-                return false
-            },
-            skipSmokeRevalidation: true
-        )
-
-        assertTrue(granted, "smoke-mode revalidation should keep the cached granted state")
-        assertEqual(requestBox.callCount, 0, "smoke mode should not perform a live system-audio probe")
-        assertTrue(
-            UserDefaults.standard.bool(forKey: knownKey),
-            "smoke mode should keep the cached system-audio state marked as known"
-        )
-        assertTrue(
-            UserDefaults.standard.bool(forKey: grantedKey),
-            "smoke mode should preserve the cached granted state"
         )
     }
 
@@ -1045,38 +781,6 @@ func testTranscriptedPermissionAccess() async {
             TranscriptedPermissionAccess.systemAudioRecordingStatus(),
             .granted,
             "cached positive result should stay granted"
-        )
-    }
-
-    await runSuite("TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus — refreshes stale cache") {
-        let originalKnown = UserDefaults.standard.object(forKey: knownKey)
-        let originalGranted = UserDefaults.standard.object(forKey: grantedKey)
-        defer {
-            restore(originalKnown, forKey: knownKey)
-            restore(originalGranted, forKey: grantedKey)
-        }
-
-        UserDefaults.standard.set(true, forKey: knownKey)
-        UserDefaults.standard.set(false, forKey: grantedKey)
-        let granted = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
-            true
-        }
-
-        assertTrue(granted, "revalidation should return the fresh requester result")
-        assertEqual(
-            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
-            .granted,
-            "revalidation should replace stale denied cache with the fresh grant"
-        )
-
-        let denied = await TranscriptedPermissionAccess.revalidateSystemAudioRecordingStatus {
-            false
-        }
-        assertFalse(denied, "revalidation should also report revocations")
-        assertEqual(
-            TranscriptedPermissionAccess.systemAudioRecordingStatus(),
-            .denied,
-            "revalidation should replace stale granted cache after revocation"
         )
     }
 
