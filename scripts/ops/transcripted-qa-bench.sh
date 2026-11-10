@@ -706,7 +706,7 @@ run_deep_tail() {
   run_step "14-qa-stress-small" "TranscriptedQA small stress pass" "yes" \
     "swift run --package-path Tools/TranscriptedQA transcripted-qa stress-test --transcripts 12 --speakers-per-transcript 4 --utterances-per-transcript 80"
   run_step "15-imported-audio-smoke" "Imported audio artifact smoke" "yes" \
-    "swift run --package-path Tools/TranscriptedQA transcripted-qa imported-audio-smoke --output $(shell_quote "${RAW_DIR}/imported-audio-smoke")"
+    "bash scripts/dev/run-imported-audio-smoke.sh --output $(shell_quote "${RAW_DIR}/imported-audio-smoke")"
 
   if [[ "${STRICT_ARTIFACTS}" -eq 1 ]]; then
     run_artifact_validation "yes"

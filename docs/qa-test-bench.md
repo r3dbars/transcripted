@@ -133,7 +133,7 @@ This adds:
 - `swift test --package-path Tools/TranscriptedQA`
 - `swift run --package-path Tools/TranscriptedQA transcripted-qa round-trip`
 - a small `TranscriptedQA` stress pass
-- `swift run --package-path Tools/TranscriptedQA transcripted-qa imported-audio-smoke`
+- `bash scripts/dev/run-imported-audio-smoke.sh` (real Core import/save/retention with synthetic engines)
 - native imported-audio picker proof remains opt-in via
   `--mode imported-audio-native`
 - `TranscriptedQA` health and live artifact validation
@@ -401,8 +401,11 @@ private speaker-name match counts. Reports do not print transcript text or
 speaker names.
 
 This does not drive the app UI or native file picker automatically. It scores
-the Transcripted Markdown once that Markdown exists. For deterministic imported
-artifact shape proof, use `imported-audio-smoke` from the deep bench.
+the Transcripted Markdown once that Markdown exists. For deterministic
+Core imported-transcription, save and retained-audio proof with synthetic engines,
+use `bash scripts/dev/run-imported-audio-smoke.sh` from the deep bench. This does
+not cover the app's media preparer, native picker or real-model accuracy. Direct
+`imported-audio-smoke --fixture-only` checks parser fixtures only.
 
 ## Exit Codes
 
