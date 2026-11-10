@@ -182,7 +182,6 @@ quiet_mic_unrecovered
 realtime_agc
 reason
 reason_kind
-recent_meetings_available
 recording_minutes
 recovering
 repair_kind
