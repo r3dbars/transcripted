@@ -57,12 +57,7 @@ enum AudioStoragePreferences {
         userDefaults: UserDefaults = .standard
     ) {
         userDefaults.set(window.rawValue, forKey: deleteAudioAfterKey)
-        NotificationCenter.default.post(name: .audioStoragePreferencesDidChange, object: nil)
     }
-}
-
-extension Notification.Name {
-    static let audioStoragePreferencesDidChange = Notification.Name("audioStoragePreferencesDidChange")
 }
 
 /// How long a dictation's audio is kept after its transcript saves. Separate
@@ -124,6 +119,5 @@ extension AudioStoragePreferences {
         userDefaults: UserDefaults = .standard
     ) {
         userDefaults.set(window.rawValue, forKey: dictationAudioKeepKey)
-        NotificationCenter.default.post(name: .audioStoragePreferencesDidChange, object: nil)
     }
 }
