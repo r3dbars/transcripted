@@ -48,7 +48,10 @@ struct NextSentenceKeyGesture {
                 // Its modifiers held exactly (none for a function key on its own); anything else is another
                 // shortcut. Letting go counts however the modifiers were released.
                 guard downAt != nil || flags & NextSentenceHotkey.chordMask == key.modifiers else { return Outcome() }
-                if !isDown { return Outcome(swallow: true, event: released(now)) }
+                if !isDown {
+                    guard downAt != nil else { return Outcome() }
+                    return Outcome(swallow: true, event: released(now))
+                }
                 if downAt != nil { return Outcome(swallow: true) } // auto-repeat
                 guard !blocked else { return Outcome() }
                 return pressed(now, swallow: true)
