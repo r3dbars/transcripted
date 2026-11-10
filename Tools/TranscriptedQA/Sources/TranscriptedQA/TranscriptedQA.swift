@@ -213,8 +213,8 @@ struct QADataDirectories {
             return standardized
         }
 
-        if standardized.path.hasPrefix(inferredBase.meetingsDir.standardizedFileURL.path)
-            || standardized.path.hasPrefix(inferredBase.stateDir.standardizedFileURL.path) {
+        if isPath(standardized.path, under: inferredBase.meetingsDir)
+            || isPath(standardized.path, under: inferredBase.stateDir) {
             return inferredBase.dictationsDir
         }
 
@@ -264,13 +264,20 @@ struct QADataDirectories {
         legacyShared: QADataDirectories
     ) -> QADataDirectories {
         let path = meetingsDir.standardizedFileURL.path
-        if path.hasPrefix(legacyDraft.stateDir.standardizedFileURL.path) {
+        if isPath(path, under: legacyDraft.stateDir) {
             return legacyDraft
         }
-        if path.hasPrefix(legacyShared.meetingsDir.standardizedFileURL.path) {
+        if isPath(path, under: legacyShared.meetingsDir) {
             return legacyShared
         }
         return current
+    }
+
+    /// Match an entire path component, so similarly named siblings do not
+    /// inherit another capture directory's layout.
+    private static func isPath(_ path: String, under root: URL) -> Bool {
+        let rootPath = root.standardizedFileURL.path
+        return path == rootPath || path.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
     }
 }
 
