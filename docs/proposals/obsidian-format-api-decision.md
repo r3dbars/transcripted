@@ -1,7 +1,7 @@
 # Obsidian formatting API: owner decision
 
 Status: **unselected proposal** for CORE-REST-13. This worksheet changes no
-writer, public API, preference, reader, or existing file.
+writer, public API, preference, reader, or existing captured transcript.
 
 ## Verified source boundary
 
