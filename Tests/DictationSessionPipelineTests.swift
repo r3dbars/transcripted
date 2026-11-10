@@ -91,14 +91,12 @@ func testDictationSessionPipeline() async {
     runSuite("Try Again restarts the failed take marked as a retry") {
         let host = PipelineFakeHost()
         host.currentDictationTrigger = .physicalKey
-        let anchor = NSRect(x: 1, y: 2, width: 3, height: 4)
 
-        host.retryDictation(sourceApp: nil, anchorRect: anchor)
+        host.retryDictation(sourceApp: nil)
 
         assertEqual(host.starts.count, 1)
         assertEqual(host.starts.first?.isRetry, true, "four taps on Try Again must not read as five attempts")
         assertEqual(host.starts.first?.trigger, .physicalKey, "the retry keeps the failed take's trigger")
-        assertEqual(host.starts.first?.anchorRect, anchor, "the retry opens where the take was")
     }
 
     await runSuite("The start click is queued before the mic start and plays once per session") {
@@ -483,7 +481,6 @@ func testDictationSessionPipeline() async {
 private final class PipelineFakeHost: DictationSessionPipelineHost {
     struct Start: Equatable {
         var trigger: DictationTrigger
-        var anchorRect: NSRect?
         var isRetry: Bool
     }
 
@@ -627,10 +624,9 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger,
         shortcutMode: DictationShortcutMode?,
-        anchorRect: NSRect?,
         isRetry: Bool
     ) {
-        starts.append(Start(trigger: trigger, anchorRect: anchorRect, isRetry: isRetry))
+        starts.append(Start(trigger: trigger, isRetry: isRetry))
     }
 
     func rememberStartPressIfFinishing(
