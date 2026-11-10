@@ -153,8 +153,14 @@ final class AnalyticsReporter: @unchecked Sendable { // mutable state is confine
             "distinct_id": distinctID,
             "app_version": infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown",
             "build_version": infoDictionary?["CFBundleVersion"] as? String ?? "unknown",
-            "build_channel": AnalyticsRuntimeConfiguration.buildChannel(infoDictionary: infoDictionary),
-            "build_revision": AnalyticsRuntimeConfiguration.buildRevision(infoDictionary: infoDictionary),
+            "build_channel": AnalyticsRuntimeConfiguration.buildChannel(
+                environment: AnalyticsRuntimeConfiguration.processBuildMetadataEnvironment,
+                infoDictionary: infoDictionary
+            ),
+            "build_revision": AnalyticsRuntimeConfiguration.buildRevision(
+                environment: AnalyticsRuntimeConfiguration.processBuildMetadataEnvironment,
+                infoDictionary: infoDictionary
+            ),
             "os_major": "\(operatingSystemVersion.majorVersion)",
         ]
 
