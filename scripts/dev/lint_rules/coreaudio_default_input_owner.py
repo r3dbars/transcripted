@@ -17,8 +17,8 @@ the app's writes from the user's (8cd7d7152). Both fixes made one owner:
 Three shapes are flagged, on comment- and string-blanked code:
   1. the `kAudioHardwarePropertyDefaultInputDevice` selector outside the owner
      files (a raw read, write or listener)
-  2. `.setDefaultInputDeviceID(` (the raw write) outside DefaultInputDeviceMonitor
-  3. `.setDefaultInputDevice(` (the monitored write) outside
+  2. `setDefaultInputDeviceID(` calls outside DefaultInputDeviceMonitor
+  3. `setDefaultInputDevice(` calls outside
      PersistentDictationInputController and the monitor
 
 Out of scope: `AVAudioEngine.inputNode` (it binds the default input on first
@@ -59,8 +59,8 @@ RULE = {
 }
 
 _SELECTOR = re.compile(r"\bkAudioHardwarePropertyDefaultInputDevice\b")
-_RAW_WRITE = re.compile(r"\.\s*setDefaultInputDeviceID\s*\(")
-_MONITORED_WRITE = re.compile(r"\.\s*setDefaultInputDevice\s*\(")
+_RAW_WRITE = re.compile(r"(?<!\w)`?setDefaultInputDeviceID`?\s*\(")
+_MONITORED_WRITE = re.compile(r"(?<!\w)`?setDefaultInputDevice`?\s*\(")
 
 _SELECTOR_OWNERS = frozenset({
     "Sources/Speech/DefaultInputDeviceMonitor.swift",
@@ -87,6 +87,13 @@ MONITORED_WRITE_MSG = ("only PersistentDictationInputController may write the Ma
                        "applyPreferredDictationInputDevice, which binds only Transcripted's own AUHAL")
 
 
+def write_calls(sf, pattern):
+    """Qualified and unqualified invocations, excluding function declarations."""
+    for line, match in sf.find(pattern):
+        if not re.search(r"\bfunc\s*$", sf.code[:match.start()]):
+            yield line, match
+
+
 def check(path: str, text: str):
     if ("kAudioHardwarePropertyDefaultInputDevice" not in text
             and "setDefaultInputDevice" not in text):
@@ -96,8 +103,8 @@ def check(path: str, text: str):
     if path not in _SELECTOR_OWNERS:
         out += [(line, SELECTOR_MSG) for line, _ in sf.find(_SELECTOR)]
     if path not in _RAW_WRITE_OWNERS:
-        out += [(line, RAW_WRITE_MSG) for line, _ in sf.find(_RAW_WRITE)]
+        out += [(line, RAW_WRITE_MSG) for line, _ in write_calls(sf, _RAW_WRITE)]
     if path not in _MONITORED_WRITE_OWNERS:
-        out += [(line, MONITORED_WRITE_MSG) for line, _ in sf.find(_MONITORED_WRITE)]
+        out += [(line, MONITORED_WRITE_MSG) for line, _ in write_calls(sf, _MONITORED_WRITE)]
     out.sort()
     return out
