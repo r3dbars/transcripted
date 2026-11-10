@@ -20,6 +20,9 @@ public final class StatsDatabase {
     public static let shared = StatsDatabase()
 
     var db: OpaquePointer?
+    // An unexpected close failure must not lose ownership of the refused handle.
+    // It never becomes the active query/write connection again.
+    private var unavailableDatabaseHandle: OpaquePointer?
     // Thread-safety invariant: writes happen only during `init`
     // (single-threaded construction); reads happen only inside `queue.sync`.
     // See the matching comment in `SpeakerDatabase` for the rationale.
@@ -69,6 +72,12 @@ public final class StatsDatabase {
 
     deinit {
         sqlite3_close(db)
+        if let unavailableDatabaseHandle {
+            let result = sqlite3_close_v2(unavailableDatabaseHandle)
+            if result != SQLITE_OK {
+                AppLogger.stats.error("Failed to close unavailable stats database", ["sqlite_result": "\(result)"])
+            }
+        }
     }
 
     // MARK: - Database Setup
@@ -96,27 +105,18 @@ public final class StatsDatabase {
 
         // Corruption detection: run quick_check to verify database integrity
         if !verifyDatabaseIntegrity() {
-            AppLogger.stats.error("CRITICAL: Stats database corrupt — backing up and recreating", ["path": dbPath.path])
-            sqlite3_close(db)
+            // Another connection may still use this path. Do not move the main
+            // file or separate it from WAL/SHM; keep the store for repair instead
+            // of silently replacing it with an empty database.
+            isDatabaseOpen = false
+            let unavailableHandle = db
             db = nil
-            // Backup corrupt file with timestamp
-            let backupName = "stats_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
-            let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
-            try? FileManager.default.moveItem(at: dbPath, to: backupPath)
-            // Recreate fresh database
-            db = SQLiteHandle.open(
-                at: dbPath,
-                onPragmaFailure: { name, detail in
-                    AppLogger.stats.error("PRAGMA failed", ["pragma": name, "detail": detail])
-                }
-            )
-            if db != nil {
-                isDatabaseOpen = true
-                AppLogger.stats.info("Recreated fresh database after corruption recovery")
-            } else {
-                isDatabaseOpen = false
-                AppLogger.stats.error("Failed to recreate database after corruption recovery")
+            let result = sqlite3_close_v2(unavailableHandle)
+            if result != SQLITE_OK {
+                unavailableDatabaseHandle = unavailableHandle
+                AppLogger.stats.error("Failed to close unavailable stats database", ["sqlite_result": "\(result)"])
             }
+            AppLogger.stats.error("Stats integrity check failed — stats unavailable until the database is repaired and reopened")
         } else {
             AppLogger.stats.info("Opened database", ["path": dbPath.path])
         }
@@ -127,10 +127,10 @@ public final class StatsDatabase {
     private func verifyDatabaseIntegrity() -> Bool {
         guard let db = db else { return false }
         var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
         guard sqlite3_prepare_v2(db, "PRAGMA quick_check;", -1, &stmt, nil) == SQLITE_OK else {
             return false
         }
-        defer { sqlite3_finalize(stmt) }
         if sqlite3_step(stmt) == SQLITE_ROW {
             if let text = sqlite3_column_text(stmt, 0) {
                 return String(cString: text) == "ok"
@@ -197,6 +197,7 @@ public final class StatsDatabase {
     }
 
     private func createTables() {
+        guard isDatabaseOpen else { return }
         let createRecordingsTable = """
         CREATE TABLE IF NOT EXISTS recordings (
             id TEXT PRIMARY KEY,
