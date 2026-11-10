@@ -261,7 +261,7 @@ extension ParakeetEngine {
         modelDownloadState = .loading
         AppLogger.transcription.info("PARAKEET | initializing models...")
 
-        var failureStage: ParakeetModelInitStage = .authorizationRequest
+        var failureStage: ParakeetModelInitStage = .bundleLoad
         var loadSource: ParakeetModelLoadSource = .unresolved
         Self.migrateLegacyParakeetCacheIfNeeded(variant: token.variant)
         // FluidAudio 0.15.x resolves bundled models as <parent>/<repo folderName>, and the
