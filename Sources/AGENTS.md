@@ -23,7 +23,7 @@ The app does: dictation with paste-back, Writing (opt-in autocomplete through it
 
 ## Where things start
 
-- `App/TranscriptedApp.swift` — entry point and the `TranscriptedAppDelegate` core: builds controllers, overlay setup, detected-meeting prompt wiring. The delegate's other halves: `+MenuBar` (status item, popover, Settings window, activation policy so active recordings stay in the force-quit dialog), `+SettingsActions` (Settings actions, audio-import queue), `+Lifecycle` (login-item launch detection, Quit confirmations), `+LaunchReports` (launch smoke and first-run reports for automated launches).
+- `App/TranscriptedApp.swift` — entry point and the `TranscriptedAppDelegate` core: builds controllers, overlay setup, detected-meeting prompt wiring. The delegate's other halves: `+MenuBar` (status item, popover, Settings window, activation policy so active recordings stay in the force-quit dialog), `+SettingsActions` (Settings actions, audio-import queue), `+Lifecycle` (login-item launch detection, Quit confirmations), `+LaunchReports` (launch smoke and first-run reports for automated launches), `+CallActivity` (call activity monitor wiring), `+NextSentence` (Write for Me hand-off dictation and live preview).
 - `App/TranscriptedAppState.swift` — the service container (card below).
 - `App/TranscriptedMenuCommands.swift` — app-active menu commands. They are window-scoped additions; they don't replace the global physical triggers.
 - `Capture/ContextCaptureEngine.swift` (+`+DictationKeys`, `PhysicalShortcutDetector.swift`) — the CGEvent tap, trigger routing, `hotkeyError`. Fn/media-key policy is `Capture/PhysicalShortcutTapPolicy.swift`. Detail: `Capture/AGENTS.md`.
