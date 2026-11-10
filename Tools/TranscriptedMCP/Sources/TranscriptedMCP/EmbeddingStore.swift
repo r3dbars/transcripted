@@ -553,8 +553,12 @@ final class EmbeddingStore: @unchecked Sendable {
 
         return queue.sync {
             var sql = """
+                SELECT c.filename, c.speaker_name, c.utterance_start, c.text,
+                       c.date, c.datetime, c.duration_seconds,
+                       (SELECT vec FROM utterance_vectors WHERE rowid = c.vector_rowid)
+                FROM (
                 SELECT u.filename, u.speaker_name, u.utterance_start, u.text,
-                       m.date, m.datetime, m.duration_seconds, v.vec
+                       m.date, m.datetime, m.duration_seconds, v.rowid AS vector_rowid
                 FROM utterance_vectors v
                 JOIN utterances u ON u.rowid = v.rowid
                 JOIN meetings m ON m.filename = u.filename
@@ -584,7 +588,9 @@ final class EmbeddingStore: @unchecked Sendable {
                 sql += " AND m.date <= ?"
                 binders.append { stmt, idx in sqlite3_bind_text(stmt, idx, (dateTo as NSString).utf8String, -1, self.SQLITE_TRANSIENT) }
             }
-            sql += " ORDER BY m.datetime DESC LIMIT \(maxCandidateRows)"
+            // Keep vector BLOBs out of the sorter. The outer correlated lookup
+            // runs after the ordered, limited subquery yields a candidate.
+            sql += " ORDER BY m.datetime DESC LIMIT \(maxCandidateRows)) c"
 
             struct Scored {
                 let filename: String, speaker: String, start: Double, text: String
@@ -687,8 +693,12 @@ final class EmbeddingStore: @unchecked Sendable {
 
         return queue.sync {
             var sql = """
+                SELECT c.filename, c.entry_id, c.title, c.created_at, c.text,
+                       c.source_app_name, c.delivery, c.date,
+                       (SELECT vec FROM dictation_entry_vectors WHERE rowid = c.vector_rowid)
+                FROM (
                 SELECT e.filename, e.entry_id, e.title, e.created_at, e.text,
-                       e.source_app_name, e.delivery, d.date, v.vec
+                       e.source_app_name, e.delivery, d.date, v.rowid AS vector_rowid
                 FROM dictation_entry_vectors v
                 JOIN dictation_entries e ON e.rowid = v.rowid
                 JOIN dictation_days d ON d.filename = e.filename
@@ -704,7 +714,7 @@ final class EmbeddingStore: @unchecked Sendable {
                 sql += " AND d.date <= ?"
                 binders.append { stmt, idx in sqlite3_bind_text(stmt, idx, (dateTo as NSString).utf8String, -1, self.SQLITE_TRANSIENT) }
             }
-            sql += " ORDER BY d.datetime DESC LIMIT \(maxCandidateRows)"
+            sql += " ORDER BY d.datetime DESC LIMIT \(maxCandidateRows)) c"
 
             struct Scored {
                 let group: ContextSearchGroup
