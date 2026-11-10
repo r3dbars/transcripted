@@ -1081,10 +1081,10 @@ private final class RequestCapturingAgentCaptureQueryTelemetry: AgentCaptureQuer
               let object = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
               let event = object["event"] as? String,
               event == AgentCaptureQueryTelemetryPolicy.eventName,
-              let properties = object["properties"] as? [String: String] else {
+              let properties = object["properties"] as? [String: Any] else {
             return
         }
-        self.properties = properties
+        self.properties = properties.compactMapValues { $0 as? String }
     }
 }
 

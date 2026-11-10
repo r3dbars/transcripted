@@ -7,6 +7,28 @@ private struct PostHogCaptureRequest: Encodable {
     let timestamp: String
     let properties: [String: String]
 
+    private struct PropertyKey: CodingKey {
+        let stringValue: String
+        var intValue: Int? { nil }
+        init(_ value: String) { stringValue = value }
+        init?(stringValue: String) { self.stringValue = stringValue }
+        init?(intValue: Int) { return nil }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(apiKey, forKey: .apiKey)
+        try container.encode(event, forKey: .event)
+        try container.encode(distinctID, forKey: .distinctID)
+        try container.encode(timestamp, forKey: .timestamp)
+        var values = container.nestedContainer(keyedBy: PropertyKey.self, forKey: .properties)
+        for (key, value) in properties {
+            try values.encode(value, forKey: PropertyKey(key))
+        }
+        // Match app captures: this must be a JSON boolean, not a string property.
+        try values.encode(true, forKey: PropertyKey("$geoip_disable"))
+    }
+
     enum CodingKeys: String, CodingKey {
         case apiKey = "api_key"
         case event
