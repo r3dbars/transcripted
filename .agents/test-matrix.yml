@@ -810,7 +810,7 @@ rules:
       - "swift test --package-path Tools/TranscriptedLab --jobs 4"
       - "swift build --package-path Tools/TranscriptedLab --product transcripted-lab --jobs 4"
       - "swift build --package-path Tools/TranscriptedLab --product TranscriptedLab --jobs 4"
-      - "Tools/TranscriptedLab/script/build_and_run.sh --verify"
+      - "bash Tools/TranscriptedLab/script/build_and_run.sh --verify"
 
   - paths:
       - "build-beta.sh"
@@ -861,8 +861,6 @@ rules:
       - ".claude-plugin/marketplace.json"
     checks:
       - "swift test --package-path Tools/TranscriptedLive"
-      - "claude plugin validate Tools/TranscriptedLive/claude-mod"
-      - "claude plugin test Tools/TranscriptedLive/claude-mod"
 
   - paths:
       - "scripts/stt_fluidaudio_ab.sh"

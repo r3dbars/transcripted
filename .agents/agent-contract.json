@@ -297,7 +297,8 @@
     {
       "id": "tools-live",
       "path_prefixes": [
-        "Tools/TranscriptedLive/"
+        "Tools/TranscriptedLive/",
+        ".claude-plugin/marketplace.json"
       ],
       "docs": [
         "Tools/TranscriptedLive/AGENTS.md"
@@ -308,7 +309,8 @@
         "Tools remain local-first and consume saved artifacts through documented seams."
       ],
       "manual_proof": [
-        "Live transport and client connection behavior."
+        "Live transport and client connection behavior.",
+        "With CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1, run claude plugin validate . and claude plugin test . from Tools/TranscriptedLive/claude-mod."
       ]
     },
     {
