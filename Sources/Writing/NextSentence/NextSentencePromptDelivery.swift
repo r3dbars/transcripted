@@ -63,18 +63,21 @@ enum NextSentencePromptDelivery {
     private final class Failure: @unchecked Sendable {
         private let lock = NSLock()
         private var reported = false
-        private let callback: () -> Void
+        private var callback: (() -> Void)?
 
         init(_ callback: @escaping () -> Void) { self.callback = callback }
         var hasFailed: Bool { lock.withLock { reported } }
 
         func report() {
-            let shouldReport = lock.withLock {
-                guard !reported else { return false }
+            let action: (() -> Void)? = lock.withLock {
+                guard !reported else { return nil }
                 reported = true
-                return true
+                // The deadline may keep this box alive after a write error.
+                // Release the failed request's captures before leaving it there.
+                defer { callback = nil }
+                return callback
             }
-            if shouldReport { callback() }
+            action?()
         }
     }
 }

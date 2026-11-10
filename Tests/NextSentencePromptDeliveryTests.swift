@@ -85,6 +85,51 @@ func testNextSentencePromptDelivery() async {
         deadline.fire()
         assertEqual(failures.value, 1)
     }
+
+    runSuite("An immediate write failure releases its callback captures before the deadline") {
+        let deadline = PromptDeliveryFixtureDeadline()
+        let queued = PromptDeliveryFixtureJob()
+        let failures = PromptDeliveryFixtureCounter()
+        let reference = PromptDeliveryFixtureWeakReference()
+        armPromptDeliveryFailureCapture(reference, deadline: deadline, queued: queued, failures: failures)
+        assertNotNil(reference.value, "the pending failure callback owns its synthetic capture")
+        queued.run()
+        assertEqual(failures.value, 1)
+        assertNil(reference.value, "a reported write failure must release request captures")
+        assertTrue(deadline.hasAction, "the manual deadline is still retained during this check")
+        deadline.fire()
+        deadline.fire()
+        assertEqual(failures.value, 1)
+    }
+}
+
+@MainActor
+private func armPromptDeliveryFailureCapture(
+    _ reference: PromptDeliveryFixtureWeakReference,
+    deadline: PromptDeliveryFixtureDeadline,
+    queued: PromptDeliveryFixtureJob,
+    failures: PromptDeliveryFixtureCounter
+) {
+    let capture = PromptDeliveryFixtureCapture(failures)
+    reference.value = capture
+    NextSentencePromptDelivery.send(
+        prompt: "Synthetic lifetime", image: nil, timeout: 60,
+        write: { _ in throw PromptDeliveryFixtureError.writeFailed },
+        onFailure: { capture.noteFailure() },
+        scheduleTimeout: { delay, action in deadline.arm(delay: delay, action: action) },
+        background: { queued.store($0) }
+    )
+}
+
+private final class PromptDeliveryFixtureCapture: Sendable {
+    let failures: PromptDeliveryFixtureCounter
+    init(_ failures: PromptDeliveryFixtureCounter) { self.failures = failures }
+    func noteFailure() { _ = failures.increment() }
+}
+
+@MainActor
+private final class PromptDeliveryFixtureWeakReference {
+    weak var value: PromptDeliveryFixtureCapture?
 }
 
 private struct PromptDeliveryFixtureRecord: Sendable {
