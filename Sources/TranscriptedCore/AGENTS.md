@@ -57,7 +57,7 @@ Run `find Sources/TranscriptedCore -name '*.swift'` for the live list. By folder
 
 ## Environment variables Core reads
 
-- `TRANSCRIPTED_LAB_KNOBS_FILE` is read once per process by `Utilities/LabKnobOverrides.swift`. It names a JSON object of hill-climb knob overrides. Unset (every normal run) means no file I/O. Only ids in `LabKnobOverrides.knownIDs` are honored: the four `diarization.*` knobs in `Services/DiarizationService.swift` and the four `speaker.cluster.*` thresholds in `Speaker/SpeakerEmbeddingThresholds.swift`. Anything else is warned about on stderr (ids only) and dropped. A new knob needs the call site, the id in `knownIDs`, and an entry in `config/hillclimb/knobs.json`. It is the only env var that changes pipeline math; don't add more unless a host seam can't do the job.
+- `TRANSCRIPTED_LAB_KNOBS_FILE` is read once per process by `Utilities/LabKnobOverrides.swift`. It names a JSON object of hill-climb knob overrides. Unset (every normal run) means no file I/O. Only ids in `LabKnobOverrides.knownIDs` are honored: the four `diarization.*` knobs in `Services/FluidAudioCompatibility.swift` and the four `speaker.cluster.*` thresholds in `Speaker/SpeakerEmbeddingThresholds.swift`. Anything else is warned about on stderr (ids only) and dropped. A new knob needs the call site, the id in `knownIDs`, and an entry in `config/hillclimb/knobs.json`. It is the only env var that changes pipeline math; don't add more unless a host seam can't do the job.
 - Lab-only, diarization: `TRANSCRIPTED_NEMOTRON_PRESET` and `TRANSCRIPTED_NEMOTRON_EMBEDDER=online` (below).
 
 ## Diarization backends

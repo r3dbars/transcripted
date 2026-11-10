@@ -32,7 +32,7 @@ public enum LabKnobOverrides {
     public static let environmentKey = "TRANSCRIPTED_LAB_KNOBS_FILE"
 
     /// Every knob id Core reads through this type. Keep in sync with the call
-    /// sites (DiarizationService.swift, SpeakerEmbeddingThresholds.swift) and
+    /// sites (FluidAudioCompatibility.swift, SpeakerEmbeddingThresholds.swift) and
     /// with config/hillclimb/knobs.json.
     public static let knownIDs: Set<String> = [
         "diarization.clustering_threshold",
