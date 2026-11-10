@@ -697,10 +697,6 @@ final class TranscriptionQueueCoordinator {
         job.importedRecoverySession?.scratchCleanupConfirmed()
     }
 
-    func confirmImportedFailedQueueHandoff(for job: QueuedTranscriptionJob) {
-        job.importedRecoverySession?.failedQueueHandoffConfirmed()
-    }
-
     private func removeRecoveredImportedScratchFile(_ audioURL: URL) -> Bool {
         do {
             try FileManager.default.removeItem(at: audioURL)
