@@ -37,7 +37,7 @@ enum NextSentencePolicy {
         case returnUp
         /// Any other key: start editing the card's text with it, so they can just type into the card.
         case typeIntoCard
-        /// Auto-repeated Return while it's held to send: swallowed, so the app never gets newlines.
+        /// Non-text keys and auto-repeated Return are swallowed without editing the card.
         case ignore
         /// Shortcuts with ⌘, ⌃ or ⌥: leave them alone entirely.
         case passThrough
@@ -72,6 +72,17 @@ enum NextSentencePolicy {
         case KeyCode.escape: return .close
         default: return .typeIntoCard
         }
+    }
+
+    /// Refines a typing action using the event's Unicode payload. AppKit encodes
+    /// navigation and function keys in F700–F8FF; those are keys, not card text.
+    static func typingAction(text: String, keyCode: Int64) -> KeyAction {
+        if keyCode == KeyCode.delete { return .typeIntoCard }
+        guard !text.isEmpty, !text.unicodeScalars.contains(where: { scalar in
+            scalar.value < 0x20 || (0x7F...0x9F).contains(scalar.value)
+                || (0xF700...0xF8FF).contains(scalar.value)
+        }) else { return .ignore }
+        return .typeIntoCard
     }
 
     /// The open card's key tap leaves Write for Me's own key alone when it's a function key, so its tap
