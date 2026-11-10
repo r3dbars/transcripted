@@ -632,7 +632,9 @@ class FloatingOverlayController {
         }
     }
 
-    func showSuccessAndDismiss(title: String = "Pasted", completion: (() -> Void)? = nil) {
+    /// Text delivery leaves a recent insertion for Copy / Paste again. Audio-only
+    /// maintenance uses the same success beat without recording another insertion.
+    func showSuccessAndDismiss(title: String = "Pasted", recordsDictationInsertion: Bool = true, completion: (() -> Void)? = nil) {
         errorDismissTask?.cancel()
         clearNotPasted()
         loadingTimerTask?.cancel()
@@ -641,7 +643,7 @@ class FloatingOverlayController {
         messageTone = .error
         discardActionableMessageIfNeeded()
         successTitle = title
-        if isIslandMode && !quiet {
+        if recordsDictationInsertion && isIslandMode && !quiet {
             island?.noteDictationInserted(title: title)
         }
         state = .success
