@@ -206,11 +206,17 @@ enum TranscribeModelResolver {
     static func loadManager(
         modelsDir: String?,
         allowDownload: Bool,
-        log: (String) -> Void
+        log: (String) -> Void,
+        bundledDirectories: [URL]? = nil
     ) async throws -> AsrManager {
         let models: AsrModels
+        // A bundled directory is caller-owned just like --models-dir. Route it
+        // through the same offline load, so failed Core ML loads cannot purge
+        // assets from a signed app bundle before attempting a download.
+        let localDirectory = modelsDir ?? (bundledDirectories ?? candidateBundledModelDirectories())
+            .first(where: { AsrModels.modelsExist(at: $0) })?.path
 
-        if let modelsDir {
+        if let modelsDir = localDirectory {
             let directory = URL(fileURLWithPath: modelsDir, isDirectory: true).standardizedFileURL
             guard AsrModels.modelsExist(at: directory) else {
                 throw ValidationError(
@@ -234,10 +240,6 @@ enum TranscribeModelResolver {
             if !isFluidAudioCache { ModelHub.offlineMode = true }
             defer { ModelHub.offlineMode = previousOfflineMode }
             models = try await AsrModels.load(from: directory, version: .v3)
-        } else if let bundled = candidateBundledModelDirectories()
-            .first(where: { AsrModels.modelsExist(at: $0) }) {
-            log("Loading Parakeet models bundled with Transcripted.app")
-            models = try await AsrModels.load(from: bundled, version: .v3)
         } else {
             migrateLegacyParakeetCacheIfNeeded(log: log)
             let cacheDirectory = AsrModels.defaultCacheDirectory(for: .v3)
