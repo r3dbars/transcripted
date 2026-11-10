@@ -162,14 +162,19 @@ final class MicOnlyRecordingTests: XCTestCase {
     }
 
     func testMicOnlyRecordingIgnoresTheLastMeetingsTap() {
-        // `systemAudioCapture` keeps the previous meeting's tap. A mic-only
-        // recording must not grade, report, or reconnect it as its own.
+        // A new session detaches the previous tap. A mic-only recording must
+        // neither grade it nor build a replacement as its own.
         let previousTap = MicOnlyStubSystemAudioCapture(successRate: 0)
-        let audio = Audio(paths: makePaths(), systemAudioCaptureForTesting: previousTap)
+        let nextTap = MicOnlyStubSystemAudioCapture(successRate: 1)
+        let audio = Audio(
+            paths: makePaths(), systemAudioCaptureForTesting: previousTap,
+            systemAudioCaptureFactoryForTesting: { nextTap }
+        )
 
         audio.capturesSystemAudio = false
         audio.prepareForNewRecordingStart()
 
+        XCTAssertNil(audio.systemAudioCapture)
         XCTAssertNil(audio.recordingSystemAudioCapture)
         XCTAssertEqual(
             audio.createHealthInfo().captureQuality,
@@ -181,7 +186,13 @@ final class MicOnlyRecordingTests: XCTestCase {
 
         audio.capturesSystemAudio = true
         audio.prepareForNewRecordingStart()
-        XCTAssertTrue((audio.recordingSystemAudioCapture as AnyObject?) === previousTap)
+        XCTAssertNil(audio.systemAudioCapture)
+        XCTAssertNil(audio.recordingSystemAudioCapture)
+        let generation = audio.recordingSessionGeneration
+        let next = audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: generation)
+        XCTAssertTrue((next as AnyObject?) === nextTap)
+        XCTAssertFalse((next as AnyObject?) === previousTap)
+        XCTAssertTrue((audio.recordingSystemAudioCapture as AnyObject?) === nextTap)
     }
 
     /// #1781's tap diagnostics once read the stored tap directly, which
@@ -208,6 +219,10 @@ final class MicOnlyRecordingTests: XCTestCase {
 
         audio.capturesSystemAudio = true
         audio.prepareForNewRecordingStart()
+        XCTAssertNil(audio.systemAudioCapture)
+        let generation = audio.recordingSessionGeneration
+        let installedTap = audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: generation)
+        XCTAssertTrue((installedTap as AnyObject?) === previousTap)
         let withTap = audio.createPipelineDiagnosticsSnapshot()
         XCTAssertEqual(withTap.systemRateHz, "48000", "control: a meeting with a tap reports it")
         XCTAssertEqual(withTap.systemChannels, "2")
