@@ -10,7 +10,7 @@
 // helper turns the raw set into a *confirmed* set: a key is only confirmed once
 // it has been continuously present for at least `sustain` seconds.
 //
-// It is the lightweight, on-device alternative to Plaud's deferred Phase-2 UDP
+// It is the lightweight, on-device alternative to the deferred Phase-2 UDP
 // inspection: a browser/app that holds the mic (or the camera) continuously for
 // a few seconds is overwhelmingly a live call, while blips drop out before they
 // ever reach the prompt. Keeping it pure (no clock, no CoreAudio/CMIO) makes the
