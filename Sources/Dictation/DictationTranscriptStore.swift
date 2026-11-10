@@ -220,11 +220,15 @@ enum DictationTranscriptStore {
             }
         }
 
-        return Array(
-            collectedEntries
-                .sorted { $0.createdAt > $1.createdAt }
-                .prefix(limit)
-        )
+        return collectedEntries.enumerated()
+            .sorted { lhs, rhs in
+                if lhs.element.createdAt != rhs.element.createdAt {
+                    return lhs.element.createdAt > rhs.element.createdAt
+                }
+                return lhs.offset < rhs.offset
+            }
+            .prefix(limit)
+            .map(\.element)
     }
 
     private static func isDictationDayFile(_ url: URL) -> Bool {
@@ -392,8 +396,19 @@ enum DictationTranscriptStore {
         }
 
         if let limit, limit > 0 {
-            return splitRecentSections(in: content, limit: limit)
+            // Undo can append an older restored section. Rank the whole day
+            // before limiting; equal instants consistently favor later sections.
+            return splitSections(in: content)
                 .compactMap { parseEntry(from: $0, in: url) }
+                .enumerated()
+                .sorted { lhs, rhs in
+                    if lhs.element.createdAt != rhs.element.createdAt {
+                        return lhs.element.createdAt > rhs.element.createdAt
+                    }
+                    return lhs.offset > rhs.offset
+                }
+                .prefix(limit)
+                .map(\.element)
         }
 
         return splitSections(in: content)
@@ -530,35 +545,6 @@ enum DictationTranscriptStore {
         }
 
         return sections
-    }
-
-    private static func splitRecentSections(in content: String, limit: Int) -> [String] {
-        let lines = content.components(separatedBy: "\n")
-        var recentSections: [String] = []
-        var currentSection: [String] = []
-
-        for line in lines {
-            if isEntryHeading(line) {
-                if !currentSection.isEmpty {
-                    recentSections.append(currentSection.joined(separator: "\n"))
-                    if recentSections.count > limit {
-                        recentSections.removeFirst(recentSections.count - limit)
-                    }
-                }
-                currentSection = [line]
-            } else if !currentSection.isEmpty {
-                currentSection.append(line)
-            }
-        }
-
-        if !currentSection.isEmpty {
-            recentSections.append(currentSection.joined(separator: "\n"))
-            if recentSections.count > limit {
-                recentSections.removeFirst(recentSections.count - limit)
-            }
-        }
-
-        return recentSections
     }
 
     private static let entryHeadingRegex = try? NSRegularExpression(
