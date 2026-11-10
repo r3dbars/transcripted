@@ -33,12 +33,13 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 20
     env:
-      GH_TOKEN: ${{ github.token }}
       BUNDLE_NAME: transcripted-mcp.mcpb
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
 
       - name: Resolve release
         id: release
@@ -55,10 +56,31 @@ jobs:
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
+      - name: Download release inputs
+        id: download
+        shell: bash
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/mcpb"
+          mkdir -p "$work"
+          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
+          if grep -qx "$BUNDLE_NAME" <<< "$assets"; then
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$BUNDLE_NAME" --dir "$work"
+            echo "reused=true" >> "$GITHUB_OUTPUT"
+          else
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Transcripted-$VERSION.dmg" --dir "$work"
+            echo "reused=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Reuse or build the bundle
         id: bundle
         shell: bash
         env:
+          REUSED: ${{ steps.download.outputs.reused }}
           TAG: ${{ steps.release.outputs.tag }}
           VERSION: ${{ steps.release.outputs.version }}
         run: |
@@ -67,13 +89,10 @@ jobs:
           mkdir -p "$work"
           out="$work/$BUNDLE_NAME"
 
-          assets="$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')"
-          if grep -qx "$BUNDLE_NAME" <<< "$assets"; then
+          if [ "$REUSED" = "true" ]; then
             echo "Release $TAG already has $BUNDLE_NAME; reusing it."
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "$BUNDLE_NAME" --dir "$work"
             echo "uploaded=true" >> "$GITHUB_OUTPUT"
           else
-            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern "Transcripted-$VERSION.dmg" --dir "$work"
             mount="$work/mount"
             mkdir -p "$mount"
             hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$work/Transcripted-$VERSION.dmg"
@@ -102,7 +121,9 @@ jobs:
             hdiutil detach "$mount" -quiet
             trap - EXIT
 
-            npx --yes @anthropic-ai/mcpb validate "$stage/manifest.json"
+            # Exact validator and transitive bytes come from the committed lockfile.
+            npm ci --ignore-scripts --no-audit --no-fund --prefix .github/mcp-publish-tools
+            .github/mcp-publish-tools/node_modules/.bin/mcpb validate "$stage/manifest.json"
             (cd "$stage" && zip -r -X -q "$out" .)
             echo "uploaded=false" >> "$GITHUB_OUTPUT"
           fi
@@ -118,6 +139,7 @@ jobs:
         env:
           TAG: ${{ steps.release.outputs.tag }}
           BUNDLE_PATH: ${{ steps.bundle.outputs.path }}
+          GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" "$BUNDLE_PATH" --repo "$GITHUB_REPOSITORY"
 
       - name: Fill server.json
@@ -145,6 +167,6 @@ jobs:
             echo "io.github.r3dbars/transcripted $VERSION is already in the MCP Registry; nothing to publish."
             exit 0
           fi
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_darwin_$(uname -m | sed 's/x86_64/amd64/').tar.gz" | tar xz mcp-publisher
+          bash scripts/release/install-mcp-publisher.sh ./mcp-publisher
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish

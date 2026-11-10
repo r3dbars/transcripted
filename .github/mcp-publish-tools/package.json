@@ -1,0 +1,9 @@
+{
+  "name": "transcripted-mcp-publish-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Locked MCP bundle validator used only by release publishing",
+  "dependencies": {
+    "@anthropic-ai/mcpb": "2.1.2"
+  }
+}

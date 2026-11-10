@@ -346,6 +346,7 @@ PY_TEST_SUITES=(
     Tools/TranscriptedCompanion/test-package.py
     Tools/TranscriptedCompanion/test-launcher.py
     scripts/release/test-register-sentry-release.py
+    scripts/release/test-mcp-publish-tools.py
     scripts/dev/test-verify-receipts.py
     scripts/dev/test-call-app-hint-harness.py
     scripts/ops/test-native-smoke-isolation.py
