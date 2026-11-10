@@ -197,6 +197,39 @@ final class TranscribeOutputTests: XCTestCase {
         ])
     }
 
+    func testBatchOutputURLsKeepIdenticalFilenamesDistinctAcrossFolders() {
+        let directory = URL(fileURLWithPath: "/tmp/out", isDirectory: true)
+        for format in [TranscribeOutputFormat.text, .json, .srt] {
+            let urls = TranscribeOutputBuilder.outputURLs(
+                for: [URL(fileURLWithPath: "/a/talk.wav"), URL(fileURLWithPath: "/b/talk.wav")],
+                outputDirectory: directory, format: format
+            )
+            XCTAssertEqual(urls.map(\.lastPathComponent), ["talk.wav.\(format.fileExtension)", "talk.wav-2.\(format.fileExtension)"])
+        }
+    }
+
+    func testBatchSuffixesCannotStealAnotherInputsPlannedName() {
+        let urls = TranscribeOutputBuilder.outputURLs(
+            for: ["/a/talk.wav", "/b/talk.wav", "/c/talk.wav-2.aac", "/d/talk.wav"].map { URL(fileURLWithPath: $0) },
+            outputDirectory: URL(fileURLWithPath: "/tmp/out", isDirectory: true), format: .text
+        )
+        XCTAssertEqual(urls.map(\.lastPathComponent), ["talk.wav.txt", "talk.wav-3.txt", "talk.wav-2.txt", "talk.wav-4.txt"])
+    }
+
+    func testBatchOutputURLsAvoidCaseAndSecondaryStemCollisions() {
+        let directory = URL(fileURLWithPath: "/tmp/out", isDirectory: true)
+        let caseVariants = TranscribeOutputBuilder.outputURLs(
+            for: ["/a/Talk.wav", "/b/talk.wav"].map { URL(fileURLWithPath: $0) },
+            outputDirectory: directory, format: .text
+        )
+        XCTAssertEqual(caseVariants.map(\.lastPathComponent), ["Talk.txt", "talk-2.txt"])
+        let stemCollision = TranscribeOutputBuilder.outputURLs(
+            for: ["/a/talk.mp4", "/b/talk.mov", "/c/talk.mp4.aac"].map { URL(fileURLWithPath: $0) },
+            outputDirectory: directory, format: .text
+        )
+        XCTAssertEqual(stemCollision.map(\.lastPathComponent), ["talk.mp4.txt", "talk.mov.txt", "talk.mp4-2.txt"])
+    }
+
     // MARK: - JSON encoding
 
     func testEncodeJSONSingleOutputIsObject() throws {
