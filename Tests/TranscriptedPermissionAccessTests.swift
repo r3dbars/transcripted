@@ -757,7 +757,7 @@ func testTranscriptedPermissionAccess() async {
         UserDefaults.standard.removeObject(forKey: grantedKey)
 
         let decision = await TranscriptedPermissionAccess.systemAudioRecordingAccessDecision(
-            probeRequester: { .indeterminate(.shareableContent) }
+            probeRequester: { .indeterminate(.prepareCapture) }
         )
 
         assertFalse(decision.canProceed, "an unverified first-run state should not claim capture is ready")
@@ -787,8 +787,8 @@ func testTranscriptedPermissionAccess() async {
             "a Core Audio transport/start failure should not impersonate TCC denial"
         )
         assertEqual(
-            SystemAudioPermissionProbeClassifier.result(for: unrelatedFailure, stage: .shareableContent),
-            .indeterminate(.shareableContent),
+            SystemAudioPermissionProbeClassifier.result(for: unrelatedFailure, stage: .prepareCapture),
+            .indeterminate(.prepareCapture),
             "unrelated service failures should remain indeterminate"
         )
         assertEqual(
