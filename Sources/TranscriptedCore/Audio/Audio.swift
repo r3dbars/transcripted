@@ -199,7 +199,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     /// Whether to arm Apple's AUVoiceProcessingIO (VPIO) on the meeting mic
     /// engine. Default off because VPIO causes macOS to duck audio output
-    /// from other apps (Zoom plays Katie's voice quieter while we're
+    /// from other apps (a call app plays the other side quieter while we're
     /// recording — observed in production after PR #523). Set this BEFORE
     /// calling `start()`; toggling mid-session has no effect until the next
     /// recording begins. The app reads `MicrophoneProcessingPreferences`
