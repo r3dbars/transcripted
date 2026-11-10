@@ -387,11 +387,17 @@ days and almost none downloaded). Installed apps can't be patched, but the feed
 can mark the newest item critical for anything older:
 
 ```bash
-python3 scripts/release/mark-appcast-critical.py --dry-run   # show what it would do
-python3 scripts/release/mark-appcast-critical.py             # write docs/appcast.xml (frozen legacy feed only; releases use --appcast <feed>)
-python3 scripts/release/mark-appcast-critical.py --check     # state; fails if the previous release is marked and the newest isn't
-python3 scripts/release/mark-appcast-critical.py --remove    # undo
+python3 scripts/release/mark-appcast-critical.py --appcast build/appcast.xml --dry-run
+python3 scripts/release/mark-appcast-critical.py --appcast build/appcast.xml
+python3 scripts/release/mark-appcast-critical.py --appcast build/appcast.xml --check
+python3 scripts/release/mark-appcast-critical.py --appcast build/appcast.xml --remove
 ```
+
+Use an existing scratch feed prepared for the release, before signing it.
+The default `docs/appcast.xml` is the frozen legacy feed. `--check` and
+`--dry-run` may inspect it, but marking or removing its marker is refused after
+the freeze record exists. Uploading a changed release feed still needs the
+owner's explicit go.
 
 It adds `<sparkle:criticalUpdate sparkle:version="X" />` to the newest item, and
 refuses to write a feed that ElementTree wouldn't round-trip byte for byte (a

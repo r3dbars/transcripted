@@ -15,15 +15,19 @@ leaves older items alone (a marker there is inert). The default floor stops at 1
 first build that downloads updates on its own and whose Install action works,
 so marking later releases doesn't nag people who are already fine.
 
-This only edits the local `docs/appcast.xml`. Committing it to the branch that
-backs the live feed is publishing, and needs the owner's explicit go.
+Use `--appcast` to edit a local scratch feed before signing. The default
+`docs/appcast.xml` is the frozen legacy feed: only `--check` and `--dry-run`
+may target it after freezing. Publishing any edited feed needs the owner's
+explicit go.
 """
 
 from __future__ import annotations
 
 import argparse
 import io
+import os
 import re
+import subprocess
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -47,6 +51,16 @@ ET.register_namespace("atom", ATOM_NS)
 
 def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
+
+
+def is_frozen_legacy_feed(path: Path) -> bool:
+    root = repo_root()
+    if not (root / "config/release/legacy-appcast-freeze.json").is_file():
+        return False
+    frozen = root / "docs/appcast.xml"
+    return path.resolve() == frozen.resolve() or (
+        path.exists() and frozen.exists() and path.samefile(frozen)
+    )
 
 
 def parse_version(version: str) -> tuple[int, ...]:
@@ -311,8 +325,8 @@ def self_test() -> int:
         check_(parse_version("1.1.10") > parse_version("1.1.9"), "versions compare numerically")
         check_(default_floor("1.1.62") == "1.1.62", "floor is the item itself before 1.1.63")
 
-    # The live feed must round-trip through this writer unchanged, or marking
-    # it would rewrite unrelated items.
+    # The committed legacy feed must round-trip unchanged. Read it only;
+    # serialization is exercised on an owned temporary copy.
     live = repo_root() / "docs" / "appcast.xml"
     if live.exists():
         with tempfile.TemporaryDirectory() as tmp:
@@ -321,9 +335,57 @@ def self_test() -> int:
             write(ET.parse(copy), copy)
             check_(
                 copy.read_bytes() == live.read_bytes(),
-                "docs/appcast.xml no longer round-trips byte-identical; rewrite it with "
-                "generate-sparkle-appcast.sh's writer (ElementTree, indent 2) so the marker stays a one-line change",
+                "docs/appcast.xml no longer round-trips byte-identical; inspect the writer "
+                "without rewriting the frozen legacy feed",
             )
+
+    # Exercise the actual CLI from outside its checkout, with synthetic feeds
+    # only. The copied script derives its owning root exactly as in production.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary) / "checkout"
+        script = root / "scripts/release/mark-appcast-critical.py"
+        script.parent.mkdir(parents=True)
+        script.write_bytes(Path(__file__).read_bytes())
+        frozen = root / "docs/appcast.xml"
+        frozen.parent.mkdir()
+        frozen.write_bytes(serialize(ET.ElementTree(ET.fromstring(SAMPLE_APPCAST))))
+        before = frozen.read_bytes()
+        record = root / "config/release/legacy-appcast-freeze.json"
+        record.parent.mkdir(parents=True)
+        record.write_text("{}")
+        outside = Path(temporary) / "external"
+        outside.mkdir()
+        alias = outside / "feed.xml"
+        alias.symlink_to(frozen)
+        directory_alias = outside / "feed-directory"
+        directory_alias.symlink_to(frozen.parent, target_is_directory=True)
+        hardlink = outside / "hardlink.xml"
+        os.link(frozen, hardlink)
+
+        def cli(*arguments: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run([sys.executable, str(script), *arguments], cwd=outside,
+                                  capture_output=True, text=True, check=False)
+
+        for path in [None, frozen, alias, directory_alias / "appcast.xml", hardlink]:
+            target = ["--appcast", str(path)] if path else []
+            for mode in [[], ["--remove"]]:
+                result = cli(*target, *mode)
+                check_(result.returncode == 1 and "frozen legacy feed" in result.stderr,
+                       "CLI blocks frozen writes through every path alias and default")
+                check_(frozen.read_bytes() == before, "blocked CLI leaves frozen bytes intact")
+        for mode in [["--check"], ["--dry-run"], ["--remove", "--dry-run"]]:
+            check_(cli(*mode).returncode == 0, "read-only default CLI remains available")
+            check_(frozen.read_bytes() == before, "read-only CLI leaves frozen bytes intact")
+        scratch = outside / "appcast.xml"
+        scratch.write_bytes(before)
+        check_(cli("--appcast", str(scratch)).returncode == 0,
+               "CLI can mark an explicit scratch feed after freeze")
+        check_(scratch.read_bytes() != before, "scratch marking changes its own bytes")
+        check_(cli("--appcast", str(scratch), "--remove").returncode == 0,
+               "CLI can remove a scratch marker after freeze")
+        check_(scratch.read_bytes() == before, "scratch removal restores its own feed")
+        record.unlink()
+        check_(cli().returncode == 0, "unfrozen first-transition CLI can still mark")
 
     if failures:
         for failure in failures:
@@ -335,7 +397,8 @@ def self_test() -> int:
 
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--appcast", type=Path, default=repo_root() / "docs" / "appcast.xml")
+    parser.add_argument("--appcast", type=Path, default=repo_root() / "docs" / "appcast.xml",
+                        help="scratch feed to edit (default: frozen legacy feed, read-only after freeze)")
     parser.add_argument(
         "--below",
         help=f"apps below this CFBundleVersion get the window (default: the newest item's version, capped at {FIRST_SELF_UPDATING_VERSION})",
@@ -354,6 +417,8 @@ def main(argv: list[str]) -> int:
         parser.error("--below only applies when marking")
 
     try:
+        if not args.check and not args.dry_run and is_frozen_legacy_feed(args.appcast):
+            raise ValueError("docs/appcast.xml is the frozen legacy feed; edit an explicit --appcast scratch copy instead")
         if args.below and VERSION_PATTERN.fullmatch(args.below) and parse_version(args.below) > parse_version(FIRST_SELF_UPDATING_VERSION):
             print(
                 f"warning: --below {args.below} also reaches {FIRST_SELF_UPDATING_VERSION}+ builds, which update on their own; "
