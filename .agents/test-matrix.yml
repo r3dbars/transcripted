@@ -157,6 +157,16 @@ rules:
       - "bash run-tests.sh"
 
   - paths:
+      - "Sources/TranscriptedCore/Storage/SQLiteHandle.swift"
+      - "Sources/TranscriptedCore/Utilities/FilePermissions.swift"
+      - "Tests/Integration/SQLiteHandleOpen/**"
+      - "scripts/dev/test-sqlite-handle-open.sh"
+      - ".github/workflows/swift-ci.yml"
+    checks:
+      - "bash -n scripts/dev/test-sqlite-handle-open.sh"
+      - "bash scripts/dev/test-sqlite-handle-open.sh"
+
+  - paths:
       - "run-integration-smoke.sh"
       - "scripts/entrypoints/run-integration-smoke.sh"
       - "Tests/Integration/**"
