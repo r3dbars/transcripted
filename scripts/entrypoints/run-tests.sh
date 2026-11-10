@@ -482,6 +482,7 @@ APP_SOURCES=(
     "Sources/Writing/NextSentence/NextSentenceKeyGesture.swift"
     "Sources/Writing/NextSentence/NextSentencePrivacy.swift"
     "Sources/Writing/NextSentence/NextSentenceWarmPool.swift"
+    "Sources/Writing/NextSentence/NextSentencePromptDelivery.swift"
     "Sources/Writing/NextSentence/NextSentenceTetheredProcess.swift"
     "Sources/Writing/NextSentence/NextSentenceLineProcess.swift"
     "Sources/Writing/NextSentence/NextSentenceClaude.swift"
