@@ -4,12 +4,14 @@ func testHomePresentation() {
     runSuite("HomeMeetingSpeakerPalette.slotIndex — stable, in-range, spread") {
         let slotCount = HomeMeetingSpeakerPalette.slotCount
 
-        // Same name always lands in the same slot.
-        assertEqual(
-            HomeMeetingSpeakerPalette.slotIndex(for: "Linus"),
-            HomeMeetingSpeakerPalette.slotIndex(for: "Linus"),
-            "Same speaker name should map to the same slot"
-        )
+        // Fixed mapping vectors catch a changed assignment between launches.
+        for (name, expectedSlot) in [("Linus", 3), ("Alex", 2), ("You", 5)] {
+            assertEqual(
+                HomeMeetingSpeakerPalette.slotIndex(for: name),
+                expectedSlot,
+                "Existing speaker palette assignments should remain stable"
+            )
+        }
 
         // Normalization: case and surrounding whitespace do not change the slot.
         assertEqual(
@@ -35,11 +37,11 @@ func testHomePresentation() {
     }
 
     runSuite("HomeStableReferenceID.id — deterministic FNV-1a derivation") {
-        // Same input -> same id.
+        // A representative capture id retains its published byte-stable output.
         assertEqual(
             HomeStableReferenceID.id(for: "297F08B7-62AE-4291-9EA3-41EB0B17A64A"),
-            HomeStableReferenceID.id(for: "297F08B7-62AE-4291-9EA3-41EB0B17A64A"),
-            "Same capture id should derive the same stable reference id"
+            "72634aa329e052b2",
+            "Existing capture ids should retain their stable reference ids"
         )
 
         // Distinct inputs -> distinct ids.
