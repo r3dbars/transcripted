@@ -66,15 +66,16 @@ final class DictationAudioMuffler: @unchecked Sendable {
     // MARK: - Queue
 
     private func handleMicOpened(_ context: DictationMuffleContext, requestedAt: UInt64) {
-        guard machine.phase == .idle else {
-            // Mid-release or mid-hand-back: the machine resumes without
-            // rebuilding anything.
-            enqueue(.micOpened)
-            return
-        }
+        // Every take must pass the gate, including a resume while the previous
+        // route is still releasing or handing audio back.
         if let reason = DictationMufflePolicy.gate(context) {
             // Feature off is the normal case for most people; don't log it.
             if reason != .disabled { logSkip(reason.rawValue) }
+            return
+        }
+        guard machine.phase == .idle else {
+            // An eligible take can reuse the route without rebuilding it.
+            enqueue(.micOpened)
             return
         }
         guard isSystemAudioAuthorized() else {
