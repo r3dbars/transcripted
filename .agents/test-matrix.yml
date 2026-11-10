@@ -15,6 +15,15 @@ rules:
       - "bash scripts/dev/run-imported-audio-smoke.sh --output build/imported-audio-mapped-proof"
 
   - paths:
+      - ".github/workflows/publish-mcp-registry.yml"
+      - ".github/mcp-publish-tools/**"
+      - "scripts/release/install-mcp-publisher.sh"
+      - "scripts/release/test-mcp-publish-tools.py"
+    checks:
+      - "bash -n scripts/release/install-mcp-publisher.sh"
+      - "python3 scripts/release/test-mcp-publish-tools.py"
+
+  - paths:
       - "scripts/dev/bench-launch-latency.sh"
       - "scripts/dev/verify-change.sh"
       - "scripts/dev/test-verify-receipts.py"
