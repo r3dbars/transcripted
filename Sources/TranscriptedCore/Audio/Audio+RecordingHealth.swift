@@ -71,28 +71,6 @@ extension Audio {
         releaseSystemRecoveryWriteHold()
     }
 
-    /// Commit recovery artifacts only while the recovery still owns the
-    /// current recording generation. The generation lock also blocks a
-    /// concurrent stop/start from advancing the session between the check and
-    /// the array/journal mutations.
-    @discardableResult
-    func finalizeMicRecoveryArtifacts(
-        gap: AudioGap,
-        recoverySegment: MicRecordingSegment?,
-        sessionGeneration: UInt64
-    ) -> Bool {
-        recordingSessionGenerationLock.lock()
-        defer { recordingSessionGenerationLock.unlock() }
-        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
-
-        appendRecordingGap(gap)
-        if let recoverySegment {
-            appendMicSegment(recoverySegment)
-        }
-        recoveryAttemptCount = 0
-        return true
-    }
-
     /// List a recovery segment before its tap can write to it, so a Stop
     /// that lands mid-recovery merges the file instead of losing it.
     @discardableResult
