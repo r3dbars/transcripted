@@ -16,14 +16,6 @@ enum SpeakerNamingTierPresentation {
     /// confirmed meeting outside a lineup.
     static let segmentCount = 5
 
-    static func word(_ tier: SpeakerNamingTier) -> String {
-        switch tier {
-        case .new: return "New"
-        case .learning: return "Learning"
-        case .auto: return "Auto"
-        }
-    }
-
     /// Filled segments out of `segmentCount`. On a meeting whose bar is lower
     /// than 5 (a live meeting's lineup), the dial scales so reaching that bar
     /// fills it.

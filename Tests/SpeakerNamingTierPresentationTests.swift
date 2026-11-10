@@ -1,15 +1,9 @@
 import Foundation
 
 func testSpeakerNamingTierPresentation() {
-    runSuite("The dial's tier words are New, Learning and Auto") {
-        assertEqual(SpeakerNamingTierPresentation.word(.new), "New")
-        assertEqual(SpeakerNamingTierPresentation.word(.learning), "Learning")
-        assertEqual(SpeakerNamingTierPresentation.word(.auto), "Auto")
-        assertEqual(SpeakerNamingTierPresentation.segmentCount, 5, "one segment per meeting on the standard bar")
-    }
-
     runSuite("The dial fills by progress toward the bar and is only full at Auto") {
         typealias P = SpeakerNamingTierPresentation
+        assertEqual(P.segmentCount, 5, "one segment per meeting on the standard bar")
         assertEqual(P.filledSegments(confirmed: 0, required: 5, tier: .new), 0)
         assertEqual(P.filledSegments(confirmed: 2, required: 5, tier: .learning), 2)
         assertEqual(P.filledSegments(confirmed: 5, required: 5, tier: .auto), 5)
