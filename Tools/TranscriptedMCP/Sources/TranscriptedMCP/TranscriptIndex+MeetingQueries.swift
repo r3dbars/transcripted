@@ -270,6 +270,12 @@ extension TranscriptIndex {
     }
 
     func getSpeakerHistory(speaker: String) throws -> SpeakerHistoryResult {
+        try speakerHistoryMatches(speaker: speaker).history
+    }
+
+    private func speakerHistoryMatches(
+        speaker: String
+    ) throws -> (history: SpeakerHistoryResult, matchedNames: [String]) {
         return try queue.sync {
             var matchCondition: String
             var matchBindings: [SQLBinding]
@@ -326,15 +332,38 @@ extension TranscriptIndex {
                 ))
             }
 
-            return SpeakerHistoryResult(
+            // Keep the existing first matched row as each meeting's representative.
+            // Multiple matched names contribute metrics, not extra meetings.
+            var grouped: [String: [SpeakerMeeting]] = [:]
+            var filenameOrder: [String] = []
+            for meeting in meetings {
+                if grouped[meeting.filename] == nil { filenameOrder.append(meeting.filename) }
+                grouped[meeting.filename, default: []].append(meeting)
+            }
+            let uniqueMeetings = filenameOrder.compactMap { filename -> SpeakerMeeting? in
+                guard let rows = grouped[filename], let first = rows.first else { return nil }
+                return SpeakerMeeting(
+                    filename: first.filename,
+                    speakerName: first.speakerName,
+                    persistentSpeakerId: first.persistentSpeakerId,
+                    wordCount: rows.reduce(0) { $0 + $1.wordCount },
+                    speakingSeconds: rows.reduce(0.0) { $0 + $1.speakingSeconds },
+                    meetingDate: first.meetingDate,
+                    meetingDurationSeconds: first.meetingDurationSeconds,
+                    meetingSpeakerCount: first.meetingSpeakerCount,
+                    previewSnippet: first.previewSnippet
+                )
+            }
+            let history = SpeakerHistoryResult(
                 queriedName: speaker,
                 matchedName: meetings.first?.speakerName ?? speaker,
                 persistentSpeakerId: meetings.compactMap(\.persistentSpeakerId).first,
-                meetingCount: meetings.count,
+                meetingCount: uniqueMeetings.count,
                 totalWordCount: meetings.reduce(0) { $0 + $1.wordCount },
                 totalSpeakingSeconds: meetings.reduce(0.0) { $0 + $1.speakingSeconds },
-                meetings: meetings
+                meetings: uniqueMeetings
             )
+            return (history, Array(Set(meetings.map(\.speakerName))).sorted())
         }
     }
 
@@ -460,7 +489,8 @@ extension TranscriptIndex {
     // MARK: - Person Profile (who_is)
 
     func getPersonProfile(speaker: String) throws -> PersonProfile {
-        let history = try getSpeakerHistory(speaker: speaker)
+        let matches = try speakerHistoryMatches(speaker: speaker)
+        let history = matches.history
 
         // Batch-fetch all co-speakers for all meetings in one query
         let allFilenames = history.meetings.map(\.filename)
@@ -469,14 +499,17 @@ extension TranscriptIndex {
         if !allFilenames.isEmpty {
             queue.sync {
                 let placeholders = allFilenames.map { _ in "?" }.joined(separator: ", ")
-                let sql = "SELECT filename, speaker_name FROM meeting_speakers WHERE filename IN (\(placeholders)) AND speaker_name COLLATE NOCASE != ? AND speaker_name NOT LIKE 'Speaker %'"
+                let namePlaceholders = matches.matchedNames.map { _ in "?" }.joined(separator: ", ")
+                let sql = "SELECT filename, speaker_name FROM meeting_speakers WHERE filename IN (\(placeholders)) AND speaker_name COLLATE NOCASE NOT IN (\(namePlaceholders)) AND speaker_name NOT LIKE 'Speaker %'"
                 var stmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
                 defer { sqlite3_finalize(stmt) }
                 for (i, f) in allFilenames.enumerated() {
                     sqlite3_bind_text(stmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 }
-                sqlite3_bind_text(stmt, Int32(allFilenames.count + 1), (history.matchedName as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                for (i, name) in matches.matchedNames.enumerated() {
+                    sqlite3_bind_text(stmt, Int32(allFilenames.count + i + 1), (name as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                }
                 while sqlite3_step(stmt) == SQLITE_ROW {
                     coSpeakersByMeeting[colText(stmt, 0), default: []].append(colText(stmt, 1))
                 }
