@@ -8,8 +8,9 @@ import Foundation
 /// embedder decides how to present them (system notification, in-app toast, nothing).
 ///
 /// Passing `nil` at init sites makes all calls no-ops, which is the right behavior for
-/// tests and headless embedders. The standalone Transcripted app supplies a concrete
-/// `UserNotificationsNotifier` that wraps `UNUserNotificationCenter`.
+/// tests and headless embedders. The current in-repository app and CLI hosts do not
+/// supply a notifier. This remains a public optional seam for embedders; removing
+/// it requires a library-compatibility decision.
 @MainActor
 public protocol TranscriptNotifier: AnyObject {
     /// Notify the user that a transcript has been written to disk.
@@ -20,7 +21,7 @@ public protocol TranscriptNotifier: AnyObject {
     /// - Parameter errorMessage: Human-readable explanation of the failure.
     func notifyTranscriptionFailed(errorMessage: String)
 
-    /// Request permission to show notifications. Called once during first-run setup.
-    /// Implementations should no-op on subsequent calls.
+    /// Embedders may request notification permission during setup;
+    /// implementations should no-op on subsequent calls.
     func requestNotificationPermission()
 }
