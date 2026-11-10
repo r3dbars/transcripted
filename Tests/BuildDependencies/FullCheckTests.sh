@@ -26,6 +26,14 @@ printf '%s|%s|mode=%s|audio=%s|meeting=%s|diarization=%s|bundled=%s\n' \
     "$tool" "$*" "${TRANSCRIPTEDCLI_EXPECT_BUILD_MODE:-}" "${TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION:-}" \
     "${TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT:-}" "${TRANSCRIPTEDCLI_ENABLE_DIARIZATION:-}" \
     "${TRANSCRIPTEDCLI_BUNDLED_HELPER:-}" >> "$FULL_CHECK_LOG"
+if [ "$tool" = bash ] && [ "$*" = 'build.sh --no-open' ] && [ "${FULL_CHECK_NEW_RECEIPT:-0}" = 1 ]; then
+    [ ! -e build/launch-ui-smoke.json ] || exit 43
+    mkdir -p build
+    printf '%s\n' '{"launchToInteractiveMs":1}' > build/launch-ui-smoke.json
+fi
+if [ "$tool" = ruby ] && [ "${1:-}" = scripts/ops/performance-budget.rb ] && [ "${FULL_CHECK_REQUIRE_RECEIPT:-0}" = 1 ]; then
+    [ -f build/launch-ui-smoke.json ] || exit 44
+fi
 if [ -n "${FULL_CHECK_FAIL:-}" ] && [ "$*" = "$FULL_CHECK_FAIL" ]; then exit 42; fi
 FAKE
 chmod +x "$test_root/bin/command-fake"
@@ -35,6 +43,7 @@ run_gate() {
     local label="$1" failure="$2"
     shift 2
     env PATH="$test_root/bin:$PATH" FULL_CHECK_LOG="$test_root/$label.log" FULL_CHECK_FAIL="$failure" \
+        FULL_CHECK_REQUIRE_RECEIPT="${FULL_CHECK_REQUIRE_RECEIPT:-0}" FULL_CHECK_NEW_RECEIPT="${FULL_CHECK_NEW_RECEIPT:-0}" \
         TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 \
         TRANSCRIPTEDCLI_ENABLE_DIARIZATION=1 TRANSCRIPTEDCLI_BUNDLED_HELPER=1 \
         TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=unexpected TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS=3000 \
@@ -50,6 +59,31 @@ fi
 if run_gate continuing scripts/dev/test-speaker-settings-model.sh --keep-going; then
     echo 'FAIL: keep-going hid a failing required smoke' >&2; exit 1
 fi
+# A skipped native launch must not inherit a previous build's passing receipt.
+mkdir -p "$test_root/repo/build"
+printf '%s\n' '{"launchToInteractiveMs":1}' > "$test_root/repo/build/launch-ui-smoke.json"
+if FULL_CHECK_REQUIRE_RECEIPT=1 run_gate stale ''; then
+    echo 'FAIL: full gate accepted a stale receipt after a build produced none' >&2; exit 1
+fi
+printf '%s\n' '{"launchToInteractiveMs":1}' > "$test_root/repo/build/launch-ui-smoke.json"
+FULL_CHECK_REQUIRE_RECEIPT=1 FULL_CHECK_NEW_RECEIPT=1 run_gate fresh ''
+
+# Clearing a receipt must never follow a symlinked build directory.
+mv "$test_root/repo/build" "$test_root/saved-build"
+mkdir "$test_root/external-build"
+printf '%s\n' '{"launchToInteractiveMs":1}' > "$test_root/external-build/launch-ui-smoke.json"
+cp "$test_root/external-build/launch-ui-smoke.json" "$test_root/external-before.json"
+ln -s "$test_root/external-build" "$test_root/repo/build"
+if FULL_CHECK_REQUIRE_RECEIPT=1 run_gate linked ''; then
+    echo 'FAIL: full gate accepted a symlinked build directory' >&2; exit 1
+fi
+if FULL_CHECK_REQUIRE_RECEIPT=1 run_gate linked-continuing '' --keep-going; then
+    echo 'FAIL: keep-going accepted a symlinked build directory' >&2; exit 1
+fi
+cmp "$test_root/external-before.json" "$test_root/external-build/launch-ui-smoke.json"
+rm "$test_root/repo/build"
+mv "$test_root/saved-build" "$test_root/repo/build"
+
 "$PYTHON_BIN" - "$test_root" <<'PY'
 from pathlib import Path
 import sys
@@ -80,5 +114,9 @@ stopped = (root / 'stopped.log').read_text().splitlines()
 assert stopped[-1].split('|')[1] == required[0], 'full gate ran more checks after a failure'
 continuing = (root / 'continuing.log').read_text().splitlines()
 assert continuing == lines, 'keep-going did not run the remaining checks'
+for label in ['linked', 'linked-continuing']:
+    guarded = (root / f'{label}.log').read_text().splitlines()
+    assert not any(line.split('|')[1] == 'build.sh --no-open' for line in guarded), 'unsafe build ran after ownership guard failed'
+    assert not any('performance-budget.rb' in line for line in guarded), 'budget ran after ownership guard failed'
 print('Full gate CI coverage, mode isolation, fail-stop and keep-going tests passed')
 PY

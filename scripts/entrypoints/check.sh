@@ -143,8 +143,19 @@ case "$tier" in
         step "CLI mode: audio" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=audio TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI"
         step "CLI mode: meeting" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=meeting TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI"
         step "CLI mode: retrieval" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=retrieval swift test --package-path Tools/TranscriptedCLI"
-        step "Build app" "bash build.sh --no-open"
-        step "Premium performance budget" 'scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms "${TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS:-3000}"'
+        # A skipped launch must not reuse a report from a previous build.
+        receipt_step=${#statuses[@]}
+        step "Invalidate previous launch receipt" 'if [ -L build ] || { [ -e build ] && [ ! -d build ]; }; then
+            echo "Refusing to clear a launch receipt through an unowned build directory" >&2
+            exit 1
+        fi
+        rm -f build/launch-ui-smoke.json'
+        # A failed ownership/reset prerequisite also blocks this dependent
+        # build when --keep-going was requested for independent checks.
+        if [ "${statuses[$receipt_step]:-SKIP}" = PASS ]; then
+            step "Build app" "bash build.sh --no-open"
+            step "Premium performance budget" 'scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms "${TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS:-3000}"'
+        fi
         ;;
     hardware)
         step "Build app" "bash build.sh --no-open"
