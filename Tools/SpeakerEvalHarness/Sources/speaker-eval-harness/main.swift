@@ -137,7 +137,6 @@ struct Main {
         // run never writes into the real app.jsonl.
         setenv("TRANSCRIPTED_DISABLE_FILE_LOGGER", "1", 1)
         let args = Array(CommandLine.arguments.dropFirst())
-        guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
         guard let cmd = args.first else {
             die("usage: speaker-eval-harness <dump|replay|embedding-parity|autoeval|autoeval-self-test|meeting-series|dump-e2e|embedder-debug|dump-set> ...")
         }

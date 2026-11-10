@@ -247,7 +247,6 @@ let parityPairRowsCap = 1500
 
 // MARK: - embedding-parity
 
-@available(macOS 14.0, *)
 func runEmbeddingParity(_ args: [String]) async {
     let usage = "embedding-parity requires --audio <wav|m4a> --out <parity.json> [--meeting NAME] "
         + "[--rttm <reference.rttm>] [--min-seconds 1.0] "
