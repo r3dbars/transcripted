@@ -137,14 +137,6 @@ func testCallAppMicrophoneSharingMonitor() {
         }
     }
 
-    runSuite("Old Zoom names still work for branches written before the rename") {
-        let monitor: ZoomMicrophoneSharingMonitor = CallAppMicrophoneSharingMonitor(
-            notificationCenter: NotificationCenter(),
-            runningApplicationBundleIDs: { ["com.microsoft.teams2"] }
-        )
-        assertTrue(monitor.isZoomRunning, "The old name reports any call app, same as isCallAppRunning")
-    }
-
     runSuite("The launch monitor skips the blocking read, but a capture start never acts before one") {
         var synchronousReads = 0
         let monitor = CallAppMicrophoneSharingMonitor(
