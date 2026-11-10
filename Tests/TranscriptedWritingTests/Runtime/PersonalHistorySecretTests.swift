@@ -484,7 +484,7 @@ struct PersonalHistorySecretTests {
 
         init() {
             let name = "transcripted.tests.history-secret.\(UUID().uuidString)"
-            let defaults = UserDefaults(suiteName: name)!
+            let defaults = WritingTestDefaults()
             defaults.removePersistentDomain(forName: name)
             defaults.set(Self.historyIdentifier, forKey: PersonalHistorySettingsContract.historyIdentifierKey)
             defaults.set(Self.consentIdentifier, forKey: PersonalHistorySettingsContract.consentIdentifierKey)
@@ -493,7 +493,7 @@ struct PersonalHistorySecretTests {
             defaults.set([String](), forKey: PersonalHistorySettingsContract.excludedAppsKey)
             controller = PersonalHistoryController(
                 store: store,
-                settings: TildeSettings(keyboard: defaults),
+                settings: TildeSettings(keyboard: defaults, app: WritingTestDefaults()),
                 modelPersistenceInterval: 0
             )
         }

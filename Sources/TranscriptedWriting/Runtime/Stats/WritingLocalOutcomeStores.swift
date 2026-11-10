@@ -48,6 +48,10 @@ enum TildeLocalOutcomeStores {
         suiteName: String = PersonalHistorySettingsContract.keyboardSuiteName
     ) {
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
+        bumpGeneration(defaults: defaults)
+    }
+
+    static func bumpGeneration(defaults: UserDefaults) {
         let next = defaults.integer(
             forKey: PersonalHistorySettingsContract.outcomeLedgerGenerationKey
         ) &+ 1

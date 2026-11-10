@@ -181,7 +181,7 @@ struct WritingKeyboardSetupStateTests {
 
     private func makeDefaults() throws -> (UserDefaults, String) {
         let suite = "WritingKeyboardSetupStateTests-\(UUID().uuidString)"
-        return (try #require(UserDefaults(suiteName: suite)), suite)
+        return (WritingTestDefaults(), suite)
     }
 
     @Test("A keyboard first installed this login session needs a relogin until the session changes")

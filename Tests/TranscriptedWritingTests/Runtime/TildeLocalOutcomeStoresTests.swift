@@ -24,9 +24,9 @@ struct TildeLocalOutcomeStoresTests {
     @Test("A wipe bump is what the IME uses to stop rewriting deleted files")
     func wipeBumpsGeneration() {
         let suite = "tilde.test.outcome-ledger.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
+        let defaults = WritingTestDefaults()
         defaults.set(3, forKey: PersonalHistorySettingsContract.outcomeLedgerGenerationKey)
-        TildeLocalOutcomeStores.bumpGeneration(suiteName: suite)
+        TildeLocalOutcomeStores.bumpGeneration(defaults: defaults)
         #expect(defaults.integer(forKey: PersonalHistorySettingsContract.outcomeLedgerGenerationKey) == 4)
         defaults.removePersistentDomain(forName: suite)
     }
