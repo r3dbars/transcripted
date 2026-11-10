@@ -234,8 +234,8 @@ struct WritingAppScopeTests {
         let app: UserDefaults
 
         init() throws {
-            keyboard = try #require(UserDefaults(suiteName: name + ".keyboard"))
-            app = try #require(UserDefaults(suiteName: name + ".app"))
+            keyboard = WritingTestDefaults()
+            app = WritingTestDefaults()
         }
 
         func remove() {

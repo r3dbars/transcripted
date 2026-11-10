@@ -7,9 +7,9 @@ import Testing
 struct TildeSettingsTests {
     private func makeSettings() -> (TildeSettings, UserDefaults) {
         let keyboardName = "tilde.tests.keyboard.\(UUID().uuidString)"
-        let keyboard = UserDefaults(suiteName: keyboardName)!
+        let keyboard = WritingTestDefaults()
         keyboard.removePersistentDomain(forName: keyboardName)
-        return (TildeSettings(keyboard: keyboard), keyboard)
+        return (TildeSettings(keyboard: keyboard, app: WritingTestDefaults()), keyboard)
     }
 
     @Test("Fresh keyboard settings enable suggestions")
@@ -30,8 +30,8 @@ struct TildeSettingsTests {
     func launchAtLoginPreference() {
         let keyboardName = "tilde.tests.keyboard.\(UUID().uuidString)"
         let appName = "tilde.tests.app.\(UUID().uuidString)"
-        let keyboard = UserDefaults(suiteName: keyboardName)!
-        let app = UserDefaults(suiteName: appName)!
+        let keyboard = WritingTestDefaults()
+        let app = WritingTestDefaults()
         keyboard.removePersistentDomain(forName: keyboardName)
         app.removePersistentDomain(forName: appName)
         let settings = TildeSettings(keyboard: keyboard, app: app)
@@ -46,8 +46,8 @@ struct TildeSettingsTests {
     func setupProgress() {
         let keyboardName = "tilde.tests.keyboard.\(UUID().uuidString)"
         let appName = "tilde.tests.app.\(UUID().uuidString)"
-        let keyboard = UserDefaults(suiteName: keyboardName)!
-        let app = UserDefaults(suiteName: appName)!
+        let keyboard = WritingTestDefaults()
+        let app = WritingTestDefaults()
         keyboard.removePersistentDomain(forName: keyboardName)
         app.removePersistentDomain(forName: appName)
         let settings = TildeSettings(keyboard: keyboard, app: app)

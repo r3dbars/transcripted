@@ -204,8 +204,8 @@ struct PersonalHistoryDeletionTests {
     func controllerDropsDeletions() async throws {
         let store = MemoryStore()
         let suite = "transcripted.tests.deletions.\(UUID().uuidString)"
-        let keyboard = try #require(UserDefaults(suiteName: suite + ".keyboard"))
-        let app = try #require(UserDefaults(suiteName: suite + ".app"))
+        let keyboard = WritingTestDefaults()
+        let app = WritingTestDefaults()
         defer {
             keyboard.removePersistentDomain(forName: suite + ".keyboard")
             app.removePersistentDomain(forName: suite + ".app")
@@ -292,7 +292,7 @@ struct PersonalHistoryDeletionTests {
 
         init() {
             let suite = "transcripted.tests.deletion-capture.\(UUID().uuidString)"
-            defaults = UserDefaults(suiteName: suite)!
+            defaults = WritingTestDefaults()
             defaults.removePersistentDomain(forName: suite)
             defaults.set(true, forKey: PersonalHistorySettingsContract.enabledKey)
             defaults.set("history", forKey: PersonalHistorySettingsContract.historyIdentifierKey)

@@ -223,7 +223,7 @@ struct WritingDurabilityTests {
         let recorder = fixture.recorder()
         let ingest = WritingHistoryIngest(dayFiles: recorder, appScope: { .all })
         let suite = "writing-durability-producer-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
+        let defaults = WritingTestDefaults()
         defer { defaults.removePersistentDomain(forName: suite) }
         defaults.set(true, forKey: PersonalHistorySettingsContract.enabledKey)
         defaults.set("history", forKey: PersonalHistorySettingsContract.historyIdentifierKey)

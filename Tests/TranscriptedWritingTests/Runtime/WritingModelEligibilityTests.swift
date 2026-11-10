@@ -33,7 +33,7 @@ struct WritingModelEligibilityTests {
 
     @Test func resolvedChoiceReadsTheGivenSuiteAndLeavesTheSavedChoiceAlone() throws {
         let suiteName = "TranscriptedWritingTests.eligibility.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let defaults = WritingTestDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
         #expect(WritingModelEligibility.resolvedChoice(
@@ -57,7 +57,7 @@ struct WritingModelEligibilityTests {
 
     @Test func previewProfilesKeepTildesFixedSelection() throws {
         let suiteName = "TranscriptedWritingTests.eligibility.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        let defaults = WritingTestDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
         #expect(WritingModelEligibility.resolvedChoice(
             for: .preview9B, defaults: defaults, physicalMemoryBytes: 64 * gibibyte
