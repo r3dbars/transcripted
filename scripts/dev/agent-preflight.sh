@@ -79,8 +79,8 @@ echo ""
 echo "Branch: ${branch:-detached HEAD}"
 echo "HEAD: $head_sha"
 echo "Base: $base_ref"
-# --check fails when the path is unset and also when it points somewhere else
-# (a stale absolute path to a folder that no longer exists runs no hooks, silently).
+# A nonempty setting can still point at an obsolete checkout, or at a
+# relative hook folder that this worktree does not contain. Check read-only.
 if ! hooks_status="$(bash scripts/dev/install-git-hooks.sh --check 2>&1)"; then
     echo "Hint: $hooks_status"
 fi

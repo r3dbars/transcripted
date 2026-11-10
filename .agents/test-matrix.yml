@@ -562,6 +562,14 @@ rules:
       - "python3 scripts/dev/agent-check.py --self-test"
 
   - paths:
+      - "scripts/dev/agent-preflight.sh"
+      - "scripts/dev/install-git-hooks.sh"
+      - "Tests/BuildDependencies/GitHooksCheckTests.py"
+    checks:
+      - "bash -n scripts/dev/install-git-hooks.sh"
+      - "python3 Tests/BuildDependencies/GitHooksCheckTests.py"
+
+  - paths:
       - ".agents/test-matrix.yml"
       - "scripts/dev/agent-preflight.sh"
       - "scripts/dev/test-matrix-checks.py"
