@@ -94,7 +94,7 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Agent page
 
-- `AgentConnectionSettingsPage.swift` - one connect row per detected agent (via `AgentMCPConnector`), the universal copy-prompt row, the `CompanionSettingsCard()`, and the Advanced disclosure (folders, Codex inbox, config).
+- `AgentConnectionSettingsPage.swift` - one connect row per detected agent (via `AgentMCPConnector`), the universal copy-prompt row, the `CompanionSettingsCard()`, and the Advanced disclosure (the Meetings, Dictation, and Writing folders plus Copy Paths). Codex inbox setup (`codexInboxDetails`) remains implemented but off the view tree.
 - `CompanionSettingsCard.swift` - ChatGPT companion plugin card. Readiness describes the local bridge; it never implies ChatGPT has connected.
 - Onboarding has no agent step; connection lives only here.
 
@@ -137,6 +137,6 @@ Then open Settings and check by hand:
 - failed meeting retry, reveal, delete, and retained-audio playback work
 - custom dictionary edits persist and preview
 - Auto Enter app add/remove works
-- Agent page connects detected agents, copies the universal prompt, reveals config and folders, sets up the Codex inbox from Advanced
+- Agent page connects detected agents, copies the universal prompt, and reveals and copies the capture folders from Advanced
 
 Core engine types stay behind Meeting seams. The module boundary check has no grandfathered crossings.
