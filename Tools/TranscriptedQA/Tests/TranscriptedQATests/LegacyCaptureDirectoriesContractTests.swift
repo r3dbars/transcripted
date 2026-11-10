@@ -18,17 +18,29 @@ import TranscriptedCaptureKit
 /// shipping silently.
 final class LegacyCaptureDirectoriesContractTests: XCTestCase {
     private var home: URL!
+    private var ownedParent: URL!
 
     override func setUpWithError() throws {
-        home = FileManager.default.temporaryDirectory
+        ownedParent = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL
+        home = ownedParent
             .appendingPathComponent("LegacyCaptureDirectoriesContractTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
-        if let home {
-            try? FileManager.default.removeItem(at: home)
+        guard let home, let ownedParent else { return }
+        let prefix = "LegacyCaptureDirectoriesContractTests-"
+        let leaf = home.lastPathComponent
+        let canonical = home.resolvingSymlinksInPath().standardizedFileURL
+        guard leaf.hasPrefix(prefix), UUID(uuidString: String(leaf.dropFirst(prefix.count))) != nil,
+              canonical.deletingLastPathComponent() == ownedParent,
+              canonical == home.standardizedFileURL,
+              try home.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey]).isDirectory == true,
+              try home.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink != true else {
+            throw NSError(domain: "LegacyCaptureDirectoriesContractTests", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: "Refusing fixture cleanup outside its owned UUID directory"])
         }
+        try FileManager.default.removeItem(at: home)
     }
 
     func testExplicitDraftMeetingsPathResolvesToDraftLayout() {
@@ -36,7 +48,8 @@ final class LegacyCaptureDirectoriesContractTests: XCTestCase {
 
         let resolved = QADataDirectories.resolve(
             meetingsDir: legacy.draftMeetings.path,
-            homeDirectory: home
+            homeDirectory: home,
+            environment: [:]
         )
 
         XCTAssertEqual(
@@ -61,7 +74,8 @@ final class LegacyCaptureDirectoriesContractTests: XCTestCase {
 
         let resolved = QADataDirectories.resolve(
             meetingsDir: legacy.sharedRoot.path,
-            homeDirectory: home
+            homeDirectory: home,
+            environment: [:]
         )
 
         XCTAssertEqual(
@@ -84,7 +98,8 @@ final class LegacyCaptureDirectoriesContractTests: XCTestCase {
 
         let resolved = QADataDirectories.resolve(
             meetingsDir: sibling.path,
-            homeDirectory: home
+            homeDirectory: home,
+            environment: [:]
         )
 
         let currentState = home.standardizedFileURL
@@ -95,4 +110,59 @@ final class LegacyCaptureDirectoriesContractTests: XCTestCase {
             "a folder that only shares a name prefix with the legacy shared folder must not inherit its layout"
         )
     }
+    func testLegacyNamePrefixSiblingsKeepCurrentStateAndLogs() {
+        let legacy = CaptureLibraryResolver.legacyCaptureDirectories(homeDirectory: home)
+        let current = home.appendingPathComponent("Library/Application Support/Transcripted", isDirectory: true)
+        for root in [legacy.sharedRoot, legacy.draftRoot.appendingPathComponent("meetings", isDirectory: true)] {
+            let sibling = URL(fileURLWithPath: root.path + " Backup", isDirectory: true)
+                .appendingPathComponent("meetings", isDirectory: true)
+            let resolved = QADataDirectories.resolve(meetingsDir: sibling.path, homeDirectory: home, environment: [:])
+            XCTAssertEqual(resolved.meetingsDir.path, sibling.path, "the explicit meetings path must remain unchanged")
+            XCTAssertEqual(resolved.stateDir.path, current.appendingPathComponent("state").path,
+                           "a legacy-name sibling must keep current state layout")
+            XCTAssertEqual(resolved.logFilePath, current.appendingPathComponent("logs/app.jsonl").path,
+                           "a legacy-name sibling must keep current logs")
+            XCTAssertEqual(resolved.dictationsDir.path, sibling.deletingLastPathComponent().appendingPathComponent("dictations").path)
+        }
+    }
+
+    func testCurrentLayoutNamePrefixSiblingsKeepTheirOwnDictationChild() {
+        let current = home.appendingPathComponent("Library/Application Support/Transcripted", isDirectory: true)
+        for root in [current.appendingPathComponent("captures/meetings"), current.appendingPathComponent("state")] {
+            let sibling = URL(fileURLWithPath: root.path + " Backup", isDirectory: true)
+            let resolved = QADataDirectories.resolve(meetingsDir: sibling.path, homeDirectory: home, environment: [:])
+            XCTAssertEqual(resolved.dictationsDir.path, sibling.appendingPathComponent("dictations").path,
+                           "a current-layout prefix sibling must not borrow the default dictations directory")
+        }
+    }
+
+    func testRealLegacyDescendantsStillInheritLegacyStateAndLogs() {
+        let legacy = CaptureLibraryResolver.legacyCaptureDirectories(homeDirectory: home)
+        let draftState = legacy.draftRoot.appendingPathComponent("meetings", isDirectory: true)
+        for root in [legacy.sharedRoot, draftState] {
+            let descendant = root.appendingPathComponent("owned-nested-captures", isDirectory: true)
+            let resolved = QADataDirectories.resolve(meetingsDir: descendant.path, homeDirectory: home, environment: [:])
+            XCTAssertEqual(resolved.meetingsDir.path, descendant.path)
+            XCTAssertEqual(resolved.stateDir.path, root.path, "a genuine legacy descendant must retain its legacy layout")
+            XCTAssertEqual(resolved.logFilePath, home.appendingPathComponent("Library/Logs/Transcripted/app.jsonl").path)
+        }
+    }
+
+    func testExplicitStateLogAndDictationOverridesStillWinForLegacyPath() {
+        let legacy = CaptureLibraryResolver.legacyCaptureDirectories(homeDirectory: home)
+        let overrides = home.appendingPathComponent("explicit-overrides", isDirectory: true)
+        let resolved = QADataDirectories.resolve(
+            meetingsDir: legacy.sharedRoot.path,
+            dictationsDir: overrides.appendingPathComponent("dictations").path,
+            stateDir: overrides.appendingPathComponent("state").path,
+            logPath: overrides.appendingPathComponent("synthetic.jsonl").path,
+            homeDirectory: home,
+            environment: [:]
+        )
+        XCTAssertEqual(resolved.meetingsDir.path, legacy.sharedRoot.path)
+        XCTAssertEqual(resolved.dictationsDir.path, overrides.appendingPathComponent("dictations").path)
+        XCTAssertEqual(resolved.stateDir.path, overrides.appendingPathComponent("state").path)
+        XCTAssertEqual(resolved.logFilePath, overrides.appendingPathComponent("synthetic.jsonl").path)
+    }
+
 }

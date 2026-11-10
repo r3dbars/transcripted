@@ -273,9 +273,8 @@ struct QADataDirectories {
         return current
     }
 
-    /// True when `path` is `root` itself or inside it. Compares on a path
-    /// boundary so a sibling such as `~/Documents/Transcripted Backup` is not
-    /// treated as living under `~/Documents/Transcripted`.
+    /// Match an entire path component, so similarly named siblings do not
+    /// inherit another capture directory's layout.
     private static func isPath(_ path: String, under root: URL) -> Bool {
         let rootPath = root.standardizedFileURL.path
         return path == rootPath || path.hasPrefix(rootPath.hasSuffix("/") ? rootPath : rootPath + "/")
