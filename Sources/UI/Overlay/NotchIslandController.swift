@@ -20,8 +20,8 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// Right-click menu while a meeting records (Discard Recording…).
     var meetingMenuProvider: (() -> NSMenu?)?
     /// "Paste again" on the dictation that just landed.
-    var onPasteLastDictation: (() -> Void)?
-    /// The text of the dictation that just landed, for Copy and the preview.
+    var onPasteLastDictation: ((String) -> Void)?
+    /// The text of the dictation that just landed, for its actions and preview.
     var lastDictationTextProvider: (() -> String?)?
     /// The pointer entered or left the island while "Who was on this call?"
     /// is up, so its Later ring and "Everyone's named" linger can pause.
@@ -780,10 +780,15 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
             render()
             scheduleRecentInsertExpiry()
         case .pasteLastDictation:
-            clearRecentInsert()
-            expanded = false
-            render()
-            onPasteLastDictation?()
+            RecentDictationPasteAction.request(
+                visibleText: { self.recentInsert?.text },
+                dismiss: {
+                    self.clearRecentInsert()
+                    self.expanded = false
+                    self.render()
+                },
+                deliver: { self.onPasteLastDictation?($0) }
+            )
         default:
             break
         }

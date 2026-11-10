@@ -155,16 +155,11 @@ extension TranscriptedAppDelegate {
         alert.runModal()
     }
 
-    func pasteLastDictationFromSettings() {
-        guard let latestText = DictationTranscriptStore.latestSavedText() else {
-            PasteLastDictationFeedbackPresenter.shared.present(.noSavedDictation)
-            return
-        }
-
+    func pasteRecentDictation(_ text: String) {
         let sourceApp = resolvedSourceApp()
         let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sourceApp?.activate(options: [])
-        let outcome = settingsTextPaster.paste(latestText, target: pasteTarget)
+        let outcome = settingsTextPaster.paste(text, target: pasteTarget)
         PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))
     }
 

@@ -797,6 +797,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeTranscriptionActivityCopy.swift"
     "Sources/UI/Overlay/CapturePillController.swift"
     "Sources/UI/Overlay/NotchIslandPresentation.swift"
+    "Sources/UI/Overlay/RecentDictationPasteAction.swift"
     "Sources/UI/Overlay/MeetingAutoRecordNoteCopy.swift"
     "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift"
     "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy+CallAppHint.swift"
