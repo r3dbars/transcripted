@@ -72,6 +72,7 @@ rules:
       - "bash -n scripts/entrypoints/build-deps.sh"
       - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
       - "bash Tests/BuildDependencies/DepsStalenessTests.sh"
+      - "bash Tests/BuildDependencies/DepsToolchainTests.sh"
       - "bash build-deps.sh --force"
 
   - paths:
@@ -81,6 +82,8 @@ rules:
       - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
       - "bash -n Tests/BuildDependencies/DepsStalenessTests.sh"
       - "bash Tests/BuildDependencies/DepsStalenessTests.sh"
+      - "bash -n Tests/BuildDependencies/DepsToolchainTests.sh"
+      - "bash Tests/BuildDependencies/DepsToolchainTests.sh"
       - "bash -n Tests/BuildDependencies/CLIManifestTests.sh"
       - "bash Tests/BuildDependencies/CLIManifestTests.sh"
       - "bash -n Tests/BuildDependencies/CLIPackagingTests.sh"

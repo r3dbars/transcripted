@@ -386,6 +386,7 @@ unlisted_candidates() {
 
 check "build-deps archive inputs" "bash Tests/BuildDependencies/ArchiveInputsTests.sh" slow
 check "dependency freshness contracts" "bash Tests/BuildDependencies/DepsStalenessTests.sh"
+check "dependency toolchain contracts" "bash Tests/BuildDependencies/DepsToolchainTests.sh"
 check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.sh" slow
 
 # ---------------------------------------------------------------- deterministic fixture lanes (from .agents/test-matrix.yml)
