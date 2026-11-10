@@ -153,8 +153,11 @@ private func hydrateMeetingTitles<T>(
     title: WritableKeyPath<T, String>,
     meetingDirs: [URL]
 ) {
+    let filenames = collection.filter { $0[keyPath: kind] == .meeting }.map { $0[keyPath: filename] }
+    let titles = frontmatterMeetingTitles(for: filenames, meetingDirs: meetingDirs)
     for index in collection.indices where collection[index][keyPath: kind] == .meeting {
-        collection[index][keyPath: title] = meetingTitle(for: collection[index][keyPath: filename], meetingDirs: meetingDirs)
+        let name = collection[index][keyPath: filename]
+        collection[index][keyPath: title] = titles[name] ?? name
     }
 }
 
