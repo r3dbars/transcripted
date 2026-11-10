@@ -1,10 +1,10 @@
 # Auto-merge gate
 
-`scripts/ops/auto-merge-gate.py` merges low-risk PRs without waiting on the owner: cleanup, doc fixes and small tested bug fixes. Everything else still waits for Justin.
+When deployed under the App-gated flow, `scripts/ops/auto-merge-gate.py` can merge low-risk PRs without waiting on the owner: cleanup, doc fixes and small tested bug fixes. The lane runner is documented as unscheduled and dry-run-only in `docs/automations/README.md` (see "Running it" below). Lane eligibility alone does not schedule a merge. The separate risk-triage workflow is described in `docs/agent-merge-policy.md`.
 
 ## What it merges
 
-Transcripted runs at **auto-merge level 3**. Only PRs in a lane listed in `.agents/auto-merge-lanes.json` merge without the owner:
+The lane configuration permits **auto-merge level 3**. When this gate is deployed, only PRs in a lane listed in `.agents/auto-merge-lanes.json` are eligible to merge without the owner:
 
 | Lane | Level | Branch prefix | Label | May touch | Size limit |
 |---|---|---|---|---|---|
@@ -14,6 +14,10 @@ Transcripted runs at **auto-merge level 3**. Only PRs in a lane listed in `.agen
 | `module-edges` | 2 | `cleanup/module-edges/` | `cleanup` | same as `file-size`, with its own baseline | 600 lines |
 | `docs` | 2 | `garden/docs/` | `gardener` | folder `AGENTS.md` files, `docs/*.md` except release, QA, download and credential docs | 300 lines |
 | `bug-fix` | 3 | `codex/issue-` | `bug` | Sources outside the protected areas and outside UI, App and Capture, plus tests | 300 lines |
+
+Folder `AGENTS.md` files are allowed by some lane path lists but always classified
+`risk:high`, so those PRs need owner review and a manual merge. The table describes
+path eligibility; all the risk and review checks below still apply.
 
 The `bug-fix` lane asks for more than the others:
 
