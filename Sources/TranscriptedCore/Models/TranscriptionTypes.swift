@@ -240,14 +240,18 @@ public struct SpeakerIdentityOption: Identifiable, Hashable {
     public let confirmedMeetings: Int
     public let isTrusted: Bool
     public let earnsConfirmation: Bool
+    /// The bar this review's meeting used for this person. Nil for callers
+    /// without meeting context, which retain the standard confirmation bar.
+    public let requiredMeetings: Int?
 
-    public init(id: UUID, displayName: String, callCount: Int, confirmedMeetings: Int = 0, isTrusted: Bool = true, earnsConfirmation: Bool = true) {
+    public init(id: UUID, displayName: String, callCount: Int, confirmedMeetings: Int = 0, isTrusted: Bool = true, earnsConfirmation: Bool = true, requiredMeetings: Int? = nil) {
         self.id = id
         self.displayName = displayName
         self.callCount = callCount
         self.confirmedMeetings = confirmedMeetings
         self.isTrusted = isTrusted
         self.earnsConfirmation = earnsConfirmation
+        self.requiredMeetings = requiredMeetings
     }
 }
 

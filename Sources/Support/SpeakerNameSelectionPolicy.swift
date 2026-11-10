@@ -10,6 +10,12 @@ struct SpeakerNameChoice: Identifiable, Hashable {
     var confirmedMeetings: Int = 0
     var isTrusted: Bool = true
     var earnsConfirmation: Bool = true
+    /// The current review's per-person bar, when its producer has meeting context.
+    var requiredMeetings: Int? = nil
+
+    func confirmationRequirement(fallback: Int) -> Int {
+        requiredMeetings ?? fallback
+    }
 }
 
 enum SpeakerNameSelectionPolicy {

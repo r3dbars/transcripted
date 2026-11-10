@@ -102,6 +102,37 @@ func testSpeakerNamingTierPresentation() {
                     "context never overrides a recent correction")
     }
 
+    runSuite("A saved person picked in a review keeps that meeting's confirmation bar") {
+        typealias P = SpeakerNamingTierPresentation
+        let picked = SpeakerNameChoice(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000007")!,
+            displayName: "Synthetic Person", callCount: 4, confirmedMeetings: 1,
+            requiredMeetings: 2
+        )
+        let required = picked.confirmationRequirement(fallback: 5)
+        assertEqual(required, 2)
+        let tier = SpeakerNamingTier.tier(confirmedMeetings: 2, requiredMeetings: required, isTrusted: picked.isTrusted)
+        assertEqual(P.filledSegments(confirmed: 2, required: required, tier: tier), 5)
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: picked.confirmedMeetings,
+                                required: required, isTrusted: picked.isTrusted),
+                    P.ReviewHint(text: "Auto-named with matching meeting context", usesPersonColor: true))
+
+        var historical = picked
+        historical.requiredMeetings = nil
+        let standard = historical.confirmationRequirement(fallback: 5)
+        assertEqual(standard, 5, "a caller without meeting context keeps the existing standard bar")
+        let standardTier = SpeakerNamingTier.tier(confirmedMeetings: 2, requiredMeetings: standard, isTrusted: true)
+        assertEqual(P.filledSegments(confirmed: 2, required: standard, tier: standardTier), 2)
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 1, required: standard, isTrusted: true),
+                    P.ReviewHint(text: "3 more to go", usesPersonColor: false))
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 1, required: required, isTrusted: false), nil,
+                    "context does not override probation")
+        assertEqual(P.reviewHint(moment: .confirmed, confirmedBefore: 1, required: required,
+                                isTrusted: true, earnsConfirmation: false),
+                    P.ReviewHint(text: "1 more to go", usesPersonColor: false),
+                    "an already counted meeting does not earn another confirmation")
+    }
+
     runSuite("The review footer counts people named automatically") {
         typealias P = SpeakerNamingTierPresentation
         assertEqual(P.autoNamedFooter(count: 0), nil)
