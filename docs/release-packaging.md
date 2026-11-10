@@ -266,17 +266,13 @@ local `build-beta.sh` only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
    shipping release as a prerelease: `releases/latest` skips prereleases, so
    installs would keep reading the previous feed.
 4. Run `bash scripts/release/verify-sparkle-release.sh <version>` (it fetches
-   the live feed through the same redirect Sparkle follows). For the first
-   release on the new feed only, also run
-   `scripts/release/freeze-legacy-appcast.py` ("Legacy feed" in
-   `docs/sparkle-updates.md`). Land the cask, a new
-   `Tests/Fixtures/release-health-github-release-<version>.json`, an archived
-   `Tests/Fixtures/release-health-appcast-<version>.xml` copied from the signed
-   release asset, and (first
-   new-feed release only) the freeze's two files on main in one change (#1863
-   is the example). Until the freeze lands, installs older than this release
-   keep reading `docs/appcast.xml` and see no update. No release step commits an appcast to main any
-   more.
+   the live feed through the same redirect Sparkle follows). Land the cask, a
+   new `Tests/Fixtures/release-health-github-release-<version>.json` and an
+   archived `Tests/Fixtures/release-health-appcast-<version>.xml` copied from
+   the signed release asset on main together. The legacy bridge is already
+   frozen at 1.1.75 in `config/release/legacy-appcast-freeze.json`; its one-time
+   transition is documented in "Legacy feed" in `docs/sparkle-updates.md`.
+   Current releases publish their active appcast as a release asset.
    Advance the explicit feed and GitHub fixture paths in the test matrix and
    QA bench together. They are offline snapshots of that publication, not
    permanent aliases for latest. The nightly checker validates the legacy
@@ -318,10 +314,10 @@ python3 scripts/ops/nightly-security-check.py --strict --live-release-surfaces -
 
 The live surface gate compares the latest appcast item against the live appcast,
 download routes, GitHub release asset size/digest, and Homebrew cask checksum.
-It still reads the latest item from `docs/appcast.xml`, which the legacy-feed
-freeze turns into a fixed final entry, so it needs to read the release-asset feed
-before the second release on the new feed (see "Not done yet" in
-`docs/sparkle-updates.md`).
+With `--live-release-surfaces`, it obtains the active feed from `SUFeedURL`.
+Offline checks after the legacy freeze require `--appcast <snapshot>` or an
+integrity-bound same-version GitHub release fixture. The immutable legacy feed
+is checked separately against its freeze record.
 
 After a packaging build, add local dSYM verification:
 
