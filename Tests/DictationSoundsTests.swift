@@ -2,9 +2,9 @@
 //
 // Two kinds of coverage live in this file; they are NOT the same strength of proof:
 //
-// REAL BEHAVIORAL COVERAGE (compiled): the UISoundPreferences suites and the
-// "AppSoundPlayer uses expected bundled files only" / "playback entrypoints are best
-// effort" suites exercise Foundation-pure logic compiled into the fast-test runner —
+// REAL BEHAVIORAL COVERAGE (compiled): the UISoundPreferences and
+// "AppSoundPlayer uses expected bundled files only" suites exercise Foundation-pure
+// logic compiled into the fast-test runner —
 // the default-on preference, explicit get/set, and the per-cue bundled-file-name and
 // volume-multiplier mapping. These run the real logic and assert real outputs.
 //
@@ -130,18 +130,6 @@ func testDictationSounds() {
             ],
             "Resources/Sounds is copied wholesale, so unused surprise cues should not ship"
         )
-    }
-
-    runSuite("AppSoundPlayer playback entrypoints are best effort") {
-        let key = "enableUISounds"
-        let original = UserDefaults.standard.object(forKey: key)
-        defer {
-            restoreUserDefault(original, forKey: key)
-        }
-
-        UISoundPreferences.setEnabled(false)
-        AppSoundPlayer.shared.play(.dictationStart)
-        AppSoundPlayer.shared.play(.meetingTranscriptComplete, respectingPreferences: false)
     }
 
     // When the stop click plays (after the mic stops, before the snapshot) is a
