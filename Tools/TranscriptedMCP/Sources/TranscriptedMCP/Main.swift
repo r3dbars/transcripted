@@ -51,21 +51,13 @@ struct TranscriptedMCP {
                 log("Semantic search unavailable on this host; using lexical search only")
             }
             index = try TranscriptIndex(indexDir: directories.indexDir, embeddingProvider: embeddingProvider)
-            try MCPStartupIndexing.prepareForAttach(
-                index: index,
-                meetingDirs: directories.meetingDirs,
-                dictationDirs: directories.dictationDirs,
-                writingDirs: directories.writingDirs
-            )
-            log(MCPStartupDiagnostics.message(
-                phase: .lexicalIndexReady,
-                elapsedSeconds: ProcessInfo.processInfo.systemUptime - startupStartedAt
-            ))
         } catch {
             log("MCP startup failed during lexical index preparation")
             throw error
         }
 
+        // Snapshot each directory before initial indexing. Changes during that
+        // pass remain visible to the watcher's first catch-up scan.
         let watchers = directories.watchedDirectories.enumerated().map { offset, directory in
             // One watcher retries a deferred semantic pass on its timer, so a
             // quiet library still leaves lexical-only mode once the lock frees.
@@ -83,6 +75,21 @@ struct TranscriptedMCP {
                     log("Failed to reconcile the watched capture index")
                 }
             }
+        }
+        do {
+            try MCPStartupIndexing.prepareForAttach(
+                index: index,
+                meetingDirs: directories.meetingDirs,
+                dictationDirs: directories.dictationDirs,
+                writingDirs: directories.writingDirs
+            )
+            log(MCPStartupDiagnostics.message(
+                phase: .lexicalIndexReady,
+                elapsedSeconds: ProcessInfo.processInfo.systemUptime - startupStartedAt
+            ))
+        } catch {
+            log("MCP startup failed during lexical index preparation")
+            throw error
         }
         watchers.forEach { $0.start() }
 
