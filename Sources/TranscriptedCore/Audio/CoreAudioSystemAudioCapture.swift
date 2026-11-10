@@ -17,9 +17,16 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
         var currentFormat: () throws -> AVAudioFormat
         var otherAudioIsPlaying: () -> Bool = { false }
     }
+    /// Explicit fake registration for tests; ordinary hardware-hook captures
+    /// continue to bypass property listeners entirely.
+    struct DefaultOutputListenerHooks {
+        var add: (DispatchQueue, @escaping AudioObjectPropertyListenerBlock) -> OSStatus
+        var remove: (DispatchQueue, @escaping AudioObjectPropertyListenerBlock) -> OSStatus
+    }
     public let diagnosticBackendName = "core_audio_tap"
     public let deliversOwnedAudioBuffers = true
     let queue = DispatchQueue(label: "Transcripted.CoreAudioSystemAudioCapture", qos: .userInitiated)
+    let listenerQueue = DispatchQueue(label: "Transcripted.CoreAudioSystemAudioCapture.listeners", qos: .userInitiated)
     let queueKey = DispatchSpecificKey<Bool>()
     let errors = CurrentValueSubject<String?, Never>(nil)
     let recovery = PassthroughSubject<SystemAudioRecoveryEvent, Never>()
@@ -99,6 +106,7 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
     private var continuityFailed = false
     private var producerStoppedSafely = true
     let hardwareHooks: HardwareHooks?
+    let defaultOutputListenerHooks: DefaultOutputListenerHooks?
     let clock: () -> TimeInterval
     /// Off-by-default per-second and route diagnostics (`CaptureTelemetry.swift`).
     let telemetryEnabled: Bool
@@ -115,12 +123,15 @@ public final class CoreAudioSystemAudioCapture: SystemAudioCaptureEngine, @unche
 
     public init() {
         hardwareHooks = nil
+        defaultOutputListenerHooks = nil
         clock = { ProcessInfo.processInfo.systemUptime }
         telemetryEnabled = CaptureTelemetryPreferences.isEnabled()
         queue.setSpecific(key: queueKey, value: true)
     }
-    init(hardwareHooks: HardwareHooks, clock: @escaping () -> TimeInterval, telemetryEnabled: Bool = false) {
+    init(hardwareHooks: HardwareHooks, clock: @escaping () -> TimeInterval, telemetryEnabled: Bool = false,
+         defaultOutputListenerHooks: DefaultOutputListenerHooks? = nil) {
         self.hardwareHooks = hardwareHooks
+        self.defaultOutputListenerHooks = defaultOutputListenerHooks
         self.clock = clock
         self.telemetryEnabled = telemetryEnabled
         queue.setSpecific(key: queueKey, value: true)

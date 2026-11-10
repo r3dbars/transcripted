@@ -93,20 +93,38 @@ extension CoreAudioSystemAudioCapture {
     }
 
     func installDefaultOutputListener() {
-        guard hardwareHooks == nil, defaultOutputListener == nil else { return }
+        guard hardwareHooks == nil || defaultOutputListenerHooks != nil,
+              defaultOutputListener == nil else { return }
         var address = Self.defaultOutputAddress
+        let listenerGeneration = generation
+        let captureQueue = queue
         let listener: AudioObjectPropertyListenerBlock = { [weak self] _, _ in
-            self?.defaultOutputDidChange()
+            // Never wait for the capture queue from a HAL listener. Teardown
+            // can be waiting for HAL on that queue at the same time.
+            captureQueue.async { [weak self] in
+                guard let self, self.generation == listenerGeneration,
+                      self.defaultOutputListener != nil else { return }
+                self.defaultOutputDidChange()
+            }
         }
-        // Runs the block on `queue`, so the watch stays single-threaded.
-        guard AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener) == noErr else { return }
+        let status: OSStatus
+        if let defaultOutputListenerHooks {
+            status = defaultOutputListenerHooks.add(listenerQueue, listener)
+        } else {
+            status = AudioObjectAddPropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue, listener)
+        }
+        guard status == noErr else { return }
         defaultOutputListener = listener
     }
 
     func removeDefaultOutputListener() {
         guard let listener = defaultOutputListener else { return }
         var address = Self.defaultOutputAddress
-        AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, queue, listener)
+        if let defaultOutputListenerHooks {
+            _ = defaultOutputListenerHooks.remove(listenerQueue, listener)
+        } else {
+            AudioObjectRemovePropertyListenerBlock(AudioObjectID(kAudioObjectSystemObject), &address, listenerQueue, listener)
+        }
         defaultOutputListener = nil
     }
 
