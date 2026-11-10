@@ -1,6 +1,20 @@
 # Staged real Sparkle update test for 1.1.69
 
-This bounded repair harness tests the already-published 1.1.68 -> 1.1.69 update
+## Version-specific scope
+
+This recipe records the 1.1.68 -> 1.1.69 staged repair. Its fixed versions,
+candidate revision and artifact hashes are not a checklist for the current
+release. Current release work starts with `docs/release-packaging.md` and
+`docs/sparkle-updates.md`; broader validation is in `docs/qa-test-bench.md`.
+
+The harness remains executable. Swift CI exposes the manual
+`staged_update_source_sha` input and `staged-update-proof` job, restricted to
+candidate `e42ad0f759612e0080f2d11bb5de12fda6b590bd`. The procedure below
+retains that repair's original staging context and proof limits.
+
+## Original staged repair procedure
+
+This bounded repair harness was written to test the already-published 1.1.68 -> 1.1.69 update
 before the candidate appcast reaches main. It does not publish or modify any
 release surface. It refuses native execution outside GitHub's hosted `runner`
 account, even when the owner's shell sets CI environment flags.
