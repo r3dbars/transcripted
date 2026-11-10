@@ -196,6 +196,29 @@ final class ValidatorTests: XCTestCase {
         XCTAssertFalse(results.contains { $0.status == .fail })
     }
 
+    func testRenamedDictationDayIsDiscoveredValidatedAndNotTreatedAsMeeting() throws {
+        try """
+        ---
+        capture_type: dictation_day
+        date: 2026-11-09
+        ---
+
+        ## 9:00 AM - Fixture
+
+        Entry ID: `fixture-id`
+        Captured: 2026-11-09T15:00:00Z
+        Words: 2
+
+        Fixture body.
+        """.write(to: tempRoot.appendingPathComponent("Renamed.md"), atomically: true, encoding: .utf8)
+        let results = DictationValidator(directory: tempRoot).validate()
+        XCTAssertTrue(results.contains { $0.check == "dictation/capture-type" && $0.status == .pass })
+        XCTAssertFalse(results.contains { $0.status == .fail })
+        XCTAssertFalse(TranscriptValidator(directory: tempRoot).validate().contains { $0.target == "Renamed.md" })
+        let paths = QADataDirectories.resolve(meetingsDir: tempRoot.path, homeDirectory: tempRoot.appendingPathComponent("home"), environment: [:])
+        XCTAssertEqual(paths.dictationsDir.standardizedFileURL, tempRoot.standardizedFileURL)
+    }
+
     func testDictationValidatorWarnsWhenNoDictationFilesExist() {
         let results = DictationValidator(directory: tempRoot).validate()
 
