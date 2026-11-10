@@ -13,16 +13,35 @@ protocol LlamaCompletionStreamingTransport: Sendable {
     func open(request: URLRequest) async throws -> LlamaCompletionHTTPStream
 }
 
-struct URLSessionLlamaCompletionTransport: LlamaCompletionStreamingTransport, @unchecked Sendable {
-    private let configuration: URLSessionConfiguration
+typealias LlamaStreamNetworkFactory = @Sendable (URLRequest, URLSessionConfiguration, URLSessionStreamOperation) -> LlamaStreamNetwork
 
-    init(configuration: URLSessionConfiguration = .ephemeral) {
-        self.configuration = configuration
+struct URLSessionLlamaCompletionTransport: LlamaCompletionStreamingTransport, @unchecked Sendable {
+    // Private owned template: configured once, never mutated or handed out.
+    private let configuration: URLSessionConfiguration
+    private let makeNetwork: LlamaStreamNetworkFactory
+
+    init(
+        configuration: URLSessionConfiguration = .ephemeral,
+        makeNetwork: @escaping LlamaStreamNetworkFactory = { request, configuration, operation in
+            URLSessionStreamOperation.makeNetwork(request: request, configuration: configuration, operation: operation)
+        }
+    ) {
+        let owned = configuration.copy() as! URLSessionConfiguration
+        owned.requestCachePolicy = .reloadIgnoringLocalCacheData
+        owned.urlCache = nil
+        owned.httpCookieStorage = nil
+        owned.httpShouldSetCookies = false
+        owned.urlCredentialStorage = nil
+        owned.connectionProxyDictionary = [:]
+        self.configuration = owned
+        self.makeNetwork = makeNetwork
     }
 
     func open(request: URLRequest) async throws -> LlamaCompletionHTTPStream {
         let operation = URLSessionStreamOperation()
-        operation.start(request: request, configuration: configuration)
+        // Even an injected factory may retain/mutate only its operation's copy.
+        let operationConfiguration = configuration.copy() as! URLSessionConfiguration
+        operation.start(network: makeNetwork(request, operationConfiguration, operation))
         let statusCode = try await operation.waitForResponse()
         return LlamaCompletionHTTPStream(
             statusCode: statusCode,
@@ -65,20 +84,19 @@ final class URLSessionStreamOperation: NSObject, URLSessionDataDelegate, @unchec
         }
     }
 
-    func start(request: URLRequest, configuration: URLSessionConfiguration) {
-        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
-        configuration.urlCache = nil
-        configuration.httpCookieStorage = nil
-        configuration.httpShouldSetCookies = false
-        configuration.urlCredentialStorage = nil
-        configuration.connectionProxyDictionary = [:]
-        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+    static func makeNetwork(
+        request: URLRequest,
+        configuration: URLSessionConfiguration,
+        operation: URLSessionStreamOperation
+    ) -> LlamaStreamNetwork {
+        // Each operation owns its delegate/session and invalidates only itself.
+        let session = URLSession(configuration: configuration, delegate: operation, delegateQueue: nil)
         let task = session.dataTask(with: request)
-        start(network: LlamaStreamNetwork(
+        return LlamaStreamNetwork(
             resume: { task.resume() },
             cancelTask: { task.cancel() },
             invalidate: { session.invalidateAndCancel() }
-        ))
+        )
     }
 
     func start(network: LlamaStreamNetwork) {
