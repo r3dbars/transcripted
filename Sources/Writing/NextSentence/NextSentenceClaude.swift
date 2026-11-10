@@ -151,18 +151,14 @@ final class NextSentenceClaude: @unchecked Sendable {
     }
 
     private func send(prompt: String, image: Data?, to process: NextSentenceLineProcess, timeout: TimeInterval, onTimeout: @escaping () -> Void) {
-        var content: [[String: Any]] = []
-        if let image {
-            content.append(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": image.base64EncodedString()]])
-        }
-        content.append(["type": "text", "text": prompt])
-        do {
-            try process.send(["type": "user", "message": ["role": "user", "content": content]])
-        } catch {
-            return onTimeout()
-        }
-        let timeoutBox = NextSentenceCallbackBox(onTimeout)
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { timeoutBox.call() }
+        NextSentencePromptDelivery.send(
+            prompt: prompt, image: image, timeout: timeout,
+            write: { object in
+                guard process.isRunning else { throw Failure.failed("Claude stopped.") }
+                try process.send(object)
+            },
+            onFailure: onTimeout
+        )
     }
 
     private static func failure(_ line: [String: Any], _ process: NextSentenceLineProcess) -> Failure {
@@ -175,13 +171,6 @@ final class NextSentenceClaude: @unchecked Sendable {
 }
 
 extension NextSentenceLineProcess: NextSentenceWarmProcess {}
-
-/// Carries a callback across queues. Safe because every callback here is guarded by `NextSentenceOnce`.
-final class NextSentenceCallbackBox: @unchecked Sendable {
-    private let callback: () -> Void
-    init(_ callback: @escaping () -> Void) { self.callback = callback }
-    func call() { callback() }
-}
 
 /// True for exactly one caller, whichever thread gets there first (an answer or a timeout).
 final class NextSentenceOnce: @unchecked Sendable {
