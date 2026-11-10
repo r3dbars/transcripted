@@ -7,7 +7,7 @@
 #
 #   bash scripts/dev/install-git-hooks.sh           # set it (refuses to replace another hooks path)
 #   bash scripts/dev/install-git-hooks.sh --force   # replace whatever is set
-#   bash scripts/dev/install-git-hooks.sh --check   # exit 0 if set, 1 if not
+#   bash scripts/dev/install-git-hooks.sh --check   # read-only; 0 for the executable repo hook, 1 otherwise
 
 set -euo pipefail
 
@@ -21,6 +21,10 @@ current="$(git config --get core.hooksPath || true)"
 case "$mode" in
     --check)
         if [ "$current" = "$want" ]; then
+            if [ ! -f "$want/pre-push" ] || [ ! -x "$want/pre-push" ]; then
+                echo "git hooks: $want/pre-push is missing or not an executable file in this worktree. Run: bash scripts/dev/install-git-hooks.sh"
+                exit 1
+            fi
             echo "git hooks: core.hooksPath = $want"
             exit 0
         fi

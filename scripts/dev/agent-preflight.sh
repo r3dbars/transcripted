@@ -79,8 +79,10 @@ echo ""
 echo "Branch: ${branch:-detached HEAD}"
 echo "HEAD: $head_sha"
 echo "Base: $base_ref"
-if [ -z "$(git config --get core.hooksPath 2>/dev/null)" ]; then
-    echo "Hint: git hooks are off for this clone; run bash scripts/dev/install-git-hooks.sh to lint before push."
+# A nonempty setting can still point at an obsolete checkout, or at a
+# relative hook folder that this worktree does not contain. Check read-only.
+if ! hooks_status="$(bash scripts/dev/install-git-hooks.sh --check 2>&1)"; then
+    echo "Hint: $hooks_status"
 fi
 echo ""
 
