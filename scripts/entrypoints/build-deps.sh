@@ -75,13 +75,6 @@ LLAMA_SERVER_UNSIGNED_SHA256="${LLAMA_SERVER_UNSIGNED_SHA256:-3f6895ab8d077b0280
 
 source "$ENTRYPOINT_DIR/lib/deps-staleness.sh"
 
-write_deps_build_stamp() {
-    {
-        printf 'dependency_inputs_sha256=%s\n' "$(dependency_input_digest)"
-        printf 'built_at_unix=%s\n' "$(date +%s)"
-    } > "$DEPS_BUILD_STAMP"
-}
-
 deps_are_ready() {
     local newest_input
     local build_stamp
@@ -106,6 +99,10 @@ deps_are_ready() {
         return 1
     fi
 
+    if ! deps_toolchain_matches_stamp; then
+        echo "[build-deps] Dependencies are stale for the current Swift toolchain."
+        return 1
+    fi
     if dependency_inputs_match_stamp; then
         return 0
     fi
@@ -463,6 +460,10 @@ if [ "${1:-}" != "--force" ] && deps_are_ready; then
     exit 0
 fi
 
+DEPS_BUILD_TOOLCHAIN_SHA256="$(dependency_toolchain_digest "$DEPS_BUILD")" || {
+    echo "[build-deps] ERROR: Could not fingerprint the selected Swift compilers." >&2
+    exit 1
+}
 echo "Building FluidAudio + WhisperKit (unified)..."
 
 # Build into staging directories and swap them into place only after the whole
@@ -815,7 +816,10 @@ download_sparkle_distribution
 download_llama_server
 
 cd "$DRAFT_DIR"
-write_deps_build_stamp
+if ! write_deps_build_stamp "$DEPS_BUILD_TOOLCHAIN_SHA256" "$DEPS_BUILD"; then
+    echo "[build-deps] ERROR: Could not stamp dependencies; compiler identity changed or inputs are unreadable." >&2
+    exit 1
+fi
 if ! deps_are_ready; then
     echo "[build-deps] ERROR: Staged dependency bundle is incomplete; retaining previous artifacts" >&2
     exit 1

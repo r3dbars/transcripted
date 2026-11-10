@@ -34,6 +34,11 @@ if [ ! -f "$DEPS_ARCHIVE" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "$DEPS_MOD
     exit 1
 fi
 
+if ! deps_toolchain_matches_stamp; then
+    echo "Dependencies are stale for the current Swift toolchain."
+    echo "Run: bash build-deps.sh --force"
+    exit 1
+fi
 if ! dependency_inputs_match_stamp; then
     newest_input="$(newest_dependency_input)"
     build_stamp="$(deps_build_stamp_info)"

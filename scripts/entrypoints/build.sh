@@ -90,6 +90,11 @@ ensure_deps_ready() {
     local build_stamp_path
 
     if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ] && [ -x "$LLAMA_SERVER_BINARY" ]; then
+        if ! deps_toolchain_matches_stamp; then
+            echo "Dependencies are stale for the current Swift toolchain."
+            echo "Run: bash build-deps.sh --force"
+            exit 1
+        fi
         if dependency_inputs_match_stamp; then
             return 0
         fi

@@ -39,7 +39,7 @@ with the operational health probes at `scripts/ops/daily-audio-reliability-check
 The wrappers share code from `scripts/entrypoints/lib/`:
 
 - `scripts/entrypoints/lib/running-bundle-guard.sh` — `refuse_if_bundle_running`, called by `build.sh` and `build-beta.sh` before they delete the app bundle; refuses while that bundle is running (`FORCE_REBUILD_RUNNING=1` overrides)
-- `scripts/entrypoints/lib/deps-staleness.sh` — dependency-staleness-check functions shared by `build-deps.sh`, `build.sh`, and `run-integration-smoke.sh` (a valid matching sha256 stamp rescues touched-but-unchanged inputs; invalid or mismatched stamps stay stale)
+- `scripts/entrypoints/lib/deps-staleness.sh` — dependency-staleness-check functions shared by `build-deps.sh`, `build.sh`, and `run-integration-smoke.sh` (package/app compiler identities must match the stamp, then a matching content digest rescues touched-but-unchanged inputs; invalid stamps stay stale)
 - `scripts/entrypoints/lib/shared-smoke-sources.sh` — the overlapping subset of the hand-listed swiftc source files used by `run-tests.sh`, `run-e2e-smoke.sh`, and `run-slow-pasteback-smoke.sh`
 - `scripts/entrypoints/lib/swiftc-app-args.sh` — shared swiftc argument construction (frameworks, linker inputs, source list) for the Transcripted app target, sourced by `build.sh` and `build-beta.sh` so they cannot silently diverge
 

@@ -32,6 +32,9 @@
 #   deps_build_stamp_info()     — "<mtime>\t<path>" row for the stamp file itself
 #   deps_build_stamp_digest()   — the digest recorded inside the stamp file
 #   dependency_inputs_match_stamp() — valid current content matches the stamp
+#   dependency_toolchain_digest() — effective package/app compiler identities
+#   deps_toolchain_matches_stamp() — both current compiler identities match
+#   write_deps_build_stamp(digest, cwd) — stamp a completed, unchanged build
 
 dependency_input_paths() {
     {
@@ -71,10 +74,16 @@ deps_build_stamp_info() {
 }
 
 deps_build_stamp_digest() {
+    deps_build_stamp_value dependency_inputs_sha256
+}
+
+deps_build_stamp_value() {
     if [ -f "$DEPS_BUILD_STAMP" ]; then
-        awk -F= '$1 == "dependency_inputs_sha256" {
+        awk -F= -v field="$1" '$1 == field {
             count++; value = substr($0, index($0, "=") + 1)
         } END { if (count == 1) print value; else exit 1 }' "$DEPS_BUILD_STAMP"
+    else
+        return 1
     fi
 }
 
@@ -85,4 +94,90 @@ dependency_inputs_match_stamp() {
     current_digest="$(dependency_input_digest)" || return 1
     [[ "$current_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
     [ "$current_digest" = "$stamp_digest" ]
+}
+
+dependency_package_compiler() {
+    # SwiftPM resolves SWIFT_EXEC cwd-first, then PATH for a bare name. A reuse
+    # probe models the next fresh generated package, not this repository's cwd.
+    # The generated package has no compiler executables of its own. Compilation
+    # passes its real package cwd; reuse uses an absent sibling under mktemp's
+    # same canonical parent. No previous temporary paths go into the stamp.
+    python3 - "${1:-}" "${SWIFT_EXEC:-}" <<'PY'
+import os, sys, uuid
+try:
+    cwd, override = sys.argv[1:]
+    if cwd:
+        cwd = os.path.realpath(cwd)
+    else:
+        parent = os.environ.get("TMPDIR", "").removesuffix("/") or "/tmp"
+        cwd = os.path.join(os.path.realpath(parent), "transcripted-deps-probe-" + uuid.uuid4().hex)
+        if os.path.lexists(cwd):
+            raise SystemExit(1)
+    def absolute(value):
+        return os.path.normpath(value if os.path.isabs(value) else os.path.join(cwd, value))
+    def executable(value):
+        return os.path.isfile(value) and os.access(value, os.X_OK)
+    paths = [absolute(value or ".") for value in os.environ.get("PATH", "").split(os.pathsep)]
+    if override:
+        candidates = [absolute(override)]
+        if "/" not in override:
+            candidates += [os.path.join(path, override) for path in paths]
+        for candidate in candidates:
+            if executable(candidate):
+                print(candidate)
+                raise SystemExit(0)
+    # An unresolved/nonexecutable override is ignored by SwiftPM. Its normal
+    # compiler belongs to the PATH-selected Swift driver, not arbitrary swiftc.
+    for path in paths:
+        candidate = os.path.join(path, "swift")
+        if executable(candidate):
+            print(candidate)
+            raise SystemExit(0)
+    raise SystemExit(1)
+except (OSError, ValueError):
+    raise SystemExit(1)
+PY
+}
+
+dependency_toolchain_digest() {
+    (
+        set -o pipefail
+        local app_version package_version package_compiler digest
+        app_version="$(swiftc --version 2>/dev/null)" || return 1
+        package_compiler="$(dependency_package_compiler "${1:-}")" || return 1
+        package_version="$("$package_compiler" --version 2>/dev/null)" || return 1
+        [[ "$app_version" =~ [^[:space:]] ]] && [[ "$package_version" =~ [^[:space:]] ]] || return 1
+        if [ "$app_version" = "$package_version" ]; then
+            # Same banner as CI's swiftc cache key on the usual shared toolchain.
+            digest="$(printf '%s\n' "$app_version" | shasum -a 256 | awk '{print $1}')" || return 1
+        else
+            # PATH swiftc and SwiftPM's compiler may differ legitimately. Track
+            # both without overriding selectors or deciding their compatibility.
+            digest="$(printf 'app\0%s\0package\0%s\n' "$app_version" "$package_version" | shasum -a 256 | awk '{print $1}')" || return 1
+        fi
+        [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+        printf '%s\n' "$digest"
+    )
+}
+
+deps_toolchain_matches_stamp() {
+    local stamp_digest current_digest
+    stamp_digest="$(deps_build_stamp_value swift_toolchain_sha256)" || return 1
+    [[ "$stamp_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    current_digest="$(dependency_toolchain_digest)" || return 1
+    [ "$current_digest" = "$stamp_digest" ]
+}
+
+write_deps_build_stamp() {
+    local expected_toolchain="$1" current_toolchain input_digest
+    [[ "$expected_toolchain" =~ ^[0-9a-f]{64}$ ]] || return 1
+    current_toolchain="$(dependency_toolchain_digest "${2:-}")" || return 1
+    [ "$current_toolchain" = "$expected_toolchain" ] || return 1
+    input_digest="$(dependency_input_digest)" || return 1
+    [[ "$input_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    {
+        printf 'dependency_inputs_sha256=%s\n' "$input_digest"
+        printf 'swift_toolchain_sha256=%s\n' "$current_toolchain"
+        printf 'built_at_unix=%s\n' "$(date +%s)"
+    } > "$DEPS_BUILD_STAMP"
 }
