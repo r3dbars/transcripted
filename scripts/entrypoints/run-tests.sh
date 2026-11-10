@@ -485,6 +485,8 @@ APP_SOURCES=(
     "Sources/Writing/NextSentence/NextSentencePrivacy.swift"
     "Sources/Writing/NextSentence/NextSentenceWarmPool.swift"
     "Sources/Writing/NextSentence/NextSentenceTetheredProcess.swift"
+    "Sources/Writing/NextSentence/NextSentenceLineProcess.swift"
+    "Sources/Writing/NextSentence/NextSentenceClaude.swift"
     "Sources/Writing/NextSentence/NextSentenceSemanticIndex.swift"
     "Sources/TranscriptedWriting/Core/ScreenMemory/DefaultExcludedApps.swift"
     "Sources/TranscriptedWriting/Core/Text/SecretRules.swift"

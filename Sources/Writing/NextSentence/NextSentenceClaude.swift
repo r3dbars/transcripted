@@ -42,8 +42,15 @@ final class NextSentenceClaude: @unchecked Sendable {
     }
 
     private let pool: NextSentenceWarmPool<Kind, NextSentenceLineProcess>
+    private let scheduleTimeout: (TimeInterval, NextSentenceCallbackBox) -> Void
 
-    init() {
+    init(
+        spawn: ((Kind, String?) -> NextSentenceLineProcess?)? = nil,
+        background: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .utility).async(execute: $0) },
+        scheduleTimeout: @escaping (TimeInterval, NextSentenceCallbackBox) -> Void = { delay, callback in
+            DispatchQueue.global().asyncAfter(deadline: .now() + delay) { callback.call() }
+        }
+    ) {
         var json: [Kind: String] = [:]
         for kind in Kind.allCases {
             guard let schema = kind.schema,
@@ -51,7 +58,11 @@ final class NextSentenceClaude: @unchecked Sendable {
             json[kind] = String(decoding: data, as: UTF8.self)
         }
         let schemas = json
-        pool = NextSentenceWarmPool(spawn: { Self.spawn($0, schema: schemas[$0]) })
+        self.scheduleTimeout = scheduleTimeout
+        pool = NextSentenceWarmPool(spawn: { kind in
+            if let spawn { return spawn(kind, schemas[kind]) }
+            return Self.spawn(kind, schema: schemas[kind])
+        }, background: background)
     }
 
     static func binary(userDefaults: UserDefaults = .standard) -> URL? {
@@ -79,9 +90,11 @@ final class NextSentenceClaude: @unchecked Sendable {
         let finish: (Result<String, Error>) -> Void = { result in
             guard once.claim() else { return }
             process.onLine(nil)
+            process.onOutputEnd(nil)
             self.pool.finished(process)
             completion(result)
         }
+        let ended = { finish(.failure(Failure.failed("Claude stopped before returning an answer."))) }
         process.onLine { line in
             switch line["type"] as? String {
             case "stream_event":
@@ -99,7 +112,9 @@ final class NextSentenceClaude: @unchecked Sendable {
             default: break
             }
         }
-        send(prompt: prompt, image: image, to: process, timeout: 60, onTimeout: { finish(.failure(Failure.failed("Claude took too long."))) })
+        process.onOutputEnd(ended)
+        send(prompt: prompt, image: image, to: process, timeout: 60, onSendFailure: ended,
+             onTimeout: { finish(.failure(Failure.failed("Claude took too long."))) })
     }
 
     /// A JSON answer matching `kind`'s schema. `completion` runs on a background queue.
@@ -110,9 +125,11 @@ final class NextSentenceClaude: @unchecked Sendable {
         let finish: (Result<[String: Any], Error>) -> Void = { result in
             guard once.claim() else { return }
             process.onLine(nil)
+            process.onOutputEnd(nil)
             self.pool.finished(process)
             completion(result)
         }
+        let ended = { finish(.failure(Failure.failed("Claude stopped before returning an answer."))) }
         process.onLine { line in
             // Structured output arrives as a StructuredOutput tool call, then a result line.
             if line["type"] as? String == "assistant",
@@ -127,7 +144,9 @@ final class NextSentenceClaude: @unchecked Sendable {
                 finish(.failure(Failure.failed("Claude didn't return an answer.")))
             }
         }
-        send(prompt: prompt, image: image, to: process, timeout: timeout, onTimeout: { finish(.failure(Failure.failed("Claude took too long."))) })
+        process.onOutputEnd(ended)
+        send(prompt: prompt, image: image, to: process, timeout: timeout, onSendFailure: ended,
+             onTimeout: { finish(.failure(Failure.failed("Claude took too long."))) })
     }
 
     // MARK: Processes
@@ -150,7 +169,8 @@ final class NextSentenceClaude: @unchecked Sendable {
         return process
     }
 
-    private func send(prompt: String, image: Data?, to process: NextSentenceLineProcess, timeout: TimeInterval, onTimeout: @escaping () -> Void) {
+    private func send(prompt: String, image: Data?, to process: NextSentenceLineProcess, timeout: TimeInterval,
+                      onSendFailure: () -> Void, onTimeout: @escaping () -> Void) {
         var content: [[String: Any]] = []
         if let image {
             content.append(["type": "image", "source": ["type": "base64", "media_type": "image/jpeg", "data": image.base64EncodedString()]])
@@ -159,10 +179,10 @@ final class NextSentenceClaude: @unchecked Sendable {
         do {
             try process.send(["type": "user", "message": ["role": "user", "content": content]])
         } catch {
-            return onTimeout()
+            return onSendFailure()
         }
         let timeoutBox = NextSentenceCallbackBox(onTimeout)
-        DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { timeoutBox.call() }
+        scheduleTimeout(timeout, timeoutBox)
     }
 
     private static func failure(_ line: [String: Any], _ process: NextSentenceLineProcess) -> Failure {
