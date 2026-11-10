@@ -2,44 +2,27 @@ import Foundation
 
 func testHomeScanWarningPolicy() {
     let fm = FileManager.default
+    let fixtureParent = fm.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL
 
     func temporaryRoot() -> URL {
-        let root = fm.temporaryDirectory.appendingPathComponent("home-scan-warning-\(UUID().uuidString)", isDirectory: true)
+        let root = fixtureParent.appendingPathComponent("home-scan-warning-\(UUID().uuidString)", isDirectory: true)
         try? fm.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
 
-    runSuite("RecentMeetingsScanner.diagnose reports a healthy meetings folder as ok") {
-        let dir = temporaryRoot()
-        defer { try? fm.removeItem(at: dir) }
-        assertEqual(
-            RecentMeetingsScanner.diagnose(directory: dir),
-            .ok,
-            "an existing readable directory should diagnose as ok"
-        )
-    }
-
-    runSuite("RecentMeetingsScanner.diagnose treats a missing folder as the empty state") {
-        let root = temporaryRoot()
-        defer { try? fm.removeItem(at: root) }
-        let missing = root.appendingPathComponent("not-created-yet", isDirectory: true)
-        assertEqual(
-            RecentMeetingsScanner.diagnose(directory: missing),
-            .missingFolder,
-            "a folder that was never created should be the benign empty state, not damage"
-        )
-    }
-
-    runSuite("RecentMeetingsScanner.diagnose flags a file-shaped meetings path as damaged") {
-        let root = temporaryRoot()
-        defer { try? fm.removeItem(at: root) }
-        let filePath = root.appendingPathComponent("meetings", isDirectory: false)
-        fm.createFile(atPath: filePath.path, contents: Data("not a directory".utf8))
-        assertEqual(
-            RecentMeetingsScanner.diagnose(directory: filePath),
-            .damagedPath(reason: .notADirectory),
-            "a path that resolves to a file should diagnose as a damaged, not-a-directory path"
-        )
+    func removeOwnedRoot(_ root: URL) {
+        let canonical = root.resolvingSymlinksInPath().standardizedFileURL
+        let prefix = "home-scan-warning-"
+        let name = canonical.lastPathComponent
+        guard canonical == root.standardizedFileURL,
+              canonical.deletingLastPathComponent() == fixtureParent,
+              name.hasPrefix(prefix),
+              UUID(uuidString: String(name.dropFirst(prefix.count))) != nil else {
+            assertTrue(false, "refusing to remove a fixture outside its owned temporary root")
+            return
+        }
+        do { try fm.removeItem(at: canonical) }
+        catch { assertTrue(false, "could not remove the owned scan-warning fixture") }
     }
 
     runSuite("HomeScanWarningPolicy stays silent for ok and missing-folder states") {
@@ -55,11 +38,13 @@ func testHomeScanWarningPolicy() {
 
     runSuite("HomeScanWarningPolicy surfaces a named retry/reveal card for a damaged path") {
         let dir = temporaryRoot()
-        defer { try? fm.removeItem(at: dir) }
+        defer { removeOwnedRoot(dir) }
         let filePath = dir.appendingPathComponent("meetings", isDirectory: false)
         fm.createFile(atPath: filePath.path, contents: Data("not a directory".utf8))
 
-        let diagnosis = RecentMeetingsScanner.diagnose(directory: filePath)
+        let diagnosis = RecentMeetingsScanner.loadRecentWithDiagnosis(
+            limit: 10, directory: filePath, cache: nil
+        ).diagnosis
         let card = HomeScanWarningPolicy.card(for: diagnosis)
         assertNotNil(card, "a damaged path should produce a warning card")
         guard let card else { return }
@@ -72,7 +57,7 @@ func testHomeScanWarningPolicy() {
 
     runSuite("The capture scan returns its warning alongside rows without a second diagnosis") {
         let root = temporaryRoot()
-        defer { try? fm.removeItem(at: root) }
+        defer { removeOwnedRoot(root) }
         let missing = root.appendingPathComponent("missing", isDirectory: true)
         let damaged = root.appendingPathComponent("file", isDirectory: false)
         fm.createFile(atPath: damaged.path, contents: Data("not a folder".utf8))
