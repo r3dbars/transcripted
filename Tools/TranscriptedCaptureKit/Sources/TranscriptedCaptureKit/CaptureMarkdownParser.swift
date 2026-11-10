@@ -107,9 +107,7 @@ public enum CaptureMarkdownParser {
             if trimmed.hasPrefix("- ") {
                 guard currentListKey != nil else { continue }
                 currentListItems.append(
-                    String(trimmed.dropFirst(2))
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                        .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                    CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(2)))
                 )
                 continue
             }
@@ -123,9 +121,7 @@ public enum CaptureMarkdownParser {
             }
 
             let key = String(trimmed[..<separator]).trimmingCharacters(in: .whitespaces)
-            let value = String(trimmed[trimmed.index(after: separator)...])
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            let value = CaptureMarkdown.unquoteYAMLScalar(String(trimmed[trimmed.index(after: separator)...]))
 
             if value.isEmpty {
                 currentListKey = key
@@ -364,35 +360,18 @@ public enum CaptureMarkdownParser {
             let trimmed = rawLine.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("- id:") {
                 flush()
-                currentId = trimmed
-                    .replacingOccurrences(of: "- id:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                currentId = CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(5)))
             } else if trimmed.hasPrefix("channel:") {
-                currentChannel = trimmed
-                    .replacingOccurrences(of: "channel:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                currentChannel = CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(8)))
                     .lowercased()
             } else if trimmed.hasPrefix("name:") {
-                currentName = trimmed
-                    .replacingOccurrences(of: "name:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                currentName = CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(5)))
             } else if trimmed.hasPrefix("db_id:") {
-                currentPersistentSpeakerId = trimmed
-                    .replacingOccurrences(of: "db_id:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                currentPersistentSpeakerId = CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(6)))
             } else if trimmed.hasPrefix("name_source:") {
-                currentNameSource = trimmed
-                    .replacingOccurrences(of: "name_source:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+                currentNameSource = CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(12)))
             } else if trimmed.hasPrefix("confidence:") {
-                currentConfidence = trimmed
-                    .replacingOccurrences(of: "confidence:", with: "")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                currentConfidence = CaptureMarkdown.unquoteYAMLScalar(String(trimmed.dropFirst(11)))
             } else if !trimmed.isEmpty, !trimmed.hasPrefix("-"),
                       !(rawLine.first?.isWhitespace ?? false) {
                 // Only a new top-level frontmatter key ends the speakers block.
