@@ -437,6 +437,30 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertEqual(items.map(\.title), ["Current meeting", "Legacy meeting"])
     }
 
+    func testRecentAndSearchSkipLegacySummarySidecars() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let (meetingsDir, dictationsDir) = try makeContextDirs(in: root)
+        try makeMeetingMarkdown(title: "Current meeting", date: "2026-04-18", body: "[00:03] [Mic/You] Current note.")
+            .write(to: meetingsDir.appendingPathComponent("Call.md"), atomically: true, encoding: .utf8)
+        try """
+        ---
+        capture_type: meeting_summary
+        title: Summaryonly fixture
+        date: 2026-04-18
+        time: 09:15:00
+        ---
+
+        ## Decisions
+        - Fixture decision.
+        """.write(to: meetingsDir.appendingPathComponent("Call.summary.md"), atomically: true, encoding: .utf8)
+        let directories = CLIContextDirectories(meetingsDir: meetingsDir, dictationsDir: dictationsDir)
+        let recent = CLIContextStore.recent(in: directories, kind: .meeting, count: 10, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(recent.map(\.filename), ["Call"])
+        let summaries = CLIContextStore.search(query: "summaryonly", speaker: nil, in: directories, kind: .meeting, count: 10, dateFrom: nil, dateTo: nil)
+        XCTAssertTrue(summaries.isEmpty)
+    }
+
     func testRecentSkipsNonCaptureMarkdownInMeetingsDirectory() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

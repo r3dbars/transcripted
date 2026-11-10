@@ -424,6 +424,8 @@ enum CLIContextStore {
         return files.compactMap { url in
             let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
+                  // Legacy summary sidecars belong to a parent transcript.
+                  !filename.hasSuffix(".summary"),
                   !filename.hasPrefix("Dictations_"),
                   // A writing day file has frontmatter too; in the flat
                   // shared-folder layout it must not surface as a meeting.
