@@ -13,7 +13,7 @@ spec.loader.exec_module(package)
 
 class PackagePrivacyTests(unittest.TestCase):
     def test_unexpected_data_is_rejected(self):
-        with tempfile.TemporaryDirectory(prefix="tc-package-", dir="/private/tmp") as temporary:
+        with tempfile.TemporaryDirectory(prefix="tc-package-") as temporary:
             root = Path(temporary) / "transcripted"
             shutil.copytree(package.SOURCE, root)
             package.validate(root)
