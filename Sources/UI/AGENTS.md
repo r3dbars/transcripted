@@ -19,7 +19,7 @@ Read the card for the folder you're editing first. Dependency edges live in `.ag
 - **Overlays stay out of screen capture and never steal focus.** Details in the Overlay card.
 - **Keep the product surface** (root `AGENTS.md`): meeting detection prompt, Speakers directory, per-app Auto Enter, model-cache cleanup, status-item click behavior, retained-audio playback.
 - **Saved meetings change one way.** Rename, delete, Undo and dictionary fixes go through `Shared/` and the transcript-update serializer (Shared card).
-- **Source pins.** Several UI files are pinned by tests that read source as text (`SpeakerPeopleSettingsSection.swift`, `HomeView.swift`, `MeetingOverlayController+Island.swift`, `QuietHomeLibrary.swift`). `scripts/dev/check-window-inventory.py` fails on a new `NSWindow`/`NSPanel` in `Sources/` that isn't in `.agents/window-inventory.json`, and `Tests/OverlayScreenSharePrivacyTests.swift` builds the windows and checks their `sharingType`. Run `python3 scripts/dev/check-source-pins.py --changed-only` before editing.
+- **Source pins and window coverage.** Run `python3 scripts/dev/check-source-pins.py --changed-only` before editing; its resolved targets are the current pin inventory. `scripts/dev/check-window-inventory.py` scans `Sources/` for windows against `.agents/window-inventory.json`. `Tests/OverlayScreenSharePrivacyTests.swift` builds real windows and checks their sharing behavior.
 - **Finding a label.** Settings copy is inline. Grep the exact quoted text instead of reading the big files.
 
 ## Cross-surface behavior

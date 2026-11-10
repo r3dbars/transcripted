@@ -21,7 +21,7 @@
 - Agent setup stays in `AgentConnectionSettingsPage.swift` and shares copy through `AgentConnectionGuide`; don't duplicate prompt text.
 - No transcript parsing, speaker database work, or retained-audio cleanup here. Use `Sources/Meeting/`, `Sources/TranscriptedCore/`, or `Sources/UI/Shared/`.
 - Writing views are driven by `WritingSettingsModel` in `Sources/Writing/`; runtime changes go through `WritingController`, never from a view.
-- Source-pinned: `Tests/UIAutomationSurfaceContractTests.swift` reads `TranscriptedSettingsView.swift` (Home row actions) and `HomeView.swift` as text, and `PermissionsOnboardingView.swift`, `QuietHomeLibrary.swift` and `SpeakerPeopleSettingsSection.swift` are pinned too. Run `python3 scripts/dev/check-source-pins.py --changed-only` before moving code.
+- Run `python3 scripts/dev/check-source-pins.py --changed-only` before moving code; it resolves the current source-text assertions and their targets. Do not rely on a hand-kept list of pinned Settings files.
 - Redraw gate: anything new the shell reads from `meetingSession` in its body must be added to `SettingsMeetingShellState.swift`, or the window won't redraw.
 - A closed window does no I/O. Gate work for a window nobody can see on `navigation.isWindowOpen` (`SettingsClosedWindowPolicy.swift`).
 - Per-mark work on Today runs once per snapshot, off main. Don't put it back in a view body.
