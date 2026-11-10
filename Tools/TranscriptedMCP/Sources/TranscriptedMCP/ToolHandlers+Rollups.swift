@@ -105,8 +105,9 @@ func handleListActionItems(params: CallTool.Parameters, index: TranscriptIndex, 
         dateFrom: dateFrom, dateTo: dateTo, maxItems: count
     )
 
+    let titles = frontmatterMeetingTitles(for: result.items.map(\.filename), meetingDirs: meetingDirs)
     for i in result.items.indices {
-        result.items[i].meetingTitle = meetingTitle(for: result.items[i].filename, meetingDirs: meetingDirs)
+        result.items[i].meetingTitle = titles[result.items[i].filename] ?? result.items[i].filename
     }
 
     if result.items.isEmpty {
@@ -132,8 +133,9 @@ func handleListDecisions(params: CallTool.Parameters, index: TranscriptIndex, me
 
     var result = try index.listDecisions(query: query, dateFrom: dateFrom, dateTo: dateTo, maxItems: count)
 
+    let titles = frontmatterMeetingTitles(for: result.decisions.map(\.filename), meetingDirs: meetingDirs)
     for i in result.decisions.indices {
-        result.decisions[i].meetingTitle = meetingTitle(for: result.decisions[i].filename, meetingDirs: meetingDirs)
+        result.decisions[i].meetingTitle = titles[result.decisions[i].filename] ?? result.decisions[i].filename
     }
 
     if result.decisions.isEmpty {
@@ -159,8 +161,9 @@ func handleDigest(params: CallTool.Parameters, index: TranscriptIndex, meetingDi
 
     var result = try index.digest(dateFrom: dateFrom, dateTo: dateTo)
 
+    let titles = frontmatterMeetingTitles(for: result.meetings.map(\.filename), meetingDirs: meetingDirs)
     for i in result.meetings.indices {
-        result.meetings[i].title = meetingTitle(for: result.meetings[i].filename, meetingDirs: meetingDirs)
+        result.meetings[i].title = titles[result.meetings[i].filename] ?? result.meetings[i].filename
     }
 
     if result.meetings.isEmpty {
