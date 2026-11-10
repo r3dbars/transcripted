@@ -290,10 +290,6 @@ class FloatingOverlayController {
         installEscapeMonitor()
     }
 
-    /// The island sizes itself; kept so callers that used to shrink the old
-    /// panel after loading don't need to change.
-    func resizePanelToCompact() {}
-
     func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
         errorDismissTask?.cancel()
         errorDismissTask = nil
