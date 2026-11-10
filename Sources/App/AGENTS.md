@@ -9,7 +9,7 @@
 - **Owns:** app entry, the delegate's stored state and launch wiring, detected-meeting prompts, the status item and popover, Quit, the app-active command menus, the lab control channel, and the debug test control surface.
 - **May depend on:** anything. Nothing may depend on it (the manifest check enforces that).
 - **Tests:** `bash run-tests.sh --filter StatusItem`, `bash run-tests.sh --filter LabControlCommand`, `bash run-tests.sh --filter DebugControlCommand`, `bash run-e2e-smoke.sh`.
-- **Start at:** `TranscriptedApp.swift`. It is the most source-pinned file in the repo, so run `python3 scripts/dev/check-source-pins.py --changed-only` before editing it or moving code between the delegate extensions.
+- **Start at:** `TranscriptedApp.swift`. It still has source pins, so run `python3 scripts/dev/check-source-pins.py --changed-only` before editing it or moving code between the delegate extensions.
 
 ## Rules
 
@@ -28,6 +28,8 @@
 - `TranscriptedAppDelegate+SettingsActions.swift` - Settings actions, the audio-import queue, the auto call detection preference.
 - `TranscriptedAppDelegate+Lifecycle.swift` - login-item launch detection and the Quit confirmation dialogs.
 - `TranscriptedAppDelegate+LaunchReports.swift` - launch UI smoke and first-run reliability reports for automated launches.
+- `TranscriptedAppDelegate+CallActivity.swift` - wires mic, output and camera activity monitors into `MeetingPromptDetector` and the meeting session.
+- `TranscriptedAppDelegate+NextSentence.swift` - wires Write for Me's hand-off dictation, microphone level and live words.
 - `TranscriptedMenuCommands.swift` - app-active command menus for capture, import, navigation, speaker search. The shortcut lists live in `Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift`.
 - `TranscriptedAppState.swift` - module `AppState` (card in `Sources/AGENTS.md`): the service container.
 - `TranscriptedSupportActions.swift` - Email Support and Send diagnostics: builds the diagnostics snapshot from `TranscriptedAppState` and hands it to `SupportDiagnosticsBundle`.
