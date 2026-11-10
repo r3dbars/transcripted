@@ -7,7 +7,7 @@ final class LiveCaptureSmokeTests: XCTestCase {
     func testSavedSignalEvidenceDistinguishesToneFromValidSilentWAV() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent("TranscriptedSignalEvidence-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: root) }
+        defer { removeSignalEvidenceFixture(root) }
         let tone = root.appendingPathComponent("tone.wav")
         try SystemToneFixture.writeSineWave(to: tone, duration: 1)
         let toneEvidence = try signalEvidence(at: tone)
@@ -209,10 +209,28 @@ final class LiveCaptureSmokeTests: XCTestCase {
         if let size = attributes[.size] as? UInt64 {
             return size
         }
-        if let size = attributes[.size] as? NSNumber {
-            return size.uint64Value
+        return try XCTUnwrap(attributes[.size] as? NSNumber,
+                             "Could not read file size for \(url.path)").uint64Value
+    }
+
+    private func removeSignalEvidenceFixture(_ root: URL) {
+        let fileManager = FileManager.default
+        let prefix = "TranscriptedSignalEvidence-"
+        let temporaryRoot = fileManager.temporaryDirectory.resolvingSymlinksInPath()
+        let resolved = root.resolvingSymlinksInPath()
+        guard root.lastPathComponent.hasPrefix(prefix),
+              UUID(uuidString: String(root.lastPathComponent.dropFirst(prefix.count))) != nil,
+              resolved.deletingLastPathComponent() == temporaryRoot,
+              resolved.lastPathComponent == root.lastPathComponent else {
+            XCTFail("refusing to remove a signal fixture outside its owned temporary root")
+            return
         }
-        throw XCTSkip("Could not read file size for \(url.path)")
+        guard fileManager.fileExists(atPath: root.path) else { return }
+        do {
+            try fileManager.removeItem(at: root)
+        } catch {
+            XCTFail("owned signal fixture cleanup failed")
+        }
     }
 }
 
