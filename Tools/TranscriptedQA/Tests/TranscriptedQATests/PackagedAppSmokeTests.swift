@@ -12,7 +12,15 @@ final class PackagedAppSmokeTests: XCTestCase {
 
     override func tearDownWithError() throws {
         if let tempRoot {
-            try? FileManager.default.removeItem(at: tempRoot)
+            let canonical = tempRoot.resolvingSymlinksInPath().standardizedFileURL
+            let prefix = "PackagedAppSmokeTests-"
+            guard canonical.deletingLastPathComponent() == FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL,
+                  canonical.lastPathComponent.hasPrefix(prefix),
+                  UUID(uuidString: String(canonical.lastPathComponent.dropFirst(prefix.count))) != nil,
+                  try FileManager.default.attributesOfItem(atPath: tempRoot.path)[.type] as? FileAttributeType == .typeDirectory else {
+                throw CocoaError(.fileWriteInvalidFileName)
+            }
+            try FileManager.default.removeItem(at: tempRoot)
         }
     }
 
@@ -53,6 +61,52 @@ final class PackagedAppSmokeTests: XCTestCase {
         XCTAssertTrue(report.checks.contains { $0.id == "keyboard-signature" && $0.status == .pass })
         XCTAssertEqual(report.status, .warn)
         XCTAssertEqual(report.exitCode, 3)
+    }
+
+    func testPackagedPrivacyScanRejectsOnboardingLeakWithCleanMainLog() throws {
+        let fixture = try makeFixture()
+        let onboardingLog = tempRoot.appendingPathComponent("onboarding.jsonl")
+        try #"{"email":"synthetic-onboarding@example.invalid"}"#.write(to: onboardingLog, atomically: true, encoding: .utf8)
+        let uiReport = uiReport(fixture: fixture, onboardingLog: onboardingLog.path)
+
+        let report = makeRunner(fixture: fixture, uiReport: uiReport).run()
+
+        XCTAssertTrue(report.logPaths.contains(onboardingLog.path))
+        XCTAssertTrue(report.checks.contains { $0.id == "logs/privacy-scan" && $0.target == fixture.log.path && $0.status == .pass })
+        XCTAssertTrue(report.checks.contains { $0.id == "logs/privacy-scan" && $0.target == onboardingLog.path && $0.status == .fail })
+        XCTAssertEqual(report.exitCode, 1)
+        XCTAssertFalse(report.checks.compactMap(\.detail).joined().contains("synthetic-onboarding@example.invalid"))
+    }
+
+    func testPackagedPrivacyScanAcceptsBothCleanLaunchLogs() throws {
+        let fixture = try makeFixture()
+        let onboardingLog = tempRoot.appendingPathComponent("onboarding.jsonl")
+        try #"{"m":"synthetic onboarding ready"}"#.write(to: onboardingLog, atomically: true, encoding: .utf8)
+
+        let report = makeRunner(fixture: fixture, uiReport: uiReport(fixture: fixture, onboardingLog: onboardingLog.path)).run()
+
+        let scans = report.checks.filter { $0.id == "logs/privacy-scan" }
+        XCTAssertEqual(Set(scans.map(\.target)), Set([fixture.log.path, onboardingLog.path]))
+        XCTAssertTrue(scans.allSatisfy { $0.status == .pass })
+        XCTAssertFalse(report.checks.contains { $0.status == .fail })
+    }
+
+    func testPackagedPrivacyScanSupportsAbsentOrRepeatedOnboardingLog() throws {
+        let fixture = try makeFixture()
+        for onboardingLog in [nil, fixture.log.path] {
+            let report = makeRunner(fixture: fixture, uiReport: uiReport(fixture: fixture, onboardingLog: onboardingLog)).run()
+            let scans = report.checks.filter { $0.id == "logs/privacy-scan" }
+            XCTAssertEqual(scans.count, 1)
+            XCTAssertEqual(scans.first?.status, .pass)
+        }
+    }
+
+    private func uiReport(fixture: Fixture, onboardingLog: String?) -> UIAutomationSmokeReport {
+        var builder = UIAutomationSmokeReportBuilder(runID: "synthetic", appBundlePath: fixture.app.path, reportPath: nil)
+        builder.appLogPath = fixture.log.path
+        builder.onboardingAppLogPath = onboardingLog
+        builder.add(.pass("synthetic-ui", "Injected report only; no app launch", target: "owned fixture"))
+        return builder.build()
     }
 
     func testMissingLlamaServerHelperFails() throws {
@@ -270,7 +324,8 @@ final class PackagedAppSmokeTests: XCTestCase {
         fixture: Fixture,
         requireDSYM: Bool = true,
         requireDMG: Bool = true,
-        commandRunner: PackagedAppSmokeCommandRunning = FakePackagedAppSmokeCommandRunner()
+        commandRunner: PackagedAppSmokeCommandRunning = FakePackagedAppSmokeCommandRunner(),
+        uiReport: UIAutomationSmokeReport? = nil
     ) -> PackagedAppSmokeRunner {
         PackagedAppSmokeRunner(
             appBundlePath: fixture.app.path,
@@ -286,12 +341,17 @@ final class PackagedAppSmokeTests: XCTestCase {
             firstRunTimeout: 1,
             requireDSYM: requireDSYM,
             requireDMG: requireDMG,
-            runUISmoke: false,
+            runUISmoke: uiReport != nil,
             runFirstRunReliability: false,
             allowExistingInstance: false,
             promptForAccessibility: false,
             verifyCodeSignature: true,
-            commandRunner: commandRunner
+            commandRunner: commandRunner,
+            runUIAutomation: { _ in
+                // A report fixture replaces the real runner, including all native account/AX/app work.
+                guard let uiReport else { preconditionFailure("UI smoke was not requested") }
+                return uiReport
+            }
         )
     }
 

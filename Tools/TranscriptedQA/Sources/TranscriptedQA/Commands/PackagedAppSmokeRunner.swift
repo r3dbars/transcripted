@@ -21,6 +21,7 @@ final class PackagedAppSmokeRunner {
     private let verifyCodeSignature: Bool
     private let fileManager: FileManager
     private let commandRunner: PackagedAppSmokeCommandRunning
+    private let runUIAutomation: (UIAutomationSmokeRunner) -> UIAutomationSmokeReport
     private let runID = UUID().uuidString
 
     init(
@@ -43,7 +44,8 @@ final class PackagedAppSmokeRunner {
         promptForAccessibility: Bool,
         verifyCodeSignature: Bool,
         fileManager: FileManager = .default,
-        commandRunner: PackagedAppSmokeCommandRunning = ProcessPackagedAppSmokeCommandRunner()
+        commandRunner: PackagedAppSmokeCommandRunning = ProcessPackagedAppSmokeCommandRunner(),
+        runUIAutomation: @escaping (UIAutomationSmokeRunner) -> UIAutomationSmokeReport = { $0.run() }
     ) {
         self.appBundleURL = URL(fileURLWithPath: appBundlePath).standardizedFileURL
         self.sourceInfoPlistURL = URL(fileURLWithPath: sourceInfoPlistPath).standardizedFileURL
@@ -65,6 +67,7 @@ final class PackagedAppSmokeRunner {
         self.verifyCodeSignature = verifyCodeSignature
         self.fileManager = fileManager
         self.commandRunner = commandRunner
+        self.runUIAutomation = runUIAutomation
     }
 
     func run(generatedAt: Date = Date()) -> PackagedAppSmokeReport {
@@ -172,12 +175,12 @@ final class PackagedAppSmokeRunner {
                 promptForAccessibility: promptForAccessibility,
                 keepRunning: false
             )
-            let uiReport = uiRunner.run()
+            let uiReport = runUIAutomation(uiRunner)
             try? uiReport.writeIfRequested()
             uiEvidencePath = uiReport.reportPath
-            if let appLogPath = uiReport.appLogPath {
-                scannedLogPaths.append(appLogPath)
-            }
+            scannedLogPaths.append(contentsOf: [
+                uiReport.appLogPath, uiReport.onboardingAppLogPath,
+            ].compactMap { $0 })
             checks.append(validateUISmoke(uiReport))
         } else {
             checks.append(.warn("ui-smoke", target: appBundleURL.path, detail: "Menu bar launch proof was not run. Rerun with --run-ui-smoke on a host with Accessibility permission."))
