@@ -439,6 +439,13 @@ protocol ParakeetConfigChangeRecoveryHost: AnyObject {
     func markRecordingStoppedForRecovery()
     func cancelConfigRecoveryIfCurrent(generation: UInt64)
     func reportGraphReusedAfterConfigChange()
+    func reportConfigChangeAdmissionBlocked(activeWorkers: Int)
+    func configChangeNativeWorkTimedOut(generation: UInt64, wasRecording: Bool) async
+}
+
+extension ParakeetConfigChangeRecoveryHost {
+    func reportConfigChangeAdmissionBlocked(activeWorkers: Int) {}
+    func configChangeNativeWorkTimedOut(generation: UInt64, wasRecording: Bool) async {}
 }
 
 enum ParakeetConfigChangeTeardown {
@@ -458,42 +465,60 @@ enum ParakeetConfigChangeTeardown {
         // A route notification that lands while a user stop is suspended must
         // not take the graph or inherit the old recording bit.
         guard host.admitsConfigChangeRecovery else { return nil }
-        graph.generation += 1
-        let recoveryGeneration = host.beginConfigChangeRecovery()
-        // The system already stopped the engine before posting the change, so
-        // the tap and prewarm state are stale.
-        host.cancelAudioWatchdog()
-        host.cancelPrewarmRetry()
-
-        guard let teardown = await graph.stopForRecovery(
-            isRecording: host.isRecording,
-            preserveRecording: { host.preserveCurrentRecordingBuffersForRecovery() },
-            markRecordingStopped: { host.markRecordingStoppedForRecovery() }
-        ) else {
-            host.cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+        guard let permit = graph.reserveConfigurationTeardown() else {
+            host.reportConfigChangeAdmissionBlocked(activeWorkers: graph.configurationWorkerCount)
             return nil
         }
-
-        switch ParakeetConfigChangeGraphPolicy.action(
-            strategy: strategy,
-            releasedVoiceProcessing: teardown.releasedVoiceProcessing,
+        // Cancel old watchdog work before installing this operation's phase;
+        // cancelAudioWatchdog claims pending work and must not claim itself.
+        host.cancelAudioWatchdog()
+        guard host.admitsConfigChangeRecovery else { permit.release(); return nil }
+        let wasRecording = host.isRecording
+        graph.generation += 1
+        guard let work = graph.ownConfigurationTeardown(
+            permit, wasRecording: wasRecording, strategy: strategy,
             forceForMicrophoneSharing: forceForMicrophoneSharing
-        ) {
-        case .reuseCurrentGraph:
-            // CoreAudio already stopped this graph. Leave it in place so the
-            // recovery snapshot and restart can rebind the tap without retiring
-            // another engine and scheduling another late configuration echo.
-            host.reportGraphReusedAfterConfigChange()
-        case .rebuildGraph(let requiresFreshGraph):
-            guard let rebuiltOwner = await graph.rebuild(
-                reason: "configuration_change",
-                requiresFreshGraph: requiresFreshGraph
-            ), graph.owns(rebuiltOwner) else {
+        ) else { return nil }
+        let observerSuspended = graph.suspendConfigurationObserver(ownedBy: work.owner)
+        defer {
+            // No exit may strand the queued authority behind its entry gate.
+            graph.allowConfigurationNativeCalls(work)
+            // A timeout can return while late cleanup is still running. Only
+            // returned native calls and the exact owner may restore listening.
+            if observerSuspended, work.nativeWorkFinished {
+                graph.restoreConfigurationObserverIfCurrent(work.owner)
+            }
+        }
+        let recoveryGeneration = host.beginConfigChangeRecovery()
+        host.cancelPrewarmRetry()
+        if graph.owns(work.owner), wasRecording {
+            host.preserveCurrentRecordingBuffersForRecovery()
+        }
+        graph.allowConfigurationNativeCalls(work)
+        do {
+            // One ordered native block, one overall budget, one old resource.
+            let result = try await work.value()
+            guard graph.owns(work.owner), host.admitsConfigChangeRecovery else {
+                graph.releaseFinishedConfigurationAuthority(work)
                 host.cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
                 return nil
             }
+            if wasRecording { host.markRecordingStoppedForRecovery() }
+            guard graph.commitConfigurationTeardown(work, result: result) else {
+                host.cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+                return nil
+            }
+            if case .reuseCurrentGraph = result.action { host.reportGraphReusedAfterConfigChange() }
+            return recoveryGeneration
+        } catch {
+            if (error as? ParakeetAudioEngineWorkError)?.isTimedOut == true {
+                await host.configChangeNativeWorkTimedOut(generation: recoveryGeneration, wasRecording: wasRecording)
+            } else {
+                host.cancelConfigRecoveryIfCurrent(generation: recoveryGeneration)
+            }
+            graph.releaseFinishedConfigurationAuthority(work)
+            return nil
         }
-        return recoveryGeneration
     }
 }
 

@@ -123,12 +123,23 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
     private let workLimiter: ParakeetTimedAudioEngineWorkLimiter
     private(set) var engine: Driver.Engine
     private(set) var queue: DispatchQueue
-    var generation = 0
+    var generation = 0 {
+        didSet {
+            // A finished proof cannot authorize cleanup suppression after the
+            // same engine/queue is reused by a different lifecycle.
+            if generation != oldValue, let work = configurationNativeWork,
+               work.nativeWorkFinished,
+               !workOwnership.isActive(owner: work.owner, phase: .configurationTeardown) {
+                configurationNativeWork = nil
+            }
+        }
+    }
     var inputTapInstalled = false
     var isPrewarmed = false
     var startAdmission = ParakeetAudioStartAdmissionState()
     let workOwnership = ParakeetTimedAudioEngineWorkOwnership()
     private var didReportRetirementLimit = false
+    private var configurationNativeWork: ParakeetConfigurationNativeWork<Driver.Engine>?
 
     init(driver: Driver, workLimiter: ParakeetTimedAudioEngineWorkLimiter) {
         self.driver = driver
@@ -140,8 +151,11 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
     deinit {
         let engine = ParakeetGraphConfined(engine)
         let driver = driver
-        queue.async {
-            driver.cleanUpLateStart(engine.value)
+        if configurationNativeWork?.claimCleanup(
+            owner: ParakeetAudioEngineQueueOwnerToken(generation: generation, engine: engine.value, queue: queue),
+            engine: engine.value, queue: queue
+        ) != true {
+            queue.async { driver.cleanUpLateStart(engine.value) }
         }
         _ = driver.retire(engine.value, reason: "deinit")
     }
@@ -194,6 +208,122 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
             cleanupAfterLateCompletion: cleanupAfterLateCompletion,
             work
         )
+    }
+
+    /// Admission precedes graph/recovery mutation. Refusal cannot stop or
+    /// silently relabel a currently running recording.
+    func reserveConfigurationTeardown() -> ParakeetTimedAudioEngineWorkLimiter.Lease? {
+        guard configurationNativeWork?.nativeWorkFinished != false else { return nil }
+        return workLimiter.acquire()
+    }
+
+    var configurationWorkerCount: Int { workLimiter.activeWorkerCount }
+
+    /// Queues cleanup authority before recovery publication can reenter. Native
+    /// work waits behind allowConfigurationNativeCalls, after host setup.
+    func ownConfigurationTeardown(
+        _ permit: ParakeetTimedAudioEngineWorkLimiter.Lease, wasRecording: Bool,
+        strategy: ParakeetConfigChangeGraphStrategy, forceForMicrophoneSharing: Bool
+    ) -> ParakeetConfigurationNativeWork<Driver.Engine>? {
+        guard let work = ParakeetConfigurationNativeWork(owner: queueOwner, engine: engine, queue: queue, permit: permit) else { return nil }
+        let driver = driver
+        let ownership = workOwnership
+        let owner = work.owner
+        let current = { ownership.isActive(owner: owner, phase: .configurationTeardown) }
+        ownership.begin(owner: owner, phase: .configurationTeardown)
+        guard work.enqueue(
+            timeoutNanoseconds: TranscriptedConstants.audioDeviceRecoveryTimeout,
+            scheduleTimeout: workLimiter.configurationTimeouts,
+            isCurrent: current, cleanup: { driver.cleanUpLateStart($0) },
+            nativeCompletion: { ownership.finish(owner: owner, phase: .configurationTeardown) },
+            didFinishNativeCalls: workLimiter.configurationNativeCompletion,
+            work: { engine in
+                if wasRecording { _ = driver.removeInputTap(on: engine) }
+                guard current() else { throw CancellationError() }
+                let released = driver.stop(engine)
+                guard current() else { throw CancellationError() }
+                let action = ParakeetConfigChangeGraphPolicy.action(
+                    strategy: strategy, releasedVoiceProcessing: released,
+                    forceForMicrophoneSharing: forceForMicrophoneSharing
+                )
+                var resetReleased: Bool?
+                if case .rebuildGraph = action {
+                    resetReleased = driver.removeInputTap(on: engine)
+                    guard current() else { throw CancellationError() }
+                    driver.reset(engine)
+                }
+                return ParakeetConfigurationNativeResult(action: action, resetReleasedVoiceProcessing: resetReleased)
+            }
+        ) else {
+            ownership.finish(owner: owner, phase: .configurationTeardown)
+            return nil
+        }
+        configurationNativeWork = work
+        return work
+    }
+
+    /// Suspend before any route-native calls, including a reuse decision that
+    /// escalates to reset. A reset echo must not enter the live route mailbox.
+    func suspendConfigurationObserver(ownedBy owner: QueueOwner) -> Bool {
+        guard owns(owner), let host else { return false }
+        host.removeAudioEngineConfigObserver()
+        return true
+    }
+
+    /// Unlike the legacy engine-only helper, this belongs to one exact route
+    /// operation. A newer generation or queue owns its observer installation.
+    func restoreConfigurationObserverIfCurrent(_ owner: QueueOwner) {
+        guard owns(owner), let host, !host.isShuttingDown else { return }
+        host.installAudioEngineConfigObserverIfNeeded()
+    }
+
+    func allowConfigurationNativeCalls(_ work: ParakeetConfigurationNativeWork<Driver.Engine>) {
+        // Always release the gate: an obsolete owner still owes leased cleanup.
+        work.allowNativeCalls()
+    }
+
+    /// A stale continuation cannot leave a returned proof attached to a later
+    /// capture that reuses the same resource identities.
+    func releaseFinishedConfigurationAuthority(_ work: ParakeetConfigurationNativeWork<Driver.Engine>) {
+        if configurationNativeWork === work, work.nativeWorkFinished {
+            configurationNativeWork = nil
+        }
+    }
+
+    /// Commits only returned native work. The authority stays installed until
+    /// this actor turn, covering a watchdog that wins before this continuation.
+    func commitConfigurationTeardown(
+        _ work: ParakeetConfigurationNativeWork<Driver.Engine>,
+        result: ParakeetConfigurationNativeResult
+    ) -> Bool {
+        guard owns(work.owner), configurationNativeWork === work else { return false }
+        defer { configurationNativeWork = nil }
+        inputTapInstalled = false
+        isPrewarmed = false
+        switch result.action {
+        case .reuseCurrentGraph: return true
+        case .rebuildGraph(let requiresFreshGraph):
+            host?.trackAudioEngineRebuildChurn(reason: "configuration_change")
+            host?.removeAudioEngineConfigObserver()
+            if result.resetReleasedVoiceProcessing == false {
+                return discardStoppedVoiceProcessingGraph(ownedBy: work.owner) != nil
+            }
+            generation += 1
+            let didRetire = reserveRetired(engine, reason: "configuration_change")
+            if didRetire { engine = driver.makeEngine() }
+            host?.clearGraphSampleFlags()
+            installConfigObserverUnlessShuttingDown()
+            guard didRetire else {
+                if requiresFreshGraph {
+                    host?.interruptRecordingPreservingRecoveredTimeline()
+                    return false
+                }
+                host?.reportAudioGraphEvent(.resetInPlaceAtRetirementLimit)
+                return true
+            }
+            host?.reportAudioGraphEvent(.rebuilt(reason: "configuration_change"))
+            return true
+        }
     }
 
     // MARK: - Teardown
@@ -405,10 +535,30 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
         reason: String,
         expectedOwner: QueueOwner? = nil
     ) -> Bool {
+        abandonBlocked(reason: reason, expectedOwner: expectedOwner, claimedWork: nil)
+    }
+
+    /// Only the synchronous pending-work claim path can hand an old completed
+    /// phase across a user stop's generation advance. Resource identity alone
+    /// never extends a completed proof into a new capture.
+    private func abandonBlocked(
+        reason: String, expectedOwner: QueueOwner?,
+        claimedWork: ParakeetTimedAudioEngineWorkLease?
+    ) -> Bool {
         if let expectedOwner, !owns(expectedOwner) {
             return false
         }
+        let handoffOwner = queueOwner
+        let cleanupOwner: QueueOwner
+        if let claimedWork, claimedWork.phase == .configurationTeardown,
+           claimedWork.owner.matchesResources(engine: engine, queue: queue) {
+            cleanupOwner = claimedWork.owner
+        } else { cleanupOwner = handoffOwner }
+        let cleanupIsLeased = configurationNativeWork?.claimCleanup(
+            owner: cleanupOwner, engine: engine, queue: queue
+        ) == true
         host?.trackAudioEngineRebuildChurn(reason: reason)
+        guard owns(handoffOwner) else { return false }
         _ = workOwnership.claimPendingWorkForSuccessor(
             currentEngine: engine,
             currentQueue: queue
@@ -425,8 +575,9 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
         queue = driver.makeQueue()
         let driver = driver
         let confinedEngine = ParakeetGraphConfined(retiredEngine)
-        retiredQueue.async {
-            driver.cleanUpLateStart(confinedEngine.value)
+        configurationNativeWork = nil
+        if !cleanupIsLeased {
+            retiredQueue.async { driver.cleanUpLateStart(confinedEngine.value) }
         }
         inputTapInstalled = false
         isPrewarmed = false
@@ -454,11 +605,13 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
             reason = "audio_engine_start_cancelled"
         case .deviceRecoverySnapshot:
             reason = "device_recovery_snapshot_cancelled"
+        case .configurationTeardown:
+            reason = "configuration_change_teardown_cancelled"
         }
         if blockedLease.phase == .audioStart {
             startAdmission.finish(owner: blockedLease.owner)
         }
-        return abandonBlocked(reason: reason)
+        return abandonBlocked(reason: reason, expectedOwner: nil, claimedWork: blockedLease)
     }
 
     /// A start that timed out inside CoreAudio replaces its graph exactly

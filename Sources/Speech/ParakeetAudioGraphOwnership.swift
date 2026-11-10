@@ -103,6 +103,7 @@ enum ParakeetTimedAudioEngineWorkPhase: String, Equatable, Sendable {
     case zombieReset
     case audioStart
     case deviceRecoverySnapshot
+    case configurationTeardown
 }
 
 struct ParakeetTimedAudioEngineWorkLease: Equatable, Sendable {

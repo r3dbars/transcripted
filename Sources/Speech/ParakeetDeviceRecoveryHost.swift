@@ -43,4 +43,20 @@ extension ParakeetEngine: ParakeetConfigChangeRecoveryHost {
     func reportGraphReusedAfterConfigChange() {
         AppLogger.transcription.info("PARAKEET | stable configuration change → reusing current audio graph")
     }
+    func reportConfigChangeAdmissionBlocked(activeWorkers: Int) {
+        reportWorkCircuitOpenIfNeeded(
+            message: "Configuration recovery awaits admitted native work",
+            context: ParakeetAudioEngineWorkError.circuitOpen(
+                operation: "configuration_change_teardown", activeWorkers: activeWorkers
+            ).boundedWorkContext
+        )
+    }
+
+    func configChangeNativeWorkTimedOut(generation: UInt64, wasRecording: Bool) async {
+        await ParakeetDeviceRecoverySequence.runTimeout(
+            generation: generation, wasRecording: wasRecording,
+            steps: deviceRecoveryTimeoutSteps(generation: generation, wasRecording: wasRecording)
+        )
+    }
+
 }

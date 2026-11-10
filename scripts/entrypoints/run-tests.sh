@@ -536,6 +536,7 @@ APP_SOURCES=(
     "Sources/Speech/ParakeetAudioGraphOwnership.swift"
     "Sources/Speech/ParakeetDecoderLayerCountCache.swift"
     "Sources/Speech/ParakeetAudioGraph.swift"
+    "Sources/Speech/ParakeetConfigurationNativeWork.swift"
     "Sources/Speech/ParakeetAudioGraphSequences.swift"
     "Sources/Speech/ParakeetDeviceRecoverySequence.swift"
     # AudioInputTapTeardownPolicy, the shared tap teardown order the
