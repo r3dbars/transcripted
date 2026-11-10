@@ -146,6 +146,13 @@ def self_test(matrix_path: Path) -> None:
         raise AssertionError(f"expected the full verification matrix, found only {len(rules)} rules")
 
     matching_cases = {
+        "Sources/App/TranscriptedApp.swift": {"bash scripts/dev/typecheck-lab-build.sh"},
+        "Sources/Meeting/Nested/LabDependency.swift": {"bash scripts/dev/typecheck-lab-build.sh"},
+        "Sources/TranscriptedWriting/Core/LabDependency.swift": {"bash scripts/dev/typecheck-lab-build.sh"},
+        "scripts/entrypoints/lib/swiftc-app-args.sh": {"bash scripts/dev/typecheck-lab-build.sh"},
+        "scripts/entrypoints/build-deps.sh": {"bash scripts/dev/typecheck-lab-build.sh"},
+        "Package.swift": {"bash scripts/dev/typecheck-lab-build.sh"},
+        ".github/workflows/swift-ci.yml": {"bash scripts/dev/typecheck-lab-build.sh"},
         "Tests/ReleaseMetadataContractTests.swift": {
             "bash build.sh --no-open",
             "bash run-tests.sh",
