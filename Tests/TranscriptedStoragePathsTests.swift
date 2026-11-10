@@ -66,6 +66,48 @@ func testTranscriptedStoragePaths() {
     }
     guard manifestWritesAreIsolated else { return }
 
+    // The capture-library safety policy rejects system temp paths under /private.
+    // Keep these production-setter fixtures under this checkout's owned build
+    // directory instead of creating UUID folders directly in the user's home.
+    let checkoutRoot = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        .standardizedFileURL.resolvingSymlinksInPath()
+    let buildRoot = checkoutRoot.appendingPathComponent("build", isDirectory: true)
+        .resolvingSymlinksInPath()
+    guard buildRoot.deletingLastPathComponent() == checkoutRoot,
+          buildRoot.lastPathComponent == "build" else {
+        assertTrue(false, "storage fixtures require this checkout's own build directory")
+        return
+    }
+    let fixtureParent = buildRoot.appendingPathComponent("storage-path-fixtures", isDirectory: true)
+        .resolvingSymlinksInPath()
+    guard fixtureParent.deletingLastPathComponent() == buildRoot else {
+        assertTrue(false, "storage fixture parent must stay directly under this checkout's build directory")
+        return
+    }
+    let fixtureRoot = fixtureParent
+        .appendingPathComponent("TranscriptedStoragePathsTests-\(UUID().uuidString)", isDirectory: true)
+    do {
+        try FileManager.default.createDirectory(at: fixtureRoot, withIntermediateDirectories: true)
+    } catch {
+        assertTrue(false, "storage fixture setup failed: \(error)")
+        return
+    }
+    defer {
+        // Delete only this invocation's child, never the shared parent or a
+        // preexisting folder in the real home directory.
+        let resolved = fixtureRoot.standardizedFileURL.resolvingSymlinksInPath()
+        if resolved.deletingLastPathComponent() == fixtureParent,
+           resolved.lastPathComponent.hasPrefix("TranscriptedStoragePathsTests-") {
+            do {
+                try FileManager.default.removeItem(at: resolved)
+            } catch {
+                assertTrue(false, "storage fixture cleanup failed: \(error)")
+            }
+        } else {
+            assertTrue(false, "refusing storage fixture cleanup outside its owned parent")
+        }
+    }
+
     runSuite("FileManager.createPrivateDirectory — tightens existing directories to owner-only") {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedStoragePathsTests-existing-\(UUID().uuidString)", isDirectory: true)
@@ -174,9 +216,8 @@ func testTranscriptedStoragePaths() {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
-        let customRoot = FileManager.default.homeDirectoryForCurrentUser
+        let customRoot = fixtureRoot
             .appendingPathComponent("TranscriptedStoragePathsTests-parity-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: customRoot) }
 
         let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
         assertTrue(persisted, "test setup should persist a safe custom capture-library root")
@@ -215,9 +256,8 @@ func testTranscriptedStoragePaths() {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
-        let customRoot = FileManager.default.homeDirectoryForCurrentUser
+        let customRoot = fixtureRoot
             .appendingPathComponent("TranscriptedStoragePathsTests-custom-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: customRoot) }
 
         let persisted = TranscriptedStoragePreferences.setCaptureLibraryURL(customRoot)
 
@@ -284,9 +324,8 @@ func testTranscriptedStoragePaths() {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
-        let sharedRoot = FileManager.default.homeDirectoryForCurrentUser
+        let sharedRoot = fixtureRoot
             .appendingPathComponent("TranscriptedStoragePathsTests-shared-\(UUID().uuidString)", isDirectory: true)
-        defer { try? FileManager.default.removeItem(at: sharedRoot) }
         try? FileManager.default.createDirectory(
             at: sharedRoot,
             withIntermediateDirectories: true,
@@ -415,9 +454,8 @@ func testTranscriptedStoragePaths() {
         }
         UserDefaults.standard.removeObject(forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
 
-        let fileURL = FileManager.default.homeDirectoryForCurrentUser
+        let fileURL = fixtureRoot
             .appendingPathComponent("TranscriptedStoragePathsTests-file-root-\(UUID().uuidString)", isDirectory: false)
-        defer { try? FileManager.default.removeItem(at: fileURL) }
 
         FileManager.default.createFile(atPath: fileURL.path, contents: Data("not a directory".utf8))
 
@@ -442,14 +480,10 @@ func testTranscriptedStoragePaths() {
             restore(original, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
         }
 
-        let existingRoot = FileManager.default.homeDirectoryForCurrentUser
+        let existingRoot = fixtureRoot
             .appendingPathComponent("TranscriptedStoragePathsTests-existing-root-\(UUID().uuidString)", isDirectory: true)
-        let fileURL = FileManager.default.homeDirectoryForCurrentUser
+        let fileURL = fixtureRoot
             .appendingPathComponent("TranscriptedStoragePathsTests-replacement-file-root-\(UUID().uuidString)", isDirectory: false)
-        defer {
-            try? FileManager.default.removeItem(at: existingRoot)
-            try? FileManager.default.removeItem(at: fileURL)
-        }
 
         assertTrue(
             TranscriptedStoragePreferences.setCaptureLibraryURL(existingRoot),
