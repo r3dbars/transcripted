@@ -115,6 +115,9 @@ enum TranscribeMediaLoader {
             throw decodeFailure(url: url, detail: "could not convert \(srcFormat.sampleRate)Hz \(srcFormat.channelCount)ch audio to \(Int(targetSampleRate))Hz mono")
         }
 
+        // AVAudioConverter otherwise maps stereo to the first channel only.
+        converter.downmix = srcFormat.channelCount > 1
+
         let ratio = targetSampleRate / srcFormat.sampleRate
         let estimatedDstFrames = Double(file.length) * ratio + 64
         guard estimatedDstFrames.isFinite,
