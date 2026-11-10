@@ -478,10 +478,12 @@ rules:
   - paths:
       - "check.sh"
       - "scripts/entrypoints/check.sh"
+      - "Tests/BuildDependencies/FullCheckTests.sh"
     checks:
       - "bash -n check.sh"
       - "bash -n scripts/entrypoints/check.sh"
       - "bash check.sh --help"
+      - "bash Tests/BuildDependencies/FullCheckTests.sh"
 
   - paths:
       - "scripts/dev/agent-check.py"

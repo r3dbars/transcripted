@@ -384,6 +384,7 @@ unlisted_candidates() {
     done
 }
 
+check "full gate CI parity contracts" "bash Tests/BuildDependencies/FullCheckTests.sh" slow
 check "build-deps archive inputs" "bash Tests/BuildDependencies/ArchiveInputsTests.sh" slow
 check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.sh" slow
 
