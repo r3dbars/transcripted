@@ -16,14 +16,6 @@ enum SpeakerNamingTierPresentation {
     /// confirmed meeting outside a lineup.
     static let segmentCount = 5
 
-    static func word(_ tier: SpeakerNamingTier) -> String {
-        switch tier {
-        case .new: return "New"
-        case .learning: return "Learning"
-        case .auto: return "Auto"
-        }
-    }
-
     /// Filled segments out of `segmentCount`. On a meeting whose bar is lower
     /// than 5 (a live meeting's lineup), the dial scales so reaching that bar
     /// fills it.
@@ -56,15 +48,6 @@ enum SpeakerNamingTierPresentation {
             }
             return "Confirmed in \(confirmed) of \(required) meetings. \(left) more and Transcripted names \(first) on its own\(scope)."
         }
-    }
-
-    /// VoiceOver label for the dial: the word plus the count.
-    static func accessibilityLabel(confirmed: Int, required: Int, tier: SpeakerNamingTier) -> String {
-        if tier == .auto {
-            let scope = max(1, required) < segmentCount ? " with matching meeting context" : ""
-            return "\(word(tier)), names on its own\(scope)"
-        }
-        return "\(word(tier)), \(confirmed) of \(required) meetings confirmed"
     }
 
     private static func firstName(_ name: String) -> String {
