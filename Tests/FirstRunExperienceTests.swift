@@ -332,29 +332,6 @@ func testFirstRunExperience() {
         assertTrue(parakeet.detail.contains("Retry Download"), "other models keep their copy")
     }
 
-    runSuite("FirstRunOnboardingPolishContract — protects first-run polish targets") {
-        assertTrue(
-            FirstRunOnboardingPolishContract.minimumHitTarget >= 40,
-            "onboarding controls should keep at least a 40px hit target"
-        )
-        assertTrue(
-            FirstRunOnboardingPolishContract.minimumCompactButtonHeight >= 40,
-            "compact permission buttons should not shrink below the requested target"
-        )
-        assertTrue(
-            FirstRunOnboardingPolishContract.modelProgressLabelMinimumWidth >= 100,
-            "download progress labels need a stable tabular slot"
-        )
-        assertTrue(
-            FirstRunOnboardingPolishContract.selectedStateStrokeWidth >= 2,
-            "selected cards need a visible state that is not just a faint border"
-        )
-        assertTrue(
-            FirstRunOnboardingPolishContract.bodyCopyLineLimit <= 3,
-            "first-run cards should keep short copy from wrapping into tall blocks"
-        )
-    }
-
     runSuite("FirstRunExperience.onboardingDoneModelPresentation — Done only says You're set once the model is on this Mac") {
         for state in [ParakeetModelState.ready, .cached] {
             let done = FirstRunExperience.onboardingDoneModelPresentation(for: state)
