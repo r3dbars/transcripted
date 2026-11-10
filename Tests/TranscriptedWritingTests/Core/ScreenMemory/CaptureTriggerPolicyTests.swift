@@ -6,6 +6,39 @@ import Testing
 struct CaptureTriggerPolicyTests {
     private let epoch = Date(timeIntervalSince1970: 1_000_000)
 
+    @Test("Built-in exclusions ignore observed bundle identifier casing")
+    func builtInExclusionIgnoresCase() {
+        for owner in ["COM.APPLE.PASSWORDS", "org.keepassxc.keepassxc"] {
+            #expect(decide(
+                visibleWindowOwnerBundleIdentifiers: ["com.example.Editor", owner]
+            ) == .skip(.excludedWindow(appBundleIdentifier: owner)))
+        }
+    }
+
+    @Test("Configured exclusions ignore casing and report the original observed owner")
+    func configuredExclusionIgnoresCase() {
+        #expect(decide(
+            visibleWindowOwnerBundleIdentifiers: ["org.example.private"],
+            excludedApps: ["ORG.EXAMPLE.Private"]
+        ) == .skip(.excludedWindow(appBundleIdentifier: "org.example.private")))
+    }
+
+    @Test("The first visible excluded owner wins even when only its casing differs")
+    func firstExcludedOwnerPreservesOrder() {
+        #expect(decide(
+            visibleWindowOwnerBundleIdentifiers: ["ORG.EXAMPLE.Private", "com.apple.Passwords"],
+            excludedApps: ["org.example.private"]
+        ) == .skip(.excludedWindow(appBundleIdentifier: "ORG.EXAMPLE.Private")))
+    }
+
+    @Test("Case-insensitive exclusions still require the complete bundle identifier")
+    func exclusionDoesNotMatchPrefixes() {
+        #expect(decide(
+            visibleWindowOwnerBundleIdentifiers: ["COM.APPLE.PASSWORDS.helper", "ORG.EXAMPLE.PrivateExtra"],
+            excludedApps: ["org.example.private"]
+        ) == .capture)
+    }
+
     private func decide(
         trigger: CaptureTriggerPolicy.Trigger = .windowChanged,
         enabled: Bool = true,

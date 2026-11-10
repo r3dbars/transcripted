@@ -97,12 +97,11 @@ public enum CaptureTriggerPolicy {
             }
         }
 
-        // Union with the always-excluded set (password managers, Keychain
-        // Access) on every call — never trust a caller to have already
-        // merged it. A fresh install with an empty settings store, or a
-        // caller that forgets the union, must still exclude these apps.
-        let effectiveExcludedApps = DefaultExcludedApps.union(with: excludedApps)
-        if let excludedOwner = visibleWindowOwnerBundleIdentifiers.first(where: effectiveExcludedApps.contains) {
+        // Use the shared case-insensitive check for both built-in and
+        // configured exclusions, preserving the observed owner's spelling.
+        if let excludedOwner = visibleWindowOwnerBundleIdentifiers.first(where: {
+            DefaultExcludedApps.isExcluded($0, configuredExcludedApps: excludedApps)
+        }) {
             return .skip(.excludedWindow(appBundleIdentifier: excludedOwner))
         }
 
