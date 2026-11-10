@@ -575,6 +575,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingPipelinePhaseCadence.swift"
     "Sources/Meeting/LiveTranscriptPrewarmPolicy.swift"
     "Sources/Meeting/MeetingRecordingStartGate.swift"
+    "Sources/Meeting/MeetingRecordingStartAdmission.swift"
     "Sources/Meeting/MeetingCallAudioAsk.swift"
     "Sources/Meeting/MeetingMicOnlyNotice.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"

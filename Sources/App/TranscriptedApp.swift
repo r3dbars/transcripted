@@ -207,12 +207,13 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         // Meeting overlay + hotkey + speaker naming — Lane C wiring.
         if #available(macOS 14.0, *) {
             let meetingSession = appState.meetingSession
+            meetingSession.recordingStartAllowed = { [weak self] in self?.terminationCleanupStarted == false }
             meetingSession.calendarSuggestedTitleProvider = { [weak self] in
                 self?.meetingPromptDetector.currentSuggestedTranscriptTitle()
             }
             meetingPromptDetector.shouldSkipPromptEvaluation = { [weak self] in
                 guard let self else { return false }
-                return !MeetingPromptSessionPromptState(
+                return self.terminationCleanupStarted || !MeetingPromptSessionPromptState(
                     self.appState.meetingSession.state
                 ).allowsDetectedMeetingPrompt
             }
@@ -260,7 +261,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             )
             meetingPromptRecordAction = promptRecordAction
             let recordPrompt: (MeetingPromptDetector.Candidate, Bool) -> Bool = { [weak self] candidate, autoStarted in
-                guard let self else { return false }
+                guard let self, !self.terminationCleanupStarted else { return false }
                 // startRecording returns true early, without publishing a state
                 // transition, when a meeting is already recording/starting/stopping.
                 // Without this gate the overlay enters .preparing and never leaves

@@ -48,6 +48,7 @@ extension MeetingSessionController {
         detectedCallCandidate: MeetingPromptDetector.Candidate? = nil,
         autoStarted: Bool = false
     ) async -> Bool {
+        guard recordingStartAllowed() else { return false }
         let admission = MeetingSessionStateMachine.startAdmission(
             startCallInFlight: startRecordingCallInFlight,
             state: state
@@ -111,7 +112,14 @@ extension MeetingSessionController {
             context: baseDiagnosticsContext(extra: ["trigger": trigger.rawValue])
         )
 
-        let startDecision = await resolveStartRecordingPermissionDecision(trigger: trigger)
+        guard let startDecision = await MeetingRecordingStartAdmission.resolve(
+            isAllowed: recordingStartAllowed,
+            permission: { await self.resolveStartRecordingPermissionDecision(trigger: trigger) }
+        ) else {
+            Self.runtimeDiagnosticsRecorder?.clearSession(kind: "meeting", outcome: "start_blocked_termination")
+            clearDetectedPromptRecordingTelemetry()
+            return false
+        }
         guard startDecision.canStart else {
             let permissionCheckWasInconclusive = startDecision.systemAudioPermissionCheckWasInconclusive
             ProductFrictionTelemetry.track(
