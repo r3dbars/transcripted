@@ -14,7 +14,7 @@
 Prompt the user to start recording when a call *starts* — including a spontaneous
 Google Meet with no calendar invite — by adding one app-agnostic runtime signal
 (microphone activity, attributed to a process) into the existing
-`MeetingPromptDetector`. This matches what Notion and Plaud do. The prompt UI,
+`MeetingPromptDetector`. The prompt UI,
 the detector, and its backoff/snooze machinery already exist; this is mostly a
 new signal feeding an existing pipe.
 
@@ -35,50 +35,12 @@ empty (`[]`) and `supportsRuntimeOnlyPrompt` is `false`. The only browser signal
 today is coarse — `activeRuntimeReason()` returns "meeting tab is active" purely
 because *some* browser is frontmost, and only as an augmentation to an existing
 calendar match. Net result: **a spontaneous Meet call with no calendar event is
-invisible.** That is exactly the case Notion/Plaud cover and we don't.
-
-## Prior art — how Notion and Plaud do it
-
-Both are Electron apps in `/Applications`. Inspecting their bundles (native
-`.node` addons + entitlements; reproduction commands in the appendix) shows
-neither special-cases Google Meet — they detect *the act of being in any live
-call*, generically, then attribute it. Two layers:
-
-**Layer 1 — mic activity via CoreAudio (both apps).** Both attach a CoreAudio
-property listener to the input device.
-- Notion's `mac_utils.node`: `AudioObjectAddPropertyListenerBlock`,
-  `Failed to get default input device ID from AudioObjectGetPropertyData`,
-  `Removing AudioObjectRemovePropertyListenerBlock for micDeviceID`, plus
-  `runningApplications` for attribution and ScreenCaptureKit for system audio.
-- Plaud's `audio_monitor_mac.node` (the `[MicMonitor]`) goes further: it spins
-  up its own `AudioDeviceCreateIOProcID` tap and does voice-activity detection
-  (`Voice recovered on`, `Weak voice on ALL devices for 10s`), with
-  device-change/fallback handling.
-
-**Layer 2 — "is this really a call?" via per-process UDP inspection (Plaud).**
-Plaud's monitor links libproc (`proc_listpids`, `proc_listchildpids`,
-`proc_pidpath`, `proc_name`, `proc_pidfdinfo`, `proc_pidinfo`) and inspects each
-candidate process's open **UDP sockets**, applying port heuristics
-(`udpSockets`, `rejLowPort`, `sampleLowPort`, `udpPassed`) to spot WebRTC media
-traffic. Per-browser logic:
-- Chrome → renderer WebRTC PeerConnection (`ignored (Chromium without WebRTC PeerConnections)`, `WebRTC has active PeerConnection`)
-- Firefox → its `plugin-container` child (`Firefox verified via plugin-container UDP`)
-- Safari → the sibling `com.apple.WebKit.Networking` XPC process (`WebKit verified via sibling WebKit.Networking UDP`)
-
-This is how Plaud tells "Chrome is open" from "Chrome is in a Meet/Zoom-web call"
-— without ever reading a tab URL.
-
-**Note:** both apps carry the `com.apple.security.automation.apple-events`
-entitlement, but there is no `osascript`/`tell application` in the detection
-path. The earlier hypothesis that they read the browser's active-tab URL via
-AppleScript was wrong — they use the network-socket approach, which is more
-robust and needs no per-browser Automation prompt.
+invisible.**
 
 ## Design decision: use the modern Core Audio process-object API
 
-Plaud uses libproc socket-sniffing because it supports macOS 11. **Transcripted
-targets macOS 26+**, so it can use the **Core Audio process-object API**
-(introduced macOS 14.2) instead:
+**Transcripted targets macOS 26+**, so it can use the **Core Audio process-object API**
+(introduced macOS 14.2):
 
 - `kAudioHardwarePropertyProcessObjectList` → every process Core Audio knows about
 - per process: `kAudioProcessPropertyIsRunningInput` (using the mic right now?),
@@ -86,7 +48,7 @@ targets macOS 26+**, so it can use the **Core Audio process-object API**
 
 This yields the mic-active signal **and** attribution (which bundle ID is in the
 call) in a single read — no audio tapping, no continuous orange-mic indicator,
-and self-exclusion is just "drop our own bundle ID." It makes Plaud's UDP-socket
+and self-exclusion is just "drop our own bundle ID." It makes the UDP-socket
 layer optional rather than required, because a browser process holding the mic
 input is already a strong call signal (browsers rarely hold the mic otherwise).
 
@@ -156,8 +118,6 @@ results below are the provenance for the production monitor design.
     prompting. It does not detect a call by itself.
 - **Self-exclusion:** our bundle ID is `com.justinbetker.draft` (legacy Draft id);
   exclude it by prefix so any future helper process is dropped too.
-- Aside: `ai.plaud.desktop.plaud` + `.helper` show up in the process list — Plaud
-  registers its own audio objects, matching the prior-art findings.
 
 ## Phase 1 — MicActivityMonitor + wiring
 
@@ -262,7 +222,7 @@ while Transcripted itself records — is covered by unit tests.)
 ## Phase 2 — optional UDP hardening (only if needed)
 
 If non-call browser mic use (voice search, a web recorder) causes false prompts
-in practice, add Plaud's per-process UDP-socket check via libproc
+in practice, add a per-process UDP-socket check via libproc
 (`proc_pidfdinfo`) as a confirmation gate for browser candidates. Skip until
 real-world false positives justify it — browsers rarely hold the mic outside
 calls, so Phase 1 alone is likely enough.
@@ -319,29 +279,6 @@ confirm no prompt fires while Transcripted itself is recording).
    positives)?
 3. Do we want a distinct `MeetingPromptReason` for the mic-input signal for
    analytics, even while reusing the `.runtimeApp` source?
-
-## Appendix — reproducing the prior-art findings
-
-```bash
-# Entitlements (both declare apple-events + audio-input; Notion also camera/bluetooth)
-codesign -d --entitlements :- /Applications/Plaud.app 2>/dev/null | plutil -p -
-
-# Native addons
-ls -lhS /Applications/Plaud.app/Contents/Resources/*.node
-#   audio_monitor_mac.node  (MicMonitor)   recorder_mac.node
-otool -L /Applications/Plaud.app/Contents/Resources/audio_monitor_mac.node   # CoreAudio + AudioToolbox
-
-# CoreAudio + libproc symbols / diagnostic strings
-nm -u /Applications/Plaud.app/Contents/Resources/audio_monitor_mac.node | grep -iE 'proc_|pidinfo'
-strings -n 5 /Applications/Plaud.app/Contents/Resources/audio_monitor_mac.node | grep -iE 'MicMonitor|WebRTC|UDP|PeerConnection'
-
-# Notion's native helper
-otool -L "/Applications/Notion.app/Contents/Resources/app.asar.unpacked/node_modules/@notionhq/desktop-native/build/Release/mac_utils.node"
-strings -n 6 "/Applications/Notion.app/Contents/Resources/app.asar.unpacked/node_modules/@notionhq/desktop-native/build/Release/mac_utils.node" | grep -iE 'AudioObject|runningApplications|ScreenCapture'
-
-# Neither hardcodes a meeting host (detection is host-agnostic): both return 0
-strings -n 5 /Applications/Notion.app/Contents/Resources/app.asar | grep -icE 'meet\.google\.com|zoom\.us'
-```
 
 ## Phase 3 — "spontaneous calls feel invisible" diagnosis + aggressiveness + camera (2026-06-20)
 

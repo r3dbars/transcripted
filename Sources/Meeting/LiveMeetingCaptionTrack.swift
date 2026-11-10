@@ -33,8 +33,7 @@ actor LiveMeetingCaptionTrack {
 
     /// The decoder's own endpointing can go quiet mid-utterance and never
     /// fire, freezing on stale text. A turn also closes after this long with
-    /// no new words, or once it has run this long. FluidVoice ships the same
-    /// two fallbacks.
+    /// no new words, or once it has run this long.
     static let quietCloseSeconds: Double = 2.5
     static let longestUtteranceSeconds: Double = 20
     /// One encoder step per feed, so a yield (a dictation's final pass
