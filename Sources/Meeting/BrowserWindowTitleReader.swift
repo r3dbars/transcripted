@@ -142,8 +142,6 @@ enum BrowserWindowTitleReader {
         return title
     }
 
-    /// Bounds the next AX round trip on `element` by what is left of the
-    /// budget. Returns false when the budget is spent.
     /// The call a running Chromium app shortcut is for, or `nil`. Reads
     /// `CrAppModeShortcutURL` and drops it; only the provider enum leaves.
     static func callShortcutProvider(forBundleID bundleID: String) async -> MeetingPromptProvider? {
@@ -168,6 +166,8 @@ enum BrowserWindowTitleReader {
         return url
     }
 
+    /// Bounds the next AX round trip on `element` by what is left of the
+    /// budget. Returns false when the budget is spent.
     private static func setTimeout(on element: AXUIElement, deadline: Date) -> Bool {
         let remaining = deadline.timeIntervalSinceNow
         guard remaining > 0.005 else { return false }
