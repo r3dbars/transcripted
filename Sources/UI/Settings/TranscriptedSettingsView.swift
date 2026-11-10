@@ -196,11 +196,7 @@ struct TranscriptedSettingsView: View {
                 handleMeetingArtifactRecoveryAlert(alert)
             }
             refreshState()
-            trackSettingsPageViewed(
-                navigation.selectedPage,
-                source: navigation.presentationSource,
-                discoveredPage: navigation.presentedPage
-            )
+            trackSettingsFeatureDiscovery(for: navigation.presentedPage, source: navigation.presentationSource)
         }
         .onChange(of: navigation.isWindowOpen) { _, _ in updateLibraryVisibility() }
         .onChange(of: navigation.selectedPage) { oldPage, page in
@@ -215,11 +211,9 @@ struct TranscriptedSettingsView: View {
                 refreshAutoEnterPreferences(includeCandidates: true)
             }
             let isPresentationSelectionChange = page == navigation.presentedPage
-            trackSettingsPageViewed(
-                page,
-                source: "navigation",
-                trackFeatureDiscovery: !isPresentationSelectionChange
-            )
+            if !isPresentationSelectionChange {
+                trackSettingsFeatureDiscovery(for: page, source: "navigation")
+            }
         }
         .onChange(of: meetingSession.lastSavedTranscriptURL) { _, newURL in
             refreshRecentCaptures(isLibraryChange: true)

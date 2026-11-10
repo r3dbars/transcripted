@@ -60,18 +60,16 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         navigationModel.isWindowOpen = true
         speakerPeopleModel.setShown(true)
         speakerPeopleModel.refresh()
-        navigationModel.presentedPage = page
-        navigationModel.select(page, source: ProductUsageTelemetry.NavigationSource(rawValue: source) ?? .unknown)
-        navigationModel.presentationSource = source
-        navigationModel.presentationID = UUID()
-        navigationModel.lastPresentedAt = Date()
-        AnalyticsReporter.track(
-            "settings_opened",
-            properties: [
-                "page_id": page.analyticsValue,
-                "source": source,
-            ]
-        )
+        navigationModel.present(page: page, source: source) {
+            navigationModel.lastPresentedAt = Date()
+            AnalyticsReporter.track(
+                "settings_opened",
+                properties: [
+                    "page_id": page.analyticsValue,
+                    "source": source,
+                ]
+            )
+        }
         // Publish anything Today built while closed before the first frame.
         todayViewModel.windowWillShow()
         window.makeKeyAndOrderFront(nil)
