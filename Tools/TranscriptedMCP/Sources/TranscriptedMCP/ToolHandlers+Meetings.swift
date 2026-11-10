@@ -275,12 +275,25 @@ func meetingTitle(for filename: String, meetingDirs: [URL]) -> String {
     frontmatterMeetingTitle(for: filename, meetingDirs: meetingDirs) ?? filename
 }
 
+/// Read each meeting at most once per response. Missing titles stay absent so
+/// callers retain their existing fallback; no cache survives into a later call.
+func frontmatterMeetingTitles(for filenames: [String], meetingDirs: [URL]) -> [String: String] {
+    var titles: [String: String] = [:]
+    for filename in Set(filenames) {
+        if let title = frontmatterMeetingTitle(for: filename, meetingDirs: meetingDirs) {
+            titles[filename] = title
+        }
+    }
+    return titles
+}
+
 /// Replace the index's filename-derived meeting titles with real frontmatter
 /// titles. Groups whose markdown has no frontmatter title keep the
 /// filename-derived title they already carry.
 func hydrateMeetingSearchTitles(in results: inout GroupedSearchResult, meetingDirs: [URL]) {
+    let titles = frontmatterMeetingTitles(for: results.results.map(\.filename), meetingDirs: meetingDirs)
     for index in results.results.indices {
-        if let title = frontmatterMeetingTitle(for: results.results[index].filename, meetingDirs: meetingDirs) {
+        if let title = titles[results.results[index].filename] {
             results.results[index].meetingTitle = title
         }
     }

@@ -21,10 +21,11 @@ func handleDecisions(params: CallTool.Parameters, index: TranscriptIndex, meetin
         dateTo: range.dateTo,
         maxItems: count + 1
     )
+    let titles = frontmatterMeetingTitles(for: indexed.decisions.prefix(count).map(\.filename), meetingDirs: meetingDirs)
     let receipts = indexed.decisions.prefix(count).map { item in
         CrossMeetingReceipt(
             meetingId: item.filename,
-            meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
+            meetingTitle: titles[item.filename] ?? item.filename,
             timestamp: nil,
             quote: item.text,
             date: item.date,
@@ -50,10 +51,11 @@ func handleCommitments(params: CallTool.Parameters, index: TranscriptIndex, meet
         dateTo: range.dateTo,
         maxItems: count + 1
     )
+    let titles = frontmatterMeetingTitles(for: indexed.items.prefix(count).map(\.filename), meetingDirs: meetingDirs)
     let receipts = indexed.items.prefix(count).map { item in
         CrossMeetingReceipt(
             meetingId: item.filename,
-            meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
+            meetingTitle: titles[item.filename] ?? item.filename,
             timestamp: nil,
             quote: item.owner.map { "\($0): \(item.text)" } ?? item.text,
             date: item.date,
@@ -79,10 +81,11 @@ func handleOpenQuestions(params: CallTool.Parameters, index: TranscriptIndex, me
         limit: fetchLimit
     )
     let filtered = filterSummaryItems(indexed, matching: project)
+    let titles = frontmatterMeetingTitles(for: filtered.prefix(count).map(\.filename), meetingDirs: meetingDirs)
     let receipts = filtered.prefix(count).map { item in
         CrossMeetingReceipt(
             meetingId: item.filename,
-            meetingTitle: meetingTitle(for: item.filename, meetingDirs: meetingDirs),
+            meetingTitle: titles[item.filename] ?? item.filename,
             timestamp: nil,
             quote: item.text,
             date: item.meetingDate,
