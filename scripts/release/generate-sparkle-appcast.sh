@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+
 if [ $# -ne 1 ]; then
     echo "Usage: bash scripts/release/generate-sparkle-appcast.sh /path/to/updates-folder"
     exit 1
@@ -48,8 +50,17 @@ if [ ! -f "$REPO_APPCAST_PATH" ]; then
     exit 1
 fi
 
-if [ -f "config/release/legacy-appcast-freeze.json" ] \
-    && [ "$(cd "$(dirname "$REPO_APPCAST_PATH")" && pwd -P)/$(basename "$REPO_APPCAST_PATH")" = "$(pwd -P)/docs/appcast.xml" ]; then
+if [ -f "$REPO_ROOT/config/release/legacy-appcast-freeze.json" ] \
+    && python3 - "$REPO_APPCAST_PATH" "$REPO_ROOT/docs/appcast.xml" <<'PY'
+import os
+import sys
+candidate, frozen = sys.argv[1:]
+same = os.path.realpath(candidate) == os.path.realpath(frozen)
+if not same and os.path.exists(frozen):
+    same = os.path.samefile(candidate, frozen)
+sys.exit(0 if same else 1)
+PY
+then
     echo "docs/appcast.xml is the frozen legacy feed; merge into a scratch copy instead."
     exit 1
 fi
