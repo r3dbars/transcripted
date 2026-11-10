@@ -14,6 +14,7 @@ Workflows, templates, and the CI contracts that gate merges. Repo-wide rules liv
 | `workflows/publish-mcp-registry.yml` | Release published only (no manual dispatch; re-run the job to retry) | Repackages the already-signed `transcripted-mcp` into a `.mcpb`; builds and signs nothing. OIDC login, no secret. |
 | `workflows/mac-runner-sweep.yml` | Every 30 min | Re-runs Swift CI on hosted runners if the owner's Mac went quiet, except in `MAC_RUNNER_MODE=always`. |
 | `workflows/mutation-monthly.yml` | 1st of the month | Report-only mutation probe on the `transcripted-mac` runner. |
+| `workflows/risk-triage.yml` | Swift CI / Repo Hygiene `workflow_run` (requested and completed), every 20 min, manual | Invokes `scripts/ops/risk-triage.py` review and gate jobs from a default-branch checkout. Declares `automerge-ai` / `AI_REVIEW_API_KEY` and `automerge-app` / `AUTOMERGE_APP_PRIVATE_KEY` environment/secret references; this does not establish that the secrets are configured. Policy: `docs/agent-merge-policy.md`. |
 
 ## Rules
 
