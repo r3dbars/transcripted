@@ -109,9 +109,6 @@ class FloatingOverlayController {
 
     private var escapeMonitor: Any?
 
-    /// Epoch — invalidated on every showPanel(), checked in async _performHide()
-    private var hideGeneration = SupersessionEpoch()
-
     /// Combine subscriptions for engine state → island updates
     private var subscriptions = Set<AnyCancellable>()
 
@@ -273,9 +270,6 @@ class FloatingOverlayController {
     /// Shows the session in the island. `anchorRect` is kept for callers;
     /// the island picks its own place.
     func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
-        // Invalidate any pending async _performHide() from a previous session's animation
-        hideGeneration.invalidate()
-
         // Cancel stale timers from a previous session
         errorDismissTask?.cancel()
         errorDismissTask = nil
@@ -312,7 +306,6 @@ class FloatingOverlayController {
     }
 
     private func cancelPendingHideForActiveDictation() {
-        hideGeneration.invalidate()
         successDismissTask?.cancel()
         successDismissTask = nil
     }

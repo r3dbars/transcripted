@@ -5,7 +5,7 @@ import Foundation
 ///
 /// The tree re-implements this exact question — "did something newer start before
 /// my async work finished?" — roughly three dozen times as raw `Int`/`UInt64`
-/// fields with hand-placed `guard x == y` checks (e.g. `FloatingOverlayController
+/// fields with hand-placed `guard x == y` checks (e.g. `NotchIslandController
 /// .hideGeneration`, `HomeViewModel.refreshGeneration`, `STTRouter
 /// .backgroundWarmupGeneration`, `WhisperEngine.initializationGeneration`). Every
 /// one of those sites hand-rolls the same three moves — bump, capture, compare —
@@ -30,19 +30,18 @@ import Foundation
 ///   `TranscriptedSettingsView.refreshHomeDashboard`, `STTRouter
 ///   .scheduleSelectedModelWarmup`, and `WhisperEngine.initialize`.
 /// - `snapshot()` — "let me read the current token without claiming ownership of
-///   anything." Mirrors `FloatingOverlayController.hideWithConfirmAnimation` /
-///   `hideWithCancelAnimation`, which capture `let gen = hideGeneration` before
-///   kicking off an animation, purely to compare against later — the capture
-///   site never "began" a unit of work via a bump of its own.
+///   anything." For a caller that captures the current token before kicking
+///   off an animation, purely to compare against later — the capture site
+///   never "began" a unit of work via a bump of its own.
 /// - `isCurrent(_:)` — a pure, repeatable "is this token still the live one?"
 ///   check. Mirrors the several independent guard checks scattered through
 ///   `WhisperEngine.load(model:generation:)`, each of which re-checks the same
 ///   captured generation at a different suspension point without consuming
 ///   anything.
 /// - `invalidate()` — "something reset or is starting over, and nobody in
-///   particular owns the new epoch." Mirrors the bare `hideGeneration &+= 1` in
-///   `FloatingOverlayController.showPanel()` / `cancelPendingHideForActiveDictation
-///   ()`, and the `cleanup()`/`cancel()` bumps in `STTRouter`, `WhisperEngine`,
+///   particular owns the new epoch." Mirrors the bare `hideGeneration += 1` when
+///   `NotchIslandController` shows the island, and the `cleanup()`/`cancel()`
+///   bumps in `STTRouter`, `WhisperEngine`,
 ///   and `HomeViewModel` that exist purely to fence out whatever async work was
 ///   previously in flight.
 /// - `finishIfCurrent(_:)` — "my owned unit of work reached its terminal
