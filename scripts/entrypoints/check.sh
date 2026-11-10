@@ -131,15 +131,18 @@ case "$tier" in
         step "E2E smoke" "bash run-e2e-smoke.sh"
         step "Build dependencies" "bash build-deps.sh"
         step "Concurrency census (Swift 6 backlog can't grow)" "bash scripts/dev/concurrency-census.sh --check"
+        step "SQLite failed-open resource lifetime" "bash scripts/dev/test-sqlite-handle-open.sh"
         step "Core package tests" "swift test"
         step "Integration smoke" "bash run-integration-smoke.sh"
         step "Speaker settings model smoke" "bash scripts/dev/test-speaker-settings-model.sh"
         step "Speakers directory scroll smoke" "bash scripts/dev/test-speakers-directory-scroll.sh"
+        step "Capture list Load More scroll smoke" "bash scripts/dev/test-capture-list-load-more-scroll.sh"
         step "Tools: CaptureKit" "swift test --package-path Tools/TranscriptedCaptureKit"
         step "Tools: CLI" "swift test --package-path Tools/TranscriptedCLI"
         step "Tools: MCP" "swift test --package-path Tools/TranscriptedMCP"
         step "Tools: QA" "swift test --package-path Tools/TranscriptedQA"
         step "Tools: Live" "swift test --package-path Tools/TranscriptedLive"
+        step "Claude mod wrapper contracts" "python3 scripts/dev/test-live-claude-mod-tests.py"
         step "CLI mode: audio" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=audio TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI"
         step "CLI mode: meeting" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=meeting TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI"
         step "CLI mode: retrieval" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=retrieval swift test --package-path Tools/TranscriptedCLI"
@@ -154,6 +157,7 @@ case "$tier" in
         # build when --keep-going was requested for independent checks.
         if [ "${statuses[$receipt_step]:-SKIP}" = PASS ]; then
             step "Build app" "bash build.sh --no-open"
+            step "Type-check lab control channel" "bash scripts/dev/typecheck-lab-build.sh"
             step "Premium performance budget" 'scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms "${TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS:-3000}"'
         fi
         ;;

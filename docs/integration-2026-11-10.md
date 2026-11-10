@@ -84,7 +84,24 @@ standalone documentation-path check passes. The initial suite remains FAIL becau
 checks are still running at this checkpoint. No failed initial run is rewritten
 as a pass. A final clean complete quick-suite verdict is not claimed.
 
-Independent final review and all exact-head hosted outcomes remain pending.
+Independent review of `c8b80987d1c68167f1943ee0b4d4c8e6127d348a`
+against the recorded base returned RED with two P2 integration findings:
+the capture-list smoke retained the removed `QuietMeetingRow.isExpanded`
+argument, and `check.sh full` omitted four new Swift CI checks. The follow-up
+removes that obsolete argument and adds SQLite lifetime, capture-list scroll,
+Claude-mod wrapper and lab-control typecheck steps to the full gate. Its owned
+command-fixture tests now require all four commands and their dependency order.
+The strengthened fixture passes with the corrected gate and rejects the original
+gate at the missing SQLite step. Shell syntax, test-shape and diff checks pass;
+SQLite again passes 12 controls and 148 behavior assertions, and all 10 Claude-mod
+wrapper tests pass. These are component/contract results, not native list proof.
+The reviewer traced all 244 changed Sources paths and accounted for all 47
+conflicted PR entries/60 file resolutions; no other confirmed runtime regression
+was found. Static review does not certify hardware, removed image evidence or
+every line of retired/generated material. The parent checked the narrow fixes;
+replacement-head hosted compilation/native outcomes remain pending.
+
+Exact-head hosted outcomes remain pending.
 Hosted run IDs are returned to the parent rather than claimed as completed proof. Full unfiltered fast/Core/integration suites, native GUI,
 keyboard/microphone/TCC and full QA bench are not executed on the owner's profile.
 No running app was quit, relaunched or rebuilt. Local app signing/distribution is

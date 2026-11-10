@@ -94,6 +94,10 @@ required = [
     'scripts/dev/test-speaker-settings-model.sh',
     'scripts/dev/test-speakers-directory-scroll.sh',
     'test --package-path Tools/TranscriptedLive',
+    'scripts/dev/test-sqlite-handle-open.sh',
+    'scripts/dev/test-capture-list-load-more-scroll.sh',
+    'scripts/dev/test-live-claude-mod-tests.py',
+    'scripts/dev/typecheck-lab-build.sh',
 ]
 for command in required:
     assert command in commands, f'full gate omitted required CI validation: {command}'
@@ -104,11 +108,15 @@ for line, expected in zip(cli, ['', 'audio', 'meeting', 'retrieval']):
     assert fields == {'mode': expected, 'audio': '1' if expected == 'audio' else '',
                       'meeting': '1' if expected == 'meeting' else '', 'diarization': '', 'bundled': ''}, fields
 assert commands.index(required[0]) < commands.index(required[1]) < commands.index(required[2])
+assert commands.index('build-deps.sh') < commands.index('scripts/dev/test-sqlite-handle-open.sh') < commands.index('test')
+assert commands.index('scripts/dev/test-speakers-directory-scroll.sh') < commands.index('scripts/dev/test-capture-list-load-more-scroll.sh')
+assert commands.index('test --package-path Tools/TranscriptedLive') < commands.index('scripts/dev/test-live-claude-mod-tests.py')
 budget = [command for command in commands if command.startswith('scripts/ops/performance-budget.rb ')]
 assert len(budget) == 1, 'full gate omitted required CI performance budget'
 assert '--launch-ui-smoke build/launch-ui-smoke.json' in budget[0]
 assert '--max-launch-interactive-ms 3000' in budget[0]
 assert commands.index('build.sh --no-open') < commands.index(budget[0])
+assert commands.index('build.sh --no-open') < commands.index('scripts/dev/typecheck-lab-build.sh') < commands.index(budget[0])
 assert not any('run-live-capture-smoke' in command for command in commands), 'full gate requested hardware'
 stopped = (root / 'stopped.log').read_text().splitlines()
 assert stopped[-1].split('|')[1] == required[0], 'full gate ran more checks after a failure'

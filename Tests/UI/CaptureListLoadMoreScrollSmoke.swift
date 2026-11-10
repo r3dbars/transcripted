@@ -364,7 +364,6 @@ import TranscriptedCore
                 QuietMeetingRow(
                     item: item,
                     isCopied: false,
-                    isExpanded: false,
                     onOpen: {},
                     onCopy: {},
                     menuItems: []
