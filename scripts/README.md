@@ -242,11 +242,11 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/ops/generate-nightly-digest.py` — create the morning HTML + JSON summary from active Transcripted nightly automation memories and GitHub PR state
   - Usage: `python3 scripts/ops/generate-nightly-digest.py --open`
   - Self-test: `python3 scripts/ops/generate-nightly-digest.py --self-test`
-  - Writes:
-    - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.html`
-    - `/Users/redbars/Delance/transcripted-nightly-digest-latest.html`
-    - `/Users/redbars/Delance/transcripted-nightly-digest-YYYY-MM-DD.json`
-    - `/Users/redbars/Delance/transcripted-nightly-digest-latest.json`
+  - Writes, under `build/nightly-digest/` in the checkout (override with `--output-dir`):
+    - `transcripted-nightly-digest-YYYY-MM-DD.html`
+    - `transcripted-nightly-digest-latest.html`
+    - `transcripted-nightly-digest-YYYY-MM-DD.json`
+    - `transcripted-nightly-digest-latest.json`
 
 
 ## Rule of thumb
