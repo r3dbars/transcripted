@@ -46,7 +46,7 @@ Real call capture, permissions, Bluetooth/AirPods behavior, native companion con
 
 - Native build: `build/Transcripted.app`.
 - Portable plugin archive: `build/companion/Transcripted-plugin.zip`.
-- Sample screenshots: `.agent-review/visuals/companion-*.png`.
+- Historical sample screenshots: [merged companion PR #1952](https://github.com/r3dbars/transcripted/pull/1952). For fresh fixture screenshots, see `Tools/TranscriptedCompanion/test-ui.cjs`.
 - Full QA report: `/private/tmp/transcripted-companion-qa/final/qa-report.md`; raw logs remain local.
 - Implementation and connection contract: [companion guide](chatgpt-companion.md).
 

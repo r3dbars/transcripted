@@ -13,5 +13,4 @@ Rules:
   real user content.
 - Prefer small PNGs. Use GIFs only when motion matters.
 - Old visuals are evidence for their original PR only.
-- Visuals from merged PRs were cleared on 2026-09-25. They are still in git
-  history.
+- Review evidence removed from this folder remains available in Git history.
