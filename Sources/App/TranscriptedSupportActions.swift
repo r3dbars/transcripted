@@ -52,8 +52,8 @@ enum TranscriptedSupportActions {
     }
 
     private static func diagnosticsSnapshot(appState: TranscriptedAppState) async -> SupportDiagnosticsSnapshot {
-        // The model-cache walk and the reliability log read touch disk (the
-        // cache holds many CoreML files, the log can be ~10 MB), so they run
+        // The model-cache walk and bounded reliability-log tail touch disk
+        // (the cache holds many CoreML files), so they run
         // off the main thread. Everything else here is cheap in-memory state.
         let diskFields = await Task.detached(priority: .userInitiated) {
             (

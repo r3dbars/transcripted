@@ -89,8 +89,13 @@ reliability packet is derived from an already-captured `ObservabilityEvent`:
 directly as part of handling every event (see
 `Sources/Observability/EventReporter.swift`). `ReliabilityPacketRecorder` then
 re-shapes a subset of events (via its own coarse, bucketed allowlist — see
-`Sources/Observability/AGENTS.md`) into `reliability.jsonl`, which is what gets
-attached to user-submitted support diagnostics. If you're looking for where
+`Sources/Observability/AGENTS.md`) into `reliability.jsonl`. Manual diagnostic
+events send only a count from the last eight nonempty lines in a tail of at most
+512 KiB, counting only records that decode. They do not attach packets or this
+log; feedback emails do not attach reliability packets either. The count is
+bounded recent availability, not a total failure count;
+unreadable, oversized, or torn records can reduce it, and zero does not prove
+there are no packets or failures. If you're looking for where
 reliability packets come from, start at `EventReporter.capture`, not at
 `ReliabilityPacketRecorder`.
 
