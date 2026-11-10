@@ -758,6 +758,7 @@ APP_SOURCES=(
     "Sources/Support/AppSoundPlayer.swift"
     "Sources/UI/Shared/FocusOrderContract.swift"
     "Sources/UI/Settings/TranscriptedSettingsPage.swift"
+    "Sources/UI/Settings/TranscriptedSettingsNavigationModel.swift"
     "Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift"
     "Sources/UI/Settings/TranscriptedSettingsFallbackView.swift"
     "Sources/UI/Settings/HomeMeetingActionTelemetry.swift"

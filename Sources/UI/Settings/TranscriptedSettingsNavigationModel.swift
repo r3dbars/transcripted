@@ -4,6 +4,15 @@ import Observation
 @Observable
 @MainActor
 final class TranscriptedSettingsNavigationModel {
+    typealias PageViewSink = @MainActor (TranscriptedSettingsPage, String) -> Void
+    typealias NavigationSink = @MainActor (
+        ProductUsageTelemetry.Destination,
+        ProductUsageTelemetry.Destination,
+        ProductUsageTelemetry.NavigationSource
+    ) -> Void
+
+    private let pageViewSink: PageViewSink
+    private let navigationSink: NavigationSink
     var selectedPage: TranscriptedSettingsPage
     var presentedPage: TranscriptedSettingsPage
     var presentationSource: String
@@ -41,14 +50,43 @@ final class TranscriptedSettingsNavigationModel {
 
     /// Call from a control or window presentation with its known source, never from render callbacks.
     func select(_ page: TranscriptedSettingsPage, source: ProductUsageTelemetry.NavigationSource) {
-        ProductUsageTelemetry.trackNavigation(
-            destination: page.telemetryDestination, previous: selectedPage.telemetryDestination, source: source
-        )
+        let previous = selectedPage
+        updateSelection(page, source: source)
+        if previous != page {
+            pageViewSink(page, "navigation")
+        }
+    }
+
+    /// One explicit window presentation owns one page view, regardless of render callbacks.
+    func present(page: TranscriptedSettingsPage, source: String, beforePageView: () -> Void = {}) {
+        presentedPage = page
+        updateSelection(page, source: ProductUsageTelemetry.NavigationSource(rawValue: source) ?? .unknown)
+        presentationSource = source
+        presentationID = UUID()
+        beforePageView()
+        pageViewSink(page, source)
+    }
+
+    private func updateSelection(_ page: TranscriptedSettingsPage, source: ProductUsageTelemetry.NavigationSource) {
+        navigationSink(page.telemetryDestination, selectedPage.telemetryDestination, source)
         selectedPage = page
         onSelect?()
     }
 
-    init(selectedPage: TranscriptedSettingsPage = .today) {
+    init(
+        selectedPage: TranscriptedSettingsPage = .today,
+        pageViewSink: @escaping PageViewSink = { page, source in
+            AnalyticsReporter.track("settings_page_viewed", properties: [
+                "page_id": page.analyticsValue,
+                "source": source,
+            ])
+        },
+        navigationSink: @escaping NavigationSink = { destination, previous, source in
+            ProductUsageTelemetry.trackNavigation(destination: destination, previous: previous, source: source)
+        }
+    ) {
+        self.pageViewSink = pageViewSink
+        self.navigationSink = navigationSink
         self.selectedPage = selectedPage
         self.presentedPage = selectedPage
         self.presentationSource = "unknown"

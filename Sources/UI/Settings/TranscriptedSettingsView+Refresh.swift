@@ -184,23 +184,6 @@ extension TranscriptedSettingsView {
         }
     }
 
-    func trackSettingsPageViewed(
-        _ page: TranscriptedSettingsPage,
-        source: String,
-        discoveredPage: TranscriptedSettingsPage? = nil,
-        trackFeatureDiscovery: Bool = true
-    ) {
-        AnalyticsReporter.track(
-            "settings_page_viewed",
-            properties: [
-                "page_id": page.analyticsValue,
-                "source": source,
-            ]
-        )
-        guard trackFeatureDiscovery else { return }
-        trackSettingsFeatureDiscovery(for: discoveredPage ?? page, source: source)
-    }
-
     func trackSettingsAction(_ actionID: String, page: TranscriptedSettingsPage? = nil) {
         AnalyticsReporter.track(
             "settings_action_clicked",
@@ -233,7 +216,7 @@ extension TranscriptedSettingsView {
         )
     }
 
-    private func trackSettingsFeatureDiscovery(for page: TranscriptedSettingsPage, source: String) {
+    func trackSettingsFeatureDiscovery(for page: TranscriptedSettingsPage, source: String) {
         guard let featureArea = settingsDiscoveryFeatureArea(for: page) else { return }
 
         FeatureDiscoveryTelemetry.trackIfNeeded(
