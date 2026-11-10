@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
@@ -127,6 +128,54 @@ def appcast_metadata(path: Path) -> dict[str, str]:
         "signature": enclosure.attrib.get(f"{{{SPARKLE_NS}}}edSignature", "") if enclosure is not None else "",
         "self_url": atom_link.attrib.get("href", "") if atom_link is not None else "",
     }
+
+
+def check_appcast(appcast_path: Path | None, app_info: dict[str, Any], version: str,
+                  manifest: dict[str, Any], root: Path) -> list[Check]:
+    """Compare an explicit local snapshot; never fetch or assume a published feed."""
+    checks: list[Check] = []
+    if appcast_path is None:
+        add(checks, "appcast-input", "WARN", "Local appcast snapshot supplied", "not supplied",
+            "Appcast coherence is unverified; pass --appcast with a local release-asset feed snapshot.")
+        return checks
+    try:
+        appcast = appcast_metadata(appcast_path)
+        add(checks, "appcast-parse", "PASS", "Local appcast is parseable", normalize_path(appcast_path, root), "Local snapshot loaded; publication and live availability are not checked.")
+        feed_url = str(app_info.get("SUFeedURL", "")).strip()
+        if appcast["self_url"] == feed_url:
+            add(checks, "appcast-feed-url", "PASS", "Appcast self link matches packaged SUFeedURL", appcast["self_url"], "Feed URL is coherent.")
+        else:
+            add(checks, "appcast-feed-url", "FAIL", "Appcast self link matches packaged SUFeedURL", appcast["self_url"] or "missing", "The supplied snapshot differs from the packaged feed URL.")
+
+        if appcast["version"] == version:
+            add(checks, "appcast-version", "PASS", "Latest appcast version matches packaged app", appcast["version"], "The supplied local snapshot matches the packaged version; publication is not checked.")
+        else:
+            add(checks, "appcast-version", "FAIL", "Latest appcast version matches packaged app", appcast["version"] or "missing", f"Packaged app is {version}; supply the matching release-asset feed snapshot.")
+
+        expected_url = f"https://github.com/{manifest['repo_slug']}/releases/download/v{appcast['version']}/Transcripted-{appcast['version']}.dmg"
+        if appcast["url"] == expected_url:
+            add(checks, "appcast-enclosure-url", "PASS", "Latest appcast enclosure uses GitHub release asset shape", appcast["url"], "URL shape is coherent.")
+        else:
+            add(checks, "appcast-enclosure-url", "FAIL", "Latest appcast enclosure uses GitHub release asset shape", appcast["url"] or "missing", "Sparkle download URL drifted from the expected GitHub release asset.")
+
+        if appcast["minimum_system_version"] == str(app_info.get("LSMinimumSystemVersion", "")).strip():
+            add(checks, "appcast-min-os", "PASS", "Appcast minimum macOS matches packaged app", appcast["minimum_system_version"], "Minimum OS is aligned.")
+        else:
+            add(checks, "appcast-min-os", "FAIL", "Appcast minimum macOS matches packaged app", appcast["minimum_system_version"] or "missing", "Sparkle metadata must match LSMinimumSystemVersion.")
+
+        if appcast["hardware_requirements"] == "arm64":
+            add(checks, "appcast-hardware", "PASS", "Appcast declares arm64 hardware requirement", "arm64", "Apple Silicon requirement is explicit.")
+        else:
+            add(checks, "appcast-hardware", "FAIL", "Appcast declares arm64 hardware requirement", appcast["hardware_requirements"] or "missing", "Release metadata should stay arm64-only.")
+
+        if appcast["signature"] and appcast["length"].isdigit() and int(appcast["length"]) > 0:
+            add(checks, "appcast-signature", "PASS", "Latest appcast item has Sparkle signature and length", normalize_path(appcast_path, root), "Signature and positive length are present; cryptographic validity is not checked.")
+        else:
+            add(checks, "appcast-signature", "FAIL", "Latest appcast item has Sparkle signature and length", normalize_path(appcast_path, root), "Sparkle cannot trust/download the update without these fields.")
+    except Exception as exc:
+        add(checks, "appcast-parse", "FAIL", "Local appcast is parseable", normalize_path(appcast_path, root), str(exc))
+
+    return checks
 
 
 def uuid_set(path: Path, root: Path) -> tuple[set[str], str]:
@@ -436,55 +485,7 @@ def build_checks(args: argparse.Namespace) -> tuple[list[Check], dict[str, Any]]
     else:
         add(checks, "sparkle-framework", "FAIL", "Sparkle framework is bundled", normalize_path(sparkle_framework, root), "In-app updates cannot run without Sparkle.framework.")
 
-    appcast_path = root / "docs/appcast.xml"
-    try:
-        appcast = appcast_metadata(appcast_path)
-        add(checks, "appcast-parse", "PASS", "Local appcast is parseable", normalize_path(appcast_path, root), "Latest item loaded.")
-        feed_url = str(app_info.get("SUFeedURL", "")).strip()
-        # Since the feed moved to a release asset, docs/appcast.xml is the frozen
-        # legacy feed for old installs. When that legacy file is the one being
-        # read, its self link and version no longer have to match the packaged
-        # app. The release workflow's generated appcast.xml carries the new self
-        # link, so passing it still gets the full self-link and version checks.
-        feed_is_release_asset = (
-            feed_url.endswith("/releases/latest/download/appcast.xml") and appcast["self_url"] != feed_url
-        )
-        if feed_is_release_asset:
-            add(checks, "appcast-feed-url", "PASS", "Packaged SUFeedURL is the latest release's appcast.xml asset", feed_url, "The appcast read here is the legacy feed (docs/appcast.xml), so it is not compared; pass the generated appcast.xml to compare it.")
-        elif appcast["self_url"] == feed_url:
-            add(checks, "appcast-feed-url", "PASS", "Appcast self link matches packaged SUFeedURL", appcast["self_url"], "Feed URL is coherent.")
-        else:
-            add(checks, "appcast-feed-url", "FAIL", "Appcast self link matches packaged SUFeedURL", appcast["self_url"] or "missing", "Sparkle clients may read a different feed than the committed appcast.")
-
-        if feed_is_release_asset:
-            pass
-        elif appcast["version"] == version:
-            add(checks, "appcast-version", "PASS", "Latest appcast version matches packaged app", appcast["version"], "Existing installs can discover this version once the feed is pushed live.")
-        else:
-            add(checks, "appcast-version", "WARN", "Latest appcast version matches packaged app", appcast["version"] or "missing", f"Packaged app is {version}; existing installs will not discover it in-app until docs/appcast.xml is updated.")
-
-        expected_url = f"https://github.com/{manifest['repo_slug']}/releases/download/v{appcast['version']}/Transcripted-{appcast['version']}.dmg"
-        if appcast["url"] == expected_url:
-            add(checks, "appcast-enclosure-url", "PASS", "Latest appcast enclosure uses GitHub release asset shape", appcast["url"], "URL shape is coherent.")
-        else:
-            add(checks, "appcast-enclosure-url", "FAIL", "Latest appcast enclosure uses GitHub release asset shape", appcast["url"] or "missing", "Sparkle download URL drifted from the expected GitHub release asset.")
-
-        if appcast["minimum_system_version"] == str(app_info.get("LSMinimumSystemVersion", "")).strip():
-            add(checks, "appcast-min-os", "PASS", "Appcast minimum macOS matches packaged app", appcast["minimum_system_version"], "Minimum OS is aligned.")
-        else:
-            add(checks, "appcast-min-os", "FAIL", "Appcast minimum macOS matches packaged app", appcast["minimum_system_version"] or "missing", "Sparkle metadata must match LSMinimumSystemVersion.")
-
-        if appcast["hardware_requirements"] == "arm64":
-            add(checks, "appcast-hardware", "PASS", "Appcast declares arm64 hardware requirement", "arm64", "Apple Silicon requirement is explicit.")
-        else:
-            add(checks, "appcast-hardware", "FAIL", "Appcast declares arm64 hardware requirement", appcast["hardware_requirements"] or "missing", "Release metadata should stay arm64-only.")
-
-        if appcast["signature"] and appcast["length"].isdigit() and int(appcast["length"]) > 0:
-            add(checks, "appcast-signature", "PASS", "Latest appcast item has Sparkle signature and length", normalize_path(appcast_path, root), "Signature and positive length are present.")
-        else:
-            add(checks, "appcast-signature", "FAIL", "Latest appcast item has Sparkle signature and length", normalize_path(appcast_path, root), "Sparkle cannot trust/download the update without these fields.")
-    except Exception as exc:
-        add(checks, "appcast-parse", "FAIL", "Local appcast is parseable", normalize_path(appcast_path, root), str(exc))
+    checks.extend(check_appcast(resolve_path(root, args.appcast), app_info, version, manifest, root))
 
     sign_result = run(["codesign", "--verify", "--deep", "--strict", "--verbose=2", str(app_bundle)], cwd=root)
     if sign_result.returncode == 0:
@@ -637,6 +638,62 @@ def make_payload(checks: list[Check], metadata: dict[str, Any]) -> dict[str, Any
 
 
 def self_test() -> int:
+    # These controls call only the local XML validator and argument parser;
+    # no bundle inspection, signing tools, app launch or network is involved.
+    with tempfile.TemporaryDirectory() as temporary:
+        root = Path(temporary)
+        path = root / "appcast.xml"
+        feed = "https://github.com/fixture/repo/releases/latest/download/appcast.xml"
+        info = {"SUFeedURL": feed, "LSMinimumSystemVersion": "26.0"}
+        manifest = {"repo_slug": "fixture/repo"}
+
+        def statuses(target: Path | None) -> dict[str, str]:
+            return {check.check_id: check.status for check in check_appcast(target, info, "1.2.3", manifest, root)}
+
+        missing = check_appcast(None, info, "1.2.3", manifest, root)
+        if statuses(None) != {"appcast-input": "WARN"} or EXIT_CODES[worst_status(missing)] != 3:
+            raise AssertionError("Omitted appcast must be visibly incomplete without PASS claims")
+        if statuses(path) != {"appcast-parse": "FAIL"}:
+            raise AssertionError("An explicit missing file must fail")
+        path.write_text("not XML")
+        if statuses(path) != {"appcast-parse": "FAIL"}:
+            raise AssertionError("An explicit malformed file must fail")
+
+        def write_feed(**overrides: str) -> None:
+            values = {"version": "1.2.3", "feed": feed, "os": "26.0", "hardware": "arm64",
+                      "signature": "synthetic-signature", "length": "1"}
+            values.update(overrides)
+            values["url"] = overrides.get("url", f"https://github.com/fixture/repo/releases/download/v{values['version']}/Transcripted-{values['version']}.dmg")
+            path.write_text(('''<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle"
+                xmlns:atom="http://www.w3.org/2005/Atom"><channel><atom:link href="{feed}"/>
+                <item><sparkle:version>{version}</sparkle:version>
+                <sparkle:minimumSystemVersion>{os}</sparkle:minimumSystemVersion>
+                <sparkle:hardwareRequirements>{hardware}</sparkle:hardwareRequirements>
+                <enclosure url="{url}" sparkle:edSignature="{signature}" length="{length}"/>
+                </item></channel></rss>''').format(**values))
+
+        write_feed()
+        expected = {name: "PASS" for name in ["appcast-parse", "appcast-feed-url", "appcast-version",
+                    "appcast-enclosure-url", "appcast-min-os", "appcast-hardware", "appcast-signature"]}
+        if statuses(path) != expected:
+            raise AssertionError("Matching local snapshot must pass its coherence checks")
+        for values, failing in [
+            ({"feed": "https://example.invalid/legacy/appcast.xml"}, "appcast-feed-url"),
+            ({"version": "1.2.2"}, "appcast-version"),
+            ({"url": "https://example.invalid/incorrect.dmg"}, "appcast-enclosure-url"),
+            ({"os": "15.0"}, "appcast-min-os"),
+            ({"hardware": "x86_64"}, "appcast-hardware"),
+            ({"signature": ""}, "appcast-signature"),
+            ({"length": "0"}, "appcast-signature"),
+        ]:
+            write_feed(**values)
+            if statuses(path).get(failing) != "FAIL":
+                raise AssertionError(f"Explicit snapshot drift must fail: {failing}")
+        if parse_args(["--appcast", str(path)]).appcast != str(path):
+            raise AssertionError("CLI must accept an explicit local appcast")
+        if parse_args([]).appcast is not None:
+            raise AssertionError("CLI must not assume a default appcast")
+
     fixture = {
         "checks": [
             asdict(Check("ok", "PASS", "fixture pass", "fixture", "ok")),
@@ -700,9 +757,10 @@ def self_test() -> int:
     return 0
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Smoke a built/packaged Transcripted.app before release publishing.")
     parser.add_argument("--app-bundle", default="build/Transcripted.app", help="Path to Transcripted.app. Default: build/Transcripted.app")
+    parser.add_argument("--appcast", help="Explicit local release-asset feed snapshot; omitted means appcast proof is incomplete. Never fetched.")
     parser.add_argument("--dmg", help="Path to the DMG. Default: build/Transcripted-<app-version>.dmg")
     parser.add_argument("--dsym", default="build/Transcripted.app.dSYM", help="Path to the app dSYM. Default: build/Transcripted.app.dSYM")
     parser.add_argument("--expected-version", help="Expected CFBundleShortVersionString. Default: repo Info.plist version.")
@@ -714,7 +772,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--write-report", help="Write JSON report. Default: <out-dir>/packaged-app-smoke.json")
     parser.add_argument("--markdown-out", help="Write Markdown report. Default: <out-dir>/packaged-app-smoke.md")
     parser.add_argument("--self-test", action="store_true", help="Run renderer, status, and current menu contract regressions.")
-    return parser.parse_args()
+    return parser.parse_args(argv)
 
 
 def main() -> int:
