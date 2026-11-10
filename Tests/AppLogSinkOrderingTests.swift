@@ -21,8 +21,8 @@ func testAppLogSinkOrdering() async {
             .split(separator: "\n").map(String.init)
         assertTrue(lines.first?.hasPrefix("--- Session started ") == true,
                    "the session marker must precede launch messages")
-        assertEqual(Array(lines.dropFirst()), sink.entries,
-                    "every admitted message must reach disk in the same order as memory")
+        assertTrue(zip(lines.dropFirst(), messages).allSatisfy { $0.hasSuffix("] " + $1) },
+                   "every admitted message must reach disk in caller order")
         assertEqual(lines.count, messages.count + 1,
                     "initialization must not drop or duplicate the first messages")
     }
@@ -36,7 +36,7 @@ func testAppLogSinkOrdering() async {
         await sink.flush()
         let content = (try? String(contentsOf: logURL, encoding: .utf8)) ?? ""
         assertTrue(content.contains("--- Session started "), "flush must include the session marker")
-        assertEqual(sink.entries, [], "the session marker must not become a user log message")
+        assertEqual(content.split(separator: "\n").count, 1, "an empty session writes only its marker")
     }
 }
 

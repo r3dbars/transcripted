@@ -1,12 +1,11 @@
 // AppLogSink.swift
 // Shared logging service — tracks every user action with timestamps.
-// Writes to both the in-app debug panel and the app-owned logs folder.
+// Writes debug.log in the app-owned logs folder.
 //
 // See docs/observability.md for how this fits alongside TranscriptedCore's
 // AppLogger, FileLogger, EventReporter, and ReliabilityPacketRecorder.
 
 import Foundation
-import SwiftUI
 #if canImport(TranscriptedCore)
 import TranscriptedCore
 #endif
@@ -111,9 +110,7 @@ private actor AppLogSinkFileWriter {
 }
 
 @MainActor
-class AppLogSink: ObservableObject {
-    @Published var entries: [String] = []
-
+class AppLogSink {
     private let logFilePath: String
     private let fileWriter = AppLogSinkFileWriter()
     private var pendingWrite: Task<Void, Never>?
@@ -154,18 +151,12 @@ class AppLogSink: ObservableObject {
 
         let timestamp = dateFormatter.string(from: Date())
         let entry = "[\(timestamp)] \(message)"
-        entries.append(entry)
 
         let line = entry + "\n"
         let previousWrite = pendingWrite
         pendingWrite = Task.detached(priority: .utility) { [fileWriter] in
             await previousWrite?.value
             await fileWriter.append(line)
-        }
-
-        // Keep last 200 entries to avoid unbounded growth
-        if entries.count > 200 {
-            entries.removeFirst(entries.count - 200)
         }
     }
 

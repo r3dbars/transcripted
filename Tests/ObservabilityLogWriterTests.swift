@@ -309,16 +309,17 @@ func testObservabilityLogWriter() async {
         assertEqual(sanitized.context?["trigger"], "physical_key", "coarse diagnostics should stay useful")
     }
 
-    runSuite("AppLogSink redacts direct debug-log messages before storing them") {
+    await runSuite("AppLogSink writes redacted direct messages to its log file") {
         let fm = FileManager.default
         let root = fm.temporaryDirectory.appendingPathComponent("AppLogSinkTests-\(UUID().uuidString)", isDirectory: true)
-        defer { try? fm.removeItem(at: root) }
+        defer { removeAppLogSinkPrivacyFixture(root) }
         let sink = AppLogSink(logFileURL: root.appendingPathComponent("debug.log", isDirectory: false))
         sink.log(
             "DICTATION | started (parakeet, Jane's AirPods Pro) then saved /Users/jane/Private/meeting.md for person@example.com with token sk-private"
         )
-        let sanitized = sink.entries.last ?? ""
-        assertFalse(sanitized.isEmpty, "the message should be stored for the debug panel")
+        await sink.flush()
+        let sanitized = (try? String(contentsOf: root.appendingPathComponent("debug.log"), encoding: .utf8)) ?? ""
+        assertFalse(sanitized.isEmpty, "the message should reach the log file")
 
         assertFalse(sanitized.contains("Jane's AirPods Pro"), "raw device names should not enter debug logs")
         assertFalse(sanitized.contains("/Users/jane/Private/meeting.md"), "absolute paths should not enter debug logs")
@@ -447,4 +448,24 @@ private func observabilityTestEvent(level: String, event: String) -> Observabili
         appVersion: "1.2.3",
         osVersion: "Version 26.0"
     )
+}
+
+private func removeAppLogSinkPrivacyFixture(_ root: URL) {
+    let fileManager = FileManager.default
+    let prefix = "AppLogSinkTests-"
+    let temporaryRoot = fileManager.temporaryDirectory.resolvingSymlinksInPath()
+    let resolved = root.resolvingSymlinksInPath()
+    guard root.lastPathComponent.hasPrefix(prefix),
+          UUID(uuidString: String(root.lastPathComponent.dropFirst(prefix.count))) != nil,
+          resolved.deletingLastPathComponent() == temporaryRoot,
+          resolved.lastPathComponent == root.lastPathComponent else {
+        assertTrue(false, "refusing to remove a log fixture outside its owned temporary root")
+        return
+    }
+    guard fileManager.fileExists(atPath: root.path) else { return }
+    do {
+        try fileManager.removeItem(at: root)
+    } catch {
+        assertTrue(false, "owned log fixture cleanup failed")
+    }
 }
