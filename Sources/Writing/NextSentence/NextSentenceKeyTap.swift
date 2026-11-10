@@ -53,7 +53,7 @@ final class NextSentenceKeyTap: @unchecked Sendable {
         if NextSentencePolicy.cardPassesThrough(keyCode: keyCode, hotkey: NextSentencePreferences.hotkey()) {
             return Unmanaged.passUnretained(event)
         }
-        let action = type == .keyUp
+        let candidateAction = type == .keyUp
             ? NextSentencePolicy.releaseAction(keyCode: keyCode)
             : NextSentencePolicy.action(
                 keyCode: keyCode,
@@ -61,12 +61,15 @@ final class NextSentenceKeyTap: @unchecked Sendable {
                 option: flags.contains(.maskAlternate), shift: flags.contains(.maskShift),
                 isRepeat: event.getIntegerValueField(.keyboardEventAutorepeat) != 0
             )
-        guard action != .passThrough else { return Unmanaged.passUnretained(event) }
-        guard action != .ignore else { return nil }
+        guard candidateAction != .passThrough else { return Unmanaged.passUnretained(event) }
+        guard candidateAction != .ignore else { return nil }
         var length = 0
         var chars = [UniChar](repeating: 0, count: 8)
         event.keyboardGetUnicodeString(maxStringLength: chars.count, actualStringLength: &length, unicodeString: &chars)
         let typed = String(utf16CodeUnits: chars, count: length)
+        let action = candidateAction == .typeIntoCard
+            ? NextSentencePolicy.typingAction(text: typed, keyCode: keyCode)
+            : candidateAction
         let onAction = onAction
         DispatchQueue.main.async { MainActor.assumeIsolated { onAction(action, typed, keyCode) } }
         return NextSentencePolicy.consumes(action) ? nil : Unmanaged.passUnretained(event)
