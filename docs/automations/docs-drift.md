@@ -1,6 +1,6 @@
 # Codex job: docs drift
 
-Runs nightly at 11:00 PM as a Codex automation on the owner's Mac. It keeps the folder `AGENTS.md` files and `docs/` true to the code, because agents act on what those files say. Its PRs use the `docs` auto-merge lane (`.agents/auto-merge-lanes.json`), so they can merge without Justin once checks and Codex review pass.
+Runs nightly at 11:00 PM as a Codex automation on the owner's Mac. It keeps the folder `AGENTS.md` files and `docs/` true to the code, because agents act on what those files say. Its PRs use the `docs` lane (`.agents/auto-merge-lanes.json`). The lane runner is documented as unscheduled and dry-run-only in `docs/automations/README.md`; lane eligibility alone does not schedule a merge. Folder `AGENTS.md` changes are always `risk:high` and wait for owner review and a manual merge, even though the lane allows their paths.
 
 ## What to look at
 
