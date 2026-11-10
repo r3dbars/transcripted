@@ -280,18 +280,6 @@ enum HotkeyPreferences {
         }
     }
 
-    // MARK: - Validation
-
-    /// Rejects: bare letters (no modifier), modifier-only combos, Escape, Tab
-    static func isValid(_ binding: HotkeyBinding) -> Bool {
-        let code = Int(binding.keyCode)
-        // Reject Escape and Tab outright
-        if code == kVK_Escape || code == kVK_Tab { return false }
-        // Must have at least one modifier (Cmd, Option, or Control — Shift alone doesn't count)
-        let meaningfulModifiers = binding.modifiers & UInt32(cmdKey | optionKey | controlKey)
-        if meaningfulModifiers == 0 { return false }
-        return true
-    }
 }
 
 // MARK: - Notification
