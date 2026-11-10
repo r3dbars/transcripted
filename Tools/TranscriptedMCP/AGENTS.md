@@ -59,7 +59,7 @@ captures/*.md -> TranscriptLoader (direct reads: read_meeting/read_dictation/rea
 ```
 
 - Index tables: meetings, speakers and utterance rows, `meeting_summary_items` (one row per Decision / Action Item with owner / Open Question, `kind` discriminator, FTS5), dictation days and entries, `writing_days` / `writing_entries` + FTS5. Schema version is 6 (`TranscriptIndex.swift`); an older `user_version` rebuilds from disk. DDL is in `TranscriptIndex+Schema.swift`.
-- Summary items come from `TranscriptedCaptureKit.CaptureSummaryParser` over legacy artifacts (inline summary or `<stem>.summary.md` sidecar) during `indexMeeting`. Current app capture does not create new AI summaries. Cross-meeting queries go through `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)`.
+- Summary items come from `TranscriptedCaptureKit.CaptureSummaryParser` during `indexMeeting`: heuristic `auto_summary_*` frontmatter from the current meeting-save pipeline, older `local_summary_*` fields and inline blocks, or a legacy `<stem>.summary.md` sidecar. The current heuristic extraction does not use an AI model; meetings without indexable summary fields contribute no summary rows. Cross-meeting queries go through `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)`.
 - `FileWatcher` debounces 500ms and also scans on a 5-minute timer.
 
 ## Semantic search
