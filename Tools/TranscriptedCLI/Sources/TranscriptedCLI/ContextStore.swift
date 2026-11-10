@@ -118,7 +118,7 @@ enum CLIContextStore {
         })
     }
 
-    static func recent(in directories: CLIContextDirectories, kind: CLIContextKind, count: Int, dateFrom: String?, dateTo: String?) -> [CLIContextItem] {
+    static func recent(in directories: CLIContextDirectories, kind: CLIContextKind, count: Int, dateFrom: String?, dateTo: String?, timeZone: TimeZone = .current) -> [CLIContextItem] {
         var items: [CLIContextItem] = []
 
         if kind.includes(.meeting) {
@@ -165,10 +165,10 @@ enum CLIContextStore {
             items.append(contentsOf: writingItems(in: directories, dateFrom: dateFrom, dateTo: dateTo) { _ in true })
         }
 
-        return Array(items.sorted { $0.datetime > $1.datetime }.prefix(count))
+        return newestItems(items, count: count, timeZone: timeZone)
     }
 
-    static func search(query: String, speaker: String?, in directories: CLIContextDirectories, kind: CLIContextKind, count: Int, dateFrom: String?, dateTo: String?) -> [CLIContextItem] {
+    static func search(query: String, speaker: String?, in directories: CLIContextDirectories, kind: CLIContextKind, count: Int, dateFrom: String?, dateTo: String?, timeZone: TimeZone = .current) -> [CLIContextItem] {
         let normalizedQuery = query.lowercased()
         var items: [CLIContextItem] = []
 
@@ -235,7 +235,18 @@ enum CLIContextStore {
             })
         }
 
-        return Array(items.sorted { $0.datetime > $1.datetime }.prefix(count))
+        return newestItems(items, count: count, timeZone: timeZone)
+    }
+
+    /// Meeting stamps are local wall-clock times; day entries carry a zone.
+    /// Parse once per item, and preserve input order when instants tie or fail.
+    private static func newestItems(_ items: [CLIContextItem], count: Int, timeZone: TimeZone) -> [CLIContextItem] {
+        let parser = CLIContextInstantParser(timeZone: timeZone)
+        let dated = items.enumerated().map { (offset: $0.offset, item: $0.element, instant: parser.date(from: $0.element.datetime) ?? .distantPast) }
+        return dated.sorted {
+            if $0.instant != $1.instant { return $0.instant > $1.instant }
+            return $0.offset < $1.offset
+        }.prefix(count).map(\.item)
     }
 
     static func readMeeting(filename: String, in directories: CLIContextDirectories) throws -> String {
@@ -684,5 +695,36 @@ enum CLIContextStore {
         }
 
         return ordered
+    }
+}
+
+/// Parses the recent feed's mixed datetime strings into instants: ISO 8601
+/// with a zone (dictation, writing), or a zoneless local wall-clock time
+/// (meetings), read in `timeZone`.
+struct CLIContextInstantParser {
+    private let zoned: [ISO8601DateFormatter]
+    private let local: [DateFormatter]
+
+    init(timeZone: TimeZone) {
+        let options: [ISO8601DateFormatter.Options] = [[.withInternetDateTime, .withFractionalSeconds], [.withInternetDateTime]]
+        zoned = options.map {
+            let f = ISO8601DateFormatter()
+            f.formatOptions = $0
+            return f
+        }
+        local = ["yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm"].map {
+            let f = DateFormatter()
+            f.locale = Locale(identifier: "en_US_POSIX")
+            f.calendar = Calendar(identifier: .gregorian)
+            f.timeZone = timeZone
+            f.dateFormat = $0
+            return f
+        }
+    }
+
+    func date(from value: String) -> Date? {
+        for f in zoned { if let d = f.date(from: value) { return d } }
+        for f in local { if let d = f.date(from: value) { return d } }
+        return nil
     }
 }
