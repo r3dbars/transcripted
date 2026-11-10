@@ -461,6 +461,20 @@ final class ContextStoreTests: XCTestCase {
         XCTAssertTrue(summaries.isEmpty)
     }
 
+    func testRenamedDictationDayAppearsOnlyAsDictationAndCanBeRead() throws {
+        let root = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try makeDictationMarkdown(text: "Renamed fixture body.")
+            .write(to: root.appendingPathComponent("Renamed.md"), atomically: true, encoding: .utf8)
+        let directories = CLIContextDirectories(meetingsDir: root, dictationsDir: root)
+        let recent = CLIContextStore.recent(in: directories, kind: .all, count: 10, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(recent.map(\.kind.rawValue), ["dictation"])
+        XCTAssertEqual(CLIContextStore.listDictationDays(in: directories, count: 10, dateFrom: nil, dateTo: nil).map(\.filename), ["Renamed"])
+        XCTAssertEqual(try CLIContextStore.readDictationDocument(filename: "Renamed", entryId: nil, in: directories).entries.first?.text, "Renamed fixture body.")
+        XCTAssertThrowsError(try CLIContextStore.readMeeting(filename: "Renamed", in: directories))
+
+    }
+
     func testRecentSkipsNonCaptureMarkdownInMeetingsDirectory() throws {
         let root = makeTempDir()
         defer { try? FileManager.default.removeItem(at: root) }

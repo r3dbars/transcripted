@@ -18,7 +18,7 @@ public enum CaptureFileLimits {
 /// Which kind of capture artifact a Markdown file is, as far as the filename
 /// and flat frontmatter can tell (see `CaptureMarkdown.captureKind(of:)`).
 public enum CaptureMarkdownKind: String, Sendable {
-    /// `Dictations_<date>.md` day file.
+    /// `Dictations_<date>.md` day file, or any file with `capture_type: dictation_day`.
     case dictationDay = "dictation_day"
     /// `Writing_<date>.md` day file, or any file with `capture_type: writing_day`.
     case writingDay = "writing_day"
@@ -58,8 +58,8 @@ public enum CaptureMarkdown {
     /// Writing day files are recognized first, by the `Writing_` prefix or by
     /// `capture_type: writing_day`, so a writing file sitting in a shared
     /// folder (the `TRANSCRIPTED_DATA_DIR` fallback) is never mistaken for a
-    /// meeting. Dictation day files are still recognized by filename only,
-    /// exactly as before this helper existed.
+    /// meeting. Dictation days are recognized by their filename prefix or
+    /// explicit `capture_type: dictation_day`, including renamed exports.
     public static func captureKind(of url: URL) -> CaptureMarkdownKind? {
         let filename = url.deletingPathExtension().lastPathComponent
         if filename.hasPrefix(writingDayFilenamePrefix) {
@@ -84,10 +84,11 @@ public enum CaptureMarkdown {
             return nil
         }
 
-        if CaptureMarkdownParser.parseFrontmatter(from: head)?.values["capture_type"] == CaptureMarkdownKind.writingDay.rawValue {
-            return .writingDay
+        switch CaptureMarkdownParser.parseFrontmatter(from: head)?.values["capture_type"] {
+        case CaptureMarkdownKind.writingDay.rawValue: return .writingDay
+        case CaptureMarkdownKind.dictationDay.rawValue: return .dictationDay
+        default: return .meeting
         }
-        return .meeting
     }
 
     /// First `maxBytes` of a file decoded as UTF-8. The prefix can cut a
