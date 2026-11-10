@@ -58,15 +58,6 @@ enum SpeakerNamingTierPresentation {
         }
     }
 
-    /// VoiceOver label for the dial: the word plus the count.
-    static func accessibilityLabel(confirmed: Int, required: Int, tier: SpeakerNamingTier) -> String {
-        if tier == .auto {
-            let scope = max(1, required) < segmentCount ? " with matching meeting context" : ""
-            return "\(word(tier)), names on its own\(scope)"
-        }
-        return "\(word(tier)), \(confirmed) of \(required) meetings confirmed"
-    }
-
     private static func firstName(_ name: String) -> String {
         name.trimmingCharacters(in: .whitespacesAndNewlines)
             .split(whereSeparator: { $0.isWhitespace }).first.map(String.init) ?? name
