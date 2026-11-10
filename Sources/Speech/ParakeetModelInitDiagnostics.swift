@@ -182,7 +182,6 @@ enum ParakeetModelDownloadAttemptPolicy {
 }
 
 enum ParakeetModelInitStage: String, Equatable {
-    case authorizationRequest = "authorization_request"
     case bundleLoad = "bundle_load"
     case downloadModels = "download_models"
     case managerInitialize = "manager_initialize"
