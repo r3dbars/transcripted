@@ -92,7 +92,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search",
-                description: "Search meeting transcripts. Defaults to hybrid search: exact full-text matches PLUS on-device semantic matches, so paraphrases hit (e.g. 'pricing pushback' finds 'they balked at the cost'). Returns matching utterances with speaker, timestamp, and meeting context. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
+                description: "Search meeting transcripts. Defaults to hybrid search: exact full-text matches PLUS on-device semantic matches, so paraphrases hit (e.g. 'pricing pushback' finds 'they balked at the cost'). Returns matching utterances with speaker, timestamp, and meeting context. When truncated is true, total_meetings_matched is a lower bound; narrow the query or date range for more focused results. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -203,7 +203,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "search_context",
-                description: "Search across saved meetings, dictations, writing, or all of them. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording; writing is matched by full text only. Results are ranked by relevance across kinds, not by date; use recent_context for newest first. Great for finding everything you captured about a topic, whether it came from a meeting, a quick dictated note, or something you wrote.",
+                description: "Search across saved meetings, dictations, writing, or all of them. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording; writing is matched by full text only. Results are ranked by relevance across kinds, not by date; use recent_context for newest first. When truncated is true, total_items_matched is a lower bound; increase count or narrow the query/date range. Great for finding everything you captured about a topic, whether it came from a meeting, a quick dictated note, or something you wrote.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
