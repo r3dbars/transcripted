@@ -112,9 +112,9 @@ extension ParakeetEngine {
     }
 
     private func drainInputDeviceRefreshMailbox() async {
-        while !Task.isCancelled,
-              !isShuttingDown,
-              let request = inputDeviceRefreshMailbox.takeNext() {
+        await ParakeetInputDeviceRefreshDrain.run(
+            mailbox: inputDeviceRefreshMailbox, isStopped: { self.isShuttingDown }
+        ) { request in
             let loadedSelection = await boundedRouteNotificationSelection()
             guard !Task.isCancelled, !isShuttingDown else { return }
 
@@ -124,7 +124,7 @@ extension ParakeetEngine {
                 updateCachedInputDeviceName("Unknown")
             }
 
-            guard let source = request.configChangeSource else { continue }
+            guard let source = request.configChangeSource else { return }
             let observedSelection = loadedSelection ?? Self.unknownInputDeviceSelection
             if source == .defaultInputDevice {
                 let selection = observedSelection
@@ -678,7 +678,7 @@ extension ParakeetEngine {
         }
     }
 
-    private func deviceRecoveryTimeoutSteps(
+    func deviceRecoveryTimeoutSteps(
         generation: UInt64,
         wasRecording: Bool
     ) -> ParakeetDeviceRecoveryTimeoutSteps {

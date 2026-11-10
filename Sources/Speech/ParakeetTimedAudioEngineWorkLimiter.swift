@@ -8,10 +8,45 @@ import Foundation
 /// never recycled and the hard cap prevents replacement queues from creating
 /// an unlimited collection of blocked workers and retained native graphs.
 final class ParakeetTimedAudioEngineWorkLimiter: @unchecked Sendable {
+    typealias TimeoutScheduler = @Sendable (UInt64, @escaping @Sendable () -> Void) -> Void
+    static let wallClockTimeouts: TimeoutScheduler = { delay, expire in
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(
+            deadline: .now() + .nanoseconds(Int(delay)), execute: expire
+        )
+    }
+    let configurationTimeouts: TimeoutScheduler
+    let configurationNativeCompletion: @Sendable () -> Void
+
     final class Lease: @unchecked Sendable {
         private weak var owner: ParakeetTimedAudioEngineWorkLimiter?
         private let lock = NSLock()
         private var isReleased = false
+        private var configurationClaimed = false
+
+        /// Transfer capability. The original unclaimed handle cannot release
+        /// this worker after ownership moves into a configuration operation.
+        final class ConfigurationClaim: @unchecked Sendable {
+            private let lease: Lease
+            fileprivate init(_ lease: Lease) { self.lease = lease }
+            func release() { lease.releaseConfigurationClaim() }
+            deinit { release() }
+        }
+
+        func claimConfigurationOwnership() -> ConfigurationClaim? {
+            lock.withLock {
+                guard !isReleased, !configurationClaimed else { return nil }
+                configurationClaimed = true
+                return ConfigurationClaim(self)
+            }
+        }
+
+        private func releaseConfigurationClaim() {
+            lock.lock()
+            let shouldRelease = !isReleased
+            isReleased = true
+            lock.unlock()
+            if shouldRelease { owner?.releaseWorker() }
+        }
 
         fileprivate init(owner: ParakeetTimedAudioEngineWorkLimiter) {
             self.owner = owner
@@ -19,8 +54,8 @@ final class ParakeetTimedAudioEngineWorkLimiter: @unchecked Sendable {
 
         func release() {
             lock.lock()
-            let shouldRelease = !isReleased
-            isReleased = true
+            let shouldRelease = !isReleased && !configurationClaimed
+            if shouldRelease { isReleased = true }
             lock.unlock()
 
             guard shouldRelease else { return }
@@ -38,10 +73,14 @@ final class ParakeetTimedAudioEngineWorkLimiter: @unchecked Sendable {
 
     init(
         maximumActiveWorkers: Int =
-            ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount
+            ParakeetAudioEngineRetirementPolicy.maximumRetainedEngineCount,
+        configurationTimeouts: @escaping TimeoutScheduler = ParakeetTimedAudioEngineWorkLimiter.wallClockTimeouts,
+        configurationNativeCompletion: @escaping @Sendable () -> Void = {}
     ) {
         precondition(maximumActiveWorkers > 0)
         self.maximumActiveWorkers = maximumActiveWorkers
+        self.configurationTimeouts = configurationTimeouts
+        self.configurationNativeCompletion = configurationNativeCompletion
     }
 
     func acquire() -> Lease? {

@@ -131,7 +131,7 @@ extension ParakeetEngine {
     /// the dictation readiness wait retries every poll meanwhile. The first
     /// circuit-open failure per throttle window goes out at error level; the
     /// repeats stay local warnings, like `reportAudioStartFailureIfNeeded`.
-    private func reportWorkCircuitOpenIfNeeded(message: String, context: [String: String]) {
+    func reportWorkCircuitOpenIfNeeded(message: String, context: [String: String]) {
         let now = ProcessInfo.processInfo.systemUptime
         let reportsAsError = ParakeetAudioStartRecoveryPolicy.shouldReportFailure(
             now: now,
