@@ -285,6 +285,10 @@ jobs:
             deps-tools
           key: ${{ steps.deps-cache-mac.outputs.cache-primary-key }}
 
+      - name: SQLite failed-open resource lifetime
+        shell: bash
+        run: bash scripts/dev/test-sqlite-handle-open.sh
+
       # XCTest's stall detector has aborted this step several times, always at
       # a main-thread wait, with no stack to say what was stuck. The same
       # freeze also hides in passing runs as one ~150s test. The watcher
