@@ -78,7 +78,7 @@ let pauseMs = Int(option("--pause-ms") ?? "640") ?? 640
 let runner = LiveRunner(output: output, chunkSize: chunkSize, pauseMs: pauseMs, log: log)
 
 let work = Task {
-    do {
+    let status = await LiveCommandExecution.run(operation: {
         try await runner.loadModels()
         if command == "watch" {
             let directory = option("--recordings").map { URL(fileURLWithPath: $0) }
@@ -97,12 +97,10 @@ let work = Task {
             guard !tracks.isEmpty else { fail(usage) }
             try await runner.replay(tracks, speed: speed, title: title)
         }
-    } catch is CancellationError {
-    } catch {
+    }, shutdown: { output.shutdown() }, reportError: { error in
         log("error: \(error)")
-    }
-    output.shutdown()
-    exit(0)
+    })
+    exit(status)
 }
 
 // Ctrl-C: mark the session over so the mod stops showing a live meeting.
