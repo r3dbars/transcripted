@@ -112,6 +112,7 @@ public enum ModelDownloadService {
 
     /// Execute an async operation with retry logic and exponential backoff.
     /// Classifies errors on each attempt and only retries transient failures.
+    /// Cancellation escapes without retrying or wrapping it as a download failure.
     public static func withRetry<T>(
         maxAttempts: Int = maxRetries,
         operation: @escaping () async throws -> T
@@ -119,9 +120,12 @@ public enum ModelDownloadService {
         var lastError: Error?
 
         for attempt in 0..<maxAttempts {
+            try Task.checkCancellation()
             do {
                 return try await operation()
             } catch {
+                if error is CancellationError { throw error }
+                try Task.checkCancellation()
                 lastError = error
                 let kind = classifyError(error)
 
@@ -142,7 +146,7 @@ public enum ModelDownloadService {
                 // Wait before retrying (unless this was the last attempt)
                 if attempt < maxAttempts - 1 {
                     let delay = retryDelays[min(attempt, retryDelays.count - 1)]
-                    try? await Task.sleep(nanoseconds: delay)
+                    try await Task.sleep(nanoseconds: delay)
                 }
             }
         }
