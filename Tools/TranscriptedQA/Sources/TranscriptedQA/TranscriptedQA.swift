@@ -312,7 +312,7 @@ struct PathOptions: ParsableArguments {
     @Option(name: .long, help: "Path to the writing capture directory (Writing_<date>.md). Defaults follow the selected layout; writing is skipped when no folder exists.")
     var writingPath: String?
 
-    @Option(name: .long, help: "Path to the state directory containing speakers.sqlite and stats.sqlite. Defaults follow the selected layout.")
+    @Option(name: .long, help: "Path to the state directory containing per-model speaker databases and stats.sqlite. Defaults follow the selected layout.")
     var stateDir: String?
 
     @Option(name: .long, help: "Path to app.jsonl. Defaults follow the selected layout.")

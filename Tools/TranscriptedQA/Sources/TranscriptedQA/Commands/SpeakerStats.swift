@@ -1,7 +1,7 @@
 import ArgumentParser
 import Foundation
 
-/// Report speaker-recognition lifeline metrics from speakers.sqlite.
+/// Report speaker-recognition lifeline metrics from every per-model speaker DB.
 ///
 /// Reads the append-only `speaker_match_outcomes` table the app writes on
 /// every auto-recognition and review verdict, and prints the funnel plus the
@@ -20,10 +20,7 @@ struct SpeakerStats: ParsableCommand {
 
     func run() throws {
         let stateDir = pathOpts.resolved.stateDir
-        let candidates = [
-            ("WeSpeaker", stateDir.appendingPathComponent("speakers.sqlite").path),
-            ("ERes2Net", stateDir.appendingPathComponent("speakers_eres2net.sqlite").path),
-        ].filter { FileManager.default.fileExists(atPath: $0.1) }
+        let candidates = try SpeakerDatabaseArtifact.existing(in: stateDir)
 
         guard !candidates.isEmpty else {
             print("No speaker database found under \(stateDir.path)")
@@ -31,9 +28,10 @@ struct SpeakerStats: ParsableCommand {
         }
 
         var reports: [SpeakerLifelineReport] = []
-        for (embedder, path) in candidates {
+        for artifact in candidates {
+            let path = artifact.url.path
             let reader = try SQLiteReader(path: path)
-            reports.append(try Self.buildReport(embedder: embedder, path: path, reader: reader, now: Date()))
+            reports.append(try Self.buildReport(embedder: artifact.displayName, path: path, reader: reader, now: Date()))
         }
 
         switch formatOpts.format {

@@ -4,7 +4,7 @@ import Foundation
 struct ValidateDatabase: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "validate-database",
-        abstract: "Validate speakers.sqlite and stats.sqlite integrity and schema."
+        abstract: "Validate all speaker databases and stats.sqlite integrity and schema."
     )
 
     @OptionGroup var pathOpts: PathOptions
@@ -13,7 +13,7 @@ struct ValidateDatabase: ParsableCommand {
     func run() throws {
         let paths = pathOpts.resolved
         var results: [ValidationResult] = []
-        results += SpeakerDBValidator(dbPath: paths.stateDir.appendingPathComponent("speakers.sqlite").path).validate()
+        results += SpeakerDBValidator.validateAll(in: paths.stateDir)
         results += StatsDBValidator(dbPath: paths.stateDir.appendingPathComponent("stats.sqlite").path).validate()
         try runValidation(results: results, format: formatOpts.format)
     }

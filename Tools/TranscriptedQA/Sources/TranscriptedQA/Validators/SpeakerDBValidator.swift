@@ -3,18 +3,31 @@ import Foundation
 struct SpeakerDBValidator {
     let dbPath: String
 
+    static func validateAll(in directory: URL) -> [ValidationResult] {
+        do {
+            let databases = try SpeakerDatabaseArtifact.existing(in: directory)
+            guard !databases.isEmpty else {
+                return [.warn("database/speakers-exists", target: "speaker databases", detail: "No speaker databases found")]
+            }
+            return databases.flatMap { Self(dbPath: $0.url.path).validate() }
+        } catch {
+            return [.fail("database/speakers-discovery", target: "speaker databases", detail: "Cannot enumerate speaker databases")]
+        }
+    }
+
     func validate() -> [ValidationResult] {
         var results: [ValidationResult] = []
-        let target = "speakers.sqlite"
+        let artifact = SpeakerDatabaseArtifact(url: URL(fileURLWithPath: dbPath))
+        let target = artifact.url.lastPathComponent
 
         // File exists
         guard FileManager.default.fileExists(atPath: dbPath) else {
-            return [.warn("database/speakers-exists", target: target, detail: "speakers.sqlite not found")]
+            return [.warn("database/speakers-exists", target: target, detail: "Speaker database not found")]
         }
 
         // Open DB
         guard let db = try? SQLiteReader(path: dbPath) else {
-            return [.fail("database/speakers-open", target: target, detail: "Cannot open speakers.sqlite")]
+            return [.fail("database/speakers-open", target: target, detail: "Cannot open speaker database")]
         }
 
         // Integrity check
@@ -47,16 +60,17 @@ struct SpeakerDBValidator {
             results.append(.fail("database/speakers-schema", target: target, detail: "Cannot read table schema"))
         }
 
-        // Embedding size (256 float32 = 1024 bytes)
-        if let rows = try? db.query("SELECT id, LENGTH(embedding) as emb_len FROM speakers WHERE embedding IS NOT NULL") {
+        // Different embedding spaces use different vector sizes.
+        if let expectedBytes = artifact.embeddingByteCount,
+           let rows = try? db.query("SELECT id, LENGTH(embedding) as emb_len FROM speakers WHERE embedding IS NOT NULL") {
             if rows.isEmpty {
                 results.append(.warn("database/speakers-embedding-size", target: target, detail: "No speakers with embeddings — check skipped"))
             } else {
                 var allCorrect = true
                 for row in rows {
-                    if let len = row["emb_len"] as? Int64, len != 1024 {
+                    if let len = row["emb_len"] as? Int64, len != expectedBytes {
                         let id = row["id"] as? String ?? "?"
-                        results.append(.fail("database/speakers-embedding-size", target: target, detail: "Speaker \(id) has \(len)-byte embedding (expected 1024)"))
+                        results.append(.fail("database/speakers-embedding-size", target: target, detail: "Speaker \(id) has \(len)-byte embedding (expected \(expectedBytes))"))
                         allCorrect = false
                     }
                 }
@@ -64,6 +78,8 @@ struct SpeakerDBValidator {
                     results.append(.pass("database/speakers-embedding-size", target: target))
                 }
             }
+        } else if artifact.embeddingByteCount == nil {
+            results.append(.warn("database/speakers-embedding-size", target: target, detail: "Unknown voiceprint model — embedding size not validated"))
         }
 
         // No NULL embeddings
