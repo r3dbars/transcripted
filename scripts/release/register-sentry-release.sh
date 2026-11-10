@@ -158,6 +158,17 @@ echo "Sentry release: $SENTRY_RELEASE"
 echo "Sentry dist: $SENTRY_DIST"
 echo "Sentry project: $SENTRY_ORG/$SENTRY_PROJECT"
 
+# Check required artifacts before any Sentry call can create/finalize a release.
+if [ "$SENTRY_UPLOAD_DEBUG_FILES" = "1" ]; then
+    if [ -e "$SENTRY_DEBUG_FILES_PATH" ]; then
+        verify_debug_file_match "$SENTRY_APP_BINARY_PATH" "$SENTRY_DEBUG_FILES_PATH"
+    elif [ "$SENTRY_REQUIRE_DEBUG_FILES" = "1" ]; then
+        echo "Missing Sentry debug files: $SENTRY_DEBUG_FILES_PATH" >&2
+        echo "Build with build-beta.sh first, or set SENTRY_DEBUG_FILES_PATH to the release dSYM." >&2
+        exit 1
+    fi
+fi
+
 if sentry_release_exists; then
     echo "Sentry release already exists."
     echo "Skipping finalize so reruns do not change the existing release date."
@@ -184,6 +195,7 @@ fi
 
 if [ "$SENTRY_UPLOAD_DEBUG_FILES" = "1" ]; then
     if [ -e "$SENTRY_DEBUG_FILES_PATH" ]; then
+        # Network calls above may outlast another packaging step replacing artifacts.
         verify_debug_file_match "$SENTRY_APP_BINARY_PATH" "$SENTRY_DEBUG_FILES_PATH"
         echo "Uploading Sentry debug files: $SENTRY_DEBUG_FILES_PATH"
         sentry-cli debug-files upload \

@@ -660,6 +660,13 @@ rules:
       - "python3 scripts/release/sentry-release-dry-run.py --self-test"
 
   - paths:
+      - "scripts/release/register-sentry-release.sh"
+      - "scripts/release/test-register-sentry-release.py"
+    checks:
+      - "bash -n scripts/release/register-sentry-release.sh"
+      - "python3 scripts/release/test-register-sentry-release.py"
+
+  - paths:
       - "scripts/ops/packaged-app-smoke.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
