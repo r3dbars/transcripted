@@ -432,7 +432,7 @@ Writing isn't useful to agents until the tools read it:
   - `SettingsRecentCaptureRefreshPolicyTests.swift` (pins Agent on ⌘5)
   - `Tools/TranscriptedQA/.../UISmoke.swift`
   - `Sources/UI/AGENTS.md` and `Sources/UI/Settings/AGENTS.md`
-- **Screen-share privacy test.** `OverlayScreenSharePrivacyTests` scans every window under `Sources/UI`, so the intro and setup views must follow its rules.
+- **Screen-share privacy coverage.** `scripts/dev/check-window-inventory.py` scans `Sources/` for windows against `.agents/window-inventory.json`. `OverlayScreenSharePrivacyTests` builds real windows and checks sharing behavior, so the intro and setup views need inventory entries and behavioral coverage.
 
 ## Permissions changes
 
