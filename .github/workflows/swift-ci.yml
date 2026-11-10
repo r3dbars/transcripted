@@ -477,6 +477,11 @@ jobs:
           TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS: ${{ runner.environment == 'self-hosted' && '10000' || '3000' }}
         run: scripts/ops/performance-budget.rb --check-home-recent-captures --allow-missing-parakeet-model --max-app-mb 220 --max-resources-mb 80 --launch-ui-smoke build/launch-ui-smoke.json --max-launch-interactive-ms "$TRANSCRIPTED_MAX_LAUNCH_INTERACTIVE_MS"
 
+      - name: Type-check lab control channel
+        # Normal app builds exclude this conditional code. Check it against
+        # the same sources and restored deps without launching a lab app.
+        run: bash scripts/dev/typecheck-lab-build.sh
+
   # ---------------------------------------------------------------------------
   # Required-status umbrella. Branch protection requires the "build-and-test"
   # context; keeping a job with that exact id means the split above does not

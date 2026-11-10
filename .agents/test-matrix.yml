@@ -1044,9 +1044,12 @@ rules:
       - "python3 scripts/hillclimb/hillclimb.py validate"
 
   - paths:
-      - "Sources/App/LabControlChannel.swift"
-      - "Sources/App/LabControlCommand.swift"
+      - "Sources/**/*.swift"
+      - "Package.swift"
+      - "scripts/entrypoints/build-deps.sh"
+      - "scripts/entrypoints/lib/swiftc-app-args.sh"
       - "scripts/dev/typecheck-lab-build.sh"
+      - ".github/workflows/swift-ci.yml"
     checks:
       - "bash build-deps.sh"
       - "bash build.sh --no-open"
