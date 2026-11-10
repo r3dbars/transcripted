@@ -19,6 +19,7 @@ enum PipelineFailureDisplayCopy {
     static func isLanguageModelGuidance(_ normalized: String) -> Bool {
         normalized.contains("select a whisper model")
             || normalized.contains("select a model in settings that supports this recording's saved language")
+            || normalized.contains("this transcription engine does not support a selected language")
     }
 
     enum Flow {

@@ -25,12 +25,25 @@ func testRecoveryLanguageGuidance() {
         )
     }
 
+    let unsupportedLanguageError = TranscriptionLanguageError.explicitLanguageUnsupported
     let legacyMessages = [
+        "This transcription engine does not support a selected language. Select Whisper or use Automatic.",
+        unsupportedLanguageError.errorDescription ?? "Missing explicit-language error description",
+        unsupportedLanguageError.localizedDescription,
         "This recording has a saved language choice. Select a Whisper model in Settings to transcribe it in that language.",
         "Select a Whisper model in Settings to transcribe this recording in its saved language.",
         "This recording has a saved language choice. Select a Whisper model or Apple Speech in Settings to transcribe it in that language.",
         "Apple Speech can't transcribe Finnish. Select a Whisper model in Settings to transcribe this recording in that language."
     ]
+    runSuite("The actual unsupported-language error remains actionable through its public descriptions") {
+        assertEqual(unsupportedLanguageError.errorDescription, unsupportedLanguageError.localizedDescription,
+                    "Foundation must retain the explicit-language error's public recovery copy")
+        assertTrue(PipelineFailureDisplayCopy.isLanguageModelGuidance(unsupportedLanguageError.localizedDescription.lowercased()),
+                   "the actual error must not depend on a legacy engine name to retain actionable recovery guidance")
+        assertEqual(MeetingFailureKind.classify(message: unsupportedLanguageError.localizedDescription),
+                    .languageNeedsWhisperModel, "the actual public error must reach compatible-model recovery")
+    }
+
     for message in [guidance] + legacyMessages {
         runSuite("Saved-language recovery retains the stable failure bucket for \(message)") {
             assertTrue(
