@@ -136,6 +136,7 @@ public enum SensitiveScenePolicy {
     }
 
     private static func matchedCategory(in text: String) -> Category? {
+        let text = text.replacingOccurrences(of: "\u{2019}", with: "'")
         let range = NSRange(text.startIndex..., in: text)
         for category in Category.allCases {
             guard let patterns = compiledPhrases[category] else { continue }

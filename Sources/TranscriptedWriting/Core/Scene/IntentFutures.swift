@@ -123,7 +123,8 @@ public enum IntentFuturesPlanner {
     }
 
     private static func folded(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: englishLocale)
+        text.replacingOccurrences(of: "\u{2019}", with: "'")
+            .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: englishLocale)
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
