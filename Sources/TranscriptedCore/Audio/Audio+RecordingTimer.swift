@@ -44,6 +44,7 @@ extension Audio {
                         DispatchQueue.main.async {
                             guard self.recordingSessionGeneration == generation, self.isRecording else { return }
                             self.error = "Recording stopped — disk space critically low (\(freeSpace / 1_000_000)MB free)"
+                            self.internalStopCause = .diskLow
                             self.stop()
                         }
                         return

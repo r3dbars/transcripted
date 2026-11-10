@@ -128,6 +128,9 @@ struct SentryEventPolicy: Equatable {
         "start_failure_stage",
         "start_plan",
         "stt_model",
+        // Which Core stop path ended a recording on its own
+        // (`InternalCaptureStopCause`), so APPLE-MACOS-2D can be split by cause.
+        "stop_cause",
         "stop_timed_out",
         "system_file_available",
         "system_failed",

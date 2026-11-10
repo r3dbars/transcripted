@@ -21,6 +21,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     @Published public var audioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published public var systemAudioLevelHistory: [Float] = Array(repeating: 0.0, count: 15)
     @Published public var error: String?
+    /// Why Core stopped the current recording by itself; nil when the app
+    /// asked for the stop. Main thread only; reset when a recording starts.
+    public internal(set) var internalStopCause: InternalCaptureStopCause?
     @Published public var systemAudioStatus: SystemAudioStatus = .unknown
     @Published public internal(set) var startFailureStage: AudioCaptureStartFailureStage = .unknown
     /// True only when the current start attempt received ScreenCaptureKit's

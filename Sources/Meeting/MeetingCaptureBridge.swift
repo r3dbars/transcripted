@@ -36,6 +36,9 @@ final class MeetingCaptureBridge: ObservableObject {
         audio.systemAudioStartPermissionExplicitlyDenied
     }
     var hasObservedSystemAudioSignal: Bool { audio.hasObservedSystemAudioSignal }
+    /// Which of Core's own stop paths ended the recording, as a telemetry
+    /// category; nil when no Core-side stop was recorded.
+    var internalStopCause: String? { audio.internalStopCause?.rawValue }
     /// Live: another app has been playing for a while but the system-audio
     /// tap hears only silence, even after reconnecting.
     var systemAudioNotHearingPlayback: Bool { audio.isSystemAudioNotHearingPlayback }

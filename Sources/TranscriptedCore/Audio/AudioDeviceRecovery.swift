@@ -112,14 +112,31 @@ extension Audio {
             let timeSinceLastBuffer = CACurrentMediaTime() - self.lastBufferTime
 
             if timeSinceLastBuffer > AudioRecoveryTuning.Mic.stallTimeoutSeconds {
-                // Enforce cooldown — don't attempt recovery more often than every 5s
+                let giveUp = MicWatchdogGiveUpPolicy.decision(
+                    recoveryAttemptsUsed: self.recoveryAttemptCount,
+                    maxRecoveryAttempts: self.maxRecoveryAttempts,
+                    normalCooldown: self.recoveryCooldown,
+                    recordingCapturesSystemAudio: self.currentRecordingCapturesSystemAudio,
+                    systemAudioFailed: self.systemAudioFailed
+                )
+                let cooldown: TimeInterval
+                switch giveUp {
+                case .retry(let normalCooldown):
+                    cooldown = normalCooldown
+                case .keepRecordingWithoutMic(let retryCooldown):
+                    cooldown = retryCooldown
+                case .stopRecording:
+                    cooldown = self.recoveryCooldown
+                }
+
+                // Enforce cooldown — don't attempt recovery more often than the policy allows
                 if let lastRecovery = self.lastRecoveryTime,
-                   Date().timeIntervalSince(lastRecovery) < self.recoveryCooldown {
+                   Date().timeIntervalSince(lastRecovery) < cooldown {
                     return  // Too soon, skip this tick
                 }
 
-                // Give up after too many failed recoveries
-                if self.recoveryAttemptCount >= self.maxRecoveryAttempts {
+                // Give up only when the mic was the last thing still capturing.
+                if giveUp == .stopRecording {
                     AppLogger.audioMic.error("Max recovery attempts reached, stopping recording", [
                         "attempts": "\(self.recoveryAttemptCount)"
                     ])
@@ -129,12 +146,19 @@ extension Audio {
                               self.isRecording,
                               !self.isMicRecovering else { return }
                         let expectedStopGeneration = self.predictedNextRecordingSessionGeneration()
+                        self.internalStopCause = .micRecoveryGaveUp
                         self.stop()
                         guard self.recordingSessionGeneration == expectedStopGeneration else { return }
                         // Re-apply error after stop() clears it
                         self.error = savedError
                     }
                     return
+                }
+                if case .keepRecordingWithoutMic = giveUp {
+                    AppLogger.audioMic.warning("Microphone still unavailable after max recovery attempts; recording continues with system audio and retries slowly", [
+                        "attempts": "\(self.recoveryAttemptCount)",
+                        "retryCooldownSeconds": "\(Int(cooldown))"
+                    ])
                 }
 
                 // Audio stopped → device likely changed
@@ -606,8 +630,9 @@ extension Audio {
 
     /// One failed recovery no longer ends the meeting: system audio keeps
     /// recording and the watchdog retries on its cooldown, trying the
-    /// built-in mic first from the second attempt on. The watchdog still
-    /// stops the recording with an error after `maxRecoveryAttempts` in a row.
+    /// built-in mic first from the second attempt on. After
+    /// `maxRecoveryAttempts` in a row the watchdog stops the recording only
+    /// when system audio has failed too (`MicWatchdogGiveUpPolicy`).
     func logMicRecoveryWillRetry(stage: String) {
         AppLogger.audioMic.warning("Microphone recovery attempt failed; recording continues and will retry", [
             "stage": stage,
