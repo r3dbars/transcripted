@@ -16,6 +16,7 @@ func testFeedbackIssueBuilder() {
     }
 
     runSuite("FeedbackIssueBuilder sanitizes optional diagnostics and retains coarse safe values") {
+        let syntheticToken = "sk-" + "synthetic-feedback-secret-1234567890"
         let url = FeedbackIssueBuilder.emailURL(diagnostics: """
         meeting_state: idle
         route: bluetooth_input_to_built_in_output
@@ -23,7 +24,7 @@ func testFeedbackIssueBuilder() {
         private_path: /Users/synthetic-feedback/private.txt
         private_email: synthetic-feedback@example.com
         private_url: https://example.invalid/synthetic-feedback?secret=private
-        private_token: sk-synthetic-feedback-secret-1234567890
+        private_token: \(syntheticToken)
         """)
         assertNotNil(url, "sanitized diagnostics should still produce a draft")
         let body = feedbackBody(from: url)
@@ -34,7 +35,7 @@ func testFeedbackIssueBuilder() {
         assertFalse(body.contains("/Users/synthetic-feedback/private.txt"), "private paths should be removed")
         assertFalse(body.contains("synthetic-feedback@example.com"), "private email addresses should be removed")
         assertFalse(body.contains("https://example.invalid/synthetic-feedback"), "private URLs should be removed")
-        assertFalse(body.contains("sk-synthetic-feedback-secret-1234567890"), "private tokens should be removed")
+        assertFalse(body.contains(syntheticToken), "private tokens should be removed")
         assertTrue(body.lowercased().contains("no in-app logs attached"), "adding diagnostics should not imply logs were attached")
     }
 
