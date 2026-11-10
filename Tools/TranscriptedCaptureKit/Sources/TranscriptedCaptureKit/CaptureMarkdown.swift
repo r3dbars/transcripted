@@ -150,8 +150,52 @@ public enum CaptureMarkdown {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed == "---" { break }
             if trimmed.hasPrefix("title:") {
-                let title = String(trimmed.dropFirst(6)).trimmingCharacters(in: CharacterSet(charactersIn: "\"' "))
+                let title = unquoteYAMLScalar(String(trimmed.dropFirst(6)))
                 return title.isEmpty ? nil : title
+            }
+        }
+        return nil
+    }
+
+    /// Decode a YAML double-quoted scalar (`\"`, `\\`, `\n`, `\r`, `\t`).
+    /// Anything that isn't one whole quoted scalar comes back trimmed and
+    /// otherwise unchanged.
+    static func unquoteYAMLScalar(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        guard trimmed.first == "\"",
+              let decoded = decodeYAMLQuoted(trimmed, from: trimmed.index(after: trimmed.startIndex)),
+              decoded.end == trimmed.endIndex else {
+            return trimmed
+        }
+        return decoded.value
+    }
+
+    /// Decode a double-quoted scalar whose opening quote sits just before
+    /// `start`. Returns the value and the index after the closing quote, or
+    /// nil when the closing quote is missing.
+    static func decodeYAMLQuoted(_ text: String, from start: String.Index) -> (value: String, end: String.Index)? {
+        var index = start
+        var result = ""
+        while index < text.endIndex {
+            let c = text[index]
+            index = text.index(after: index)
+            if c == "\\" && index < text.endIndex {
+                let next = text[index]
+                index = text.index(after: index)
+                switch next {
+                case "\"": result.append("\"")
+                case "\\": result.append("\\")
+                case "n":  result.append("\n")
+                case "r":  result.append("\r")
+                case "t":  result.append("\t")
+                default:
+                    result.append("\\")
+                    result.append(next)
+                }
+            } else if c == "\"" {
+                return (result, index)
+            } else {
+                result.append(c)
             }
         }
         return nil

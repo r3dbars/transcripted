@@ -2,6 +2,41 @@ import XCTest
 @testable import TranscriptedCaptureKit
 
 final class CaptureMarkdownParserTests: XCTestCase {
+    func testEscapedSpeakerNameRetainsPersistentIdentity() throws {
+        let markdown = #"""
+        ---
+        capture_type: meeting
+        title: "Review \"quoted\" C:\\Notes"
+        speakers:
+          - id: "4"
+            channel: "system"
+            name: "Alex \"Q\" \\ Lab"
+            db_id: "persistent-4"
+            name_source: "user"
+            confidence: "high"
+        ---
+        ## Transcript
+
+        **00:00** [System/Alex "Q" \ Lab]
+        Fixture words.
+        """#
+        let parsed = try XCTUnwrap(CaptureMarkdownParser.parseMeeting(from: markdown))
+        let speaker = try XCTUnwrap(parsed.speakers.first)
+        XCTAssertEqual(speaker.id, "system_4")
+        XCTAssertEqual(speaker.persistentSpeakerId, "persistent-4")
+        XCTAssertEqual(speaker.confidence, "high")
+        XCTAssertEqual(speaker.nameSource, "user")
+        XCTAssertEqual(CaptureMarkdown.extractTitle(from: markdown), #"Review "quoted" C:\Notes"#)
+    }
+
+    func testTitleUnquotingPreservesPlainApostrophesAndMalformedScalars() {
+        for title in ["Chris'", #"'single quoted'"#, #""unterminated"#, #""extra" suffix"#] {
+            let markdown = "---\ntitle: \(title)\n---\nBody.\n"
+            XCTAssertEqual(CaptureMarkdown.extractTitle(from: markdown), title)
+            XCTAssertEqual(CaptureMarkdownParser.parseFrontmatter(from: markdown)?.values["title"], title)
+        }
+    }
+
     func testLanguageMetadataRemainsReadableToCLIAndMCP() throws {
         let markdown = """
         ---
