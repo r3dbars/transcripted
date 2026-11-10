@@ -27,10 +27,12 @@ Markdown.
    `meeting_summary_items` with a `kind` discriminator.
 4. The rollup tools query those rows and join `meetings` for dates.
 
-Action items carry `text`, an optional `owner`, and an optional `status` and
-`due` parsed from trailing markers such as `(done)`, `(status: blocked)` or
-`(due: Friday)`. `status: "done"` returns items whose status is done, complete,
-completed, resolved, closed or cancelled; the default `open` returns the rest.
+Action items carry `text`, an optional `owner`, and optional `status` and `due`
+parsed from trailing parenthesized markers such as `(done)`, `(status: blocked)`,
+or `(due: Friday)`. `status: "done"` returns items whose parsed status is `done`,
+`complete`, `completed`, `resolved`, `closed`, `cancelled`, or `canceled`. The
+default `open` returns the rest, including items without a status; `all` applies
+no status filter.
 
 ## Verification
 
