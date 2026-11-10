@@ -3,7 +3,7 @@ import MCP
 
 @main
 struct TranscriptedMCP {
-    static let serverVersion = "1.0.0"
+    static let serverVersion = MCPBuildVersion.value
 
     static func main() async throws {
         let startupStartedAt = ProcessInfo.processInfo.systemUptime
