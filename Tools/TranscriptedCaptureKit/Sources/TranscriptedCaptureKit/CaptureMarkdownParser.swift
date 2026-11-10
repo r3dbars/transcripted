@@ -269,7 +269,7 @@ public enum CaptureMarkdownParser {
     public static func parseDictationDay(from content: String, markdownURL url: URL) -> ParsedDictationDayCapture? {
         guard let document = parseFrontmatter(from: content) else { return nil }
 
-        let entries = parseDictationEntries(from: document.body)
+        let entries = parseDictationEntries(from: document.body, filename: url.lastPathComponent)
         let fallbackDate = url.deletingPathExtension().lastPathComponent
             .replacingOccurrences(of: "Dictations_", with: "")
 
@@ -292,7 +292,7 @@ public enum CaptureMarkdownParser {
     public static func parseWritingDay(from content: String, markdownURL url: URL) -> ParsedWritingDayCapture? {
         guard let document = parseFrontmatter(from: content) else { return nil }
 
-        let entries = parseWritingEntries(from: document.body)
+        let entries = parseWritingEntries(from: document.body, filename: url.lastPathComponent)
         let fallbackDate = url.deletingPathExtension().lastPathComponent
             .replacingOccurrences(of: CaptureMarkdown.writingDayFilenamePrefix, with: "")
 
@@ -517,6 +517,7 @@ public enum CaptureMarkdownParser {
         let heading: String
         let title: String
         var entryId = ""
+        var legacyIdentity = ""
         var createdAt = ""
         var sourceAppName: String?
         var sourceAppBundleId: String?
@@ -533,7 +534,7 @@ public enum CaptureMarkdownParser {
         }
     }
 
-    private static func parseDayFileSections(from body: String, flavor: DayFileFlavor) -> [DayFileSection] {
+    private static func parseDayFileSections(from body: String, flavor: DayFileFlavor, filename: String) -> [DayFileSection] {
         let lines = body.components(separatedBy: "\n")
         var sections: [String] = []
         var currentSection: [String] = []
@@ -553,6 +554,7 @@ public enum CaptureMarkdownParser {
             sections.append(currentSection.joined(separator: "\n"))
         }
 
+        var occurrences: [String: Int] = [:]
         return sections.compactMap { section -> DayFileSection? in
             let lines = section.components(separatedBy: "\n")
             guard let heading = lines.first, heading.hasPrefix("## ") else { return nil }
@@ -629,16 +631,22 @@ public enum CaptureMarkdownParser {
             }
 
             parsed.text = bodyLines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if parsed.entryId.isEmpty {
+                let digest = CaptureLegacyEntryIdentity.digest(filename: filename, section: section)
+                let occurrence = occurrences[digest, default: 0]
+                occurrences[digest] = occurrence + 1
+                parsed.legacyIdentity = "\(digest)-\(occurrence)"
+            }
             return parsed
         }
     }
 
     // MARK: - Dictation entries
 
-    private static func parseDictationEntries(from body: String) -> [ParsedDictationDayCapture.Entry] {
-        parseDayFileSections(from: body, flavor: .dictation).map { section in
+    private static func parseDictationEntries(from body: String, filename: String) -> [ParsedDictationDayCapture.Entry] {
+        parseDayFileSections(from: body, flavor: .dictation, filename: filename).map { section in
             ParsedDictationDayCapture.Entry(
-                id: section.entryId.isEmpty ? "dictation-\(UUID().uuidString)" : section.entryId,
+                id: section.entryId.isEmpty ? "dictation-legacy-\(section.legacyIdentity)" : section.entryId,
                 createdAt: section.createdAt.isEmpty ? "1970-01-01T00:00:00Z" : section.createdAt,
                 title: section.title.isEmpty ? section.headingText : section.title,
                 text: section.text,
@@ -663,11 +671,11 @@ public enum CaptureMarkdownParser {
             .joined(separator: "\n")
     }
 
-    private static func parseWritingEntries(from body: String) -> [ParsedWritingDayCapture.Entry] {
-        parseDayFileSections(from: body, flavor: .writing).map { section in
+    private static func parseWritingEntries(from body: String, filename: String) -> [ParsedWritingDayCapture.Entry] {
+        parseDayFileSections(from: body, flavor: .writing, filename: filename).map { section in
             let text = unescapeWritingBody(section.text)
             return ParsedWritingDayCapture.Entry(
-                id: section.entryId.isEmpty ? "writing-\(UUID().uuidString)" : section.entryId,
+                id: section.entryId.isEmpty ? "writing-legacy-\(section.legacyIdentity)" : section.entryId,
                 createdAt: section.createdAt.isEmpty ? "1970-01-01T00:00:00Z" : section.createdAt,
                 title: section.title.isEmpty ? section.headingText : section.title,
                 text: text,
