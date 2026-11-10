@@ -546,9 +546,8 @@ extension TranscriptionTaskManagerMetadataTests {
         )
         XCTAssertEqual(statsStore.recordedSessions.count, 1, "successful imports should record stats exactly once")
         let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
-        XCTAssertLessThan(
-            abs(metadata.date.timeIntervalSince(sourceRecordingDate)),
-            0.001,
+        XCTAssertEqual(
+            metadata.date.timeIntervalSince1970, sourceRecordingDate.timeIntervalSince1970, accuracy: 0.001,
             "recording metadata should use the source recording date"
         )
     }
@@ -610,9 +609,8 @@ extension TranscriptionTaskManagerMetadataTests {
         )
         XCTAssertEqual(statsStore.recordedSessions.count, 1)
         let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
-        XCTAssertLessThan(
-            abs(metadata.date.timeIntervalSince(recordingDate)),
-            0.001,
+        XCTAssertEqual(
+            metadata.date.timeIntervalSince1970, recordingDate.timeIntervalSince1970, accuracy: 0.001,
             "stats metadata should use the live recording start date"
         )
     }

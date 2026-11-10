@@ -121,7 +121,7 @@ func testMeetingPromptDetector() async {
             "calendar dismissal should keep using the normal Not now backoff"
         )
         assertTrue(
-            decision.until.timeIntervalSince(before) > 25 * 60,
+            decision.until > before.addingTimeInterval(25 * 60),
             "Not now should remain meaningfully longer than Remind me soon"
         )
     }
