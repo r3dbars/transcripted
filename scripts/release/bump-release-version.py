@@ -51,26 +51,6 @@ def update_info_plist(path: Path, version: str, dry_run: bool) -> bool:
     return changed
 
 
-def update_beta_config(path: Path, version: str, dry_run: bool) -> str:
-    if not path.exists():
-        return "not present"
-
-    original = path.read_text()
-    updated, count = re.subn(
-        r'(static let appVersion = ")([^"]+)(")',
-        rf"\g<1>{version}\g<3>",
-        original,
-        count=1,
-    )
-    if count == 0:
-        return "no appVersion mirror"
-    if updated == original:
-        return "unchanged"
-    if not dry_run:
-        path.write_text(updated)
-    return "updated"
-
-
 MCP_VERSION_PATH = Path("Tools/TranscriptedMCP/Sources/TranscriptedMCP/BuildVersion.swift")
 
 
@@ -104,11 +84,9 @@ def update_mcp_version(repo: Path, version: str, dry_run: bool) -> bool:
 def bump(repo: Path, version: str, dry_run: bool) -> list[str]:
     info_changed = update_info_plist(repo / "Info.plist", version, dry_run)
     mcp_changed = update_mcp_version(repo, version, dry_run)
-    beta_status = update_beta_config(repo / "Sources" / "Beta" / "BetaConfig.swift", version, dry_run)
     return [
         f"{MCP_VERSION_PATH}: {'would update' if dry_run and mcp_changed else 'updated' if mcp_changed else 'unchanged'}",
         f"Info.plist: {'would update' if dry_run and info_changed else 'updated' if info_changed else 'unchanged'}",
-        f"Sources/Beta/BetaConfig.swift: {beta_status if not dry_run or beta_status in {'unchanged', 'not present', 'no appVersion mirror'} else 'would update'}",
     ]
 
 
@@ -133,7 +111,7 @@ def self_test() -> int:
         payload = load_plist(fixture)
         assert payload["CFBundleShortVersionString"] == "1.1.49"
         assert payload["CFBundleVersion"] == "1.1.49"
-        assert 'appVersion = "1.1.49"' in beta_config.read_text()
+        assert beta_config.read_text() == 'enum BetaConfig { static let appVersion = "1.1.48" }\n', "retired beta metadata must stay untouched"
         assert any("Info.plist: updated" == item for item in messages)
         mirror = root / MCP_VERSION_PATH
         assert mirror.read_text() == mcp_version_source("1.1.49")
