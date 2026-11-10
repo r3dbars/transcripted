@@ -77,9 +77,13 @@ final class ImportedAudioNativeSmokeTests: XCTestCase {
         }
         """.write(to: program, atomically: true, encoding: .utf8)
         let executable = root.appendingPathComponent("contract")
+        // This file is a compiler input, never loaded or asserted on as text.
+        let appGate = repo.appendingPathComponent("Sources", isDirectory: true)
+            .appendingPathComponent("Support", isDirectory: true)
+            .appendingPathComponent("AutomatedLaunchEnvironment.swift")
         let compilation = try execute(URL(fileURLWithPath: "/usr/bin/xcrun"), [
             "swiftc", "-parse-as-library", "-module-cache-path", root.appendingPathComponent("modules").path,
-            repo.appendingPathComponent("Sources/Support/AutomatedLaunchEnvironment.swift").path,
+            appGate.path,
             repo.appendingPathComponent("Tools/TranscriptedQA/Sources/TranscriptedQA/Utilities/IsolatedLaunchEnvironment.swift").path,
             program.path, "-o", executable.path,
         ])
