@@ -113,7 +113,8 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                 .padding(.horizontal, 4)
             }
         } else {
-            LazyVStack(alignment: .leading, spacing: sectionSpacing) {
+            // The paged Settings scroll shell lays day sections out eagerly.
+            VStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
                         Text(Self.headerTitle(for: section))
@@ -130,10 +131,16 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                             }
 
                         VStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(section.items.enumerated()), id: \.offset) { index, item in
-                                row(item)
-                                    .id(getID(item))
-                                if showsRowDividers, index < section.items.count - 1 {
+                            ForEach(
+                                HomeDayGroupedRows.make(
+                                    items: section.items,
+                                    id: getID,
+                                    showsRowDividers: showsRowDividers
+                                )
+                            ) { grouped in
+                                row(grouped.item)
+                                    .id(getID(grouped.item))
+                                if grouped.showsDividerAfter {
                                     Divider()
                                 }
                             }
