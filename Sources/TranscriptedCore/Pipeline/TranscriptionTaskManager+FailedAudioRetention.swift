@@ -44,7 +44,7 @@ extension TranscriptionTaskManager {
             }.value
 
             if let retainedAudio {
-                return enqueueFailedTranscriptionAfterRetainingAudio(
+                let didPersist = enqueueFailedTranscriptionAfterRetainingAudio(
                     taskId: taskId,
                     retainedAudio: retainedAudio,
                     originalMicURL: micAudioURL,
@@ -58,6 +58,10 @@ extension TranscriptionTaskManager {
                     languageSelection: languageSelection,
                     micOnlyByChoice: micOnlyByChoice
                 )
+                if didPersist { return true }
+                // A library switch can put this archive outside the queue's
+                // launch-time roots. Rejection rolls it back; persist the
+                // still-owned scratch audio through the fallback below.
             }
         }
 
