@@ -66,6 +66,44 @@ enum TranscriptedPermissionAccess {
         let probeResult: SystemAudioPermissionProbeResult?
     }
 
+    /// Effects shared by the real decision path and explicitly injected fixtures.
+    /// Constructing these values does not read preferences or request permission.
+    struct SystemAudioPermissionCache: Sendable {
+        let read: @Sendable () -> SystemAudioPermissionState
+        let recordGrant: @Sendable (Bool) -> Void
+        let clear: @Sendable () -> Void
+
+        static var live: Self {
+            Self(read: {
+                let defaults = UserDefaults.standard
+                if defaults.object(forKey: systemAudioRecordingGrantedKey) as? Bool == true { return .granted }
+                return defaults.bool(forKey: systemAudioRecordingKnownKey) ? .denied : .unknown
+            }, recordGrant: { granted in
+                setSystemAudioRecordingGranted(granted)
+            }, clear: {
+                UserDefaults.standard.removeObjectIfPresent(forKey: systemAudioRecordingKnownKey)
+                UserDefaults.standard.removeObjectIfPresent(forKey: systemAudioRecordingGrantedKey)
+            })
+        }
+    }
+
+    @MainActor
+    struct SystemAudioPermissionDependencies {
+        let cache: SystemAudioPermissionCache
+        let tcc: SystemAudioCaptureTCC
+        let isSmokeMode: @Sendable () -> Bool
+        let probe: @MainActor (SystemAudioPermissionState) async -> SystemAudioPermissionProbeResult
+        let activateForPrompt: @MainActor () -> Void
+        let notifyChanged: @MainActor () -> Void
+
+        static var live: Self {
+            Self(cache: .live, tcc: systemAudioCaptureTCC, isSmokeMode: { isLaunchSmokeMode },
+                 probe: { await performSystemAudioRecordingAccessRequest(cachedState: $0) },
+                 activateForPrompt: { activateForPermissionPrompt() },
+                 notifyChanged: { notifyPermissionsDidChange(kind: .systemAudioRecording) })
+        }
+    }
+
     // Preserve existing users' previously verified access across the backend
     // change. This cache is historical evidence, not a live macOS TCC query.
     private static let systemAudioRecordingGrantedKey = "systemAudioRecordingPermissionGranted"
@@ -294,19 +332,14 @@ enum TranscriptedPermissionAccess {
         }
     }
 
-    static func systemAudioRecordingStatus() -> SystemAudioPermissionState {
-        let defaults = UserDefaults.standard
-        let known = defaults.bool(forKey: systemAudioRecordingKnownKey)
-
-        if defaults.object(forKey: systemAudioRecordingGrantedKey) as? Bool == true {
-            return .granted
-        }
-
-        return known ? .denied : .unknown
+    static func systemAudioRecordingStatus(
+        cache: SystemAudioPermissionCache = .live
+    ) -> SystemAudioPermissionState {
+        cache.read()
     }
 
-    static func systemAudioRecordingGranted() -> Bool {
-        systemAudioRecordingStatus().isGranted
+    static func systemAudioRecordingGranted(cache: SystemAudioPermissionCache = .live) -> Bool {
+        systemAudioRecordingStatus(cache: cache).isGranted
     }
 
     private static func setSystemAudioRecordingGranted(_ granted: Bool) {
@@ -321,19 +354,20 @@ enum TranscriptedPermissionAccess {
     /// Cheap and prompt-free: safe on window activation and at meeting start.
     @discardableResult
     static func refreshSystemAudioRecordingStatusFromSystem(
-        tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC
+        tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC,
+        cache: SystemAudioPermissionCache = .live,
+        isSmokeMode: @Sendable () -> Bool = { isLaunchSmokeMode }
     ) -> SystemAudioCaptureTCCStatus {
-        if isLaunchSmokeMode { return .unavailable }
+        if isSmokeMode() { return .unavailable }
         let status = tcc.preflight()
         switch status {
         case .authorized:
-            setSystemAudioRecordingGranted(true)
+            cache.recordGrant(true)
         case .denied:
-            setSystemAudioRecordingGranted(false)
+            cache.recordGrant(false)
         case .notDetermined:
             // Reset in System Settings (or never asked). Nothing is known.
-            UserDefaults.standard.removeObjectIfPresent(forKey: systemAudioRecordingKnownKey)
-            UserDefaults.standard.removeObjectIfPresent(forKey: systemAudioRecordingGrantedKey)
+            cache.clear()
         case .unavailable:
             break
         }
@@ -356,7 +390,11 @@ enum TranscriptedPermissionAccess {
     @MainActor
     static func requestSystemAudioCaptureAccess(
         tcc: SystemAudioCaptureTCC = systemAudioCaptureTCC,
-        activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() }
+        activateForPrompt: @MainActor () -> Void = { activateForPermissionPrompt() },
+        cache: SystemAudioPermissionCache = .live,
+        notifyChanged: @MainActor () -> Void = {
+            notifyPermissionsDidChange(kind: .systemAudioRecording)
+        }
     ) async -> Bool? {
         activateForPrompt()
         // Bounded like the tap probe so a request that never answers cannot
@@ -380,125 +418,85 @@ enum TranscriptedPermissionAccess {
         case .explicitlyDenied: granted = false
         case .indeterminate: return nil
         }
-        setSystemAudioRecordingGranted(granted)
-        notifyPermissionsDidChange(kind: .systemAudioRecording)
-        return granted
-    }
-
-    @MainActor
-    static func requestSystemAudioRecordingAccessIfNeeded(forceRefresh: Bool = false) async -> Bool {
-        await systemAudioRecordingAccessDecision(forceRefresh: forceRefresh).canProceed
-    }
-
-    @MainActor
-    static func systemAudioRecordingAccessDecision(
-        forceRefresh: Bool = false
-    ) async -> SystemAudioPermissionAccessDecision {
-        switch refreshSystemAudioRecordingStatusFromSystem() {
-        case .authorized:
-            return applySystemAudioRecordingProbeResult(.granted)
-        case .denied:
-            return applySystemAudioRecordingProbeResult(.explicitlyDenied)
-        case .notDetermined:
-            // The real macOS box answers directly, however long the user
-            // takes, instead of a tap probe racing a timeout.
-            if let granted = await requestSystemAudioCaptureAccess() {
-                return applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
-            }
-        case .unavailable:
-            break
-        }
-
-        if !forceRefresh, systemAudioRecordingStatus() == .granted {
-            return SystemAudioPermissionAccessDecision(
-                canProceed: true,
-                state: .granted,
-                probeResult: nil
-            )
-        }
-
-        activateForPermissionPrompt()
-        let result = await performSystemAudioRecordingAccessRequest()
-        return applySystemAudioRecordingProbeResult(result)
-    }
-
-    @MainActor
-    static func revalidateSystemAudioRecordingStatus() async -> Bool {
-        if isLaunchSmokeMode {
-            return systemAudioRecordingGranted()
-        }
-        if let activeSystemAudioRevalidator {
-            return await activeSystemAudioRevalidator.value
-        }
-
-        let cachedBefore = systemAudioRecordingStatus()
-        switch refreshSystemAudioRecordingStatusFromSystem() {
-        case .authorized, .denied, .notDetermined:
-            if systemAudioRecordingStatus() != cachedBefore {
-                notifyPermissionsDidChange(kind: .systemAudioRecording)
-            }
-            return systemAudioRecordingGranted()
-        case .unavailable:
-            break
-        }
-
-        let task = Task { @MainActor in
-            let result = await performSystemAudioRecordingAccessRequest()
-            let granted = applySystemAudioRecordingProbeResult(result).canProceed
-            notifyPermissionsDidChange(kind: .systemAudioRecording)
-            return granted
-        }
-        activeSystemAudioRevalidator = task
-        let granted = await task.value
-        activeSystemAudioRevalidator = nil
-        return granted
-    }
-
-    @MainActor
-    static func revalidateSystemAudioRecordingStatus(
-        requester: @escaping @MainActor () async -> Bool,
-        skipSmokeRevalidation: Bool = isLaunchSmokeMode
-    ) async -> Bool {
-        if skipSmokeRevalidation {
-            return systemAudioRecordingGranted()
-        }
-        let granted = await requester()
-        _ = applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
-        notifyPermissionsDidChange(kind: .systemAudioRecording)
+        cache.recordGrant(granted)
+        notifyChanged()
         return granted
     }
 
     @MainActor
     static func requestSystemAudioRecordingAccessIfNeeded(
         forceRefresh: Bool = false,
-        requester: @escaping @MainActor () async -> Bool
+        dependencies: SystemAudioPermissionDependencies? = nil
     ) async -> Bool {
-        if !forceRefresh, systemAudioRecordingStatus() == .granted {
-            return true
-        }
-
-        let granted = await requester()
-        _ = applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied)
-        return granted
+        await systemAudioRecordingAccessDecision(forceRefresh: forceRefresh, dependencies: dependencies).canProceed
     }
 
-    /// Typed test/integration seam for exercising transport failures without
-    /// turning them into a synthetic denial. Production callers use the
-    /// no-requester overload above.
     @MainActor
     static func systemAudioRecordingAccessDecision(
         forceRefresh: Bool = false,
-        probeRequester: @escaping @MainActor () async -> SystemAudioPermissionProbeResult
+        dependencies: SystemAudioPermissionDependencies? = nil
     ) async -> SystemAudioPermissionAccessDecision {
-        if !forceRefresh, systemAudioRecordingStatus() == .granted {
-            return SystemAudioPermissionAccessDecision(
-                canProceed: true,
-                state: .granted,
-                probeResult: nil
-            )
+        let dependencies = dependencies ?? .live
+        let cache = dependencies.cache
+        switch refreshSystemAudioRecordingStatusFromSystem(
+            tcc: dependencies.tcc, cache: cache, isSmokeMode: dependencies.isSmokeMode
+        ) {
+        case .authorized:
+            return applySystemAudioRecordingProbeResult(.granted, cache: cache)
+        case .denied:
+            return applySystemAudioRecordingProbeResult(.explicitlyDenied, cache: cache)
+        case .notDetermined:
+            if let granted = await requestSystemAudioCaptureAccess(
+                tcc: dependencies.tcc, activateForPrompt: dependencies.activateForPrompt,
+                cache: cache, notifyChanged: dependencies.notifyChanged
+            ) {
+                return applySystemAudioRecordingProbeResult(granted ? .granted : .explicitlyDenied, cache: cache)
+            }
+        case .unavailable:
+            break
         }
 
-        return applySystemAudioRecordingProbeResult(await probeRequester())
+        if !forceRefresh, cache.read() == .granted {
+            return SystemAudioPermissionAccessDecision(canProceed: true, state: .granted, probeResult: nil)
+        }
+
+        dependencies.activateForPrompt()
+        let result = await dependencies.probe(cache.read())
+        return applySystemAudioRecordingProbeResult(result, cache: cache)
+    }
+
+    @MainActor
+    static func revalidateSystemAudioRecordingStatus(
+        dependencies: SystemAudioPermissionDependencies? = nil
+    ) async -> Bool {
+        let dependencies = dependencies ?? .live
+        let cache = dependencies.cache
+        if dependencies.isSmokeMode() { return cache.read().isGranted }
+        if let activeSystemAudioRevalidator {
+            return await activeSystemAudioRevalidator.value
+        }
+
+        let cachedBefore = cache.read()
+        switch refreshSystemAudioRecordingStatusFromSystem(
+            tcc: dependencies.tcc, cache: cache, isSmokeMode: dependencies.isSmokeMode
+        ) {
+        case .authorized, .denied, .notDetermined:
+            if cache.read() != cachedBefore { dependencies.notifyChanged() }
+            return cache.read().isGranted
+        case .unavailable:
+            break
+        }
+
+        let task = Task { @MainActor in
+            let result = await dependencies.probe(cache.read())
+            let granted = applySystemAudioRecordingProbeResult(result, cache: cache).canProceed
+            dependencies.notifyChanged()
+            return granted
+        }
+        activeSystemAudioRevalidator = task
+        let granted = await task.value
+        activeSystemAudioRevalidator = nil
+        return granted
     }
 
     @MainActor
@@ -509,10 +507,12 @@ enum TranscriptedPermissionAccess {
     }
 
     @MainActor
-    private static func performSystemAudioRecordingAccessRequest() async -> SystemAudioPermissionProbeResult {
+    private static func performSystemAudioRecordingAccessRequest(
+        cachedState: SystemAudioPermissionState
+    ) async -> SystemAudioPermissionProbeResult {
         let requester = SystemAudioPermissionRequester()
         let attempt = SystemAudioPermissionRequestAttempt(
-            timeoutNanoseconds: systemAudioProbeTimeout(for: systemAudioRecordingStatus())
+            timeoutNanoseconds: systemAudioProbeTimeout(for: cachedState)
         )
 
         return await attempt.awaitResult(
@@ -527,13 +527,14 @@ enum TranscriptedPermissionAccess {
 
     @MainActor
     private static func applySystemAudioRecordingProbeResult(
-        _ result: SystemAudioPermissionProbeResult
+        _ result: SystemAudioPermissionProbeResult,
+        cache: SystemAudioPermissionCache
     ) -> SystemAudioPermissionAccessDecision {
         switch result {
         case .granted:
-            setSystemAudioRecordingGranted(true)
+            cache.recordGrant(true)
         case .explicitlyDenied:
-            setSystemAudioRecordingGranted(false)
+            cache.recordGrant(false)
         case .indeterminate:
             // Preserve the existing state. A probe timeout, daemon failure,
             // missing display, or stream setup/teardown error is not evidence
@@ -541,7 +542,7 @@ enum TranscriptedPermissionAccess {
             break
         }
 
-        let state = systemAudioRecordingStatus()
+        let state = cache.read()
         return SystemAudioPermissionAccessDecision(
             // Silence cannot distinguish a quiet Mac from revoked access.
             // Keep the existing cached-grant policy without claiming a new
