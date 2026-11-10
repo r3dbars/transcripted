@@ -2,6 +2,8 @@
 
 This repo keeps the live day-to-day command surface intentionally small.
 
+`bash scripts/dev/run-imported-audio-smoke.sh --output <owned-evidence-dir>` compiles the Core-only synthetic import producer and validates its real saved Markdown and retained WAV. Current prebuilt dependencies are required. `--build-only` compiles without running it; fixture-only QA coverage must be selected explicitly.
+
 ## Active root entry points
 
 These stay at the repo root as thin wrappers so the public command surface stays

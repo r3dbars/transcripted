@@ -124,3 +124,6 @@ bash "$REPO_ROOT/scripts/dev/test-parakeet-lifecycle.sh"
 echo ""
 echo "Running recovery merge package tests…"
 TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test --filter MicRecordingFileMergerTests
+
+# Real imported-transcription/save/retention with synthetic engines and owned paths.
+bash "$REPO_ROOT/scripts/dev/run-imported-audio-smoke.sh" --output "$REPO_ROOT/build/imported-audio-integration"
