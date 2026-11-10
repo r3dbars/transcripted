@@ -88,7 +88,8 @@ final class NotchIslandLiveTranscriptView: NSView {
     /// was under 5 s ago. Updates are incremental, so applying only the
     /// latest one draws the same text as applying every one in between.
     private var pending: (log: LiveMeetingCaptionLog, status: LiveMeetingCaptions.Status)?
-    /// The clock the hidden catch-up is gated on; tests inject their own.
+    /// The clock the hidden catch-up is gated on. The flush rule is tested
+    /// through `NotchIslandPresentation.flushesHiddenTranscript`.
     var now: () -> CFTimeInterval = CACurrentMediaTime
     private var lastHiddenFlush: CFTimeInterval?
 
