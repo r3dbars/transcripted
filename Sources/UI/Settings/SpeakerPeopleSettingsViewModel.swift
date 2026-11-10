@@ -659,7 +659,8 @@ final class SpeakerPeopleSettingsViewModel: ObservableObject {
         let reviewQueueItems = SpeakerReviewQueueScanner.loadPendingItems(
             transcriptsDirectory: transcriptDirectory,
             profiles: profiles,
-            clipURLsByProfileID: clipURLsByProfileID
+            clipURLsByProfileID: clipURLsByProfileID,
+            clipQuotesByProfileID: clipQuotesByProfileID
         )
 
         return Snapshot(
