@@ -6,10 +6,13 @@
 # sources (the same list build.sh uses) with the smoke as the entry point,
 # the way test-speakers-directory-scroll.sh does. Opens a borderless window,
 # so it needs a GUI session (hosted macOS runners and the owner's Mac job
-# VM have one). The child gets a temporary HOME: no real library, prefs or
-# logs. Does not touch Speakers.
+# VM have one). Requires an approved CI or separate OS account; a temporary
+# HOME does not isolate CFPreferences. Fixture captures and logs stay under
+# the owned container. Does not touch Speakers.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
+# Fail before compiling or launching anything on the owner's account.
+python3 scripts/ops/native-smoke-isolation.py
 if [ ! -f deps-libs/libDraftDeps.a ] || [ ! -d deps-modules/TranscriptedCore.swiftmodule ]; then
     echo "Dependencies not found — run build-deps.sh first."
     exit 1
@@ -45,7 +48,7 @@ case "$fixture_home" in
     *) echo "Unexpected temporary HOME: $fixture_home"; exit 1 ;;
 esac
 mkdir -p "$fixture_home/container"
-# Child-only HOME override: no application delegate, captures, permission prompts, or telemetry.
+# Fixture paths after native-account preflight; HOME alone is not preference isolation.
 harness_environment=(env HOME="$fixture_home" CFFIXED_USER_HOME="$fixture_home" TMPDIR="$fixture_home/"
     TRANSCRIPTED_CONTAINER_DIR="$fixture_home/container"
     TRANSCRIPTED_AUTOMATED_HARNESS=1 TRANSCRIPTED_DISABLE_FILE_LOGGER=1

@@ -22,9 +22,9 @@ import TranscriptedCore
 /// - each step costs a few layout passes, and the page goes quiet once
 ///   scrolling stops.
 ///
-/// Before the fix (a `LazyVStack` of day sections, rows keyed by offset)
-/// this is the same hang class as Speakers: macOS 26.6.2 never returned from
-/// a step on a long list, and macOS 27 jumped the scroll back.
+/// The lazy-stack layout is a hypothesis based on the Speakers regression.
+/// This harness must reproduce and then clear the capture-list failure on
+/// macOS before it can establish that the reported freeze is fixed.
 ///
 /// A hang guard turns a frozen main thread into a failure that names the
 /// step; it never checks how long a step took.

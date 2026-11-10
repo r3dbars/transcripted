@@ -255,8 +255,10 @@ thresholds, pumps and completion receipts stay authoritative.
 
 Dictations and Meetings share a Load More scroll smoke:
 `bash scripts/dev/test-capture-list-load-more-scroll.sh` (requires `bash build-deps.sh`
-and a GUI session). It compiles the app's sources with
-`Tests/UI/CaptureListLoadMoreScrollSmoke.swift` as the entry point, hosts the
+and a GUI session in a separate OS account or verified CI runner). The native
+isolation preflight blocks the owner's account before compilation or launch;
+HOME overrides alone do not isolate preferences. It compiles the app's sources
+with `Tests/UI/CaptureListLoadMoreScrollSmoke.swift` as the entry point, hosts the
 real Dictations page and the Meetings day-grouped list in the Settings
 detail-column `ScrollView` over a temporary capture library, and clicks Load
 More from the bottom at several library sizes. It fails if a Load More does

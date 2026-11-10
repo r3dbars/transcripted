@@ -113,7 +113,8 @@ struct HomeDayGroupedList<Item, Row: View>: View {
                 .padding(.horizontal, 4)
             }
         } else {
-            LazyVStack(alignment: .leading, spacing: sectionSpacing) {
+            // The paged Settings scroll shell lays day sections out eagerly.
+            VStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
                         Text(Self.headerTitle(for: section))

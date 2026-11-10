@@ -127,14 +127,12 @@ enum HomeDayGroupedRows {
     /// The identity `ForEach` should use for a row. Must be the item's own
     /// id, never the offset in the current page.
     static func rowID<Item>(
-        offset: Int,
+        offset _: Int,
         item: Item,
         id: (Item) -> AnyHashable
     ) -> AnyHashable {
-        // Today's list still keys ForEach by offset and stamps the item id
-        // on the child. That is the identity the Load More tests pin.
-        _ = id(item)
-        return AnyHashable(offset)
+        // Prepending a capture can change the position of an existing row.
+        id(item)
     }
 
     static func make<Item>(
