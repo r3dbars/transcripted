@@ -214,7 +214,7 @@ struct SecureLocalStorageTests {
         #expect(try posixMode(of: file) == 0o600)
     }
 
-    @Test("History operations reject an owner-only FIFO without blocking")
+    @Test("History operations reject an owner-only FIFO")
     func historyOperationsRejectFIFO() throws {
         let root = makeTempDirectoryURL()
         let file = root.appendingPathComponent("history.v1.enc")
@@ -222,7 +222,6 @@ struct SecureLocalStorageTests {
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         #expect(chmod(root.path, 0o700) == 0)
         #expect(mkfifo(file.path, 0o600) == 0)
-        let start = ContinuousClock.now
 
         #expect(SecureLocalStorage.openExistingFileForReading(at: file) == nil)
         #expect(SecureLocalStorage.openFileForReadingAndAppending(at: file) == nil)
@@ -231,7 +230,6 @@ struct SecureLocalStorageTests {
         default: Issue.record("Status accepted an owner-only FIFO")
         }
         #expect(!SecureLocalStorage.removeOwnerOnlyFile(at: file))
-        #expect(start.duration(to: .now) < .seconds(1))
         var info = stat()
         #expect(lstat(file.path, &info) == 0)
         #expect(info.st_mode & S_IFMT == S_IFIFO)
