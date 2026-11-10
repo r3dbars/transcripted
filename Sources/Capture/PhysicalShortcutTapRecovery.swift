@@ -33,6 +33,9 @@ final class PhysicalShortcutTapRecovery: @unchecked Sendable {
         enqueue { [self] in
             lock.lock()
             let shouldEnable = active
+            // Coalesce queued requests, but let a new disable during the OS
+            // round trip queue one follow-up on the serial recovery queue.
+            pending = false
             lock.unlock()
             guard shouldEnable else { return }
 
@@ -40,7 +43,6 @@ final class PhysicalShortcutTapRecovery: @unchecked Sendable {
             let enabled = enable()
 
             lock.lock()
-            pending = false
             let shouldComplete = active
             lock.unlock()
             if shouldComplete { completed(enabled) }
