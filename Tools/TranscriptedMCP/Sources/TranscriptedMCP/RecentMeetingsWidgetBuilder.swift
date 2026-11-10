@@ -5,10 +5,10 @@ import TranscriptedCaptureKit
 /// reuses the same meeting/transcript/audio access the read tools use — it adds
 /// a UI layer on top of the existing data surface, it does not re-plumb data.
 ///
-/// Everything served here is local: transcripts are read from the capture
-/// Markdown, audio bytes from the sibling `audio/<stem>_audio/` bundle. The bytes
-/// are base64-inlined into the widget and travel over the local stdio transport;
-/// nothing is fetched from or sent to a remote host.
+/// Sources are local capture Markdown and sibling audio files. The returned
+/// widget model includes transcripts, speaker labels, audio-folder paths, and
+/// bounded base64 audio. It travels over stdio to the MCP client; downstream
+/// processing, forwarding, and retention depend on that client and its host.
 enum RecentMeetingsWidgetBuilder {
     /// Per-meeting inline audio ceiling. Above this the card shows the audio
     /// folder path instead of embedding — keeps a single widget response bounded.
