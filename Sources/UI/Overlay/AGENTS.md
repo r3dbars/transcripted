@@ -53,7 +53,7 @@ bash run-tests.sh --filter MeetingPill
 bash run-tests.sh --filter CapturePill
 ```
 
-Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOverlayPlacementPolicyTests`, `OverlayScreenSharePrivacyTests` (scans all of `Sources/UI`). The island is excluded from screenshots, so review a visual change by rendering `NotchIslandView` offscreen with `NSView.cacheDisplay(in:to:)` (`layer.render(in:)` drops AppKit text).
+Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOverlayPlacementPolicyTests`, `OverlayScreenSharePrivacyTests` (builds real windows and checks sharing behavior). `scripts/dev/check-window-inventory.py` scans `Sources/` for window coverage. The island is excluded from screenshots, so review a visual change by rendering `NotchIslandView` offscreen with `NSView.cacheDisplay(in:to:)` (`layer.render(in:)` drops AppKit text).
 
 ## Rules
 
@@ -62,7 +62,7 @@ Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOv
 - **Never steal focus.** Panels are non-activating. The island takes the keyboard only while someone types a name in "Who spoke?" (`acceptsKeyForTyping`); when naming ends or the review leaves the screen, `NotchIslandController` hands the keyboard back to the app they were in without hiding the island or activating Transcripted. The panel may sit over the menu bar.
 - **AppKit renderers, controller-owned state.** Controllers push `update(...)` into views; no SwiftUI hosting in the island.
 - **AirPods.** Nothing here builds an `AVAudioEngine` or touches `inputNode`. The start click waits for recording on a headset (`DictationStartCuePolicy`); read `Sources/Speech/AGENTS.md` before changing start timing.
-- **Source pins.** `DictationSessionController.swift` and `MeetingOverlayController+Island.swift` are heavily pinned; run `python3 scripts/dev/check-source-pins.py --changed-only` before editing.
+- **Source pins.** Run `python3 scripts/dev/check-source-pins.py --changed-only` before editing; use its resolved targets rather than a hand-kept list of pinned files.
 
 The same review draws as a card on Settings › Speakers (`NotchIslandSpeakerReviewView(input:chrome: .page(...), width:)`, `+Page.swift`): the page passes its own words (title, date, Done, Skip), each row shows its quote (`NotchIslandSpeakerReviewPolicy.quoteLine`) and plays from a clip file or a window of kept audio (`NotchIslandVoiceClip`), there's no Later ring or hard cap, no analytics, no Delete recording, and Done hands the answers back without finishing the view. The island's defaults are unchanged.
 
