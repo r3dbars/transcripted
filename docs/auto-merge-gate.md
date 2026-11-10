@@ -11,7 +11,7 @@ The lane configuration permits **auto-merge level 3**. When this gate is deploye
 | `test-shape` | 1 | `cleanup/test-shape/` | `cleanup` | test files, its baseline | 400 lines |
 | `source-pins` | 1 | `cleanup/source-pins/` | `cleanup` | test files, its baseline | 400 lines |
 | `file-size` | 1 | `cleanup/file-size/` | `cleanup` | Sources outside the protected areas, tests, folder `AGENTS.md` files, the hand-kept source lists, its baseline | 1,600 lines (moves count twice) |
-| `module-edges` | 2 | `cleanup/module-edges/` | `cleanup` | same as `file-size`, with its own baseline | 600 lines |
+| `module-edges` | 2 | `cleanup/module-edges/` | `cleanup` | Sources, tool Sources/tests, tests, folder `AGENTS.md` files, the hand-kept source lists, source-pin baseline | 600 lines |
 | `docs` | 2 | `garden/docs/` | `gardener` | folder `AGENTS.md` files, `docs/*.md` except release, QA, download and credential docs | 300 lines |
 | `bug-fix` | 3 | `codex/issue-` | `bug` | Sources outside the protected areas and outside UI, App and Capture, plus tests | 300 lines |
 
@@ -48,6 +48,9 @@ Agents open lane PRs as drafts. Once a draft passes everything except the review
 Each run merges at most 3 PRs, and at most one per lane, so main's CI runs between batches.
 
 ## Baselines and held PRs
+
+Module boundaries have no baseline: every forbidden crossing fails
+`check-module-boundaries.py`. The lane has no module-edge debt exemption.
 
 A PR in any lane may change a debt baseline (`.agents/*-baseline.json`) only when the change lowers counts or drops entries, compared with the PR's merge base. A reformatted or reordered copy with nothing lowered doesn't count. That holds even for a baseline the lane's allow globs name, so a lane PR can never raise its own baseline. Anything else in a baseline (a higher count, a new entry, including a moved one, a repeated list entry, or a changed or deleted top-level setting like `limit` or `_comment`) keeps the PR out of the lane. The other baselines are re-checked against the code by `repo-hygiene`, a required check. `.agents/concurrency-baseline.json` is never eligible: only the Swift concurrency census can say a lower count is true, and that isn't a required check. Which baselines changed comes from the same rename-aware REST file list as rule 4, so renaming a baseline away counts as changing it. If GitHub can't serve a baseline during a run, the PR just waits for the next run.
 

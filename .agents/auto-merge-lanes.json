@@ -109,7 +109,6 @@
         "Tools/*/Tests/**",
         "Tests/**",
         "*/AGENTS.md",
-        ".agents/module-boundary-baseline.json",
         ".agents/source-pin-baseline.json",
         "scripts/entrypoints/run-tests.sh",
         "scripts/entrypoints/lib/shared-smoke-sources.sh"
