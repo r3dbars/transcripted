@@ -89,8 +89,6 @@ deps_are_ready() {
     local newest_input_path
     local build_stamp_mtime
     local build_stamp_path
-    local current_digest
-    local stamp_digest
 
     if [ ! -f "$DEPS_LIBS/libDraftDeps.a" ] \
         || [ ! -f "$DEPS_LIBS/libExternalDeps.a" ] \
@@ -108,6 +106,10 @@ deps_are_ready() {
         return 1
     fi
 
+    if dependency_inputs_match_stamp; then
+        return 0
+    fi
+
     newest_input="$(newest_dependency_input)"
     build_stamp="$(deps_build_stamp_info)"
 
@@ -123,17 +125,9 @@ deps_are_ready() {
         return 1
     fi
 
-    current_digest="$(dependency_input_digest)"
-    stamp_digest="$(deps_build_stamp_digest)"
-    if [ -z "$stamp_digest" ] || [ "$current_digest" != "$stamp_digest" ]; then
-        echo "[build-deps] Dependencies are stale for TranscriptedCore."
-        echo "[build-deps] Dependency input digest changed."
-        echo "[build-deps]   current: ${current_digest:-missing}"
-        echo "[build-deps]   stamp:   ${stamp_digest:-missing}"
-        return 1
-    fi
-
-    return 0
+    echo "[build-deps] Dependencies are stale for TranscriptedCore."
+    echo "[build-deps] Dependency input digest is missing, invalid, unreadable, or changed."
+    return 1
 }
 
 verify_download_sha256() {
