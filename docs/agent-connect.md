@@ -33,7 +33,7 @@ Tomorrow, ask:
 Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today.
 ```
 
-Claude answers from Transcripted's read-only direct tools. If those tools are
+Claude answers from Transcripted's saved-context tools. If those tools are
 unavailable, use the local-agent prompt below so an agent can fall back to the
 saved Markdown folders.
 
@@ -59,7 +59,7 @@ helper. If the silent refresh fails (for example a permissions problem), the
 Agent page surfaces the error on the affected row and `Connect` performs a
 full reinstall.
 
-Current `transcripted-mcp` capabilities:
+Current `transcripted-mcp` saved-context and diagnostic tools:
 
 - `recent_context`
 - `search_context`
@@ -75,10 +75,23 @@ Current `transcripted-mcp` capabilities:
 - `list_action_items`
 - `list_decisions`
 - `digest`
+- `decisions`
+- `commitments`
+- `open_questions`
+- `search_meetings`
+- `status`
+- `show_recent_meetings`
 
-The last three roll up structured summary fields (decisions, action items,
-open questions) across saved meetings. They only return rows for meetings
+`list_action_items`, `list_decisions`, and `digest` roll up structured summary
+fields (decisions, action items, open questions) across saved meetings. They only return rows for meetings
 that have a saved summary; see `docs/cross-meeting-tools.md`.
+
+`decisions`, `commitments`, and `open_questions` query those saved summary
+fields; `search_meetings` searches saved utterances. `status` reports the helper
+version, resolved directories, and index counts. `show_recent_meetings` opens
+the recent-meetings widget, which can return transcript text and size-capped
+recorded audio to the connected host. That widget is omitted in packaged
+companion mode, which exports text only.
 
 Agents can read what you wrote, too, if Save my writing is on.
 `list_writing` and `read_writing` open the daily `Writing_<date>.md` files.
@@ -90,15 +103,26 @@ These tools are read-only, but they are not redacted. `read_meeting`,
 `read_dictation`, and `read_writing` can return local transcript or writing
 text to the agent you connected.
 
+The helper also registers companion tools: `show_companion`,
+`get_recording_status`, `start_meeting`, `stop_meeting`,
+`set_live_context_sharing`, `read_live_transcript`, `get_live_meeting_context`,
+`browse_companion_context`, and `read_context_passage`. Meeting controls and
+live-sharing changes are actions, not read-only queries. They require the
+running app's local-companion access, with separate meeting-control and
+live-sharing permissions in Agent settings. Live text also requires sharing
+to be enabled for the current meeting. Starting a meeting leaves sharing off.
+
 ### Anonymous Usage Ping
 
 Like the app, the MCP helper can send one anonymous analytics event per
-successful tool call (`agent_capture_query_observed`) so we can tell whether
-the agent connection gets used. It carries only bucketed metadata: which kind
-of tool ran, which kind of capture (meeting, dictation, or writing), rough
-capture age, and rough source count.
+tracked saved-context query (`agent_capture_query_observed`) so we can tell
+whether the agent connection gets used. It records the tool and capture kinds,
+a coarse terminal result (success, empty/not found, invalid input, or internal
+error), bucketed source and result counts, and bucketed latency. Safe app
+version, build channel, and revision metadata are included when available.
 It never includes transcript text, queries, titles, speaker names, file paths,
-or audio, and your captures still never leave your Mac.
+or audio. Requested tool results can contain capture content and are returned
+to the agent or host you connected; that is separate from these analytics events.
 
 It follows the same anonymous analytics switch as the app: turn off analytics
 in Settings > Privacy and the helper sends nothing. Source builds send nothing
