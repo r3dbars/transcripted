@@ -33,7 +33,7 @@ Owner-approved support exception (2026-10-25): the Feedback form may send the me
 ```bash
 bash check.sh             # the checks your diff needs, from .agents/test-matrix.yml
 bash check.sh quick       # Linux-safe checks, no Swift build (about a minute)
-bash check.sh full        # what Swift CI runs on a PR
+bash check.sh full        # the same validation steps as Swift CI on a PR
 bash check.sh hardware    # real mic, system audio, and paste-back smokes on this Mac
 ```
 
