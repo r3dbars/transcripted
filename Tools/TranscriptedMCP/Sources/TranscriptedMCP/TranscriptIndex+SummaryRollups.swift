@@ -251,7 +251,7 @@ extension TranscriptIndex {
             if let dateFrom { meetingSQL += " AND m.date >= ?"; bindings.append(.text(dateFrom)) }
             if let dateTo { meetingSQL += " AND m.date <= ?"; bindings.append(.text(dateTo)) }
             meetingSQL += " ORDER BY m.datetime DESC LIMIT ?"
-            bindings.append(.int(limit))
+            bindings.append(.int(limit + 1))
 
             var stmt: OpaquePointer?
             guard sqlite3_prepare_v2(db, meetingSQL, -1, &stmt, nil) == SQLITE_OK else {
@@ -271,11 +271,13 @@ extension TranscriptIndex {
             guard !windowMeetings.isEmpty else {
                 return DigestResult(
                     dateRange: digestRangeLabel(dateFrom: dateFrom, dateTo: dateTo),
-                    meetingCount: 0, actionItemCount: 0, openActionItemCount: 0,
+                    meetingCount: 0, truncated: false, actionItemCount: 0, openActionItemCount: 0,
                     decisionCount: 0, openQuestionCount: 0, meetings: []
                 )
             }
 
+            let truncated = windowMeetings.count > limit
+            windowMeetings = Array(windowMeetings.prefix(limit))
             let filenames = windowMeetings.map(\.filename)
             let decisionsByMeeting = try fetchTextSummaryItems(kind: SummaryItemKind.decision, filenames: filenames)
             let questionsByMeeting = try fetchTextSummaryItems(kind: SummaryItemKind.openQuestion, filenames: filenames)
@@ -309,6 +311,7 @@ extension TranscriptIndex {
             return DigestResult(
                 dateRange: digestRangeLabel(dateFrom: dateFrom, dateTo: dateTo),
                 meetingCount: digestMeetings.count,
+                truncated: truncated,
                 actionItemCount: totalActions,
                 openActionItemCount: totalOpenActions,
                 decisionCount: totalDecisions,

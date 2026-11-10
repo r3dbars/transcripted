@@ -283,7 +283,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "recap",
-                description: "Get a structured digest of all meetings in a date range. Returns each meeting with title, speakers, duration, and a preview of the first ~200 words. Perfect for 'What did I miss Monday through Wednesday?' or 'Summarize today's meetings'.",
+                description: "Get a structured digest of up to 50 meetings in a date range. Reports truncated=true when more match; narrow the date range to retrieve omitted meetings. Returns each meeting with title, speakers, duration, and a preview of the first ~200 words. Perfect for 'What did I miss Monday through Wednesday?' or 'Summarize today's meetings'.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -361,7 +361,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "digest",
-                description: "Cross-meeting summary for a time window: every meeting in range that has structured summary facts, with its decisions, action items, and open questions, plus rolled-up counts. Use for 'what happened across all my meetings this week'. Depends on the meeting summary index.",
+                description: "Returns up to 50 matching meetings and reports truncated=true when more exist; counts cover returned meetings. Cross-meeting summary for a time window with each returned meeting's structured decisions, action items, and open questions, plus rolled-up counts. Use for 'what happened across all my meetings this week'. Depends on the meeting summary index.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
