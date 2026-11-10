@@ -18,13 +18,13 @@ enum GhostStats {
 /// a fixed clock and a serial queue instead of sharing the live keyboard store.
 final class GhostStatsStore: @unchecked Sendable {
     private let persistenceQueue: DispatchQueue
-    private let defaults: UserDefaults
+    private let defaults: UserDefaults?
     private let now: @Sendable () -> Date
     private var pending = [String: Int]()
     private var lastFlush = Date.distantPast
 
     init(
-        defaults: UserDefaults = .standard,
+        defaults: UserDefaults? = nil,
         now: @escaping @Sendable () -> Date = { Date() },
         persistenceQueue: DispatchQueue = DispatchQueue(
             label: "com.justinbetker.draft.keyboard.ghost-stats", qos: .utility
@@ -87,10 +87,12 @@ final class GhostStatsStore: @unchecked Sendable {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         let key = "stats." + formatter.string(from: now)
-        var day = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
+        // Keep the live preference lookup on the persistence queue, as before.
+        let storeDefaults = defaults ?? .standard
+        var day = storeDefaults.dictionary(forKey: key) as? [String: Int] ?? [:]
         for (counter, count) in recorded {
             day[counter, default: 0] += count
         }
-        defaults.set(day, forKey: key)
+        storeDefaults.set(day, forKey: key)
     }
 }
