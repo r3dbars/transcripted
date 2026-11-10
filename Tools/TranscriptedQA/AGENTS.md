@@ -23,7 +23,7 @@ Registered in `TranscriptedQA.configuration`; `validate-all` is the default.
 
 What each smoke does and does not prove:
 
-- `imported-audio-smoke`: deterministic synthetic WAV through the imported-meeting artifact shape (`system_audio` metadata, retained single-file audio, parser discovery, transcript validation). Not file-picker or real ML transcription proof.
+- `imported-audio-smoke`: requires `--producer <executable>` for real Core imported-transcription/save/retention using synthetic engines, or explicit `--fixture-only` for parser/validator fixtures with no pipeline proof. `bash scripts/dev/run-imported-audio-smoke.sh` builds the source-linked Core producer and runs the QA validators. It checks `system_audio` metadata, retained bytes and discovery, but does not exercise the app preparer, native picker, or real ML accuracy.
 - `imported-audio-native-smoke`: drives the native import picker; needs Accessibility and local models.
 - `ui-smoke`: stable AX identifiers across onboarding, menu bar, Home, Settings. Exits `3` for Accessibility/TCC blockers.
 - `sparkle-update-smoke`: fake update-available and downloading states, real menu snapshot. Each run writes its launch reports and logs under `<output>/runs/<runID>/<state>/`, so overlapping runs on one output don't touch each other. Every owned directory below the explicit output root must be a real directory, and launch reports/logs must not be symlinks. Local UI proof only, not live appcast/download/install.
