@@ -80,7 +80,7 @@ struct PersonalHistoryControllerTests {
 
         let restarted = PersonalHistoryController(
             store: fixture.store,
-            settings: TildeSettings(keyboard: fixture.defaults)
+            settings: TildeSettings(keyboard: fixture.defaults, app: WritingTestDefaults())
         )
         let after = await settledStatus(restarted).snapshot
         #expect(after.opportunities == before.opportunities)
@@ -123,7 +123,7 @@ struct PersonalHistoryControllerTests {
         #expect(await settledStatus(fixture.controller).snapshot.opportunities == 0)
         let restarted = PersonalHistoryController(
             store: fixture.store,
-            settings: TildeSettings(keyboard: fixture.defaults)
+            settings: TildeSettings(keyboard: fixture.defaults, app: WritingTestDefaults())
         )
         #expect(await settledStatus(restarted).snapshot.opportunities == 0)
     }
@@ -1033,7 +1033,7 @@ struct PersonalHistoryControllerTests {
                 = PersonalHistoryController.defaultModelPersistenceInterval
         ) {
             let name = "tilde.tests.personal-history.\(UUID().uuidString)"
-            defaults = UserDefaults(suiteName: name)!
+            defaults = WritingTestDefaults()
             defaults.removePersistentDomain(forName: name)
             let historyIdentifier = "history"
             defaults.set(
@@ -1072,7 +1072,7 @@ struct PersonalHistoryControllerTests {
             )
             controller = PersonalHistoryController(
                 store: store,
-                settings: TildeSettings(keyboard: defaults),
+                settings: TildeSettings(keyboard: defaults, app: WritingTestDefaults()),
                 diagnostics: diagnostics,
                 modelPersistenceInterval: modelPersistenceInterval
             )
@@ -1084,7 +1084,7 @@ struct PersonalHistoryControllerTests {
         ) -> PersonalHistoryController {
             PersonalHistoryController(
                 store: store,
-                settings: TildeSettings(keyboard: defaults),
+                settings: TildeSettings(keyboard: defaults, app: WritingTestDefaults()),
                 modelPersistenceInterval: modelPersistenceInterval
             )
         }

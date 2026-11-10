@@ -205,7 +205,7 @@ struct PersonalHistoryCaptureTests {
 
         init(maximumBufferedEvents: Int = 192) {
             let suite = "tilde.tests.personal-history-capture.\(UUID().uuidString)"
-            defaults = UserDefaults(suiteName: suite)!
+            defaults = WritingTestDefaults()
             defaults.removePersistentDomain(forName: suite)
             let sink = self.sink
             capture = PersonalHistoryCapture(

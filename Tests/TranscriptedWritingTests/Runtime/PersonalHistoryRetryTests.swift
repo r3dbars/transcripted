@@ -157,7 +157,7 @@ struct PersonalHistoryRetryTests {
 
     private static func capture(_ app: ScriptedApp) -> PersonalHistoryCapture {
         let suite = "transcripted.tests.history-retry.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
+        let defaults = WritingTestDefaults()
         defaults.removePersistentDomain(forName: suite)
         defaults.set(true, forKey: PersonalHistorySettingsContract.enabledKey)
         defaults.set("history", forKey: PersonalHistorySettingsContract.historyIdentifierKey)
