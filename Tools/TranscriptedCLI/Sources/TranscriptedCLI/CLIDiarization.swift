@@ -229,15 +229,3 @@ enum CLIDiarization {
         FileHandle.standardError.write(Data((note + "\n").utf8))
     }
 }
-
-extension ImportAudio {
-    static var sharedDiarizationWindowing: CLIDiarization.Windowing { CLIDiarization.windowing }
-}
-
-extension Diarize {
-    static var sharedDiarizationWindowing: CLIDiarization.Windowing { CLIDiarization.windowing }
-}
-
-extension Batch {
-    static var sharedDiarizationWindowing: CLIDiarization.Windowing { CLIDiarization.windowing }
-}
