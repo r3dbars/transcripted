@@ -402,7 +402,6 @@ final class NotchIslandView: NSView {
     func updateLive(_ live: NotchIslandLiveValues) {
         leftWing.updateLive(live)
         rightWing.updateLive(live)
-        dropView?.updateLive(live)
     }
 
     func setGeometry(screen: NotchIslandScreenInfo, hasDrop: Bool, edgeProgress: Double?) {
