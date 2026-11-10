@@ -513,6 +513,9 @@ final class CaptureListHangGuard: @unchecked Sendable {
     let container: URL
     let meetings: URL
     let dictations: URL
+    private let fixtureHome: URL
+    private let fixtureParent: URL
+    private let captures: URL
     private static var instance: Fixture?
 
     static func shared() throws -> Fixture {
@@ -527,18 +530,43 @@ final class CaptureListHangGuard: @unchecked Sendable {
         guard AutomatedLaunchEnvironment.isActive(environment: environment),
               environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1",
               let homePath = environment["HOME"], homePath.hasPrefix("/"),
-              homePath.contains("transcripted-capture-list-scroll"),
-              let containerPath = environment["TRANSCRIPTED_CONTAINER_DIR"],
-              containerPath.hasPrefix(homePath) else {
+              let parentPath = environment["TRANSCRIPTED_CAPTURE_LIST_FIXTURE_PARENT"], parentPath.hasPrefix("/"),
+              let containerPath = environment["TRANSCRIPTED_CONTAINER_DIR"], containerPath.hasPrefix("/") else {
             throw IsolationError.unowned
         }
-        container = URL(fileURLWithPath: containerPath, isDirectory: true).standardizedFileURL
-        let meetingsURL = FileManager.default.meetingSupportDir.standardizedFileURL
-        let dictationsURL = FileManager.default.dictationSupportDir.standardizedFileURL
-        guard meetingsURL.path.hasPrefix(container.path + "/"),
-              dictationsURL.path.hasPrefix(container.path + "/") else {
+        let home = URL(fileURLWithPath: homePath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+        let parent = URL(fileURLWithPath: parentPath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
+        let actualContainer = URL(fileURLWithPath: containerPath, isDirectory: true)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let expectedContainer = home.appendingPathComponent("container", isDirectory: true)
+        let expectedCaptures = expectedContainer.appendingPathComponent("captures", isDirectory: true)
+        let expectedMeetings = expectedCaptures.appendingPathComponent("meetings", isDirectory: true)
+        let expectedDictations = expectedCaptures.appendingPathComponent("dictations", isDirectory: true)
+        guard home.deletingLastPathComponent() == parent,
+              home.lastPathComponent.hasPrefix("transcripted-capture-list-scroll."),
+              FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL == home,
+              actualContainer == expectedContainer else { throw IsolationError.unowned }
+        // Prepare only exact owned leaves before consulting app storage helpers.
+        for directory in [expectedCaptures, expectedMeetings, expectedDictations] {
+            guard directory.resolvingSymlinksInPath().standardizedFileURL == directory else {
+                throw IsolationError.unowned
+            }
+            try FileManager.default.createPrivateDirectory(at: directory)
+        }
+        // Pin the volatile capture location before app helpers can consult a
+        // stale preference belonging to this executable in the test account.
+        var arguments = UserDefaults.standard.volatileDomain(forName: UserDefaults.argumentDomain)
+        arguments[TranscriptedStoragePreferences.captureLibraryLocationKey] = expectedCaptures.path
+        UserDefaults.standard.setVolatileDomain(arguments, forName: UserDefaults.argumentDomain)
+        let meetingsURL = FileManager.default.meetingSupportDir.resolvingSymlinksInPath().standardizedFileURL
+        let dictationsURL = FileManager.default.dictationSupportDir.resolvingSymlinksInPath().standardizedFileURL
+        guard meetingsURL == expectedMeetings, dictationsURL == expectedDictations else {
             throw IsolationError.unowned
         }
+        fixtureHome = home
+        fixtureParent = parent
+        container = actualContainer
+        captures = expectedCaptures
         meetings = meetingsURL
         dictations = dictationsURL
     }
@@ -549,7 +577,11 @@ final class CaptureListHangGuard: @unchecked Sendable {
     }
 
     func resetSafely() {
-        try? reset()
+        do {
+            try reset()
+        } catch {
+            CaptureListLoadMoreScrollSmoke.setupFailed("fixture cleanup failed")
+        }
     }
 
     func populate(_ scenario: CaptureListLoadMoreScrollSmoke.Scenario) throws {
@@ -566,8 +598,19 @@ final class CaptureListHangGuard: @unchecked Sendable {
     }
 
     private func emptyDirectory(_ url: URL) throws {
-        guard url.path.hasPrefix(container.path + "/") else {
-            fatalError("Refusing to empty a directory outside the harness container")
+        let resolved = url.resolvingSymlinksInPath().standardizedFileURL
+        guard fixtureHome.resolvingSymlinksInPath().standardizedFileURL == fixtureHome,
+              fixtureHome.deletingLastPathComponent() == fixtureParent,
+              fixtureHome.lastPathComponent.hasPrefix("transcripted-capture-list-scroll."),
+              container.resolvingSymlinksInPath().standardizedFileURL == container,
+              container == fixtureHome.appendingPathComponent("container", isDirectory: true),
+              captures.resolvingSymlinksInPath().standardizedFileURL == captures,
+              captures == container.appendingPathComponent("captures", isDirectory: true),
+              resolved == url.standardizedFileURL,
+              resolved.deletingLastPathComponent() == captures,
+              (resolved == meetings && resolved.lastPathComponent == "meetings") ||
+                (resolved == dictations && resolved.lastPathComponent == "dictations") else {
+            throw IsolationError.unowned
         }
         let items = try FileManager.default.contentsOfDirectory(
             at: url,
@@ -575,6 +618,9 @@ final class CaptureListHangGuard: @unchecked Sendable {
             options: [.skipsHiddenFiles]
         )
         for item in items {
+            guard item.standardizedFileURL.deletingLastPathComponent() == resolved else {
+                throw IsolationError.unowned
+            }
             try FileManager.default.removeItem(at: item)
         }
     }

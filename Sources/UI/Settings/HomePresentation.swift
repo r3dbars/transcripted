@@ -101,22 +101,14 @@ enum HomeStableReferenceID {
     }
 }
 
-// MARK: - Meeting speaker palette selection
-
-/// Foundation-pure palette-slot selection for meeting speaker chips.
-///
-/// `HomeMeetingSpeakerColor.color(for:)` returns a SwiftUI `Color`, but the
-/// underlying decision — which stable palette slot a speaker name maps to — is
-/// deterministic and Foundation-only. That selection lives here so it can be
-/// fast-tested; `color(for:)` keeps the slot -> `Color` mapping in `HomeView`.
 // MARK: - Day-grouped row identity
 
 /// Identity and divider flags for one row in a Home / Dictations day section.
 ///
 /// Meetings and Dictations share `HomeDayGroupedList`. Each row's `ForEach`
-/// identity must be the capture's own id: Load More appends older rows, a
-/// refresh can insert a newer one at the top, and two day sections both have
-/// an item at offset 0. Offset keys collide across those cases.
+/// identity must be the capture's own id. A refresh can prepend or reorder
+/// captures, changing their offsets without changing which capture they are.
+/// Load More appends older rows while preserving the earlier row identities.
 enum HomeDayGroupedRows {
     struct Row<Item>: Identifiable {
         let id: AnyHashable
@@ -151,6 +143,14 @@ enum HomeDayGroupedRows {
     }
 }
 
+// MARK: - Meeting speaker palette selection
+
+/// Foundation-pure palette-slot selection for meeting speaker chips.
+///
+/// `HomeMeetingSpeakerColor.color(for:)` returns a SwiftUI `Color`, but the
+/// underlying decision — which stable palette slot a speaker name maps to — is
+/// deterministic and Foundation-only. That selection lives here so it can be
+/// fast-tested; `color(for:)` keeps the slot -> `Color` mapping in `HomeView`.
 enum HomeMeetingSpeakerPalette {
     /// Number of palette slots the speaker-color mapping spreads names across.
     static let slotCount = 8

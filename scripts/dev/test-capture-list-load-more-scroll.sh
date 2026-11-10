@@ -42,15 +42,28 @@ swiftc -Onone -j "$(sysctl -n hw.ncpu 2>/dev/null || printf 8)" -o "$OUT_DIR/scr
     "${APP_SWIFTC_LINK_ARGS[@]}" "${smoke_sources[@]}" \
     Tests/UI/CaptureListLoadMoreScrollSmoke.swift Tests/UI/CaptureListScrollDiagnostics.swift "${APP_SWIFTC_TAIL_ARGS[@]}" \
     -Xlinker -rpath -Xlinker "$PWD/deps-frameworks"
-fixture_home=$(mktemp -d "${TMPDIR:-/tmp}/transcripted-capture-list-scroll.XXXXXX")
-case "$fixture_home" in
-    */transcripted-capture-list-scroll.*) trap 'rm -rf "$fixture_home"' EXIT ;;
-    *) echo "Unexpected temporary HOME: $fixture_home"; exit 1 ;;
-esac
+fixture_parent=$(cd "${TMPDIR:-/tmp}" && pwd -P)
+fixture_home=$(mktemp -d "$fixture_parent/transcripted-capture-list-scroll.XXXXXX")
+fixture_home=$(cd "$fixture_home" && pwd -P)
+cleanup_fixture() {
+    local resolved_fixture
+    resolved_fixture=$(cd "$fixture_home" && pwd -P) || {
+        echo "Fixture cleanup failed: owned directory is unavailable" >&2; exit 1;
+    }
+    if [[ "$resolved_fixture" != "$fixture_home" || "${resolved_fixture%/*}" != "$fixture_parent" ||
+          "${resolved_fixture##*/}" != transcripted-capture-list-scroll.* ]]; then
+        echo "Refusing fixture cleanup outside its canonical owned parent" >&2; exit 1
+    fi
+    rm -rf -- "$resolved_fixture" || {
+        echo "Fixture cleanup failed" >&2; exit 1;
+    }
+}
+trap cleanup_fixture EXIT
 mkdir -p "$fixture_home/container"
 # Fixture paths after native-account preflight; HOME alone is not preference isolation.
 harness_environment=(env HOME="$fixture_home" CFFIXED_USER_HOME="$fixture_home" TMPDIR="$fixture_home/"
     TRANSCRIPTED_CONTAINER_DIR="$fixture_home/container"
+    TRANSCRIPTED_CAPTURE_LIST_FIXTURE_PARENT="$fixture_parent"
     TRANSCRIPTED_AUTOMATED_HARNESS=1 TRANSCRIPTED_DISABLE_FILE_LOGGER=1
     TRANSCRIPTED_DISABLE_RUNTIME_DIAGNOSTICS=1)
 # The compiled scenario list owns selection; no second count/list can drift.
