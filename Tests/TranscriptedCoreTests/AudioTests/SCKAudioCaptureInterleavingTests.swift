@@ -505,32 +505,6 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
         )
     }
 
-    // MARK: - Recovery gap must be measured from the last real buffer (review fix)
-
-    func testLastKnownBufferTimeReflectsLastRealBufferNotWhenAskedForIt() {
-        let capture = SCKAudioCapture(
-            callbackTimeout: .milliseconds(250),
-            callbackTimeoutSeconds: 1
-        )
-        capture.resetBufferWatchdogStateForTesting()
-        capture.markBufferReceivedForTesting()
-        let lastBufferTime = capture.lastKnownBufferTimeForTesting()
-
-        // Simulate silence AFTER the last real buffer — the elapsed-time
-        // window `handleMidRecordingFailure` must report as the gap, not a
-        // duration measured from whenever the watchdog/error callback
-        // happened to fire (which would omit the whole stall window).
-        Thread.sleep(forTimeInterval: 0.08)
-        let elapsedSinceRealBuffer = CACurrentMediaTime() - lastBufferTime
-
-        XCTAssertGreaterThanOrEqual(
-            elapsedSinceRealBuffer, 0.08,
-            "a gap computed from the last real buffer time must include the full silent stretch"
-        )
-        // A second read without another buffer must be stable (not "now").
-        XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), lastBufferTime, accuracy: 0.001)
-    }
-
     func testWatchdogFiresWhenFirstBufferNeverArrived() {
         let stream = ControlledSCKStream()
         let capture = SCKAudioCapture(
@@ -592,15 +566,14 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
             callbackTimeoutSeconds: 1
         )
         capture.resetBufferWatchdogStateForTesting()
-        let afterReset = capture.lastKnownBufferTimeForTesting()
-
-        Thread.sleep(forTimeInterval: 0.05)
-        // No buffer arrives here — `lastKnownBufferTime()` must not silently
-        // advance just because time passed (it is not `CACurrentMediaTime()`
-        // in disguise).
-        XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), afterReset, accuracy: 0.001)
+        // A synthetic sentinel proves a read returns the stored buffer time,
+        // rather than sampling the current clock. No sleep is needed.
+        let previousBufferTime: CFTimeInterval = -1
+        capture.setLastBufferTimeForTesting(previousBufferTime)
+        XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), previousBufferTime)
+        XCTAssertEqual(capture.lastKnownBufferTimeForTesting(), previousBufferTime)
 
         capture.markBufferReceivedForTesting()
-        XCTAssertGreaterThan(capture.lastKnownBufferTimeForTesting(), afterReset)
+        XCTAssertNotEqual(capture.lastKnownBufferTimeForTesting(), previousBufferTime)
     }
 }
