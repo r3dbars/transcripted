@@ -485,69 +485,6 @@ func testClipboardRestoringTextPaster() async {
             assertEqual(plain.hint, nil, "a plain error has no hint")
         }
 
-        runSuite("DictationPasteRetryTelemetry — emits one aggregate terminal event") {
-            var captures: [(String, [String: String])] = []
-            var attempts = 0
-            let outcome = DictationPasteRetryTelemetry.performUserRetry(
-                track: { event, properties in captures.append((event, properties)) },
-                retry: {
-                    attempts += 1
-                    return .copied(
-                        "synthetic private path /Users/test/secret.txt",
-                        reason: .pasteNotConfirmed
-                    )
-                }
-            )
-
-            assertEqual(attempts, 1, "retry telemetry should invoke the retry exactly once")
-            assertEqual(captures.count, 1, "retry telemetry should emit one terminal event")
-            assertEqual(captures.first?.0, "dictation_paste_retry_completed", "retry telemetry should use the canonical event")
-            assertEqual(
-                captures.first?.1,
-                ["reason": "paste_not_confirmed", "result": "copied"],
-                "retry telemetry should expose only coarse outcome properties"
-            )
-            assertEqual(
-                outcome,
-                .copied(
-                    "synthetic private path /Users/test/secret.txt",
-                    reason: .pasteNotConfirmed
-                ),
-                "retry telemetry should preserve the actual user-facing outcome"
-            )
-        }
-
-        runSuite("DictationPasteRetryTelemetry — a likely paste reports its own coarse result") {
-            var captured: [String: String] = [:]
-            let outcome = DictationPasteRetryTelemetry.performUserRetry(
-                track: { _, properties in captured = properties },
-                retry: { .likelyPasted }
-            )
-            assertEqual(captured, ["result": "likely_pasted"], "a likely paste should be countable apart from confirmed pastes")
-            assertEqual(outcome, .likelyPasted, "retry telemetry should preserve the actual outcome")
-        }
-
-        runSuite("DictationPasteRetryTelemetry — preserves typed failure reason without private copy") {
-            var captured: [String: String] = [:]
-            let outcome = DictationPasteRetryTelemetry.performUserRetry(
-                track: { _, properties in captured = properties },
-                retry: {
-                    .failed(
-                        "private failure detail /Users/test/secret.txt",
-                        reason: .fallbackClipboardRecoveryUnverified
-                    )
-                }
-            )
-
-            assertEqual(
-                captured,
-                ["reason": "fallback_clipboard_recovery_unverified", "result": "failed"],
-                "retry telemetry should keep only the typed terminal failure"
-            )
-            assertEqual(outcome.failureReason, .fallbackClipboardRecoveryUnverified, "the user-facing outcome should retain the same typed cause")
-            assertFalse(captured.values.contains(where: { $0.contains("/Users/") }), "retry telemetry must not carry raw failure copy")
-        }
-
         runSuite("ClipboardRestoringTextPaster production confirmation adapters — Codex, Notes, and browser editors") {
             let cases: [(SyntheticPasteTargetAdapter.EditorKind, String)] = [
                 (.codex, "text_value"),

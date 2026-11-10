@@ -153,7 +153,6 @@ allowlist.
 - `dictation_start_dropped_for_modifier_combo`
 - `dictation_completed`
 - `dictation_paste_late_confirmed`
-- `dictation_paste_retry_completed`
 - `dictation_artifact_saved`
 - `dictation_stop_latency_measured`
 - `dictation_cancelled`

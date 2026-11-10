@@ -678,7 +678,6 @@ APP_SOURCES=(
     "Sources/Observability/MachineClassTelemetry.swift"
     "Sources/Observability/LaunchTimingTelemetry.swift"
     "Sources/Meeting/MeetingProcessingTelemetry.swift"
-    "Sources/Observability/DictationPasteRetryTelemetry.swift"
     "Sources/Observability/WorkflowRecoveryTelemetry.swift"
     "Sources/Observability/CrashReporterPrivacyOptions.swift"
     "Sources/Observability/SpeakerRecognitionTelemetry.swift"
