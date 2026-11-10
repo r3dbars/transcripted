@@ -402,6 +402,7 @@ FAST_TEST_SOURCES=(
     "Tests/UI/CaptureListScrollDiagnostics.swift"
     "Tests/FastTestApplicationHost.swift"
     "Tests/TestHelpers.swift"
+    "Tests/ImportedTranscriptionQueueJournalFixture.swift"
     "Tests/UI/CallAppHintHarnessIsolation.swift"
     "$GENERATED_RUNNER"
 )

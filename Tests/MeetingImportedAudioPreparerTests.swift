@@ -534,7 +534,7 @@ func testMeetingImportedAudioPreparer() async {
         try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
         try! Data([0, 1, 2, 3]).write(to: audioURL)
 
-        try! ImportedTranscriptionQueueJournal.persist(
+        try! ImportedTranscriptionQueueJournalFixture.seedUnleasedQueuedRecord(
             id: id,
             audioURL: audioURL,
             recordingDate: recordingDate,
@@ -604,7 +604,7 @@ func testMeetingImportedAudioPreparer() async {
         let olderSourceNewerQueueID = UUID()
         let olderSourceNewerQueueAudioURL = scratchURL.appendingPathComponent("older-source-newer-queue.wav")
         try! Data([4, 5, 6, 7]).write(to: olderSourceNewerQueueAudioURL)
-        try! ImportedTranscriptionQueueJournal.persist(
+        try! ImportedTranscriptionQueueJournalFixture.seedUnleasedQueuedRecord(
             id: olderSourceNewerQueueID,
             audioURL: olderSourceNewerQueueAudioURL,
             recordingDate: recordingDate.addingTimeInterval(-86_400),
@@ -695,7 +695,7 @@ func testMeetingImportedAudioPreparer() async {
         let id = UUID()
         try! FileManager.default.createDirectory(at: scratchURL, withIntermediateDirectories: true)
         try! Data([0, 1, 2, 3]).write(to: audioURL)
-        try! ImportedTranscriptionQueueJournal.persist(
+        try! ImportedTranscriptionQueueJournalFixture.seedUnleasedQueuedRecord(
             id: id,
             audioURL: audioURL,
             recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
@@ -889,7 +889,7 @@ func testMeetingImportedAudioPreparer() async {
         let jobId = UUID()
         let regularURL = scratchURL.appendingPathComponent("regular.wav")
         try! Data([4, 5, 6, 7]).write(to: regularURL)
-        try! ImportedTranscriptionQueueJournal.persist(
+        try! ImportedTranscriptionQueueJournalFixture.seedUnleasedQueuedRecord(
             id: jobId,
             audioURL: regularURL,
             recordingDate: Date(timeIntervalSince1970: 1_704_067_200),
