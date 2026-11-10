@@ -198,11 +198,8 @@ final class CLIDiarizationTests: XCTestCase {
         )
     }
 
-    func testEveryCLIPathSharesTheAppTunedPyannoteWindowing() {
-        XCTAssertEqual(ImportAudio.sharedDiarizationWindowing, Diarize.sharedDiarizationWindowing)
-        XCTAssertEqual(Diarize.sharedDiarizationWindowing, Batch.sharedDiarizationWindowing)
-
-        let windowing = Diarize.sharedDiarizationWindowing
+    func testDefaultWindowingUsesTheAppTunedPyannoteSchedule() {
+        let windowing = CLIDiarization.windowing
         XCTAssertEqual(windowing.windowDuration, 10.0)
         XCTAssertEqual(windowing.segmentationStepRatio, 0.266, accuracy: 1e-12)
         XCTAssertEqual(windowing.nemotronSliceSeconds, 10.0)
