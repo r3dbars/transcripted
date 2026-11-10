@@ -156,6 +156,7 @@ public class TranscriptionTaskManager: ObservableObject {
 
     public let failedTranscriptionManager: FailedTranscriptionManager
     public let statsStore: (any StatsStore)?
+    let failedAudioArchiveJobs = FailedAudioArchiveJobs()
     let retainedAudioDirectory: URL?
     let retainedAudioDirectoryProvider: (() -> URL?)?
     /// The host's current authorized meeting folder, read again when a review saves.
@@ -271,6 +272,11 @@ public class TranscriptionTaskManager: ObservableObject {
             speakerStore: speakerStore,
             speakerClipsDirectory: speakerClipsDirectory
         )
+    }
+
+    /// Observes archives admitted at this synchronous snapshot boundary only.
+    func beginWaitingForScheduledFailedAudioArchives() -> FailedAudioArchiveJobs.Completion {
+        failedAudioArchiveJobs.beginWaitingForScheduledJobs()
     }
 
     func publishFailure(_ failure: FailurePresentation) {

@@ -428,37 +428,15 @@ extension TranscriptionTaskManager {
 
         let placeholderTranscriptURL = Self.placeholderFailedTranscriptURL(taskId: taskId, in: retainedAudioDirectory)
 
-        if Self.shouldArchiveFailedAudioSynchronouslyForTests {
-            guard let retainedAudio = Self.archiveFailedRecordingAudio(
+        failedAudioArchiveJobs.schedule(work: {
+            Self.archiveFailedRecordingAudio(
                 micURL: micURL,
                 systemURL: systemURL,
                 taskId: taskId,
                 transcriptURL: placeholderTranscriptURL,
                 archiveRoot: retainedAudioDirectory
-            ) else { return }
-            applyRetainedFailedRecordingAudio(
-                retainedAudio,
-                micURL: micURL,
-                systemURL: systemURL,
-                taskId: taskId,
-                removeOriginalsAfterArchive: removeOriginalsAfterArchive,
-                originalMicCleanupLabel: originalMicCleanupLabel,
-                originalSystemCleanupLabel: originalSystemCleanupLabel
             )
-            return
-        }
-
-        Task { [weak self] in
-            let retainedAudio = await Task.detached(priority: .utility) {
-                Self.archiveFailedRecordingAudio(
-                    micURL: micURL,
-                    systemURL: systemURL,
-                    taskId: taskId,
-                    transcriptURL: placeholderTranscriptURL,
-                    archiveRoot: retainedAudioDirectory
-                )
-            }.value
-
+        }, apply: { [weak self] retainedAudio in
             guard let self, let retainedAudio else { return }
             self.applyRetainedFailedRecordingAudio(
                 retainedAudio,
@@ -469,7 +447,7 @@ extension TranscriptionTaskManager {
                 originalMicCleanupLabel: originalMicCleanupLabel,
                 originalSystemCleanupLabel: originalSystemCleanupLabel
             )
-        }
+        })
     }
 
     private func applyRetainedFailedRecordingAudio(
@@ -629,11 +607,6 @@ extension TranscriptionTaskManager {
             ])
             return nil
         }
-    }
-
-    nonisolated private static var shouldArchiveFailedAudioSynchronouslyForTests: Bool {
-        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
-            || ProcessInfo.processInfo.processName == "xctest"
     }
 
     nonisolated static func setFailedAudioArchiveThreadProbe(

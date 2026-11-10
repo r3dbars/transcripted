@@ -1,6 +1,6 @@
 import Foundation
 
-struct RetainedRecordingAudio: Equatable {
+struct RetainedRecordingAudio: Equatable, Sendable {
     let directory: URL
     let micURL: URL?
     let systemURL: URL?

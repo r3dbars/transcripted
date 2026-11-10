@@ -430,7 +430,7 @@ extension TranscriptionTaskManagerMetadataTests {
         )
     }
 
-    func testMicOnlyFailedQueueRetainsArchiveAndRemovesScratch() throws {
+    func testMicOnlyFailedQueueRetainsArchiveAndRemovesScratch() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -446,6 +446,7 @@ extension TranscriptionTaskManagerMetadataTests {
             errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
         ))
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertTrue(
             failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"),
@@ -461,7 +462,7 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: archivedDirectory.path), "delete should remove the empty failed-audio directory")
     }
 
-    func testManualFailedQueueRetainsAudioBeforeRemovingScratch() throws {
+    func testManualFailedQueueRetainsAudioBeforeRemovingScratch() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -479,6 +480,7 @@ extension TranscriptionTaskManagerMetadataTests {
             errorMessage: "Recording stop timed out before audio files were finalized."
         )
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
         XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
@@ -544,6 +546,7 @@ extension TranscriptionTaskManagerMetadataTests {
             recordingDate: Date(timeIntervalSince1970: 1_797_000_000)
         )
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         XCTAssertTrue(didQueue)
         XCTAssertGreaterThan(probe.calls, 0, "unexpected-stop retention must archive the live recording")
         XCTAssertFalse(probe.ranOnMainThread, "copying a long meeting's audio must not run on the main thread")
@@ -577,6 +580,7 @@ extension TranscriptionTaskManagerMetadataTests {
             recordingDate: Date(timeIntervalSince1970: 1_797_000_000)
         )
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         XCTAssertTrue(didQueue)
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(failed.micAudioURL.standardizedFileURL, micURL.standardizedFileURL)
@@ -619,7 +623,7 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(retainedChildren.isEmpty, "failed queue persistence should not leave orphan retained audio")
     }
 
-    func testSystemOnlyFailedQueueCreatesPlaceholderAndRetainsSystemAudio() throws {
+    func testSystemOnlyFailedQueueCreatesPlaceholderAndRetainsSystemAudio() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -642,6 +646,7 @@ extension TranscriptionTaskManagerMetadataTests {
         )
 
         XCTAssertTrue(didQueue)
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(failed.micAudioURL.lastPathComponent, "microphone_placeholder.wav")
         XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
@@ -661,6 +666,7 @@ extension TranscriptionTaskManagerMetadataTests {
             micAudioURL: scratchDirectory.appendingPathComponent("still-missing-mic.wav"),
             systemAudioURL: originalRetainedSystemURL
         ))
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let promoted = try XCTUnwrap(
             manager.failedTranscriptionManager.failedTranscriptions.first(where: { $0.id == failed.id })
         )
@@ -677,7 +683,7 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(promoted.audioFilesExist())
     }
 
-    func testMissingMicPathUsesPlaceholderAndSystemAudioSurvivesQueueReload() throws {
+    func testMissingMicPathUsesPlaceholderAndSystemAudioSurvivesQueueReload() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -697,6 +703,7 @@ extension TranscriptionTaskManagerMetadataTests {
             errorMessage: "System-only recovery fixture"
         ))
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let firstRow = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertTrue(firstRow.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
         XCTAssertTrue(firstRow.audioFilesExist())
@@ -941,6 +948,7 @@ extension TranscriptionTaskManagerMetadataTests {
     /// meetings, and no late transcript or second row appears.
     func testCancelAllKeepingRecordedAudioLeavesOneRetryRowWithPlayableAudio() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "This should not be saved.")
+        defer { speech.release() }
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -970,48 +978,58 @@ extension TranscriptionTaskManagerMetadataTests {
             outputFolder: outputFolder,
             meetingTitle: "Kept call"
         )
-        try await waitUntil { speech.didStart }
+        let producer = manager.activeTasks.values.first
+        do {
+            try await waitUntil { speech.didStart }
 
-        manager.cancelAll(recordedAudioRetryMessage: "Transcription cancelled")
+            manager.cancelAll(recordedAudioRetryMessage: "Transcription cancelled")
 
-        let rows = manager.failedTranscriptionManager.failedTranscriptions
-        XCTAssertEqual(rows.count, 1, "the cancelled meeting should be kept as one retry row")
-        XCTAssertEqual(rows.first?.errorMessage, "Transcription cancelled")
-        XCTAssertEqual(rows.first?.meetingTitle, "Kept call")
-        XCTAssertEqual(manager.activeCount, 1, "the cancelled model call still occupies the pipeline until it returns")
-        XCTAssertFalse(
-            manager.hasPreservableActiveTranscriptionAudio,
-            "the retry row owns the audio now, so quitting must not save it a second time"
-        )
-        XCTAssertEqual(
-            manager.preserveActiveTranscriptionsForShutdown(errorMessage: "App quit during cancellation"),
-            0,
-            "cancel then quit must not add a second row for the same meeting"
-        )
+            let rows = manager.failedTranscriptionManager.failedTranscriptions
+            XCTAssertEqual(rows.count, 1, "the cancelled meeting should be kept as one retry row")
+            XCTAssertEqual(rows.first?.errorMessage, "Transcription cancelled")
+            XCTAssertEqual(rows.first?.meetingTitle, "Kept call")
+            XCTAssertEqual(manager.activeCount, 1, "the cancelled model call still occupies the pipeline until it returns")
+            XCTAssertFalse(
+                manager.hasPreservableActiveTranscriptionAudio,
+                "the retry row owns the audio now, so quitting must not save it a second time"
+            )
+            XCTAssertEqual(
+                manager.preserveActiveTranscriptionsForShutdown(errorMessage: "App quit during cancellation"),
+                0,
+                "cancel then quit must not add a second row for the same meeting"
+            )
 
-        speech.release()
-        try await waitUntil { speech.didReturn && manager.activeTasks.isEmpty }
+            speech.release()
+            try await waitUntil { speech.didReturn && manager.activeTasks.isEmpty }
 
-        let finalRows = manager.failedTranscriptionManager.failedTranscriptions
-        XCTAssertEqual(finalRows.count, 1, "the late cancelled body must not add or remove rows")
-        let row = try XCTUnwrap(finalRows.first)
-        try await waitUntil {
-            let current = manager.failedTranscriptionManager.failedTranscriptions.first ?? row
-            return FileManager.default.fileExists(atPath: current.micAudioURL.path)
-                && (current.systemAudioURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            let finalRows = manager.failedTranscriptionManager.failedTranscriptions
+            XCTAssertEqual(finalRows.count, 1, "the late cancelled body must not add or remove rows")
+            let row = try XCTUnwrap(finalRows.first)
+            try await waitUntil {
+                let current = manager.failedTranscriptionManager.failedTranscriptions.first ?? row
+                return FileManager.default.fileExists(atPath: current.micAudioURL.path)
+                    && (current.systemAudioURL.map { FileManager.default.fileExists(atPath: $0.path) } ?? false)
+            }
+            let savedMarkdown = (try? FileManager.default.contentsOfDirectory(
+                at: outputFolder,
+                includingPropertiesForKeys: nil
+            ))?.filter { $0.pathExtension == "md" } ?? []
+            XCTAssertTrue(savedMarkdown.isEmpty, "a cancelled meeting should not save a late transcript")
+            XCTAssertNil(manager.lastSavedTranscriptURL, "a cancelled meeting should not publish saved metadata")
+            XCTAssertTrue(
+                manager.failedTranscriptionManager.failedTranscriptions.first?.isRetryable ?? false,
+                "the kept meeting should offer Try again"
+            )
+            XCTAssertEqual(manager.activeCount, 0)
+            XCTAssertEqual(manager.backgroundTaskCount, 0)
+        } catch {
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            throw error
         }
-        let savedMarkdown = (try? FileManager.default.contentsOfDirectory(
-            at: outputFolder,
-            includingPropertiesForKeys: nil
-        ))?.filter { $0.pathExtension == "md" } ?? []
-        XCTAssertTrue(savedMarkdown.isEmpty, "a cancelled meeting should not save a late transcript")
-        XCTAssertNil(manager.lastSavedTranscriptURL, "a cancelled meeting should not publish saved metadata")
-        XCTAssertTrue(
-            manager.failedTranscriptionManager.failedTranscriptions.first?.isRetryable ?? false,
-            "the kept meeting should offer Try again"
-        )
-        XCTAssertEqual(manager.activeCount, 0)
-        XCTAssertEqual(manager.backgroundTaskCount, 0)
     }
 
     func testCancelAllAfterCommittedSideEffectsStillPublishesTranscript() async throws {
