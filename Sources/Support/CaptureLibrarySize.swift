@@ -8,6 +8,30 @@ import Foundation
 /// that growth visible in the event log instead of being discovered only when
 /// the disk fills.
 enum CaptureLibrarySize {
+    /// Measures the three capture folders from one library-root snapshot.
+    /// Unrelated root contents and symlinked folders are excluded. Missing
+    /// optional capture folders contribute zero; an unavailable root is unknown.
+    static func measureCaptureBytes(at root: URL, fileManager: FileManager = .default) -> Int64? {
+        let keys: Set<URLResourceKey> = [.isDirectoryKey, .isSymbolicLinkKey]
+        guard let rootValues = try? root.resourceValues(forKeys: keys),
+              rootValues.isDirectory == true, rootValues.isSymbolicLink != true else { return nil }
+        let directories = [
+            FileManager.meetingsDirectory(in: root),
+            FileManager.dictationsDirectory(in: root),
+            FileManager.writingDirectory(in: root),
+        ]
+        var total: Int64 = 0
+        for directory in directories {
+            guard fileManager.fileExists(atPath: directory.path) else { continue }
+            guard let values = try? directory.resourceValues(forKeys: keys) else { return nil }
+            if values.isSymbolicLink == true { continue }
+            guard values.isDirectory == true,
+                  let bytes = measureBytes(at: directory, fileManager: fileManager) else { return nil }
+            total += bytes
+        }
+        return total
+    }
+
     /// Sum of regular-file sizes under `url`, skipping symlinks so a linked
     /// external folder is never double-counted or traversed. Returns nil when
     /// the directory cannot be enumerated.

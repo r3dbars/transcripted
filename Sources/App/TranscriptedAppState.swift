@@ -511,7 +511,8 @@ class TranscriptedAppState: ObservableObject {
                 }
             }
 
-            if let libraryBytes = CaptureLibrarySize.measureBytes(at: MeetingStoragePaths.transcriptsFolder) {
+            let libraryRoot = TranscriptedStoragePreferences.captureLibraryURL()
+            if let libraryBytes = CaptureLibrarySize.measureCaptureBytes(at: libraryRoot) {
                 let bucket = CaptureLibrarySize.bucketLabel(forBytes: libraryBytes)
                 let retention = AudioStoragePreferences.deleteAudioAfter().rawValue
                 await MainActor.run {
