@@ -28,17 +28,6 @@ enum AudioRetentionWindow: String, CaseIterable, Identifiable {
             return "Never"
         }
     }
-
-    var detail: String {
-        switch self {
-        case .sevenDays:
-            return "Retained audio is removed after one week. Markdown transcripts stay."
-        case .thirtyDays:
-            return "Retained audio is removed after one month. Markdown transcripts stay."
-        case .never:
-            return "Retained compressed audio stays until you delete it."
-        }
-    }
 }
 
 enum AudioStoragePreferences {
