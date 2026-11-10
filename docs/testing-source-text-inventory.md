@@ -1,10 +1,23 @@
-# Source-text test inventory
+# Source-text test cleanup record
+
+This is a historical record of completed cleanup passes, not the current test
+inventory. The counts, file names, and deferred work below describe those passes.
+For the current remaining source-text uses and pins, run:
+
+```bash
+python3 scripts/dev/check-test-shape.py
+python3 scripts/dev/check-source-pins.py --count-baseline
+```
+
+The live baselines are `.agents/test-shape-baseline.json` and
+`.agents/source-pin-baseline.json`. Check the current code before acting on a
+deferred item here.
 
 Root fast tests (`Tests/*.swift`, run by `bash run-tests.sh`) that read production Swift
 files as text and assert on fragments of them. These "pins" go red on harmless renames and
-reflows, and stay green when the behavior breaks but the text survives. This file lists every
-root test file that reads a `Sources/**/*.swift` path, what it promises, and what it would
-take to check that promise through inputs and outputs instead. It was built from:
+reflows, and stay green when the behavior breaks but the text survives. The original inventory
+listed each root test file found reading a `Sources/**/*.swift` path, what it promised, and
+what it would take to check that promise through inputs and outputs instead. It was built from:
 
 ```bash
 grep -lE '"Sources/[^"]+\.swift"' Tests/*.swift \
