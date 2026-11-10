@@ -1,8 +1,8 @@
 // ContextCaptureEngine+SecureKeyboardEntry.swift
-// Watches Secure Keyboard Entry while dictation is bound to a non-modifier
-// key. The tap cannot see F8 while another app holds it, so this polls and
-// also checks on app activation and flagsChanged. Modifier bindings stay
-// quiet: Right Option still arrives as flagsChanged.
+// Watches Secure Keyboard Entry while dictation or the registered meeting
+// shortcut uses a non-modifier key. The tap cannot see those keyDown events,
+// so this polls and also checks on app activation and flagsChanged.
+// Modifier bindings stay usable: Right Option still arrives as flagsChanged.
 
 import AppKit
 import Foundation
@@ -82,15 +82,20 @@ extension ContextCaptureEngine {
         let binding = PhysicalDictationTriggerPreferences.pushToTalkBinding()
         let usesModifier = PhysicalDictationTriggerPreferences.isModifierKey(binding.keyCode)
         let shortcutsEnabled = HotkeyPreferences.dictationShortcutsEnabled()
+        let meetingDisplay = SecureKeyboardEntryWarningPolicy.meetingKeyDisplay(
+            in: PhysicalShortcutMatcher.configuredBindings()
+        )
         secureKeyboardEntryMonitor?.check(
             dictationUsesModifierKey: usesModifier,
             dictationShortcutsEnabled: shortcutsEnabled,
             dictationKeyDisplay: PhysicalDictationTriggerPreferences.displayString(for: binding),
+            meetingKeyDisplay: meetingDisplay,
             refreshOwner: refreshOwner
         )
         updateSecureKeyboardEntryPoll(
             dictationUsesModifierKey: usesModifier,
-            dictationShortcutsEnabled: shortcutsEnabled
+            dictationShortcutsEnabled: shortcutsEnabled,
+            meetingShortcutBlocked: meetingDisplay != nil
         )
     }
 
@@ -108,12 +113,14 @@ extension ContextCaptureEngine {
 
     private func updateSecureKeyboardEntryPoll(
         dictationUsesModifierKey: Bool,
-        dictationShortcutsEnabled: Bool
+        dictationShortcutsEnabled: Bool,
+        meetingShortcutBlocked: Bool
     ) {
         let shouldPoll = SecureKeyboardEntryWarningPolicy.shouldStartPoll(
             isWatching: secureKeyboardEntryMonitor != nil,
             dictationUsesModifierKey: dictationUsesModifierKey,
-            dictationShortcutsEnabled: dictationShortcutsEnabled
+            dictationShortcutsEnabled: dictationShortcutsEnabled,
+            meetingShortcutBlocked: meetingShortcutBlocked
         )
         if !shouldPoll {
             secureKeyboardEntryPollTask?.cancel()

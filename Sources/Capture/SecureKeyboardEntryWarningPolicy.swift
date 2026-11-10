@@ -59,7 +59,7 @@ enum SecureEventInputRegistryKeys {
 }
 
 enum SecureKeyboardEntryWarningPolicy {
-    /// Cheap poll while dictation is bound to a non-modifier key. 2.5 s sits
+    /// Cheap poll while a registered shortcut uses a non-modifier key. 2.5 s sits
     /// in the requested 2–3 s window.
     static let pollIntervalNanoseconds: UInt64 = 2_500_000_000
 
@@ -71,9 +71,10 @@ enum SecureKeyboardEntryWarningPolicy {
 
     static func shouldPoll(
         dictationUsesModifierKey: Bool,
-        dictationShortcutsEnabled: Bool
+        dictationShortcutsEnabled: Bool,
+        meetingShortcutBlocked: Bool = false
     ) -> Bool {
-        dictationShortcutsEnabled && !dictationUsesModifierKey
+        (dictationShortcutsEnabled && !dictationUsesModifierKey) || meetingShortcutBlocked
     }
 
     /// App-activation and flagsChanged hops already queued at stop must not
@@ -81,11 +82,13 @@ enum SecureKeyboardEntryWarningPolicy {
     static func shouldStartPoll(
         isWatching: Bool,
         dictationUsesModifierKey: Bool,
-        dictationShortcutsEnabled: Bool
+        dictationShortcutsEnabled: Bool,
+        meetingShortcutBlocked: Bool = false
     ) -> Bool {
         isWatching && shouldPoll(
             dictationUsesModifierKey: dictationUsesModifierKey,
-            dictationShortcutsEnabled: dictationShortcutsEnabled
+            dictationShortcutsEnabled: dictationShortcutsEnabled,
+            meetingShortcutBlocked: meetingShortcutBlocked
         )
     }
 
@@ -94,10 +97,27 @@ enum SecureKeyboardEntryWarningPolicy {
         isWatching
     }
 
-    static func noticeText(ownerDisplayName: String?, dictationKeyDisplay: String) -> String {
+    static func meetingKeyDisplay(in registeredBindings: [PhysicalShortcutBinding]) -> String? {
+        guard let meeting = registeredBindings.first(where: { $0.action == .meeting }),
+              !PhysicalDictationTriggerPreferences.isModifierKey(meeting.binding.keyCode) else { return nil }
+        return PhysicalDictationTriggerPreferences.displayString(for: meeting.binding)
+    }
+
+    static func noticeText(
+        ownerDisplayName: String?,
+        dictationKeyDisplay: String,
+        dictationShortcutBlocked: Bool = true,
+        meetingKeyDisplay: String? = nil
+    ) -> String {
         let owner = cleaned(ownerDisplayName) ?? unknownOwnerDisplayName
-        let key = cleaned(dictationKeyDisplay)
-        let keyPhrase = key.map { "\($0) dictation" } ?? "Dictation"
+        var affected: [String] = []
+        if dictationShortcutBlocked {
+            affected.append(cleaned(dictationKeyDisplay).map { "\($0) dictation" } ?? "Dictation")
+        }
+        if let meeting = cleaned(meetingKeyDisplay) {
+            affected.append("\(meeting) meeting")
+        }
+        let keyPhrase = affected.joined(separator: " and ")
         return "Shortcuts are blocked until \(owner) releases Secure Keyboard Entry. \(keyPhrase) won't work."
     }
 
@@ -138,11 +158,13 @@ enum SecureKeyboardEntryWarningPolicy {
         dictationUsesModifierKey: Bool,
         dictationShortcutsEnabled: Bool,
         dictationKeyDisplay: String,
+        meetingKeyDisplay: String? = nil,
         selfProcessID: Int32,
         now: TimeInterval,
         logInterval: TimeInterval = logInterval
     ) -> (SecureEventInputWatchState, SecureKeyboardEntryDecision) {
-        if !dictationShortcutsEnabled || dictationUsesModifierKey {
+        let dictationBlocked = dictationShortcutsEnabled && !dictationUsesModifierKey
+        if !dictationBlocked && meetingKeyDisplay == nil {
             return clearNotice(from: previous, logRelease: false)
         }
 
@@ -158,7 +180,9 @@ enum SecureKeyboardEntryWarningPolicy {
         let key = ownerKey(processID: snapshot.ownerProcessID, displayName: snapshot.ownerDisplayName)
         let text = noticeText(
             ownerDisplayName: snapshot.ownerDisplayName,
-            dictationKeyDisplay: dictationKeyDisplay
+            dictationKeyDisplay: dictationKeyDisplay,
+            dictationShortcutBlocked: dictationBlocked,
+            meetingKeyDisplay: meetingKeyDisplay
         )
 
         if previous.visibleNotice != nil, previous.noticedOwnerKey == key {
