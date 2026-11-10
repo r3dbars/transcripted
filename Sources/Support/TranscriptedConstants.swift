@@ -226,17 +226,9 @@ enum TranscriptedConstants {
 
     // MARK: - Model Loading
 
-    /// Nothing polls a model load now; these two only define the
-    /// 600 × 200 ms = 120 s ceiling of `modelLoadWaitBudget` (nanoseconds).
-    static let modelLoadPollInterval: UInt64 = 200_000_000  // 200ms
-
-    /// See `modelLoadPollInterval`.
-    static let modelLoadMaxIterations = 600
-
-    /// Total time budget for waiting on a voice-model load (120 s). Dictation
-    /// and meeting model-load waits give up after this long.
-    static let modelLoadWaitBudget: TimeInterval =
-        Double(modelLoadMaxIterations) * Double(modelLoadPollInterval) / 1_000_000_000
+    /// Total time budget for waiting on a voice-model load. Dictation and
+    /// meeting model-load waits share this 120-second ceiling.
+    static let modelLoadWaitBudget: TimeInterval = 120
 
     // MARK: - Clipboard
 

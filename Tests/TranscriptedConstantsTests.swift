@@ -160,13 +160,7 @@ func testTranscriptedConstants() async {
         )
     }
 
-    runSuite("TranscriptedConstants keeps the model load wait budget aligned with the poll parameters") {
-        assertEqual(
-            TranscriptedConstants.modelLoadWaitBudget,
-            Double(TranscriptedConstants.modelLoadMaxIterations)
-                * Double(TranscriptedConstants.modelLoadPollInterval) / 1_000_000_000,
-            "joined model-load waits should keep the same overall ceiling as the legacy poll loop"
-        )
+    runSuite("TranscriptedConstants keeps the model load wait ceiling at 120 seconds") {
         assertEqual(
             TranscriptedConstants.modelLoadWaitBudget,
             120,
