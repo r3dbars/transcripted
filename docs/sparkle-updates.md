@@ -159,8 +159,9 @@ delta from a `releases/download/...` URL through that second redirect, so that
 hop is proven for Sparkle's download path; the feed fetch and the extra
 `latest` hop are the new part.
 `verify-sparkle-release.sh` fetches the feed with `curl -L`, which follows it the
-same way. No Sparkle build has fetched this feed URL yet: the first real upgrade
-(see "Not done yet") is the proof.
+same way. Published builds from 1.1.75 configure this release-asset feed in
+`SUFeedURL`. Installed-app upgrade behavior is verified separately with the
+staged-upgrade workflow (`docs/staged-sparkle-update-test.md`).
 
 Why not main: a feed on main is edited by a normal commit, so anyone who can
 land a commit there can redirect every install to a different archive. A release
@@ -235,7 +236,12 @@ give us:
 
 Installs older than the first build with the new `SUFeedURL` still read
 `https://raw.githubusercontent.com/r3dbars/transcripted/main/docs/appcast.xml`.
-They need one last hop. When the first release on the new feed ships:
+Their final bridge is 1.1.75. The committed
+`config/release/legacy-appcast-freeze.json` records that version and the legacy
+feed's immutable hash. [1.1.75](https://github.com/r3dbars/transcripted/releases/tag/v1.1.75)
+shipped on 2026-11-03 as the first release with the new `SUFeedURL`;
+[1.1.76](https://github.com/r3dbars/transcripted/releases/tag/v1.1.76) followed on
+2026-11-05. The following steps document the completed one-time transition:
 
 1. publish it as above, with its signed `appcast.xml`
 2. run, once, from a checkout whose `Info.plist` is that release's:
@@ -265,24 +271,26 @@ freeze file differs from `origin/main`. `generate-sparkle-appcast.sh` and
 `sign-appcast.sh` refuse to write to it. Deleting the file would strand every
 install that has not updated yet, so it stays.
 
-Nothing is frozen yet: the first new-feed release does not exist, and the freeze
-entry cannot be written before it. Until then `docs/appcast.xml` is still the
-live feed for every shipped build.
+## Transition status and remaining verification
 
-## Not done yet
+As checked on 2026-11-10, both the GitHub release-asset feed and
+`https://transcripted.app/appcast.xml` serve 1.1.76 as their newest item. The
+website route belongs to the separate `r3dbars/transcripted-webapp` repository.
+Use the staged-upgrade receipts to establish installed-app bridge behavior;
+publication and feed metadata alone do not establish that result.
 
-- no release has shipped on the new feed, and no old install has been taken
-  through the hop. The real proof is an RC, a staged upgrade from an old build
-  against the published feed, and a check that the signed feed and redirect work
-  from a clean machine. None was run here.
-- `scripts/ops/nightly-security-check.py` (live release surfaces),
-  `scripts/ops/release-health-card.py` and `scripts/ops/release-watch.py` still
-  read "latest release" from `docs/appcast.xml`. Once it is frozen they report
-  the frozen entry. They need to read the release-asset feed before the second
-  release on the new feed. Until the freeze exists the nightly check skips the
-  new feed URL, since it would only 404.
-- the website's `/appcast.xml` route (in `r3dbars/transcripted-webapp`) should
-  point at the release-asset feed after the first release.
+`nightly-security-check.py` selects the active feed from `SUFeedURL` with
+`--live-release-surfaces`. Offline checks after the freeze require an explicit
+`--appcast` snapshot or an integrity-bound same-version GitHub release fixture.
+The legacy hash guard runs separately; the frozen entry is not treated as the
+active release.
+
+Two legacy-only helper paths remain in the operations tools:
+`release-health-card.py` prints the committed feed's version, and
+`release-watch.py` uses its `pubDate` for the default watch window. For a release
+newer than the frozen entry, give release-watch an explicit `--since` or
+`--hours` window. These are current tooling limitations, rather than work to do
+before a future second release.
 
 ## Release flow
 
@@ -348,9 +356,7 @@ REPO_APPCAST_PATH=/path/to/feed-copy/appcast.xml INFO_PLIST_PATH=<shipped Info.p
 bash scripts/release/verify-sparkle-release.sh <version>
 ```
 
-9. For the first release on the new feed only, freeze the legacy feed ("Legacy
-   feed" above).
-10. After the release is published and any expected Homebrew/Sentry release
+9. After the release is published and any expected Homebrew/Sentry release
    surfaces are live, run the strict live-surface gate:
 
 ```bash
