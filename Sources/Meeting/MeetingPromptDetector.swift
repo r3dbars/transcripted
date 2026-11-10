@@ -152,8 +152,9 @@ final class MeetingPromptDetector {
     // from several independent, unstructured Task{} sources (poll loop, workspace
     // notifications, mic/camera/audio signal changes, .EKEventStoreChanged). Two of
     // those firing close together while a fetch is already in flight would otherwise
-    // both pass the guard below (the need-refresh flags only clear after the await),
-    // issuing a second redundant query. Callers don't need synchronously up-to-date
+    // both request a read while the TTL is still expired or an invalidation is
+    // pending. One fetch owner also drains invalidations arriving during its wait.
+    // Callers don't need synchronously up-to-date
     // state on return — the same assumption the existing TTL-based skip already relies on.
     private var isFetchingCalendarSnapshots = false
     private var pollingTask: Task<Void, Never>?
@@ -579,22 +580,39 @@ final class MeetingPromptDetector {
             return
         }
 
+        // A forced refresh arriving during a fetch must survive that fetch's
+        // completion. Busy callers still return without joining its work.
+        if force || accessChanged { calendarSnapshotsNeedRefresh = true }
         let now = Date()
         let refreshExpired = lastCalendarSnapshotRefreshAt.map {
             now.timeIntervalSince($0) >= calendarSnapshotRefreshInterval
         } ?? true
         guard !isFetchingCalendarSnapshots,
-              force || accessChanged || calendarSnapshotsNeedRefresh || refreshExpired
+              calendarSnapshotsNeedRefresh || refreshExpired
         else { return }
 
         isFetchingCalendarSnapshots = true
-        calendarEventSnapshots = await fetchCalendarEventSnapshots(
-            now.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
-            now.addingTimeInterval(calendarLookaheadInterval)
-        )
-        lastCalendarSnapshotRefreshAt = now
-        calendarSnapshotsNeedRefresh = false
-        isFetchingCalendarSnapshots = false
+        defer { isFetchingCalendarSnapshots = false }
+        repeat {
+            // Consume only invalidations already known before this query.
+            // Anything arriving across the await requests a follow-up query.
+            calendarSnapshotsNeedRefresh = false
+            let requestedAt = Date()
+            let snapshots = await fetchCalendarEventSnapshots(
+                requestedAt.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
+                requestedAt.addingTimeInterval(calendarLookaheadInterval)
+            )
+            guard calendarAccessGranted() else {
+                calendarEventSnapshots = []
+                lastCalendarAccessGranted = false
+                lastCalendarSnapshotRefreshAt = Date()
+                calendarSnapshotsNeedRefresh = false
+                return
+            }
+            guard !calendarSnapshotsNeedRefresh else { continue }
+            calendarEventSnapshots = snapshots
+            lastCalendarSnapshotRefreshAt = requestedAt
+        } while calendarSnapshotsNeedRefresh
     }
 
     private func installCalendarStoreObserver() {
