@@ -58,9 +58,9 @@ private struct DeviceListListenerAdd: @unchecked Sendable {
 }
 
 /// Applies the recommended non-Bluetooth microphone when the user explicitly
-/// opts in, and keeps it selected across reconnects while the opt-in stays on
-/// (an input picked outside Transcripted is left alone until the preference
-/// changes). Keeping that device as the system default avoids
+/// opts in, and maintains the selection across reconnects. An external input
+/// choice relinquishes ownership for this controller's run until the preference
+/// changes. Keeping that device as the system default avoids
 /// paying the CoreAudio Bluetooth route-switch penalty on every dictation start.
 @MainActor
 final class PersistentDictationInputController {
