@@ -74,10 +74,16 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.agents/` — machine-readable agent maps for path verification and QA gates
 - `.agent-review/` — sanitized review evidence for agent PRs, not current UI truth
 - `.github/` — issue templates, PR template, and repository workflows
+- `.githooks/` — git hooks (`commit-msg`, `pre-push`, the public-repo guard); see the Docs Map entry below
+- `.claude/` — Claude Code settings, skills, slash commands, subagents and the `stop-lint.sh` Stop hook
+- `.claude-plugin/` — marketplace metadata for the `transcripted-live` Claude Code plugin (source in `Tools/TranscriptedLive/claude-mod`)
+- `.codex/` — the Codex environment; its Run action calls `script/build_and_run.sh --verify`
+- `script/` — `build_and_run.sh`, the companion build-and-launch entrypoint; its default run builds the app, packages Companion and opens the app, with a running-app guard
+- `AppIcon/` — the app icon source (`Transcripted.icon`)
+- `glama.json`, `server.json` — MCP registry metadata
 - `Sources/` — macOS app target
-- `Sources/App/` — app-shell helpers: the lab control channel, the debug test control surface, and Email Support / Send diagnostics
 - `Sources/Accessibility/` — AX helpers for overlay positioning
-- `Sources/App/` — app shell: `TranscriptedApp`, the delegate extensions, command menus
+- `Sources/App/` — app shell: `TranscriptedApp`, the delegate extensions, command menus, the lab control channel, the debug test control surface, and Email Support / Send diagnostics
 - `Sources/Capture/` — physical dictation trigger capture and meeting hotkey routing
 - `Sources/Dictation/` — dictation persistence
 - `Sources/Meeting/` — app-side meeting bridge into `TranscriptedCore`
@@ -182,7 +188,7 @@ Each module's `AGENTS.md` (named in the manifest) says what it owns, its public 
 
 ## Hotspots
 
-Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`, 37 files today). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
+Two ratchets keep files from growing back: `scripts/dev/check-file-size.py` fails on a new Swift file over 800 lines and on a baselined one that grows (`.agents/file-size-baseline.json`). Read the whole file and its folder's `AGENTS.md` before editing a big one, and don't add another responsibility to it. Regenerate the list instead of trusting it:
 
 ```bash
 python3 scripts/dev/check-file-size.py --hotspots
