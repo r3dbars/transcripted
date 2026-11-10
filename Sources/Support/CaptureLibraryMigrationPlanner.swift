@@ -130,8 +130,15 @@ struct CaptureLibraryMigrationPlanner {
             plan(.meetingTranscript, from: transcript, into: destinationMeetings)
         }
 
+        // A skipped transcript keeps its own audio too. Otherwise Move could
+        // leave its Markdown behind while attaching that audio to a different
+        // same-named destination meeting and removing the source audio.
+        let stayingMeetingAudioPaths = Set(skippedExisting
+            .filter { $0.kind == .meetingTranscript }
+            .map { pairedMeetingAudioPath(for: $0.sourceURL) })
         let destinationAudio = audioDirectory(in: destinationMeetings)
-        for retainedAudio in retainedAudioDirectories(in: audioDirectory(in: sourceMeetings)) {
+        for retainedAudio in retainedAudioDirectories(in: audioDirectory(in: sourceMeetings))
+        where !stayingMeetingAudioPaths.contains(retainedAudio.standardizedFileURL.path) {
             plan(.meetingAudioDirectory, from: retainedAudio, into: destinationAudio)
         }
 
@@ -174,9 +181,22 @@ struct CaptureLibraryMigrationPlanner {
         var skipped = plan.skippedExisting.count
         let total = plan.itemsToCopy.count
         var copiedItems: [CaptureLibraryCopiedItem] = []
+        var stayingMeetingAudioPaths = Set(plan.skippedExisting
+            .filter { $0.kind == .meetingTranscript }
+            .map { pairedMeetingAudioPath(for: $0.sourceURL) })
 
+        // Meeting transcripts precede their audio in makePlan. A collision
+        // discovered here must also protect that transcript's later audio item.
         for item in plan.itemsToCopy {
+            if item.kind == .meetingAudioDirectory,
+               stayingMeetingAudioPaths.contains(item.sourceURL.standardizedFileURL.path) {
+                skipped += 1
+                continue
+            }
             if fileManager.fileExists(atPath: item.destinationURL.path) {
+                if item.kind == .meetingTranscript {
+                    stayingMeetingAudioPaths.insert(pairedMeetingAudioPath(for: item.sourceURL))
+                }
                 skipped += 1
                 continue
             }
@@ -304,6 +324,12 @@ struct CaptureLibraryMigrationPlanner {
 
     private func writingDirectory(in library: URL) -> URL {
         FileManager.writingDirectory(in: library)
+    }
+
+    private func pairedMeetingAudioPath(for transcript: URL) -> String {
+        audioDirectory(in: transcript.deletingLastPathComponent())
+            .appendingPathComponent("\(transcript.deletingPathExtension().lastPathComponent)_audio", isDirectory: true)
+            .standardizedFileURL.path
     }
 
     private func audioDirectory(in meetings: URL) -> URL {
