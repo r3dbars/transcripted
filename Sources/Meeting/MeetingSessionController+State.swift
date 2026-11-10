@@ -145,6 +145,8 @@ final class MeetingSessionController: ObservableObject {
     private let statsDatabase: StatsDatabase
     let downloader: MeetingModelDownloader
     var calendarSuggestedTitleProvider: (() -> String?)?
+    /// The app closes new capture admission while async Quit cleanup runs.
+    var recordingStartAllowed: @MainActor () -> Bool = { true }
 
     /// Failed-meeting queue/persistence/retry bookkeeping (audit 2026-07-08
     /// wave 2, W2-B). Plain owned object — this controller stays the single
