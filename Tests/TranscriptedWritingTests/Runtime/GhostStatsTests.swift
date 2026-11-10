@@ -3,50 +3,73 @@ import Foundation
 import Testing
 @testable import TranscriptedKeyboard
 
-@Suite("IME usage stats", .serialized)
+@Suite("IME usage stats")
 struct GhostStatsTests {
     @Test("Empty flush does not delay the next aggregate")
     func emptyFlushKeepsNextWriteImmediate() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        let key = "stats." + formatter.string(from: Date())
-        let defaults = UserDefaults.standard
-        let original = defaults.object(forKey: key)
-        defer { defaults.set(original, forKey: key) }
+        let key = "stats." + formatter.string(from: Date(timeIntervalSince1970: 1_700_000_000))
+        let defaults = WritingTestDefaults()
+        let queue = DispatchQueue(label: "GhostStatsTests.fixture")
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let stats = GhostStatsStore(defaults: defaults, now: { date }, persistenceQueue: queue)
 
-        GhostStats.flush(force: true)
+        stats.flush(force: true)
         let before = (defaults.dictionary(forKey: key) as? [String: Int])?["wordsAccepted"] ?? 0
-        GhostStats.recordAccepted("one")
-        for _ in 0..<50 {
-            let current = (defaults.dictionary(forKey: key) as? [String: Int])?["wordsAccepted"] ?? 0
-            if current == before + 1 { break }
-            Thread.sleep(forTimeInterval: 0.01)
-        }
+        stats.recordAccepted("one")
+        queue.sync {}
         let automatic = (defaults.dictionary(forKey: key) as? [String: Int])?["wordsAccepted"] ?? 0
         #expect(automatic == before + 1)
 
-        GhostStats.recordAccepted("two words")
-        GhostStats.flush(force: true)
+        stats.recordAccepted("two words")
+        queue.sync {}
+        #expect((defaults.dictionary(forKey: key) as? [String: Int])?["wordsAccepted"] == before + 1)
+        stats.flush(force: true)
         let after = (defaults.dictionary(forKey: key) as? [String: Int])?["wordsAccepted"] ?? 0
 
         #expect(after == before + 3)
+    }
+
+    @Test("Automatic writes retain the twenty-second throttle without sharing a clock")
+    func automaticWritesUseTheInjectedClock() {
+        let defaults = WritingTestDefaults()
+        let queue = DispatchQueue(label: "GhostStatsTests.throttle")
+        let clock = Clock()
+        let stats = GhostStatsStore(defaults: defaults, now: { clock.now() }, persistenceQueue: queue)
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd"
+        let key = "stats." + formatter.string(from: clock.now())
+
+        stats.recordSuggestionShown()
+        queue.sync {}
+        #expect((defaults.dictionary(forKey: key) as? [String: Int])?["suggestionsShown"] == 1)
+        clock.advance(seconds: 20)
+        stats.recordSuggestionShown()
+        queue.sync {}
+        #expect((defaults.dictionary(forKey: key) as? [String: Int])?["suggestionsShown"] == 1)
+        clock.advance(seconds: 1)
+        stats.recordSuggestionShown()
+        queue.sync {}
+        #expect((defaults.dictionary(forKey: key) as? [String: Int])?["suggestionsShown"] == 3)
     }
 
     @Test("Suggestion shown and accepted counters persist independently")
     func suggestionCountersStayExplicit() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        let key = "stats." + formatter.string(from: Date())
-        let defaults = UserDefaults.standard
-        let original = defaults.object(forKey: key)
-        defer { defaults.set(original, forKey: key) }
+        let key = "stats." + formatter.string(from: Date(timeIntervalSince1970: 1_700_000_000))
+        let defaults = WritingTestDefaults()
+        let queue = DispatchQueue(label: "GhostStatsTests.fixture")
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let stats = GhostStatsStore(defaults: defaults, now: { date }, persistenceQueue: queue)
 
-        GhostStats.flush(force: true)
+        stats.flush(force: true)
         let before = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
-        GhostStats.recordSuggestionShown()
-        GhostStats.recordSuggestionShown()
-        GhostStats.recordSuggestionAccepted()
-        GhostStats.flush(force: true)
+        stats.recordSuggestionShown()
+        stats.recordSuggestionShown()
+        stats.recordSuggestionAccepted()
+        stats.flush(force: true)
         let after = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
 
         var expected = before
@@ -59,18 +82,19 @@ struct GhostStatsTests {
     func runtimeFailuresStayExplicit() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
-        let key = "stats." + formatter.string(from: Date())
-        let defaults = UserDefaults.standard
-        let original = defaults.object(forKey: key)
-        defer { defaults.set(original, forKey: key) }
+        let key = "stats." + formatter.string(from: Date(timeIntervalSince1970: 1_700_000_000))
+        let defaults = WritingTestDefaults()
+        let queue = DispatchQueue(label: "GhostStatsTests.fixture")
+        let date = Date(timeIntervalSince1970: 1_700_000_000)
+        let stats = GhostStatsStore(defaults: defaults, now: { date }, persistenceQueue: queue)
 
-        GhostStats.flush(force: true)
+        stats.flush(force: true)
         let before = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
-        GhostStats.recordFailure(.error)
-        GhostStats.recordFailure(.timeout)
-        GhostStats.recordFailure(.invalidRequest)
-        GhostStats.recordFailure(.silence)
-        GhostStats.flush(force: true)
+        stats.recordFailure(.error)
+        stats.recordFailure(.timeout)
+        stats.recordFailure(.invalidRequest)
+        stats.recordFailure(.silence)
+        stats.flush(force: true)
         let after = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
 
         var expected = before
@@ -79,4 +103,12 @@ struct GhostStatsTests {
         expected["completionInvalidRequests", default: 0] += 1
         #expect(after == expected)
     }
+}
+
+private final class Clock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var date = Date(timeIntervalSince1970: 1_700_000_000)
+
+    func now() -> Date { lock.withLock { date } }
+    func advance(seconds: TimeInterval) { lock.withLock { date.addTimeInterval(seconds) } }
 }
