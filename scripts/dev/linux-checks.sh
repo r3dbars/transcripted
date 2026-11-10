@@ -391,6 +391,7 @@ check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.
 check "posthog dashboard summary (fixture)" "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only >/dev/null" slow
 check "posthog product context pack (fixture)" "python3 scripts/ops/posthog-product-context-pack.py --fixture Tests/Fixtures/posthog-product-context-pack-fixture.json --write-dir $OUT_DIR/posthog-product-context-sample" slow
 check "posthog taxonomy check (fixture)" "python3 scripts/ops/posthog-dashboard-queries.py --taxonomy-check --observed-fixture Tests/Fixtures/posthog-observed-event-taxonomy.json --json-only >/dev/null" slow
+check "compiled MCP version" "python3 scripts/release/bump-release-version.py --check" slow
 # --version is required; use the next patch after Info.plist's version, i.e. the
 # bump a release-prep branch would actually make. --dry-run writes nothing.
 next_patch_version="$(python3 -c 'import plistlib; a, b, c = plistlib.load(open("Info.plist", "rb"))["CFBundleShortVersionString"].split("."); print(f"{a}.{b}.{int(c) + 1}")' 2>/dev/null || true)"

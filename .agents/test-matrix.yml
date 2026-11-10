@@ -607,6 +607,13 @@ rules:
       - "python3 scripts/release/post-dmg-release-audit.py --self-test"
 
   - paths:
+      - "Info.plist"
+      - "Tools/TranscriptedMCP/Sources/TranscriptedMCP/**"
+      - "scripts/release/bump-release-version.py"
+    checks:
+      - "python3 scripts/release/bump-release-version.py --check"
+
+  - paths:
       - "scripts/release/bump-release-version.py"
     checks:
       - "scripts/dev/agent-preflight.sh"
