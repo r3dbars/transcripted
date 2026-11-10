@@ -8,7 +8,7 @@ Global physical triggers: the dictation key and the meeting key, from a CGEvent 
 
 - **Owns:** global physical triggers and their routing (dictation, meeting start/stop).
 - **Public surface:** `ContextCaptureEngine` (owned by `TranscriptedAppState`), `PhysicalShortcutMatcher`, `PhysicalShortcutTapPolicy`, `SecureKeyboardEntryWarningPolicy`.
-- **May depend on:** UIOverlay, Dictation, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
+- **May depend on:** UIOverlay, Speech, Support, Observability. It sits above UIOverlay because the engine drives `DictationSessionController` and `FloatingOverlayController` directly.
 - **Tests:** `bash run-tests.sh --filter ContextCaptureEngine`, `--filter PhysicalShortcut`, `--filter HotkeyPreferences`, `--filter SecureKeyboardEntry`.
 
 ## Files

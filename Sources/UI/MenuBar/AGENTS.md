@@ -12,7 +12,7 @@ The status item and its popover: the glyph, the header status line, the Record a
 
 ## May depend on
 
-UIShared, UIOverlay, UISettings, AppState, Capture, Meeting, Dictation, Speech, Support, Observability, and Core's `core-vocab` tier. Nothing in the app may depend on UIMenuBar except AppShell. `.agents/modules.json` is the source of truth.
+UIShared, UIOverlay, UISettings, AppState, Capture, Meeting, Support, and Observability. Nothing in the app may depend on UIMenuBar except AppShell. `.agents/modules.json` is the source of truth.
 
 ## Files
 
