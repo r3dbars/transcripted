@@ -57,11 +57,13 @@ enum SemanticSearchFusion {
             )
         }
 
-        let total = ranked.count
+        // Inputs may already be capped. Their totals remain lower bounds for
+        // the union even when the visible lists overlap completely.
+        let total = max(ranked.count, lexical.totalMeetingsMatched, semantic.totalMeetingsMatched)
         return GroupedSearchResult(
             results: Array(fused.prefix(maxMeetings)),
             totalMeetingsMatched: total,
-            truncated: total > maxMeetings
+            truncated: lexical.truncated || semantic.truncated || total > maxMeetings
         )
     }
 

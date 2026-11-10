@@ -53,6 +53,8 @@ extension TranscriptIndex {
         // relevance in every mode (FTS rank, cosine, or their RRF), so the lists
         // are merged by rank, never by date.
         var rankedLists: [[ContextSearchGroup]] = []
+        var total = 0
+        var upstreamTruncated = false
 
         if kind.includes(.meeting) {
             let meetings = try searchUtterances(
@@ -64,6 +66,8 @@ extension TranscriptIndex {
                 snippetsPerMeeting: 3,
                 mode: mode
             )
+            total += meetings.totalMeetingsMatched
+            upstreamTruncated = meetings.truncated
             rankedLists.append(meetings.results.map {
                 ContextSearchGroup(
                     kind: .meeting,
@@ -87,34 +91,38 @@ extension TranscriptIndex {
         }
 
         if kind.includes(.dictation), speaker == nil {
-            rankedLists.append(try searchDictationEntries(
+            // One extra match detects a cut even for a single-kind query.
+            let dictations = try searchDictationEntries(
                 query: query,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
-                maxItems: maxItems,
+                maxItems: maxItems + 1,
                 mode: mode
-            ))
+            )
+            total += dictations.count
+            rankedLists.append(dictations)
         }
 
         // Writing has no speakers, so a speaker filter skips it like dictations.
         if kind.includes(.writing), speaker == nil {
-            rankedLists.append(try searchWritingEntries(
+            let writing = try searchWritingEntries(
                 query: query,
                 dateFrom: dateFrom,
                 dateTo: dateTo,
-                maxItems: maxItems
-            ))
+                maxItems: maxItems + 1
+            )
+            total += writing.count
+            rankedLists.append(writing)
         }
 
         // BM25 and cosine scores aren't comparable across kinds, so fuse by
         // each item's rank within its own list.
         let combined = SemanticSearchFusion.fuseRankedContextLists(rankedLists)
-        let total = combined.count
 
         return ContextSearchResult(
             results: Array(combined.prefix(maxItems)),
             totalItemsMatched: total,
-            truncated: total > maxItems
+            truncated: upstreamTruncated || total > maxItems
         )
     }
 
