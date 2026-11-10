@@ -20,6 +20,40 @@ func testHomeMeetingPreviewFormatter() {
         assertFalse(content.fallbackText.contains("capture_id:"), "Preview fallback should not expose YAML metadata")
     }
 
+    runSuite("Home preview keeps escaped speaker names linked to their saved voice") {
+        let speakerID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let fixtures = [
+            ("Alex\"", "\"Alex\\\"\""),
+            ("Alex\\", "\"Alex\\\\\""),
+            ("Alex\\\"", "\"Alex\\\\\\\"\""),
+            ("\"Alex\"", "\"\\\"Alex\\\"\""),
+            ("Alex\\new", "\"Alex\\\\new\""),
+        ]
+        for (name, scalar) in fixtures {
+            let markdown = """
+            ---
+            capture_type: meeting
+            speakers:
+              - id: "1"
+                channel: system
+                db_id: "\(speakerID.uuidString)"
+                name: \(scalar)
+                source: db
+            ---
+
+            ## Transcript
+
+            **00:01** [System/\(name)]
+            A saved synthetic turn.
+            """
+            let line = HomeMeetingPreviewContent.make(from: markdown).transcriptLines.first
+            assertEqual(line?.identity.displayName, name, "the displayed name must preserve literal quotes and backslashes")
+            assertEqual(line?.identity.persistentSpeakerID, speakerID, "escaped metadata must still attach the saved voice identity")
+            assertEqual(HomeMeetingPreviewContent.autoRecognizedVoices(in: markdown).first?.profileID, speakerID,
+                        "escaped names must not disrupt the recognized-voice metadata")
+        }
+    }
+
     runSuite("HomeMeetingPreviewFormatter parses legacy inline transcript rows") {
         let content = HomeMeetingPreviewContent.make(from: legacyInlineMarkdown())
 
