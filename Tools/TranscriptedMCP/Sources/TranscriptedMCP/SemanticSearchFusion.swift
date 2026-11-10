@@ -6,9 +6,9 @@ import Foundation
 /// otherwise comparable without tuning weights.
 ///
 /// Fusion happens at the grouped level (per meeting / per dictation entry), which
-/// is the granularity the MCP API already returns. The result is a strict
-/// superset of the lexical list's recall: any FTS hit keeps its snippets and
-/// only gets reordered, while semantic-only matches are appended by score.
+/// is the granularity the MCP API already returns. The candidate union is
+/// ranked by RRF and then capped, so semantic candidates can displace lexical
+/// hits. Returned meetings keep lexical snippets first within the snippet cap.
 enum SemanticSearchFusion {
     /// Standard RRF damping constant. Larger = flatter contribution from rank.
     static let rrfK: Double = 60
@@ -40,7 +40,10 @@ enum SemanticSearchFusion {
             semByName[group.filename] = group
         }
 
-        let ranked = order.sorted { (score[$0] ?? 0) > (score[$1] ?? 0) }
+        let ranked = order.enumerated().sorted { a, b in
+            let sa = score[a.element] ?? 0, sb = score[b.element] ?? 0
+            return sa == sb ? a.offset < b.offset : sa > sb
+        }.map(\.element)
 
         let fused: [MeetingSearchGroup] = ranked.compactMap { name in
             let base = lexByName[name] ?? semByName[name]
@@ -88,7 +91,10 @@ enum SemanticSearchFusion {
             if byKey[k] == nil { order.append(k); byKey[k] = group }
         }
 
-        let ranked = order.sorted { (score[$0] ?? 0) > (score[$1] ?? 0) }
+        let ranked = order.enumerated().sorted { a, b in
+            let sa = score[a.element] ?? 0, sb = score[b.element] ?? 0
+            return sa == sb ? a.offset < b.offset : sa > sb
+        }.map(\.element)
         let fused = ranked.compactMap { byKey[$0] }
         return Array(fused.prefix(maxItems))
     }
