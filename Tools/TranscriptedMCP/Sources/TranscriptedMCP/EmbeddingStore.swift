@@ -120,9 +120,9 @@ final class EmbeddingStore: @unchecked Sendable {
         // every row of a rewritten file (a whole dictation day on each new
         // entry, a whole meeting on a speaker rename), so per-rowid vectors are
         // orphaned even when the text is unchanged. key = SHA-256 of
-        // namespace + 0x00 + the exact text handed to the provider. Additive:
-        // older helpers never read it, and the lexical schema gate leaves it
-        // alone.
+        // namespace + 0x00 + the exact text handed to the provider. Older
+        // helpers never read this additive table. A lexical schema-version
+        // rebuild drops it with the rest of the derived index tables.
         execLocked("""
             CREATE TABLE IF NOT EXISTS embedding_cache (
                 key BLOB PRIMARY KEY,
