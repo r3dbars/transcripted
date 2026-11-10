@@ -65,11 +65,12 @@ let coreTestLinkerSettings: [LinkerSetting] = [
     .linkedFramework("ScreenCaptureKit"),
 ]
 
-func coreTestTarget(_ name: String, _ path: String) -> Target {
+func coreTestTarget(_ name: String, _ path: String, resources: [Resource] = []) -> Target {
     .testTarget(
         name: name,
         dependencies: ["TranscriptedCore"],
         path: path,
+        resources: resources,
         swiftSettings: [.unsafeFlags(coreTestUnsafeSwiftFlags)],
         linkerSettings: coreTestLinkerSettings
     )
@@ -80,14 +81,17 @@ func coreTestTarget(_ name: String, _ path: String) -> Target {
 // target: none of the current test files share a fixture or helper across
 // subsystem boundaries (every helper type/fixture in the old monolithic target
 // was already `private`/file-scoped, or — for the ERes2Net JSON fixture — has
-// exactly one consumer), so a resource-only shared target would add SPM
+// consumers within SpeakerTests), so a resource-only shared target would add SPM
 // ceremony with no current benefit. Revisit if a future fixture needs sharing
 // across these targets.
 let coreTestTargets: [Target] = [
     coreTestTarget("AudioTests", "Tests/TranscriptedCoreTests/AudioTests"),
     // EmbeddingClustererSplitTests, SpeakerTurnWindowSplitterTests, and
     // NemotronTurnBuilderTests live here. Filter: `^SpeakerTests\.<Class>`.
-    coreTestTarget("SpeakerTests", "Tests/TranscriptedCoreTests/SpeakerTests"),
+    coreTestTarget(
+        "SpeakerTests", "Tests/TranscriptedCoreTests/SpeakerTests",
+        resources: [.copy("Fixtures")]
+    ),
     coreTestTarget("PipelineTests", "Tests/TranscriptedCoreTests/PipelineTests"),
     coreTestTarget("StorageTests", "Tests/TranscriptedCoreTests/StorageTests"),
     coreTestTarget("UtilitiesTests", "Tests/TranscriptedCoreTests/UtilitiesTests"),
