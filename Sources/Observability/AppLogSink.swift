@@ -29,9 +29,10 @@ private actor AppLogSinkFileWriter {
             do {
                 let attrs = try fm.attributesOfItem(atPath: path)
                 if let size = attrs[.size] as? UInt64, size > TranscriptedConstants.logRotationThreshold {
-                    // Trigger (byte size, checked once here at session start) stays
-                    // local; the actual read/trim/rewrite mechanics are shared with
-                    // TranscriptedCore's FileLogger via LogTailTrimmer.
+                    // Trigger (byte size, checked here at session start and again
+                    // after each append) stays local; the actual read/trim/rewrite
+                    // mechanics are shared with TranscriptedCore's FileLogger via
+                    // LogTailTrimmer.
                     LogTailTrimmer.trimIfNeeded(
                         at: path,
                         maxLines: nil,

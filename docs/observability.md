@@ -9,7 +9,7 @@ never reach Sentry/PostHog), see `docs/privacy-first-observability.md`.
 | Sink | Lives in | Writes to | Rotation |
 | --- | --- | --- | --- |
 | `AppLogger` | `Sources/TranscriptedCore/Logging/AppLogger.swift` | `~/Library/Application Support/Transcripted/logs/app.jsonl` (via `FileLogger`) + `os.Logger`/Console.app | Line-count gated: trims to 1500 lines once past 2000, checked every 100 writes |
-| `AppLogSink` | `Sources/Observability/AppLogSink.swift` | `~/Library/Application Support/Transcripted/logs/debug.log` + in-app debug panel (`entries`) | Byte-size gated: trims to 1000 lines once past 500 KB, checked once at session start |
+| `AppLogSink` | `Sources/Observability/AppLogSink.swift` | `~/Library/Application Support/Transcripted/logs/debug.log` + in-app debug panel (`entries`) | Byte-size gated: trims to 1000 lines once past 500 KB, checked at session start and after each append |
 | `FileLogger` | `Sources/TranscriptedCore/Logging/FileLogger.swift` | `app.jsonl` (this is `AppLogger`'s file backend, not a separate log) | Same as `AppLogger` above — it's the same file |
 | `EventReporter` | `Sources/Observability/EventReporter.swift` | `~/Library/Application Support/Transcripted/logs/events.jsonl` + optional Sentry forwarding (errors only, allowlisted) | Rename-based: `ObservabilityLogRotation` renames the active file to `events.jsonl.1` once past the shared JSONL threshold (`TranscriptedConstants.jsonlLogRotationThreshold`) |
 | `ReliabilityPacketRecorder` | `Sources/Observability/ReliabilityPacketRecorder.swift` | `~/Library/Application Support/Transcripted/logs/reliability.jsonl` | Same rename-based `ObservabilityLogRotation` strategy as `EventReporter`, same threshold |
@@ -62,7 +62,7 @@ are now implemented once:
   public): read the file, keep only the newest N lines, atomically rewrite
   the same path, re-chmod to owner-only. Used by `FileLogger` (gated on line
   count, checked periodically during writes) and `AppLogSink` (gated on byte
-  size, checked once at session start). The gating decision (when to trim)
+  size, checked at session start and after each append). The gating decision (when to trim)
   stays with each caller since the two sinks trigger on different signals;
   the mechanical read/keep-tail/rewrite/re-chmod step is the one shared
   implementation both call, replacing what used to be two hand-rolled copies
