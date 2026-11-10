@@ -29,7 +29,8 @@ struct WidgetMeeting: Codable, Hashable {
     /// Inline audio, when a preferred track exists and fits the size budget.
     let audio: WidgetAudio?
     /// Absolute local path to the audio directory, for the "open in Finder"
-    /// fallback when audio is absent or too large to inline. Never leaves the Mac.
+    /// fallback when audio is absent or too large to inline. Included in the
+    /// client payload, so downstream handling depends on the client and host.
     let audioDirectory: String?
     /// Why inline audio is unavailable, when it is (missing vs. over budget).
     let audioNote: String?
@@ -46,10 +47,9 @@ struct WidgetMeeting: Codable, Hashable {
 }
 
 /// A base64 `data:` audio payload the widget plays with a plain `<audio>`
-/// element. `data:` media is allowed under the MCP Apps default sandbox CSP
-/// (`media-src 'self' data:`), so this plays with no network access — the audio
-/// bytes travel with the widget over the local stdio transport and never touch
-/// a remote host.
+/// element, subject to the host's media policy. The bytes are included in the
+/// MCP result rather than fetched from an audio endpoint. Local stdio does not
+/// constrain what the receiving client or host does with that result.
 struct WidgetAudio: Codable, Hashable {
     /// `data:audio/<subtype>;base64,<...>`
     let dataURI: String
@@ -93,7 +93,7 @@ enum RecentMeetingsWidget {
     static let resourceMimeType = "text/html;profile=mcp-app"
 
     /// Render a self-contained HTML document for the given model. Inline CSS/JS,
-    /// no external network, theme-aware (honors `prefers-color-scheme` and a
+    /// no external asset requests, theme-aware (honors `prefers-color-scheme` and a
     /// host-provided theme). The data is baked into a `<script type="application/json">`
     /// block so the page renders identically standalone, from `resources/read`,
     /// or inline in a tool result; when a spec-compliant host later pushes fresh

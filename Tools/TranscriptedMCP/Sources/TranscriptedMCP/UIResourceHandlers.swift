@@ -14,7 +14,8 @@ import MCP
 ///     embedded resource (the mcp-ui `rawHtml` pattern) plus `structuredContent`,
 ///     so the widget renders whether the host inlines the embedded resource,
 ///     reads the template and pushes `structuredContent`, or is inspected
-///     standalone. Nothing here reaches the network.
+///     standalone. The MCP client receives this content; its downstream handling
+///     is outside this resource builder's control.
 enum TranscriptedUIResources {
     static let recentMeetingsResourceName = "recent_meetings"
     static let defaultRecentCount = 5
@@ -52,8 +53,8 @@ enum TranscriptedUIResources {
     }
 
     /// The resource descriptor returned by `resources/list`. The `_meta.ui` block
-    /// carries the MCP Apps hints (sandbox CSP is the permissive default; the
-    /// widget needs `media-src data:` for inline audio, which the default allows).
+    /// carries display hints. The host's sandbox policy must allow `data:`
+    /// media for inline audio; this descriptor does not set or guarantee that policy.
     static var recentMeetingsResource: Resource {
         Resource(
             name: recentMeetingsResourceName,
