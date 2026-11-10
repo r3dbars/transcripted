@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(TranscriptedCore)
+import TranscriptedCore
+#endif
 
 enum HomeMeetingSpeakerChannel: String, Equatable, Hashable, Sendable {
     case mic
@@ -642,11 +645,9 @@ struct HomeMeetingPreviewContent {
         let parts = line.split(separator: ":", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { return }
         let key = parts[0].trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = parts[1]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-            .replacingOccurrences(of: "\\\"", with: "\"")
-            .replacingOccurrences(of: "\\\\", with: "\\")
+        let value = TranscriptFrontmatter.unquoteYAMLScalar(
+            parts[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        )
         current?[key] = value
     }
 }
