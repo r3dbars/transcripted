@@ -93,6 +93,15 @@ jobs:
           python3 scripts/ci/pick-ci-runner.py --self-test
           bash scripts/ci/mac-runner.sh self-test
 
+      # Exercise the dispatch harness contracts on ordinary PRs too. These
+      # suites use synthetic reports and owned temporary files, not native apps.
+      - name: Hosted QA and staged update offline guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 Tests/BuildDependencies/HostedQAArtifactsTests.py
+          python3 Tests/BuildDependencies/StagedSparkleUpdateTests.py
+
       # The release pipeline's Sparkle appcast merge (delta update URLs, the
       # upload manifest, failure before docs/appcast.xml is written) runs
       # against a stub generate_appcast, so it needs no Mac or signing key.

@@ -73,6 +73,25 @@ rules:
       - "bash Tests/BuildDependencies/ArchiveInputsTests.sh"
       - "bash build-deps.sh --force"
 
+  # Offline contracts for the hosted harnesses; never invoke their native CLIs.
+  - paths:
+      - "scripts/ci/prepare-hosted-qa-artifacts.py"
+      - "Tests/BuildDependencies/HostedQAArtifactsTests.py"
+      - ".github/workflows/repo-hygiene.yml"
+      - ".github/workflows/swift-ci.yml"
+      - ".agents/test-matrix.yml"
+    checks:
+      - "python3 Tests/BuildDependencies/HostedQAArtifactsTests.py"
+
+  - paths:
+      - "scripts/release/test-staged-sparkle-update.py"
+      - "Tests/BuildDependencies/StagedSparkleUpdateTests.py"
+      - ".github/workflows/repo-hygiene.yml"
+      - ".github/workflows/swift-ci.yml"
+      - ".agents/test-matrix.yml"
+    checks:
+      - "python3 Tests/BuildDependencies/StagedSparkleUpdateTests.py"
+
   - paths:
       - "Tests/BuildDependencies/**"
     checks:
