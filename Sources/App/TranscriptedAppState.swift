@@ -570,16 +570,7 @@ class TranscriptedAppState: ObservableObject {
 
     private var meetingStateSummary: String {
         if #available(macOS 14.0, *) {
-            switch meetingSession.state {
-            case .idle: return "idle"
-            case .loadingModels: return "loadingModels"
-            case .ready: return "ready"
-            case .startingRecording: return "startingRecording"
-            case .recording: return "recording"
-            case .stoppingRecording: return "stoppingRecording"
-            case .transcribing: return "transcribing"
-            case .error: return "error"
-            }
+            return meetingSession.state.legacyEventName
         }
         return "unavailable"
     }
