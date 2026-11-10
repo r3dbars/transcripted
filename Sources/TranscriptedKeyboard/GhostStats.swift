@@ -5,25 +5,51 @@ import Foundation
 
 /// Aggregate-only keyboard counters. Personal History is a separate, explicit subsystem.
 enum GhostStats {
-    private static let persistenceQueue = DispatchQueue(label: "com.justinbetker.draft.keyboard.ghost-stats", qos: .utility)
-    private static var pending = [String: Int]()
-    private static var lastFlush = Date.distantPast
+    private static let live = GhostStatsStore()
 
-    static func recordAccepted(_ text: String) {
+    static func recordAccepted(_ text: String) { live.recordAccepted(text) }
+    static func recordSuggestionShown() { live.recordSuggestionShown() }
+    static func recordSuggestionAccepted() { live.recordSuggestionAccepted() }
+    static func recordFailure(_ outcome: GhostBrainResponse.Outcome) { live.recordFailure(outcome) }
+    static func flush(force: Bool = false) { live.flush(force: force) }
+}
+
+/// Each store owns its aggregation state. Tests inject in-memory preferences,
+/// a fixed clock and a serial queue instead of sharing the live keyboard store.
+final class GhostStatsStore: @unchecked Sendable {
+    private let persistenceQueue: DispatchQueue
+    private let defaults: UserDefaults?
+    private let now: @Sendable () -> Date
+    private var pending = [String: Int]()
+    private var lastFlush = Date.distantPast
+
+    init(
+        defaults: UserDefaults? = nil,
+        now: @escaping @Sendable () -> Date = { Date() },
+        persistenceQueue: DispatchQueue = DispatchQueue(
+            label: "com.justinbetker.draft.keyboard.ghost-stats", qos: .utility
+        )
+    ) {
+        self.defaults = defaults
+        self.now = now
+        self.persistenceQueue = persistenceQueue
+    }
+
+    func recordAccepted(_ text: String) {
         let count = text.split(whereSeparator: \Character.isWhitespace).count
         guard count > 0 else { return }
         record(count, key: "wordsAccepted")
     }
 
-    static func recordSuggestionShown() {
+    func recordSuggestionShown() {
         record(1, key: "suggestionsShown")
     }
 
-    static func recordSuggestionAccepted() {
+    func recordSuggestionAccepted() {
         record(1, key: "suggestionsAccepted")
     }
 
-    static func recordFailure(_ outcome: GhostBrainResponse.Outcome) {
+    func recordFailure(_ outcome: GhostBrainResponse.Outcome) {
         let key: String
         switch outcome {
         case .error: key = "completionErrors"
@@ -34,24 +60,24 @@ enum GhostStats {
         record(1, key: key)
     }
 
-    private static func record(_ count: Int, key: String) {
-        let now = Date()
-        persistenceQueue.async {
+    private func record(_ count: Int, key: String) {
+        let now = now()
+        persistenceQueue.async { [self] in
             pending[key, default: 0] += count
             persist(now: now, force: false)
         }
     }
 
-    static func flush(force: Bool = false) {
-        let now = Date()
+    func flush(force: Bool = false) {
+        let now = now()
         if force {
             persistenceQueue.sync { persist(now: now, force: true) }
         } else {
-            persistenceQueue.async { persist(now: now, force: false) }
+            persistenceQueue.async { [self] in persist(now: now, force: false) }
         }
     }
 
-    private static func persist(now: Date, force: Bool) {
+    private func persist(now: Date, force: Bool) {
         guard force || now.timeIntervalSince(lastFlush) > 20 else { return }
         let recorded = pending
         guard !recorded.isEmpty else { return }
@@ -61,11 +87,12 @@ enum GhostStats {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         let key = "stats." + formatter.string(from: now)
-        let defaults = UserDefaults.standard
-        var day = defaults.dictionary(forKey: key) as? [String: Int] ?? [:]
+        // Keep the live preference lookup on the persistence queue, as before.
+        let storeDefaults = defaults ?? .standard
+        var day = storeDefaults.dictionary(forKey: key) as? [String: Int] ?? [:]
         for (counter, count) in recorded {
             day[counter, default: 0] += count
         }
-        defaults.set(day, forKey: key)
+        storeDefaults.set(day, forKey: key)
     }
 }
