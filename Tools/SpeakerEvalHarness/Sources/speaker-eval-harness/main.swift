@@ -133,7 +133,6 @@ func clusterMeanEmbedding(_ segs: [SegmentDump]) -> (embedding: [Float], count: 
 struct Main {
     static func main() async {
         let args = Array(CommandLine.arguments.dropFirst())
-        guard #available(macOS 14.0, *) else { die("requires macOS 14+") }
         guard let cmd = args.first else {
             die("usage: speaker-eval-harness <dump|replay|embedding-parity|autoeval|autoeval-self-test|meeting-series|dump-e2e|dump-set> ...")
         }

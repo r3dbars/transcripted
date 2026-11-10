@@ -28,7 +28,6 @@ struct LabVoiceprintEmbedder {
     ]
 
     /// nil when no `--embedder-*` flag was given (the run keeps Core's default voiceprint).
-    @available(macOS 14.0, *)
     static func load(from args: [String]) -> LabVoiceprintEmbedder? {
         guard flags.contains(where: { args.contains($0) }) else { return nil }
         guard let modelPath = argValue("--embedder-model", in: args),

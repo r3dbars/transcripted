@@ -40,7 +40,6 @@ func defaultERes2NetModelPath() -> String? {
 /// Core silently falls back to the default on an unknown name, which would make the dump
 /// lie about its variant, so a name Core does not honor is a hard error here. "default"
 /// is accepted as an explicit spelling of the default.
-@available(macOS 14.0, *)
 func resolvedNemotronPresetForDump() -> String {
     let raw = (ProcessInfo.processInfo.environment["TRANSCRIPTED_NEMOTRON_PRESET"] ?? "")
         .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -59,7 +58,6 @@ func audioDurationSeconds(_ url: URL) -> Double? {
     return Double(file.length) / rate
 }
 
-@available(macOS 14.0, *)
 func runDump(_ args: [String]) async {
     let usage = "dump requires --audio <wav|m4a> --out <raw.json> [--meeting NAME] "
         + "[--backend \(DiarizationBackend.allCases.map { $0.rawValue }.joined(separator: "|"))] "

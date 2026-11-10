@@ -97,7 +97,6 @@ func doubleArg(_ name: String, in args: [String], default fallback: Double) -> D
 
 // MARK: - replay
 
-@available(macOS 14.0, *)
 func runReplay(_ args: [String]) async {
     guard let inputsCSV = argValue("--inputs", in: args), let out = argValue("--out", in: args) else {
         die("replay requires --inputs <a.json,b.json,...> (session order) --out <result.json> "
