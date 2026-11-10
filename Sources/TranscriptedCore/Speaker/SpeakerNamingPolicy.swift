@@ -173,9 +173,7 @@ public enum SpeakerNamingPolicy {
         request.invitedNames.contains { !nameKey($0).isEmpty }
     }
 
-    /// Profile-level eligibility for silent recognition, shared by the
-    /// auto-accept gate and the review sheet's "recognizes N people" roster so
-    /// the promise and the behavior can never drift apart: named, explicitly
+    /// Profile-level eligibility for silent recognition: named, explicitly
     /// confirmed in enough distinct meetings, and healthy per the lifeline (no
     /// disputes, no recent corrections). Passive appearances never graduate a
     /// profile. Match-level gates (similarity, margin) live in `shouldAutoAccept`.
