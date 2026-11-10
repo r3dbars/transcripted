@@ -178,10 +178,9 @@ final class EmbeddingClustererTests: XCTestCase {
     }
 
     func testConsolidationThresholdNotAboveAutoAcceptBar() {
-        // Drift guard: within-meeting same-voice consolidation must never merge two clusters
-        // we would not also auto-accept as the same known person across meetings. The auto bar
-        // (0.92) is now stricter than the consolidation bar (0.88) — consolidation may merge at
-        // a lower bar (it has within-meeting evidence), but it must never EXCEED the auto bar.
+        // Guard the ordering of the WeSpeaker-scale defaults: consolidation's
+        // 0.88 must not exceed silent naming's 0.92. The pipeline passes the
+        // active model's consolidation threshold; this assertion covers the defaults.
         XCTAssertLessThanOrEqual(
             EmbeddingClusterer.sameVoiceConsolidationThreshold,
             Float(SpeakerNamingPolicy.autoAcceptSimilarityThreshold),

@@ -29,15 +29,11 @@ import Accelerate
 
 public enum EmbeddingClusterer {
 
-    /// Cosine-similarity bar for the same-voice consolidation pass (within a single meeting).
-    /// Kept at 0.88 even though `SpeakerNamingPolicy.autoAcceptSimilarityThreshold` was raised
-    /// to 0.92: within-meeting consolidation has temporal/contextual evidence that two clusters
-    /// are one speaker, so it may legitimately merge at a *lower* bar than the stricter
-    /// cross-meeting silent-naming decision. The guarded invariant is therefore
-    /// `sameVoiceConsolidationThreshold <= autoAcceptSimilarityThreshold`
-    /// (`EmbeddingClustererTests.testConsolidationThresholdNotAboveAutoAcceptBar`), so the merge
-    /// bar can never exceed — i.e. consolidation never merges two clusters we would NOT also
-    /// auto-accept as one another.
+    /// Default same-voice consolidation bar for standalone callers at WeSpeaker scale.
+    /// Pipeline callers pass the active model's `SpeakerEmbeddingThresholds.consolidation`.
+    /// This default (0.88) is below WeSpeaker's cross-meeting auto-accept bar (0.92);
+    /// `EmbeddingClustererTests.testConsolidationThresholdNotAboveAutoAcceptBar` guards
+    /// that ordering. Consolidation and silent naming remain separate decisions.
     public static let sameVoiceConsolidationThreshold: Float = 0.88
 
     /// Lower bar used only to detect "these centroids may belong to different
@@ -59,10 +55,9 @@ public enum EmbeddingClusterer {
     ///   `nil` because VBx already handles the base merge/fragmentation case.
     /// - Parameter consolidationThreshold: Cosine similarity threshold for the
     ///   same-voice consolidation pass that collapses over-segmented large
-    ///   clusters of one speaker. Pass `nil` to skip it. Defaults to the
-    ///   `SpeakerNamingPolicy` auto-accept bar (0.88) so two clusters only merge
-    ///   when they are more similar than we'd demand to auto-accept them as the
-    ///   same known person.
+    ///   clusters of one speaker. Pass `nil` to skip it. Pipeline callers pass the
+    ///   active model's `SpeakerEmbeddingThresholds.consolidation`; the default
+    ///   `sameVoiceConsolidationThreshold` is the WeSpeaker-scale value (0.88).
     public static func postProcess(
         segments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
@@ -341,9 +336,8 @@ public enum EmbeddingClusterer {
     /// This pass compares the mean embedding of every surviving cluster pair and
     /// merges those above `threshold`. Two safeguards keep genuine
     /// multi-speaker meetings intact:
-    /// - The threshold is high (0.88 by default — the `SpeakerNamingPolicy`
-    ///   auto-accept bar). Distinct speakers rarely exceed ~0.6 cosine
-    ///   similarity, so only near-identical voices merge.
+    /// - The pipeline uses the active model's consolidation threshold; the
+    ///   standalone default is 0.88 at WeSpeaker scale.
     /// - Merging is agglomerative with recomputed centroids: after A and B
     ///   merge, the combined centroid must still clear `threshold` against C
     ///   before C joins. This avoids the transitive A≈B, B≈C → A+B+C collapse
