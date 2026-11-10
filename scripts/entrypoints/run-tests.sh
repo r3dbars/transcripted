@@ -840,6 +840,7 @@ APP_SOURCES=(
     "Sources/Capture/PhysicalShortcutMatcher.swift"
     "Sources/Capture/PhysicalShortcutTapPolicy.swift"
     "Sources/Capture/PhysicalShortcutTapRecovery.swift"
+    "Sources/Capture/PhysicalShortcutTapRunLoopStop.swift"
     "Sources/Capture/SecureEventInputSource.swift"
     "Sources/Capture/SecureKeyboardEntryMonitor.swift"
     "Sources/Capture/SecureKeyboardEntryWarningPolicy.swift"

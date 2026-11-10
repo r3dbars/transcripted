@@ -40,10 +40,16 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
     var onLog: ((String, String, [String: String]) -> Void)?
 
     private let stateLock = NSRecursiveLock()
-    private var eventTap: CFMachPort?
-    private var tapRecovery: PhysicalShortcutTapRecovery?
+    private struct InstalledTap {
+        let port: CFMachPort
+        let context: TapCallbackContext
+    }
+    /// The port and its unretained callback pointer always retire together.
+    private var installedTap: InstalledTap?
+    private var tapRecovery: PhysicalShortcutTapRecovery? { installedTap?.context.recovery }
     private var runLoopSource: CFRunLoopSource?
     private var tapRunLoop: CFRunLoop?
+    private var tapRunLoopStop: PhysicalShortcutTapRunLoopStop?
     private var tapThread: Thread?
     private var diagnosticRateLimiter = PhysicalShortcutDiagnosticRateLimiter()
     private var activePushToTalkKeyCode: UInt32? {
@@ -135,14 +141,13 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         }
 
         guard let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0) else {
-            CFMachPortInvalidate(tap)
+            Self.retire(tap: tap, context: callbackContext)
             resetState()
             return PhysicalShortcutTriggerStatus.failedToStartMessage
         }
 
         stateLock.lock()
-        eventTap = tap
-        tapRecovery = recovery
+        installedTap = InstalledTap(port: tap, context: callbackContext)
         runLoopSource = source
         stateLock.unlock()
         startTapThread(tap: tap, source: source, callbackContext: callbackContext)
@@ -152,25 +157,23 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
     func remove() {
         stateLock.lock()
         let source = runLoopSource
-        let eventTap = eventTap
+        let installation = installedTap
         let tapRunLoop = tapRunLoop
+        let tapRunLoopStop = tapRunLoopStop
         tapRecovery?.invalidate()
-        tapRecovery = nil
+        installedTap = nil
         runLoopSource = nil
-        self.eventTap = nil
         self.tapRunLoop = nil
+        self.tapRunLoopStop = nil
         self.tapThread = nil
         stateLock.unlock()
 
-        if let source {
-            CFRunLoopRemoveSource(tapRunLoop ?? CFRunLoopGetMain(), source, .commonModes)
+        if let source, let tapRunLoop {
+            CFRunLoopRemoveSource(tapRunLoop, source, .commonModes)
         }
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            CFMachPortInvalidate(eventTap)
-        }
-        if let tapRunLoop {
-            CFRunLoopStop(tapRunLoop)
+        tapRunLoopStop?.request()
+        if let installation {
+            Self.retire(tap: installation.port, context: installation.context)
         }
 
         // A key held across a reinstall (wake recovery) keeps its hold, so the
@@ -185,30 +188,65 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
         let thread = Thread { [weak self] in
             autoreleasepool {
                 guard let self else {
+                    PhysicalShortcutDetector.retire(tap: tap, context: callbackContext)
                     ready.signal()
                     return
                 }
 
                 let runLoop = CFRunLoopGetCurrent()
+                let stop = PhysicalShortcutTapRunLoopStop(enqueue: { action in
+                    CFRunLoopPerformBlock(runLoop, CFRunLoopMode.defaultMode.rawValue, action)
+                    CFRunLoopWakeUp(runLoop)
+                }, stop: {
+                    CFRunLoopStop(runLoop)
+                })
                 self.stateLock.lock()
-                self.tapRunLoop = runLoop
+                let isCurrent = self.tapRecovery === callbackContext.recovery
+                if isCurrent {
+                    self.tapRunLoop = runLoop
+                    self.tapRunLoopStop = stop
+                }
                 self.stateLock.unlock()
+                guard isCurrent else {
+                    PhysicalShortcutDetector.retire(tap: tap, context: callbackContext)
+                    ready.signal()
+                    return
+                }
 
                 CFRunLoopAddSource(runLoop, source, .commonModes)
-                CGEvent.tapEnable(tap: tap, enable: true)
+                callbackContext.recovery.requestStartup {
+                    CGEvent.tapEnable(tap: tap, enable: true)
+                }
                 ready.signal()
-                withExtendedLifetime(callbackContext) { CFRunLoopRun() }
+                // Stop queued before Run executes within its first activation.
+                // Both values outlive the loop's last callback; native cleanup
+                // independently retains the context until port invalidation.
+                withExtendedLifetime((callbackContext, stop)) { CFRunLoopRun() }
             }
         }
         thread.name = "TranscriptedPhysicalShortcutTap"
         thread.qualityOfService = .userInteractive
 
         stateLock.lock()
-        tapThread = thread
+        let isCurrent = tapRecovery === callbackContext.recovery
+        if isCurrent { tapThread = thread }
         stateLock.unlock()
+        guard isCurrent else {
+            Self.retire(tap: tap, context: callbackContext)
+            return
+        }
 
         thread.start()
         ready.wait()
+    }
+
+    private static func retire(tap: CFMachPort, context: TapCallbackContext) {
+        context.recovery.invalidate(teardown: {
+            withExtendedLifetime(context) {
+                CGEvent.tapEnable(tap: tap, enable: false)
+                CFMachPortInvalidate(tap)
+            }
+        })
     }
 
     private func resetState() {
@@ -227,7 +265,7 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
 
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
             reconcileActivePushToTalkAfterTapDisabled()
-            if let tap = eventTap,
+            if let tap = installedTap?.port,
                let reason = PhysicalShortcutTapPolicy.tapDisabledReason(for: type) {
                 // APPLE-MACOS-6H: WindowServer can stall this call. Doing it
                 // in the callback under stateLock also stranded wake's
