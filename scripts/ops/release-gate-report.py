@@ -316,6 +316,8 @@ def run_packaged_app_smoke(
     command = [
         "python3",
         "scripts/ops/packaged-app-smoke.py",
+        "--appcast",
+        args.appcast or "build/appcast.xml",
         "--out-dir",
         str(out_dir / "packaged-app-smoke"),
         "--write-report",
@@ -1002,6 +1004,24 @@ def parse_args() -> argparse.Namespace:
 
 
 def self_test() -> int:
+    # Capture the actual packaged-smoke call without executing any command.
+    import tempfile
+    from unittest.mock import patch
+
+    with tempfile.TemporaryDirectory() as temporary:
+        owned = Path(temporary)
+        for supplied in (None, "fixtures/chosen-feed.xml"):
+            arguments = argparse.Namespace(include_packaged_app_smoke=True, appcast=supplied,
+                                           require_release_debug_files=False,
+                                           require_packaged_app_dmg=False, dry_run=True)
+            record = CommandRecord("synthetic", "yellow", 3, "not executed", "owned", "fixture")
+            with patch(__name__ + ".run_command", return_value=(record, "")) as runner:
+                run_packaged_app_smoke(arguments, owned, owned / "output", [])
+                command = runner.call_args.kwargs["command"]
+            expected_appcast = supplied or "build/appcast.xml"
+            if command[command.index("--appcast") + 1] != expected_appcast:
+                raise AssertionError("Packaged smoke must receive the selected local appcast")
+
     root = repo_root()
     generated_at = "2026-06-07T00:00:00Z"
     release_record = CommandRecord(

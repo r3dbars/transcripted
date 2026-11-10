@@ -190,7 +190,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
   - Missing Sentry/PostHog credentials or manual proof are reported as yellow/unknown, not green
   - Its first screen separates deterministic proof, mocked/proxy proof, telemetry proof, release-surface proof, timestamped current-run local log proof, and manual/hardware UNKNOWN
 - `scripts/ops/packaged-app-smoke.py` — smoke a built/packaged `Transcripted.app` before release publishing: app bundle, DMG, dSYM, Sparkle appcast keys, and an isolated launch/menu check, with output scrubbed of secrets/paths/emails before it's written
-  - Usage: `python3 scripts/ops/packaged-app-smoke.py --app-bundle build/Transcripted.app`
+  - Usage: `python3 scripts/ops/packaged-app-smoke.py --app-bundle build/Transcripted.app --appcast build/appcast.xml` (existing local feed snapshot; omission leaves appcast proof incomplete, with no network fetch or legacy-feed fallback)
   - Self-test: `python3 scripts/ops/packaged-app-smoke.py --self-test`
 - `scripts/ops/privacy-leak-sweep.py` — synthetic-only privacy sweep for logs/events/reliability JSONL, Sentry/PostHog payloads, QA/local reports, PR/release text, and scanner handoff summaries
   - Usage: `python3 scripts/ops/privacy-leak-sweep.py --write-report build/privacy-leak-sweep-report.json`
