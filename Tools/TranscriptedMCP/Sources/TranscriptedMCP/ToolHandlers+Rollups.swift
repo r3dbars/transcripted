@@ -10,7 +10,8 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
     let dateFrom = params.arguments?["date_from"]?.stringValue ?? String(today)
     let dateTo = params.arguments?["date_to"]?.stringValue ?? dateFrom
 
-    let meetings = try index.listMeetings(count: 50, dateFrom: dateFrom, dateTo: dateTo)
+    let page = try index.listMeetingsPage(count: 50, dateFrom: dateFrom, dateTo: dateTo)
+    let meetings = page.meetings
 
     if meetings.isEmpty {
         return try emptyResult(scope: .meetings, searchedDirectories: meetingDirs, index: index)
@@ -71,6 +72,7 @@ func handleRecap(params: CallTool.Parameters, index: TranscriptIndex, meetingDir
     let result = RecapResult(
         dateRange: dateFrom == dateTo ? dateFrom : "\(dateFrom) to \(dateTo)",
         meetingCount: recapParts.count,
+        truncated: page.truncated,
         meetings: recapParts
     )
 
@@ -238,6 +240,7 @@ struct RecapActionItem: Codable, Equatable {
 struct RecapResult: Codable {
     let dateRange: String
     let meetingCount: Int
+    let truncated: Bool
     let meetings: [RecapEntry]
 }
 

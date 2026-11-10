@@ -355,10 +355,11 @@ extension TranscriptIndex {
         count: Int,
         dateFrom: String?,
         dateTo: String?,
-        includeFirstUtterance: Bool
+        includeFirstUtterance: Bool,
+        includeOverflow: Bool = false
     ) throws -> [MeetingQueryRow] {
         return try queue.sync {
-            let limit = max(1, min(count, 50))
+            let limit = max(1, min(count, 50)) + (includeOverflow ? 1 : 0)
 
             var sql = """
                 SELECT m.filename, m.date, m.datetime, m.duration_seconds, m.speaker_count, m.word_count
@@ -455,6 +456,17 @@ extension TranscriptIndex {
             dateTo: dateTo,
             includeFirstUtterance: false
         ).map(\.summary)
+    }
+
+    /// A bounded meeting page with one extra row used only to detect overflow.
+    /// The ordinary listMeetings contract remains capped at 50.
+    func listMeetingsPage(count: Int, dateFrom: String?, dateTo: String?) throws -> (meetings: [MeetingSummary], truncated: Bool) {
+        let limit = max(1, min(count, 50))
+        let rows = try queryMeetings(
+            count: limit, dateFrom: dateFrom, dateTo: dateTo,
+            includeFirstUtterance: false, includeOverflow: true
+        )
+        return (Array(rows.prefix(limit)).map(\.summary), rows.count > limit)
     }
 
     // MARK: - Person Profile (who_is)

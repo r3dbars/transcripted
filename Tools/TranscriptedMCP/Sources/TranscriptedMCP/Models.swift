@@ -646,6 +646,7 @@ struct DigestMeeting: Codable {
 struct DigestResult: Codable {
     let dateRange: String
     let meetingCount: Int
+    let truncated: Bool
     let actionItemCount: Int
     let openActionItemCount: Int
     let decisionCount: Int
@@ -659,7 +660,7 @@ struct DigestResult: Codable {
         case openActionItemCount = "open_action_item_count"
         case decisionCount = "decision_count"
         case openQuestionCount = "open_question_count"
-        case meetings
+        case meetings, truncated
     }
 }
 
