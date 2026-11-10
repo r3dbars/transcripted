@@ -265,8 +265,7 @@ without touching the Mac, set the `MAC_RUNNER_MODE` repo variable to `off`.
 Set `MAC_RUNNER_MODE` to `always` to never use GitHub's hosted Macs: every
 same-repo run waits for this Mac, however long the line is, and nothing is
 re-run on GitHub (neither the sweep nor this service reroutes). Fork PRs still
-run hosted. This is the owner's default, because hosted macOS minutes run out
-fast on a private repo.
+run hosted. Use this mode when eligible builds should wait for this Mac.
 
 The one exception is `pause`: while the heartbeat says `paused`, new runs go to
 hosted `macos-26`, so nothing new lands on a Mac you asked to leave alone. Jobs
