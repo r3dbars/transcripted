@@ -2,7 +2,7 @@
 
 Every PR gets a risk tier. Low and medium PRs may squash-merge on their own once CI is green and the AI review found nothing serious. **High-risk PRs are always merged by Justin, by hand.** Releases stay manual: nothing here tags, builds, signs, notarizes or publishes.
 
-Code: `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (run by `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them). Design: `automerge-trust-design.md` (Option A, the GitHub App check run).
+Code: `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (run by `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them).
 
 The older lane gate (`scripts/ops/auto-merge-gate.py`, `docs/auto-merge-gate.md`) uses this classifier and the same App-stored AI verdict, never merges a `risk:high` PR, and **only merges with the gate App's token** (`GATE_TOKEN`). Run from a Mac with a person's `gh` login, it refuses to merge.
 
@@ -59,7 +59,7 @@ python3 scripts/ops/risk-triage.py gate --pr 2190          # dry run: print the 
 Agents run `gh` as @r3dbars, so anything "only @r3dbars can do" is something every agent can do. So:
 - No code path here merges or arms auto-merge with a person's token or `GITHUB_TOKEN`; only the gate App token. A test fails if any workflow or script calls `gh pr merge ... --admin`.
 - The lane gate refuses to merge without `GATE_TOKEN`.
-- What actually stops an agent with Justin's admin token from clicking merge is outside code: see "Justin only" in `automerge-trust-design.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
+- What actually stops an agent with Justin's admin token from clicking merge is outside code: see the account-separation steps (4–6) in section B of `docs/automerge-justin-setup.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
 
 ## 6. CODEOWNERS
 
