@@ -289,6 +289,18 @@ run_step() {
 
   append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
   echo "[qa] ${status} ${title} (${duration}s)"
+  # Private diagnostic cut only: the original command/result above is intact.
+  # Emit no raw logs; one allowlisted annotation is read through Checks metadata.
+  if [[ "$MODE" == full && "$id" == 00-preflight && "$blocking" == yes ]]; then
+    local checkout_sha
+    checkout_sha="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null)" || checkout_sha=""
+    ( python3 "$REPO_ROOT/scripts/ops/canonical-full-notice.py" \
+      --log "$log_path" --check-script "$REPO_ROOT/scripts/entrypoints/check.sh" \
+      --source "${SOURCE_SHA:-}" --checkout "$checkout_sha" \
+      --workflow "${WORKFLOW_SHA:-}" --exit-code "$exit_code" \
+      2> "$LOG_DIR/00-diagnostic-parser.log" ) 2>/dev/null \
+      || printf '%s\n' '::notice title=Transcripted canonical full v1::{"schema":1,"complete":false,"error":"helper_failed","source_sha":null,"workflow_sha":null,"canonical_exit":null,"checks":[]}'
+  fi
   return "${exit_code}"
 }
 
