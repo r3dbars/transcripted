@@ -251,10 +251,10 @@ struct QADataDirectories {
     }
 
     private static func containsDictationDayMarkdown(in directory: URL, fileManager: FileManager) -> Bool {
-        guard let files = try? fileManager.contentsOfDirectory(atPath: directory.path) else {
+        guard let files = try? fileManager.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil) else {
             return false
         }
-        return files.contains { $0.hasPrefix("Dictations_") && $0.hasSuffix(".md") }
+        return files.contains { $0.pathExtension == "md" && CaptureMarkdown.captureKind(of: $0) == .dictationDay }
     }
 
     private static func inferBaseLayout(

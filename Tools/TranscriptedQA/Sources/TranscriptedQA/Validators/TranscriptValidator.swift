@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptedCaptureKit
 
 struct TranscriptValidator {
     let directory: URL
@@ -46,10 +47,10 @@ struct TranscriptValidator {
 
             let yaml = YAMLParser(content: content)
 
-            // Summary sidecars and writing day files (which share the folder in
-            // the flat shared layout) aren't transcripts; WritingValidator
-            // covers writing.
-            if yaml.value(for: "capture_type") == "meeting_summary"
+            // Sidecars and day files share the flat legacy folder with meetings.
+            // Their dedicated validators cover day files, including renamed ones.
+            if CaptureMarkdown.captureKind(of: file) == .dictationDay
+                || yaml.value(for: "capture_type") == "meeting_summary"
                 || yaml.value(for: "capture_type") == "writing_day" {
                 continue
             }

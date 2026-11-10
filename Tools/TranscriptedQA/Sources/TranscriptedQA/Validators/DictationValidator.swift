@@ -1,4 +1,5 @@
 import Foundation
+import TranscriptedCaptureKit
 
 struct DictationValidator {
     let directory: URL
@@ -11,7 +12,7 @@ struct DictationValidator {
         }
 
         guard let files = try? fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter({ $0.pathExtension == "md" && isDictationDayFilename($0.lastPathComponent) })
+            .filter({ $0.pathExtension == "md" && CaptureMarkdown.captureKind(of: $0) == .dictationDay })
             .sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) else {
             return [.fail("dictation/dir-readable", target: directory.path, detail: "Cannot read directory")]
         }
@@ -67,7 +68,4 @@ struct DictationValidator {
         return results
     }
 
-    private func isDictationDayFilename(_ filename: String) -> Bool {
-        filename.hasPrefix("Dictations_") && filename.hasSuffix(".md")
-    }
 }

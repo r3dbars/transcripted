@@ -435,12 +435,10 @@ enum CLIContextStore {
         return files.compactMap { url in
             let filename = url.deletingPathExtension().lastPathComponent
             guard url.pathExtension == "md",
-                  // Legacy summary sidecars belong to a parent transcript.
+                  // Legacy sidecars are not standalone meeting transcripts.
                   !filename.hasSuffix(".summary"),
-                  !filename.hasPrefix("Dictations_"),
-                  // A writing day file has frontmatter too; in the flat
-                  // shared-folder layout it must not surface as a meeting.
-                  CaptureMarkdown.captureKind(of: url) != .writingDay,
+                  // Metadata identifies renamed day files in flat libraries.
+                  CaptureMarkdown.captureKind(of: url) == .meeting,
                   // One read per meeting: the transcript parse and the title
                   // extraction below both work off this same content. Reading
                   // it once here also means the title comes from the
@@ -478,7 +476,7 @@ enum CLIContextStore {
     private static func loadDictationDays(from directory: URL) -> [DictationDayRecord] {
         let files = safeMarkdownFiles(in: directory)
         return files.compactMap { url in
-            guard url.pathExtension == "md", url.deletingPathExtension().lastPathComponent.hasPrefix("Dictations_") else { return nil }
+            guard url.pathExtension == "md", CaptureMarkdown.captureKind(of: url) == .dictationDay else { return nil }
             guard let day = loadDictationDay(at: url) else { return nil }
 
             return DictationDayRecord(

@@ -196,6 +196,27 @@ final class SummaryItemIndexTests: XCTestCase {
         XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
     }
 
+    func testOldMisclassifiedDayIsRebuiltWithoutChangingItsMtime() throws {
+        try writeFixture(makeFixtureJSON(), filename: "Renamed", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
+        index = nil
+        let file = tempDir.appendingPathComponent("Renamed.md")
+        let originalDate = try XCTUnwrap(FileManager.default.attributesOfItem(atPath: file.path)[.modificationDate] as? Date)
+        try makeDictationDayJSON().write(to: file, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: originalDate], ofItemAtPath: file.path)
+        var raw: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(tempDir.appendingPathComponent("mcp_index.sqlite").path, &raw), SQLITE_OK)
+        let database = try XCTUnwrap(raw)
+        XCTAssertEqual(sqlite3_exec(database, "PRAGMA user_version=8", nil, nil, nil), SQLITE_OK)
+        sqlite3_close(database)
+
+        let reopened = try TranscriptIndex(indexDir: tempDir)
+        try reopened.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        XCTAssertTrue(try reopened.listMeetings(count: 10).isEmpty)
+        XCTAssertEqual(try reopened.listDictationDays(count: 10).map(\.filename), ["Renamed"])
+    }
+
     func testOlderSchemaVersionForcesRebuild() throws {
         // Simulate a pre-v2 index: index a meeting-with-summary, then stamp the
         // on-disk DB back to an older user_version to mimic an index built before
