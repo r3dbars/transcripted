@@ -28,7 +28,7 @@ All read-only. Registered in `ToolHandlers.swift`; bodies live in `ToolHandlers+
 | Dictations | `list_dictations`, `read_dictation` (day, `entry_id`, or `offset`/`limit`) |
 | Writing | `list_writing`, `read_writing` (same shape as dictations) |
 | Search | `search`, `search_context` (meetings/dictations/writing/all; writing is full-text only), `recent_context`, `who_is`. `mode` is `hybrid` (default), `lexical`, or `semantic` |
-| Rollups | `recap`, `list_action_items` (`status` open/done/all; done means a parsed `(done)` or `(status: ...)` marker), `list_decisions`, `digest` |
+| Rollups | `recap`, `list_action_items` (`status` open/done/all; default open, done matches parsed completion markers), `list_decisions`, `digest` |
 | Receipts | `decisions`, `commitments`, `open_questions`, `search_meetings` (share `handleReceiptQuery`) |
 | Diagnostics | `status`: version, resolved dirs and which rule chose them, index location, counts |
 | MCP Apps | `show_recent_meetings` returns a `ui://` HTML widget plus `structuredContent` (`UIResourceHandlers.swift`) |
