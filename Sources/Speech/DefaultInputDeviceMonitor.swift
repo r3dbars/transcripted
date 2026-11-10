@@ -188,14 +188,12 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
     /// `isSelfWrite: true` for every subscriber, once, centrally, instead of
     /// each one independently re-deriving "was that us?".
     ///
-    /// ParakeetEngine's own device overrides during recording start
-    /// deliberately do *not* route through here — they keep their existing,
-    /// purpose-built `ignoreInputSelectionConfigChangesUntil` window (see
-    /// ParakeetDeviceRecovery.swift), which is not the same suppression: it
-    /// spans the whole recording-start sequencing around the override (audio
-    /// graph rebuild, format renegotiation), not just the CoreAudio round
-    /// trip, so collapsing it into this 500ms window would not be behavior
-    /// preserving.
+    /// ParakeetEngine never writes `kAudioHardwarePropertyDefaultInputDevice`;
+    /// it binds only its own AUHAL (`applyPreferredDictationInputDevice`).
+    /// Its `ignoreInputSelectionConfigChangesUntil` window (see
+    /// ParakeetDeviceRecovery.swift) covers the config-change echo of that
+    /// AUHAL bind and of a zombie-engine reset, not a system-default write,
+    /// so it is a separate suppression from this 500ms window.
     ///
     /// The marker is armed on main, then the HAL write runs on `coordinator`
     /// off main, timed. A timeout or open circuit throws like a failed write.

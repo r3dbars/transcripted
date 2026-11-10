@@ -69,15 +69,13 @@ extension ParakeetEngine {
     // device-recovery machinery in reaction to that controller reasserting
     // its own preference. Dropping those notifications reproduces this
     // consumer's pre-migration behavior (it never saw its own writes trigger
-    // recovery, since it doesn't make any). ParakeetEngine's *own*
-    // default-input overrides during recording start are a separate concern
-    // entirely — they don't go through `setDefaultInputDevice` at all, so
-    // they always arrive here with `isSelfWrite == false` and are guarded
-    // instead by this method's own `ignoreInputSelectionConfigChangesUntil`
-    // (checked in `handleAudioConfigChange` below), unchanged — that window
-    // spans the whole recording-start sequencing around the override, not
-    // just the CoreAudio round trip, so it was intentionally kept
-    // per-consumer instead of centralized.
+    // recovery, since it doesn't make any). ParakeetEngine never writes the
+    // Mac-wide default input; it binds only its own AUHAL
+    // (`applyPreferredDictationInputDevice`). The config-change echo of that
+    // AUHAL bind and of a zombie-engine reset is guarded by
+    // `ignoreInputSelectionConfigChangesUntil` (checked in
+    // `handleAudioConfigChange` below), kept per-consumer instead of
+    // centralized because it isn't a system-default write.
     func installInputDeviceChangeListenerIfNeeded() {
         guard inputDeviceChangeObserverToken == nil else { return }
         DefaultInputDeviceMonitor.shared.start()
