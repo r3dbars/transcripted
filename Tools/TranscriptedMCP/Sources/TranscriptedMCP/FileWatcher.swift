@@ -16,11 +16,15 @@ final class FileWatcher: @unchecked Sendable {
         self.directory = directory
         self.onPeriodicTick = onPeriodicTick
         self.onChange = onChange
+        knownModTimes = Self.modificationTimes(in: directory)
     }
 
     func start() {
         startDirectoryWatcher()
         startReconciliationTimer()
+        // Catch writes made during initial indexing or before the source was
+        // installed. An unchanged snapshot does not trigger another reconcile.
+        watchQueue.async { [weak self] in self?.scanForChanges() }
     }
 
     func stop() {
@@ -74,25 +78,22 @@ final class FileWatcher: @unchecked Sendable {
     }
 
     func scanForChanges() {
+        let currentModTimes = Self.modificationTimes(in: directory)
+        guard currentModTimes != knownModTimes else { return }
+        knownModTimes = currentModTimes
+        onChange()
+    }
+
+    private static func modificationTimes(in directory: URL) -> [String: TimeInterval] {
         let files = TranscriptLoader.enumerateArtifacts(in: directory)
         var currentModTimes: [String: TimeInterval] = [:]
-        var changed = false
 
         for file in files {
             let filename = file.url.deletingPathExtension().lastPathComponent
             let modDate = file.modDate
             currentModTimes[filename] = modDate
-            if knownModTimes[filename] != modDate {
-                changed = true
-            }
         }
 
-        if Set(knownModTimes.keys) != Set(currentModTimes.keys) {
-            changed = true
-        }
-
-        guard changed else { return }
-        knownModTimes = currentModTimes
-        onChange()
+        return currentModTimes
     }
 }
