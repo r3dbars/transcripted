@@ -30,22 +30,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
 
     // Silence detection for "Still Recording?" prompt
     //
-    // Pinned, not unified: mic and system audio each track "how quiet is it"
-    // as parallel state (this block + `systemAudioSilenceStart`/
-    // `systemAudioStatus`/`systemAudioSilenceThreshold` further down, plus
-    // the mirrored `calculateLevel`/`calculateSystemLevel` and
-    // `updateSilenceTracking`/`updateSystemAudioSilenceTracking` pairs in
-    // AudioLevelMonitor.swift). Both read normalized RMS, but they use
-    // different thresholds and output shapes (continuous Bool+TimeInterval
-    // here vs. a hysteresis-gated `SystemAudioStatus` enum for system),
-    // and the mic path runs
-    // synchronously on the AVAudioEngine tap callback thread under
-    // `micLevelPublishLock`/`systemLevelLock` — see the threading note above
-    // `levelPublishInterval`. Collapsing both into one generic track-state
-    // type would mean generalizing over that metric/threshold/output
-    // divergence inside RT-adjacent, lock-guarded code, which is exactly the
-    // "touches RT code non-trivially" case call out for this cleanup pass —
-    // left alone rather than risking a behavior change here.
+    // Mic and system silence tracking both consume normalized RMS from
+    // AudioLevelMonitor.swift, with separate thresholds and output states.
+    // The mic exposes isSilent/silenceDuration; system audio changes
+    // SystemAudioStatus after prolonged silence. Mic silence updates are
+    // dispatched to main by calculateLevel.
     @Published public var silenceDuration: TimeInterval = 0.0  // How long we've been in silence
     @Published public var isSilent: Bool = false  // True when audio below threshold
     let silenceThreshold: Float = 0.02  // Audio level below this = silence
