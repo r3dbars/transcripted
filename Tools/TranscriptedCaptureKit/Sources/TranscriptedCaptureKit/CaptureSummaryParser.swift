@@ -52,10 +52,8 @@ public struct ParsedMeetingSummary: Equatable {
 /// Parses the structured summary sections (Decisions / Action Items / Open
 /// Questions) out of a Transcripted capture.
 ///
-/// This mirrors the section-parsing logic the app uses for the Home preview
-/// (`RecentMeetingSummaryPreviewParser` in `Sources/UI/Shared/RecentCaptureScanners.swift`).
-/// The app target's parser can't be imported by the standalone tools, so the
-/// proven string logic lives here in the shared kit. It understands both shapes:
+/// The standalone tools can't import the app target, so this string logic
+/// lives here in the shared kit. It understands these shapes:
 ///
 /// - legacy inline local summary written into the meeting transcript: frontmatter
 ///   `local_summary_version` plus a `## Local Summary` body block with `###`
