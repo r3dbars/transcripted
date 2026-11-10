@@ -174,7 +174,10 @@ extension WritingController {
             if openSettingsOnFailure { keyboardInstaller.openKeyboardSettings() }
             return false
         }
-        let selected = enableAndSelectKeyboard()
+        let current: @MainActor () -> Bool = { [weak self] in
+            !Task.isCancelled && self?.keyboardActionAdmission == admission
+        }
+        guard let selected = await enableAndSelectKeyboard(isCurrent: current), current() else { return false }
         if !selected, openSettingsOnFailure {
             keyboardInstaller.openKeyboardSettings()
         }
@@ -215,8 +218,13 @@ extension WritingController {
     /// Tries `TISEnableInputSource`, checks it took, and selects the
     /// keyboard when it's enabled. Logs what actually happened. `true` once
     /// the keyboard is the selected input source.
-    func enableAndSelectKeyboard() -> Bool {
-        let enable = WritingKeyboardInputSource.enable(using: inputSources)
+    /// `nil` means the originating action was cancelled or superseded by a stop.
+    func enableAndSelectKeyboard(isCurrent: @escaping @MainActor () -> Bool) async -> Bool? {
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        let provider = await inputSources.prepareTrustedProvider(isCurrent: isCurrent)
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        let enable = provider.map { WritingKeyboardInputSource.enable(using: $0) } ?? .notRegistered
+        guard !Task.isCancelled, isCurrent() else { return nil }
         switch enable {
         case .enabled:
             log("WRITING | keyboard enable: enabled")
@@ -229,11 +237,13 @@ extension WritingController {
         case let .failed(status):
             log("WRITING | keyboard enable: TISEnableInputSource failed (\(status))")
         }
-        guard enable.isEnabled else {
+        guard enable.isEnabled, let provider else {
             log("WRITING | keyboard select: skipped, keyboard not enabled")
             return false
         }
-        let selected = keyboardInstaller.selectInputSourceIfAvailable()
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        let selected = provider.selectTrustedSource()
+        guard !Task.isCancelled, isCurrent() else { return nil }
         log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
         if selected {
             Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)

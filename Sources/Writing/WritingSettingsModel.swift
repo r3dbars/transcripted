@@ -112,6 +112,7 @@ final class WritingSettingsModel: ObservableObject {
     private var distributedObservers: [NSObjectProtocol] = []
     private var todayLoadGeneration: UInt64 = 0
     private var todayRefresh = CoalescedRefreshState(isEnabled: false)
+    private let keyboardRefresh = WritingKeyboardRefreshCoordinator<WritingKeyboardState>()
     private var statsLoadGeneration: UInt64 = 0
     private var hasLoadedInstalledApps = false
 
@@ -150,6 +151,7 @@ final class WritingSettingsModel: ObservableObject {
 
     func pageDisappeared() {
         isPageMounted = false
+        keyboardRefresh.setEnabled(false)
         todayRefresh.isEnabled = false
         timers.suspend()
         for observer in observers + windowObservers {
@@ -166,6 +168,7 @@ final class WritingSettingsModel: ObservableObject {
     /// Stops the 1 s and 5 s refreshes while the page stays mounted, for a
     /// window that closed or is fully covered. Observers stay.
     func suspendTimers() {
+        keyboardRefresh.setEnabled(false)
         todayRefresh.isEnabled = false
         timers.suspend()
     }
@@ -176,6 +179,7 @@ final class WritingSettingsModel: ObservableObject {
     func resumeTimers() {
         guard isPageMounted, isOnScreen, armTimers() else { return }
         todayRefresh.isEnabled = true
+        refreshKeyboard()
         reloadToday()
         refreshLive()
         refreshStats()
@@ -245,9 +249,8 @@ final class WritingSettingsModel: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                // Only while the page is showing: refreshKeyboard validates code
-                // signatures on the main thread, and the Settings window can
-                // close without onDisappear.
+                // Only while showing; a retained Settings window can close
+                // without onDisappear. Signature preparation runs off-main.
                 guard let self, self.isOnScreen else { return }
                 self.refreshKeyboard()
                 self.refreshLive()
@@ -303,9 +306,18 @@ final class WritingSettingsModel: ObservableObject {
     /// settings, the controller selects it once here. Never opens System
     /// Settings.
     func refreshKeyboard() {
-        let state = controller.keyboardState(previous: keyboardSetup)
-        update(\.keyboardSetup, state.setup)
-        update(\.keyboardOn, state.selected)
+        keyboardRefresh.setEnabled(isPageMounted && isOnScreen)
+        keyboardRefresh.request(operation: { [weak self] current in
+            guard let self else { return nil }
+            return await self.controller.keyboardState(previous: self.keyboardSetup, isCurrent: { [weak self] in
+                guard let self, self.isPageMounted, self.isOnScreen else { return false }
+                return current()
+            })
+        }, publish: { [weak self] state in
+            guard let self, self.isPageMounted, self.isOnScreen else { return }
+            self.update(\.keyboardSetup, state.setup)
+            self.update(\.keyboardOn, state.selected)
+        })
     }
 
     func refreshStats() {

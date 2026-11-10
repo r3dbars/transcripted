@@ -150,22 +150,37 @@ final class WritingController {
     /// usually applies the grant to a new process only).
     var screenRecordingRequested: Bool { Self.settings().screenRecordingRequested }
 
-    /// Expensive: validates this app's and the keyboard's code signatures,
-    /// and Text Input Sources wants the main thread. Call it when a screen
-    /// needs it, not on a timer.
+    /// Validates this app's and the keyboard's code signatures off-main,
+    /// then reads Text Input Sources on main. Call when needed, not on a timer.
     ///
     /// `previous` is the state the tab showed last. When the keyboard has
     /// just become enabled (the user added it in Keyboard settings), this
     /// selects it once (`WritingKeyboardSetupState.shouldSelect`). It never
     /// enables the keyboard and never opens System Settings.
-    func keyboardState(previous: WritingKeyboardSetupState? = nil) -> WritingKeyboardState {
+    func keyboardState(
+        previous: WritingKeyboardSetupState? = nil,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> WritingKeyboardState? {
+        guard !Task.isCancelled, let admission = keyboardActionAdmission else { return nil }
+        let current: @MainActor () -> Bool = { [weak self] in
+            !Task.isCancelled && self?.keyboardActionAdmission == admission && isCurrent()
+        }
+        let provider = await inputSources.prepareTrustedProvider(isCurrent: current)
+        guard current() else { return nil }
         let installed = Self.keyboardIsInstalled
-        let refresh = WritingKeyboardInputSource.refresh(
-            using: inputSources,
-            previous: previous,
-            firstInstalledThisLoginSession: keyboardFirstInstalledThisLoginSession,
-            selectedOnce: Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey)
-        )
+        let firstInstalled = keyboardFirstInstalledThisLoginSession
+        let refresh: WritingKeyboardInputSource.Refresh
+        if let provider {
+            refresh = WritingKeyboardInputSource.refresh(
+                using: provider, previous: previous,
+                firstInstalledThisLoginSession: firstInstalled,
+                selectedOnce: Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey)
+            )
+        } else {
+            refresh = .init(state: .resolve(enabled: false, selected: false,
+                firstInstalledThisLoginSession: firstInstalled), selectSucceeded: nil)
+        }
+        guard current() else { return nil }
         if let selected = refresh.selectSucceeded {
             let succeeded = selected && refresh.state == .selected
             log("WRITING | keyboard select after it was added: \(succeeded ? "selected" : "not selected")")
@@ -649,23 +664,28 @@ final class WritingController {
     /// shows the guidance and its button does that.
     private func installKeyboard() {
         Task { @MainActor [weak self] in
-            guard let self, await self.installKeyboardRecordingFirstInstall(),
+            guard let self, !Task.isCancelled, let admission = self.keyboardActionAdmission,
+                  await self.installKeyboardRecordingFirstInstall(),
+                  self.keyboardActionAdmission == admission,
                   self.isRunning,
                   !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey) else { return }
-            self.enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true)
+            await self.enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: true, admission: admission)
         }
     }
 
-    private func enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: Bool) {
-        let selected = enableAndSelectKeyboard()
+    private func enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: Bool, admission: Int) async {
+        let current: @MainActor () -> Bool = { [weak self] in
+            guard let self else { return false }
+            return !Task.isCancelled && self.keyboardActionAdmission == admission && self.isRunning
+                && !Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey)
+        }
+        guard current(), let selected = await enableAndSelectKeyboard(isCurrent: current) else { return }
         // Text Input Sources can take a moment to list a just-registered or
         // just-enabled source. One retry; after that, the next start.
-        if !selected, retryAfterDelay {
-            Task { @MainActor [weak self] in
-                try? await Task.sleep(for: .seconds(1))
-                guard let self, self.isRunning else { return }
-                self.enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: false)
-            }
+        if !selected, retryAfterDelay, current() {
+            try? await Task.sleep(for: .seconds(1))
+            guard current() else { return }
+            await enableAndSelectKeyboardOnFirstSetup(retryAfterDelay: false, admission: admission)
         }
     }
 

@@ -6,7 +6,7 @@ import Darwin
 import Foundation
 
 /// The Text Input Sources calls behind the Writing keyboard step. The app
-/// uses `SystemWritingInputSources`; tests pass a fake, so no test ever
+/// uses a freshly prepared provider; tests pass a fake, so no test ever
 /// enables, selects or reads the real Input Sources.
 protocol WritingInputSourceProviding {
     /// The keyboard's registered source, enabled or not: whether it's
@@ -110,52 +110,46 @@ enum WritingKeyboardInputSource {
     }
 }
 
-/// The real Text Input Sources. Enabling looks the source up by identifier
-/// and bundle ID, as before; the state read and selecting go through the
-/// installer's trusted lookup (signature, Team ID, enabled).
-struct SystemWritingInputSources: WritingInputSourceProviding {
+/// Prepares trust off-main before returning a main-actor native provider.
+/// There is no synchronous system conformance that can signature-check on main.
+struct SystemWritingInputSources {
     let installer: GhostKeyboardInstallerHost
-    var inputSourceID: String = TildeProductProfile.current.inputMethodBundleIdentifier
 
-    func registeredSourceIsEnabled() -> Bool? {
-        registeredSource().map { Self.booleanProperty(kTISPropertyInputSourceIsEnabled, of: $0) }
+    @MainActor
+    func prepareTrustedProvider(
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> PreparedWritingInputSources? {
+        await installer.prepareInputSource(isCurrent: isCurrent)
+    }
+}
+
+/// The synchronous policy API stays usable with pure fakes. Its real provider
+/// enforces the main actor and carries only this invocation's validated source.
+struct PreparedWritingInputSources: WritingInputSourceProviding {
+    private let registered: @MainActor () -> Bool?
+    private let enable: @MainActor () -> OSStatus
+    private let status: @MainActor () -> GhostKeyboardInstallerHost.TildeInputSourceStatus
+    private let select: @MainActor () -> Bool
+
+    @MainActor
+    init(
+        registered: @escaping @MainActor () -> Bool?,
+        enable: @escaping @MainActor () -> OSStatus,
+        status: @escaping @MainActor () -> GhostKeyboardInstallerHost.TildeInputSourceStatus,
+        select: @escaping @MainActor () -> Bool
+    ) {
+        self.registered = registered
+        self.enable = enable
+        self.status = status
+        self.select = select
     }
 
-    func enableRegisteredSource() -> OSStatus {
-        guard let source = registeredSource() else { return OSStatus(paramErr) }
-        return TISEnableInputSource(source)
-    }
-
+    func registeredSourceIsEnabled() -> Bool? { MainActor.assumeIsolated { registered() } }
+    func enableRegisteredSource() -> OSStatus { MainActor.assumeIsolated { enable() } }
     func trustedSourceStatus() -> GhostKeyboardInstallerHost.TildeInputSourceStatus {
-        installer.inputSourceStatus()
+        MainActor.assumeIsolated { status() }
     }
-
-    func selectTrustedSource() -> Bool {
-        installer.selectInputSourceIfAvailable()
-    }
-
-    private func registeredSource() -> TISInputSource? {
-        guard let sources = TISCreateInputSourceList(
-            [kTISPropertyInputSourceID: inputSourceID] as CFDictionary,
-            true
-        )?.takeRetainedValue() as? [TISInputSource],
-              sources.count == 1,
-              let source = sources.first,
-              Self.stringProperty(kTISPropertyBundleID, of: source) == inputSourceID else {
-            return nil
-        }
-        return source
-    }
-
-    private static func stringProperty(_ key: CFString, of source: TISInputSource) -> String? {
-        guard let pointer = TISGetInputSourceProperty(source, key) else { return nil }
-        return Unmanaged<CFString>.fromOpaque(pointer).takeUnretainedValue() as String
-    }
-
-    private static func booleanProperty(_ key: CFString, of source: TISInputSource) -> Bool {
-        guard let pointer = TISGetInputSourceProperty(source, key) else { return false }
-        return Unmanaged<CFBoolean>.fromOpaque(pointer).takeUnretainedValue() == kCFBooleanTrue
-    }
+    func selectTrustedSource() -> Bool { MainActor.assumeIsolated { select() } }
 }
 
 /// Remembers when the app first copied the keyboard into

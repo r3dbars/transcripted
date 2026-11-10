@@ -3,6 +3,7 @@ import AppKit
 import TranscriptedWritingCore
 #endif
 import Carbon
+import Darwin
 import Foundation
 import Security
 
@@ -158,24 +159,147 @@ final class GhostKeyboardInstallerHost {
         return sources.contains { stringProperty(kTISPropertyBundleID, of: $0) == bundleIdentifier }
     }
 
-    func inputSourceStatus() -> TildeInputSourceStatus {
-        guard let source = trustedEnabledInputSource() else {
-            return .missing
-        }
-        guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(),
-              CFEqual(current, source) else {
-            return .available
-        }
-        return .selected
+    /// Invocation-local validation crosses the await; native source objects do not.
+    struct LookupSteps<Validation: Sendable, Source> {
+        var prepare: @Sendable () -> Validation?
+        var identityIsCurrent: @MainActor (Validation) -> Bool
+        var isRegistered: @MainActor (Validation) -> Bool
+        var register: @MainActor (Validation) -> Bool
+        var source: @MainActor (Validation) -> Source?
     }
 
-    @discardableResult
-    func selectInputSourceIfAvailable() -> Bool {
-        guard let source = trustedEnabledInputSource(),
-              Self.booleanProperty(kTISPropertyInputSourceIsSelectCapable, of: source) else {
-            return false
+    @MainActor
+    static func prepareTrustedSource<Validation: Sendable, Source>(
+        using steps: LookupSteps<Validation, Source>,
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> Source? {
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        let prepare = steps.prepare
+        let validation = await Task.detached(priority: .userInitiated) { prepare() }.value
+        guard !Task.isCancelled, isCurrent(), let validation,
+              steps.identityIsCurrent(validation) else { return nil }
+        if !steps.isRegistered(validation) {
+            guard !Task.isCancelled, isCurrent(), steps.register(validation) else { return nil }
         }
-        return TISSelectInputSource(source) == noErr
+        guard !Task.isCancelled, isCurrent() else { return nil }
+        return steps.source(validation)
+    }
+
+    @MainActor
+    func prepareInputSource(
+        isCurrent: @escaping @MainActor () -> Bool
+    ) async -> PreparedWritingInputSources? {
+        let steps = Self.lookupSteps(isCurrent: isCurrent)
+        return await Self.prepareTrustedSource(using: steps, isCurrent: isCurrent)
+    }
+
+    /// A short-lived proof for this lookup, never a process-wide trust cache.
+    private struct ValidatedInstallation: Sendable {
+        let configuredURL: URL
+        let identity: InstallationIdentity
+
+        func isCurrent() -> Bool { InstallationIdentity.capture(at: configuredURL) == identity }
+    }
+
+    private struct InstallationIdentity: Equatable, Sendable {
+        struct Node: Equatable, Sendable {
+            let mode: mode_t
+            let fingerprint: SecureLocalStorage.FileContentFingerprint
+        }
+        let installedURL: URL
+        let directory: Node
+        let executable: Node
+        let infoPlist: Node
+        let codeResources: Node
+
+        static func capture(at configuredURL: URL) -> InstallationIdentity? {
+            let url = configuredURL.resolvingSymlinksInPath().standardizedFileURL
+            guard let directory = node(at: url, kind: S_IFDIR),
+                  let executable = node(at: url.appendingPathComponent("Contents/MacOS/\(GhostKeyboardInstallerHost.executableName)"), kind: S_IFREG),
+                  let info = node(at: url.appendingPathComponent("Contents/Info.plist"), kind: S_IFREG),
+                  let resources = node(at: url.appendingPathComponent("Contents/_CodeSignature/CodeResources"), kind: S_IFREG) else {
+                return nil
+            }
+            return InstallationIdentity(installedURL: url, directory: directory,
+                executable: executable, infoPlist: info, codeResources: resources)
+        }
+
+        private static func node(at url: URL, kind: mode_t) -> Node? {
+            var info = stat()
+            guard lstat(url.path, &info) == 0, info.st_mode & S_IFMT == kind else { return nil }
+            return Node(mode: info.st_mode, fingerprint: .init(info))
+        }
+    }
+
+    private static func prepareLookup() -> ValidatedInstallation? {
+        let configured = URL(fileURLWithPath: installedPath)
+        guard let before = InstallationIdentity.capture(at: configured),
+              let ownerTeam = ownerTeamIdentifier,
+              strictSignatureTeamIdentifier(at: before.installedURL) == ownerTeam,
+              (try? validateInputMethod(at: before.installedURL, fileManager: .default)) != nil,
+              InstallationIdentity.capture(at: configured) == before else { return nil }
+        return ValidatedInstallation(configuredURL: configured, identity: before)
+    }
+
+    @MainActor
+    private static func lookupSteps(
+        isCurrent: @escaping @MainActor () -> Bool
+    ) -> LookupSteps<ValidatedInstallation, PreparedWritingInputSources> {
+        LookupSteps(
+            prepare: { prepareLookup() },
+            identityIsCurrent: { $0.isCurrent() },
+            isRegistered: { proof in proof.isCurrent() && registeredSourceIsListed() },
+            register: { proof in
+                guard proof.isCurrent() else { return false }
+                return TISRegisterInputSource(proof.identity.installedURL as CFURL) == noErr
+            },
+            source: { proof in preparedSource(proof: proof, isCurrent: isCurrent) }
+        )
+    }
+
+    @MainActor
+    private static func preparedSource(
+        proof: ValidatedInstallation, isCurrent: @escaping @MainActor () -> Bool
+    ) -> PreparedWritingInputSources? {
+        // Metadata rechecks reject obvious replacement across validation and before
+        // native calls. They do not make whole-bundle validation and use atomic.
+        let authorized: @MainActor () -> Bool = {
+            !Task.isCancelled && isCurrent() && proof.isCurrent()
+        }
+        // Input-source lists are snapshots. Requery after enable/select instead
+        // of assuming a retained source's properties changed with the system.
+        let lookup: @MainActor () -> TISInputSource? = {
+            guard authorized(),
+                  let sources = TISCreateInputSourceList(
+                    [kTISPropertyInputSourceID: bundleIdentifier] as CFDictionary, true
+                  )?.takeRetainedValue() as? [TISInputSource],
+                  sources.count == 1, let source = sources.first,
+                  stringProperty(kTISPropertyBundleID, of: source) == bundleIdentifier else { return nil }
+            return source
+        }
+        guard lookup() != nil else { return nil }
+        return PreparedWritingInputSources(
+            registered: {
+                guard let source = lookup() else { return nil }
+                return booleanProperty(kTISPropertyInputSourceIsEnabled, of: source)
+            },
+            enable: {
+                guard let source = lookup() else { return OSStatus(paramErr) }
+                return TISEnableInputSource(source)
+            },
+            status: {
+                guard let source = lookup(), booleanProperty(kTISPropertyInputSourceIsEnabled, of: source) else { return .missing }
+                guard let current = TISCopyCurrentKeyboardInputSource()?.takeRetainedValue(), CFEqual(current, source) else {
+                    return .available
+                }
+                return .selected
+            },
+            select: {
+                guard let source = lookup(), booleanProperty(kTISPropertyInputSourceIsEnabled, of: source),
+                      booleanProperty(kTISPropertyInputSourceIsSelectCapable, of: source) else { return false }
+                return TISSelectInputSource(source) == noErr
+            }
+        )
     }
 
     func openKeyboardSettings() {
@@ -194,25 +318,6 @@ final class GhostKeyboardInstallerHost {
     private static func booleanProperty(_ key: CFString, of source: TISInputSource) -> Bool {
         guard let pointer = TISGetInputSourceProperty(source, key) else { return false }
         return Unmanaged<CFBoolean>.fromOpaque(pointer).takeUnretainedValue() == kCFBooleanTrue
-    }
-
-    private func trustedEnabledInputSource() -> TISInputSource? {
-        let installed = URL(fileURLWithPath: Self.installedPath)
-        guard let ownerTeam = Self.ownerTeamIdentifier,
-              Self.strictSignatureTeamIdentifier(at: installed) == ownerTeam,
-              (try? Self.validateInputMethod(at: installed, fileManager: .default)) != nil,
-              TISRegisterInputSource(installed as CFURL) == noErr,
-              let sources = TISCreateInputSourceList(
-                [kTISPropertyInputSourceID: Self.bundleIdentifier] as CFDictionary,
-                false
-              )?.takeRetainedValue() as? [TISInputSource],
-              sources.count == 1,
-              let source = sources.first,
-              Self.stringProperty(kTISPropertyBundleID, of: source) == Self.bundleIdentifier,
-              Self.booleanProperty(kTISPropertyInputSourceIsEnabled, of: source) else {
-            return nil
-        }
-        return source
     }
 
     /// Builds the replacement completely before swapping it into the live path.
