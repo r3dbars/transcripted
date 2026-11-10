@@ -618,14 +618,12 @@ final class LlamaServerProcessHost: @unchecked Sendable {
     }
 
     private static func lsofListeners(port: Int) -> [Int32]? {
-        command("/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]).map {
-            $0.split(whereSeparator: \Character.isNewline).compactMap { Int32($0) }
-        }
+        LlamaShellProbe.listenerPIDs(from:
+            command("/usr/sbin/lsof", ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-t"]))
     }
 
     private static func parentProcessID(of pid: Int32) -> String? {
-        command("/bin/ps", ["-o", "ppid=", "-p", String(pid)])?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        LlamaShellProbe.parentPID(from: command("/bin/ps", ["-o", "ppid=", "-p", String(pid)]))
     }
 
     /// The listener that may be killed, if any: the port's only listener,
@@ -656,24 +654,34 @@ final class LlamaServerProcessHost: @unchecked Sendable {
         _ executable: String,
         _ arguments: [String],
         timeout: TimeInterval = 1
-    ) -> String? {
+    ) -> LlamaShellProbe.Outcome {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: executable)
         task.arguments = arguments
         let output = Pipe()
+        let diagnostics = Pipe()
         task.standardOutput = output
-        task.standardError = FileHandle.nullDevice
+        task.standardError = diagnostics
         let exited = DispatchSemaphore(value: 0)
         task.terminationHandler = { _ in exited.signal() }
-        do { try task.run() } catch { return nil }
-        if exited.wait(timeout: .now() + timeout) == .timedOut {
-            task.terminate()
-            if exited.wait(timeout: .now() + 0.2) == .timedOut {
-                kill(task.processIdentifier, SIGKILL)
-                guard exited.wait(timeout: .now() + 0.2) == .success else { return nil }
+        return LlamaShellProbe.execute(driver: .init(
+            start: {
+                do { try task.run(); return true } catch { return false }
+            },
+            waitForExit: { exited.wait(timeout: .now() + $0) == .success },
+            isRunning: { task.isRunning },
+            terminate: { task.terminate() },
+            forceKill: { kill(task.processIdentifier, SIGKILL) },
+            completion: {
+                guard !task.isRunning else { return nil }
+                return .init(
+                    status: task.terminationStatus,
+                    exitedNormally: task.terminationReason == .exit,
+                    stdout: output.fileHandleForReading.readDataToEndOfFile(),
+                    stderr: diagnostics.fileHandleForReading.readDataToEndOfFile()
+                )
             }
-        }
-        return String(data: output.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+        ), timeout: timeout)
     }
 
     /// Runtime failures shut down away from the lifecycle queue. Clean app
