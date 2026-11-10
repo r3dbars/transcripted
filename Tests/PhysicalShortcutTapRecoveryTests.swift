@@ -79,6 +79,29 @@ func testPhysicalShortcutTapRecovery() {
         assertEqual(queue.completions, [true], "replacement recovery has its own lifetime")
     }
 
+    runSuite("Disabled callbacks during enable coalesce into one follow-up recovery") {
+        let queue = ShortcutRecoveryTestQueue()
+        let recovery = PhysicalShortcutTapRecovery(enqueue: { queue.enqueue($0) })
+        recovery.request(enable: {
+            let enabled = queue.enable()
+            recovery.request(enable: { queue.enable() }, completed: { queue.report($0) })
+            recovery.request(enable: { queue.enable() }, completed: { queue.report($0) })
+            assertEqual(queue.completions, [], "the first recovery is still in its enable call")
+            assertEqual(queue.queued, 1, "two callbacks during enable retain exactly one follow-up")
+            return enabled
+        }, completed: { queue.report($0) })
+        assertEqual(queue.queued, 1)
+        assertEqual(queue.enableCount, 0, "the manual queue has not executed recovery yet")
+        queue.runNext()
+        assertEqual(queue.enableCount, 1, "the follow-up does not run inside the first enable")
+        assertEqual(queue.completions, [true], "the first run completes before the follow-up executes")
+        assertEqual(queue.queued, 1, "the follow-up survives completion of the first run")
+        if queue.queued == 1 { queue.runNext() }
+        assertEqual(queue.enableCount, 2, "the retained follow-up enables the tap once more")
+        assertEqual(queue.completions, [true, true], "both runs report completion")
+        assertEqual(queue.queued, 0, "the two overlapping requests need no third recovery")
+    }
+
     runSuite("Repeated disabled callbacks share one outstanding recovery and can retry afterward") {
         let queue = ShortcutRecoveryTestQueue()
         let recovery = PhysicalShortcutTapRecovery(enqueue: { queue.enqueue($0) })
