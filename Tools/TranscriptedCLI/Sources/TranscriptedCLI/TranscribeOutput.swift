@@ -154,8 +154,8 @@ enum TranscribeOutputBuilder {
 
     /// Derived output URLs for a whole batch. Inputs that share a stem
     /// (talk.mp4 + talk.mov) keep their original extension in the output name
-    /// (talk.mp4.txt, talk.mov.txt) so one transcript never silently
-    /// overwrites another.
+    /// (talk.mp4.txt, talk.mov.txt). Any remaining collisions receive numeric
+    /// suffixes, reserving every planned name before allocating new ones.
     static func outputURLs(
         for inputs: [URL],
         outputDirectory: URL,
@@ -165,7 +165,7 @@ enum TranscribeOutputBuilder {
         for input in inputs {
             stemCounts[input.deletingPathExtension().lastPathComponent, default: 0] += 1
         }
-        return inputs.map { input in
+        let candidates = inputs.map { input in
             let stem = input.deletingPathExtension().lastPathComponent
             guard stemCounts[stem, default: 0] > 1 else {
                 return outputURL(for: input, outputDirectory: outputDirectory, format: format)
@@ -173,6 +173,25 @@ enum TranscribeOutputBuilder {
             return outputDirectory
                 .appendingPathComponent(input.lastPathComponent, isDirectory: false)
                 .appendingPathExtension(format.fileExtension)
+        }
+        // Protect the default case-insensitive macOS filesystem as well as
+        // exact duplicates. Normalize Unicode so equivalent spellings collide.
+        func key(_ url: URL) -> String {
+            url.lastPathComponent.precomposedStringWithCanonicalMapping.lowercased()
+        }
+        let reserved = Set(candidates.map(key))
+        var used = Set<String>()
+        return candidates.map { candidate in
+            if used.insert(key(candidate)).inserted { return candidate }
+            let stem = candidate.deletingPathExtension().lastPathComponent
+            var suffix = 2
+            while true {
+                let unique = outputDirectory.appendingPathComponent("\(stem)-\(suffix)")
+                    .appendingPathExtension(format.fileExtension)
+                let identity = key(unique)
+                if !reserved.contains(identity), used.insert(identity).inserted { return unique }
+                suffix += 1
+            }
         }
     }
 
