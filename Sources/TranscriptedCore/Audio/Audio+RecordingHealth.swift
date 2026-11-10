@@ -41,7 +41,7 @@ extension Audio {
     /// metadata the same way mic-side gaps already do.
     ///
     /// This is the metadata half, handled on main. The pad itself is written
-    /// by `padSystemAudioGapBeforeNextBuffer` on the capture's own thread, so
+    /// by the observation adapter on the capture's own thread, so
     /// the reconnect's first buffer isn't dropped by the hold.
     func appendSystemAudioGap(duration: TimeInterval) {
         // A mic-only recording has no tap; a finished tap's late gap must
@@ -52,23 +52,6 @@ extension Audio {
             duration: duration,
             reason: "System audio reconnect"
         ))
-    }
-
-    /// Runs on the thread that sent `.gap`, before the capture hands over
-    /// the reconnect's first buffer. Releasing the hold here, rather than
-    /// later on main, keeps that buffer (and any after it) from being thrown
-    /// away uncounted by the pad (deep review M8). The pad is queued on the
-    /// file queue ahead of the buffer's own write. No `isRecording` check:
-    /// that flag belongs to main, and the file queue already drops a pad
-    /// whose generation no longer owns the system writer.
-    func padSystemAudioGapBeforeNextBuffer(duration: TimeInterval) {
-        if currentRecordingCapturesSystemAudio {
-            enqueueSystemRecoverySilencePad(
-                duration: duration,
-                generation: recordingSessionGeneration
-            )
-        }
-        releaseSystemRecoveryWriteHold()
     }
 
     /// Commit recovery artifacts only while the recovery still owns the
@@ -210,25 +193,8 @@ extension Audio {
         )
     }
 
-    func armSystemRecoveryWriteHold() {
-        systemRecoveryWriteHoldLock.lock()
-        _systemRecoveryWriteHoldCount += 1
-        systemRecoveryWriteHoldLock.unlock()
-    }
-    func releaseSystemRecoveryWriteHold() {
-        systemRecoveryWriteHoldLock.lock()
-        _systemRecoveryWriteHoldCount = max(0, _systemRecoveryWriteHoldCount - 1)
-        systemRecoveryWriteHoldLock.unlock()
-    }
-    func resetSystemRecoveryWriteHold() {
-        systemRecoveryWriteHoldLock.lock()
-        _systemRecoveryWriteHoldCount = 0
-        systemRecoveryWriteHoldLock.unlock()
-    }
     func isHoldingSystemWritesForRecoveryPad() -> Bool {
-        systemRecoveryWriteHoldLock.lock()
-        defer { systemRecoveryWriteHoldLock.unlock() }
-        return _systemRecoveryWriteHoldCount > 0
+        systemAudioObservation.isHolding
     }
 
     @discardableResult

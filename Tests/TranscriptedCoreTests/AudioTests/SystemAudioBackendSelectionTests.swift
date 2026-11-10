@@ -16,7 +16,7 @@ final class SystemAudioBackendSelectionTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let audio = Audio(paths: paths)
         XCTAssertNil(audio.systemAudioCapture)
-        let capture = audio.makeSystemAudioCaptureForRecordingAttempt()
+        let capture = audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: audio.recordingSessionGeneration)
         XCTAssertTrue(capture is CoreAudioSystemAudioCapture)
         XCTAssertEqual(capture?.diagnosticBackendName, "core_audio_tap")
         XCTAssertNil(capture?.audioFormat, "Factory creation must not prepare a HAL tap or acquire permission")

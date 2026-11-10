@@ -37,6 +37,8 @@ extension Audio {
         systemAudioStatus = capturesSystemAudioThisRecording ? .healthy : .unknown
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
         let sessionGeneration = beginRecordingSessionGeneration()
+        systemAudioObservation.beginSession(generation: sessionGeneration)
+        publishSystemAudioCapture(nil, generation: sessionGeneration)
         micAudioWriteBackpressure.begin(generation: sessionGeneration)
         systemAudioWriteBackpressure.begin(generation: sessionGeneration)
         micHostPCMBufferFanout.begin(generation: sessionGeneration)
@@ -55,7 +57,6 @@ extension Audio {
         micAudioFileURL = nil
         systemAudioFileURL = nil
         lastSystemBufferTime = CACurrentMediaTime()
-        resetSystemRecoveryWriteHold()
 
         // Reset health tracking for new recording session
         recordingGaps = []

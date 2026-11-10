@@ -43,6 +43,9 @@ extension Audio {
     }
 
     func startAudioCapture(sessionGeneration: UInt64) async throws {
+        guard sessionGeneration == recordingSessionGeneration else {
+            throw AudioCaptureStaleSessionError()
+        }
         ensureCaptureInfrastructureConfigured()
 
         func sessionIsCurrent() -> Bool {
@@ -100,9 +103,19 @@ extension Audio {
         // Creating files in the audio callback causes HALC_ProxyIOContext::IOWorkLoop overload
         //
         // Returns nil for a mic-only recording, so it never builds the tap.
-        if let capture = makeSystemAudioCaptureForRecordingAttempt() {
+        let systemCapture = makeSystemAudioCaptureForRecordingAttempt(
+            sessionGeneration: sessionGeneration
+        )
+        guard sessionIsCurrent() else { throw AudioCaptureStaleSessionError() }
+        if let capture = systemCapture {
             let recordsTimeline = recordsSystemAudioTimeline
             let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
+            guard wireSystemAudioStatusPublisher(
+                from: capture, generation: sessionGeneration,
+                captureID: ObjectIdentifier(captureAttempt)
+            ) != nil, sessionIsCurrent() else {
+                throw AudioCaptureStaleSessionError()
+            }
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
             let captureDir = self.paths.audioCaptures
             try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)

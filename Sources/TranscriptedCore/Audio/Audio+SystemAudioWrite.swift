@@ -48,7 +48,12 @@ extension Audio {
     /// are accepted (writes are held until this returns).
     func writeSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
         systemAudioFileQueue.sync {
-            self.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
+            guard let attempt = self.systemAudioCaptureAttemptOwnership.current,
+                  attempt.generation == generation else { return }
+            self.writeSystemRecoverySilencePadOnFileQueue(
+                duration: duration, generation: generation,
+                captureID: ObjectIdentifier(attempt.capture)
+            )
         }
     }
 
@@ -56,18 +61,25 @@ extension Audio {
     /// buffer the capture hands over after this call returns. Lets the
     /// capture's own thread release the write-hold before its first new
     /// buffer, without waiting for the disk.
-    func enqueueSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
+    func enqueueSystemRecoverySilencePad(
+        duration: TimeInterval, token: SystemAudioObservationOwnership.Token
+    ) {
         systemAudioFileQueue.async { [weak self] in
-            self?.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
+            self?.writeSystemRecoverySilencePadOnFileQueue(
+                duration: duration, generation: token.generation, captureID: token.captureID
+            )
         }
     }
 
-    private func writeSystemRecoverySilencePadOnFileQueue(duration: TimeInterval, generation: UInt64) {
+    private func writeSystemRecoverySilencePadOnFileQueue(
+        duration: TimeInterval, generation: UInt64, captureID: ObjectIdentifier
+    ) {
         let capped = min(max(0, duration), Self.maxSystemRecoverySilencePadSeconds)
         guard capped > 0 else { return }
         do {
             guard let attempt = self.systemAudioCaptureAttemptOwnership.current,
                   attempt.generation == generation,
+                  ObjectIdentifier(attempt.capture) == captureID,
                   let writer = attempt.writer else { return }
             let format = writer.processingFormat
             let sampleRate = format.sampleRate
@@ -155,12 +167,15 @@ extension Audio {
     }
 
     /// Updates systemAudioStatus based on the system-audio backend's error messages
-    func updateSystemAudioStatus(fromError errorMessage: String?) {
+    @discardableResult
+    func updateSystemAudioStatus(
+        fromError errorMessage: String?
+    ) -> SystemAudioCaptureObservation.ErrorEffect {
         // A mic-only recording has no tap of its own. A late message from the
         // previous meeting's tap must not mark it failed or reconnecting.
         guard isRecording, currentRecordingCapturesSystemAudio else {
             systemAudioStatus = .unknown
-            return
+            return .none
         }
 
         if let message = errorMessage {
@@ -178,12 +193,7 @@ extension Audio {
             } else if message.contains("Switched to") {
                 // Brief reconnecting state, then back to healthy
                 systemAudioStatus = .reconnecting
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self = self, self.isRecording else { return }
-                    if self.systemAudioStatus == .reconnecting {
-                        self.systemAudioStatus = .healthy
-                    }
-                }
+                return .healAfterDeviceSwitch
             } else if normalizedMessage.contains("unavailable") || normalizedMessage.contains("failed") {
                 systemAudioStatus = .failed
                 systemAudioFailed = true
@@ -194,5 +204,6 @@ extension Audio {
                 systemAudioStatus = .healthy
             }
         }
+        return .none
     }
 }

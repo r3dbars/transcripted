@@ -511,13 +511,13 @@ final class MicOnlyRecordingTests: XCTestCase {
         audio.capturesSystemAudio = false
         audio.prepareForNewRecordingStart()
         let buildsBeforeMicOnly = builds.value
-        XCTAssertNil(audio.makeSystemAudioCaptureForRecordingAttempt())
+        XCTAssertNil(audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: audio.recordingSessionGeneration))
         XCTAssertEqual(builds.value, buildsBeforeMicOnly, "a mic-only recording must not build a tap")
 
         audio.capturesSystemAudio = true
         audio.prepareForNewRecordingStart()
         let buildsBeforeFull = builds.value
-        XCTAssertNotNil(audio.makeSystemAudioCaptureForRecordingAttempt())
+        XCTAssertNotNil(audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: audio.recordingSessionGeneration))
         XCTAssertEqual(builds.value, buildsBeforeFull + 1, "control: a normal recording builds one")
     }
 
