@@ -115,13 +115,6 @@ extension MeetingPromptDetector {
         return decision
     }
 
-    @discardableResult
-    func snooze(candidate: Candidate, interval: TimeInterval? = nil) -> MeetingPromptBackoffDecision {
-        detectedCallSession?.userDeclined = true
-        dismissStreaks[candidate.provider, default: 0] += 1
-        return dismiss(candidate: candidate, interval: interval)
-    }
-
     /// The prompt countdown ran out with no interaction. That is weaker evidence
     /// of "don't record" than an explicit dismissal — the user may be heads-down
     /// in the call or on another Space — so schedule a short candidate-level

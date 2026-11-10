@@ -271,7 +271,7 @@ calls, so Phase 1 alone is likely enough.
 
 - Our own capture / dictation → self-exclusion (own-bundle filter + `isOwnCaptureActive`).
 - QuickTime, Voice Memos, Photo Booth → map to no provider → no prompt.
-- Repeated nagging → existing `snooze` / `dismiss` / `remindSoon` +
+- Repeated nagging → existing `dismiss` / `remindSoon` +
   `runtimeSuppressedUntil` already handle it. The inactive edge does not clear
   prompt cooldowns, so mute/unmute cannot bypass either the short pending
   cooldown or an explicit user dismissal.
