@@ -189,6 +189,24 @@ case "$MODE" in
     ;;
 esac
 
+# Private Wave 4 validation only. Refuse this extra full gate before any
+# runtime or evidence setup unless the existing isolation guard confirms the
+# actual hosted runner account. Environment overrides alone cannot approve it.
+if [[ "$MODE" == full ]]; then
+  if ! python3 - "$REPO_ROOT/scripts/ops/native-smoke-isolation.py" <<'PY'
+import runpy, sys
+guard = runpy.run_path(sys.argv[1])
+state = guard["current_state"]()
+if not (state["ci"] and state["github_actions"] and state["github_hosted"]
+        and state["hosted_runner_account"] and guard["allowed"](**state)):
+    raise SystemExit(3)
+PY
+  then
+    echo 'BLOCKED: private full validation requires the verified hosted runner account.' >&2
+    exit 3
+  fi
+fi
+
 resolve_out_root() {
   case "$1" in
     /*) printf "%s" "$1" ;;
@@ -257,6 +275,10 @@ run_step() {
 
   if [[ "${exit_code}" -eq 0 ]]; then
     status="PASS"
+  elif [[ "$MODE" == full && "$id" == 00-preflight && "$blocking" == yes ]]; then
+    # The private canonical-full aggregate cannot soften a blocked/failed
+    # gate to WARN. Preserve its original exit_code in the bounded receipt.
+    status="FAIL"
   elif [[ "${exit_code}" -eq 3 ]]; then
     status="WARN"
   elif [[ "${blocking}" == "yes" ]]; then
@@ -663,7 +685,15 @@ result_status() {
 }
 
 run_quick() {
-  run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+  if [[ "$MODE" == full ]]; then
+    # Keep the trusted main harness's 15 receipt IDs. This blocking receipt
+    # explicitly aggregates preflight and the literal canonical full gate;
+    # a PASS means both completed, not independent per-check/native evidence.
+    run_step "00-preflight" "Agent preflight + canonical full gate (private validation)" "yes" \
+      "bash scripts/dev/agent-preflight.sh && bash check.sh full"
+  else
+    run_step "00-preflight" "Agent preflight" "no" "bash scripts/dev/agent-preflight.sh"
+  fi
 
   if [[ "${SKIP_BUILD}" -eq 1 ]]; then
     skip_step "01-build" "Build app"
