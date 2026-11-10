@@ -45,11 +45,6 @@ final class NotchIslandBarsView: NSView {
         needsDisplay = true
     }
 
-    func quiet() {
-        levels = levels.map { _ in 0 }
-        needsDisplay = true
-    }
-
     /// The dictation waveform: a meter reading for the next step.
     func receive(_ reading: DictationAudioLevel, at time: TimeInterval) {
         scroller?.receive(reading, at: time)

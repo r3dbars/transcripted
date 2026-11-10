@@ -14,6 +14,7 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/auto-call-detection-spec.md` — meeting auto-detection: signals, prompt flow, phase status
 - `docs/transcription-language.md` — the meeting-language picker and how Auto samples audio
 - `docs/ui-settings-menubar-spec.md` — product intent for the menu bar popover and the Settings window
+- `docs/chatgpt-companion.md` — the companion plugin that connects a chat app to Transcripted on the same Mac
 - `docs/DESIGN_TOKENS.md` — type, spacing, and corner-radius tokens
 
 ## Writing
@@ -29,6 +30,7 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/appcast.xml` — the legacy Sparkle feed for builds that predate the release-asset feed (frozen after the first release on it; the live feed is the latest release's `appcast.xml`)
 - `docs/release-guardrails.md` — what may ship without an explicit publish decision
 - `docs/release-notes-template.md` — template for release notes
+- `docs/staged-sparkle-update-test.md` — the staged 1.1.68 -> 1.1.69 real Sparkle update harness
 
 ## Testing and QA
 
@@ -43,6 +45,8 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/mutation-testing.md` — finding assertions that never catch a bug
 - `docs/testing-source-text-inventory.md` — the grandfathered tests that read source as text
 - `docs/board-scorecard.md` — the agent-runnable per-board health task list
+- `docs/hosted-full-qa-bench.md` — running the full QA bench on GitHub-hosted Apple Silicon from Swift CI
+- `docs/chatgpt-companion-testing.md` — how the companion plugin was tested, version by version
 
 ## Labs and evals
 
@@ -54,7 +58,8 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 
 ## Observability and analytics
 
-- `docs/observability.md` — the five diagnostic sinks and which one owns what
+- `docs/observability.md` — the six diagnostic sinks and which one owns what
+- `docs/capture-telemetry.md` — off-by-default per-second capture stats for reproducing system-audio loss
 - `docs/privacy-first-observability.md` — the observability lanes and their privacy contract
 - `docs/analytics-taxonomy-merge.md` — why the analytics registry is line-based with union merge, and how to add an event
 - `docs/activation-lane.md` — saved Markdown, agent payoff, and return-use routing
@@ -63,6 +68,10 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/posthog-100-wau-dashboard.md` — minimum PostHog dashboard for steering toward 100+ weekly users
 - `docs/posthog-dashboard-query-helpers.md` — the query catalog behind `scripts/ops/posthog-dashboard-queries.py`
 
+## Security
+
+- `docs/threat-model.md` — the reviewer's security map; `SECURITY.md` is the public policy
+
 ## Agents and operations
 
 - `docs/repo-layout.md` — the repo map
@@ -70,6 +79,13 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/concurrency-debt.md` — how the census counts Swift concurrency warnings, where the count stands, and what to check before an isolation change on the audio path
 - `docs/ops-credentials.md` — Sentry, PostHog, GitHub, and Cloudflare credential lanes
 - `docs/self-hosted-mac-runner.md` — the owner's Mac as a self-hosted CI runner
+- `docs/rules.md` — generated table of each rule and the check that enforces it
+- `docs/lint-rules.md` — how to turn a repeated correction into a rule
+- `docs/ai-code-review-checklist.md` — checklist for reviewing a change an agent wrote
+- `docs/agent-merge-policy.md` — risk tiers and which PRs may merge without the owner
+- `docs/auto-merge-gate.md` — the lane auto-merger and what it may merge
+- `docs/automerge-justin-setup.md` — the auto-merge setup steps only the owner does
+- `docs/automations/README.md` — the scheduled Codex jobs; each playbook (`docs/automations/docs-drift.md`, `docs/automations/finding-responder.md`, `docs/automations/morning-triage.md`, `docs/automations/stale-prs.md`, `docs/automations/worktree-cleanup.md`) sits beside it
 
 ## Assets (not engineering docs)
 

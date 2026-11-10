@@ -97,14 +97,8 @@ final class MeetingCaptureBridge: ObservableObject {
     /// readiness and the timeout copy only look at the mic.
     private var pendingStartRequiresSystemAudio = true
 
-    init(audio: Audio? = nil) {
-        self.audio = audio ?? Audio(
-            sleepWakeNotifications: AudioSleepWakeNotifications(
-                center: NSWorkspace.shared.notificationCenter,
-                willSleepName: Notification.Name("NSWorkspaceWillSleepNotification"),
-                didWakeName: Notification.Name("NSWorkspaceDidWakeNotification")
-            )
-        )
+    init(audio: Audio) {
+        self.audio = audio
         let micPCMRelay = self.micPCMRelay
         self.audio.onMicPCMBuffer = { [weak micPCMRelay] buffer in
             micPCMRelay?.enqueue(buffer)

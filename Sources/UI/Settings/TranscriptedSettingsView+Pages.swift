@@ -260,19 +260,11 @@ extension TranscriptedSettingsView {
                     trackSettingsAction("today_open_recent_dictation", page: .today)
                     navigation.select(.dictations, source: .settingsAction)
                 case .writing:
-                    // No Writing page on main yet: open the day's file.
+                    // A writing mark opens its day's Markdown file.
                     if let dayFile = item.transcriptURL {
                         NSWorkspace.shared.open(dayFile)
                     }
                 }
-            },
-            onShowMeetings: {
-                trackSettingsAction("today_show_meetings", page: .today)
-                navigation.select(.home, source: .settingsAction)
-            },
-            onShowDictations: {
-                trackSettingsAction("today_show_dictations", page: .today)
-                navigation.select(.dictations, source: .settingsAction)
             },
             onStartMeeting: {
                 trackSettingsAction("empty_start_meeting", page: .today)

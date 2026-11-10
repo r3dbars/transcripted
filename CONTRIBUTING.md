@@ -107,7 +107,7 @@ The codebase is organized around the current Transcripted app:
 
 | Area | Directory | Responsibility |
 |------|-----------|----------------|
-| App entry + state | `Sources/` (top-level files) | app lifecycle, menubar wiring, shared app state |
+| App shell + state | `Sources/App/` | app entry, delegate extensions, menubar wiring, command menus, shared app state |
 | Dictation | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture and STT, saved dictation transcripts, hotkey and trigger routing |
 | Meetings | `Sources/Meeting/` | meeting recording, model warmup, transcript flow, bridge into Core |
 | Shared meeting core | `Sources/TranscriptedCore/` | meeting/transcription library and agent artifacts |
@@ -131,7 +131,7 @@ Transcripted prefers durable local outputs over opaque app-only state.
 That means changes should preserve or improve:
 
 - readable Markdown outputs
-- structured JSON sidecars and indexes
+- stable frontmatter and the `mcp-directories.json` manifest that agents and the MCP index read
 - stable storage paths
 - the ability for external agents to consume saved artifacts directly
 

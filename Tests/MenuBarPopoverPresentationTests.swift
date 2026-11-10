@@ -172,7 +172,10 @@ func testMenuBarPopoverPresentation() async {
         assertTrue(presented, "a menu reopened on the full-screen anchor is counted as an open")
         assertEqual(fixture.popover.presentations.count, 2, "a shown window on another Space gets one anchor retry")
         assertTrue(fixture.popover.isShown, "the retried menu is open")
-        guard let panel = fixture.fallbackPanels.first, let retry = fixture.popover.presentations.last else { return }
+        guard let panel = fixture.fallbackPanels.first, let retry = fixture.popover.presentations.last else {
+            assertTrue(false, "the other-Space retry should create one anchor panel")
+            return
+        }
         assertTrue(retry.view.window === panel, "the visible menu is anchored in the full-screen panel")
         assertEqual(panel.level, .screenSaver, "the anchor sits above full-screen content")
         assertEqual(fixture.events, ["show", "create anchor", "order anchor", "show", "focus popover"], "recovery orders the anchor before the second show")

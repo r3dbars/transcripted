@@ -70,7 +70,7 @@ The channel waits up to 2 seconds (20 ms polls) for:
 
 Then it writes `result` from the latest snapshot. A timeout is still `ok: true` if the session command itself succeeded — check the flags in `result`, not only `ok`. Meeting start/stop already await the session APIs, so they do not use this wait.
 
-Every command can also fail with `harness_inactive`, `control_dir_required`, `malformed_json`, `not_an_object`, `payload_too_large`, `not_a_regular_file`, `wrong_owner`, `unreadable_file`, `missing_id`, `invalid_id`, `missing_command`, `invalid_command`, `unknown_command`, `invalid_args`, `unknown_arg[:name]`, `unknown_scheme`, `malformed_url`, or `app_unavailable`.
+Every command can also fail with `harness_inactive`, `control_dir_required`, `malformed_json`, `not_an_object`, `payload_too_large`, `not_a_regular_file`, `wrong_owner`, `unreadable_file`, `missing_id`, `invalid_id`, `missing_command`, `invalid_command`, `unknown_command`, `invalid_args`, `unknown_arg[:name]`, or `app_unavailable`.
 
 ### Screens
 

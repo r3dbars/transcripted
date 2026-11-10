@@ -79,8 +79,10 @@ echo ""
 echo "Branch: ${branch:-detached HEAD}"
 echo "HEAD: $head_sha"
 echo "Base: $base_ref"
-if [ -z "$(git config --get core.hooksPath 2>/dev/null)" ]; then
-    echo "Hint: git hooks are off for this clone; run bash scripts/dev/install-git-hooks.sh to lint before push."
+# --check fails when the path is unset and also when it points somewhere else
+# (a stale absolute path to a folder that no longer exists runs no hooks, silently).
+if ! hooks_status="$(bash scripts/dev/install-git-hooks.sh --check 2>&1)"; then
+    echo "Hint: $hooks_status"
 fi
 echo ""
 
@@ -152,7 +154,7 @@ echo "Matrix: .agents/test-matrix.yml"
 echo ""
 
 echo "Coordinator closeout:"
-echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action"
+echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action"
 echo "See docs/agent-closeout.md for status meanings and cleanup boundaries."
 
 if [ "$run_checks" = "true" ]; then

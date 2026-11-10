@@ -73,7 +73,8 @@ public protocol SystemAudioCaptureEngine: AnyObject {
     /// a backend can prove it. Timing-unaware backends never invent a clock.
     func startTimed(bufferCallback: @escaping (AVAudioPCMBuffer, SystemAudioBufferTiming) -> Void) throws
 
-    /// Stop capture with a short delay to let the pipeline settle.
+    /// Stop capture. Backends may stop synchronously (the Core Audio tap's
+    /// `stop()` is `stopSync()`).
     func stop()
 
     /// Stop capture immediately (no delay). Use when re-preparing the same instance.

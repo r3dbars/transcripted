@@ -181,8 +181,6 @@ enum NotchIslandSymbol: String, Equatable {
 
 enum NotchIslandTint: Equatable {
     case accent
-    case primary
-    case secondary
     case warning
 }
 
@@ -202,7 +200,6 @@ enum NotchIslandLiveValue: Equatable {
 
 enum NotchIslandChipStyle: Equatable {
     case plain
-    case accent
     case destructive
     case warning
 }

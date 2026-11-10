@@ -88,7 +88,7 @@ struct RoundTrip: ParsableCommand {
                     // Insert a speaker with a 512-byte embedding (128 floats) instead of 1024
                     let uuid = UUID().uuidString
                     let now = ISO8601DateFormatter().string(from: Date())
-                    var embedding = [Float](repeating: 0.5, count: 128)
+                    let embedding = [Float](repeating: 0.5, count: 128)
                     let embData = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
 
                     let sql = "INSERT INTO speakers (id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count) VALUES (?, 'BadEmbed', 'test', ?, ?, ?, 1, 0.5, 0)"
@@ -118,7 +118,7 @@ struct RoundTrip: ParsableCommand {
                     let uuid = UUID().uuidString
                     let now = ISO8601DateFormatter().string(from: Date())
                     // Insert with a valid embedding first, then set it to NULL
-                    var embedding = [Float](repeating: 0.5, count: 256)
+                    let embedding = [Float](repeating: 0.5, count: 256)
                     let embData = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
 
                     let insertSQL = "INSERT INTO speakers (id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count) VALUES (?, 'NullEmbed', 'test', ?, ?, ?, 1, 0.5, 0)"
@@ -166,7 +166,7 @@ struct RoundTrip: ParsableCommand {
                     let uuid = UUID().uuidString
                     let now = ISO8601DateFormatter().string(from: Date())
                     // Valid 1024-byte embedding
-                    var embedding = [Float](repeating: 0.5, count: 256)
+                    let embedding = [Float](repeating: 0.5, count: 256)
                     let embData = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
 
                     let sql = "INSERT INTO speakers (id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count) VALUES (?, 'BadConf', 'test', ?, ?, ?, 1, 5.0, 0)"
@@ -195,7 +195,7 @@ struct RoundTrip: ParsableCommand {
 
                     let uuid = UUID().uuidString
                     let now = ISO8601DateFormatter().string(from: Date())
-                    var embedding = [Float](repeating: 0.5, count: 256)
+                    let embedding = [Float](repeating: 0.5, count: 256)
                     let embData = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
 
                     let sql = "INSERT INTO speakers (id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count) VALUES (?, 'ZeroCall', 'test', ?, ?, ?, 0, 0.5, 0)"
@@ -223,7 +223,7 @@ struct RoundTrip: ParsableCommand {
                     defer { sqlite3_close(db) }
 
                     let now = ISO8601DateFormatter().string(from: Date())
-                    var embedding = [Float](repeating: 0.5, count: 256)
+                    let embedding = [Float](repeating: 0.5, count: 256)
                     let embData = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
 
                     let sql = "INSERT INTO speakers (id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count) VALUES (?, 'BadUUID', 'test', ?, ?, ?, 1, 0.5, 0)"
@@ -252,7 +252,7 @@ struct RoundTrip: ParsableCommand {
 
                     let uuid = UUID().uuidString
                     let now = ISO8601DateFormatter().string(from: Date())
-                    var embedding = [Float](repeating: 0.5, count: 256)
+                    let embedding = [Float](repeating: 0.5, count: 256)
                     let embData = embedding.withUnsafeBufferPointer { Data(buffer: $0) }
 
                     let sql = "INSERT INTO speakers (id, display_name, name_source, embedding, first_seen, last_seen, call_count, confidence, dispute_count) VALUES (?, 'BadSource', 'invalid_source', ?, ?, ?, 1, 0.5, 0)"

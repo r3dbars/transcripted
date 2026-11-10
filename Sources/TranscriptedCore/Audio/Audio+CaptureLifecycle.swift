@@ -389,7 +389,7 @@ extension Audio {
         // before any of the slow CoreAudio teardown begins. Without this
         // dispatch, the user-visible "still spinning" state could last
         // hundreds of ms while AVAudioEngine drains in-flight callbacks
-        // — the freeze Taylor reported on the meeting widget.
+        // — the freeze a user reported on the meeting widget.
         DispatchQueue.main.async {
             guard self.recordingSessionGeneration == stopGeneration else {
                 AppLogger.audio.info("Skipping stale stop UI reset because a newer session exists", [

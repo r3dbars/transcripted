@@ -88,6 +88,7 @@ public enum LabCommandBuilder {
                     "MATCH": configuration.matchThresholds,
                     "COLLAR": String(configuration.speakerCollar),
                     "ALLOW_PARTIAL_CORPUS": configuration.allowPartialCorpus ? "1" : "0",
+                    "TRANSCRIPTED_DISABLE_FILE_LOGGER": "1",
                 ]
                 if !configuration.speakerSeries.isEmpty {
                     environment["SERIES"] = configuration.speakerSeries
@@ -124,7 +125,7 @@ public enum LabCommandBuilder {
                 return LabCommand(
                     executable: "/usr/bin/env",
                     arguments: arguments,
-                    environment: [:],
+                    environment: ["TRANSCRIPTED_DISABLE_FILE_LOGGER": "1"],
                     workingDirectory: repo.path,
                     summary: "Run the frozen ASK / SUGGEST / AUTO speaker-identity research loop with locked holdout validation."
                 )

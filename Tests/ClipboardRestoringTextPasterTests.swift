@@ -1607,7 +1607,6 @@ func testClipboardRestoringTextPaster() async {
                 pasteDispatcher: { true },
                 confirmationSource: { unreadSource },
                 targetIsFrontmost: { true },
-                retainClipboardForPasteRetry: false,
                 pasteConfirmationWait: 0.06
             )
 
@@ -1625,7 +1624,6 @@ func testClipboardRestoringTextPaster() async {
                 },
                 confirmationSource: { readSource },
                 targetIsFrontmost: { true },
-                retainClipboardForPasteRetry: false,
                 pasteConfirmationWait: 0.06
             )
             return (unreadSource.asked, readSource.asked, readSource.askedBeforeRead == 0)

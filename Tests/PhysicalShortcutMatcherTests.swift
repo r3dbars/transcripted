@@ -21,7 +21,6 @@ private func binding(
 
 func testPhysicalShortcutMatcher() {
     let option = PhysicalDictationTriggerModifiers.option
-    let shift = PhysicalDictationTriggerModifiers.shift
     let function = PhysicalDictationTriggerModifiers.function
 
     runSuite("PhysicalShortcutMatcher — keyed key-down matches exactly") {

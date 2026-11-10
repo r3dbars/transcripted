@@ -25,15 +25,6 @@ enum RTTMText {
 import FluidAudio
 
 enum RTTMWriter {
-    static func write(segments: [TimedSpeakerSegment], fileId: String) -> String {
-        RTTMText.render(
-            fileId: fileId,
-            segments: segments.map {
-                (speakerId: $0.speakerId, start: Double($0.startTimeSeconds), end: Double($0.endTimeSeconds))
-            }
-        )
-    }
-
     static func output(segments: [TimedSpeakerSegment], fileId: String, to path: String?) throws {
         try RTTMText.output(
             fileId: fileId,

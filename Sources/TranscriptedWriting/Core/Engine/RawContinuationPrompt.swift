@@ -225,8 +225,10 @@ public struct RawContinuationPrompt: Equatable, Sendable {
 
     /// Screen Memory plan Phase 2 PR 2b: the most a screen-context block may
     /// spend of the shared budget, regardless of how much the field text
-    /// left over. Keeps a near-empty field from handing the whole 3,000-char
-    /// budget to OCR'd screen text.
+    /// left over. At 3,000 it equals the default total budget
+    /// (`maxContextCharacters`), so it only bites for a caller that passes a
+    /// larger total; with the default, a near-empty field can hand nearly the
+    /// whole budget to OCR'd screen text.
     /// Raised 1,000 -> 3,000 on 2026-08-23 (owner call): the scaffold+scene
     /// prefix is cache_prompt-cached across keystrokes within a scene, so a
     /// larger block costs one prefill per scene change, not per keystroke.

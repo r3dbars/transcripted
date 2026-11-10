@@ -40,10 +40,8 @@ final class ClipboardRestoringTextPaster {
         "Couldn't confirm the paste. If the text isn't there, press ⌘V."
 
     private var clipboardRestoreTask: Task<Void, Never>?
-    private var clipboardAutoEnterReadinessTask: Task<Void, Never>?
     private var clipboardAutoEnterReadyToken: SupersessionEpoch.Token?
     private var pendingClipboardRestore = ClaimSlot<PendingClipboardRestore>()
-    private var retainedClipboardRestoreForPasteRetry: PendingClipboardRestore?
     private var temporaryPasteboardDataProvider: TemporaryPasteboardStringProvider?
     /// Every paster that has run a paste, so one can put back another's
     /// clipboard (dictation, Paste Last and the menu bar all borrow the same
@@ -66,17 +64,16 @@ final class ClipboardRestoringTextPaster {
 
     deinit {
         clipboardRestoreTask?.cancel()
-        clipboardAutoEnterReadinessTask?.cancel()
     }
 
     func cancelPendingClipboardRestore() {
         restorePendingClipboardNow()
-        restoreRetainedClipboardNow()
     }
 
-    func discardPasteRetry() {
-        restoreRetainedClipboardNow()
-    }
+    /// The dictation controller calls this when its overlay changes or a
+    /// not-pasted message is discarded. Nothing is held for a retry, so there
+    /// is nothing to undo: the recovery text stays on the clipboard.
+    func discardPasteRetry() {}
 
     func restorePendingClipboardNow() {
         operationEpoch.invalidate()
@@ -129,9 +126,6 @@ final class ClipboardRestoringTextPaster {
     }
 
     func waitForClipboardReadyForAutoEnter() async {
-        while let readinessTask = clipboardAutoEnterReadinessTask {
-            await readinessTask.value
-        }
         if let readyToken = clipboardAutoEnterReadyToken, pasteEpoch.isCurrent(readyToken) {
             return
         }
@@ -160,7 +154,6 @@ final class ClipboardRestoringTextPaster {
         confirmationSource: (@MainActor () -> (any ClipboardPasteConfirmationSource)?)? = nil,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
         targetIsFrontmost: (@MainActor () -> Bool)? = nil,
-        retainClipboardForPasteRetry: Bool = true,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait,
@@ -199,8 +192,6 @@ final class ClipboardRestoringTextPaster {
         activePasteCount += 1
         defer { activePasteCount -= 1 }
         registerForSharedClipboardRestores()
-        discardPasteRetry()
-        guard isCurrentOperation() else { return cancelledOutcome }
         restorePendingClipboard()
         guard isCurrentOperation() else { return cancelledOutcome }
         restoreOtherPastersPendingClipboards()
@@ -548,7 +539,7 @@ final class ClipboardRestoringTextPaster {
         return .pasted
     }
 
-    /// Fences out every in-flight restore/readiness task, empties the pending
+    /// Fences out any in-flight restore task, empties the pending
     /// slot, and returns whatever restore payload was stored so the caller can
     /// decide what to do with it.
     @discardableResult
@@ -556,8 +547,6 @@ final class ClipboardRestoringTextPaster {
         pasteEpoch.invalidate()
         clipboardRestoreTask?.cancel()
         clipboardRestoreTask = nil
-        clipboardAutoEnterReadinessTask?.cancel()
-        clipboardAutoEnterReadinessTask = nil
         clipboardAutoEnterReadyToken = nil
         lateConfirmationWatch.cancel()
         temporaryPasteboardDataProvider = nil
@@ -565,7 +554,6 @@ final class ClipboardRestoringTextPaster {
     }
 
     private func leaveTemporaryClipboardAvailable(
-        retainingRestoreForPasteRetry: Bool = false,
         savingClipboardForNextPaste: Bool = false
     ) -> ClipboardFallbackState {
         guard let pending = clearPendingClipboardRestore() else { return .unavailable }
@@ -613,31 +601,7 @@ final class ClipboardRestoringTextPaster {
         if savingClipboardForNextPaste {
             saveClipboardForNextPaste(pending)
         }
-        if retainingRestoreForPasteRetry {
-            retainedClipboardRestoreForPasteRetry = PendingClipboardRestore(
-                savedItems: pending.savedItems,
-                temporaryString: pending.temporaryString,
-                temporaryChangeCount: pending.pasteboard.changeCount,
-                pasteboard: pending.pasteboard
-            )
-        }
         return .dictationPresent
-    }
-
-    private func restoreRetainedClipboardNow() {
-        guard let retained = retainedClipboardRestoreForPasteRetry else { return }
-        retainedClipboardRestoreForPasteRetry = nil
-        let pasteboard = retained.pasteboard
-        guard pasteboard.changeCount == retained.temporaryChangeCount,
-              pasteboard.string(forType: .string) == retained.temporaryString else {
-            return
-        }
-        restorePasteboardItems(
-            retained.savedItems,
-            temporaryString: retained.temporaryString,
-            temporaryChangeCount: retained.temporaryChangeCount,
-            to: pasteboard
-        )
     }
 
     private func scheduleClipboardRestore(
@@ -674,8 +638,6 @@ final class ClipboardRestoringTextPaster {
             self.temporaryPasteboardDataProvider = nil
             self.pendingClipboardRestore.clearIfOwned(by: token)
             self.clipboardRestoreTask = nil
-            self.clipboardAutoEnterReadinessTask?.cancel()
-            self.clipboardAutoEnterReadinessTask = nil
             // Deliberately fused: publish this attempt as the Auto Enter ready
             // marker, then close its epoch so no later restore/readiness work
             // can still act on the finished attempt.
@@ -712,10 +674,7 @@ final class ClipboardRestoringTextPaster {
     ) -> Bool {
         guard pasteboard is NSPasteboard else { return false }
 
-        let provider = TemporaryPasteboardStringProvider(
-            text: text,
-            onTemporaryStringRead: {}
-        )
+        let provider = TemporaryPasteboardStringProvider(text: text)
         let item = NSPasteboardItem()
         guard item.setDataProvider(provider, forTypes: [.string]) else {
             return false
@@ -744,7 +703,6 @@ private final class WeakPasterReference {
 
 private final class TemporaryPasteboardStringProvider: NSObject, NSPasteboardItemDataProvider {
     private let text: String
-    private let onTemporaryStringRead: () -> Void
     private let lock = NSLock()
     private var didNotifyRead = false
     private var firstReadTimestamp: CFAbsoluteTime?
@@ -763,9 +721,8 @@ private final class TemporaryPasteboardStringProvider: NSObject, NSPasteboardIte
         return value
     }
 
-    init(text: String, onTemporaryStringRead: @escaping () -> Void) {
+    init(text: String) {
         self.text = text
-        self.onTemporaryStringRead = onTemporaryStringRead
     }
 
     func pasteboard(
@@ -775,20 +732,15 @@ private final class TemporaryPasteboardStringProvider: NSObject, NSPasteboardIte
     ) {
         guard type == .string else { return }
         item.setString(text, forType: .string)
-        notifyReadOnce()
+        recordRead()
     }
 
-    private func notifyReadOnce() {
+    private func recordRead() {
         lock.lock()
-        let shouldNotify = !didNotifyRead
         didNotifyRead = true
         if firstReadTimestamp == nil {
             firstReadTimestamp = CFAbsoluteTimeGetCurrent()
         }
         lock.unlock()
-
-        if shouldNotify {
-            onTemporaryStringRead()
-        }
     }
 }

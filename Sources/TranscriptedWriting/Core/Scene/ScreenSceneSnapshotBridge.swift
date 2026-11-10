@@ -8,7 +8,7 @@ import Foundation
 /// comments), so this file is a straight field-for-field mapping plus a
 /// staleness clock, not a second geometry system.
 ///
-/// Screen Memory plan, Phase 2 PR 2b (`docs/plans/screen-memory.md`): "the
+/// Screen Memory plan, Phase 2 PR 2b: "the
 /// engine consumes the latest fresh `ScreenSnapshot`-derived Scene
 /// (staleness cap 20s) — never awaits capture; absent/stale scene = exactly
 /// today's behavior."

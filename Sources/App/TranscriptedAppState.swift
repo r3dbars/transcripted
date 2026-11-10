@@ -29,7 +29,6 @@ class TranscriptedAppState: ObservableObject {
         sttRouter: sttRouter
     )
 
-    private var promptsObserver: NSObjectProtocol?
     private var runtimeReadinessTask: Task<Void, Never>?
     private var runtimeReadinessRerunRequested = false
     private var hasReportedLaunchWarmup = false
@@ -258,10 +257,6 @@ class TranscriptedAppState: ObservableObject {
         writingController.stop()
         nextSentence.stop()
         contextCapture.unregisterHotkey()
-        if let observer = promptsObserver {
-            NotificationCenter.default.removeObserver(observer)
-            promptsObserver = nil
-        }
         if #available(macOS 14.0, *) {
             MeetingSessionController.runtimeDiagnosticsRecorder = nil
         }

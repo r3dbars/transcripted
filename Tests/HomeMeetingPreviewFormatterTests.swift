@@ -82,7 +82,7 @@ func testHomeMeetingPreviewFormatter() {
         let lines = HomeMeetingPreviewContent.make(from: markdown).transcriptLines
         let drafts = HomeMeetingSpeakerNamingPolicy.drafts(from: lines)
         guard let draft = drafts.first(where: { $0.identity.persistentSpeakerID == speakerId }) else {
-            assertionFailure("fixture should produce a naming draft for the pending voice")
+            assertTrue(false,"fixture should produce a naming draft for the pending voice")
             return
         }
         assertEqual(
@@ -132,7 +132,7 @@ func testHomeMeetingPreviewFormatter() {
 
         let selectedProfileID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         guard var selectedDraft = drafts.first else {
-            assertionFailure("fixture should produce a speaker naming draft")
+            assertTrue(false,"fixture should produce a speaker naming draft")
             return
         }
         selectedDraft.name = "Alex"

@@ -24,6 +24,9 @@ enum NextSentenceSound {
 final class NextSentenceSounds {
     static let shared = NextSentenceSounds()
 
+    /// AirPods: output only. Players feed `mainMixerNode` and nothing here touches `inputNode`, so
+    /// this engine never binds the macOS default input and can't push a Bluetooth headset that is
+    /// the default input into call mode.
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
     private var next = 0

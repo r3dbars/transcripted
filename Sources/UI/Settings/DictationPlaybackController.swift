@@ -211,7 +211,8 @@ final class DictationAudioInfoStore: ObservableObject {
                 }
                 return Info(isAvailable: true, duration: Self.duration(of: url))
             }.value
-            infos[key] = info
+            // Writing an unchanged value still publishes and redraws the whole page.
+            if infos[key] != info { infos[key] = info }
             guard !info.isAvailable, attempt < retryDelays.count, !Task.isCancelled else { return }
             try? await Task.sleep(nanoseconds: retryDelays[attempt] * 1_000_000_000)
             attempt += 1
@@ -227,8 +228,9 @@ final class DictationAudioInfoStore: ObservableObject {
             dictationsFolder: entry.url.deletingLastPathComponent(),
             recoveryDirectory: DictationStoppedAudioRecoveryStore.defaultDirectory
         )
-        if url == nil, let key = Self.key(for: entry) {
-            infos[key] = Info(isAvailable: false, duration: nil)
+        let miss = Info(isAvailable: false, duration: nil)
+        if url == nil, let key = Self.key(for: entry), infos[key] != miss {
+            infos[key] = miss
         }
         return url
     }

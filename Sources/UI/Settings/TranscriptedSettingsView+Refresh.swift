@@ -91,18 +91,6 @@ extension TranscriptedSettingsView {
         }
     }
 
-    var permissionsDetailLine: String {
-        if missingRequiredPermissions.isEmpty {
-            return dictationShortcutsEnabled
-                ? "Dictation permissions are on. Meeting audio can be enabled when you need it."
-                : "Meeting recording permissions are on. Dictation shortcuts can stay off."
-        }
-        let permissions = missingRequiredPermissions.map(\.title).joined(separator: " and ")
-        return dictationShortcutsEnabled
-            ? "Turn on \(permissions) to record and paste back."
-            : "Turn on \(permissions) to record meetings."
-    }
-
     var isUsingDefaultCaptureLibrary: Bool {
         captureLibraryURL.standardizedFileURL == FileManager.default.transcriptedDefaultCaptureLibraryDir.standardizedFileURL
     }

@@ -465,8 +465,6 @@ extension TranscriptedSettingsView {
                 HomeAttentionIssue(
                     id: "permissions",
                     title: "Permissions need attention",
-                    detail: permissionsDetailLine,
-                    tone: .warning,
                     destination: .privacy
                 )
             )
@@ -480,8 +478,6 @@ extension TranscriptedSettingsView {
                 HomeAttentionIssue(
                     id: "failed-meetings",
                     title: summary.title,
-                    detail: summary.detail,
-                    tone: summary.onlySpeakerNamesMissing ? .warning : .failure,
                     destination: .failedMeetings
                 )
             )
@@ -493,8 +489,6 @@ extension TranscriptedSettingsView {
                 HomeAttentionIssue(
                     id: "speakers",
                     title: reviewCount == 1 ? "1 speaker needs a name" : "\(reviewCount) speakers need names",
-                    detail: "Name saved speaker labels so transcripts read like a conversation.",
-                    tone: .warning,
                     destination: .speakers
                 )
             )
@@ -510,8 +504,6 @@ extension TranscriptedSettingsView {
                 HomeAttentionIssue(
                     id: "voice-model-failed",
                     title: "Voice model needs attention",
-                    detail: modelCard.detail,
-                    tone: .warning,
                     destination: .models
                 )
             )

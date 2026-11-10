@@ -226,26 +226,6 @@ class ParakeetEngine: ObservableObject {
         dictationRouteAnalyticsContext(selection: cachedInputDeviceSelection)
     }
 
-    /// True when the Parakeet model files are already local (bundled,
-    /// prefetched, or cached), so initialization is an in-memory load rather
-    /// than a network download. Dictation uses this to open the microphone
-    /// immediately and load the model concurrently.
-    var modelFilesAvailableLocally: Bool {
-        modelFilesAvailableLocally(for: modelVariant)
-    }
-
-    func modelFilesAvailableLocally(for variant: ParakeetModelVariant) -> Bool {
-        if isModelLoaded(for: variant) { return true }
-        switch modelDownloadState(for: variant) {
-        case .downloading, .failed:
-            return false
-        case .notLoaded, .cached, .loading, .ready:
-            return (variant == modelVariant && prefetchedModelPath != nil && !variant.isLocalInstallOnly)
-                || ModelCacheInventory.activeParakeetModelDirectory(variant: variant) != nil
-                || bundledParakeetModelPath(variant: variant) != nil
-        }
-    }
-
     init(audioLevels: DictationAudioLevels) {
         self.audioLevels = audioLevels
         audioGraph.host = self

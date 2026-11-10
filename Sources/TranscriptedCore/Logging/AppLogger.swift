@@ -5,7 +5,7 @@ import OSLog
 ///
 /// Writes to both:
 /// 1. os.Logger (Console.app) — for human debugging
-/// 2. FileLogger (~/Library/Logs/Transcripted/app.jsonl) — for agent diagnostics
+/// 2. FileLogger (~/Library/Application Support/Transcripted/logs/app.jsonl by default) — for agent diagnostics
 ///
 /// Usage:
 ///   AppLogger.audioMic.info("Started", ["sampleRate": "\(format.sampleRate)"])

@@ -26,7 +26,7 @@ func testMeetingImportedAudioCopyMemory() async {
             )
         }
         do {
-            try await task.value
+            _ = try await task.value
         } catch {
             assertTrue(false, "copying a readable file should succeed, got \(error)")
             return

@@ -73,7 +73,7 @@ func testDictationTranscriptWriter() {
         )
 
         guard let dayFile = saved?.url else {
-            assertionFailure("Expected dictation transcript file")
+            assertTrue(false,"Expected dictation transcript file")
             return
         }
 
@@ -118,7 +118,7 @@ func testDictationTranscriptWriter() {
         )
 
         guard let dayFile = firstSaved?.url else {
-            assertionFailure("Expected first dictation to save")
+            assertTrue(false,"Expected first dictation to save")
             return
         }
 

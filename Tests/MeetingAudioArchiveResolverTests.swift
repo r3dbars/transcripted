@@ -113,7 +113,7 @@ private func testResolverKeepsRetranscriptionAvailableDuringArtifactRecovery() {
             "re-transcription should stay available while transcript and audio stems recover"
         )
     } catch {
-        assertionFailure("recovery audio fixture should succeed: \(error)")
+        assertTrue(false,"recovery audio fixture should succeed: \(error)")
     }
 }
 

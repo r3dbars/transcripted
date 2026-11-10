@@ -89,11 +89,13 @@ public enum SpeakerWritePathPolicy {
     // MARK: - #8 Cross-cluster link/merge floor
 
     /// Minimum *cross-cluster* cosine (cluster-to-cluster, not cluster-to-profile) required to fuse
-    /// two diarizer clusters that matched the same profile into one row. Stricter than the loosest
-    /// per-utterance attach floor (0.70) so two distinct people who each merely resemble one profile
-    /// are not silently merged, but below the within-meeting same-voice consolidation bar
-    /// (`EmbeddingClusterer.sameVoiceConsolidationThreshold`, 0.88) so genuine over-segmented
-    /// fragments of one voice that survived consolidation still fuse.
+    /// two diarizer clusters that matched the same profile into one row (`crossClusterLink`).
+    /// Stricter than the loosest per-utterance attach floor (`matchManySegments`) so two distinct
+    /// people who each merely resemble one profile are not silently merged, but below the
+    /// within-meeting same-voice consolidation bar (`consolidation`) so genuine over-segmented
+    /// fragments of one voice that survived consolidation still fuse. WeSpeaker: 0.70 < 0.78 < 0.88;
+    /// ReDimNet2: 0.707 < 0.795 < 0.902. ERes2Net keeps the WeSpeaker-scale link bar, so the
+    /// ordering doesn't hold there.
     public static let crossClusterLinkFloor: Double = SpeakerEmbeddingThresholds.weSpeaker.crossClusterLink
 
     /// Whether two clusters that matched the same profile are similar enough *to each other* to be

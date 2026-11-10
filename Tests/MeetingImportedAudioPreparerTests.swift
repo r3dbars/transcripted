@@ -511,7 +511,7 @@ func testMeetingImportedAudioPreparer() async {
 
         var threwCancellation = false
         do {
-            try await task.value
+            _ = try await task.value
         } catch is CancellationError {
             threwCancellation = true
         } catch {

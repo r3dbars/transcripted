@@ -39,18 +39,13 @@ enum LocalMeetingTranscriptExtractor {
 /// saved meeting transcript's YAML frontmatter, under a dedicated
 /// `auto_summary_*` namespace.
 ///
-/// Why a separate namespace instead of the heavy summarizer's `local_summary_*`
-/// keys: the heavy path's keys also drive Home UI gating (the inline summary
-/// card and the "Run AI summary" affordance key off `local_summary_version`).
-/// Reusing them would make the cheap heuristic masquerade as the AI summary and
-/// hide the upgrade affordance. Keeping a parallel `auto_summary_*` set means:
+/// `auto_summary_*` keys are the only summary Transcripted writes now. The
+/// `local_summary_*` keys came from the removed local AI summarizer and exist
+/// only in meetings saved before 2026-08; this writer never writes or rewrites
+/// them, so an old AI summary stays as it was.
 ///
-/// - the index (Moat #1) gets the same logical fields for 100% of meetings,
-/// - the heavy summarizer stays the high-quality path and overwrites nothing,
-/// - existing Home/Settings UI is untouched.
-///
-/// Field shape for the indexer (Moat #1) — value format mirrors
-/// `local_summary_*` exactly (bullet lines flattened with " | "):
+/// Field shape for the indexer — value format mirrors the old
+/// `local_summary_*` keys (bullet lines flattened with " | "):
 ///
 /// - `auto_summary_version`            ("1")
 /// - `auto_summary_generated_at`       (ISO8601)
@@ -63,8 +58,8 @@ enum LocalMeetingTranscriptExtractor {
 /// - `auto_summary_risks_or_followups`
 /// - `auto_summary_accuracy_notes`
 ///
-/// Index precedence: prefer `local_summary_*` when present (heavy, higher
-/// quality), else fall back to `auto_summary_*`.
+/// Index precedence: the CaptureKit/MCP readers prefer `local_summary_*` when
+/// an older file has it, else fall back to `auto_summary_*`.
 enum MeetingQuickSummaryWriter {
     static let version = "1"
     static let method = "heuristic-v1"
@@ -144,7 +139,7 @@ enum MeetingQuickSummaryWriter {
         return "---\n\((retained + appended).joined(separator: "\n"))\n---\n\(document.body)"
     }
 
-    // MARK: - Helpers (mirror LocalMeetingSummaryMarkdownUpdater formatting)
+    // MARK: - Helpers (same formatting as the old `local_summary_*` keys)
 
     private static func frontmatterKey(in line: String) -> String? {
         guard line.first?.isWhitespace != true else { return nil }

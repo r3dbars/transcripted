@@ -159,16 +159,22 @@ final class TranscriptIndexTests: XCTestCase {
     func testFTS5SpecialCharacters() throws {
         let fixture = makeFixtureJSON(utterances: [
             ("mic_0", 0.0, 5.0, "The C++ implementation is ready"),
+            ("system_0", 5.0, 10.0, "Search for the quoted phrase here"),
+            ("mic_0", 10.0, 15.0, "Words like and or near are plain text"),
+            ("system_0", 15.0, 20.0, "Notes in parentheses stay searchable"),
+            ("mic_0", 20.0, 25.0, "The test wildcard case"),
         ])
         try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        // These should not crash even with FTS5 special chars
-        _ = try index.searchUtterances(query: "C++", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "\"quoted phrase\"", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "AND OR NEAR", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "(parentheses)", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "test*wildcard", speaker: nil, dateFrom: nil, dateTo: nil)
+        // FTS5 operators and punctuation in a query are treated as plain words.
+        // A query that became an FTS5 syntax error would come back empty, so each
+        // one must still find the meeting whose utterance carries those words.
+        let queries = ["C++", "\"quoted phrase\"", "AND OR NEAR", "(parentheses)", "test*wildcard"]
+        for query in queries {
+            let result = try index.searchUtterances(query: query, speaker: nil, dateFrom: nil, dateTo: nil)
+            XCTAssertEqual(result.results.map(\.filename), ["Call_2026-03-29_10-00-00"], "query: \(query)")
+        }
     }
 
     func testSearchGroupsByMeeting() throws {

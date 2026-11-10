@@ -271,11 +271,6 @@ public struct PendingRetainedWatch: Equatable, Sendable {
             accepted: accepted,
             window: window
         )
-        if let kept = retentionAt5Seconds.retainedCharacters {
-            let replaced = max(0, accepted.count - kept)
-            // Five-second replacement is the v2 field; keep it honest.
-            _ = replaced
-        }
     }
 
     public mutating func observeThirtySeconds(window: String?) throws {

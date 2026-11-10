@@ -7,7 +7,7 @@ import Foundation
 /// pixels into `OCRBlock`s; this type only reasons about the blocks it is
 /// handed.
 ///
-/// Screen Memory plan, Phase 2 PR 2a (`docs/plans/screen-memory.md`).
+/// Screen Memory plan, Phase 2 PR 2a.
 public enum ScreenScene {
     /// A unit-square rectangle in the display's coordinate space
     /// (x/y/width/height all in `0...1`), origin at the **top-left** — y
@@ -141,7 +141,7 @@ public enum ScreenScene {
     /// Paragraph-style chats (Claude/ChatGPT-like) carry turns several
     /// sentences long, so the caps allow one more turn and a bigger shared
     /// budget than the bubble-era 3/600 — still under
-    /// `RawContinuationPrompt.maxSceneContextCharacters` (1,000).
+    /// `RawContinuationPrompt.maxSceneContextCharacters` (3,000).
     public static let maxTurns = 8
     /// Combined character budget across every surviving turn's text.
     public static let maxTurnsCharacterBudget = 2_000
@@ -318,10 +318,9 @@ public enum ScreenScene {
     /// paragraph by paragraph -- a single multi-line chat bubble surfaces as
     /// several adjacent `OCRBlock`s, one per wrapped line, all from the same
     /// speaker (see `ScreenTextRecognizer`). Left as separate turns, a long
-    /// three-line reply would look exactly like three short back-to-back
-    /// messages to `RawContinuationPrompt`'s terse-room detector and wrongly
-    /// clamp generation to a single short burst (verified: nothing between
-    /// Vision and here re-groups wrapped lines back into one block).
+    /// three-line reply would reach the prompt as three short back-to-back
+    /// messages (verified: nothing between Vision and here re-groups
+    /// wrapped lines back into one block).
     /// Distinguishing a wrapped continuation line from a genuinely separate
     /// next message needs geometry, not just text: lines within one bubble
     /// sit almost flush against each other (ordinary line-height spacing),
@@ -330,7 +329,7 @@ public enum ScreenScene {
     /// visible bubble padding and inter-message margin between them. Blocks
     /// from the same speaker whose vertical gap is small relative to their
     /// own height are folded into one logical turn before anything
-    /// downstream (including the terse-room median) ever sees them;
+    /// downstream ever sees them;
     /// everything else, including consecutive short messages from one
     /// speaker with normal spacing, stays as distinct turns.
     private static let wrappedLineMaxGapRatio = 0.6

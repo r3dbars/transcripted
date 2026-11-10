@@ -16,7 +16,7 @@ Work top to bottom. If you can't tick a box, that's the part to slow down on.
 
 ## 2. Check the architecture and how the pieces fit
 
-- [ ] The change lives in the layer that owns it (for this repo, check the folder's `CLAUDE.md` and `docs/repo-layout.md`).
+- [ ] The change lives in the layer that owns it (for this repo, check the folder's `AGENTS.md` and `docs/repo-layout.md`).
 - [ ] It doesn't add a new responsibility to a hotspot file that already does too much.
 - [ ] It reuses the existing helper instead of writing a near-copy of one.
 - [ ] Data flows the same way the rest of the code does: same ownership, same threading model, same error style.

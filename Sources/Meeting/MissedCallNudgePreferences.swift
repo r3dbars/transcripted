@@ -5,7 +5,7 @@
 // recording, the meeting overlay can show a one-line awareness nudge (see
 // MissedCallNudgePolicy in Sources/Meeting/MeetingPromptHeuristics.swift for
 // the rate limits). Default ON; the nudge itself carries a "Don't show again"
-// action that writes this preference, and Settings exposes the same toggle.
+// action that writes this preference.
 
 import Foundation
 

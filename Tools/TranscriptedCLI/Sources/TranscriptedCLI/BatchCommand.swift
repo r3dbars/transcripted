@@ -99,8 +99,6 @@ struct Batch: AsyncParsableCommand {
 
         // Process each file
         let batchStart = Date()
-        var totalDuration: Double = 0
-        var totalProcessing: Double = 0
 
         for (index, audioURL) in audioFiles.enumerated() {
             let fileId = audioURL.deletingPathExtension().lastPathComponent
@@ -119,11 +117,6 @@ struct Batch: AsyncParsableCommand {
             // Write RTTM
             let rttmPath = outDirURL.appendingPathComponent("\(fileId).rttm").path
             try RTTMWriter.output(segments: result.segments, fileId: fileId, to: rttmPath)
-
-            totalProcessing += fileElapsed
-            if let timings = result.timings {
-                totalDuration += timings.audioLoadingSeconds
-            }
         }
 
         let batchElapsed = Date().timeIntervalSince(batchStart)

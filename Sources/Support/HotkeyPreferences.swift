@@ -18,7 +18,7 @@ enum DictationShortcutMode: String, Hashable {
     case handsFree = "hands_free"
 }
 
-/// What the one dictation key does, like Handy's Shortcut Behavior.
+/// What the one dictation key does.
 enum DictationKeyBehavior: String, CaseIterable, Identifiable, Hashable {
     /// Hold to talk; a quick tap keeps listening until the next press.
     case holdOrTap = "hold_or_tap"
@@ -240,6 +240,10 @@ enum HotkeyPreferences {
         case kVK_RightArrow:    return "→"
         case kVK_UpArrow:       return "↑"
         case kVK_DownArrow:     return "↓"
+        case kVK_Home:          return "Home"
+        case kVK_End:           return "End"
+        case kVK_PageUp:        return "Page Up"
+        case kVK_PageDown:      return "Page Down"
         // Function keys
         case kVK_F1:  return "F1"
         case kVK_F2:  return "F2"
@@ -253,6 +257,14 @@ enum HotkeyPreferences {
         case kVK_F10: return "F10"
         case kVK_F11: return "F11"
         case kVK_F12: return "F12"
+        case kVK_F13: return "F13"
+        case kVK_F14: return "F14"
+        case kVK_F15: return "F15"
+        case kVK_F16: return "F16"
+        case kVK_F17: return "F17"
+        case kVK_F18: return "F18"
+        case kVK_F19: return "F19"
+        case kVK_F20: return "F20"
         // Punctuation
         case kVK_ANSI_Minus:        return "-"
         case kVK_ANSI_Equal:        return "="
@@ -278,19 +290,6 @@ enum HotkeyPreferences {
         case kVK_CapsLock:          return "Caps Lock"
         default: return "Key\(keyCode)"
         }
-    }
-
-    // MARK: - Validation
-
-    /// Rejects: bare letters (no modifier), modifier-only combos, Escape, Tab
-    static func isValid(_ binding: HotkeyBinding) -> Bool {
-        let code = Int(binding.keyCode)
-        // Reject Escape and Tab outright
-        if code == kVK_Escape || code == kVK_Tab { return false }
-        // Must have at least one modifier (Cmd, Option, or Control — Shift alone doesn't count)
-        let meaningfulModifiers = binding.modifiers & UInt32(cmdKey | optionKey | controlKey)
-        if meaningfulModifiers == 0 { return false }
-        return true
     }
 }
 

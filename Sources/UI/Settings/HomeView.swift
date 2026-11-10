@@ -305,12 +305,15 @@ private struct HomeFailedMeetingPlayAudioButton: View {
     @ObservedObject private var playback = MeetingAudioPlayback.shared
 
     var body: some View {
+        // A paused attachment stays active, so "active" alone would keep
+        // showing Pause on a player that isn't playing.
+        let isPlayingThis = playback.isActive(audioAttachment) && playback.isPlaying
         Button {
             playback.toggle(audioAttachment)
         } label: {
             Label(
-                playback.isActive(audioAttachment) ? "Pause audio" : "Play audio",
-                systemImage: playback.isActive(audioAttachment) ? "pause.fill" : "play.fill"
+                isPlayingThis ? "Pause audio" : "Play audio",
+                systemImage: isPlayingThis ? "pause.fill" : "play.fill"
             )
         }
         .buttonStyle(.bordered)

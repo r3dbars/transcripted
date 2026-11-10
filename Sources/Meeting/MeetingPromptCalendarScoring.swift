@@ -1,7 +1,6 @@
 import Foundation
 
 @available(macOS 14.0, *)
-@available(macOS 14.0, *)
 enum MeetingPromptCalendarScoring {
     static func calendarCandidates(
         from events: [MeetingPromptCalendarEventSnapshot],
@@ -30,8 +29,8 @@ enum MeetingPromptCalendarScoring {
         let endsIn = event.endDate.timeIntervalSince(now)
         guard MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(startsIn: startsIn, endsIn: endsIn) else { return nil }
 
-        let eventTitle = suggestedTranscriptTitle(from: event) ?? "Upcoming meeting"
         let transcriptTitle = suggestedTranscriptTitle(from: event)
+        let eventTitle = transcriptTitle ?? "Upcoming meeting"
         let runtimeReason = activeRuntimeReason(
             for: provider,
             runtimeSnapshot: runtimeSnapshot

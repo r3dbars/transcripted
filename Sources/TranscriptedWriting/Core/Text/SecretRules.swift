@@ -1,13 +1,12 @@
 import Foundation
 
 /// Deterministic, regex/checksum-based secret detection for text that is
-/// about to be persisted or joined into a completion prompt. This is the
-/// RULES layer only — a fast, fully-tested first pass over structurally
-/// recognizable secrets (credit cards, IBANs, SSNs, API-key shapes, JWTs,
-/// PEM blocks) plus optionally email/phone. A model-based layer (GLiNER)
-/// runs after this, app-side, to catch freeform PII the rules can't see
-/// structurally. Everything here is pure and has no knowledge of where the
-/// text came from or where it is going.
+/// about to be persisted or joined into a completion prompt. Rules only — a
+/// fast, fully-tested pass over structurally recognizable secrets (credit
+/// cards, IBANs, SSNs, API-key shapes, JWTs, PEM blocks) plus optionally
+/// email/phone. Freeform PII the rules can't see structurally isn't caught
+/// here. Everything here is pure and has no knowledge of where the text
+/// came from or where it is going.
 public enum SecretRules {
     /// The shape a rule matched. Used both to label the replacement token
     /// and to identify which rule fired in a `Finding`. Several distinct
@@ -64,8 +63,9 @@ public enum SecretRules {
             self.scrubCardNumbers = scrubCardNumbers
         }
 
-        /// Text about to be written into the encrypted Personal History
-        /// store. Default per the Screen Memory plan: scrub emails/phones.
+        /// Every rule on: emails and phones as well as structured secrets.
+        /// It's `scrub`'s default config; the production callers
+        /// (`WritingSecretScrubber`, `RawContinuationPrompt`) pass their own.
         public static let forPersistence = ScrubConfig(scrubEmails: true, scrubPhones: true)
 
         /// Text about to join a completion prompt (never written to disk

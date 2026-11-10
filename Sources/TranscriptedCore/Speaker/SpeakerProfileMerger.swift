@@ -404,8 +404,8 @@ extension SpeakerDatabase {
 
         if !transactionAlreadyOpen {
             AppLogger.speakers.info("Merged profiles", [
-                "source": source.displayName ?? "\(sourceId)",
-                "target": mergedDisplayName ?? "\(targetId)",
+                "sourceId": sourceId.uuidString,
+                "targetId": targetId.uuidString,
                 "newCallCount": "\(newCallCount)"
             ])
         }
@@ -530,7 +530,7 @@ extension SpeakerDatabase {
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
-                AppLogger.speakers.info("Merged duplicate speaker", ["absorbed": absorbed.displayName ?? "unnamed", "keeper": keeper.displayName ?? "unnamed", "similarity": String(format: "%.3f", similarity)])
+                AppLogger.speakers.info("Merged duplicate speaker", ["absorbedId": absorbed.id.uuidString, "keeperId": keeper.id.uuidString, "similarity": String(format: "%.3f", similarity)])
                 if absorbed.id == speakers[i].id { break }
             }
         }

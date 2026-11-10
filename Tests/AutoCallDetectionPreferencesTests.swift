@@ -7,7 +7,7 @@ func testAutoCallDetectionPreferences() {
 
         assertTrue(
             AutoCallDetectionPreferences.isEnabled(userDefaults: defaults),
-            "ad-hoc call detection should be on for new installs (default ON, like Notion/Plaud)"
+            "ad-hoc call detection should be on for new installs (default ON)"
         )
     }
 

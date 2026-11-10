@@ -248,12 +248,6 @@ allowlist.
   local `EventReporter` events by `AnalyticsEventForwardingPolicy`, which
   rebuilds every value from a fixed set; raw pinned counts and the mic's name
   and UID stay in local logs
-  `restart_trigger`, `stage`, `action`, and the meeting-only
-  `pinned_mic_restart_bucket`, `pinned_mic_gap_bucket`,
-  `pinned_mic_padded_bucket`, and `pinned_mic_dropped_callback_bucket`. The
-  `dictation_pinned_microphone_*` events are forwarded from local
-  `EventReporter` events by `AnalyticsEventForwardingPolicy`, which rebuilds
-  every value from a fixed set; raw pinned counts stay in local logs
 - Writing analytics limited to `save_enabled`, `autocomplete_enabled`,
   `app_scope` (`all` / `picked`), and `model_choice` (`gemma_e2b` /
   `qwen_9b`) on `writing_setup_completed`, plus, on `writing_daily_counts`,

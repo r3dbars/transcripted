@@ -1,6 +1,6 @@
 # Observability sink map
 
-Transcripted writes diagnostics to disk through five distinct sinks. They
+Transcripted writes diagnostics to disk through six distinct sinks. They
 overlap in name and in shape (JSONL-ish, size- or count-bounded, owner-only
 permissions) but serve different audiences and have different retention
 policies. This page is the map. For the privacy/redaction contract (what may
@@ -9,10 +9,11 @@ never reach Sentry/PostHog), see `docs/privacy-first-observability.md`.
 | Sink | Lives in | Writes to | Rotation |
 | --- | --- | --- | --- |
 | `AppLogger` | `Sources/TranscriptedCore/Logging/AppLogger.swift` | `~/Library/Application Support/Transcripted/logs/app.jsonl` (via `FileLogger`) + `os.Logger`/Console.app | Line-count gated: trims to 1500 lines once past 2000, checked every 100 writes |
-| `AppLogSink` | `Sources/Observability/AppLogSink.swift` | `~/Library/Application Support/Transcripted/logs/debug.log` + in-app debug panel (`entries`) | Byte-size gated: trims to 1000 lines once past 500 KB, checked once at session start |
+| `AppLogSink` | `Sources/Observability/AppLogSink.swift` | `~/Library/Application Support/Transcripted/logs/debug.log` (it also keeps the last 200 lines in memory as `entries`, which nothing in the app reads) | Byte-size gated: trims to 1000 lines once past 500 KB, checked at session start and after each append |
 | `FileLogger` | `Sources/TranscriptedCore/Logging/FileLogger.swift` | `app.jsonl` (this is `AppLogger`'s file backend, not a separate log) | Same as `AppLogger` above — it's the same file |
 | `EventReporter` | `Sources/Observability/EventReporter.swift` | `~/Library/Application Support/Transcripted/logs/events.jsonl` + optional Sentry forwarding (errors only, allowlisted) | Rename-based: `ObservabilityLogRotation` renames the active file to `events.jsonl.1` once past the shared JSONL threshold (`TranscriptedConstants.jsonlLogRotationThreshold`) |
 | `ReliabilityPacketRecorder` | `Sources/Observability/ReliabilityPacketRecorder.swift` | `~/Library/Application Support/Transcripted/logs/reliability.jsonl` | Same rename-based `ObservabilityLogRotation` strategy as `EventReporter`, same threshold |
+| `DiagnosticsLog` (Writing) | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log` | Size-gated: renamed to `writing-diagnostics.log.1` once it reaches 4 MB, one old generation kept |
 
 ## Reading the logs
 
@@ -38,11 +39,10 @@ independently for different audiences:
   support engineer can grep structured records after the fact).
 - **`AppLogSink`** (`Sources/Observability/`, renamed from `AppLogger` in the
   2026-07 observability cleanup) is a `@MainActor` `ObservableObject` that
-  backs the in-app debug panel and feeds recent log lines into user-submitted
-  feedback emails (`TranscriptedSupportActions.feedbackEmailURL`). It writes a
-  plain-text `debug.log`, not JSONL, and it is UI-observable — engine code
-  should prefer `TranscriptedCore.AppLogger`; `AppLogSink` is for
-  user-visible/user-submittable diagnostics.
+  writes a plain-text `debug.log`, not JSONL, for the app's user-action trail.
+  Nothing in the app shows its lines, and feedback emails don't include them
+  (`TranscriptedSupportActions.feedbackEmailURL` passes no log lines). Engine
+  code should prefer `TranscriptedCore.AppLogger`.
 
 Because both types lived in the same app target (no module boundary between
 `Sources/Observability/` and `Sources/TranscriptedCore/`'s consumers), any
@@ -62,7 +62,7 @@ are now implemented once:
   public): read the file, keep only the newest N lines, atomically rewrite
   the same path, re-chmod to owner-only. Used by `FileLogger` (gated on line
   count, checked periodically during writes) and `AppLogSink` (gated on byte
-  size, checked once at session start). The gating decision (when to trim)
+  size, checked at session start and after each append). The gating decision (when to trim)
   stays with each caller since the two sinks trigger on different signals;
   the mechanical read/keep-tail/rewrite/re-chmod step is the one shared
   implementation both call, replacing what used to be two hand-rolled copies
@@ -107,8 +107,8 @@ outcome derivation reads, so `recovered` was unreachable in production.
 
 - Writing engine/pipeline code in `TranscriptedCore` or elsewhere in the app
   target? Use `AppLogger.<subsystem>.info/warning/error(...)`.
-- Need something a user can see in a debug panel or attach to a feedback
-  email? Use `AppLogSink` (via `TranscriptedAppState.logger`).
+- Adding a plain-text line to the local `debug.log` user-action trail? Use
+  `AppLogSink` (via `TranscriptedAppState.logger`).
 - Recording a structured, privacy-reviewed event for local diagnostics and
   possible Sentry forwarding? Use `EventReporter.shared.capture(...)` (often
   via `DiagnosticsTrail.record(...)`, which does both the `AppLogSink` line

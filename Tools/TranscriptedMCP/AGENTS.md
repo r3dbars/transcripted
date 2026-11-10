@@ -28,7 +28,7 @@ All read-only. Registered in `ToolHandlers.swift`; bodies live in `ToolHandlers+
 | Dictations | `list_dictations`, `read_dictation` (day, `entry_id`, or `offset`/`limit`) |
 | Writing | `list_writing`, `read_writing` (same shape as dictations) |
 | Search | `search`, `search_context` (meetings/dictations/writing/all; writing is full-text only), `recent_context`, `who_is`. `mode` is `hybrid` (default), `lexical`, or `semantic` |
-| Rollups | `recap`, `list_action_items` (`done` status is rejected with an explicit error), `list_decisions`, `digest` |
+| Rollups | `recap`, `list_action_items` (`status` open/done/all; done means a parsed `(done)` or `(status: ...)` marker), `list_decisions`, `digest` |
 | Receipts | `decisions`, `commitments`, `open_questions`, `search_meetings` (share `handleReceiptQuery`) |
 | Diagnostics | `status`: version, resolved dirs and which rule chose them, index location, counts |
 | MCP Apps | `show_recent_meetings` returns a `ui://` HTML widget plus `structuredContent` (`UIResourceHandlers.swift`) |
@@ -59,7 +59,7 @@ captures/*.md -> TranscriptLoader (direct reads: read_meeting/read_dictation/rea
 ```
 
 - Index tables: meetings, speakers and utterance rows, `meeting_summary_items` (one row per Decision / Action Item with owner / Open Question, `kind` discriminator, FTS5), dictation days and entries, `writing_days` / `writing_entries` + FTS5. Schema version is 6 (`TranscriptIndex.swift`); an older `user_version` rebuilds from disk. DDL is in `TranscriptIndex+Schema.swift`.
-- Summary items come from `TranscriptedCaptureKit.CaptureSummaryParser` over legacy artifacts (inline summary or `<stem>.summary.md` sidecar) during `indexMeeting`. Current app capture does not create new AI summaries. Cross-meeting queries go through `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)`.
+- Summary items come from `TranscriptedCaptureKit.CaptureSummaryParser` during `indexMeeting`: the always-on heuristic `auto_summary_*` frontmatter the app writes on every saved meeting, older `local_summary_*` fields and inline blocks, or a legacy `<stem>.summary.md` sidecar. The app no longer writes AI summaries. Cross-meeting queries go through `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)`.
 - `FileWatcher` debounces 500ms and also scans on a 5-minute timer.
 
 ## Semantic search

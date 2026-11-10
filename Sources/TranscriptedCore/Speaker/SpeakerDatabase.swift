@@ -1,6 +1,7 @@
 // SpeakerDatabase.swift
 // Persistent SQLite database for voice fingerprints.
-// Stores 256-dim speaker embeddings and matches new voices against known speakers.
+// Stores speaker embeddings and matches new voices against known speakers.
+// One database file per voiceprint model; the vector size is the model's.
 // Follows the same SQLite pattern as StatsDatabase.swift.
 
 import Foundation

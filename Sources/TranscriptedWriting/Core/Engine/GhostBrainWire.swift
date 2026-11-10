@@ -20,11 +20,9 @@ public struct GhostBrainRequest: Codable, Equatable, Sendable {
     /// with the current PID/window number so context and response delivery
     /// can be bound to the exact field/window, not merely an app bundle.
     public let fieldSessionIdentifier: String?
-    /// H01 block-randomization arm (`a` or `b`) for the input method's current
-    /// typing session. Omitted — and therefore ignored by the app — unless the
-    /// disabled-by-default Model Preview harness is on. Only the arm identity
-    /// travels: the visible-word cap is looked up from `H01Arm` inside the
-    /// app, so no wire value can set a length directly.
+    /// Experiment-arm slot kept for wire compatibility. The keyboard always
+    /// sends nil; the app never reads it on a completion request and rejects
+    /// a Personal History or Screen Memory request that carries one.
     public let experimentArm: String?
     /// Random identifier the keyboard minted for this opportunity. The app
     /// echoes it on every response line so a receipt can be matched to the

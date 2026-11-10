@@ -83,7 +83,7 @@ public struct PreparedTypedContext: Sendable {
 /// This is a pure restructuring. Each prepared form holds the same values
 /// the per-call path computed, and the entry points that take a scene or a
 /// context string still exist and now build one of these on the way in — so
-/// Lab callers and the visible output are unchanged.
+/// existing callers and the visible output are unchanged.
 public struct PreparedCompletionContext: Sendable {
     public let typed: PreparedTypedContext
     public let sceneEcho: SceneEchoPolicy.PreparedScene

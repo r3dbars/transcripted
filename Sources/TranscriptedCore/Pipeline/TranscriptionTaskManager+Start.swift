@@ -550,6 +550,7 @@ extension TranscriptionTaskManager {
            !inputSnapshot.claimForTranscription(microphoneURL: micURL, systemURL: systemURL) {
             publishFailure(displayMessage: "This saved-audio request was cancelled. Refresh and try again.",
                            diagnosticMessage: "Saved-audio input ownership unavailable")
+            scheduleStatusReset(delay: 4)
             return
         }
 

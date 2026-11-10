@@ -42,6 +42,8 @@ func testDictationStoppedAudioRecoveryRetryRegistry() {
 
 @MainActor
 func testDictationStoppedAudioRecovery() async {
+    testDictationStoppedAudioRecoveryRetryRegistry()
+
     runSuite("Dictation stopped audio recovery writes a valid private WAV") {
         let directory = makeRecoveryTestDirectory("wav")
         defer { try? FileManager.default.removeItem(at: directory) }

@@ -3,10 +3,9 @@ import ServiceManagement
 
 @MainActor
 enum LaunchAtLoginController {
-    /// One read of the login item's status. Each `SMAppService.status` read is
-    /// a synchronous XPC round trip, so callers that need several fields should
-    /// take one state instead of reading `isEnabled`, `needsApproval` and
-    /// `statusDescription` separately.
+    /// One read of the login item's status, on the calling thread. Each
+    /// `SMAppService.status` read is a synchronous XPC round trip, so read
+    /// every field from one state; `readState()` does the read off main.
     static var currentState: LaunchAtLoginState {
         LaunchAtLoginState(status: SMAppService.mainApp.status)
     }
@@ -30,27 +29,8 @@ enum LaunchAtLoginController {
         }
     }
 
-    static var isEnabled: Bool {
-        currentState.isEnabled
-    }
-
-    /// Registered, but macOS won't launch it until the user allows it in
-    /// System Settings > General > Login Items.
-    static var needsApproval: Bool {
-        currentState.needsApproval
-    }
-
-    /// macOS can't find the app to register (a DMG, Downloads, or a dev build).
-    static var isUnavailable: Bool {
-        currentState.isUnavailable
-    }
-
     static func openLoginItemsSettings() {
         SMAppService.openSystemSettingsLoginItems()
-    }
-
-    static var statusDescription: String {
-        currentState.statusDescription
     }
 
     /// What the launch-time login-item sync failed at, as error messages.
@@ -213,7 +193,10 @@ enum LaunchAtLoginController {
 
 struct LaunchAtLoginState: Equatable, Sendable {
     var isEnabled: Bool
+    /// Registered, but macOS won't launch it until the user allows it in
+    /// System Settings > General > Login Items.
     var needsApproval: Bool
+    /// macOS can't find the app to register (a DMG, Downloads, or a dev build).
     var isUnavailable: Bool
     var statusDescription: String
 

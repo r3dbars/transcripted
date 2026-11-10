@@ -567,16 +567,6 @@ extension TranscriptionTaskManager {
                         callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0), earnsConfirmation: earnsConfirmationByProfile[profile.id] ?? false
                     )
                 }
-            // The auto-recognition roster shown as the review sheet's payoff
-            // line. Shares the exact policy predicate (including lifeline
-            // health) with the auto-accept gate so the sheet never promises
-            // recognition the pipeline would refuse.
-            let recognizedPeopleCount = allProfiles.filter { profile in
-                return SpeakerNamingPolicy.isAutoRecognizable(
-                    profile: profile,
-                    recentOutcomes: cachedRecentOutcomes(profile)
-                )
-            }.count
 
             let capturedEntries = Self.withConfirmationProgress(namingEntries, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
             let capturedRecognizedEntries = Self.withConfirmationProgress(recognizedEntries, recognized: true, profile: { speakerDB.getSpeaker(id: $0) }, trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) }, earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false }, invited: invitedNameKeys, fromInvite: lineupIsFromInvite, thresholds: speakerThresholds)
@@ -599,7 +589,6 @@ extension TranscriptionTaskManager {
                     id: speakerNamingRequestId,
                     speakers: capturedEntries,
                     knownPeople: knownPeople,
-                    recognizedPeopleCount: recognizedPeopleCount,
                     recognizedSpeakerNames: recognizedSpeakerNames,
                     recognizedSpeakers: capturedRecognizedEntries,
                     transcriptURL: savedURL,

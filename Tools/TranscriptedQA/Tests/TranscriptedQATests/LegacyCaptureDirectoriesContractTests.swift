@@ -75,4 +75,24 @@ final class LegacyCaptureDirectoriesContractTests: XCTestCase {
             "QA should infer the legacy shared folder itself as the state directory, matching the resolver's list"
         )
     }
+
+    func testSiblingOfLegacySharedPathKeepsCurrentLayout() {
+        let legacy = CaptureLibraryResolver.legacyCaptureDirectories(homeDirectory: home)
+        let sibling = legacy.sharedRoot.deletingLastPathComponent()
+            .appendingPathComponent("Transcripted Backup", isDirectory: true)
+            .appendingPathComponent("meetings", isDirectory: true)
+
+        let resolved = QADataDirectories.resolve(
+            meetingsDir: sibling.path,
+            homeDirectory: home
+        )
+
+        let currentState = home.standardizedFileURL
+            .appendingPathComponent("Library/Application Support/Transcripted/state", isDirectory: true)
+        XCTAssertEqual(
+            resolved.stateDir.standardizedFileURL.path,
+            currentState.standardizedFileURL.path,
+            "a folder that only shares a name prefix with the legacy shared folder must not inherit its layout"
+        )
+    }
 }

@@ -248,6 +248,29 @@ func testNextSentenceGuards() {
         for _ in 0..<200 where helper.isRunning { Thread.sleep(forTimeInterval: 0.05) }
         assertFalse(helper.isRunning, "a helper that exited leaves nothing running, so the index knows it's gone")
     }
+
+    runSuite("Write for Me: a reply handler can read the helper's stderr, so an error with no message still shows why") {
+        // Writes to stderr, waits for one line on stdin, then answers with an error line that has no message.
+        let script = "echo 'not signed in' >&2; read line; echo '{\"type\":\"result\",\"is_error\":true}'"
+        let process = NextSentenceLineProcess(executable: URL(fileURLWithPath: "/bin/sh"), arguments: ["-c", script],
+                                              label: "test-stderr-tail")
+        let seen = StderrTailProbe()
+        // The handler runs on the process's own I/O queue, which is where the real error path reads stderr.
+        process.onLine { _ in seen.record(process.stderrTail()) }
+        do { try process.start() } catch { return recordFailure("the helper didn't start: \(error)") }
+        defer { process.onLine(nil); process.terminate() }
+        for _ in 0..<200 where process.stderrTail().isEmpty { Thread.sleep(forTimeInterval: 0.05) }
+        do { try process.send([:]) } catch { return recordFailure("the helper took no input: \(error)") }
+        for _ in 0..<200 where seen.tail == nil { Thread.sleep(forTimeInterval: 0.05) }
+        assertEqual(seen.tail, "not signed in", "the handler got the stderr text instead of hanging on its own queue")
+    }
+}
+
+private final class StderrTailProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: String?
+    func record(_ tail: String) { lock.lock(); value = tail; lock.unlock() }
+    var tail: String? { lock.lock(); defer { lock.unlock() }; return value }
 }
 
 private final class FakeWarmProcess: NextSentenceWarmProcess, @unchecked Sendable {

@@ -90,4 +90,20 @@ func testPhysicalShortcutTapRecovery() {
         queue.runNext()
         assertEqual(queue.completions, [true, false])
     }
+
+    runSuite("A tap disabled again while its re-enable is in flight gets one more recovery") {
+        let queue = ShortcutRecoveryTestQueue()
+        let recovery = PhysicalShortcutTapRecovery(enqueue: { queue.enqueue($0) })
+        recovery.request(enable: {
+            // macOS reports the tap disabled again before the first enable returns.
+            recovery.request(enable: { queue.enable() }, completed: { queue.report($0) })
+            recovery.request(enable: { queue.enable() }, completed: { queue.report($0) })
+            return queue.enable()
+        }, completed: { queue.report($0) })
+        queue.runNext()
+        assertEqual(queue.queued, 1, "the later disable is not dropped, and repeats still share one job")
+        queue.runNext()
+        assertEqual(queue.enableCount, 2, "the tap is re-enabled again after the first attempt")
+        assertEqual(queue.completions, [true, true])
+    }
 }

@@ -53,7 +53,7 @@ bash run-tests.sh --filter MeetingPill
 bash run-tests.sh --filter CapturePill
 ```
 
-Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOverlayPlacementPolicyTests`, `OverlayScreenSharePrivacyTests` (scans all of `Sources/UI`). The island is excluded from screenshots, so review a visual change by rendering `NotchIslandView` offscreen with `NSView.cacheDisplay(in:to:)` (`layer.render(in:)` drops AppKit text).
+Also `MeetingPromptPriorityTests`, `MeetingDurationFormatterTests`, `DictationOverlayPlacementPolicyTests`, `OverlayScreenSharePrivacyTests`. The island is excluded from screenshots, so review a visual change by rendering `NotchIslandView` offscreen with `NSView.cacheDisplay(in:to:)` (`layer.render(in:)` drops AppKit text).
 
 ## Rules
 

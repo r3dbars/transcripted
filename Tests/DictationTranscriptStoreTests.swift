@@ -303,14 +303,14 @@ func testDictationTranscriptStore() {
 
         let entries = DictationTranscriptStore.recentSavedDictations(limit: 2, directory: outputDir)
         guard let second = entries.first(where: { $0.entryID == "dictation-second" }) else {
-            assertionFailure("Expected second dictation entry")
+            assertTrue(false,"Expected second dictation entry")
             return
         }
 
         do {
             _ = try DictationTranscriptStore.deleteEntryReversibly(second)
         } catch {
-            assertionFailure("deleteEntryReversibly should not throw: \(error)")
+            assertTrue(false,"deleteEntryReversibly should not throw: \(error)")
         }
 
         let remainingContent = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
@@ -354,14 +354,14 @@ func testDictationTranscriptStore() {
         assertEqual(uniqueEntryIDs.count, 2, "same-timestamp saves should still get unique entry IDs")
 
         guard let second = entries.first(where: { $0.text == "second saved text" }) else {
-            assertionFailure("Expected second saved dictation entry")
+            assertTrue(false,"Expected second saved dictation entry")
             return
         }
 
         do {
             _ = try DictationTranscriptStore.deleteEntryReversibly(second)
         } catch {
-            assertionFailure("deleteEntryReversibly should not throw for unique same-timestamp save: \(error)")
+            assertTrue(false,"deleteEntryReversibly should not throw for unique same-timestamp save: \(error)")
         }
 
         let remainingEntries = DictationTranscriptStore.recentSavedDictations(limit: 5, directory: outputDir)
@@ -389,7 +389,7 @@ func testDictationTranscriptStore() {
         guard let middle = DictationTranscriptStore.recentSavedDictations(limit: 10, directory: outputDir)
             .first(where: { $0.text == "bravo note two" }),
             let undo = try? DictationTranscriptStore.deleteEntryReversibly(middle) else {
-            assertionFailure("Expected to delete the middle entry reversibly")
+            assertTrue(false,"Expected to delete the middle entry reversibly")
             return
         }
 
@@ -405,7 +405,7 @@ func testDictationTranscriptStore() {
         do {
             try DictationTranscriptStore.restoreDeletedEntry(undo)
         } catch {
-            assertionFailure("restoreDeletedEntry should not throw: \(error)")
+            assertTrue(false,"restoreDeletedEntry should not throw: \(error)")
         }
 
         let texts = DictationTranscriptStore.recentSavedDictations(limit: 20, directory: outputDir).map(\.text).sorted()
@@ -460,7 +460,7 @@ func testDictationTranscriptStore() {
         guard let edited = DictationTranscriptStore.recentSavedDictations(limit: 10, directory: outputDir)
             .first(where: { $0.entryID == "dictation-hand-edited" }),
             let undo = try? DictationTranscriptStore.deleteEntryReversibly(edited) else {
-            assertionFailure("Expected to delete the hand-edited entry reversibly")
+            assertTrue(false,"Expected to delete the hand-edited entry reversibly")
             return
         }
 
@@ -475,7 +475,7 @@ func testDictationTranscriptStore() {
         do {
             try DictationTranscriptStore.restoreDeletedEntry(undo)
         } catch {
-            assertionFailure("restoreDeletedEntry should not throw: \(error)")
+            assertTrue(false,"restoreDeletedEntry should not throw: \(error)")
         }
 
         let restored = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
@@ -511,7 +511,7 @@ func testDictationTranscriptStore() {
             guard let target = DictationTranscriptStore.recentSavedDictations(limit: 20, directory: outputDir)
                 .first(where: { $0.entryID == "dictation-target" }),
                 let undo = try? DictationTranscriptStore.deleteEntryReversibly(target) else {
-                assertionFailure("cycle \(cycle): expected to delete the target entry reversibly")
+                assertTrue(false,"cycle \(cycle): expected to delete the target entry reversibly")
                 return
             }
             _ = try? DictationTranscriptWriter.save(
@@ -524,7 +524,7 @@ func testDictationTranscriptStore() {
             do {
                 try DictationTranscriptStore.restoreDeletedEntry(undo)
             } catch {
-                assertionFailure("cycle \(cycle): restoreDeletedEntry should not throw: \(error)")
+                assertTrue(false,"cycle \(cycle): restoreDeletedEntry should not throw: \(error)")
             }
             let afterUndo = (try? String(contentsOf: dayFile, encoding: .utf8)) ?? ""
             assertTrue(afterUndo.hasSuffix(targetSection + "\n"), "cycle \(cycle): undo should append the exact target bytes")

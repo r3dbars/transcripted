@@ -47,13 +47,6 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         }
     }
 
-    func reservedIdentity(at url: URL) -> UUID? {
-        lock.lock()
-        defer { lock.unlock() }
-        let path = key(for: url)
-        return entries.values.first { $0.path == path }?.transcriptId
-    }
-
     func reservedExpectation(at url: URL) -> TranscriptReplacementExpectation? {
         let path = key(for: url)
         lock.lock()
@@ -316,37 +309,6 @@ public class TranscriptSaver {
             statsStore: statsStore,
             transcriptionEngine: .parakeetLocal,
             formatOptions: formatOptions
-        )
-    }
-
-    @available(macOS 14.0, *)
-    @discardableResult
-    public static func saveTranscript(
-        _ result: TranscriptionResult,
-        transcriptId: UUID,
-        speakerMappings: [String: SpeakerMapping] = [:],
-        speakerSources: [String: String] = [:],
-        speakerDbIds: [String: UUID] = [:],
-        directory: URL? = nil,
-        meetingTitle: String? = nil,
-        healthInfo: RecordingHealthInfo? = nil,
-        notifier: TranscriptNotifier? = nil,
-        speakerStore: (any SpeakerStore)? = nil,
-        statsStore: (any StatsStore)? = nil
-    ) -> URL? {
-        saveTranscript(
-            result,
-            transcriptId: transcriptId,
-            speakerMappings: speakerMappings,
-            speakerSources: speakerSources,
-            speakerDbIds: speakerDbIds,
-            directory: directory,
-            meetingTitle: meetingTitle,
-            healthInfo: healthInfo,
-            notifier: notifier,
-            speakerStore: speakerStore,
-            statsStore: statsStore,
-            formatOptions: .default
         )
     }
 

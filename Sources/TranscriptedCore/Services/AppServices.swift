@@ -7,8 +7,9 @@ import Foundation
 // (ParakeetEngineAdapter in Transcripted standalone; MeetingSTTAdapter in
 // `Sources/Meeting/` in this repo).
 //
-// Diarization, stats, and the speaker store still default to Core's
-// concrete implementations via empty extensions (see Step 8 wiring).
+// Diarization and the speaker store are injected the same way. Core's own
+// `DiarizationService` and `SpeakerDatabase` conform through empty
+// extensions, so a host can pass them directly.
 
 @available(macOS 14.0, *)
 @MainActor

@@ -117,7 +117,7 @@ extension MeetingPromptDetector {
     /// nonempty→empty transition ends the call; if it was long enough,
     /// unrecorded, and not explicitly declined, `onUnrecordedCallEnded` fires.
     /// Runs every evaluate() pass, so signal-inactive edges from the monitors
-    /// end the session promptly and the 20s poll bounds recording-overlap
+    /// end the session promptly and the 120 s poll bounds recording-overlap
     /// sampling. Meeting recordings keep the underlying app's signals alive
     /// (only our own bundle is filtered), so recording never splits a session.
     func updateDetectedCallSession(

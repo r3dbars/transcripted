@@ -53,4 +53,4 @@ Mac or hardware test still needed? If yes: the steps, the log line or UI change 
 
 <!-- For delegated work, paste the one-line closeout from docs/agent-closeout.md. -->
 
-`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`
+`COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action`

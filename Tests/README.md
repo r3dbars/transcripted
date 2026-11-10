@@ -261,8 +261,8 @@ the explicit boundary between this executor test and full engine/live proof.
 
 `bash run-integration-smoke.sh` verifies that the app-side dependency bundle
 still exposes the `TranscriptedCore` types that `Sources/Meeting/` depends on.
-It also runs the wake-recovery smoke binary and currently finishes with
-`swift test --filter MicRecordingFileMergerTests`.
+It also runs the wake-recovery smoke binary and the Parakeet lifecycle executor
+harness above, and finishes with `swift test --filter MicRecordingFileMergerTests`.
 
 The smoke sources now live under `Tests/Integration/` so the repo’s verification
 surface stays under one top-level `Tests/` umbrella.

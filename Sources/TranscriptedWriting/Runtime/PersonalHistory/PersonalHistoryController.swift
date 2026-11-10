@@ -305,7 +305,7 @@ final class PersonalHistoryController: PersonalHistoryIngesting, @unchecked Send
     }
 
     /// Read-only production lookup for the "Personal suggestions
-    /// (experimental)" toggle (`docs/plans/road-to-paid.md` Phase 3). Goes
+    /// (experimental)" toggle. Goes
     /// through the SAME actor that owns the live trained model — no new
     /// state, no separate copy — but only ever calls
     /// `PersonalNextWordShadow.predictNextWord`, a non-mutating lookup, so

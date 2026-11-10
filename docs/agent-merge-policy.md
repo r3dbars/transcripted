@@ -2,7 +2,7 @@
 
 Every PR gets a risk tier. Low and medium PRs may squash-merge on their own once CI is green and the AI review found nothing serious. **High-risk PRs are always merged by Justin, by hand.** Releases stay manual: nothing here tags, builds, signs, notarizes or publishes.
 
-Code: `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (run by `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them). Design: `automerge-trust-design.md` (Option A, the GitHub App check run).
+Code: `scripts/ops/risk-triage.py`, run by `.github/workflows/risk-triage.yml`. Tests: `python3 scripts/ops/test-risk-triage.py` (run by `scripts/dev/linux-checks.sh`, so `repo-hygiene` runs them).
 
 The older lane gate (`scripts/ops/auto-merge-gate.py`, `docs/auto-merge-gate.md`) uses this classifier and the same App-stored AI verdict, never merges a `risk:high` PR, and **only merges with the gate App's token** (`GATE_TOKEN`). Run from a Mac with a person's `gh` login, it refuses to merge.
 
@@ -21,7 +21,7 @@ Each changed file, and the old name of a renamed file, is checked; **the highest
 | Tier | What |
 |---|---|
 | `risk:high` (owner paths) | Release, version, Sparkle, appcast, cask, signing, notarization, entitlements, `Info.plist`, `server.json`, `glama.json`. **Every workflow and action, `CODEOWNERS`, the gate itself** (`risk-triage.py`, `test-risk-triage.py`, `auto-merge-gate.py`, the lane file, this doc) and the **CI harness** the required checks run (`scripts/ci/**`, `scripts/dev/linux-checks.sh`, `scripts/dev/agent-preflight.sh`, `scripts/dev/check-*.py`, `run-tests.sh`, `check.sh`, `run-*-smoke.sh`). |
-| `risk:high` | Audio capture and `Sources/Speech/**`; database, schema, migrations, reassignment log; permissions/TCC/entitlements; privacy egress (sanitizers, redactors, scrubbers, `*Privacy*`, event policies, crash reporting, telemetry, all of `Sources/Observability/**`, analytics preferences); `Package.swift`; agent instructions and config (`AGENTS.md`, `CLAUDE.md`, `WORKFLOW.md`, `.claude/**`, `.codex/**`, `.cursor/**`, `.agents/**` except debt baselines, `**/skills/**`, `**/SKILL.md`, `.agent-review/*.md`, `.github/*.md`), checked before the `*.md` = low rule; and code the release-candidate job runs beside the signing keychain (`Tools/TranscriptedQA/**`, `scripts/ops/privacy-leak-sweep.py`, `scripts/entrypoints/**`, `Tools/*/Package.swift`, `Package.resolved`). `docs/appcast.xml` is the live Sparkle feed (`SUFeedURL` points at `main`), so merging it is releasing: owner path. |
+| `risk:high` | Audio capture and `Sources/Speech/**`; database, schema, migrations, reassignment log; permissions/TCC/entitlements; privacy egress (sanitizers, redactors, scrubbers, `*Privacy*`, event policies, crash reporting, telemetry, all of `Sources/Observability/**`, analytics preferences); `Package.swift`; agent instructions and config (`AGENTS.md`, `CLAUDE.md`, `WORKFLOW.md`, `.claude/**`, `.codex/**`, `.cursor/**`, `.agents/**` except debt baselines, `**/skills/**`, `**/SKILL.md`, `.agent-review/*.md`, `.github/*.md`), checked before the `*.md` = low rule; and code the release-candidate job runs beside the signing keychain (`Tools/TranscriptedQA/**`, `scripts/ops/privacy-leak-sweep.py`, `scripts/entrypoints/**`, `Tools/*/Package.swift`, `Package.resolved`). `docs/appcast.xml` is the frozen legacy feed that installs older than the release-asset feed still read from `main`, so merging it ships to them: owner path. |
 | `risk:high` (owner-protected surfaces, from `AGENTS.md`) | Meeting detection and its prompt flow (`MicActivityMonitor`, `CameraActivityMonitor`, `MeetingPromptDetector*`, `MeetingPrompt*`, `AutoCallDetectionPreferences`); the Speakers directory (`SpeakerPeople*`, `SpeakerSettingsStore`); per-app Auto Enter (`DictationAutoSendPreferences`, `AutoEnter*`); model-cache inspection (`*ModelCache*`); the status item (`StatusItem*`); meeting-audio playback (`MeetingAudioPlayback*`). |
 | `risk:high` (harness guards) | `AutomatedLaunchEnvironment*`, `NativeSmokeIsolation*`, `scripts/ops/native-smoke-isolation.py`, `scripts/vm/**`. |
 | `risk:medium` | Other source changes up to **400 changed lines** for the whole PR (bigger is high). Debt baselines except the concurrency one. **Unknown paths are high.** |
@@ -59,7 +59,7 @@ python3 scripts/ops/risk-triage.py gate --pr 2190          # dry run: print the 
 Agents run `gh` as @r3dbars, so anything "only @r3dbars can do" is something every agent can do. So:
 - No code path here merges or arms auto-merge with a person's token or `GITHUB_TOKEN`; only the gate App token. A test fails if any workflow or script calls `gh pr merge ... --admin`.
 - The lane gate refuses to merge without `GATE_TOKEN`.
-- What actually stops an agent with Justin's admin token from clicking merge is outside code: see "Justin only" in `automerge-trust-design.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
+- What actually stops an agent with Justin's admin token from clicking merge is outside code: see section B of `docs/automerge-justin-setup.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
 
 ## 6. CODEOWNERS
 

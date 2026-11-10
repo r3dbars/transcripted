@@ -8,6 +8,9 @@ import Foundation
 final class NextSentenceSynth {
     static let shared = NextSentenceSynth()
 
+    /// AirPods: output only. It reads `outputNode`'s format and feeds `mainMixerNode`; nothing here
+    /// touches `inputNode`, so this engine never binds the macOS default input and can't push a
+    /// Bluetooth headset that is the default input into call mode.
     private let engine = AVAudioEngine()
     private let reverb = AVAudioUnitReverb()
     /// Mono voices meet here; it hands the reverb the stereo it needs.

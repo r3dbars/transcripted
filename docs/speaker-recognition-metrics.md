@@ -20,8 +20,10 @@ Three numbers say whether the system works:
 
 1. **Confirmed meetings to graduation** — how many distinct meetings the user
    confirms before the first silent auto-recognition. The policy requires 5
-   explicit confirmations plus similarity > 0.92 and margin ≥ 0.12 in
-   `SpeakerNamingPolicy`. Passive appearances never graduate a profile.
+   explicit confirmations plus the voiceprint model's auto-accept similarity
+   and margin (`SpeakerEmbeddingThresholds.autoAcceptSimilarity` /
+   `autoAcceptMarginMin`: 0.946 / 0.128 for the default ReDimNet2, 0.92 / 0.12
+   for WeSpeaker). Passive appearances never graduate a profile.
 2. **Recognition precision** — confirmed vs corrected verdicts. Should trend up.
 3. **Questions per meeting** — review rows requiring a user answer. Should
    trend down.
@@ -74,9 +76,6 @@ auto-accept sites in `TranscriptionPipelineRunner` via
 
 - `SpeakerReviewPrioritizer` orders review rows most-informative-first:
   doubtful suggestions (lowest similarity) lead, unknown voices follow.
-- The sheet shows the payoff line "Transcripted recognizes N people
-  automatically" (`SpeakerNamingRequest.recognizedPeopleCount`) so confirming
-  visibly makes the app smarter.
 
 ### 3. Fleet calibration (better for everyone)
 
@@ -97,8 +96,8 @@ Two allowlisted, bucketed PostHog events (see
   same buckets plus `graduated` (a profile's first-ever auto-recognition).
 
 Correction rate by similarity/margin bucket across the fleet is exactly the
-curve needed to retune the auto-accept gates (0.92 similarity / 0.12 margin / 5
-explicitly confirmed meetings) from real living rooms instead of the AMI
+curve needed to retune the auto-accept gates (the per-model auto-accept
+similarity / margin and 5 explicitly confirmed meetings) from real living rooms instead of the AMI
 corpus. Validate any proposed threshold change offline with
 `Tools/SpeakerEvalHarness` before shipping it.
 

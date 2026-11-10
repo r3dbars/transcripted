@@ -150,11 +150,12 @@ RULES: tuple[Rule, ...] = (
         name="diagnostic file writers avoid the NSException-throwing legacy FileHandle APIs",
         files=(
             "Sources/Observability/LockedFileAppender.swift",
-            "Sources/Observability/EventReporter.swift",
+            "Sources/Observability/EventFileWriter.swift",
             "Sources/Observability/ReliabilityPacketRecorder.swift",
             "Sources/Observability/AppLogSink.swift",
             "Sources/TranscriptedCore/Logging/FileLogger.swift",
-            "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater.swift",
+            "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater+Scanning.swift",
+            "Sources/Observability/ObservabilityLogRotation.swift",
         ),
         strip_line_comments=True,
         banned=(

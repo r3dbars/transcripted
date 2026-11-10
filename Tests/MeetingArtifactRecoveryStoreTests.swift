@@ -9,7 +9,7 @@ func testMeetingArtifactRecoveryStore() {
             let targetURL = meetingsRoot.appendingPathComponent("2026-06-05 Launch planning.md")
             guard let values = try TranscriptFrontmatter.readValues(from: transcriptURL),
                   let captureID = TranscriptFrontmatter.captureID(in: values) else {
-                assertionFailure("fixture should include a capture ID")
+                assertTrue(false,"fixture should include a capture ID")
                 return
             }
             let foreign = Data("""
@@ -36,7 +36,7 @@ func testMeetingArtifactRecoveryStore() {
                     },
                     recoveryStoreDirectory: artifactRecoveryStoreDirectory(for: meetingsRoot)
                 )
-                assertionFailure("a target collision should not be reconciled as our transcript")
+                assertTrue(false,"a target collision should not be reconciled as our transcript")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -44,7 +44,7 @@ func testMeetingArtifactRecoveryStore() {
                     "a foreign target should remain a normal move failure"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertEqual(try Data(contentsOf: transcriptURL), original, "the owned transcript should remain untouched")
@@ -84,7 +84,7 @@ func testMeetingArtifactRecoveryStore() {
                     },
                     recoveryStoreDirectory: recoveryStoreDirectory
                 )
-                assertionFailure("partial copy recovery should remain pending")
+                assertTrue(false,"partial copy recovery should remain pending")
             } catch let error as MeetingArtifactRenameError {
                 assertEqual(
                     error,
@@ -92,7 +92,7 @@ func testMeetingArtifactRecoveryStore() {
                     "the complete target must remain the recovery source"
                 )
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertFalse(FileManager.default.fileExists(atPath: sourceAudioDirectory.path), "a partial source copy must be removed")
@@ -147,11 +147,11 @@ func testMeetingArtifactRecoveryStore() {
                     to: "Launch planning",
                     recoveryStoreDirectory: recoveryStoreDirectory
                 )
-                assertionFailure("a damaged journal should block artifact movement")
+                assertTrue(false,"a damaged journal should block artifact movement")
             } catch let error as HomeMeetingRenameError {
                 assertEqual(error, .artifactRenameFailed, "journal damage should fail closed")
             } catch {
-                assertionFailure("unexpected error: \(error)")
+                assertTrue(false,"unexpected error: \(error)")
             }
 
             assertEqual(
@@ -167,7 +167,7 @@ func testMeetingArtifactRecoveryStore() {
             )
             do {
                 _ = try MeetingArtifactRecoveryStore.pendingNotices(directory: recoveryStoreDirectory)
-                assertionFailure("launch scanning should also report journal damage")
+                assertTrue(false,"launch scanning should also report journal damage")
             } catch {
                 // Expected: unreadable journals stay blocking instead of being skipped.
             }
@@ -232,7 +232,7 @@ private func withTemporaryMeetingArtifactRecoveryLibrary(_ body: (URL) throws ->
         try fileManager.createDirectory(at: meetingsRoot, withIntermediateDirectories: true)
         try body(meetingsRoot)
     } catch {
-        assertionFailure("temporary recovery fixture failed: \(error)")
+        assertTrue(false,"temporary recovery fixture failed: \(error)")
     }
     try? fileManager.removeItem(at: root)
 }

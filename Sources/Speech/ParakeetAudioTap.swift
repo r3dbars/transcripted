@@ -177,12 +177,10 @@ extension ParakeetEngine {
             try inputNode.setVoiceProcessingEnabled(enabled)
             if enabled {
                 inputNode.isVoiceProcessingAGCEnabled = true
-                if #available(macOS 14.0, *) {
-                    inputNode.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
-                        enableAdvancedDucking: false,
-                        duckingLevel: .min
-                    )
-                }
+                inputNode.voiceProcessingOtherAudioDuckingConfiguration = AVAudioVoiceProcessingOtherAudioDuckingConfiguration(
+                    enableAdvancedDucking: false,
+                    duckingLevel: .min
+                )
             }
             return inputNode.isVoiceProcessingEnabled == enabled
         } catch {

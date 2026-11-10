@@ -940,10 +940,6 @@ struct PersonalHistoryControllerTests {
             appendFailure = failure
         }
 
-        func setReplayFailure(_ failure: PersonalHistoryStorageError?) {
-            replayFailure = failure
-        }
-
         func waitForReplayStart() async {
             guard !replayStarted else { return }
             await withCheckedContinuation { replayStartWaiters.append($0) }
