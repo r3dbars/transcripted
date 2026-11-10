@@ -34,13 +34,15 @@ final class SecureKeyboardEntryMonitor {
         dictationUsesModifierKey: Bool,
         dictationShortcutsEnabled: Bool,
         dictationKeyDisplay: String,
+        meetingKeyDisplay: String? = nil,
         now: TimeInterval = ProcessInfo.processInfo.systemUptime,
         refreshOwner: Bool = false
     ) {
         let snapshot: SecureEventInputSnapshot
         if SecureKeyboardEntryWarningPolicy.shouldPoll(
             dictationUsesModifierKey: dictationUsesModifierKey,
-            dictationShortcutsEnabled: dictationShortcutsEnabled
+            dictationShortcutsEnabled: dictationShortcutsEnabled,
+            meetingShortcutBlocked: meetingKeyDisplay != nil
         ) {
             snapshot = makeSnapshot(refreshOwner: refreshOwner)
         } else {
@@ -54,6 +56,7 @@ final class SecureKeyboardEntryMonitor {
             dictationUsesModifierKey: dictationUsesModifierKey,
             dictationShortcutsEnabled: dictationShortcutsEnabled,
             dictationKeyDisplay: dictationKeyDisplay,
+            meetingKeyDisplay: meetingKeyDisplay,
             selfProcessID: selfProcessID,
             now: now
         )

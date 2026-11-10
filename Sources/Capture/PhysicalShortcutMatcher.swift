@@ -275,25 +275,35 @@ extension PhysicalShortcutMatcher {
         // No paste-last-dictation shortcut: it was dropped from Settings,
         // and a global chord nobody can see or change shouldn't stay live.
         let meeting = PhysicalDictationTriggerPreferences.meetingBinding(userDefaults: userDefaults)
-        var bindings: [PhysicalShortcutBinding] = []
+        var dictation: PhysicalShortcutBinding?
 
         if HotkeyPreferences.dictationShortcutsEnabled(userDefaults: userDefaults) {
             // One dictation key. Tap to toggle runs it through the hands-free
             // path; the other behaviors are Push to Talk, where Hold or tap
             // keeps listening after a quick tap (DictationHotkeyRouter).
             let behavior = HotkeyPreferences.dictationKeyBehavior(userDefaults: userDefaults)
-            let dictation = PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
-            bindings.append(
-                PhysicalShortcutBinding(
-                    action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
-                    binding: dictation
-                )
+            dictation = PhysicalShortcutBinding(
+                action: behavior == .tapToToggle ? .dictationHandsFree : .dictationPushToTalk,
+                binding: PhysicalDictationTriggerPreferences.pushToTalkBinding(userDefaults: userDefaults)
             )
+        }
+        return configuredBindings(dictation: dictation, meeting: meeting)
+    }
+
+    /// The same registration assembly, with values supplied directly so callers
+    /// can reason about the installed bindings without reading preferences.
+    static func configuredBindings(
+        dictation: PhysicalShortcutBinding?,
+        meeting: PhysicalDictationTriggerBinding
+    ) -> [PhysicalShortcutBinding] {
+        var bindings: [PhysicalShortcutBinding] = []
+        if let dictation {
+            bindings.append(dictation)
             // F8 vs Fn+F8 now compare equal. Installing both would make
             // `.first` matching leave meetings silently dead. Settings
             // shows `storedClashReason` so the user can pick a free key.
             if PhysicalDictationTriggerPreferences.storedClashReason(
-                dictation: dictation,
+                dictation: dictation.binding,
                 meeting: meeting
             ) != nil {
                 return bindings
