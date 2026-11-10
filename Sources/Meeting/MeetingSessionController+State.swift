@@ -444,13 +444,14 @@ final class MeetingSessionController: ObservableObject {
         _ = MeetingStoragePaths.recordingsScratch
         _ = MeetingStoragePaths.audioArchiveFolder
 
-        // Speaker embedding model selection. ERes2Net (codec-robust, 192-dim) runs
-        // after diarization to drive same-voice consolidation + cross-call matching;
-        // WeSpeaker (256-dim, diarizer-native) is the default. The two produce
-        // different-dimension vectors, so each gets its own speaker database file —
-        // a SpeakerProfile row must never mix dimensions. makeEmbedder loads nothing
-        // here on the main actor: it picks the model (and so the DB path) from
-        // model-file presence and returns an embedder that loads in the background;
+        // SpeakerEmbedderChoiceResolution picks the voiceprint model for
+        // same-voice consolidation + cross-call matching after diarization:
+        // ReDimNet2 (192-dim) by default, ERes2Net (192-dim) when chosen, and
+        // native WeSpeaker (256-dim) when selected or used as the fallback.
+        // Each model gets its own speaker database file so a SpeakerProfile
+        // never mixes dimensions. makeEmbedder loads nothing here on the main
+        // actor: model-file presence selects an embedder and its database path,
+        // and the embedder loads in the background;
         // the diarizer's warmup, each meeting and the voiceprint migration await it.
         // A missing model, or one that failed to load on this build, returns nil:
         // native WeSpeaker embedding AND the default speakers.sqlite. A load that
