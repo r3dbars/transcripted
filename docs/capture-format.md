@@ -215,11 +215,14 @@ that name as a hint, not an identity. Naming or confirming the voice, or
 renaming or merging that person in Settings › Speakers, rewrites the row
 with the real name and drops `name_source`. New files never write it.
 
-Obsidian metadata (legacy, read-only): older transcripts written while the
-retired `enableObsidianFormat` flag existed may carry nested `tags:`,
+Obsidian metadata (legacy app format; optional Core output): older transcripts
+written while the retired `enableObsidianFormat` flag existed may carry nested `tags:`,
 `aliases:`, and `cssclasses:` blocks, with named body speakers wrapped in
-`[[wiki links]]`. New transcripts never include these, but parsers and
-speaker-rename rewrites still tolerate and preserve them.
+`[[wiki links]]`. The current app and CLI write plain output; the app no longer
+reads that preference. Core's public `TranscriptFormatOptions` still allows
+an embedder to explicitly set `includeObsidianMetadata: true` when formatting
+or saving new transcripts. Its default is false. Parsers and speaker-rename
+rewrites still tolerate and preserve the legacy form.
 
 Older files may contain `auto_summary_*`, `local_summary_*`, or other summary
 frontmatter and trailing sections. These are legacy data: current meeting
