@@ -32,12 +32,6 @@ enum MenuBarMeetingCapturePhase: Equatable {
         case .saving: return "Saving…"
         }
     }
-
-    /// Stop still works while the mic is engaging (it joins the pending
-    /// start); once the audio is being saved there is nothing left to stop.
-    var allowsStop: Bool {
-        self != .saving
-    }
 }
 
 /// What the menu's meeting button does for a given session state. Starting,

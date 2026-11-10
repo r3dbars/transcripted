@@ -14,9 +14,5 @@ func testMenuBarMeetingCapturePhase() {
         assertEqual(MenuBarMeetingCapturePhase.starting.headerText, "Starting…", "starting should not claim to be recording yet")
         assertEqual(MenuBarMeetingCapturePhase.recording.headerText, "Recording", "steady capture keeps the Recording label")
         assertEqual(MenuBarMeetingCapturePhase.saving.headerText, "Saving…", "saving should not claim to still be recording")
-
-        assertTrue(MenuBarMeetingCapturePhase.starting.allowsStop, "stop joins a pending start")
-        assertTrue(MenuBarMeetingCapturePhase.recording.allowsStop, "stop works while recording")
-        assertFalse(MenuBarMeetingCapturePhase.saving.allowsStop, "the saving item should be disabled")
     }
 }
