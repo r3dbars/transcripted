@@ -58,7 +58,8 @@ ASSERTION_CALL = re.compile(
     r"(#expect|#require|XCTAssert[A-Za-z]*|assertTrue|assertFalse|assertEqual|assertLessThan|\bassert)\s*\("
 )
 CLOCK_READ = re.compile(
-    r"timeIntervalSince(?!1970|ReferenceDate)|CFAbsoluteTimeGetCurrent|DispatchTime\.now|uptimeNanoseconds|"
+    r"Date\s*\(\s*\)\s*\.\s*timeIntervalSince(?!1970|ReferenceDate)|"
+    r"CFAbsoluteTimeGetCurrent|DispatchTime\.now|uptimeNanoseconds|"
     r"ContinuousClock|SuspendingClock|mach_absolute_time|ProcessInfo\.processInfo\.systemUptime"
 )
 # A local named like a measured time (elapsed, elapsedMs, duration, latencyMs,
@@ -126,19 +127,95 @@ def count_source_text(text: str) -> int:
 STRING_LITERAL = re.compile(r'"(?:[^"\\\n]|\\.)*"')
 
 
+SWIFT_STRING_START = re.compile(r'(#+)?("""|")')
+
+
+def wall_clock_code(text: str) -> str:
+    """Mask Swift comments and string bodies before looking for assertions."""
+    output: list[str] = []
+    position = 0
+    while position < len(text):
+        if text.startswith("//", position):
+            end = text.find("\n", position)
+            position = len(text) if end < 0 else end
+            continue
+        if text.startswith("/*", position):
+            depth = 1
+            position += 2
+            while position < len(text) and depth:
+                if text.startswith("/*", position):
+                    depth += 1
+                    position += 2
+                elif text.startswith("*/", position):
+                    depth -= 1
+                    position += 2
+                else:
+                    position += 1
+            output.append(" ")
+            continue
+        opening = SWIFT_STRING_START.match(text, position)
+        if opening:
+            hashes, quotes = opening.group(1) or "", opening.group(2)
+            start = opening.end()
+            position = start
+            closing = quotes + hashes
+            while position < len(text):
+                if text.startswith("\\" + hashes, position):
+                    position += len(hashes) + 2
+                elif text.startswith(closing, position):
+                    break
+                else:
+                    position += 1
+            body = text[start:position]
+            # Retain only timing-key shape, never words from assertion messages.
+            output.append('"_ms"' if body.endswith(("_ms", "_seconds")) else '""')
+            position = min(len(text), position + len(closing))
+            continue
+        output.append(text[position])
+        position += 1
+    return "".join(output)
+
+
+def assertion_spans(code: str):
+    """Yield complete argument spans, including nested calls and quoted parens."""
+    for match in ASSERTION_CALL.finditer(code):
+        position, depth = match.end(), 1
+        in_string = False
+        while position < len(code) and depth:
+            character = code[position]
+            if in_string:
+                if character == "\\":
+                    position += 2
+                    continue
+                if character == '"':
+                    in_string = False
+            elif character == '"':
+                in_string = True
+            elif character == "(":
+                depth += 1
+            elif character == ")":
+                depth -= 1
+            position += 1
+        yield code[match.start():position]
+
+
+TIMING_MEASUREMENT = re.compile(r'\[\s*"[^"\n]*(?:_ms|_seconds)"\s*\]')
+
+
 def count_wall_clock(text: str) -> int:
     count = 0
-    for raw_line in strip_comments(text).splitlines():
-        # Judge the code, not the assertion message: "converter latency" in a
-        # message string is not a timing check.
-        line = STRING_LITERAL.sub('""', raw_line)
-        if not ASSERTION_CALL.search(line):
-            continue
+    for span in assertion_spans(wall_clock_code(text)):
+        # Ignore message text, but retain whether the expression reads a timing
+        # measurement dictionary before blanking string literals.
+        measurement_read = TIMING_MEASUREMENT.search(span)
+        line = STRING_LITERAL.sub('""', span).replace("\n", " ")
         if ELAPSED_NAME.search(line):
             count += 1
         elif ORDERING_ASSERTION.search(line) and (re.search(ELAPSED_WORD, line) or CLOCK_READ.search(line)):
             count += 1
         elif CLOCK_READ.search(line) and COMPARISON.search(line):
+            count += 1
+        elif measurement_read and (COMPARISON.search(line) or ORDERING_ASSERTION.search(line)):
             count += 1
     return count
 
@@ -317,6 +394,19 @@ def self_test() -> None:
     assert count_wall_clock("assertTrue(Motion.blurInDuration >= Motion.fadeIn)\n") == 0
     assert count_wall_clock("XCTAssertLessThan(try XCTUnwrap(secondPassElapsed), 0.3)\n") == 1
     assert count_wall_clock("XCTAssertGreaterThan(a.timeIntervalSince1970, b.timeIntervalSince1970 + 60)\n") == 0
+
+    # Multiline arguments, literal delimiters and timing keys are checked
+    # through the same public counting function as real Swift test files.
+    assert count_wall_clock('assertTrue(\n    elapsed < 1.5,\n    "message with ) and elapsed < 10"\n)\n') == 1
+    assert count_wall_clock('XCTAssertLessThan(\n try XCTUnwrap(secondPassElapsed),\n 0.3\n)\n') == 1
+    assert count_wall_clock('assertTrue(\n (measurements["paste_clipboard_read_ms"] ?? 1000) < 30,\n "target read"\n)\n') == 1
+    assert count_wall_clock('assertTrue(\n Date().timeIntervalSince(started) < 10,\n "timeout"\n)\n') == 1
+    assert count_wall_clock('assertTrue(\n abs(savedDate.timeIntervalSince(recordedDate)) < 1,\n "retains recording date"\n)\n') == 0
+    assert count_wall_clock('assertEqual(measurements["paste_dispatch_ms"], 20)\n') == 0
+    assert count_wall_clock('assertTrue(items.count < 3, #"message ) elapsed < 1"#)\n') == 0
+    assert count_wall_clock('XCTAssertFalse(updated.contains(#"name: "Dana \\"D\\" Smith""#))\n') == 0
+    assert count_wall_clock('let fixture = """\nassertTrue(elapsed < 1)\n"""\n') == 0
+    assert count_wall_clock('/* outer /* assertTrue(elapsed < 1) */ comment */\n') == 0
 
     with tempfile.TemporaryDirectory() as tmp, contextlib.redirect_stdout(io.StringIO()):
         root = Path(tmp)

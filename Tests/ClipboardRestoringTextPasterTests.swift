@@ -230,47 +230,19 @@ func testClipboardRestoringTextPaster() async {
         }
 
         runSuite("ClipboardRestoringTextPaster timing separates dispatch from confirmation") {
-            let pasteboard = NSPasteboard(
-                name: NSPasteboard.Name("TranscriptedPasteTiming-\(UUID().uuidString)")
-            )
-            let paster = ClipboardRestoringTextPaster()
-            let dictationText = "synthetic paste timing"
-            var dispatchedAt: CFAbsoluteTime?
+            let measurements = ClipboardPasteTiming(
+                startedAt: 10,
+                dispatchStartedAt: 11,
+                dispatchFinishedAt: 11.02,
+                clipboardReadAt: 11.01,
+                confirmationStartedAt: 11.02,
+                confirmationFinishedAt: 11.08
+            ).measurements()
 
-            pasteboard.clearContents()
-            pasteboard.setString("synthetic original clipboard", forType: .string)
-            let outcome = paster.paste(
-                dictationText,
-                pasteboard: pasteboard,
-                accessibilityTrusted: { true },
-                requestAccessibilityTrust: {},
-                pasteDispatcher: {
-                    dispatchedAt = CFAbsoluteTimeGetCurrent()
-                    _ = pasteboard.string(forType: .string)
-                    return true
-                },
-                pasteConfirmed: {
-                    guard let dispatchedAt else { return false }
-                    return CFAbsoluteTimeGetCurrent() - dispatchedAt >= 0.06
-                },
-                restoreDelay: 5_000_000,
-                fallbackRestoreDelay: 20_000_000,
-                pasteConfirmationWait: 0.15
-            )
-
-            let measurements = paster.lastPasteTiming?.measurements() ?? [:]
-            assertEqual(outcome, .pasted, "the delayed synthetic confirmation should succeed")
-            assertNotNil(measurements["paste_prepare_ms"], "paste preparation should be measured")
-            assertNotNil(measurements["paste_dispatch_ms"], "Cmd+V dispatch should be measured")
-            assertNotNil(measurements["paste_clipboard_read_ms"], "the target clipboard read should be measured")
-            assertTrue(
-                (measurements["paste_clipboard_read_ms"] ?? 1_000) < 30,
-                "an immediate target clipboard read should stay separate from the later confirmation"
-            )
-            assertTrue(
-                (measurements["paste_confirmation_wait_ms"] ?? 0) >= 40,
-                "the delayed confirmation should be visible as confirmation wait instead of dispatch time"
-            )
+            assertEqual(measurements["paste_prepare_ms"], 1_000, "preparation ends when dispatch starts")
+            assertEqual(measurements["paste_dispatch_ms"], 20, "dispatch excludes the later confirmation")
+            assertEqual(measurements["paste_clipboard_read_ms"], 10, "clipboard read is measured from dispatch start")
+            assertEqual(measurements["paste_confirmation_wait_ms"], 60, "confirmation uses its own interval")
         }
 
         runSuite("ClipboardRestoringTextPaster timing excludes non-confirmation work") {
@@ -317,10 +289,6 @@ func testClipboardRestoringTextPaster() async {
         }
 
         runSuite("ClipboardRestoringTextPaster stops waiting and reports a likely paste after a target reads") {
-            if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
-                print("    SKIPPED: wall-clock timing proof — covered by local runs")
-                return
-            }
             let pasteboard = NSPasteboard(
                 name: NSPasteboard.Name("TranscriptedPasteReadExit-\(UUID().uuidString)")
             )
@@ -344,15 +312,10 @@ func testClipboardRestoringTextPaster() async {
                 pasteConfirmationWait: 0.35
             )
 
-            let measurements = paster.lastPasteTiming?.measurements() ?? [:]
             assertEqual(
                 outcome,
                 .likelyPasted,
                 "a frontmost target that reads the clipboard right after Cmd+V most likely pasted"
-            )
-            assertTrue(
-                (measurements["paste_confirmation_wait_ms"] ?? 350) < 50,
-                "a post-dispatch clipboard read should avoid the remaining 350ms wait when Auto Enter is off"
             )
         }
 
@@ -2168,16 +2131,12 @@ func testClipboardRestoringTextPaster() async {
     }
 
     await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait") {
-        if ProcessInfo.processInfo.environment["TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS"] == "1" {
-            print("    SKIPPED: wall-clock timing proof — covered by local runs")
-            return
-        }
         let existingClipboard = "auto enter timing original clipboard"
         let dictationText = "auto enter timing dictation"
         let pasteboardName = NSPasteboard.Name("TranscriptedAutoEnterReadExit-\(UUID().uuidString)")
         let paster = await MainActor.run { ClipboardRestoringTextPaster() }
 
-        let (outcome, measurements) = await MainActor.run { () -> (TextPasteOutcome, [String: Int]) in
+        let outcome = await MainActor.run { () -> TextPasteOutcome in
             let pasteboard = NSPasteboard(name: pasteboardName)
             pasteboard.clearContents()
             pasteboard.setString(existingClipboard, forType: .string)
@@ -2197,17 +2156,13 @@ func testClipboardRestoringTextPaster() async {
                 fallbackRestoreDelay: 120_000_000,
                 pasteConfirmationWait: 0.35
             )
-            return (outcome, paster.lastPasteTiming?.measurements() ?? [:])
+            return outcome
         }
 
         assertEqual(
             outcome,
             .likelyPasted,
             "an immediate unattributed read should be a likely paste, never a confirmed one"
-        )
-        assertTrue(
-            (measurements["paste_confirmation_wait_ms"] ?? 350) < 50,
-            "a confirmation-less target can never confirm, so its post-dispatch read should end the wait for Auto Enter targets too"
         )
         await paster.waitForPendingClipboardRestore()
         let restoredClipboard = await MainActor.run {

@@ -192,12 +192,10 @@ func testCIWorkflowContract() {
         assertFalse(clipboardTests.isEmpty, "ClipboardRestoringTextPasterTests.swift should be readable")
 
         // The no-read readiness proof now uses an hour-long fallback and checks
-        // completion, so it runs on CI too. Only these four remaining real-time
+        // completion, so it runs on CI too. Only these two remaining real-time
         // pasteboard observer proofs may opt out under shared-runner jitter.
         let expectedTimingProofs: Set<String> = [
-            "ClipboardRestoringTextPaster stops waiting and reports a likely paste after a target reads",
             "ClipboardRestoringTextPaster.paste — confirmed target read restores clipboard",
-            "ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait",
             "ClipboardRestoringTextPaster.paste — early observer reads do not race slow consumers"
         ]
         let timingGuard = "if ProcessInfo.processInfo.environment[\"TRANSCRIPTED_SKIP_TIMING_SENSITIVE_TESTS\"] == \"1\" {"
