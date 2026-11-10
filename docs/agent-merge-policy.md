@@ -59,7 +59,7 @@ python3 scripts/ops/risk-triage.py gate --pr 2190          # dry run: print the 
 Agents run `gh` as @r3dbars, so anything "only @r3dbars can do" is something every agent can do. So:
 - No code path here merges or arms auto-merge with a person's token or `GITHUB_TOKEN`; only the gate App token. A test fails if any workflow or script calls `gh pr merge ... --admin`.
 - The lane gate refuses to merge without `GATE_TOKEN`.
-- What actually stops an agent with Justin's admin token from clicking merge is outside code: see section B of `docs/automerge-justin-setup.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
+- What actually stops an agent with Justin's admin token from clicking merge is outside code: see the account-separation steps (4–6) in section B of `docs/automerge-justin-setup.md` (a separate non-admin login for agents, and a ruleset whose admin bypass then only Justin holds).
 
 ## 6. CODEOWNERS
 
