@@ -124,4 +124,11 @@ attaches the bundle to the release, then fills in and publishes the root
 `server.json`. It runs when a release is published. There is no manual dispatch (it could run from any branch); to retry, re-run the job.
 Nothing is rebuilt, so the bundle keeps the notarized app's signature.
 
+The helper compiles the app's source version from `Info.plist` into its binary,
+so `--version` and MCP `initialize` keep that version when the signed helper is
+copied into a bundle. `scripts/release/bump-release-version.py` generates
+`Sources/TranscriptedMCP/BuildVersion.swift` in this package during a version
+bump; its required `--check` catches a missing or stale generated value. No
+installed app, current directory, or environment override supplies the version.
+
 `glama.json` at the repo root claims the Glama listing for the maintainer.
