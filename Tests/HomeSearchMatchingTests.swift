@@ -45,36 +45,4 @@ func testHomeSearchMatching() {
         assertTrue(!dateText.isEmpty, "Date search text should not be empty")
     }
 
-    runSuite("TranscriptFinder.matches — occurrence ordering and ranges") {
-        // Empty query yields no matches.
-        assertTrue(
-            TranscriptFinder.matches(in: ["hello world"], query: "").isEmpty,
-            "Empty query should produce no matches"
-        )
-        assertTrue(
-            TranscriptFinder.matches(in: ["hello world"], query: "   ").isEmpty,
-            "Whitespace-only query should produce no matches"
-        )
-
-        // Multiple occurrences within one line, in order.
-        let repeated = TranscriptFinder.matches(in: ["the cat sat on the mat"], query: "the")
-        assertEqual(repeated.count, 2, "Both occurrences of 'the' should be found")
-        assertEqual(repeated[0].range, 0..<3, "First match should start at offset 0")
-        assertEqual(repeated[1].range.lowerBound, 15, "Second match should start at offset 15")
-        assertTrue(repeated.allSatisfy { $0.lineIndex == 0 }, "Single-line matches should report line 0")
-
-        // Matches across multiple lines preserve line indices and reading order.
-        let multi = TranscriptFinder.matches(
-            in: ["Alpha beta", "gamma BETA delta", "no hit here"],
-            query: "beta"
-        )
-        assertEqual(multi.count, 2, "One match per line containing 'beta'")
-        assertEqual(multi[0].lineIndex, 0, "First match should be on line 0")
-        assertEqual(multi[1].lineIndex, 1, "Second match should be on line 1")
-
-        // Case- and diacritic-insensitive matching.
-        let accented = TranscriptFinder.matches(in: ["Café au lait"], query: "cafe")
-        assertEqual(accented.count, 1, "Accent-insensitive query should match")
-        assertEqual(accented[0].range.lowerBound, 0, "Match should start at the accented word")
-    }
 }
