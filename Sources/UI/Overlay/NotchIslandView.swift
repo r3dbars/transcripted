@@ -135,7 +135,7 @@ final class NotchIslandRingView: NSView {
     }
 }
 
-/// A plain dot; `pulsing` breathes gently.
+/// A plain dot; `glow` adds a soft halo twice its size.
 final class NotchIslandDotView: NSView {
     private let size: CGFloat
     private let glow: Bool
