@@ -69,8 +69,8 @@ func testMeetingImportedAudioPreparer() async {
         )
         assertEqual(prepared.copiedAudioURL.deletingPathExtension().lastPathComponent.hasPrefix("imported-"), true, "scratch filenames should be app-owned")
         assertEqual(prepared.suggestedTitle, "Customer Call 1", "import title should come from the selected filename")
-        assertTrue(
-            abs(prepared.recordingDate.timeIntervalSince(sourceRecordingDate)) < 1,
+        assertEqual(
+            prepared.recordingDate.timeIntervalSince1970.rounded(), sourceRecordingDate.timeIntervalSince1970,
             "import metadata should use the source file creation date instead of the scratch-copy date"
         )
         assertEqual(
@@ -355,8 +355,8 @@ func testMeetingImportedAudioPreparer() async {
             now: now
         )
         assertNotNil(resolved, "an old creation date is reliable")
-        assertTrue(
-            abs(resolved!.timeIntervalSince(recordedDay)) < 1,
+        assertEqual(
+            resolved!, recordedDay,
             "the earliest reliable timestamp should win"
         )
     }
@@ -373,8 +373,8 @@ func testMeetingImportedAudioPreparer() async {
             now: now
         )
         assertNotNil(resolved, "a preserved modification date is still usable")
-        assertTrue(
-            abs(resolved!.timeIntervalSince(originalRecording)) < 1,
+        assertEqual(
+            resolved!, originalRecording,
             "a copy-time creation date must not win over the preserved recording time"
         )
     }
@@ -426,7 +426,7 @@ func testMeetingImportedAudioPreparer() async {
         let root = temporaryImportAudioPreparerRoot()
         let sourceURL = root.appendingPathComponent("Downloaded_Call.wav")
         let scratchURL = root.appendingPathComponent("scratch", isDirectory: true)
-        let originalRecording = Date().addingTimeInterval(-45 * 86_400)
+        let originalRecording = Date(timeIntervalSince1970: 1_700_000_000)
         try! FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: sourceURL.path, contents: Data([0, 1, 2, 3]))
         try! FileManager.default.setAttributes(
@@ -443,8 +443,8 @@ func testMeetingImportedAudioPreparer() async {
             scratchDirectory: scratchURL
         )
 
-        assertTrue(
-            abs(prepared.recordingDate.timeIntervalSince(originalRecording)) < 2,
+        assertEqual(
+            prepared.recordingDate.timeIntervalSince1970.rounded(), originalRecording.timeIntervalSince1970,
             "imported audio should use the preserved recording time, not the copy/download date"
         )
     }

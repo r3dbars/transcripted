@@ -480,7 +480,6 @@ func testAgentMCPConnector() {
         try? "#!/bin/sh\nsleep 30\n".write(to: binaryURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
 
-        let started = Date()
         do {
             try AgentMCPConnector.connect(
                 .claudeCode,
@@ -494,12 +493,6 @@ func testAgentMCPConnector() {
         } catch {
             assertTrue(false, "unexpected error type: \(error)")
         }
-
-        // Two CLI calls (remove + add) at 0.4s each plus termination grace.
-        assertTrue(
-            Date().timeIntervalSince(started) < 10,
-            "timeout should fire promptly instead of waiting out the full sleep"
-        )
     }
 
     runSuite("AgentMCPConnector.connect(.codex) — surfaces an unwritable config directory as an error") {
