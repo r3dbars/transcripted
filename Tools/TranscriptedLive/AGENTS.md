@@ -32,4 +32,4 @@ swift test --package-path Tools/TranscriptedLive
 cd Tools/TranscriptedLive/claude-mod && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin validate . && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test .
 ```
 
-`.agents/test-matrix.yml` runs all three for `Tools/TranscriptedLive/**`. To type-check the mod, see "Checks" in the README. For a manual run without a real call, use `Tools/TranscriptedLive/live.sh replay <audio>`; first run downloads the EOU model (about 440 MB).
+`.agents/test-matrix.yml` runs the Swift tests for `Tools/TranscriptedLive/**`. The two Claude plugin checks are manual proof in `.agents/agent-contract.json`: they require Claude Code and the function-hooks environment variable, and the deterministic runner does not allow the `claude` executable. To type-check the mod, see "Checks" in the README. For a manual run without a real call, use `Tools/TranscriptedLive/live.sh replay <audio>`; first run downloads the EOU model (about 440 MB).
