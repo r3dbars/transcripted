@@ -500,6 +500,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             }
         }
         workspaceObservers.append(wakeRecoveryObserver)
+        startOpenScreenDiagnostics()
 
         presentInitialOnboardingIfNeeded()
         if LaunchWindowPolicy.shouldOpenMainWindow(

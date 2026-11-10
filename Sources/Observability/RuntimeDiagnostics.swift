@@ -7,6 +7,8 @@ final class RuntimeDiagnostics {
     private var marker: RuntimeDiagnosticsMarker?
     private var heartbeatTimer: Timer?
     private var activeWorkProvider: (() -> Bool)?
+    private var openScreenProvider: (() -> String)?
+    private var publishedOpenScreen: String?
     private let isDisabled: Bool
 
     init(
@@ -56,15 +58,31 @@ final class RuntimeDiagnostics {
         marker.lastEvent = "clean_shutdown"
         self.marker = marker
         markerWriter.writeNow(marker)
-        CrashReporter.setRuntimeDiagnosticsContext(
-            RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
-        )
+        publishContext(for: marker, now: marker.updatedAt)
         heartbeatTimer?.invalidate()
         heartbeatTimer = nil
     }
 
     func setActiveWorkProvider(_ provider: (() -> Bool)?) {
         activeWorkProvider = provider
+    }
+
+    /// Supplies the `open_screen` value (`OpenScreenDiagnostics`) for crash
+    /// and hang reports. Read on main at every marker update, so the heartbeat
+    /// catches up within a minute even if a screen change wasn't refreshed.
+    func setOpenScreenProvider(_ provider: (() -> String)?) {
+        openScreenProvider = provider
+        refreshOpenScreen()
+    }
+
+    /// Call when a window, popover or Settings page changes. Republishes the
+    /// Sentry runtime context only when the open screen changed, with the
+    /// other values exactly as the last marker update published them. Writes
+    /// nothing to disk.
+    func refreshOpenScreen() {
+        guard !isDisabled, let marker else { return }
+        guard currentOpenScreen() != publishedOpenScreen else { return }
+        publishContext(for: marker, now: marker.updatedAt)
     }
 
     func recordSession(kind: String, stage: String, active: Bool = true) {
@@ -192,8 +210,18 @@ final class RuntimeDiagnostics {
         } else {
             markerWriter.submit(marker)
         }
-        CrashReporter.setRuntimeDiagnosticsContext(
-            RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker)
-        )
+        publishContext(for: marker, now: marker.updatedAt)
+    }
+
+    private func currentOpenScreen() -> String {
+        OpenScreenDiagnostics.normalized(openScreenProvider?())
+    }
+
+    private func publishContext(for marker: RuntimeDiagnosticsMarker, now: Date) {
+        var context = RuntimeDiagnosticsStore.contextForCurrentSession(marker: marker, now: now)
+        let openScreen = currentOpenScreen()
+        context[OpenScreenDiagnostics.key] = openScreen
+        publishedOpenScreen = openScreen
+        CrashReporter.setRuntimeDiagnosticsContext(context)
     }
 }

@@ -4,10 +4,13 @@ enum SentryPayloadSanitizer {
     private static let maxValueLength = 240
     // `build_revision` and `build_channel` let a crash be searched by the
     // exact build (release name and dist only carry the version number).
+    // `open_screen` says which window a hang was drawing; only
+    // `OpenScreenDiagnostics.allowedValues` become a tag.
     private static let crashRuntimeTagKeys: Set<String> = [
         "build_channel",
         "build_revision",
         "last_event",
+        OpenScreenDiagnostics.key,
     ]
     private static let explicitlySafeKeys: Set<String> = [
         "mic_file_available",
@@ -51,7 +54,11 @@ enum SentryPayloadSanitizer {
     }
 
     static func sanitizeCrashRuntimeTags(_ context: [String: String]) -> [String: String] {
-        let tagCandidates = context.filter { crashRuntimeTagKeys.contains($0.key) }
+        let tagCandidates = context.filter { entry in
+            guard crashRuntimeTagKeys.contains(entry.key) else { return false }
+            guard entry.key == OpenScreenDiagnostics.key else { return true }
+            return OpenScreenDiagnostics.allowedValues.contains(entry.value)
+        }
         return sanitizeTags(tagCandidates)
     }
 

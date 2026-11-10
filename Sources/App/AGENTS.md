@@ -30,6 +30,7 @@
 - `TranscriptedAppDelegate+LaunchReports.swift` - launch UI smoke and first-run reliability reports for automated launches.
 - `TranscriptedAppDelegate+CallActivity.swift` - wires the mic, output and camera activity monitors into `MeetingPromptDetector` and the meeting session.
 - `TranscriptedAppDelegate+NextSentence.swift` - runs Write for Me's voice (holding fn, or saying a change) on Transcripted's own dictation as a hand-off take, and feeds the card its mic level and live words.
+- `TranscriptedAppDelegate+OpenScreenDiagnostics.swift` - feeds the `open_screen` hang-report tag: finds visible Transcripted windows through `NSApp.windows` (never the lazy controllers) and refreshes on window, popover and Settings page changes.
 - `TranscriptedMenuCommands.swift` - app-active command menus for capture, import, navigation, speaker search. The shortcut lists live in `Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift`.
 - `TranscriptedAppState.swift` - module `AppState` (card in `Sources/AGENTS.md`): the service container.
 - `TranscriptedSupportActions.swift` - Email Support and Send diagnostics: builds the diagnostics snapshot from `TranscriptedAppState` and hands it to `SupportDiagnosticsBundle`.

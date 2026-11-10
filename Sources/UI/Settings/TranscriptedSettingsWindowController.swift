@@ -137,6 +137,11 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
         }
     }
 
+    /// Runs after each Settings page change (hang-report `open_screen`).
+    func setPageChangeHandler(_ handler: @escaping () -> Void) {
+        navigationModel.onSelect = handler
+    }
+
     /// Screen id the debug control surface reports. Nil when the window is closed.
     func automationScreenName() -> String? {
         navigationModel.isWindowOpen ? navigationModel.selectedPage.analyticsValue : nil

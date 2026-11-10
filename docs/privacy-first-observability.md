@@ -39,6 +39,10 @@ references, meeting titles, speaker names, local paths, or user identifiers.
   popup is on screen (a modal run loop doesn't drain the main queue, so
   those used to be misreported as hangs). The code default with no
   Info.plist key stays off
+- crash and hang reports may carry `open_screen`: one word from a fixed list
+  (`none`, `menubar`, `onboarding` or a Settings page id such as `people`)
+  naming the front-most Transcripted screen. Never a window title, meeting,
+  speaker or any free text; anything outside the list is sent as `unknown`
 
 ## Current rollout checklist
 

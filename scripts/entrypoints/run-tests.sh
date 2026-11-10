@@ -710,6 +710,7 @@ APP_SOURCES=(
     "Sources/Observability/SentryRuntimeConfiguration.swift"
     "Sources/Observability/SentryEventPolicy.swift"
     "Sources/Observability/SentryPayloadSanitizer.swift"
+    "Sources/Observability/OpenScreenDiagnostics.swift"
     "Sources/Observability/UnrecognizedSelectorReason.swift"
     "Sources/Observability/AppHangReportPolicy.swift"
     "Sources/Observability/SentrySessionRotationPolicy.swift"
