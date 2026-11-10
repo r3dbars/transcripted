@@ -464,6 +464,7 @@ extension TranscriptedSettingsView {
             }
         }
         .onDisappear {
+            homeViewModel.finishMeetingReveal(token: homeRevealConsumedToken)
             homePendingRevealMeetingKey = nil
             collapseHomeMeetingExpansion()
         }
@@ -485,16 +486,18 @@ extension TranscriptedSettingsView {
         .task(id: navigation.homeRevealMeetingToken) {
             guard navigation.homeRevealMeetingToken > homeRevealConsumedToken,
                   let transcriptURL = navigation.homeRevealMeetingURL else { return }
-            homeRevealConsumedToken = navigation.homeRevealMeetingToken
+            let token = navigation.homeRevealMeetingToken
+            homeRevealConsumedToken = token
             homePendingRevealMeetingKey = Self.homeRevealKey(for: transcriptURL)
+            homeViewModel.requestMeetingReveal(at: transcriptURL, token: token)
             revealPendingHomeMeeting(in: homeViewModel.meetingDaySections)
-            refreshRecentCaptures(force: true)
             // A just-saved meeting can take a refresh to show up. Stop waiting
             // after a while so a much later refresh never expands it out of
             // nowhere.
             try? await Task.sleep(nanoseconds: 10_000_000_000)
             guard !Task.isCancelled else { return }
-            homePendingRevealMeetingKey = nil
+            homeViewModel.finishMeetingReveal(token: token)
+            if homeRevealConsumedToken == token { homePendingRevealMeetingKey = nil }
         }
         .onReceive(homeViewModel.$meetingDaySections) { sections in
             revealPendingHomeMeeting(in: sections)
@@ -507,25 +510,15 @@ extension TranscriptedSettingsView {
 
     /// Expands the meeting the pill's Open asked for, once it is in the list.
     private func revealPendingHomeMeeting(in sections: [HomeDaySection<RecentMeetingItem>]) {
-        guard let key = homePendingRevealMeetingKey else { return }
+        guard navigation.isWindowOpen,
+              SettingsRecentCaptureRefreshPolicy.mode(for: navigation.selectedPage) == .homeDashboard,
+              let key = homePendingRevealMeetingKey else { return }
         guard let item = sections.lazy
             .flatMap(\.items)
             .first(where: { Self.homeRevealKey(for: $0.transcriptURL) == key }) else {
-            // Today can open any meeting from the past week, not only the 10
-            // newest. Page the list until it shows up; each page publishes
-            // new sections and lands back here. Deferred, and decided inside
-            // the Task, because sections publish before the load sets
-            // canLoadMoreMeetings and clears its in-flight flag.
-            Task { @MainActor in
-                guard HomeMeetingRevealPagingPolicy.shouldLoadNextPage(
-                    pendingKey: homePendingRevealMeetingKey,
-                    requestedKey: key,
-                    canLoadMoreMeetings: homeViewModel.canLoadMoreMeetings
-                ) else { return }
-                homeViewModel.loadMoreMeetings()
-            }
             return
         }
+        homeViewModel.finishMeetingReveal(token: homeRevealConsumedToken)
         homePendingRevealMeetingKey = nil
         // A search or the Starred filter could hide the row, and it would
         // expand off-screen.

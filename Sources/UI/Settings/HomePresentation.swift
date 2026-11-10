@@ -1,5 +1,13 @@
 import Foundation
 
+struct HomeDaySection<Item>: Identifiable {
+    let day: Date
+    let label: String
+    let items: [Item]
+
+    var id: TimeInterval { day.timeIntervalSinceReferenceDate }
+}
+
 // MARK: - Capture list copy
 
 /// Empty-state copy for the Home capture lists. Foundation-pure constants so the

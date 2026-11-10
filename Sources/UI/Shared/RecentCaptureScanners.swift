@@ -304,6 +304,12 @@ struct RecentMeetingIndexEntry: Sendable {
     let item: RecentMeetingItem
 }
 
+struct RecentMeetingsScanResult: Sendable {
+    let items: [RecentMeetingItem]
+    let diagnosis: RecentMeetingsScanDiagnosis
+    let revealMinimumCount: Int?
+}
+
 struct RecentCaptureSnapshot: Sendable {
     let meetings: [RecentMeetingItem]
     let dictations: [SavedDictationEntry]
@@ -312,6 +318,7 @@ struct RecentCaptureSnapshot: Sendable {
     /// `.todayOnly` load leaves `dictationCounts` all zeros.
     var todayDictationCount: Int? = nil
     var meetingScanDiagnosis: RecentMeetingsScanDiagnosis = .ok
+    var meetingRevealMinimumCount: Int? = nil
 }
 
 /// How much of the dictation library a recent-captures load counts.
@@ -330,7 +337,11 @@ enum RecentCaptureLoader {
         includeDictationCounts: Bool = false,
         meetingDirectory: URL? = nil,
         dictationDirectory: URL? = nil,
-        today: Date = Date()
+        today: Date = Date(),
+        throughTranscriptURL: URL? = nil,
+        meetingScanner: @escaping @Sendable (Int, URL?, URL?) -> RecentMeetingsScanResult = { limit, directory, target in
+            RecentMeetingsScanner.loadRecentWithDiagnosis(limit: limit, directory: directory, throughTranscriptURL: target)
+        }
     ) async -> RecentCaptureSnapshot {
         await load(
             dictationLimit: dictationLimit,
@@ -338,7 +349,9 @@ enum RecentCaptureLoader {
             dictationCountScope: includeDictationCounts ? .fullLibrary : .none,
             meetingDirectory: meetingDirectory,
             dictationDirectory: dictationDirectory,
-            today: today
+            today: today,
+            throughTranscriptURL: throughTranscriptURL,
+            meetingScanner: meetingScanner
         )
     }
 
@@ -348,7 +361,11 @@ enum RecentCaptureLoader {
         dictationCountScope: DictationCountScope,
         meetingDirectory: URL? = nil,
         dictationDirectory: URL? = nil,
-        today: Date = Date()
+        today: Date = Date(),
+        throughTranscriptURL: URL? = nil,
+        meetingScanner: @escaping @Sendable (Int, URL?, URL?) -> RecentMeetingsScanResult = { limit, directory, target in
+            RecentMeetingsScanner.loadRecentWithDiagnosis(limit: limit, directory: directory, throughTranscriptURL: target)
+        }
     ) async -> RecentCaptureSnapshot {
         let taskBox = LoadTaskBox()
 
@@ -375,10 +392,7 @@ enum RecentCaptureLoader {
                         return
                     }
 
-                    async let meetingScan = RecentMeetingsScanner.loadRecentWithDiagnosis(
-                        limit: meetingLimit,
-                        directory: meetingDirectory
-                    )
+                    async let meetingScan = meetingScanner(meetingLimit, meetingDirectory, throughTranscriptURL)
                     async let dictations = DictationTranscriptStore.recentSavedDictations(
                         limit: dictationLimit,
                         directory: dictationDirectory
@@ -395,7 +409,8 @@ enum RecentCaptureLoader {
                         dictations: dictations,
                         dictationCounts: dictationCounts,
                         todayDictationCount: todayDictationCount,
-                        meetingScanDiagnosis: meetingScan.diagnosis
+                        meetingScanDiagnosis: meetingScan.diagnosis,
+                        meetingRevealMinimumCount: meetingScan.revealMinimumCount
                     )
                     guard !Task.isCancelled, !taskBox.isCancelled else {
                         taskBox.finish(with: emptySnapshot())

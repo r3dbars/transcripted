@@ -1,14 +1,6 @@
 import SwiftUI
 import TranscriptedCore
 
-struct HomeDaySection<Item>: Identifiable {
-    let day: Date
-    let label: String
-    let items: [Item]
-
-    var id: TimeInterval { day.timeIntervalSinceReferenceDate }
-}
-
 enum HomeMeetingListItem: Identifiable {
     case saved(RecentMeetingItem)
     case failed(MeetingSessionController.FailedMeetingItem)
