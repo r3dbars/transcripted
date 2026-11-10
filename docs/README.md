@@ -43,7 +43,7 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/qa-audio-route-notification-recovery.md` — manual USB / route-change recovery checks
 - `docs/clean-vm-testing.md` — throwaway macOS VM for new-user and upgrade tests
 - `docs/mutation-testing.md` — finding assertions that never catch a bug
-- `docs/testing-source-text-inventory.md` — the grandfathered tests that read source as text
+- `docs/testing-source-text-inventory.md` — historical source-text test cleanup record, with commands for the live inventory
 - `docs/board-scorecard.md` — the agent-runnable per-board health task list
 - `docs/hosted-full-qa-bench.md` — running the full QA bench on GitHub-hosted Apple Silicon from Swift CI
 - `docs/chatgpt-companion-testing.md` — how the companion plugin was tested, version by version
