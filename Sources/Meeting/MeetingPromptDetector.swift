@@ -624,7 +624,8 @@ final class MeetingPromptDetector {
         ) { [weak self] _ in
             MainActor.assumeIsolated {
                 self?.calendarSnapshotsNeedRefresh = true
-                self?.scheduleEvaluation(forceCalendarRefresh: true)
+                // Already invalidated here; the queued pass must not dirty it again.
+                self?.scheduleEvaluation()
             }
         }
     }
