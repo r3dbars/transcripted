@@ -288,7 +288,7 @@ func testClipboardRestoringTextPaster() async {
             )
         }
 
-        runSuite("ClipboardRestoringTextPaster stops waiting and reports a likely paste after a target reads") {
+        runSuite("ClipboardRestoringTextPaster reports a likely paste after a target reads") {
             let pasteboard = NSPasteboard(
                 name: NSPasteboard.Name("TranscriptedPasteReadExit-\(UUID().uuidString)")
             )
@@ -2130,7 +2130,7 @@ func testClipboardRestoringTextPaster() async {
         assertEqual(restoredClipboard, existingClipboard, "the user's clipboard should come back after a likely paste")
     }
 
-    await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read skips the dead confirmation wait") {
+    await runSuite("ClipboardRestoringTextPaster.paste — Auto Enter target read reports likely paste and restores clipboard") {
         let existingClipboard = "auto enter timing original clipboard"
         let dictationText = "auto enter timing dictation"
         let pasteboardName = NSPasteboard.Name("TranscriptedAutoEnterReadExit-\(UUID().uuidString)")

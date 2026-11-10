@@ -411,9 +411,8 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(markdown.contains("\ndate: \(frontmatterDateString(recordingDate))\n"))
         XCTAssertTrue(markdown.contains("\ntime: \(frontmatterTimeString(recordingDate))\n"))
         let metadata = try XCTUnwrap(statsStore.recordedSessions.first)
-        XCTAssertLessThan(
-            abs(metadata.date.timeIntervalSince(recordingDate)),
-            0.001,
+        XCTAssertEqual(
+            metadata.date.timeIntervalSince1970, recordingDate.timeIntervalSince1970, accuracy: 0.001,
             "retry stats metadata should use the original recording date"
         )
     }

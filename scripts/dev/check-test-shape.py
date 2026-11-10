@@ -58,8 +58,7 @@ ASSERTION_CALL = re.compile(
     r"(#expect|#require|XCTAssert[A-Za-z]*|assertTrue|assertFalse|assertEqual|assertLessThan|\bassert)\s*\("
 )
 CLOCK_READ = re.compile(
-    r"Date\s*\(\s*\)\s*\.\s*timeIntervalSince(?!1970|ReferenceDate)|"
-    r"CFAbsoluteTimeGetCurrent|DispatchTime\.now|uptimeNanoseconds|"
+    r"timeIntervalSince(?!1970|ReferenceDate)|CFAbsoluteTimeGetCurrent|DispatchTime\.now|uptimeNanoseconds|"
     r"ContinuousClock|SuspendingClock|mach_absolute_time|ProcessInfo\.processInfo\.systemUptime"
 )
 # A local named like a measured time (elapsed, elapsedMs, duration, latencyMs,
@@ -395,13 +394,14 @@ def self_test() -> None:
     assert count_wall_clock("XCTAssertLessThan(try XCTUnwrap(secondPassElapsed), 0.3)\n") == 1
     assert count_wall_clock("XCTAssertGreaterThan(a.timeIntervalSince1970, b.timeIntervalSince1970 + 60)\n") == 0
 
+    assert count_wall_clock("XCTAssertLessThan(finishedAt.timeIntervalSince(startedAt), 1)\n") == 1
     # Multiline arguments, literal delimiters and timing keys are checked
     # through the same public counting function as real Swift test files.
     assert count_wall_clock('assertTrue(\n    elapsed < 1.5,\n    "message with ) and elapsed < 10"\n)\n') == 1
     assert count_wall_clock('XCTAssertLessThan(\n try XCTUnwrap(secondPassElapsed),\n 0.3\n)\n') == 1
     assert count_wall_clock('assertTrue(\n (measurements["paste_clipboard_read_ms"] ?? 1000) < 30,\n "target read"\n)\n') == 1
     assert count_wall_clock('assertTrue(\n Date().timeIntervalSince(started) < 10,\n "timeout"\n)\n') == 1
-    assert count_wall_clock('assertTrue(\n abs(savedDate.timeIntervalSince(recordedDate)) < 1,\n "retains recording date"\n)\n') == 0
+    assert count_wall_clock('XCTAssertEqual(savedDate.timeIntervalSince1970, recordedDate.timeIntervalSince1970, accuracy: 1)\n') == 0
     assert count_wall_clock('assertEqual(measurements["paste_dispatch_ms"], 20)\n') == 0
     assert count_wall_clock('assertTrue(items.count < 3, #"message ) elapsed < 1"#)\n') == 0
     assert count_wall_clock('XCTAssertFalse(updated.contains(#"name: "Dana \\"D\\" Smith""#))\n') == 0
