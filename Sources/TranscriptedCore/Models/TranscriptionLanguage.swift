@@ -54,6 +54,6 @@ public struct TranscriptionLanguageContext: Equatable, Sendable, Codable {
 public enum TranscriptionLanguageError: LocalizedError {
     case explicitLanguageUnsupported
     public var errorDescription: String? {
-        "This transcription engine does not support a selected language. Select Whisper or use Automatic."
+        "This transcription engine does not support a selected language. Select a model that supports it or use Automatic."
     }
 }

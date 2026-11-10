@@ -11,6 +11,16 @@
 
 enum PipelineFailureDisplayCopy {
 
+    /// Saved language is immutable on retry; the selected engine must support it.
+    static let languageModelGuidance =
+        "Select a model in Settings that supports this recording's saved language, then retry."
+
+    /// Retain old persisted diagnostics as well as the current recovery copy.
+    static func isLanguageModelGuidance(_ normalized: String) -> Bool {
+        normalized.contains("select a whisper model")
+            || normalized.contains("select a model in settings that supports this recording's saved language")
+    }
+
     enum Flow {
         /// Transcribing a user-imported audio/video file.
         case importedAudio

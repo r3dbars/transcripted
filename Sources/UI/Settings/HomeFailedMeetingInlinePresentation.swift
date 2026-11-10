@@ -98,7 +98,7 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
         case .microphonePermission:
             return "Turn on Microphone access in System Settings first, then try again."
         case .languageNeedsWhisperModel:
-            return "This meeting's language needs a Whisper model. Pick one under Model in Settings, then try again."
+            return "Pick a model that supports this meeting's saved language under Model in Settings, then try again."
         case .modelDownloadFailed, .modelNotLoaded:
             return "The speech model wasn't ready. Try again once it has loaded."
         case .microphoneAudioUnusable:
