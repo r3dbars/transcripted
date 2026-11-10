@@ -399,6 +399,7 @@ unlisted_candidates() {
 
 check "build-deps archive inputs" "bash Tests/BuildDependencies/ArchiveInputsTests.sh" slow
 check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.sh" slow
+check "Sparkle signing and frozen-feed contracts" "bash Tests/BuildDependencies/SparkleAppcastSigningTests.sh" slow
 
 # ---------------------------------------------------------------- deterministic fixture lanes (from .agents/test-matrix.yml)
 check "posthog dashboard summary (fixture)" "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only >/dev/null" slow
