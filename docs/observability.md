@@ -1,6 +1,6 @@
 # Observability sink map
 
-Transcripted writes diagnostics to disk through five distinct sinks. They
+Transcripted writes diagnostics to disk through six distinct sinks. They
 overlap in name and in shape (JSONL-ish, size- or count-bounded, owner-only
 permissions) but serve different audiences and have different retention
 policies. This page is the map. For the privacy/redaction contract (what may
@@ -13,6 +13,7 @@ never reach Sentry/PostHog), see `docs/privacy-first-observability.md`.
 | `FileLogger` | `Sources/TranscriptedCore/Logging/FileLogger.swift` | `app.jsonl` (this is `AppLogger`'s file backend, not a separate log) | Same as `AppLogger` above — it's the same file |
 | `EventReporter` | `Sources/Observability/EventReporter.swift` | `~/Library/Application Support/Transcripted/logs/events.jsonl` + optional Sentry forwarding (errors only, allowlisted) | Rename-based: `ObservabilityLogRotation` renames the active file to `events.jsonl.1` once past the shared JSONL threshold (`TranscriptedConstants.jsonlLogRotationThreshold`) |
 | `ReliabilityPacketRecorder` | `Sources/Observability/ReliabilityPacketRecorder.swift` | `~/Library/Application Support/Transcripted/logs/reliability.jsonl` | Same rename-based `ObservabilityLogRotation` strategy as `EventReporter`, same threshold |
+| `DiagnosticsLog` (Writing) | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log` | Size-gated: renamed to `writing-diagnostics.log.1` once it reaches 4 MB, one old generation kept |
 
 ## Reading the logs
 
