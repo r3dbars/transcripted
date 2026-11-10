@@ -107,7 +107,7 @@ The codebase is organized around the current Transcripted app:
 
 | Area | Directory | Responsibility |
 |------|-----------|----------------|
-| App entry + state | `Sources/` (top-level files) | app lifecycle, menubar wiring, shared app state |
+| App shell + state | `Sources/App/` | app entry, delegate extensions, menubar wiring, command menus, shared app state |
 | Dictation | `Sources/Speech/`, `Sources/Dictation/`, `Sources/Capture/` | speech capture and STT, saved dictation transcripts, hotkey and trigger routing |
 | Meetings | `Sources/Meeting/` | meeting recording, model warmup, transcript flow, bridge into Core |
 | Shared meeting core | `Sources/TranscriptedCore/` | meeting/transcription library and agent artifacts |
