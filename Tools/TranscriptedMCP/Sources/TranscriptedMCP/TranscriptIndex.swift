@@ -114,8 +114,9 @@ final class TranscriptIndex: @unchecked Sendable {
     /// a shared folder as meetings. v7 re-reads YAML-escaped titles and speaker
     /// metadata using the app-compatible scalar decoder; v8 reindexes legacy day
     /// entries with stable IDs instead of old per-parse random IDs; v9 reclassifies
-    /// metadata-identified dictation days that older indexes treated as meetings.
-    private static let schemaVersion: Int32 = 9
+    /// metadata-identified dictation days that older indexes treated as meetings;
+    /// v10 reparses dictation bodies whose Markdown headings became false entries.
+    private static let schemaVersion: Int32 = 10
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never

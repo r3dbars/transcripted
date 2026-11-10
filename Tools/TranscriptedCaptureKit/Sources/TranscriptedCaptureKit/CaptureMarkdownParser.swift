@@ -534,13 +534,29 @@ public enum CaptureMarkdownParser {
         }
     }
 
+    // Dictation writes raw body text, so ordinary Markdown headings are not
+    // entry separators. Match the app's timestamped heading grammar instead.
+    private static let dictationEntryHeadingRegex = try? NSRegularExpression(
+        pattern: #"^## \d{1,2}:\d{2} [AP]M - .+"#
+    )
+
+    private static func isDayEntryHeading(_ line: String, flavor: DayFileFlavor) -> Bool {
+        guard line.hasPrefix("## ") else { return false }
+        switch flavor {
+        case .writing: return true // Writing escapes heading-shaped body lines.
+        case .dictation:
+            let range = NSRange(line.startIndex..<line.endIndex, in: line)
+            return dictationEntryHeadingRegex?.firstMatch(in: line, range: range) != nil
+        }
+    }
+
     private static func parseDayFileSections(from body: String, flavor: DayFileFlavor, filename: String) -> [DayFileSection] {
         let lines = body.components(separatedBy: "\n")
         var sections: [String] = []
         var currentSection: [String] = []
 
         for line in lines {
-            if line.hasPrefix("## ") {
+            if isDayEntryHeading(line, flavor: flavor) {
                 if !currentSection.isEmpty {
                     sections.append(currentSection.joined(separator: "\n"))
                 }
