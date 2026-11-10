@@ -477,7 +477,7 @@ final class MeetingSessionController: ObservableObject {
         // raw mic/system WAV captures land in the app scratch folder.
         // Core's `.macOSWorkspace` default listens on `NotificationCenter.default`,
         // which never receives NSWorkspace sleep/wake. Pass the workspace center
-        // explicitly — same wiring MeetingCaptureBridge uses when it builds Audio.
+        // explicitly from the meeting host.
         self.capture = MeetingCaptureBridge(
             audio: Audio(
                 paths: storagePaths,
