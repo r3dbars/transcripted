@@ -650,21 +650,26 @@ extension TranscriptionTaskManager {
                     self.publishNonFailureStatus(.transcribing(progress: 0.0))
                 }
 
-                let transcriptURL = try await self.transcribeMultichannelPipeline(
-                    micURL: micURL,
-                    systemURL: systemURL,
-                    outputFolder: outputFolder,
-                    taskId: taskId,
-                    healthInfo: Self.savedMicOnlyHealthInfo(from: replacementTranscriptURL),
-                    splitLocalSpeakers: splitLocalSpeakers,
-                    meetingTitle: meetingTitle,
-                    recordingDate: recordingDate,
-                    removeSourceAudioAfterArchive: false,
-                    targetTranscriptURL: replacementTranscriptURL,
-                    archiveRecordingAudio: replacementTranscriptURL == nil,
-                    languageSelection: languageSelection ?? Self.savedLanguageSelection(from: replacementTranscriptURL),
-                    inputSnapshot: inputSnapshot
-                )
+                let timings = MeetingPipelineTimings()
+                let transcriptURL = try await TranscriptionJobActivity.keepingMacAwake {
+                    try await MeetingPipelineTimings.$current.withValue(timings) {
+                        try await self.transcribeMultichannelPipeline(
+                            micURL: micURL,
+                            systemURL: systemURL,
+                            outputFolder: outputFolder,
+                            taskId: taskId,
+                            healthInfo: Self.savedMicOnlyHealthInfo(from: replacementTranscriptURL),
+                            splitLocalSpeakers: splitLocalSpeakers,
+                            meetingTitle: meetingTitle,
+                            recordingDate: recordingDate,
+                            removeSourceAudioAfterArchive: false,
+                            targetTranscriptURL: replacementTranscriptURL,
+                            archiveRecordingAudio: replacementTranscriptURL == nil,
+                            languageSelection: languageSelection ?? Self.savedLanguageSelection(from: replacementTranscriptURL),
+                            inputSnapshot: inputSnapshot
+                        )
+                    }
+                }
 
                 if replacementTranscriptURL != nil {
                     // Retire only review generations that existed before the
@@ -693,7 +698,7 @@ extension TranscriptionTaskManager {
                     if replacementTranscriptURL != nil {
                         onReplacementTranscriptCommitted?(transcriptURL)
                     }
-                    self.publishTranscriptSaved(from: transcriptURL, taskId: taskId)
+                    self.publishTranscriptSaved(from: transcriptURL, taskId: taskId, timings: timings.snapshot())
                     self.handleTaskCompletion(taskId: taskId)
                 }
             } catch {
