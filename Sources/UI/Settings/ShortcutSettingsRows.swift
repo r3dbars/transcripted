@@ -55,6 +55,7 @@ final class ShortcutRecorderModel: ObservableObject {
 
     private var keyMonitor: Any?
     private var flagsMonitor: Any?
+    private var windowCloseObserver: NSObjectProtocol?
     private var pendingModifier: PhysicalDictationTriggerBinding?
     private var pendingModifierKeyCode: UInt32?
 
@@ -104,6 +105,8 @@ final class ShortcutRecorderModel: ObservableObject {
     }
 
     func stopRecording() {
+        if let windowCloseObserver { NotificationCenter.default.removeObserver(windowCloseObserver) }
+        windowCloseObserver = nil
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         if let flagsMonitor { NSEvent.removeMonitor(flagsMonitor) }
         keyMonitor = nil
@@ -116,10 +119,16 @@ final class ShortcutRecorderModel: ObservableObject {
 
     private func startRecording(_ target: ShortcutRecordingTarget) {
         stopRecording()
+        guard let window = NSApp.keyWindow, window.isVisible else { return }
         recordingTarget = target
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.stopRecording() }
+        }
 
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self else { return event }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self, weak window] event in
+            guard let self, self.accepts(event, from: window) else { return event }
             if event.keyCode == UInt16(kVK_Escape) {
                 self.stopRecording()
                 return nil
@@ -144,8 +153,8 @@ final class ShortcutRecorderModel: ObservableObject {
             return nil
         }
 
-        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
-            guard let self else { return event }
+        flagsMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self, weak window] event in
+            guard let self, self.accepts(event, from: window) else { return event }
             let keyCode = UInt32(event.keyCode)
             let modifiers = PhysicalDictationTriggerPreferences.modifiers(from: event.modifierFlags)
 
@@ -171,6 +180,23 @@ final class ShortcutRecorderModel: ObservableObject {
 
             return event
         }
+    }
+
+    private func accepts(_ event: NSEvent, from window: NSWindow?) -> Bool {
+        switch ShortcutRecordingEventPolicy.action(
+            owner: window.map(ObjectIdentifier.init),
+            eventWindow: event.window.map(ObjectIdentifier.init),
+            ownerVisible: window?.isVisible == true
+        ) {
+        case .record:
+            return true
+        case .passAndClearPending:
+            pendingModifier = nil
+            pendingModifierKeyCode = nil
+        case .stopAndPass:
+            stopRecording()
+        }
+        return false
     }
 
     /// Saves unless another shortcut already uses it. Then it beeps, says
