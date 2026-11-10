@@ -113,13 +113,33 @@ extension MeetingPromptDetector {
 
     // MARK: - Detected-call session (missed-call nudge)
 
+    /// Keep the recording fact before async evaluation can observe a later stop.
+    /// Accept existing prompt kinds now so a later dismissal stays later.
+    func meetingRecordingDidStart(now: Date = Date()) {
+        if var session = detectedCallSession {
+            session.sawMeetingRecording = true
+            if !session.countedRecordingForLearning {
+                let kinds = session.candidateKinds.union(session.declinedKinds.keys)
+                if !kinds.isEmpty {
+                    session.countedRecordingForLearning = true
+                    for kind in kinds {
+                        learnedBackoff.recordAccepted(kind: kind, now: now)
+                    }
+                }
+            }
+            detectedCallSession = session
+        }
+        requestEvaluation()
+    }
+
     /// Folds the current ad-hoc call signals into the running session. A
     /// nonempty→empty transition ends the call; if it was long enough,
     /// unrecorded, and not explicitly declined, `onUnrecordedCallEnded` fires.
     /// Runs every evaluate() pass, so signal-inactive edges from the monitors
-    /// end the session promptly and the 20s poll bounds recording-overlap
-    /// sampling. Meeting recordings keep the underlying app's signals alive
-    /// (only our own bundle is filtered), so recording never splits a session.
+    /// end the session promptly. Recording-start receipts also retain overlap
+    /// between evaluation passes. Meeting recordings keep the underlying app's
+    /// signals alive (only our own bundle is filtered), so recording never splits
+    /// a session.
     func updateDetectedCallSession(
         signals: [(provider: MeetingPromptProvider, reason: MeetingPromptReason)],
         now: Date
@@ -143,6 +163,22 @@ extension MeetingPromptDetector {
             return
         }
 
+        session.sawMeetingRecording = session.sawMeetingRecording || isMeetingRecording
+        if isMeetingRecording, !session.countedRecordingForLearning {
+            // The user started a meeting (from the menu, the hotkey, or a
+            // prompt) while this call was going on: a "yes" for the kinds
+            // of prompt this call raised (or held back), which clears
+            // their learned quiet. A recording started before any prompt
+            // was considered (⌥M, then join) teaches nothing.
+            let kinds = session.candidateKinds.union(session.declinedKinds.keys)
+            if !kinds.isEmpty {
+                session.countedRecordingForLearning = true
+                for kind in kinds {
+                    learnedBackoff.recordAccepted(kind: kind, now: now)
+                }
+            }
+        }
+
         if providers.isEmpty {
             if !session.autoStartDeclinedProviders.isEmpty {
                 clearPromptPendingWindows(for: session)
@@ -156,21 +192,6 @@ extension MeetingPromptDetector {
         } else {
             session.providers.formUnion(providers)
             session.seenReasons.formUnion(reasons)
-            session.sawMeetingRecording = session.sawMeetingRecording || isMeetingRecording
-            if isMeetingRecording, !session.countedRecordingForLearning {
-                // The user started a meeting (from the menu, the hotkey, or a
-                // prompt) while this call was going on: a "yes" for the kinds
-                // of prompt this call raised (or held back), which clears
-                // their learned quiet. A recording started before any prompt
-                // was considered (⌥M, then join) teaches nothing.
-                let kinds = session.candidateKinds.union(session.declinedKinds.keys)
-                if !kinds.isEmpty {
-                    session.countedRecordingForLearning = true
-                    for kind in kinds {
-                        learnedBackoff.recordAccepted(kind: kind, now: now)
-                    }
-                }
-            }
             detectedCallSession = session
         }
     }
