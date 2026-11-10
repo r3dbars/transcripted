@@ -11,7 +11,7 @@ import unittest
 class LaunchSafetyTests(unittest.TestCase):
     def test_running_copy_is_preserved(self):
         source = Path(__file__).resolve().parents[2] / "script/build_and_run.sh"
-        with tempfile.TemporaryDirectory(prefix="tc-launch-", dir="/private/tmp") as temporary:
+        with tempfile.TemporaryDirectory(prefix="tc-launch-") as temporary:
             root = Path(temporary)
             (root / "script").mkdir()
             shutil.copy2(source, root / "script/build_and_run.sh")

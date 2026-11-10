@@ -857,6 +857,14 @@ rules:
       - "swift test --package-path Tools/TranscriptedQA"
 
   - paths:
+      - "Tools/TranscriptedCompanion/**"
+      - "script/build_and_run.sh"
+    checks:
+      - "python3 Tools/TranscriptedCompanion/package.py --validate-only"
+      - "python3 Tools/TranscriptedCompanion/test-package.py"
+      - "python3 Tools/TranscriptedCompanion/test-launcher.py"
+
+  - paths:
       - "Tools/TranscriptedLive/**"
       - ".claude-plugin/marketplace.json"
     checks:

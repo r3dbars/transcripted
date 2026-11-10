@@ -31,6 +31,8 @@ python3 Tools/TranscriptedCompanion/test-discovery.py            # needs a built
 
 `test-ui.cjs` needs Playwright and the preview fixture running; `TRANSCRIPTED_TEST_BROWSER` and `TRANSCRIPTED_PREVIEW_URL` override the browser and host. Screenshots go to `.agent-review/visuals/`.
 
-## Gaps
+## Automated and manual checks
 
-No `.agents/test-matrix.yml` rule or CI job runs these scripts today, so they only run when you run them. Run `package.py --validate-only` for any change under `plugin/`.
+The test matrix maps companion changes to source validation and the package/launcher unit tests. `scripts/dev/linux-checks.sh` runs source validation plus those two stdlib test suites in the full repo-hygiene CI lane; they need no Swift build, installed plugin, or native app.
+
+Handshake, discovery, and UI checks remain manual: they require a built package, Codex, or the invented-data preview host and Playwright as listed above. Passing the portable checks does not prove installed host-client behavior.
