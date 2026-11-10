@@ -15,7 +15,7 @@ Selected text returned to ChatGPT is shared with ChatGPT. Local transcription an
 
 ## Recording
 
-Check `get_recording_status` before acting. Start only after the user asks to record. Ask for neither repeated confirmation nor technical configuration once their intent and app access are established. Keep `share_live` false unless the user explicitly asks to share live meeting text. If the app connection is unavailable, direct them to open the companion-enabled Transcripted app and enable its companion access in Agent settings.
+Check `get_recording_status` before acting. Start only after the user asks to record. Ask for neither repeated confirmation nor technical configuration once their intent and app access are established. `start_meeting` takes no arguments and starts with live sharing off. Only enable live sharing after the user explicitly asks, using `set_live_context_sharing` with the current `session_id` and `enabled: true`; use `enabled: false` when they ask to turn sharing off. If the app connection is unavailable, direct them to open the companion-enabled Transcripted app and enable its companion access in Agent settings.
 
 Stop only when requested, using the exact session identifier returned by status or start. A stale session identifier must never stop another meeting. Stopping saves the audio for normal final transcription; there is no discard action in this plugin. Report success only from the native app's response.
 
