@@ -396,10 +396,6 @@ extension MeetingPromptDetector {
         return nil
     }
 
-    private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date) {
-        suppressRuntimePrompts(for: provider, until: until, reason: nil)
-    }
-
     private func suppressRuntimePrompts(for provider: MeetingPromptProvider, until: Date, reason: String?) {
         let existing = runtimeSuppressedUntil[provider] ?? .distantPast
         runtimeSuppressedUntil[provider] = max(existing, until)
