@@ -49,32 +49,4 @@ final class AudioTapInstallGuardTests: XCTestCase {
         }
     }
 
-    /// Every production `installTap` must go through the guard. A new call
-    /// site without it brings the crash back.
-    func testEveryProductionInstallTapIsGuarded() throws {
-        let repoRoot = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent() // AudioTests
-            .deletingLastPathComponent() // TranscriptedCoreTests
-            .deletingLastPathComponent() // Tests
-            .deletingLastPathComponent() // repository root
-        let sources = repoRoot.appendingPathComponent("Sources")
-        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil))
-        var callSites = 0
-        for case let url as URL in enumerator where url.pathExtension == "swift" {
-            let source = try String(contentsOf: url, encoding: .utf8)
-            var searchStart = source.startIndex
-            while let call = source.range(of: ".installTap(onBus:", range: searchStart..<source.endIndex) {
-                callSites += 1
-                let lineStart = source[..<call.lowerBound].lastIndex(of: "\n") ?? source.startIndex
-                let previousLineStart = source[..<lineStart].lastIndex(of: "\n") ?? source.startIndex
-                let lead = source[previousLineStart..<call.lowerBound]
-                XCTAssertTrue(
-                    lead.contains("AudioTapInstallGuard.run("),
-                    "\(url.lastPathComponent): installTap must be wrapped in AudioTapInstallGuard.run"
-                )
-                searchStart = call.upperBound
-            }
-        }
-        XCTAssertGreaterThanOrEqual(callSites, 3, "expected the meeting start, mic recovery, and dictation taps")
-    }
 }

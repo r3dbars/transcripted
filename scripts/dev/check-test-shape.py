@@ -48,9 +48,9 @@ QUARANTINE_WARN_DAYS = 14
 RULES_DOC = "Tests/README.md (Test rules)"
 KINDS = ("source-text", "wall-clock")
 
-# A string literal naming something under Sources/ ("Sources/Speech/X.swift",
-# "Sources/UI"), or a call to one of the read*Source helpers.
-SOURCES_LITERAL = re.compile(r'"Sources/[^"\n]*"')
+# A source root/path literal ("Sources", "Sources/UI", "Sources/Speech/X.swift"),
+# or a call to one of the read*Source helpers.
+SOURCES_LITERAL = re.compile(r'"Sources(?:/[^"\n]*)?"')
 SOURCE_READ_CALL = re.compile(r"(?<![A-Za-z0-9_])read[A-Za-z0-9_]*Source[A-Za-z0-9_]*\(")
 FUNC_DECL_PREFIX = re.compile(r"func\s+$")
 
@@ -373,6 +373,33 @@ def run_check(root: Path, baseline_path: Path, quarantine_path: Path, today: dt.
 
 
 def self_test() -> None:
+    # Package tests can construct the root from a bare component rather
+    # than a single Sources/... path literal. It is still a source-text read.
+    with tempfile.TemporaryDirectory(prefix="test-shape-package-") as tmp, contextlib.redirect_stdout(io.StringIO()):
+        root = Path(tmp)
+        package_test = root / "Tests/TranscriptedCoreTests/AudioTests/ConstructedSourceTests.swift"
+        package_test.parent.mkdir(parents=True)
+        (root / ".agents").mkdir()
+        package_test.write_text(
+            'let sources = repoRoot.appendingPathComponent("Sources")\n'
+            'let source = try String(contentsOf: sources, encoding: .utf8)\n'
+            'XCTAssertTrue(source.contains("synthetic invariant"))\n',
+            encoding="utf-8",
+        )
+        base = root / ".agents/test-shape-baseline.json"
+        quarantine = root / "Tests/quarantine.txt"
+        today = dt.date(2026, 9, 27)
+        assert run_check(root, base, quarantine, today, shrink=False) == 1, "constructed package source root must fail an empty baseline"
+        assert run_check(root, base, quarantine, today, shrink=True) == 1, "shrink must not grandfather a constructed source root"
+        assert not base.exists()
+        package_test.write_text('let resource = repoRoot.appendingPathComponent("Resources")\n', encoding="utf-8")
+        assert run_check(root, base, quarantine, today, shrink=False) == 0
+
+    assert count_source_text('let root = repoRoot.appendingPathComponent("Sources")\n') == 1
+    assert count_source_text('let root = URL(fileURLWithPath: "Sources")\n') == 1
+    assert count_source_text('// repoRoot.appendingPathComponent("Sources")\n') == 0
+    assert count_source_text('/* "Sources" */ let x = 1\n') == 0
+    assert count_source_text('let a = "SourcesList"; let b = "Resources"; let c = "Tests"\n') == 0
     assert count_source_text('let s = readRepoTextFile("Sources/UI/A.swift")\n') == 1
     assert count_source_text('// readRepoTextFile("Sources/UI/A.swift")\n') == 0
     assert count_source_text('/* "Sources/UI/A.swift" */ let x = 1\n') == 0
