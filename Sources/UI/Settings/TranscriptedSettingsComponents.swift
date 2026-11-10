@@ -315,7 +315,7 @@ struct SettingsStatusCard: View {
                     .monospacedDigit()
                     .foregroundStyle(tintColor)
                     .frame(
-                        minWidth: progress == nil ? 0 : CGFloat(FirstRunOnboardingPolishContract.modelProgressLabelMinimumWidth),
+                        minWidth: progress == nil ? 0 : 104, // Reserve a stable slot while progress changes.
                         alignment: .trailing
                     )
             }
