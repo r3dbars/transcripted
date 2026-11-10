@@ -5,6 +5,11 @@ publication. It does not change a release surface or signed application. Only
 the existing `staged-update-proof` workflow mode selects it; normal required CI
 routing and the main-only signing workflow remain unchanged.
 
+This version-specific recipe is fixed to 1.1.75 -> 1.1.76 and its pinned RC.
+It is not the current release checklist. Current release work starts with
+`docs/release-packaging.md` and `docs/sparkle-updates.md`; broader validation
+is in `docs/qa-test-bench.md`.
+
 The source checkout is fixed at `caa17f1bb522324bf8f756239347fb4c6308ab52`.
 The harness checkout and receipt separately pin `github.workflow_sha`.
 The only accepted new artifact is final RC run `41978929739`, artifact
