@@ -127,6 +127,9 @@ public class TranscriptionTaskManager: ObservableObject {
     @Published public var speakerNamingRequest: SpeakerNamingRequest? = nil
     @Published public var lastSavedTranscriptURL: URL? = nil
     @Published public private(set) var lastSavedTranscriptTaskId: UUID? = nil
+    /// Origin of the most recent saved publication, set before synchronous
+    /// status subscribers run. Reset and failure publications clear it.
+    public private(set) var lastTranscriptSaveOrigin: TranscriptSaveOrigin? = nil
     /// Where the most recent saved transcript's job spent its time; nil when
     /// the save did not come from a timed pipeline run.
     public private(set) var lastPipelineTimings: MeetingPipelineTimings.Snapshot? = nil
@@ -290,6 +293,7 @@ public class TranscriptionTaskManager: ObservableObject {
         lastFailureDiagnosticMessage = diagnosticMessage
         lastFailureErrorKind = errorKind
         lastSpeakerFinalizationFailure = speakerFinalizationFailure
+        lastTranscriptSaveOrigin = nil
         displayStatus = .failed(message: displayMessage)
     }
 
@@ -310,7 +314,7 @@ public class TranscriptionTaskManager: ObservableObject {
     /// Speaker review saved. Clears the previous failure's diagnostics so a later
     /// status observer never reads a stale failure reason.
     func publishSpeakerNamesSaved() {
-        publishNonFailureStatus(.transcriptSaved)
+        publishNonFailureStatus(.transcriptSaved, saveOrigin: .speakerReview)
     }
 
     /// A save that lands on an already-published transcript keeps its status, but the
@@ -323,10 +327,11 @@ public class TranscriptionTaskManager: ObservableObject {
         lastSpeakerFinalizationFailure = nil
     }
 
-    func publishNonFailureStatus(_ status: DisplayStatus) {
+    func publishNonFailureStatus(_ status: DisplayStatus, saveOrigin: TranscriptSaveOrigin? = nil) {
         lastFailureDiagnosticMessage = nil
         lastFailureErrorKind = nil
         lastSpeakerFinalizationFailure = nil
+        lastTranscriptSaveOrigin = status == .transcriptSaved ? saveOrigin : nil
         displayStatus = status
     }
 
@@ -339,7 +344,7 @@ public class TranscriptionTaskManager: ObservableObject {
         // `.transcriptSaved` sees this save's timings, never a previous one's.
         lastPipelineTimings = timings
         populateSavedMetadata(from: transcriptURL, taskId: taskId)
-        publishNonFailureStatus(.transcriptSaved)
+        publishNonFailureStatus(.transcriptSaved, saveOrigin: .pipeline)
         scheduleStatusReset(delay: 4)
     }
 
