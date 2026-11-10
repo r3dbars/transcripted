@@ -20,20 +20,24 @@ returns a self-contained HTML widget: one card per recent meeting with
 Light and dark themes are both handled. In a client that does not render inline
 UI, the same tool returns a plain-text meeting list as a fallback.
 
-## Privacy: nothing leaves this Mac
+## Privacy: local transport, client-controlled handling
 
-This is the reason MCP Apps is the right first move for Transcripted. The widget
-is **fully self-contained** — inline CSS/JS, no CDN, no external fonts, no
-network calls of any kind. Audio and transcripts are read from the local capture
-library and travel *with* the widget over the local stdio transport to the local
-client. There is no remote host in the loop. This matches the app's "your content
-never leaves this Mac" posture exactly; the local MCP server serves local bytes to
-the local agent.
+The helper reads the local capture library and returns the widget to the
+configured MCP client over stdio. That result includes meeting titles, speaker
+labels, transcript text, local audio-folder paths when present, and audio bytes
+within the inline limits. The meeting model is carried in both the embedded HTML
+and `structuredContent`.
 
-Concretely, the widget's sandbox runs under the MCP Apps default CSP
-(`default-src 'none'; media-src 'self' data:; connect-src 'none'; …`), so it
-*cannot* reach the network even if it wanted to. Audio plays from a
-`data:audio/mp4;base64,…` URI, which the default policy allows.
+Local stdio describes the helper-to-client connection. It does not establish
+where the client processes or retains the result: a client may forward tool
+content to a hosted model or another service. Which hosts and settings are
+acceptable remains an owner-level decision; this document does not certify a
+host's content handling or retention policy.
+
+The widget's CSS and JavaScript are inline, with no CDN or external fonts.
+Embedded audio plays from a `data:` URI, so those assets need no separate HTTP
+endpoint. This describes widget asset loading, not a guarantee that content stays
+on the Mac after it reaches the client.
 
 ## The wire shape (MCP Apps / SEP-1865)
 
