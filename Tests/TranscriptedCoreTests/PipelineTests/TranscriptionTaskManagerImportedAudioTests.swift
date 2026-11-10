@@ -69,6 +69,7 @@ extension TranscriptionTaskManagerMetadataTests {
 
     func testPreserveActiveTranscriptionsForShutdownRetainsImportedAudio() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Imported shutdown recovery.")
+        defer { speech.release() }
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -91,35 +92,47 @@ extension TranscriptionTaskManagerMetadataTests {
             meetingTitle: "Imported customer call",
             recoverySession: recoverySession
         )
+        let producer = manager.activeTasks[taskId]
 
-        try await waitUntil {
-            speech.didStart
+        do {
+            try await waitUntil {
+                speech.didStart
+            }
+
+            let preserved = manager.preserveActiveTranscriptionsForShutdown(
+                errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
+            )
+
+            XCTAssertEqual(preserved, 1)
+            XCTAssertTrue(manager.activeTasks.isEmpty)
+            XCTAssertEqual(manager.activeCount, 0)
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+            XCTAssertEqual(failed.meetingTitle, "Imported customer call")
+            XCTAssertFalse(failed.splitLocalSpeakers)
+            XCTAssertTrue(failed.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
+            XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
+            XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
+            XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
+            XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
+            XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
+
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+        } catch {
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            throw error
         }
-
-        let preserved = manager.preserveActiveTranscriptionsForShutdown(
-            errorMessage: "Meeting saved before quit. Audio is safe; finish the transcript from Home after reopening."
-        )
-
-        XCTAssertEqual(preserved, 1)
-        XCTAssertTrue(manager.activeTasks.isEmpty)
-        XCTAssertEqual(manager.activeCount, 0)
-        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
-        XCTAssertEqual(failed.meetingTitle, "Imported customer call")
-        XCTAssertFalse(failed.splitLocalSpeakers)
-        XCTAssertTrue(failed.micAudioURL.lastPathComponent.hasPrefix("microphone_placeholder"))
-        XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
-        XCTAssertTrue(failed.systemAudioURL?.path.hasPrefix(retainedAudioDirectory.path + "/") ?? false)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.systemAudioURL?.path ?? ""))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: copiedImportURL.path))
-        XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
-        XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
-
-        speech.release()
     }
 
     func testShutdownPreservesActiveImportedAudioBeforePendingNamingCleanup() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Imported shutdown ordering.")
+        defer { speech.release() }
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -141,37 +154,48 @@ extension TranscriptionTaskManagerMetadataTests {
             outputFolder: tempDirectory.appendingPathComponent("transcripts"),
             recoverySession: recoverySession
         )
-        try await waitUntil { speech.didStart }
+        let producer = manager.activeTasks[taskId]
+        do {
+            try await waitUntil { speech.didStart }
 
-        manager.speakerNamingRequest = SpeakerNamingRequest(
-            speakers: [],
-            knownPeople: [],
-            transcriptURL: tempDirectory.appendingPathComponent("precommit.md"),
-            transcriptId: taskId,
-            systemAudioURL: copiedImportURL,
-            micAudioURL: nil,
-            shouldRemoveTemporaryAudioOnCleanup: true,
-            sourceFailedTranscriptionId: nil,
-            importedRecoverySession: recoverySession,
-            onComplete: { _ in }
-        )
+            manager.speakerNamingRequest = SpeakerNamingRequest(
+                speakers: [],
+                knownPeople: [],
+                transcriptURL: tempDirectory.appendingPathComponent("precommit.md"),
+                transcriptId: taskId,
+                systemAudioURL: copiedImportURL,
+                micAudioURL: nil,
+                shouldRemoveTemporaryAudioOnCleanup: true,
+                sourceFailedTranscriptionId: nil,
+                importedRecoverySession: recoverySession,
+                onComplete: { _ in }
+            )
 
-        XCTAssertEqual(
-            manager.preserveActiveTranscriptionsForShutdown(errorMessage: "test shutdown ordering"),
-            1
-        )
-        manager.cleanupPendingNaming()
+            XCTAssertEqual(
+                manager.preserveActiveTranscriptionsForShutdown(errorMessage: "test shutdown ordering"),
+                1
+            )
+            manager.cleanupPendingNaming()
 
-        let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
-        XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
-        XCTAssertNotNil(failed.systemAudioURL)
-        XCTAssertFalse(failed.splitLocalSpeakers)
-        XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
-        XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
-        XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
-        XCTAssertNil(manager.speakerNamingRequest)
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+            XCTAssertTrue(FileManager.default.fileExists(atPath: failed.micAudioURL.path))
+            XCTAssertNotNil(failed.systemAudioURL)
+            XCTAssertFalse(failed.splitLocalSpeakers)
+            XCTAssertEqual(recoverySession.failedQueueHandoffCount, 1)
+            XCTAssertEqual(recoverySession.scratchCleanupPreparationCount, 0)
+            XCTAssertEqual(recoverySession.scratchCleanupCount, 0)
+            XCTAssertNil(manager.speakerNamingRequest)
 
-        speech.release()
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+        } catch {
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            throw error
+        }
     }
 
     func testImportedRecoverySessionUsesStableIdentityAndWaitsForScratchCleanup() async throws {

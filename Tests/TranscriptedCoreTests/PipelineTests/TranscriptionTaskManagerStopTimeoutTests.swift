@@ -33,7 +33,7 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertFalse(FileManager.default.fileExists(atPath: retainedAudioDirectory.path), "stop-timeout preservation should not copy possibly unfinished WAVs into the retained archive")
     }
 
-    func testLateStopTimeoutFinalizationPromotesFailedQueueAudioToRetainedArchive() throws {
+    func testLateStopTimeoutFinalizationPromotesFailedQueueAudioToRetainedArchive() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -61,6 +61,7 @@ extension TranscriptionTaskManagerMetadataTests {
             systemAudioURL: systemURL
         ))
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
         XCTAssertEqual(failed.id, failedId)
@@ -84,7 +85,7 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(persisted.first?.retryCount, 1)
     }
 
-    func testLateStopTimeoutFinalizationKeepsScratchAudioDuringActiveRetry() throws {
+    func testLateStopTimeoutFinalizationKeepsScratchAudioDuringActiveRetry() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -118,6 +119,7 @@ extension TranscriptionTaskManagerMetadataTests {
             systemAudioURL: systemURL
         ))
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
         XCTAssertTrue(failed.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
@@ -133,6 +135,7 @@ extension TranscriptionTaskManagerMetadataTests {
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Recovered after late finalization.")
+        defer { speech.release() }
         let manager = makeManager(
             speechToText: speech,
             retainedAudioDirectory: retainedAudioDirectory
@@ -159,28 +162,37 @@ extension TranscriptionTaskManagerMetadataTests {
                 outputFolder: tempDirectory.appendingPathComponent("transcripts")
             )
         }
-        try await waitUntil(timeout: 60) {
-            speech.didStart
+        do {
+            try await waitUntil(timeout: 60) {
+                speech.didStart
+            }
+
+            XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
+                id: failedId,
+                micAudioURL: micURL,
+                systemAudioURL: systemURL
+            ))
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
+            XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
+
+            speech.release()
+            let didRetry = await retry.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+
+            XCTAssertTrue(didRetry)
+            XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "finished retry should clean up superseded mic scratch")
+            XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "finished retry should clean up superseded system scratch")
+        } catch {
+            speech.release()
+            _ = await retry.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            throw error
         }
-
-        XCTAssertTrue(manager.promoteFinalizedFailedTranscriptionAudio(
-            id: failedId,
-            micAudioURL: micURL,
-            systemAudioURL: systemURL
-        ))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: micURL.path))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: systemURL.path))
-
-        speech.release()
-        let didRetry = await retry.value
-
-        XCTAssertTrue(didRetry)
-        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
-        XCTAssertFalse(FileManager.default.fileExists(atPath: micURL.path), "finished retry should clean up superseded mic scratch")
-        XCTAssertFalse(FileManager.default.fileExists(atPath: systemURL.path), "finished retry should clean up superseded system scratch")
     }
 
-    func testLateStopTimeoutFinalizationPromotesSystemOnlyFailedAudioToRetainedArchive() throws {
+    func testLateStopTimeoutFinalizationPromotesSystemOnlyFailedAudioToRetainedArchive() async throws {
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -209,6 +221,7 @@ extension TranscriptionTaskManagerMetadataTests {
             systemAudioURL: systemURL
         ))
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
         XCTAssertEqual(failed.id, failedId)

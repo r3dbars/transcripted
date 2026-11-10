@@ -412,6 +412,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
 
         let recoveredCount = await manager.recoverOrphanedRecordings(in: paths.audioCaptures)
         XCTAssertEqual(recoveredCount, 1)
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let recovered = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertTrue(recovered.micAudioURL.path.hasPrefix(retainedAudioDirectory.path + "/"))
         XCTAssertTrue(FileManager.default.fileExists(atPath: recovered.micAudioURL.path))
@@ -423,6 +424,7 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
             systemAudioURL: nil
         ))
 
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let afterLateCallback = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         XCTAssertEqual(afterLateCallback.micAudioURL, recovered.micAudioURL)
         XCTAssertTrue(FileManager.default.fileExists(atPath: afterLateCallback.micAudioURL.path))

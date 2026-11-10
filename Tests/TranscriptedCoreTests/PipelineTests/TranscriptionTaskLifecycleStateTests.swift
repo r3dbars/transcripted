@@ -171,6 +171,7 @@ extension TranscriptionTaskManagerMetadataTests {
     /// published surfaces the app polls before quitting must already read as "nothing active."
     func testShutdownPreservationEvictsOccupancySynchronouslyBeforeTheEngineNoticesCancellation() async throws {
         let speech = UncooperativeMetadataStubSpeechToTextEngine(transcript: "Should still be preserved as failed audio.")
+        defer { speech.release() }
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -187,24 +188,33 @@ extension TranscriptionTaskManagerMetadataTests {
             systemURL: nil,
             outputFolder: tempDirectory.appendingPathComponent("transcripts")
         )
-        try await waitUntil { speech.didStart }
-        XCTAssertTrue(manager.hasPreservableActiveTranscriptionAudio)
+        let producer = manager.activeTasks.values.first
+        do {
+            try await waitUntil { speech.didStart }
+            XCTAssertTrue(manager.hasPreservableActiveTranscriptionAudio)
 
-        let preserved = manager.preserveActiveTranscriptionsForShutdown(errorMessage: "shutting down")
+            let preserved = manager.preserveActiveTranscriptionsForShutdown(errorMessage: "shutting down")
 
-        XCTAssertEqual(preserved, 1)
-        // Synchronous, even though `speech` is still blocked mid-`transcribeSegment` and has not
-        // observed cancellation at all (it never checks `Task.isCancelled`).
-        XCTAssertTrue(manager.activeTasks.isEmpty)
-        XCTAssertEqual(manager.activeCount, 0)
-        XCTAssertFalse(manager.hasPreservableActiveTranscriptionAudio)
-        XCTAssertFalse(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation)
+            XCTAssertEqual(preserved, 1)
+            // Synchronous, even though `speech` is still blocked mid-`transcribeSegment` and has not
+            // observed cancellation at all (it never checks `Task.isCancelled`).
+            XCTAssertTrue(manager.activeTasks.isEmpty)
+            XCTAssertEqual(manager.activeCount, 0)
+            XCTAssertFalse(manager.hasPreservableActiveTranscriptionAudio)
+            XCTAssertFalse(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation)
 
-        speech.release()
-        // The still-running task body eventually returns and must quietly clean itself up via
-        // the `.preservedForShutdown` marker instead of publishing a second, redundant outcome.
-        try await Task.sleep(nanoseconds: 200_000_000)
-        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1, "shutdown preservation should have persisted exactly one failed-queue row")
+            speech.release()
+            // The still-running task body eventually returns and must quietly clean itself up via
+            // the `.preservedForShutdown` marker instead of publishing a second, redundant outcome.
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1, "shutdown preservation should have persisted exactly one failed-queue row")
+        } catch {
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            throw error
+        }
     }
 
     /// Regression test for a Codex review finding on this PR: `preserveActiveTranscriptionsForShutdown()`
@@ -219,6 +229,7 @@ extension TranscriptionTaskManagerMetadataTests {
     /// "just a cancellation."
     func testShutdownPreservationThenCancelAllKeepsCommittedPrecedenceOverTheTasksOwnCancellation() async throws {
         let speech = BlockingMetadataStubSpeechToTextEngine(transcript: "Should never actually be saved.")
+        defer { speech.release() }
         let retainedAudioDirectory = tempDirectory
             .appendingPathComponent("transcripts", isDirectory: true)
             .appendingPathComponent("audio", isDirectory: true)
@@ -237,36 +248,47 @@ extension TranscriptionTaskManagerMetadataTests {
             systemURL: nil,
             outputFolder: tempDirectory.appendingPathComponent("transcripts")
         )
-        try await waitUntil { speech.didStart }
+        let producer = manager.activeTasks[taskId]
+        do {
+            try await waitUntil { speech.didStart }
 
-        // Force the task into the committed state directly, the same way
-        // `commitSavedTranscriptSideEffectsUnlessCancelled` would deep inside the real pipeline —
-        // this test only needs the state-machine consequence, not a full pipeline run.
-        try manager.markTaskTranscriptCommitted(taskId: taskId)
-        XCTAssertTrue(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation, "a committed-but-still-occupying task still needs quit confirmation")
+            // Force the task into the committed state directly, the same way
+            // `commitSavedTranscriptSideEffectsUnlessCancelled` would deep inside the real pipeline —
+            // this test only needs the state-machine consequence, not a full pipeline run.
+            try manager.markTaskTranscriptCommitted(taskId: taskId)
+            XCTAssertTrue(manager.hasActiveTranscriptionWorkRequiringQuitConfirmation, "a committed-but-still-occupying task still needs quit confirmation")
 
-        let preserved = manager.preserveActiveTranscriptionsForShutdown(errorMessage: "shutting down")
-        XCTAssertEqual(preserved, 1, "the task still owned audio at commit time, so it must be preserved")
-        XCTAssertTrue(manager.activeTasks.isEmpty, "preservation evicts occupancy synchronously")
-        XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1, "preservation should have persisted one failed-queue row already")
+            let preserved = manager.preserveActiveTranscriptionsForShutdown(errorMessage: "shutting down")
+            XCTAssertEqual(preserved, 1, "the task still owned audio at commit time, so it must be preserved")
+            XCTAssertTrue(manager.activeTasks.isEmpty, "preservation evicts occupancy synchronously")
+            XCTAssertEqual(manager.failedTranscriptionManager.failedTranscriptions.count, 1, "preservation should have persisted one failed-queue row already")
 
-        // cancelAll() no longer finds this id in activeTasks (preserve() already evicted it), so
-        // it only exercises its "sweep any leftover .preservedForShutdown markers" pass.
-        manager.cancelAll()
+            // cancelAll() no longer finds this id in activeTasks (preserve() already evicted it), so
+            // it only exercises its "sweep any leftover .preservedForShutdown markers" pass.
+            manager.cancelAll()
 
-        // preserve() already called task.cancel() on the underlying Task; the blocking engine
-        // (unlike the uncooperative one used elsewhere in this file) checks Task.isCancelled and
-        // throws CancellationError on its own within ~20ms, without needing speech.release().
-        try await waitUntil(timeout: 60) { speech.sawCancellation }
+            // preserve() already called task.cancel() on the underlying Task; the blocking engine
+            // (unlike the uncooperative one used elsewhere in this file) checks Task.isCancelled and
+            // throws CancellationError on its own within ~20ms, without needing speech.release().
+            try await waitUntil(timeout: 60) { speech.sawCancellation }
 
-        try await waitUntil(timeout: 60) {
-            if case .failed = manager.displayStatus { return true }
-            return false
+            try await waitUntil(timeout: 60) {
+                if case .failed = manager.displayStatus { return true }
+                return false
+            }
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            guard case .failed(let message) = manager.displayStatus else {
+                return XCTFail("committed must win over the task's own CancellationError, publishing a failure instead of being silently suppressed")
+            }
+            XCTAssertEqual(message, "Transcription failed")
+        } catch {
+            speech.release()
+            await producer?.value
+            await manager.beginWaitingForScheduledFailedAudioArchives().wait()
+            throw error
         }
-        guard case .failed(let message) = manager.displayStatus else {
-            return XCTFail("committed must win over the task's own CancellationError, publishing a failure instead of being silently suppressed")
-        }
-        XCTAssertEqual(message, "Transcription failed")
     }
 
     /// Regression test for the second Codex review finding on this PR: `performRetry`'s manual

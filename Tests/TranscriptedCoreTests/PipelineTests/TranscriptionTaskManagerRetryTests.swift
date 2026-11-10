@@ -268,6 +268,7 @@ extension TranscriptionTaskManagerMetadataTests {
             errorMessage: "Parakeet inference failed",
             meetingTitle: "Recovered Customer Call"
         ))
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         let retainedMicURL = failed.micAudioURL
         let retainedSystemURL = try XCTUnwrap(failed.systemAudioURL)
@@ -318,6 +319,7 @@ extension TranscriptionTaskManagerMetadataTests {
             systemAudioURL: systemURL,
             errorMessage: "Parakeet inference failed"
         ))
+        await manager.beginWaitingForScheduledFailedAudioArchives().wait()
         let failed = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
         let failedId = failed.id
         let retainedMicURL = failed.micAudioURL
