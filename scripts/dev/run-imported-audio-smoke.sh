@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the Core-only synthetic producer, then let QA validate its real outputs.
 set -euo pipefail
-REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 cd "$REPO_ROOT"
 DEPS_BUILD_STAMP="$REPO_ROOT/deps-libs/.build-deps-stamp"
 source scripts/entrypoints/lib/deps-staleness.sh
@@ -11,7 +11,19 @@ if [ ! -f deps-libs/libDraftDeps.a ] || [ ! -d deps-modules/TranscriptedCore.swi
     exit 3
 fi
 out="$REPO_ROOT/build/imported-audio-artifact-smoke"
+for directory in "$REPO_ROOT/build" "$out"; do
+    if [ -L "$directory" ] || { [ -e "$directory" ] && [ ! -d "$directory" ]; }; then
+        echo 'BLOCKED: producer build output must be real directories under this checkout.' >&2
+        exit 3
+    fi
+done
+if [ -L "$out/producer" ]; then
+    echo 'BLOCKED: refusing a symlinked producer executable.' >&2
+    exit 3
+fi
 mkdir -p "$out"
+# Unlink a previous build artifact before the compiler opens the destination.
+rm -f "$out/producer"
 module_flags=(-I "$REPO_ROOT/deps-modules")
 for directory in "$REPO_ROOT"/deps-modules/*/; do
     [ -d "$directory" ] || continue

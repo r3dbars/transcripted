@@ -3,16 +3,25 @@ import XCTest
 
 final class ImportedAudioSmokeTests: XCTestCase {
     private var tempRoot: URL!
+    private var ownedTemp: URL!
 
     override func setUpWithError() throws {
-        tempRoot = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ImportedAudioSmokeTests-\(UUID().uuidString)", isDirectory: true)
+        ownedTemp = FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL
+        tempRoot = ownedTemp.appendingPathComponent("ImportedAudioSmokeTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
         if let tempRoot {
-            try? FileManager.default.removeItem(at: tempRoot)
+            let prefix = "ImportedAudioSmokeTests-"
+            let parent = tempRoot.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+            guard parent.path == ownedTemp.path, tempRoot.lastPathComponent.hasPrefix(prefix),
+                  UUID(uuidString: String(tempRoot.lastPathComponent.dropFirst(prefix.count))) != nil else {
+                XCTFail("Refusing cleanup outside the owned smoke test root")
+                return
+            }
+            do { try FileManager.default.removeItem(at: tempRoot) }
+            catch { XCTFail("Could not clean the owned smoke test root: \(error)") }
         }
     }
 
@@ -68,6 +77,11 @@ final class ImportedAudioSmokeTests: XCTestCase {
         XCTAssertThrowsError(try ImportedAudioSmokeRunner(outputDirectory: tempRoot, mode: .producer(producer)).run())
     }
 
+    func testAutomaticCleanupFailuresAreReported() throws {
+        let manager = CleanupFailureFileManager(root: tempRoot)
+        XCTAssertThrowsError(try ImportedAudioSmokeRunner(mode: .fixtureOnly, fileManager: manager).run())
+    }
+
     private func makeProducerReceipt(transcript: String, speechCalls: Int) throws -> URL {
         let payload: [String: Any] = ["formatVersion": 1, "transcript": transcript,
                                     "retainedAudio": "source/Imported Partner Brief.wav",
@@ -85,4 +99,13 @@ final class ImportedAudioSmokeTests: XCTestCase {
         return producer
     }
 
+}
+
+private final class CleanupFailureFileManager: FileManager, @unchecked Sendable {
+    private let root: URL
+    init(root: URL) { self.root = root; super.init() }
+    override var temporaryDirectory: URL { root }
+    override func removeItem(at URL: URL) throws {
+        throw NSError(domain: "OwnedCleanupFailure", code: 1)
+    }
 }

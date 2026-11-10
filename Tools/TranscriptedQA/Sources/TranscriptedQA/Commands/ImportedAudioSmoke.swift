@@ -71,15 +71,42 @@ struct ImportedAudioSmokeRunner {
     }
 
     func run() throws -> [ValidationResult] {
-        let root = (outputDirectory ?? fileManager.temporaryDirectory)
-            .appendingPathComponent("transcripted-imported-audio-smoke-\(UUID().uuidString)", isDirectory: true).resolvingSymlinksInPath()
+        let ownedParent = (outputDirectory ?? fileManager.temporaryDirectory)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let prefix = "transcripted-imported-audio-smoke-"
+        let root = ownedParent.appendingPathComponent(prefix + UUID().uuidString, isDirectory: true)
         let shouldRemoveRoot = outputDirectory == nil && !preserve
-        defer {
-            if shouldRemoveRoot {
-                try? fileManager.removeItem(at: root)
+        var cleanupAttempted = false
+        func cleanup() throws {
+            guard shouldRemoveRoot, !cleanupAttempted else { return }
+            cleanupAttempted = true
+            let parent = root.deletingLastPathComponent().resolvingSymlinksInPath().standardizedFileURL
+            guard parent.path == ownedParent.path,
+                  root.lastPathComponent.hasPrefix(prefix),
+                  UUID(uuidString: String(root.lastPathComponent.dropFirst(prefix.count))) != nil else {
+                throw ValidationError("Refusing cleanup outside the owned imported-audio evidence root.")
+            }
+            do {
+                let type = try fileManager.attributesOfItem(atPath: root.path)[.type] as? FileAttributeType
+                guard type == .typeDirectory else {
+                    throw ValidationError("Imported-audio evidence root is not a real directory; cleanup refused.")
+                }
+                try fileManager.removeItem(at: root)
+            } catch let error as CocoaError where error.code == .fileNoSuchFile || error.code == .fileReadNoSuchFile {
+                // Nothing was created, or the owned root is already gone.
             }
         }
+        do {
+            let results = try runEvidence(in: root)
+            try cleanup()
+            return results
+        } catch {
+            try cleanup()
+            throw error
+        }
+    }
 
+    private func runEvidence(in root: URL) throws -> [ValidationResult] {
         let sourceAudio = root.appendingPathComponent("source/Imported Partner Brief.wav", isDirectory: false)
         let meetingsDir = root.appendingPathComponent("captures/meetings", isDirectory: true)
         var transcriptURL = meetingsDir.appendingPathComponent("Imported Partner Brief.md", isDirectory: false)
