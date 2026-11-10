@@ -4,7 +4,7 @@
 
 ## Packages
 
-- `TranscriptedCaptureKit/` — shared library for capture-library resolution and capture-Markdown parsing, used by the CLI and MCP packages
+- `TranscriptedCaptureKit/` — shared library for capture-library resolution and capture-Markdown parsing, used by the CLI, MCP and QA packages
 - `TranscriptedCLI/` — local context, offline transcription, and offline diarization CLI
 - `TranscriptedMCP/` — read-only MCP server for saved meetings, dictations, and writing
 - `TranscriptedQA/` — artifact validation and QA CLI

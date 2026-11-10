@@ -836,6 +836,7 @@ rules:
       - "swift test --package-path Tools/TranscriptedCaptureKit"
       - "swift test --package-path Tools/TranscriptedCLI"
       - "swift test --package-path Tools/TranscriptedMCP"
+      - "swift test --package-path Tools/TranscriptedQA"
       - "bash run-e2e-smoke.sh"
 
   - paths:
