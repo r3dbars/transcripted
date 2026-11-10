@@ -147,7 +147,7 @@ extension SCKAudioCapture {
     }
 
     /// Restores the recovery-attempt budget after a confirmed successful
-    /// recovery, mirroring `Audio.finalizeMicRecoveryArtifacts` resetting
+    /// recovery, mirroring `Audio.finalizeRegisteredMicRecoverySegment` resetting
     /// `recoveryAttemptCount = 0` on the mic path. Without this, `attempts`
     /// only resets on a brand-new (non-recovery) `start()` — a proactive
     /// post-wake kick that succeeds would otherwise permanently spend this

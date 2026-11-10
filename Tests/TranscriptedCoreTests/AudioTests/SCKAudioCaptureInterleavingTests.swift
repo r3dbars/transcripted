@@ -458,7 +458,7 @@ final class SCKAudioCaptureInterleavingTests: XCTestCase {
     // succeeds (the common case — nothing was actually broken) would
     // permanently spend the capture's only attempt, leaving a LATER genuine
     // failure in the same recording with zero budget. This mirrors the mic
-    // path's `Audio.finalizeMicRecoveryArtifacts` resetting
+    // path's `Audio.finalizeRegisteredMicRecoverySegment` resetting
     // `recoveryAttemptCount = 0` on every successful recovery.
 
     func testRecoveryAttemptsResetToZeroAfterSuccessfulRecovery() {
