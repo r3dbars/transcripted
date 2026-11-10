@@ -479,6 +479,16 @@ enum ParakeetConfigChangeTeardown {
             permit, wasRecording: wasRecording, strategy: strategy,
             forceForMicrophoneSharing: forceForMicrophoneSharing
         ) else { return nil }
+        let observerSuspended = graph.suspendConfigurationObserver(ownedBy: work.owner)
+        defer {
+            // No exit may strand the queued authority behind its entry gate.
+            graph.allowConfigurationNativeCalls(work)
+            // A timeout can return while late cleanup is still running. Only
+            // returned native calls and the exact owner may restore listening.
+            if observerSuspended, work.nativeWorkFinished {
+                graph.restoreConfigurationObserverIfCurrent(work.owner)
+            }
+        }
         let recoveryGeneration = host.beginConfigChangeRecovery()
         host.cancelPrewarmRetry()
         if graph.owns(work.owner), wasRecording {

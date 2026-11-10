@@ -262,6 +262,21 @@ final class ParakeetAudioGraph<Driver: ParakeetAudioGraphDriver> {
         return work
     }
 
+    /// Suspend before any route-native calls, including a reuse decision that
+    /// escalates to reset. A reset echo must not enter the live route mailbox.
+    func suspendConfigurationObserver(ownedBy owner: QueueOwner) -> Bool {
+        guard owns(owner), let host else { return false }
+        host.removeAudioEngineConfigObserver()
+        return true
+    }
+
+    /// Unlike the legacy engine-only helper, this belongs to one exact route
+    /// operation. A newer generation or queue owns its observer installation.
+    func restoreConfigurationObserverIfCurrent(_ owner: QueueOwner) {
+        guard owns(owner), let host, !host.isShuttingDown else { return }
+        host.installAudioEngineConfigObserverIfNeeded()
+    }
+
     func allowConfigurationNativeCalls(_ work: ParakeetConfigurationNativeWork<Driver.Engine>) {
         // Always release the gate: an obsolete owner still owes leased cleanup.
         work.allowNativeCalls()

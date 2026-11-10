@@ -74,6 +74,8 @@ func testParakeetConfigChangeDeadline() async {
         assertTrue(fixture.graph.queue !== oldQueue, "the latest work must have a fresh serial executor")
         assertEqual(heldNative.isOpen, false, "the old native call is still held")
         assertEqual(fixture.limiter.activeWorkerCount, 1, "the held old worker still owns its permit")
+        assertFalse(fixture.observers.contains(oldEngine.id), "timeout must not restore the held old observer")
+        assertTrue(fixture.observers.contains(fixture.graph.engine.id), "timeout repair installs the successor observer")
         // This is an explicit new user intent in the fake host, not an automatic
         // restart invented by a later notification. Actual start/audio is outside this test.
         fixture.host.beginFreshUserRecording()
@@ -98,6 +100,105 @@ func testParakeetConfigChangeDeadline() async {
         assertEqual(fixture.driver.operations(engine: successor.id), successorTrace,
                     "late old work and cleanup cannot touch the successor")
         assertEqual(fixture.limiter.activeWorkerCount, 0)
+        assertTrue(fixture.driver.events.filter { $0.engine == oldEngine.id }.allSatisfy { !$0.observingEngine },
+                   "late old cleanup must still run with that engine's observer absent")
+        assertFalse(fixture.observers.contains(oldEngine.id))
+        assertTrue(fixture.observers.contains(successor.id))
+    }
+
+    await runSuite("Ordinary configuration reuse suspends the observer for native work then restores it") {
+        let fixture = ConfigDeadlineFixture(capacity: 1)
+        let engine = fixture.graph.engine
+        assertTrue(fixture.observers.contains(engine.id))
+        let result = await fixture.run()
+        assertNotNil(result)
+        assertTrue(fixture.graph.engine === engine)
+        assertEqual(fixture.driver.operations(engine: engine.id), ["remove", "stop"])
+        assertTrue(fixture.driver.events.allSatisfy { !$0.observingEngine },
+                   "the matching engine observer must be absent before every admitted native step")
+        assertTrue(fixture.observers.contains(engine.id), "completed current reuse restores its observer")
+    }
+
+    await runSuite("Reuse escalating after voice-processing release failure keeps the old observer suspended") {
+        let fixture = ConfigDeadlineFixture(capacity: 1, stopReleasesVoiceProcessing: false)
+        let old = fixture.graph.engine
+        let result = await fixture.run()
+        assertNotNil(result)
+        assertTrue(fixture.graph.engine !== old)
+        assertEqual(fixture.driver.operations(engine: old.id), ["remove", "stop", "remove", "reset"])
+        assertTrue(fixture.driver.events.filter { $0.engine == old.id }.allSatisfy { !$0.observingEngine },
+                   "a reuse decision cannot leave its observer attached when stop escalates to reset")
+        assertFalse(fixture.observers.contains(old.id))
+        assertTrue(fixture.observers.contains(fixture.graph.engine.id), "the successor gets its own observer")
+    }
+
+    await runSuite("Retirement-cap reset restores the observer on the current reused resources") {
+        let fixture = ConfigDeadlineFixture(capacity: 1, retirementAllowed: false)
+        let engine = fixture.graph.engine
+        let queue = fixture.graph.queue
+        let owner = fixture.graph.queueOwner
+        let result = await fixture.run(strategy: .rebuildGraph)
+        assertNotNil(result)
+        assertTrue(fixture.graph.engine === engine)
+        assertTrue(fixture.graph.queue === queue)
+        assertFalse(fixture.graph.owns(owner), "reset-in-place still advances ownership")
+        assertEqual(fixture.driver.operations(engine: engine.id), ["remove", "stop", "remove", "reset"])
+        assertTrue(fixture.driver.events.allSatisfy { !$0.observingEngine })
+        assertTrue(fixture.observers.contains(engine.id), "the current owner must regain its observer at the cap")
+    }
+
+    await runSuite("Completed current phase cancellation restores the observer only after cleanup returns") {
+        let preentry = DeadlineBlock()
+        let fixture = ConfigDeadlineFixture(capacity: 1, firstQueueBlock: preentry)
+        let engine = fixture.graph.engine
+        let queue = fixture.graph.queue
+        let cleanup = fixture.driver.block("reset", engine: engine.id, occurrence: 1)
+        let work = Task { @MainActor in await fixture.run() }
+        defer { preentry.open(); cleanup.open() }
+        await fixture.deadlines.registered.wait(atLeast: 1)
+        let owner = fixture.graph.queueOwner
+        assertFalse(fixture.observers.contains(engine.id), "admission suspends before the native queue can enter")
+        // Existing phase-ownership seam models cancellation without changing the
+        // graph owner. This is not actual user stop, shutdown or recording-truth proof.
+        fixture.graph.workOwnership.finish(owner: owner, phase: .configurationTeardown)
+        preentry.open()
+        await cleanup.entered.wait()
+        assertTrue(fixture.graph.owns(owner))
+        assertFalse(fixture.observers.contains(engine.id), "unfinished cleanup cannot restore the current observer")
+        assertEqual(fixture.driver.operations(engine: engine.id), ["remove", "reset"])
+        assertTrue(fixture.driver.events.allSatisfy { !$0.observingEngine && $0.activeWorkers == 1 })
+        cleanup.open()
+        let result = await work.value
+        await deadlineQueueBarrier(queue)
+        assertEqual(result, nil)
+        assertTrue(fixture.graph.owns(owner))
+        assertTrue(fixture.observers.contains(engine.id), "completed current cancellation restores observation")
+        assertEqual(fixture.limiter.activeWorkerCount, 0)
+    }
+
+    await runSuite("A stale queue owner cannot suspend or restore another observer epoch") {
+        let fixture = ConfigDeadlineFixture(capacity: 1)
+        let old = fixture.graph.queueOwner
+        let oldEngine = fixture.graph.engine
+        let oldQueue = fixture.graph.queue
+        assertTrue(fixture.graph.suspendConfigurationObserver(ownedBy: old))
+        assertFalse(fixture.observers.contains(oldEngine.id))
+        fixture.graph.generation += 1
+        let calls = fixture.host.calls
+        fixture.graph.restoreConfigurationObserverIfCurrent(old)
+        assertFalse(fixture.observers.contains(oldEngine.id), "a stale generation cannot reinstall its observer")
+        assertEqual(fixture.host.calls, calls)
+        assertFalse(fixture.graph.suspendConfigurationObserver(ownedBy: old))
+        assertTrue(fixture.graph.abandonBlocked(reason: "synthetic observer epoch", expectedOwner: fixture.graph.queueOwner))
+        let successor = fixture.graph.engine
+        assertTrue(successor !== oldEngine)
+        assertTrue(fixture.observers.contains(successor.id))
+        let successorCalls = fixture.host.calls
+        fixture.graph.restoreConfigurationObserverIfCurrent(old)
+        assertFalse(fixture.observers.contains(oldEngine.id))
+        assertTrue(fixture.observers.contains(successor.id), "stale restoration must preserve the new observer")
+        assertEqual(fixture.host.calls, successorCalls)
+        await deadlineQueueBarrier(oldQueue)
     }
 
     await runSuite("Circuit refusal leaves graph and recovery truth unchanged") {
@@ -108,6 +209,7 @@ func testParakeetConfigChangeDeadline() async {
         let engine = fixture.graph.engine
         let queue = fixture.graph.queue
         let calls = fixture.host.calls
+        let observedBefore = fixture.observers.engineIDs
         let result = await fixture.run()
         assertEqual(result, nil)
         assertTrue(fixture.graph.owns(owner))
@@ -120,6 +222,7 @@ func testParakeetConfigChangeDeadline() async {
         assertEqual(fixture.host.calls, calls + ["blocked:1"])
         assertEqual(fixture.driver.events.count, 0, "refusal must not enter a driver operation")
         assertEqual(fixture.deadlines.intervals, [])
+        assertEqual(fixture.observers.engineIDs, observedBefore, "admission refusal leaves observers untouched")
     }
 
     await runSuite("One four-second native deadline covers ordered teardown rather than restarting per stage") {
@@ -165,6 +268,9 @@ func testParakeetConfigChangeDeadline() async {
         cleanup.open()
         await deadlineQueueBarrier(oldQueue)
         assertEqual(fixture.driver.operations(engine: oldEngine.id), ["remove", "reset"], "one cleanup only")
+        assertTrue(fixture.driver.events.allSatisfy { !$0.observingEngine }, "even preentry-timeout cleanup observes no old observer")
+        assertFalse(fixture.observers.contains(oldEngine.id))
+        assertTrue(fixture.observers.contains(fixture.graph.engine.id))
         assertEqual(fixture.limiter.activeWorkerCount, 0)
     }
 
@@ -173,14 +279,15 @@ func testParakeetConfigChangeDeadline() async {
         let fixture = ConfigDeadlineFixture(capacity: 2, completionBlock: completion)
         let oldEngine = fixture.graph.engine
         let oldQueue = fixture.graph.queue
-        let owner = fixture.graph.queueOwner
         let work = Task { @MainActor in await fixture.run() }
         defer { completion.open() }
         await completion.entered.wait()
+        let owner = fixture.graph.queueOwner
         assertEqual(fixture.driver.operations(engine: oldEngine.id), ["remove", "stop"])
         assertEqual(fixture.limiter.activeWorkerCount, 1)
-        _ = fixture.graph.abandonBlocked(reason: "synthetic completion race", expectedOwner: owner)
+        assertTrue(fixture.graph.abandonBlocked(reason: "synthetic completion race", expectedOwner: owner))
         let currentEngine = fixture.graph.engine
+        assertTrue(currentEngine !== oldEngine, "the test must actually hand off to a successor")
         let currentOwner = fixture.graph.graphOwner
         completion.open()
         _ = await work.value
@@ -398,13 +505,23 @@ private final class DeadlineTimers: @unchecked Sendable {
     }
 }
 
+/// Observer identity is per engine, so an attached successor cannot hide an old observer leak.
+private final class DeadlineObservers: @unchecked Sendable {
+    private let lock = NSLock()
+    private var observed: Set<Int> = []
+    var engineIDs: Set<Int> { lock.lock(); defer { lock.unlock() }; return observed }
+    func contains(_ id: Int) -> Bool { lock.lock(); defer { lock.unlock() }; return observed.contains(id) }
+    func install(_ id: Int) { lock.lock(); observed.insert(id); lock.unlock() }
+    func remove(_ id: Int) { lock.lock(); observed.remove(id); lock.unlock() }
+}
+
 private final class DeadlineEngine: @unchecked Sendable {
     let id: Int
     init(id: Int) { self.id = id }
 }
 
 private final class DeadlineDriver: ParakeetAudioGraphDriver, @unchecked Sendable {
-    struct Event { let engine: Int; let operation: String; let activeWorkers: Int }
+    struct Event { let engine: Int; let operation: String; let activeWorkers: Int; let observingEngine: Bool }
     private let lock = NSLock()
     private var nextEngine = 0
     private var nextQueue = 0
@@ -413,8 +530,14 @@ private final class DeadlineDriver: ParakeetAudioGraphDriver, @unchecked Sendabl
     private var resets: [Int: DeadlineSignal] = [:]
     let activeWorkers: @Sendable () -> Int
     let firstQueueBlock: DeadlineBlock?
-    init(activeWorkers: @escaping @Sendable () -> Int, firstQueueBlock: DeadlineBlock?) {
+    let observers: DeadlineObservers
+    let stopReleasesVoiceProcessing: Bool
+    let retirementAllowed: Bool
+    init(activeWorkers: @escaping @Sendable () -> Int, firstQueueBlock: DeadlineBlock?,
+         observers: DeadlineObservers, stopReleasesVoiceProcessing: Bool, retirementAllowed: Bool) {
         self.activeWorkers = activeWorkers; self.firstQueueBlock = firstQueueBlock
+        self.observers = observers; self.stopReleasesVoiceProcessing = stopReleasesVoiceProcessing
+        self.retirementAllowed = retirementAllowed
     }
     var events: [Event] { lock.lock(); defer { lock.unlock() }; return recorded }
     func operations(engine: Int) -> [String] { events.filter { $0.engine == engine }.map(\.operation) }
@@ -437,22 +560,25 @@ private final class DeadlineDriver: ParakeetAudioGraphDriver, @unchecked Sendabl
     }
     private func perform(_ operation: String, engine: DeadlineEngine) {
         let count = activeWorkers()
+        let observing = observers.contains(engine.id)
         lock.lock()
         let occurrence = recorded.filter { $0.engine == engine.id && $0.operation == operation }.count + 1
-        recorded.append(Event(engine: engine.id, operation: operation, activeWorkers: count))
+        recorded.append(Event(engine: engine.id, operation: operation, activeWorkers: count, observingEngine: observing))
         let block = blocks["\(engine.id):\(operation):\(occurrence)"]; lock.unlock()
         block?.holdWorker()
     }
     func removeInputTap(on engine: DeadlineEngine) -> Bool { perform("remove", engine: engine); return true }
-    func stop(_ engine: DeadlineEngine) -> Bool { perform("stop", engine: engine); return true }
+    func stop(_ engine: DeadlineEngine) -> Bool { perform("stop", engine: engine); return stopReleasesVoiceProcessing }
     func reset(_ engine: DeadlineEngine) { perform("reset", engine: engine); resetFinished(engine: engine.id).signal() }
     func usesVoiceProcessing(_ engine: DeadlineEngine) -> Bool { false }
-    func retire(_ engine: DeadlineEngine, reason: String) -> Bool { true }
+    func retire(_ engine: DeadlineEngine, reason: String) -> Bool { retirementAllowed }
 }
 
 @MainActor
 private final class ConfigDeadlineHost: ParakeetConfigChangeRecoveryHost, ParakeetAudioGraphHost, ParakeetStopRecordingHost {
     weak var graph: ParakeetAudioGraph<DeadlineDriver>?
+    let observers: DeadlineObservers
+    init(observers: DeadlineObservers) { self.observers = observers }
     var recording = true
     var admitsConfigChangeRecovery = true
     var isShuttingDown = false
@@ -504,8 +630,14 @@ private final class ConfigDeadlineHost: ParakeetConfigChangeRecoveryHost, Parake
             )
         ))
     }
-    func installAudioEngineConfigObserverIfNeeded() { calls.append("install-observer") }
-    func removeAudioEngineConfigObserver() { calls.append("remove-observer") }
+    func installAudioEngineConfigObserverIfNeeded() {
+        if let engine = graph?.engine { observers.install(engine.id) }
+        calls.append("install-observer")
+    }
+    func removeAudioEngineConfigObserver() {
+        if let engine = graph?.engine { observers.remove(engine.id) }
+        calls.append("remove-observer")
+    }
     func trackAudioEngineRebuildChurn(reason: String) { calls.append("rebuild") }
     func clearGraphSampleFlags() { calls.append("clear-samples") }
     func interruptRecordingPreservingRecoveredTimeline() { recording = false; calls.append("graph-interrupt") }
@@ -530,9 +662,11 @@ private final class ConfigDeadlineFixture {
     let driver: DeadlineDriver
     let limiter: ParakeetTimedAudioEngineWorkLimiter
     let graph: ParakeetAudioGraph<DeadlineDriver>
-    let host = ConfigDeadlineHost()
+    let host: ConfigDeadlineHost
+    let observers = DeadlineObservers()
     let deadlines: DeadlineTimers
-    init(capacity: Int, firstQueueBlock: DeadlineBlock? = nil, completionBlock: DeadlineBlock? = nil) {
+    init(capacity: Int, firstQueueBlock: DeadlineBlock? = nil, completionBlock: DeadlineBlock? = nil,
+         stopReleasesVoiceProcessing: Bool = true, retirementAllowed: Bool = true) {
         let timers = DeadlineTimers(); deadlines = timers
         let limiter = ParakeetTimedAudioEngineWorkLimiter(maximumActiveWorkers: capacity,
             configurationTimeouts: { timers.schedule($0, $1) },
@@ -542,10 +676,14 @@ private final class ConfigDeadlineFixture {
                 completionBlock?.holdFirstCompletion()
             })
         self.limiter = limiter
-        driver = DeadlineDriver(activeWorkers: { limiter.activeWorkerCount }, firstQueueBlock: firstQueueBlock)
+        host = ConfigDeadlineHost(observers: observers)
+        driver = DeadlineDriver(activeWorkers: { limiter.activeWorkerCount }, firstQueueBlock: firstQueueBlock,
+                                observers: observers, stopReleasesVoiceProcessing: stopReleasesVoiceProcessing,
+                                retirementAllowed: retirementAllowed)
         graph = ParakeetAudioGraph(driver: driver, workLimiter: limiter)
         graph.inputTapInstalled = true; graph.isPrewarmed = true
         host.graph = graph; graph.host = host
+        observers.install(graph.engine.id)
     }
     func run(strategy: ParakeetConfigChangeGraphStrategy = .reuseCurrentGraph) async -> UInt64? {
         await ParakeetConfigChangeTeardown.run(graph: graph, host: host, strategy: strategy, forceForMicrophoneSharing: false)
