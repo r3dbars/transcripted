@@ -929,9 +929,15 @@ function superviseHelper($: EngineInterface, s: LiveState, now: number, tick: nu
         // EXIT_WITH_PARENT: the helper stops between meetings if this session goes away.
         env: { TRANSCRIPTED_DISABLE_FILE_LOGGER: '1', TRANSCRIPTED_LIVE_EXIT_WITH_PARENT: '1' },
       })
-      for await (const { text } of child) {
+      const refusal = 'already running'
+      const tails = { stdout: '', stderr: '' }
+      for await (const { stream, text } of child) {
         // The helper prints transcript lines; never copy its output anywhere.
-        if (text.includes('already running')) refused = true
+        // Process chunks are arbitrary, and stdout/stderr may interleave.
+        // Keep only the suffix needed to recognize a split refusal.
+        const joined = tails[stream] + text
+        if (joined.includes(refusal)) refused = true
+        tails[stream] = joined.slice(-(refusal.length - 1))
       }
     } catch {
       // Could not start it; try again after the back-off.
