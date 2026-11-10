@@ -3,8 +3,8 @@
 # directory's person rows, the model and the store) over a fresh temporary
 # speaker database of fictional people, and fail if the scroll hangs, jumps
 # back, or never reaches the bottom. Compiles the app's own sources (the same
-# list build.sh uses) with the smoke as the entry point, the way
-# run-post-call-discard-harness.sh does. Opens a borderless window, so it
+# list build.sh uses) with the smoke as the entry point.
+# Opens a borderless window, so it
 # needs a GUI session (hosted macOS runners and the owner's Mac job VM have
 # one). The child gets a temporary HOME: no real library, prefs or logs.
 set -euo pipefail
