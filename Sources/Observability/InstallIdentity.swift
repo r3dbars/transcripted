@@ -38,9 +38,13 @@ enum InstallIdentity {
         [
             "analytics_opt_in": "true",
             "app_version": Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
-            "build_revision": AnalyticsRuntimeConfiguration.buildRevision(),
+            "build_revision": AnalyticsRuntimeConfiguration.buildRevision(
+                environment: AnalyticsRuntimeConfiguration.processBuildMetadataEnvironment
+            ),
             "os_major": "\(ProcessInfo.processInfo.operatingSystemVersion.majorVersion)",
-            "install_channel": AnalyticsRuntimeConfiguration.buildChannel(),
+            "install_channel": AnalyticsRuntimeConfiguration.buildChannel(
+                environment: AnalyticsRuntimeConfiguration.processBuildMetadataEnvironment
+            ),
             // For upgrades this is the first observed day with this instrumentation.
             "first_launch_at": firstLaunchDay(userDefaults: userDefaults, now: now),
             "first_observed_at": firstLaunchDay(userDefaults: userDefaults, now: now),
