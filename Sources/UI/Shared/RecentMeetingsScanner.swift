@@ -135,15 +135,25 @@ enum RecentMeetingsScanner {
 
         // A warm rebuild usually misses only a file or two (a new save); look
         // those up one by one instead of decoding the whole cache table.
-        let missCount = candidates.lazy.filter { previous[$0.url.path]?.stamp != cacheStamp(for: $0) }.count
-        let cachedRows: [String: RecentMeetingMetadataCache.Row]? =
-            missCount > singleLookupMissLimit ? cache?.allRows() : nil
+        func reusablePrevious(for candidate: ScanCandidate) -> RecentMeetingIndexEntry? {
+            guard let entry = previous[candidate.url.path], entry.stamp == cacheStamp(for: candidate),
+                  !includeSpeakerDetails || entry.includesSpeakerDetails else { return nil }
+            return entry
+        }
+        let missCount = candidates.lazy.filter { reusablePrevious(for: $0) == nil }.count
+        let cachedRows: [String: [RecentMeetingMetadataCache.Row]]? = missCount > singleLookupMissLimit
+            ? (includeSpeakerDetails ? cache?.allRows().mapValues { [$0] } : cache?.allRowsForToday()) : nil
 
         // The first search after an upgrade reparses the whole library; write
         // those rows in batched transactions rather than one fsync per row.
         // Rows parsed before a cancel are still flushed, so the work is kept.
         var pendingCacheRows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)] = []
-        defer { cache?.store(pendingCacheRows) }
+        func flushPendingRows() {
+            if includeSpeakerDetails { cache?.store(pendingCacheRows) }
+            else { cache?.storeToday(pendingCacheRows) }
+            pendingCacheRows.removeAll(keepingCapacity: true)
+        }
+        defer { flushPendingRows() }
 
         var entries: [RecentMeetingIndexEntry] = []
         entries.reserveCapacity(candidates.count)
@@ -152,23 +162,28 @@ enum RecentMeetingsScanner {
             let path = candidate.url.path
             let stamp = cacheStamp(for: candidate)
 
-            if let reused = previous[path], reused.stamp == stamp {
+            if let reused = reusablePrevious(for: candidate) {
                 entries.append(reused)
                 continue
             }
 
-            let cachedMetadata: CachedRecentMeetingMetadata?
+            let cachedRow: RecentMeetingMetadataCache.Row?
             if let cachedRows {
-                cachedMetadata = cachedRows[path].flatMap { $0.stamp == stamp ? $0.metadata : nil }
+                cachedRow = cachedRows[path]?.first { $0.stamp == stamp }
+            } else if includeSpeakerDetails {
+                cachedRow = cache?.lookup(path: path, stamp: stamp).map {
+                    RecentMeetingMetadataCache.Row(stamp: stamp, metadata: $0)
+                }
             } else {
-                cachedMetadata = cache?.lookup(path: path, stamp: stamp)
+                cachedRow = cache?.lookupForToday(path: path, stamp: stamp)
             }
-            if let cachedMetadata {
+            if let cachedRow {
                 entries.append(
                     RecentMeetingIndexEntry(
                         path: path,
                         stamp: stamp,
-                        item: cachedMetadata.makeItem(transcriptURL: candidate.url, audio: nil)
+                        item: cachedRow.metadata.makeItem(transcriptURL: candidate.url, audio: nil),
+                        includesSpeakerDetails: cachedRow.includesSpeakerDetails
                     )
                 )
                 continue
@@ -180,14 +195,11 @@ enum RecentMeetingsScanner {
             ) else {
                 continue
             }
-            if includeSpeakerDetails {
-                pendingCacheRows.append((path, stamp, CachedRecentMeetingMetadata(item: item)))
-            }
-            if pendingCacheRows.count >= cacheWriteBatchSize {
-                cache?.store(pendingCacheRows)
-                pendingCacheRows.removeAll(keepingCapacity: true)
-            }
-            entries.append(RecentMeetingIndexEntry(path: path, stamp: stamp, item: item))
+            pendingCacheRows.append((path, stamp, CachedRecentMeetingMetadata(item: item)))
+            if pendingCacheRows.count >= cacheWriteBatchSize { flushPendingRows() }
+            entries.append(RecentMeetingIndexEntry(
+                path: path, stamp: stamp, item: item, includesSpeakerDetails: includeSpeakerDetails
+            ))
         }
 
         // Rows are listed by file date, but the Home list shows the recorded

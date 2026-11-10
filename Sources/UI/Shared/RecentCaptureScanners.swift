@@ -302,6 +302,8 @@ struct RecentMeetingIndexEntry: Sendable {
     let path: String
     let stamp: RecentMeetingCacheStamp
     let item: RecentMeetingItem
+    /// A bounded Today parse cannot be reused by the full speaker search.
+    var includesSpeakerDetails: Bool = true
 }
 
 struct RecentCaptureSnapshot: Sendable {
