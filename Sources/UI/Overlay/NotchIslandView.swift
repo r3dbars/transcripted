@@ -277,8 +277,7 @@ final class NotchIslandView: NSView {
     private var edgeProgress: Double?
     /// Where the finished island sits in this view (flipped coordinates).
     private(set) var islandRect: CGRect = .zero
-    /// The shape the mask is heading to, and its corner radius.
-    private var shapeRect: CGRect = .zero
+    /// The corner radius the mask is heading to.
     private var shapeRadius: CGFloat = 0
     private var morphGeneration = 0
     private var cachedLayerIsYDown: Bool?
@@ -552,7 +551,6 @@ final class NotchIslandView: NSView {
     ) {
         morphGeneration += 1
         let generation = morphGeneration
-        shapeRect = end
         shapeRadius = radius
         let yDown = layerIsYDown
         let endFrame = layerRect(end)
