@@ -9,16 +9,21 @@ final class FailedTranscriptionManagerTests: XCTestCase {
     var testRoot: URL!
 
     override func setUpWithError() throws {
-        let homeRoot = FileManager.default.homeDirectoryForCurrentUser
-        testRoot = homeRoot
-            .appendingPathComponent("Library/Application Support/TranscriptedTests", isDirectory: true)
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        testRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "TranscriptedFailedQueueTests-\(UUID().uuidString)", isDirectory: true
+        )
         try FileManager.default.createDirectory(at: testRoot, withIntermediateDirectories: true)
     }
 
     override func tearDownWithError() throws {
         if let testRoot {
-            try? FileManager.default.removeItem(at: testRoot)
+            guard testRoot.deletingLastPathComponent().standardizedFileURL
+                    == FileManager.default.temporaryDirectory.standardizedFileURL,
+                  testRoot.lastPathComponent.hasPrefix("TranscriptedFailedQueueTests-") else {
+                XCTFail("Refusing to remove a fixture outside its owned temporary root")
+                return
+            }
+            try FileManager.default.removeItem(at: testRoot)
         }
         testRoot = nil
     }
