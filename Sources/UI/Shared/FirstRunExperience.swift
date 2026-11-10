@@ -26,14 +26,6 @@ struct OnboardingDoneModelPresentation: Equatable {
     let isFailed: Bool
 }
 
-enum FirstRunOnboardingPolishContract {
-    static let minimumHitTarget: Double = 44
-    static let minimumCompactButtonHeight: Double = 40
-    static let modelProgressLabelMinimumWidth: Double = 104
-    static let selectedStateStrokeWidth: Double = 2
-    static let bodyCopyLineLimit = 3
-}
-
 struct MenuBarPrimaryActionState: Equatable {
     let title: String
     let symbolName: String
