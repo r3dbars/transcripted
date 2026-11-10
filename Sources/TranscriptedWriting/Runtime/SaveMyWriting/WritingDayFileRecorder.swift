@@ -528,8 +528,9 @@ struct WritingHistoryIngest: PersonalHistoryIngesting {
 
 /// Hands the events Save my writing cleared to Personal History, in the
 /// order they cleared, in batches the controller takes. A batch the
-/// controller refuses (storage down) is not retried: the controller's
-/// storage health already shows it isn't saving. Not part of Tilde.
+/// controller refuses (storage down) is not retried. Failures update internal
+/// storage health and local diagnostics; the Writing tab does not display that
+/// health yet. Not part of Tilde.
 final class PersonalHistoryRelay: @unchecked Sendable {
     private let personalHistory: any PersonalHistoryIngesting
     private let lock = NSLock()
