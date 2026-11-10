@@ -56,11 +56,11 @@ func testPasteLastDictationFeedback() {
         let feedback = PasteLastDictationFeedback.noSavedDictation
 
         assertEqual(feedback.title, "No saved dictation yet", "no saved title")
-        assertEqual(feedback.detail, "Dictate once, then use Paste Last Dictation.", "no saved detail uses the feature's name")
+        assertEqual(feedback.detail, "Dictate once, then copy it from Dictations.", "no saved detail points to the current saved-text surface")
         assertEqual(feedback.tone, .caution, "no saved tone")
         assertEqual(
             feedback.accessibilityValue,
-            "No saved dictation yet. Dictate once, then use Paste Last Dictation.",
+            "No saved dictation yet. Dictate once, then copy it from Dictations.",
             "notice should expose complete VoiceOver copy"
         )
     }
