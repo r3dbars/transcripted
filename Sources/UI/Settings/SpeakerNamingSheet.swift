@@ -178,6 +178,7 @@ final class SpeakerNamingSheet {
     private func finishIslandReview(requestID: UUID) {
         gate.windowClosed(requestID: requestID)
         guard islandReviewView?.requestID == requestID else { return }
+        islandReviewView?.setOnScreen(false)
         islandReviewView = nil
         islandReviewContent = nil
         island?.speakerReviewHoverHandler = nil

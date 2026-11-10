@@ -293,6 +293,9 @@ final class NotchIslandSpeakerReviewView: NSView {
     func setOnScreen(_ onScreen: Bool) {
         guard onScreen != isOnScreen else { return }
         isOnScreen = onScreen
+        if !onScreen {
+            displayedRows.forEach { $0.stopClipIfPlaying() }
+        }
         updateLaterClock()
     }
 
