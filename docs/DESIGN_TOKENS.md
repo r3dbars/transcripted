@@ -1,89 +1,70 @@
 # Design tokens
 
-The single source of truth for Transcripted's type, spacing, and corner-radius
-scales. Every new view should draw from these steps instead of picking a raw
-size. The values here are not aspirational — they are grounded in the sizes the
-app already uses most, so adopting them is a snap-to-grid, not a redesign.
+The token definitions in source are authoritative. This page describes the
+roles that exist today; it does not define a separate cross-surface scale.
+There is no shared spacing-token API or automatic rounding rule.
 
-Scope note: this is the visual language (type, spacing, radii). Color tokens
-already live per surface in `MenuTokens` (menubar popover, light + dark) and
-the Notch island's own drawing code. Those stay where they are; this document
-governs the cross-surface geometry that had drifted into ~21 ad-hoc font sizes,
-12 corner radii, and ~26 padding values across the two main windows.
+## Main-window SwiftUI surfaces
 
-## Type scale — SF Pro, 6 steps
+`Sources/UI/Shared/LibraryTokens.swift` supplies the main-window pages,
+including Meetings, Dictations, Speakers, Writing, Agent and Settings. The
+AppKit menu bar popover uses `MenuTokens` instead. The overlays keep their
+own drawing constants.
 
-SF Pro is the system face, so `Font.system(...)` / `NSFont.systemFont(...)` is
-"SF Pro throughout" with no bundled font. Six steps cover every real need.
-Weights standardize to **regular / medium / semibold**; `.light` is reserved for
-the one display use (the Home greeting). A monospaced variant is used only for
-numeric readouts (timers, counts) that must not jitter.
+| `LibraryTokens` type role | Size / weight | Use |
+|---|---|---|
+| `title` | 28, semibold | Page titles |
+| `rowTitle` | 13, medium | Row titles |
+| `body` | 13, regular | Reading text and settings rows |
+| `meta` | 12, regular | Durations, counts and secondary detail |
+| `label` | 10.5, semibold | Whisper section labels, with `labelTracking` of 1.1 |
 
-| Token | Size / weight | Use | Grounded in |
-|-------|---------------|-----|-------------|
-| `caption2` | 10, regular (semibold for labels) | dense metadata, status dots' text | `.caption2`, `size:10`, NSFont 10 |
-| `caption` | 11, regular (semibold for labels) | secondary detail lines, row subtitles | `.caption` (72 sites), `size:11` |
-| `body` | 13, regular (medium for emphasis) | primary row text, body copy | `size:13` (11 sites), `.subheadline` |
-| `emphasis` | 14, semibold | selected/active row titles, small headers | `size:14,.semibold` — the single most common numeric spec (13 sites) |
-| `title` | 16, semibold | section titles, card headers | `size:15/16,.semibold`, NSFont 15.5 |
-| `display` | 22, semibold (28, light for the Home greeting) | page-level hero text | `size:22,.semibold`; greeting 28 light |
-| `mono` | caption2 / caption size, monospaced | elapsed timers, counts | existing monospaced 10–11 readouts |
+Layout tokens are `radiusControl` (6), `radiusRaised` (10) and
+`minimumHitTarget` (40). `LibrarySectionLabel` applies the label font,
+tracking and tertiary ink to an uppercase section label.
 
-Rounding rule when adopting: snap fractional and near-miss sizes to the nearest
-step (10.5 → `caption2`, 11.5/12/12.5 → `body`, 15/15.5 → `title`). The only
-intentional exception in the codebase is a single `Georgia` serif on Home; leave
-deliberate one-offs that carry meaning, and comment them.
+Color roles include `accent`, `attention`, `recording`, the Meetings,
+Dictation and Writing stream colors, `ink2`, `ink3`, `hairline`, `rowHover`,
+`raisedFill`, `raisedStroke`, `sidebarBackground` and `contentBackground`.
+The accent, attention, stream and background colors resolve for the current
+appearance; ink and translucent fills use the system primary color.
 
-## Spacing grid — 4pt based, 7 steps
+## AppKit menu bar popover
 
-A strict 8pt grid would fight the two most-used values in the app (10 and 14),
-so the grid is 4pt-based with 10 and 14 kept as first-class steps.
+`Sources/UI/Shared/MenuTokens.swift` supplies the popover's colors, layout
+and `MenuTokens.Font` roles. Its current Swift callers are
+`MenuBarContentView`, `MenuBarHeaderView`, `MenuBarActionRowView` and
+`MenuBarPanelController`; Settings' hotkey recorder does not use it.
 
-| Token | Value | Grounded in (spacing + padding call counts) |
-|-------|-------|---------------------------------------------|
-| `xxs` | 2 | fine nudges |
-| `xs` | 4 | 26 spacing / 11 padding |
-| `sm` | 6 | 20 spacing / 27 padding |
-| `md` | 8 | 63 spacing / 17 padding — the default gap |
-| `ml` | 10 | 35 spacing / 34 padding — kept as a step, too common to round away |
-| `lg` | 12 | 49 spacing / 17 padding |
-| `xl` | 16 | 8 spacing / 13 padding |
-| `xxl` | 24 | page-section separation |
-| `gutter` | 14 | kept as a step (21 spacing / 18 padding); matches the Settings content top padding |
+| `MenuTokens.Font` role | Size / weight |
+|---|---|
+| `rowTitlePrimary` | 12.5, medium |
+| `rowTitleUtility` | 12.5, regular |
+| `rowDetail` | 10, regular |
+| `rowTrailingPrimary` | 10.5, medium, monospaced digits |
+| `rowTrailingUtility` | 10, medium, monospaced digits |
+| `headerStatus` | 11.5, medium |
+| `headerDetail` | 10, regular |
 
-## Corner radii — 4 steps
+Layout includes a 304 × 480 panel, `innerPadding` of 10,
+`sectionSpacing` of 7, `cardCornerRadius` of 8,
+`minimumHitTargetSize` of 40, and action row heights of 42 and 40.
+These are named surface constants, not aliases of a global spacing grid.
 
-Twelve distinct radii collapse to four. The two dominant values (8, 12) are kept
-exactly so the existing token files stay source-compatible.
+Menu colors resolve for light and dark appearance. When assigning one to a
+`CALayer`, use `NSView.menuResolvedCGColor(_:)` and resolve it again when the
+view's effective appearance changes.
 
-| Token | Value | Grounded in | Existing token |
-|-------|-------|-------------|----------------|
-| `sm` | 6 | small chips, inline controls | — |
-| `md` | 8 | rows, cards, icon wells (42 sites) | `MenuTokens.cardCornerRadius` |
-| `lg` | 12 | panels, sheets (25 sites) | — |
-| `xl` | 16 | large containers | — |
+## Notch island
 
-Snap rule: 7 → `md`; 10 → `md` or `lg` by container size; 14/18 → `xl`.
+The AppKit overlay owns its geometry and drawing in
+`Sources/UI/Overlay/NotchIslandGeometry.swift` and
+`Sources/UI/Overlay/NotchIslandView.swift` and its extensions. It does not
+consume either of the token enums above.
 
-## Where the tokens live in code
+## Changing a view
 
-- **Menubar (AppKit):** `Sources/UI/Shared/MenuTokens.swift` owns the menubar's
-  colors and layout, and now its **type scale** (`MenuTokens.Font`). The menubar
-  action rows and header read their fonts from there instead of raw
-  `NSFont.systemFont(ofSize:)`. This is the reference adoption — the pattern to
-  follow when the SwiftUI surfaces (Home, Settings) migrate onto tokens.
-- **Overlay (AppKit):** the Notch island is the only overlay; its colors and
-  sizes live with its drawing (`Sources/UI/Overlay/NotchIslandView.swift`,
-  `NotchIslandGeometry.swift`).
-- **SwiftUI surfaces (Home, Settings):** still hold ad-hoc sizes. Migrate them
-  onto these steps incrementally, one view per PR, snapping to the nearest step.
-  Do not convert every view at once — correctness over a big-bang refactor.
-
-## Adoption checklist for a view
-
-1. Replace each `.font(.system(size:weight:))` with the nearest type step.
-2. Replace numeric `spacing:` / `.padding(n)` with the nearest spacing step.
-3. Replace each `cornerRadius:` with the nearest of the four radii.
-4. Keep any deliberate exception, and add a one-line comment saying why.
-5. If an existing layout contract pins a constant (for example, Settings content
-   uses 14 points of top padding), keep the number equal.
+Reuse an existing role from the view's surface when it expresses the same
+purpose. Check the source definition before choosing a value. Preserve
+layout and accessibility contracts, and verify an intentional visual change
+in the app; this inventory is not a request to resize existing controls.
