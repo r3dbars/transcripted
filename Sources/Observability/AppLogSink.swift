@@ -118,6 +118,7 @@ class AppLogSink: ObservableObject {
 
     private let logFilePath: String
     private let fileWriter = AppLogSinkFileWriter()
+    private var pendingWrite: Task<Void, Never>?
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -130,11 +131,16 @@ class AppLogSink: ObservableObject {
             .appendingPathComponent("debug.log", isDirectory: false)
     }
 
-    /// `logFileURL` is for tests; the app always writes the default debug.log.
-    init(logFileURL: URL = AppLogSink.defaultLogFileURL()) {
+    /// The app uses the default debug.log; tests may supply an owned file and
+    /// hold initialization behind an explicit dependency.
+    init(
+        logFileURL: URL = AppLogSink.defaultLogFileURL(),
+        initialWriteDependency: Task<Void, Never>? = nil
+    ) {
         logFilePath = logFileURL.path
         let path = logFilePath
-        Task.detached(priority: .utility) { [fileWriter] in
+        pendingWrite = Task.detached(priority: .utility) { [fileWriter] in
+            await initialWriteDependency?.value
             await fileWriter.reset(at: path)
             await fileWriter.append("\n--- Session started \(ISO8601DateFormatter().string(from: Date())) ---\n")
         }
@@ -153,7 +159,9 @@ class AppLogSink: ObservableObject {
         entries.append(entry)
 
         let line = entry + "\n"
-        Task.detached(priority: .utility) { [fileWriter] in
+        let previousWrite = pendingWrite
+        pendingWrite = Task.detached(priority: .utility) { [fileWriter] in
+            await previousWrite?.value
             await fileWriter.append(line)
         }
 
@@ -161,5 +169,10 @@ class AppLogSink: ObservableObject {
         if entries.count > 200 {
             entries.removeFirst(entries.count - 200)
         }
+    }
+
+    /// Waits for the writes admitted before this call, including initialization.
+    func flush() async {
+        await pendingWrite?.value
     }
 }
