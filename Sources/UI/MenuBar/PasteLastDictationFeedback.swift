@@ -17,7 +17,7 @@ struct PasteLastDictationFeedback: Equatable {
 
     static let noSavedDictation = PasteLastDictationFeedback(
         title: "No saved dictation yet",
-        detail: "Dictate once, then use Paste Last Dictation.",
+        detail: "Dictate once, then copy it from Dictations.",
         tone: .caution,
         dismissDelayNanoseconds: 3_000_000_000
     )
