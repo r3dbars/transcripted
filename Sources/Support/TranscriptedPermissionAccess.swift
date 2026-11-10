@@ -27,11 +27,7 @@ enum TranscriptedPermissionAccess {
     enum SystemAudioPermissionProbeStage: String, CaseIterable, Sendable {
         case timedOut = "timed_out"
         case cancelled
-        case shareableContent = "shareable_content"
-        case displayUnavailable = "display_unavailable"
-        case addStreamOutput = "add_stream_output"
         case startCapture = "start_capture"
-        case stopCapture = "stop_capture"
         case prepareCapture = "prepare_capture"
         case silentAudio = "silent_audio"
     }
