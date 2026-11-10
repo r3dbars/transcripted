@@ -302,7 +302,9 @@ enum MeetingFailureKind: String {
 
         // A saved language choice on a Parakeet retry. Before the model and
         // "retry failed" checks so the settings fix isn't hidden behind them.
-        if normalized.contains("select a whisper model") {
+        if normalized.contains("select a whisper model")
+            || normalized.contains("select a model in settings that supports this recording's saved language")
+            || normalized.contains("this transcription engine does not support a selected language") {
             return .languageNeedsWhisperModel
         }
 

@@ -136,16 +136,12 @@ extension TranscriptionTaskManager {
         return failureClassification(forText: error.localizedDescription)
     }
 
-    /// A capture with an explicit language can only be transcribed by a
-    /// Whisper model (`STTRouter` refuses it on Parakeet). The fix is a
-    /// settings change, so this guidance is published as-is instead of a
-    /// bucket's generic copy. Must stay matchable by
-    /// `isLanguageNeedsWhisperModelText` so the text wrappers agree.
-    static let languageNeedsWhisperModelMessage =
-        "Select a Whisper model in Settings to transcribe this recording in its saved language."
+    /// A saved language needs a compatible engine. Keep this legacy internal
+    /// name while persisted Whisper-era diagnostics continue to classify.
+    static let languageNeedsWhisperModelMessage = PipelineFailureDisplayCopy.languageModelGuidance
 
     private static func isLanguageNeedsWhisperModelText(_ normalized: String) -> Bool {
-        normalized.contains("select a whisper model")
+        PipelineFailureDisplayCopy.isLanguageModelGuidance(normalized)
     }
 
     private static func displayMessage(

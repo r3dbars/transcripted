@@ -207,7 +207,7 @@ func testMeetingFailureKind() {
                 "a Parakeet retry of a saved language needs the settings fix, not model-failure copy"
             )
             let copy = MeetingFailureCopy.make(forMessage: message, shortErrorMessage: message, isRetryable: true)
-            assertEqual(copy.title, "Choose a Whisper model", "Home and the overlay should name the fix")
+            assertEqual(copy.title, "Choose a compatible model", "Home and the overlay should name the fix")
             assertTrue(copy.detail.contains("Settings > General"), "the copy should say where the model picker is")
         }
     }
