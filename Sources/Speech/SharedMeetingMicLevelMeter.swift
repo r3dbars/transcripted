@@ -7,8 +7,10 @@ import Foundation
 /// (0.15 s) with its own scaling. Feeding that to the dictation island made the
 /// waveform move about 3x slower than normal dictation while a meeting
 /// recorded. This meters the relayed buffers themselves with
-/// `DictationAudioLevelMeter` at `TranscriptedConstants.audioMeteringInterval`,
-/// the same cadence and scale as the engine and pinned-mic paths.
+/// `DictationAudioLevelMeter` at `TranscriptedConstants.audioMeteringInterval`
+/// (a 0.05 s target). It shares their normalization scale; the engine and
+/// pinned-mic paths collect readings through `DictationAudioLevelWindow` at
+/// `dictationLevelReadingInterval` (a 1/30 s target) instead.
 ///
 /// The meeting's engine tap hands over ~4096-frame buffers (~85 ms at 48 kHz)
 /// against dictation's 1024-frame tap, so metering one level per buffer would
