@@ -391,7 +391,7 @@ final class EmbeddingCacheTests: XCTestCase {
             changeCount += 1
         }
         watcher.scanForChanges()
-        XCTAssertEqual(changeCount, 1, "first scan records the library as it is")
+        XCTAssertEqual(changeCount, 0, "the existing startup snapshot must not trigger another index pass")
 
         // Another server holds the embed lock through this server's startup pass.
         let lockPath = indexDir.appendingPathComponent("mcp_index.embed.lock").path
@@ -414,7 +414,7 @@ final class EmbeddingCacheTests: XCTestCase {
         // The holder finishes; nothing on disk changed, yet the next tick recovers.
         flock(lockFD, LOCK_UN)
         watcher.periodicTick()
-        XCTAssertEqual(changeCount, 1, "the library stayed quiet")
+        XCTAssertEqual(changeCount, 0, "the library stayed quiet")
         XCTAssertFalse(store.needsModelReconciliation)
         XCTAssertEqual(provider.embedCalls, baseTexts.count)
         let semantic = store.semanticSearchDictationEntriesIfAvailable(query: baseTexts[0], dateFrom: nil, dateTo: nil)
