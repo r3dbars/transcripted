@@ -59,6 +59,7 @@ ASSERTION_CALL = re.compile(
 )
 CLOCK_READ = re.compile(
     r"timeIntervalSince(?!1970|ReferenceDate)|CFAbsoluteTimeGetCurrent|DispatchTime\.now|uptimeNanoseconds|"
+    r"\.duration\s*\(\s*to\s*:\s*\.now\s*\)|"
     r"ContinuousClock|SuspendingClock|mach_absolute_time|ProcessInfo\.processInfo\.systemUptime"
 )
 # A local named like a measured time (elapsed, elapsedMs, duration, latencyMs,
@@ -395,6 +396,9 @@ def self_test() -> None:
     assert count_wall_clock("XCTAssertGreaterThan(a.timeIntervalSince1970, b.timeIntervalSince1970 + 60)\n") == 0
 
     assert count_wall_clock("XCTAssertLessThan(finishedAt.timeIntervalSince(startedAt), 1)\n") == 1
+    assert count_wall_clock("#expect(start.duration(to: .now) < .seconds(1))\n") == 1
+    assert count_wall_clock("#expect(\n start.duration(\n to: .now\n ) < .seconds(1)\n)\n") == 1
+    assert count_wall_clock("#expect(start.duration(to: capturedEnd) < .seconds(1))\n") == 0
     # Multiline arguments, literal delimiters and timing keys are checked
     # through the same public counting function as real Swift test files.
     assert count_wall_clock('assertTrue(\n    elapsed < 1.5,\n    "message with ) and elapsed < 10"\n)\n') == 1
