@@ -1,83 +1,97 @@
 import Foundation
 
 func testFeedbackIssueBuilder() {
-    runSuite("FeedbackIssueBuilder builds a normal support email URL") {
-        let url = FeedbackIssueBuilder.emailURL(rawLogLines: [
-            "[12:00:00.000] APP LAUNCHED | modes: dictation + meetings",
-            "[12:01:00.000] ERROR | wrote /Users/redbars/private.txt for person@example.com via https://example.com/log"
-        ])
-
-        assertNotNil(url, "feedback email URL should be created")
-        assertTrue(url?.absoluteString.hasPrefix(FeedbackIssueBuilder.emailURLString) == true, "URL should target the support email address")
-        assertTrue((url?.absoluteString.count ?? 0) <= FeedbackIssueBuilder.maxEmailURLCharacterCount, "normal URL should stay under the cap")
-
+    runSuite("FeedbackIssueBuilder addresses a normal support draft with a feedback prompt") {
+        let url = FeedbackIssueBuilder.emailURL()
+        assertNotNil(url, "a support draft URL should be created")
+        let components = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false) }
+        assertEqual(components?.scheme, "mailto", "the draft should use mailto")
+        assertEqual(components?.path, "help@transcripted.app", "the draft should target the public support address")
+        assertEqual(feedbackSubject(from: url), "Transcripted Feedback", "the normal subject should remain unchanged")
         let body = feedbackBody(from: url)
-        let subject = feedbackSubject(from: url)
-        assertEqual(subject, "Transcripted Feedback", "email subject should be set")
-        assertTrue(body.contains("What happened:"), "email body should include the feedback prompt")
-        assertTrue(body.contains("Diagnostics:"), "email body should include a diagnostics section")
-        assertTrue(body.contains("APP LAUNCHED"), "short logs should remain in the email body")
-        assertFalse(body.contains("/Users/redbars/"), "paths should be redacted before the URL is built")
-        assertFalse(body.contains("person@example.com"), "emails should be redacted before the URL is built")
-        assertFalse(body.contains("https://example.com/log"), "URLs should be redacted before the URL is built")
+        assertTrue(body.contains("What happened:"), "the draft should ask what happened")
+        assertTrue(body.contains("[describe the issue here]\n\n---"), "the feedback placeholder and separator should remain unchanged")
+        assertTrue(body.lowercased().contains("no in-app logs attached"), "the draft should explain that logs are not included")
+        assertTrue((url?.absoluteString.count ?? Int.max) <= 6_000, "the encoded URL should fit the existing mailto limit")
     }
 
-    runSuite("FeedbackIssueBuilder trims huge logs before the feedback email gets too long") {
-        let longLines = (0..<140).map { index in
-            "[15:11:\(String(format: "%02d", index)).000] DIAG | capture.right_option_pressed | marker_\(index) \(String(repeating: "extra diagnostic context ", count: 8))"
-        }
-        let url = FeedbackIssueBuilder.emailURL(rawLogLines: longLines)
-
-        assertNotNil(url, "feedback email URL should still be created for huge logs")
-        assertTrue((url?.absoluteString.count ?? 0) <= FeedbackIssueBuilder.maxEmailURLCharacterCount, "huge log URL should be capped")
-
+    runSuite("FeedbackIssueBuilder sanitizes optional diagnostics and retains coarse safe values") {
+        let syntheticToken = "sk-" + "synthetic-feedback-secret-1234567890"
+        let url = FeedbackIssueBuilder.emailURL(diagnostics: """
+        meeting_state: idle
+        route: bluetooth_input_to_built_in_output
+        retries: 2
+        private_path: /Users/synthetic-feedback/private.txt
+        private_email: synthetic-feedback@example.com
+        private_url: https://example.invalid/synthetic-feedback?secret=private
+        private_token: \(syntheticToken)
+        """)
+        assertNotNil(url, "sanitized diagnostics should still produce a draft")
         let body = feedbackBody(from: url)
-        assertTrue(body.contains("Older logs omitted"), "trimmed email body should explain why older logs are missing")
-        assertTrue(body.contains("marker_139"), "newest useful log lines should be kept")
-        assertFalse(body.contains("marker_0"), "oldest logs should be omitted")
+        assertTrue(body.contains("Diagnostics:"), "attached diagnostics should have a section label")
+        assertTrue(body.contains("meeting_state: idle"), "coarse state should remain useful")
+        assertTrue(body.contains("bluetooth_input_to_built_in_output"), "coarse route shape should remain useful")
+        assertTrue(body.contains("retries: 2"), "coarse numeric values should remain useful")
+        assertFalse(body.contains("/Users/synthetic-feedback/private.txt"), "private paths should be removed")
+        assertFalse(body.contains("synthetic-feedback@example.com"), "private email addresses should be removed")
+        assertFalse(body.contains("https://example.invalid/synthetic-feedback"), "private URLs should be removed")
+        assertFalse(body.contains(syntheticToken), "private tokens should be removed")
+        assertTrue(body.lowercased().contains("no in-app logs attached"), "adding diagnostics should not imply logs were attached")
     }
 
-    runSuite("FeedbackIssueBuilder keeps only the latest in-app log window") {
-        let lines = (0..<100).map { "[14:00:\($0)] marker_\($0)" }
-        let url = FeedbackIssueBuilder.emailURL(rawLogLines: lines)
-        let body = feedbackBody(from: url)
-
-        assertFalse(body.contains("marker_0"), "logs older than the latest 80 entries should not be included")
-        assertTrue(body.contains("marker_99"), "latest log entry should be included")
-    }
-
-    runSuite("FeedbackIssueBuilder attaches sanitized diagnostics") {
-        let url = FeedbackIssueBuilder.emailURL(
-            rawLogLines: ["[14:00:00.000] APP LAUNCHED"],
-            diagnostics: "Route bluetooth_input_to_built_in_output from /Users/redbars/private.txt for person@example.com"
-        )
-        let body = feedbackBody(from: url)
-
-        assertTrue(body.contains("bluetooth_input_to_built_in_output"), "safe diagnostic route shape should be included")
-        assertFalse(body.contains("/Users/redbars"), "diagnostic paths should be redacted")
-        assertFalse(body.contains("person@example.com"), "diagnostic emails should be redacted")
-    }
-
-    runSuite("FeedbackIssueBuilder carries the diagnostic report ID into the support email") {
+    runSuite("FeedbackIssueBuilder carries a report ID without changing the normal draft layout") {
         let reportID = "1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6"
         let withID = feedbackBody(from: FeedbackIssueBuilder.emailURL(
-            rawLogLines: [],
             diagnostics: "meeting_state: idle",
-            diagnosticReportID: reportID
+            diagnosticReportID: " \(reportID)\n"
         ))
-        assertTrue(withID.contains("Diagnostic report ID: \(reportID)"), "the email should carry the full report ID from Send Diagnostics")
+        assertTrue(withID.contains("Diagnostic report ID: \(reportID)"), "a valid trimmed report ID should be carried in full")
+        let withoutID = feedbackBody(from: FeedbackIssueBuilder.emailURL(diagnostics: "meeting_state: idle"))
+        assertFalse(withoutID.contains("Diagnostic report ID"), "a draft with no report should not invent an ID")
+        assertTrue(withoutID.contains("[describe the issue here]\n\n---"), "omitting the report ID should preserve the draft layout")
+    }
 
-        let withoutID = feedbackBody(from: FeedbackIssueBuilder.emailURL(rawLogLines: [], diagnostics: "meeting_state: idle"))
-        assertFalse(withoutID.contains("Diagnostic report ID"), "no report line should appear when nothing was sent")
-        assertTrue(withoutID.contains("[describe the issue here]\n\n---"), "the body layout should be unchanged without a report ID")
+    runSuite("FeedbackIssueBuilder rejects unsafe report IDs and enforces the 64 character boundary") {
+        let validID = String(repeating: "a1", count: 32)
+        assertEqual(FeedbackIssueBuilder.safeDiagnosticReportID(validID), validID, "64 safe characters should be accepted")
+        assertEqual(FeedbackIssueBuilder.safeDiagnosticReportID(" \(validID)\n"), validID, "surrounding whitespace should be trimmed")
+        for invalid in ["", " \n", "person@example.com", "https://example.invalid/id", "a b", String(repeating: "a", count: 65)] {
+            assertNil(FeedbackIssueBuilder.safeDiagnosticReportID(invalid), "invalid or overlong report IDs should be rejected")
+            let body = feedbackBody(from: FeedbackIssueBuilder.emailURL(diagnosticReportID: invalid))
+            assertFalse(body.contains("Diagnostic report ID"), "invalid report IDs should not enter the support draft")
+        }
+    }
 
-        let unsafe = feedbackBody(from: FeedbackIssueBuilder.emailURL(
-            rawLogLines: [],
-            diagnosticReportID: "person@example.com"
-        ))
-        assertFalse(unsafe.contains("person@example.com"), "anything that isn't an event ID should never be added")
-        assertEqual(FeedbackIssueBuilder.safeDiagnosticReportID(" \(reportID)\n"), reportID, "surrounding whitespace should be trimmed")
-        assertNil(FeedbackIssueBuilder.safeDiagnosticReportID(""), "an empty ID should be dropped")
+    runSuite("FeedbackIssueBuilder bounds encoded ASCII diagnostics and preserves the newest line and report ID") {
+        let reportID = "1a2b3c4d5e6f47a8b9c0d1e2f3a4b5c6"
+        let oldMarker = "oldest_ascii_diagnostic_marker"
+        let newestMarker = "newest_ascii_diagnostic_marker"
+        let diagnostics = oldMarker + "\n" + String(repeating: "coarse_state: idle count: 2\n", count: 600) + newestMarker
+        let url = FeedbackIssueBuilder.emailURL(diagnostics: diagnostics, diagnosticReportID: reportID)
+        assertNotNil(url, "oversized ASCII diagnostics should still produce a draft")
+        assertTrue((url?.absoluteString.count ?? Int.max) <= 6_000, "the actual percent-encoded URL should fit the mailto cap")
+        let body = feedbackBody(from: url)
+        assertTrue(body.contains(newestMarker), "the newest diagnostic line should survive truncation")
+        assertFalse(body.contains(oldMarker), "the oldest diagnostic line should be omitted first")
+        assertTrue(body.lowercased().contains("diagnostics omitted"), "the draft should disclose omitted diagnostics")
+        assertTrue(body.contains("Diagnostic report ID: \(reportID)"), "truncation must not discard the report ID")
+    }
+
+    runSuite("FeedbackIssueBuilder budgets percent encoding for multibyte and emoji diagnostics") {
+        let reportID = String(repeating: "b2", count: 32)
+        let oldMarker = "oldest_unicode_diagnostic_marker"
+        let newestMarker = "newest_unicode_diagnostic_marker"
+        let diagnostics = oldMarker + "\n" + String(repeating: "coarse_state: 待機 🎙️🙂 count: 2\n", count: 600) + newestMarker
+        let url = FeedbackIssueBuilder.emailURL(diagnostics: diagnostics, diagnosticReportID: reportID)
+        assertNotNil(url, "oversized Unicode diagnostics should still produce a draft")
+        assertTrue((url?.absoluteString.count ?? Int.max) <= 6_000, "Unicode must be budgeted after URL percent encoding")
+        let body = feedbackBody(from: url)
+        assertTrue(body.contains(newestMarker), "the newest Unicode diagnostic line should survive truncation")
+        assertTrue(body.contains("待機 🎙️🙂"), "safe multibyte and emoji diagnostics should remain readable")
+        assertFalse(body.contains(oldMarker), "the oldest Unicode diagnostic line should be omitted first")
+        assertTrue(body.lowercased().contains("diagnostics omitted"), "Unicode truncation should be disclosed")
+        assertTrue(body.contains("Diagnostic report ID: \(reportID)"), "the full report ID should survive Unicode truncation")
+        assertFalse(body.contains("�"), "truncation should not introduce replacement characters")
     }
 
     runSuite("Send Diagnostics status gives a plain next step") {
@@ -85,58 +99,6 @@ func testFeedbackIssueBuilder() {
         assertTrue(status.contains("Email Support"), "the status should point at the next step")
         assertTrue(status.contains("1a2b3c4d"), "the status should show the short report ID")
         assertFalse(status.contains("5e6f47a8"), "the status should only show the short form of the ID")
-    }
-
-    runSuite("FeedbackIssueBuilder builds contextual capture feedback email") {
-        let report = FeedbackReport(
-            sourceKind: "dictation",
-            referenceID: "abc123",
-            occurredAt: Date(timeIntervalSince1970: 1_714_000_000.123),
-            issueKind: "Wrong words",
-            userNotes: "It included /Users/redbars/private.txt and person@example.com",
-            appVersion: "Version 1.2.3",
-            includeDiagnostics: true
-        )
-        let url = FeedbackIssueBuilder.emailURL(report: report, rawLogLines: [
-            "[12:00:00.000] APP LAUNCHED",
-            "[12:01:00.000] ERROR | https://example.com/log"
-        ])
-        let body = feedbackBody(from: url)
-        let subject = feedbackSubject(from: url)
-
-        assertEqual(subject, "Transcripted Dictation Feedback", "contextual email subject should include the capture type")
-        assertTrue(body.contains("Capture:"), "contextual email should include capture metadata")
-        assertTrue(body.contains("Created: 2024-04-24T23:06:40.123Z"), "capture timestamps should retain UTC millisecond rounding")
-        assertTrue(body.contains("Type: dictation"), "source kind should be included")
-        assertTrue(body.contains("Issue: Wrong words"), "issue kind should be included")
-        assertTrue(body.contains("Reference: abc123"), "safe reference should be included")
-        assertFalse(body.contains("/Users/redbars/"), "user notes should be scrubbed")
-        assertFalse(body.contains("person@example.com"), "emails in user notes should be scrubbed")
-        assertFalse(body.contains("https://example.com/log"), "diagnostic URLs should be scrubbed")
-    }
-
-    runSuite("FeedbackIssueBuilder honors contextual diagnostics opt out") {
-        let report = FeedbackReport(
-            sourceKind: "meeting",
-            referenceID: "meeting-abc",
-            occurredAt: Date(timeIntervalSince1970: 1_714_000_000),
-            issueKind: "Bad transcript",
-            userNotes: "Please check the transcript quality.",
-            appVersion: "Version 1.2.3",
-            includeDiagnostics: false
-        )
-        let url = FeedbackIssueBuilder.emailURL(report: report, rawLogLines: [
-            "[12:01:00.000] ERROR | wrote /Users/redbars/private.txt for person@example.com",
-            "[12:02:00.000] TOKEN | sk-test-secret via https://example.com/private-log"
-        ])
-        let body = feedbackBody(from: url)
-
-        assertTrue(body.contains("User chose not to attach diagnostics."), "opt-out feedback should state that diagnostics were not attached")
-        assertFalse(body.contains("ERROR | wrote"), "opt-out feedback should not include raw log markers")
-        assertFalse(body.contains("/Users/redbars/"), "opt-out feedback should not include file paths from raw logs")
-        assertFalse(body.contains("person@example.com"), "opt-out feedback should not include emails from raw logs")
-        assertFalse(body.contains("sk-test-secret"), "opt-out feedback should not include tokens from raw logs")
-        assertFalse(body.contains("https://example.com/private-log"), "opt-out feedback should not include URLs from raw logs")
     }
 }
 
