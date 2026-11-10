@@ -253,6 +253,26 @@ compared locally; names, IDs, quotes and paths never enter the records. Scenario
 thresholds, pumps and completion receipts stay authoritative.
 `SpeakersScrollDiagnosticsTests` covers the bounded encoding helper.
 
+Dictations and Meetings share a Load More scroll smoke:
+`bash scripts/dev/test-capture-list-load-more-scroll.sh` (requires `bash build-deps.sh`
+and a GUI session in a separate OS account or verified CI runner). The native
+isolation preflight blocks the owner's account before compilation or launch;
+HOME overrides alone do not isolate preferences. It compiles the app's sources
+with `Tests/UI/CaptureListLoadMoreScrollSmoke.swift` as the entry point, hosts the
+real Dictations page and the Meetings day-grouped list in the Settings
+detail-column `ScrollView` over a temporary capture library, and clicks Load
+More from the bottom at several library sizes. It fails if a Load More does
+not add a page, the scroll jumps back, the page keeps laying out once it
+stops, or the main thread stops answering (a hang guard names the step).
+Swift CI runs it in the `spm-tests` job. It does not touch Speakers.
+The compiled scenario manifest drives the shared completion guard: every
+selected scenario must return and write a fresh receipt. Failures also emit
+the last 16 numeric/Boolean diagnostic records. Identities are compared
+locally; titles, IDs and paths never enter the records.
+`CaptureListScrollDiagnosticsTests` covers the bounded encoding helper.
+`HomeDayGroupedRowsTests` pins that a Load More append keeps each row's
+ForEach identity as the capture's own id, never its offset in the page.
+
 Parakeet model-lifecycle changes also have a deterministic executor harness:
 `bash scripts/dev/test-parakeet-lifecycle.sh`. It compiles the production
 lifecycle extension against delayed fake models (no network, cache writes, or

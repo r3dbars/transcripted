@@ -101,6 +101,48 @@ enum HomeStableReferenceID {
     }
 }
 
+// MARK: - Day-grouped row identity
+
+/// Identity and divider flags for one row in a Home / Dictations day section.
+///
+/// Meetings and Dictations share `HomeDayGroupedList`. Each row's `ForEach`
+/// identity must be the capture's own id. A refresh can prepend or reorder
+/// captures, changing their offsets without changing which capture they are.
+/// Load More appends older rows while preserving the earlier row identities.
+enum HomeDayGroupedRows {
+    struct Row<Item>: Identifiable {
+        let id: AnyHashable
+        let item: Item
+        let showsDividerAfter: Bool
+    }
+
+    /// The identity `ForEach` should use for a row. Must be the item's own
+    /// id, never the offset in the current page.
+    static func rowID<Item>(
+        offset _: Int,
+        item: Item,
+        id: (Item) -> AnyHashable
+    ) -> AnyHashable {
+        // Prepending a capture can change the position of an existing row.
+        id(item)
+    }
+
+    static func make<Item>(
+        items: [Item],
+        id: (Item) -> AnyHashable,
+        showsRowDividers: Bool
+    ) -> [Row<Item>] {
+        let lastIndex = items.count - 1
+        return items.enumerated().map { offset, item in
+            Row(
+                id: rowID(offset: offset, item: item, id: id),
+                item: item,
+                showsDividerAfter: showsRowDividers && offset < lastIndex
+            )
+        }
+    }
+}
+
 // MARK: - Meeting speaker palette selection
 
 /// Foundation-pure palette-slot selection for meeting speaker chips.
