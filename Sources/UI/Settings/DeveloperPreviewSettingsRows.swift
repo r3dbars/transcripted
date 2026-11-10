@@ -82,6 +82,7 @@ private struct WriteForMeKeyRow: View {
     @State private var recording = false
     @State private var rejected = false
     @State private var monitor: Any?
+    @State private var windowCloseObserver: NSObjectProtocol?
     /// A modifier key that went down while recording: it's the key if it comes back up on its own.
     @State private var pendingModifier: Int64?
 
@@ -143,9 +144,16 @@ private struct WriteForMeKeyRow: View {
     /// The next key pressed in this window becomes the key; Esc cancels.
     private func startRecording() {
         stopRecording()
+        guard let window = NSApp.keyWindow, window.isVisible else { return }
         recording = true
         rejected = false
-        monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { event in
+        windowCloseObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: window, queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { stopRecording() }
+        }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.flagsChanged, .keyDown]) { [weak window] event in
+            guard MainActor.assumeIsolated({ accepts(event, from: window) }) else { return event }
             let isFlags = event.type == .flagsChanged
             let code = Int64(event.keyCode)
             let flags = UInt64(event.modifierFlags.rawValue)
@@ -153,6 +161,22 @@ private struct WriteForMeKeyRow: View {
             let swallow = MainActor.assumeIsolated { recorded(isFlags: isFlags, code: code, flags: flags, label: label) }
             return swallow ? nil : event
         }
+    }
+
+    private func accepts(_ event: NSEvent, from window: NSWindow?) -> Bool {
+        switch ShortcutRecordingEventPolicy.action(
+            owner: window.map(ObjectIdentifier.init),
+            eventWindow: event.window.map(ObjectIdentifier.init),
+            ownerVisible: window?.isVisible == true
+        ) {
+        case .record:
+            return true
+        case .passAndClearPending:
+            pendingModifier = nil
+        case .stopAndPass:
+            stopRecording()
+        }
+        return false
     }
 
     /// Returns whether the press was used up by recording.
@@ -187,6 +211,8 @@ private struct WriteForMeKeyRow: View {
     }
 
     private func stopRecording() {
+        if let windowCloseObserver { NotificationCenter.default.removeObserver(windowCloseObserver) }
+        windowCloseObserver = nil
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         pendingModifier = nil

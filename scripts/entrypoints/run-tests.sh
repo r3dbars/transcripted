@@ -762,6 +762,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
     "Sources/UI/Settings/SpeakerNameAutocompleteField.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
+    "Sources/UI/Settings/ShortcutRecordingEventPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/HomeHitTarget.swift"
     "Sources/UI/Settings/HomeMeetingExpansionLayout.swift"
