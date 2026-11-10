@@ -111,8 +111,9 @@ final class TranscriptIndex: @unchecked Sendable {
     /// the meeting-summary FTS document used by general search; v4 adds action
     /// item `status` and `due` metadata; v5 makes that metadata searchable; v6
     /// adds the writing day tables and stops indexing `Writing_` files found in
-    /// a shared folder as meetings.
-    private static let schemaVersion: Int32 = 6
+    /// a shared folder as meetings. v7 re-reads YAML-escaped titles and speaker
+    /// metadata using the app-compatible scalar decoder.
+    private static let schemaVersion: Int32 = 7
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
