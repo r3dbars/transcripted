@@ -335,6 +335,7 @@ SELF_TEST_SCRIPTS=(
     scripts/dev/mutation-probe.py
     scripts/dev/bench-compare.py
     scripts/dev/check-commit-credit.py
+    scripts/hillclimb/hillclimb.py
 )
 PY_TEST_SUITES=(
     scripts/dev/test-verify-receipts.py
