@@ -22,7 +22,7 @@ function idleSession(ageMs: number): string {
 type Spawned = { argv: readonly string[]; env?: Record<string, string> }
 
 /** The helper's files and a fake process noun that records each spawn. */
-function world(on: On, ageMs: number) {
+function world(on: On, ageMs: number, chunks: Array<{stream: 'stdout' | 'stderr'; text: string}> = []) {
   const spawned: Spawned[] = []
   const files: Record<string, string> = { [`${ROOT}/session.json`]: idleSession(ageMs) }
   mock.env(on, { HOME: '/Users/test', TRANSCRIPTED_LIVE_DIR: ROOT, TRANSCRIPTED_LIVE_BIN: BIN })
@@ -47,7 +47,8 @@ function world(on: On, ageMs: number) {
   on('ui.panes', () => ({ value: [] }))
   on('process.spawn', async function* ($, e) {
     spawned.push({ argv: e.argv, env: e.env })
-    return { value: { code: 0, signal: null } }
+    for (const chunk of chunks) yield chunk
+    return { value: { code: chunks.length ? 2 : 0, signal: null } }
   })
   return { spawned, clock }
 }
@@ -59,6 +60,33 @@ describe('helper supervisor', () => {
     await clock.advance(2_000)
 
     expect(spawned).toEqual([])
+  })
+
+  test('a stderr refusal split around stdout keeps the longer retry delay', async ($, on) => {
+    const { spawned, clock } = world(on, 20_000, [
+      { stream: 'stderr', text: 'another transcripted-live is already ' },
+      { stream: 'stdout', text: 'owned synthetic output' },
+      { stream: 'stderr', text: 'running (pid 1); stop it first' },
+    ])
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await clock.advance(2_000)
+    expect(spawned.length).toBe(1)
+    await clock.advance(6_000)
+    expect(spawned.length).toBe(1)
+    await clock.advance(25_000)
+    expect(spawned.length).toBe(2)
+  })
+
+  test('different output streams do not combine into a refusal', async ($, on) => {
+    const { spawned, clock } = world(on, 20_000, [
+      { stream: 'stderr', text: 'already ' },
+      { stream: 'stdout', text: 'running' },
+    ])
+    await $.session.start({ surface: 'terminal', isInteractive: true, cwd: '/work' })
+    await clock.advance(2_000)
+    expect(spawned.length).toBe(1)
+    await clock.advance(6_000)
+    expect(spawned.length).toBe(2)
   })
 
   test('a silent helper is restarted, told to exit with its parent', async ($, on) => {
