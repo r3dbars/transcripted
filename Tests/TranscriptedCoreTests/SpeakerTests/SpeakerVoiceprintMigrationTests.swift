@@ -104,11 +104,7 @@ final class SpeakerVoiceprintMigrationTests: XCTestCase {
     private var roots: [URL] = []
 
     override func tearDown() {
-        let tempRoot = FileManager.default.temporaryDirectory.standardizedFileURL.path
-        for root in roots where root.standardizedFileURL.path.hasPrefix(tempRoot)
-            && root.lastPathComponent.hasPrefix("voiceprint-migration-") {
-            try? FileManager.default.removeItem(at: root)
-        }
+        for root in roots { SpeakerMigrationFixtureCleanup.remove(root) }
         roots.removeAll()
         super.tearDown()
     }
