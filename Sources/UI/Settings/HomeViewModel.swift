@@ -1,5 +1,7 @@
 import SwiftUI
+#if canImport(TranscriptedCore)
 import TranscriptedCore
+#endif
 
 // MARK: - View model
 
@@ -46,12 +48,36 @@ final class HomeViewModel: ObservableObject {
     private var meetingSearchTask: Task<Void, Never>?
     private var meetingSearchGeneration = SupersessionEpoch()
 
-    init() {
+    typealias SnapshotLoader = @Sendable (Int, Int, URL?) async -> RecentCaptureSnapshot
+    typealias ActivationTracker = @MainActor (ActivationTelemetry.ArtifactKind, Date, ActivationTelemetry.Surface, Int) -> Bool
+    private let snapshotLoader: SnapshotLoader
+    private let activationTracker: ActivationTracker
+    private var meetingReveal: (token: Int, url: URL)?
+
+    init(
+        snapshotLoader: @escaping SnapshotLoader = { dictations, meetings, target in
+            await RecentCaptureLoader.load(dictationLimit: dictations, meetingLimit: meetings,
+                                           dictationCountScope: .todayOnly, throughTranscriptURL: target)
+        },
+        activationTracker: @escaping ActivationTracker = { kind, date, surface, count in
+            let tracked = ActivationTelemetry.trackReturnProxyIfEligible(
+                priorArtifactKind: kind, priorArtifactDate: date, surface: surface)
+            if tracked {
+                ActivationTelemetry.trackHabitLoopAction(
+                    actionKind: count >= 2 ? .returnAfterSecondArtifact : .returnAfterFirstArtifact,
+                    surface: surface, artifactKind: kind, artifactDate: date, artifactCount: count)
+            }
+            return tracked
+        },
+        notificationCenter: NotificationCenter = .default
+    ) {
+        self.snapshotLoader = snapshotLoader
+        self.activationTracker = activationTracker
         // Background post-save work (WAV->M4A recompression, transcript rename)
         // rewrites the files whose URLs this cache resolved at scan time. Re-resolve
         // from disk whenever that happens so cached transcript/audio URLs never
         // outlive the real files. The broadcaster is already debounced.
-        captureRefreshObserver = HomeCaptureRefreshObserver { _ in
+        captureRefreshObserver = HomeCaptureRefreshObserver(notificationCenter: notificationCenter) { [weak self] _ in
             Task { @MainActor [weak self] in
                 self?.refreshAfterCaptureArtifactsChanged()
             }
@@ -60,6 +86,7 @@ final class HomeViewModel: ObservableObject {
 
     func setShown(_ shown: Bool) {
         let revealed = shown && !refreshState.isEnabled
+        if !shown && refreshState.isEnabled { meetingReveal = nil }
         refreshState.isEnabled = shown
         // A change held while Home was hidden reads now. The view's reveal
         // refresh can be throttled, so it can't be the only thing that starts
@@ -78,6 +105,18 @@ final class HomeViewModel: ObservableObject {
             meetingSearchGeneration.invalidate()
             isSearchingMeetings = false
         }
+    }
+
+    /// Retain intent before presentation, then read once through the target.
+    /// Subsequent explicit artifact refreshes may retry a just-saved meeting.
+    func requestMeetingReveal(at transcriptURL: URL, token: Int) {
+        meetingReveal = (token, transcriptURL)
+        loadCurrentLimits(isInitialLoad: false, isSilent: true)
+    }
+
+    func finishMeetingReveal(token: Int) {
+        guard meetingReveal?.token == token else { return }
+        meetingReveal = nil
     }
 
     /// Silent re-resolution of the currently visible captures after the on-disk
@@ -250,11 +289,10 @@ final class HomeViewModel: ObservableObject {
         pendingLoadIsSilent = true
         let requestedDictationLimit = dictationLimit
         let requestedMeetingLimit = meetingLimit
+        let requestedReveal = meetingReveal
         refreshTask = Task { @MainActor in
-            let snapshot = await RecentCaptureLoader.load(
-                dictationLimit: requestedDictationLimit + 1,
-                meetingLimit: requestedMeetingLimit + 1,
-                dictationCountScope: .todayOnly
+            let snapshot = await snapshotLoader(
+                requestedDictationLimit + 1, requestedMeetingLimit + 1, requestedReveal?.url
             )
             defer {
                 self.refreshTask = nil
@@ -267,14 +305,22 @@ final class HomeViewModel: ObservableObject {
                 ? nil
                 : HomeScanWarningPolicy.card(for: snapshot.meetingScanDiagnosis)
             let visibleDictations = Array(snapshot.dictations.prefix(requestedDictationLimit))
-            let visibleMeetings = Array(snapshot.meetings.prefix(requestedMeetingLimit))
+            var visibleMeetingLimit = requestedMeetingLimit
+            if refreshState.isEnabled, let requestedReveal,
+               meetingReveal?.token == requestedReveal.token,
+               let minimum = snapshot.meetingRevealMinimumCount {
+                visibleMeetingLimit = max(visibleMeetingLimit, minimum)
+                // Commit before publishing: the subscriber may finish the request.
+                meetingLimit = max(meetingLimit, visibleMeetingLimit)
+            }
+            let visibleMeetings = Array(snapshot.meetings.prefix(visibleMeetingLimit))
             let calendar = Calendar.current
             self.todayDictationCount = snapshot.todayDictationCount ?? 0
             self.todayMeetingCount = visibleMeetings.lazy.filter { calendar.isDateInToday($0.listDate) }.count
             self.dictationDaySections = Self.groupByDay(visibleDictations, dateForItem: \.createdAt)
             self.meetingDaySections = Self.groupByDay(visibleMeetings, dateForItem: \.listDate)
             self.canLoadMoreDictations = snapshot.dictations.count > requestedDictationLimit
-            self.canLoadMoreMeetings = snapshot.meetings.count > requestedMeetingLimit
+            self.canLoadMoreMeetings = snapshot.meetings.count > visibleMeetingLimit
             self.trackActivationReturnProxyIfNeeded(
                 dictations: visibleDictations,
                 meetings: visibleMeetings
@@ -285,6 +331,7 @@ final class HomeViewModel: ObservableObject {
     }
 
     func cancel() {
+        meetingReveal = nil
         setShown(false)
         refreshTask?.cancel()
         refreshTask = nil
@@ -363,21 +410,7 @@ final class HomeViewModel: ObservableObject {
             return
         }
 
-        didTrackActivationReturnProxy = ActivationTelemetry.trackReturnProxyIfEligible(
-            priorArtifactKind: latest.kind,
-            priorArtifactDate: latest.date,
-            surface: surface
-        )
-        if didTrackActivationReturnProxy {
-            let artifactCount = candidates.count
-            ActivationTelemetry.trackHabitLoopAction(
-                actionKind: artifactCount >= 2 ? .returnAfterSecondArtifact : .returnAfterFirstArtifact,
-                surface: surface,
-                artifactKind: latest.kind,
-                artifactDate: latest.date,
-                artifactCount: artifactCount
-            )
-        }
+        didTrackActivationReturnProxy = activationTracker(latest.kind, latest.date, surface, candidates.count)
     }
 
 }

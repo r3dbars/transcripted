@@ -14,72 +14,68 @@ enum RecentMeetingsScanner {
         loadRecentWithDiagnosis(limit: limit, directory: directory, cache: cache).items
     }
 
-    /// The warning and rows come from the same listing, avoiding a second scan.
+    /// The warning, ordinary window and optional reveal come from one listing.
     static func loadRecentWithDiagnosis(
         limit: Int = 3,
         directory: URL? = nil,
-        cache: RecentMeetingMetadataCache? = .shared
-    ) -> (items: [RecentMeetingItem], diagnosis: RecentMeetingsScanDiagnosis) {
-        guard limit > 0 else { return ([], .ok) }
-
+        cache: RecentMeetingMetadataCache? = .shared,
+        throughTranscriptURL: URL? = nil,
+        fileManager fm: FileManager = .default,
+        audioResolver: (URL) -> MeetingAudioAttachment? = {
+            MeetingAudioArchiveResolver.attachment(forTranscript: $0)
+        }
+    ) -> RecentMeetingsScanResult {
+        func result(_ items: [RecentMeetingItem] = [],
+                    _ diagnosis: RecentMeetingsScanDiagnosis = .ok,
+                    minimum: Int? = nil) -> RecentMeetingsScanResult {
+            RecentMeetingsScanResult(items: items, diagnosis: diagnosis, revealMinimumCount: minimum)
+        }
+        guard limit > 0, !Task.isCancelled else { return result() }
         let dir = directory ?? MeetingStoragePaths.transcriptsFolder
-        let fm = FileManager.default
-
-        // Self-heal before scanning: drop cached rows whose transcript no longer
-        // exists so deleted/moved meetings (and any fixture rows a mis-scoped
-        // caller wrote) can't strand the Home list. This runs on the background
-        // refresh task, so the `stat`-per-row cost stays off the main thread.
-        if Task.isCancelled { return ([], .ok) }
         cache?.pruneMissingPathsIfNeeded(fileManager: fm)
-
-        guard !Task.isCancelled else { return ([], .ok) }
+        guard !Task.isCancelled else { return result() }
         var diagnosis = RecentMeetingsScanDiagnosis.ok
-        guard let candidates = scanCandidates(in: dir, fileManager: fm, diagnosis: &diagnosis) else {
-            return ([], diagnosis)
+        guard let scanned = scanCandidates(in: dir, fileManager: fm, diagnosis: &diagnosis) else {
+            return result([], diagnosis)
+        }
+        let candidates = scanned.sorted { $0.date > $1.date }
+        func key(_ url: URL) -> String {
+            url.resolvingSymlinksInPath().standardizedFileURL.path
+        }
+        func row(_ entry: ScanCandidate) -> RecentMeetingItem? {
+            guard !Task.isCancelled else { return nil }
+            let stamp = RecentMeetingCacheStamp(transcriptModified: entry.modified, transcriptSize: entry.size)
+            if let cached = cache?.lookup(path: entry.url.path, stamp: stamp) {
+                return cached.makeItem(transcriptURL: entry.url, audio: nil)
+            }
+            guard let item = parseItem(at: entry.url, fallbackDate: entry.date, resolveAudio: false) else {
+                return nil
+            }
+            cache?.store(path: entry.url.path, stamp: stamp, metadata: CachedRecentMeetingMetadata(item: item))
+            return item
         }
 
-        var recentItems: [RecentMeetingItem] = []
-        for entry in candidates.sorted(by: { $0.date > $1.date }) {
-            if Task.isCancelled { return ([], .ok) }
-
-            let stamp = RecentMeetingCacheStamp(
-                transcriptModified: entry.modified,
-                transcriptSize: entry.size
-            )
-
-            // Warm path: serve the row straight from the index, with no transcript
-            // content read. Only the live audio attachment is resolved.
-            if let cache,
-               let cached = cache.lookup(path: entry.url.path, stamp: stamp) {
-                recentItems.append(
-                    cached.makeItem(
-                        transcriptURL: entry.url,
-                        audio: MeetingAudioArchiveResolver.attachment(forTranscript: entry.url)
-                    )
-                )
-                if recentItems.count >= limit {
-                    break
-                }
-                continue
-            }
-
-            // Cold path: parse the transcript, then populate the index so the next
-            // refresh stays off disk.
-            guard let item = parseItem(at: entry.url, fallbackDate: entry.date, resolveAudio: true) else {
-                continue
-            }
-            cache?.store(
-                path: entry.url.path,
-                stamp: stamp,
-                metadata: CachedRecentMeetingMetadata(item: item)
-            )
-            recentItems.append(item)
-            if recentItems.count >= limit {
-                break
-            }
+        // Only a listed, valid meeting can enlarge the window. Parse it once,
+        // without audio, so an absent or nonmeeting target stays bounded.
+        let targetIndex = throughTranscriptURL.flatMap { target in
+            candidates.firstIndex { key($0.url) == key(target) }
         }
-
-        return (recentItems, diagnosis)
+        let targetRow = targetIndex.flatMap { row(candidates[$0]) }
+        var items: [RecentMeetingItem] = []
+        var minimum: Int?
+        for (index, entry) in candidates.enumerated() {
+            guard !Task.isCancelled else { return result() }
+            let item = index == targetIndex ? targetRow : row(entry)
+            if let item {
+                items.append(item)
+                if index == targetIndex { minimum = items.count }
+            }
+            let desiredCount = max(limit, minimum.map { $0 + 1 } ?? limit)
+            if items.count >= desiredCount, targetRow == nil || minimum != nil { break }
+        }
+        guard !Task.isCancelled else { return result() }
+        // Resolve attachments only for returned rows, never target prevalidation.
+        return result(items.map { $0.withAudio(audioResolver($0.transcriptURL)) }, diagnosis, minimum: minimum)
     }
 
     /// Every saved meeting, newest first, for the Home meetings search. Rows
