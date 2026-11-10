@@ -1,5 +1,4 @@
-// TranscriptedApp.swift
-// Menubar app for local dictation + meeting transcription
+// TranscriptedApp.swift — local dictation + meeting transcription
 
 import SwiftUI
 import AppKit

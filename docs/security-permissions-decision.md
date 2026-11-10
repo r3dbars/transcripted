@@ -25,7 +25,7 @@ content. Storage and companion-trust wording are separate review items.
 @@ -59,8 +59,9 @@
  - `com.apple.security.cs.disable-library-validation` = true
  - `com.apple.security.cs.allow-jit` = true
- 
+
 -Combined with the TCC permissions Transcripted asks for (microphone, screen
 -recording, accessibility, calendars), this means: anything running as your user
 +Combined with the TCC permissions Transcripted asks for (microphone, System
@@ -35,9 +35,9 @@ content. Storage and companion-trust wording are separate review items.
  code into the running app and inherit those permissions, including the ability
  to inject keystrokes into other apps via the paste-back path.
 @@ -95,10 +96,19 @@
- 
+
  ## Permissions and TCC prompts
- 
+
 -Meeting capture requests macOS's System Audio Recording permission for an
 -audio-only ScreenCaptureKit stream. `NSScreenCaptureUsageDescription` remains
 -as compatibility usage copy for ScreenCaptureKit, but Transcripted does not
@@ -55,9 +55,9 @@ content. Storage and companion-trust wording are separate review items.
 +examples of earlier dictation or writing to Claude through the user's signed-in `claude`
 +CLI. This content sharing is separate from anonymous analytics and crash
 +reporting.
- 
+
  ## Companion MCP server trust model
- 
+
 ```
 
 ## Source basis and limits

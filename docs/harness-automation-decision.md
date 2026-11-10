@@ -11,7 +11,7 @@ The report names three standalone Swift harnesses. On reviewed main
 | Harness | Runner | Current automation |
 | --- | --- | --- |
 | `Tests/Integration/HomeMeetingDeletion/ReservationSmoke.swift` | `scripts/dev/test-home-deletion-reservation.sh` | A manual command is documented in `Tests/Integration/HomeMeetingDeletion/README.md`; no automatic compilation caller was found. |
-| `Tests/UI/PostCallDiscardHarness.swift` | `scripts/dev/run-post-call-discard-harness.sh` | No current tracked CI, matrix or documented command caller was found. |
+| Post-call discard harness (retired in integration) | None | Frozen PR #2512 removes the unreferenced harness and runner; no new caller is proposed. |
 | `Tests/UI/CallAppHintHarness.swift` and `CallAppHintHarnessIsolation.swift` | `scripts/dev/run-call-app-hint-harness.sh` | The matrix selects shell syntax and `scripts/dev/test-call-app-hint-harness.py`; these offline wrapper contracts do not compile or execute the actual Swift page harness. |
 
 The Call App isolation helper separately has fast-test coverage in
@@ -29,10 +29,10 @@ native Home UI or real Trash permissions. The UI harness runners compile app
 sources and use an alternate entry point; compilation and UI execution are
 different checks.
 
-[Draft PR #2512](https://github.com/r3dbars/transcripted/pull/2512) separately
-proposes retiring the unused post-call harness for SCRIPTS-DEV-6. It is not
-merged by this worksheet. Reconcile that proposal before choosing coverage;
-do not create a new caller for a harness selected for retirement.
+[Frozen PR #2512](https://github.com/r3dbars/transcripted/pull/2512) retires
+the unused post-call harness in this integration candidate. This worksheet
+still selects no automation option for the retained harnesses. The retirement
+is candidate source state, not evidence of main promotion or native execution.
 
 ## Choices for Justin
 
