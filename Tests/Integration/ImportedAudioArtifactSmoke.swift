@@ -12,9 +12,8 @@ private final class SyntheticSpeech: SpeechToTextEngine {
     var isReady = true
     var calls = 0
     var usesRepresentativeLanguageSamples: Bool { false }
-    var transcriptionEngineDescriptor: SpeechTranscriptionEngineDescriptor {
-        .init(identifier: "synthetic_smoke", displayName: "Synthetic smoke")
-    }
+    // Simulated supported-engine metadata only; no Parakeet model is loaded.
+    var transcriptionEngineDescriptor: SpeechTranscriptionEngineDescriptor { .parakeetLocal }
     func initialize() async { isReady = true }
     func transcribeSegment(samples: [Float], source: AudioSource) async throws -> String {
         calls += 1
