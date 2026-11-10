@@ -45,6 +45,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 
 ## Active helper scripts
 
+- `scripts/dev/test-live-claude-mod.py` — BLOCKED prototype for isolated Claude mod validation/tests (pinned SDK currently fails Bun startup; no actual mod tests run); CI runs only offline wrapper contracts: `python3 scripts/dev/test-live-claude-mod-tests.py`.
 - `scripts/dev/test-parakeet-lifecycle.sh` — compile the production Parakeet lifecycle executor against deterministic delayed model fakes; see `Tests/Integration/ParakeetLifecycle/README.md` for scope and limitations
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks selected directly from the agent test matrix

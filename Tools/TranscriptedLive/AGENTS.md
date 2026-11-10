@@ -29,7 +29,9 @@ Experiment: the meeting Transcripted is recording, live inside Claude Code. A st
 
 ```bash
 swift test --package-path Tools/TranscriptedLive
-cd Tools/TranscriptedLive/claude-mod && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin validate . && CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude plugin test .
+python3 scripts/dev/test-live-claude-mod.py
 ```
 
-`.agents/test-matrix.yml` runs the Swift tests for `Tools/TranscriptedLive/**`. The two Claude plugin checks are manual proof in `.agents/agent-contract.json`: they require Claude Code and the function-hooks environment variable, and the deterministic runner does not allow the `claude` executable. To type-check the mod, see "Checks" in the README. For a manual run without a real call, use `Tools/TranscriptedLive/live.sh replay <audio>`; first run downloads the EOU model (about 440 MB).
+**SDK execution is currently BLOCKED.** The integrity-pinned Claude Code 2.1.310 binary traps during Bun startup inside the proposed isolated host, before plugin validation; actual mod tests were **not run**. The canonical wrapper exits `3` without preparing a workspace, downloading a tool or launching an SDK. Do not remove this source gate or infer a pass from the wrapper-contract tests. Distinct genuine hosted-account proof remains pending.
+
+The proposed host copies the mod/native CLI into an owned temporary root, enables function hooks, and confines them with a default-deny macOS sandbox. Its provider tests answer filesystem, process, model and MCP calls in memory; unanswered dispatch throws. The host/profile/SRI proposal is retained for review, not certified runnable SDK coverage. Swift CI and Linux checks run only `python3 scripts/dev/test-live-claude-mod-tests.py`: mocked wrapper contracts plus an owned C sandbox witness on macOS. `.agents/test-matrix.yml` also selects the canonical SDK wrapper for `Tools/TranscriptedLive/**`, which honestly reports BLOCKED (`3`). No live Claude account/model, app integration or recording-control proof is claimed. To type-check the mod, see "Checks" in the README. For a manual run without a real call, use `Tools/TranscriptedLive/live.sh replay <audio>`; first run downloads the EOU model (about 440 MB).

@@ -352,6 +352,11 @@ jobs:
           swift test --package-path Tools/TranscriptedQA
           swift test --package-path Tools/TranscriptedLive
 
+      # Only wrapper contracts run here: actual SDK bootstrap remains blocked.
+      - name: Claude mod wrapper contracts
+        shell: bash
+        run: python3 scripts/dev/test-live-claude-mod-tests.py
+
       # These modes import the prebuilt audio/Core modules. The real-model
       # executable tests remain opt-in (no audio/model downloads on hosted CI).
       - name: CLI build-mode transitions
