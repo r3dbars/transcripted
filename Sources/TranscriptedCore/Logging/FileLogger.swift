@@ -165,12 +165,16 @@ final class FileLogger: @unchecked Sendable {
     }
 
     private func escapeJSON(_ string: String) -> String {
-        string
+        let escaped = string
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "\n", with: "\\n")
             .replacingOccurrences(of: "\r", with: "\\r")
             .replacingOccurrences(of: "\t", with: "\\t")
+        guard escaped.unicodeScalars.contains(where: { $0.value < 0x20 }) else { return escaped }
+        return escaped.unicodeScalars.map { scalar in
+            scalar.value < 0x20 ? String(format: "\\u%04x", scalar.value) : String(scalar)
+        }.joined()
     }
 
     deinit {
