@@ -6,6 +6,15 @@
 
 rules:
   - paths:
+      - "scripts/dev/test-live-claude-mod.py"
+      - "scripts/dev/test-live-claude-mod-tests.py"
+      - ".github/claude-mod-tests/**"
+      - ".github/workflows/swift-ci.yml"
+    checks:
+      - "python3 scripts/dev/test-live-claude-mod-tests.py"
+      - "python3 scripts/dev/test-live-claude-mod.py"
+
+  - paths:
       - "scripts/dev/bench-launch-latency.sh"
       - "scripts/dev/verify-change.sh"
       - "scripts/dev/test-verify-receipts.py"
@@ -861,8 +870,7 @@ rules:
       - ".claude-plugin/marketplace.json"
     checks:
       - "swift test --package-path Tools/TranscriptedLive"
-      - "claude plugin validate Tools/TranscriptedLive/claude-mod"
-      - "claude plugin test Tools/TranscriptedLive/claude-mod"
+      - "python3 scripts/dev/test-live-claude-mod.py"
 
   - paths:
       - "scripts/stt_fluidaudio_ab.sh"
