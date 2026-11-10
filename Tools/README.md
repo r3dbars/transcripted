@@ -10,14 +10,16 @@
 - `TranscriptedQA/` — artifact validation and QA CLI
 - `SpeakerEvalHarness/` — headless AMI speaker-naming eval harness for diarization, embedding, clustering, and cross-meeting match sweeps
 - `TranscriptedLab/` — native experiment workbench plus `transcripted-lab` CLI; orchestrates the real speaker, transcription, dictation, and QA lanes and writes comparable regression reports
+- `TranscriptedCompanion/` — packaging and tests for the portable Transcripted plugin that wraps the MCP helper in companion mode (Python and plugin files, no Swift package)
 
 ## Read first
 
-Each package has its own local `AGENTS.md` and `Package.swift`.
+Each package has its own local `AGENTS.md`. All but `TranscriptedCompanion/` are Swift packages with a `Package.swift`.
 
 - `Tools/SpeakerEvalHarness/AGENTS.md`
 - `Tools/TranscriptedCaptureKit/AGENTS.md`
 - `Tools/TranscriptedCLI/AGENTS.md`
+- `Tools/TranscriptedCompanion/AGENTS.md`
 - `Tools/TranscriptedLab/AGENTS.md`
 - `Tools/TranscriptedMCP/AGENTS.md`
 - `Tools/TranscriptedQA/AGENTS.md`
