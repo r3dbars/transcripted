@@ -1,6 +1,19 @@
+import Combine
+
 @available(macOS 14.0, *)
 extension TranscriptedAppDelegate {
     func configureCallActivityMonitors() {
+        // Use the published edge directly: @Published emits before state changes,
+        // and async evaluation may not finish until after recording has stopped.
+        appState.meetingSession.$state
+            .map { MeetingSessionStateMachine.isSteadyStateRecording($0) }
+            .removeDuplicates()
+            .filter { $0 }
+            .sink { [weak self] _ in
+                self?.meetingPromptDetector.meetingRecordingDidStart()
+            }
+            .store(in: &meetingPromptSubscriptions)
+
         // Assign callbacks before start; HAL reads remain on the monitor queue.
         micActivityMonitor.defaultInputDeviceMonitor = DefaultInputDeviceMonitor.shared
         micActivityMonitor.onChange = { [weak self] users in

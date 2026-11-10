@@ -119,7 +119,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     @available(macOS 14.0, *)
     private var meetingPromptRecordAction: MeetingPromptRecordAction?
     private var meetingPromptRecordInFlight = false
-    private var meetingPromptSubscriptions: Set<AnyCancellable> = []
+    var meetingPromptSubscriptions: Set<AnyCancellable> = []
     var meetingPromptShownAtByCandidateID: [String: Date] = [:]
     private var workspaceObservers: [NSObjectProtocol] = []
     var micPreferenceObserver: NSObjectProtocol?
