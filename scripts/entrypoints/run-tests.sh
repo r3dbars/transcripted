@@ -759,7 +759,6 @@ APP_SOURCES=(
     "Sources/UI/Settings/OnboardingNavigation.swift"
     "Sources/UI/Settings/AgentSetupFailureCopy.swift"
     "Sources/Writing/WritingSidebarNewBadge.swift"
-    "Sources/UI/Settings/RetainedDataSourceComboBox.swift"
     "Sources/UI/Settings/SpeakerNameAutocompleteField.swift"
     "Sources/UI/Settings/SettingsRecentCaptureRefreshPolicy.swift"
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
