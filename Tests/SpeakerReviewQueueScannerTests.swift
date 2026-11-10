@@ -204,21 +204,36 @@ func testSpeakerReviewQueueScanner() {
                 sampleText: "Okay. Um. Let's see here.",
                 segments: [(5.0, 15.0, "Okay. Um. Let's see here.")]
             )
+            let quotes = verifiedReviewClipQuotes(speakerId, clipURL)
+            let sidecarURL = speakerClipSidecarURL(nextTo: clipURL)
+            let ownedRoot = transcriptURL.deletingLastPathComponent().resolvingSymlinksInPath()
+            let prefix = "SpeakerReviewAudio-"
+            guard ownedRoot.deletingLastPathComponent() == FileManager.default.temporaryDirectory.resolvingSymlinksInPath(),
+                  ownedRoot.lastPathComponent.hasPrefix(prefix),
+                  UUID(uuidString: String(ownedRoot.lastPathComponent.dropFirst(prefix.count))) != nil,
+                  sidecarURL.deletingLastPathComponent().resolvingSymlinksInPath() == ownedRoot else {
+                assertTrue(false, "refusing to remove a sidecar outside the owned review fixture")
+                return
+            }
+            do { try FileManager.default.removeItem(at: sidecarURL) }
+            catch { assertTrue(false, "could not remove the owned sidecar for the no-reread control") }
             let withSidecar = SpeakerReviewQueueScanner.pendingItems(
                 in: markdown, transcriptURL: transcriptURL,
-                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL]
+                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL], clipQuotesByProfileID: quotes
             )
             assertEqual(
                 withSidecar.first?.sampleText,
                 "Okay. Um. Let's see here.",
-                "the quote next to a saved clip must be that clip's own text, not the longer sentence"
+                "the caller's verified quote survives without rereading the sidecar"
             )
             assertEqual(withSidecar.first?.retainedAudioSample, nil)
 
+            writeSpeakerClipSidecar(nextTo: clipURL, sampleText: "Okay. Um. Let's see here.")
             try? Data([1, 1, 1]).write(to: clipURL)
             let stalePair = SpeakerReviewQueueScanner.pendingItems(
                 in: markdown, transcriptURL: transcriptURL,
-                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL]
+                profilesById: profiles, clipURLsByProfileID: [speakerId: clipURL],
+                clipQuotesByProfileID: verifiedReviewClipQuotes(speakerId, clipURL)
             )
             assertEqual(
                 stalePair.first?.sampleText,
@@ -253,7 +268,8 @@ func testSpeakerReviewQueueScanner() {
                 in: markdown,
                 transcriptURL: transcriptURL,
                 profilesById: [keptId: makeReviewQueueProfile(id: keptId, name: nil)],
-                clipURLsByProfileID: [keptId: keptClip]
+                clipURLsByProfileID: [keptId: keptClip],
+                clipQuotesByProfileID: verifiedReviewClipQuotes(keptId, keptClip)
             )
             assertEqual(
                 items.first?.sampleText,
@@ -686,7 +702,8 @@ func testSpeakerReviewQueueScanner() {
             // And back again, still without touching the transcript.
             writeSpeakerClipSidecar(nextTo: clipURL, sampleText: "The clip's own words.")
             let clipAgain = SpeakerReviewQueueScanner.loadPendingItems(
-                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [speakerId: clipURL]
+                transcriptsDirectory: directory, profiles: profiles, clipURLsByProfileID: [speakerId: clipURL],
+                clipQuotesByProfileID: verifiedReviewClipQuotes(speakerId, clipURL)
             )
             assertEqual(clipAgain.first?.clipURL, clipURL, "a clip added since the last scan shows up on the row")
             assertEqual(
@@ -918,9 +935,7 @@ func testSpeakerReviewQueueScanner() {
     }
 
     runSuite("SpeakerReviewSkippedCalls remembers a skipped call") {
-        let suite = "speaker-review-skip-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = SpeakerReviewMemoryDefaults()
         let id = UUID()
         let key = SpeakerReviewSkippedCalls.key(transcriptId: id, transcriptURL: URL(fileURLWithPath: "/tmp/Call.md"))
         assertEqual(key, id.uuidString, "a call is keyed by its transcript id so a rename keeps the skip")
@@ -1311,4 +1326,23 @@ private func makeReviewQueueProfile(
         confidence: 0.8,
         disputeCount: 0
     )
+}
+
+/// Matches the production caller's validation boundary; the scanner receives plain values.
+private func verifiedReviewClipQuotes(_ id: UUID, _ url: URL) -> [UUID: String] {
+    SpeakerClipSidecar.loadMatchingWav(nextTo: url).map { [id: $0.sampleText] } ?? [:]
+}
+
+/// The skip-policy fixture never reads or writes a persistent preference domain.
+private final class SpeakerReviewMemoryDefaults: UserDefaults, @unchecked Sendable {
+    private let lock = NSLock()
+    private var values: [String: Any] = [:]
+    override func stringArray(forKey key: String) -> [String]? {
+        lock.lock(); defer { lock.unlock() }
+        return values[key] as? [String]
+    }
+    override func set(_ value: Any?, forKey key: String) {
+        lock.lock(); defer { lock.unlock() }
+        values[key] = value
+    }
 }

@@ -721,6 +721,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Speaker/SpeakerFinalizationFailure.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerMatchOutcome.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerVectorMath.swift"
+    "Sources/TranscriptedCore/Speaker/SpeakerClipSidecar.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingPolicy.swift"
     "Sources/TranscriptedCore/Speaker/SpeakerNamingBlocker.swift"
     "Sources/UI/Shared/SpeakerNamingTierPresentation.swift"

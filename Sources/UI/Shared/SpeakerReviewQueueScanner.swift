@@ -1,4 +1,3 @@
-import CryptoKit
 import Foundation
 #if canImport(TranscriptedCore)
 import TranscriptedCore
@@ -179,10 +178,12 @@ enum SpeakerReviewQueueScanner {
         }
     }
 
+    /// Clip quotes are validated once by the caller alongside its clip URL snapshot.
     static func loadPendingItems(
         transcriptsDirectory: URL = MeetingStoragePaths.transcriptsFolder,
         profiles: [SpeakerProfile],
-        clipURLsByProfileID: [UUID: URL]
+        clipURLsByProfileID: [UUID: URL],
+        clipQuotesByProfileID: [UUID: String] = [:]
     ) -> [SpeakerPendingReviewItem] {
         let fileManager = FileManager.default
         guard fileManager.fileExists(atPath: transcriptsDirectory.path),
@@ -227,7 +228,8 @@ enum SpeakerReviewQueueScanner {
                     transcriptURL: url,
                     fileDate: fileDate,
                     profilesById: profilesById,
-                    clipURLsByProfileID: clipURLsByProfileID
+                    clipURLsByProfileID: clipURLsByProfileID,
+                    clipQuotesByProfileID: clipQuotesByProfileID
                 )
             }
             guard let markdown = readMarkdownPreview(from: url) else {
@@ -252,7 +254,8 @@ enum SpeakerReviewQueueScanner {
                 transcriptURL: url,
                 fileDate: fileDate,
                 profilesById: profilesById,
-                clipURLsByProfileID: clipURLsByProfileID
+                clipURLsByProfileID: clipURLsByProfileID,
+                clipQuotesByProfileID: clipQuotesByProfileID
             )
         }
 
@@ -279,7 +282,8 @@ enum SpeakerReviewQueueScanner {
         transcriptURL: URL,
         fileDate: Date = .distantPast,
         profilesById: [UUID: SpeakerProfile],
-        clipURLsByProfileID: [UUID: URL]
+        clipURLsByProfileID: [UUID: URL],
+        clipQuotesByProfileID: [UUID: String] = [:]
     ) -> [SpeakerPendingReviewItem] {
         guard let summary = pendingSummary(
             in: markdown,
@@ -290,7 +294,8 @@ enum SpeakerReviewQueueScanner {
             transcriptURL: transcriptURL,
             fileDate: fileDate,
             profilesById: profilesById,
-            clipURLsByProfileID: clipURLsByProfileID
+            clipURLsByProfileID: clipURLsByProfileID,
+            clipQuotesByProfileID: clipQuotesByProfileID
         )
     }
 
@@ -388,7 +393,8 @@ enum SpeakerReviewQueueScanner {
         transcriptURL: URL,
         fileDate: Date,
         profilesById: [UUID: SpeakerProfile],
-        clipURLsByProfileID: [UUID: URL]
+        clipURLsByProfileID: [UUID: URL],
+        clipQuotesByProfileID: [UUID: String]
     ) -> [SpeakerPendingReviewItem] {
         let audio = summary.needsAudioFallback(clipURLsByProfileID: clipURLsByProfileID)
             ? MeetingAudioArchiveResolver.attachment(forTranscript: transcriptURL)
@@ -405,8 +411,8 @@ enum SpeakerReviewQueueScanner {
             let clipURL = clipURLsByProfileID[dbId]
             let fallback = clipURL == nil ? retainedSample(for: entry, audio: audio) : nil
             let sampleText: String?
-            if let clipURL {
-                sampleText = clipSidecarSampleText(nextTo: clipURL)
+            if clipURL != nil {
+                sampleText = clipQuotesByProfileID[dbId].flatMap(cleanedSample)
             } else {
                 sampleText = fallback?.text ?? entry.sampleText
             }
@@ -646,34 +652,6 @@ enum SpeakerReviewQueueScanner {
         return fallbackURL.deletingPathExtension().lastPathComponent
             .replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ")
-    }
-
-    /// Reads the quote stored next to a saved clip. Decodes the sidecar
-    /// JSON by key so this module does not name the Core sidecar type, and
-    /// only returns it when the sidecar still describes this wav.
-    private static func clipSidecarSampleText(nextTo clipURL: URL) -> String? {
-        struct Payload: Decodable {
-            var sampleText: String
-            var formatVersion: Int
-            var wavByteCount: Int
-            var wavSHA256: String
-        }
-        let url = clipURL.deletingPathExtension().appendingPathExtension("json")
-        guard let data = try? Data(contentsOf: url),
-              let payload = try? JSONDecoder().decode(Payload.self, from: data),
-              payload.formatVersion == 1,
-              payload.wavByteCount > 0,
-              !payload.wavSHA256.isEmpty,
-              let wav = try? Data(contentsOf: clipURL),
-              wav.count == payload.wavByteCount,
-              clipWavSHA256(wav) == payload.wavSHA256.lowercased() else {
-            return nil
-        }
-        return cleanedSample(payload.sampleText)
-    }
-
-    private static func clipWavSHA256(_ data: Data) -> String {
-        SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func sampleText(
