@@ -17,7 +17,7 @@ struct ValidateAll: ParsableCommand {
         results += validateTranscripts(in: paths.meetingDirs)
         results += validateDictations(in: paths.dictationDirs)
         results += validateWriting(in: paths.writingDirs)
-        results += SpeakerDBValidator(dbPath: paths.stateDir.appendingPathComponent("speakers.sqlite").path).validate()
+        results += SpeakerDBValidator.validateAll(in: paths.stateDir)
         results += StatsDBValidator(dbPath: paths.stateDir.appendingPathComponent("stats.sqlite").path).validate()
         results += LogValidator(logPath: paths.logFilePath).validate()
         results += HealthChecker(paths: paths).validate()
