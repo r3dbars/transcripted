@@ -337,6 +337,7 @@ SELF_TEST_SCRIPTS=(
     scripts/dev/check-commit-credit.py
 )
 PY_TEST_SUITES=(
+    scripts/release/test-mcp-publish-tools.py
     scripts/dev/test-verify-receipts.py
     scripts/dev/test-call-app-hint-harness.py
     scripts/ops/test-native-smoke-isolation.py
