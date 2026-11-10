@@ -88,7 +88,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/fetch-sparkle-tools.sh` — download the pinned, hash-checked Sparkle tools for the signing job (no build-deps.sh there)
 - `scripts/release/sign-release.sh` — sign an unsigned app and build/sign the DMG in the signing job; shares `scripts/entrypoints/lib/release-package.sh` with `build-beta.sh`
 - `scripts/release/freeze-legacy-appcast.py` — run once for the first release on the release-asset feed: writes the final entry into the legacy `docs/appcast.xml` and the freeze record that `check-known-traps.py` enforces
-- `scripts/release/mark-appcast-critical.py` — mark the newest appcast item critical for older versions so builds that hide routine update prompts show Sparkle's window (local edit only; the release workflow runs it before signing the feed)
+- `scripts/release/mark-appcast-critical.py` — mark the newest item in an explicit `--appcast` scratch feed critical for older versions, before signing; the frozen legacy default permits only `--check`/`--dry-run` after freeze (local edit only)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
 - `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
