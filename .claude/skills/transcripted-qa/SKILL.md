@@ -1,299 +1,73 @@
 ---
 name: transcripted-qa
-description: Run comprehensive QA testing on the Transcripted application — build, unit tests, deep code audit, artifact validation, log analysis, and fix loop.
+description: Choose and run the current Transcripted QA checks, investigate failures, and report exact proof and remaining gaps.
 ---
 
-# Transcripted QA — Full Application Testing
-
-You are a QA engineer testing the Transcripted macOS app. When this skill is invoked, run a comprehensive test pass across all tiers, audit changed code for bugs, report all findings in a structured report, and enter a fix loop for any failures.
-
-## Phase 1: Assess Scope
-
-1. Run `git diff main --name-only` to see what files changed
-2. Map changed files to test domains:
-   - `Sources/TranscriptedCore/Audio/**` and `Sources/Speech/**` → audio, STT, recovery
-   - `Sources/TranscriptedCore/Pipeline/**` and `Sources/Meeting/**` → meeting pipeline, retries, speaker naming
-   - `Sources/TranscriptedCore/Storage/**` → saving, transcript formatting, artifact validation
-   - `Resources/AgentSkills/**` → bundled agent skills
-   - `Sources/TranscriptedCore/Stats/**` → stats
-   - `Sources/TranscriptedCore/Models/FailedTranscription.swift` and `Sources/TranscriptedCore/Services/FailedTranscriptionManager.swift` → retry queue
-   - `Sources/TranscriptedCore/Speaker/**` → speaker DB, embeddings, clustering
-   - `Sources/UI/**` → settings, onboarding, menu bar, overlay
-   - `Sources/Capture/**` → hotkeys and physical trigger routing
-   - `Sources/Observability/**` → logs, Sentry, analytics, privacy sanitizers
-   - `Tools/**` → standalone CLI, MCP, and QA tools
-3. If the user said "test everything" or scope is unclear, run ALL tiers
-4. Note the current transcript and speaker counts before testing from `~/Library/Application Support/Transcripted/captures/` and the app-owned state DBs when available.
-
-## Phase 2: Execute Test Tiers
-
-Run tiers in order. Stop and enter the fix loop if Tier 0 fails. Run independent tiers in parallel where possible (e.g., Tier 2 + Tier 3 can run alongside Tier 1).
-
-### Tier 0 — Build Verification
-
-```bash
-cd /path/to/transcripted && bash build-deps.sh && bash build.sh 2>&1
-```
-
-`build.sh` is the authoritative app build on `main`. The old `Transcripted.xcodeproj` flow is historical and should not be used for current QA.
-
-If dependency artifacts are missing, `build-deps.sh` is the required first step. If the build fails, extract the compiler or linker errors and enter the fix loop. Do NOT proceed to other tiers.
-
-### Tier 1 — Fast Regression Suite
-
-```bash
-cd /path/to/transcripted && bash run-tests.sh 2>&1
-```
-
-`run-tests.sh` is the repo's fast custom `swiftc` regression suite, not XCTest. Capture the failing test names and assertion output exactly.
-
-### Tier 1.5 — Package Seam Coverage
-
-```bash
-cd /path/to/transcripted && swift test 2>&1
-```
-
-Run this when the change touches `Package.swift`, `Sources/TranscriptedCore/`, or shared library interfaces. Also run it when you need additional confirmation that the package seam still compiles cleanly.
-
-**What's covered** (by test file → source file):
-
-| Test File | Source Under Test | What It Tests |
-|-----------|-------------------|---------------|
-| **Core Tests** | | |
-| `DateFormattingHelperTests` | `DateFormattingHelper` | ISO dates, time-only, filename-precise formats |
-| `DateParserTests` | `DateParser` | Date string parsing from various formats |
-| `DisplayStatusTests` | `DisplayStatus` | Status enum transitions, progress values |
-| `EmbeddingTests` | `SpeakerProfile` | Embedding vector operations |
-| `FailedTranscriptionManagerTests` | `FailedTranscriptionManager` | Retry queue, persistence, auto-cleanup |
-| `FailedTranscriptionTests` | `FailedTranscription` | Model properties, serialization |
-| `PipelineErrorTests` | `TranscriptionTypes` | Error types, retryable classification |
-| `RecordingValidatorTests` | `RecordingValidator` | Disk space, permissions, path safety |
-| `SpeechSegmentationTests` | `Transcription` | Silence detection, segment merging |
-| `StatsDatabaseTests` | `StatsDatabase` | Schema, queries, aggregations |
-| `TranscriptionTypesTests` | `TranscriptionTypes` | Utterance, result, speaker segment models |
-| `DiagnosticExporterTests` | `DiagnosticExporter` | System info collection, GitHub issue URLs |
-| `ModelDownloadServiceTests` | `ModelDownloadService` | Error classification (12+ codes), error descriptions, disk space |
-| `TranscriptExporterTests` | `TranscriptExporter` | Markdown export, plain text export, filename generation, speaker prefix stripping |
-| `TranscriptFormatterTests` | `TranscriptFormatter` | YAML escaping, source labels, markdown generation, frontmatter construction |
-| `TranscriptMetadataBuilderTests` | `TranscriptMetadataBuilder` | CaptureQuality thresholds, RecordingHealthInfo |
-| `TranscriptSaverTests` | `TranscriptSaver` | File save, notifications |
-| `TranscriptStoreTests` | `TranscriptStore` | Transcript reading for tray UI |
-| `AgentOutputTests` | `AgentOutput` | JSON sidecar generation, index updates |
-| **Service Tests** | | |
-| `AudioResamplerTests` | `AudioResampler` | 16kHz resampling, format conversion |
-| `SpeakerDatabaseTests` | `SpeakerDatabase` + `SpeakerProfileMerger` | Find by name, merge profiles, EMA update, WAL mode, confidence cap |
-| `SpeakerEmbeddingMatcherTests` | `SpeakerEmbeddingMatcher` | Cosine similarity (8 cases), L2 normalize, speaker matching with thresholds |
-| `SpeakerProfileMergerTests` | `SpeakerProfileMerger` | Name variants (15+ pairs), case insensitivity, empty strings, symmetry |
-| `QwenServiceTests` | `QwenService` | Response parsing, JSON extraction, markdown fence stripping, generic title filtering |
-| `MeetingDetectorTests` | `TranscriptionTypes` | SpeakerNameUpdate action enum cases |
-| `EmbeddingClustererTests` | `EmbeddingClusterer` | Cluster merging, absorption, DB-informed split |
-| **UI Tests** | | |
-| `PillStateManagerTests` | `PillStateManager` | State machine transitions |
-| `ContextualErrorBannerTests` | `ContextualErrorBanner` | Error classification (6 types), icons, titles, recovery hints |
-| `PillDimensionsTests` | `Design/Animations` | All pill dimension constants, size relationships, animation timing |
-| `PillSoundsTests` | `PillStateManager` | System sound availability, sound preference toggle |
-
-Parse output for: total tests run, passed, failed. For each failure: test class, method name, assertion message, file:line.
-
-### Tier 2 — Artifact Validation (68 CLI checks)
-
-```bash
-cd Tools/TranscriptedQA && swift run transcripted-qa validate-all --format json 2>&1
-```
-
-**What's checked** (by category):
-
-| Category | Checks | What It Validates |
-|----------|--------|-------------------|
-| **Transcripts** (per .md file) | yaml-present, yaml-required-keys, yaml-engine-stt, yaml-engine-diarize, yaml-sources, yaml-capture-quality, yaml-count-mic_utterances, yaml-count-system_utterances, yaml-count-total_word_count, body-has-sections, sidecar-exists, permissions | YAML frontmatter completeness, engine names match expected values, source types are valid, counts present and numeric, markdown has expected sections, .json sidecar exists alongside each .md, file permissions not world-readable |
-| **JSON Sidecars** (per .json file) | json-valid, json-version, json-engine-stt, json-engine-diarize, json-duration, json-utterances-sorted, json-speaker-refs, md-match | Valid JSON, schema version present, engine names, duration is positive number, utterances sorted by start time, all speaker refs resolve, corresponding .md file exists |
-| **Speaker DB** | speakers-integrity, speakers-wal-mode, speakers-schema, speakers-embedding-size, speakers-no-null-embeddings, speakers-valid-uuids, speakers-confidence-range, speakers-callcount-positive, speakers-name-source, speakers-permissions | SQLite integrity check, WAL journal mode, schema has expected columns, embeddings are 1024 bytes (256 floats), no NULL embeddings, UUIDs are valid format, confidence 0.0-1.0, call counts positive, name sources are known values, 0600 permissions |
-| **Stats DB** | stats-integrity, stats-schema-recordings, stats-schema-daily, stats-positive-durations, stats-valid-dates, stats-permissions | SQLite integrity, recordings table schema, daily_activity table schema, no negative durations, dates are valid YYYY-MM-DD, 0600 permissions |
-| **Logs** | jsonl-valid, jsonl-required-keys, jsonl-valid-levels, jsonl-valid-subsystems, jsonl-entry-count, jsonl-error-rate | Every line parses as JSON, required keys (ts, level, subsystem, message), levels are known values, subsystems are known values, reasonable entry count, error+warning rate below threshold |
-| **Index** | json-valid, count-match, files-exist, no-duplicate-speakers | Valid JSON, transcript count matches array length, all referenced files exist on disk, no duplicate speaker IDs |
-| **Health** | transcript-dir, logs-dir, qwen-model, disk-space, macos-version, no-crashes | ~/Documents/Transcripted exists, log directory exists, Qwen model files present, sufficient disk space, macOS 14.2+, no crash reports in DiagnosticReports |
-
-After validating real data, also run the round-trip test:
-
-```bash
-cd Tools/TranscriptedQA && swift run transcripted-qa round-trip 2>&1
-```
-
-This generates clean test fixtures, validates them (expect 0 failures), then
-runs corruption tests — each one modifies the data in a specific way and
-verifies the validator catches it, covering YAML keys, speaker-DB integrity
-(embedding size/NULL, confidence, call_count, UUID, name_source), stats-DB
-dates/schema/durations, and log format. The legacy transcripted.json index and
-JSON sidecar validators were removed — the app never wrote those formats.
-
-### Tier 3 — Log & Crash Analysis
-
-Read `~/Library/Application Support/Transcripted/logs/app.jsonl` directly. Check for:
-- Any `error` level entries — quote the message and subsystem
-- Concentration of errors in one subsystem (indicates a specific area is broken)
-- Timestamp gaps > 60 seconds between consecutive entries (may indicate crash or hang)
-- Check `~/Library/Logs/DiagnosticReports/` for any files containing "Transcripted"
-
-### Tier 3.5 — UI Smoke Tests (AppleScript, requires app running)
-
-> **No runner exists.** `scripts/ui-smoke-test.sh` is not in the repo and never has been.
-> Do not try to run it. Treat this tier as a **manual checklist** and report it as
-> SKIPPED unless you work through the table by hand with the app running.
-
-**What this tier is meant to cover** (~15 checks):
-
-| Check | What It Tests |
-|-------|---------------|
-| `ui/app-running` | App process is alive |
-| `ui/menu-bar-only` | App runs as accessory (no dock icon) |
-| `ui/menu-bar-item` | Status bar item exists |
-| `ui/idle-no-windows` | No windows open at idle state |
-| `ui/hotkey-responsive` | Cmd+Shift+R triggers log activity |
-| `ui/hotkey-stop` | Second Cmd+Shift+R stops recording |
-| `ui/settings-window` | Settings opens from menu and closes with Cmd+W |
-| `ui/context-menu` | Right-click on the status item opens the popover |
-| `ui/menu-item-Start-Recording` | "Start Recording" menu item present |
-| `ui/menu-item-Settings` | "Settings" menu item present |
-| `ui/menu-item-Quit` | "Quit" menu item present |
-| `ui/idle-cpu` | CPU usage < 5% at idle |
-| `ui/idle-memory` | Memory < 500MB at idle |
-| `ui/defaults-*` | UserDefaults keys readable |
-| `ui/accessibility` | App responds to accessibility queries |
-
-This tier is informational — failures here don't trigger the fix loop.
-
-### Tier 4 — Deep Code Audit
-
-For each changed source file (NOT test files), launch a subagent to:
-1. Read the full file and the `git diff main` for that file
-2. Check for: bugs, race conditions, security issues, edge cases, memory leaks, force unwraps, API misuse
-3. Rate each finding: critical / high / medium / low / info
-4. For bugs found, check if there's an existing test covering that code path
-
-### Tier 5 — Test Coverage Analysis
-
-For each changed source file, check:
-1. Does a corresponding test file exist?
-2. What % of public methods are tested?
-3. Are there untested error paths or edge cases?
-4. Are test assertions meaningful (not trivially true)?
-5. Do tests use isolated state (temp files, not shared singletons)?
-
-### Tier 6 — End-to-End UI + Audio Testing (requires live app)
-
-> **No runner exists.** `scripts/ui-e2e-test.sh` is not in the repo and never has been.
-> Do not try to run it. Report this tier as SKIPPED. The closest thing that actually
-> runs is `bash run-live-capture-smoke.sh` (needs mic + System Audio Recording perms),
-> which covers capture but none of the UI flows below.
-
-**What this tier is meant to cover** (~30 checks), for manual runs:
-
-| Flow | What It Does | What It Verifies |
-|------|-------------|------------------|
-| **E1: Idle State** | Check app at rest | No spurious windows, CPU < 5%, memory < 500MB |
-| **E2: Context Menu** | Click menu bar item | "Start Recording", "Open Transcripts", "Settings", "Quit" all present |
-| **E3: Settings** | Open Settings via menu, then Cmd+W | Window opens with UI content, closes cleanly |
-| **E4: Recording** | Start via menu, wait 8s, stop via menu | Log activity confirms recording, new .md + .json created |
-| **E5: Transcript Verification** | Read newest transcript | YAML has required keys, JSON sidecar valid, CLI validator passes |
-| **E6: Short Recording** | Start and stop within 0.5s | App doesn't crash |
-| **E7: Rapid Stress** | 5x rapid start/stop cycles | App survives, CPU recovers |
-| **E8: YouTube Comparison** | Open a known YouTube video (JFK Moon Speech), record 30s of system audio, compare transcript | Word count > 0, system utterances captured, expected words from speech found in transcript, JSON sidecar valid |
-
-**Flow E8 details**: Opens Chrome to JFK's 1962 Rice University "Moon Speech" at the 1:30 mark (NASA Video). Lets autoplay run, starts Transcripted recording for 30 seconds, stops both. Reads the transcript and checks for expected words: "condense", "history", "century", "animals", "caves", "years". Requires at least 3/6 matches to pass. This tests the full pipeline: system audio capture → diarization → Parakeet STT → transcript save.
-
-After running, read screenshots from the output directory to visually verify:
-- Recording state transitions (pill shows timer)
-- Settings window content
-- YouTube video was playing during capture
-- Transcript content matches expected speech
-
-## Phase 3: Report
-
-After all tiers complete, produce this report:
-
-```
-## Transcripted QA Report — [today's date]
-
-### Scope
-[Changed files count, mapped domains, baseline transcript/speaker counts]
-
-### Tier 0 — Build: PASS/FAIL
-[Build time. If failed, show compiler errors]
-
-### Tier 1 — Unit Tests: X/Y passed
-[Test time. If failures: test name + assertion + file:line for each]
-
-### Tier 2 — Artifact Validation: X passed, Y failed, Z warnings
-[Show any FAIL or WARN results with details]
-
-### Tier 3 — Log Analysis
-[Total entries, error count by subsystem, notable errors quoted, timestamp gaps, crash reports]
-
-### Tier 3.5 — UI Smoke Tests: SKIPPED (no runner)
-[SKIPPED unless you worked the manual checklist by hand — there is no script for this tier]
-
-### Tier 4 — Code Audit
-[Per-file findings table: file, issue, severity, line]
-
-### Tier 5 — Coverage Analysis
-[Per-file: tested methods vs untested, notable gaps]
-
-### Tier 6 — End-to-End: SKIPPED (no runner)
-[SKIPPED — there is no script for this tier. If you ran `bash run-live-capture-smoke.sh`
-instead, report that by name and say which flows below it does not cover]
-
-### Issues Found
-1. [severity] [description] → [file:line] → [fix applied / suggested fix]
-2. ...
-
-### Warnings
-- [notable warnings that don't block but should be tracked]
-
-### What's NOT Tested
-- [List of source files with zero test coverage that were changed]
-- [List of important untested code paths in covered files]
-```
-
-## Fix Loop
-
-When a tier fails:
-
-1. **Identify**: Extract the test name, assertion message, and file:line from the failure output
-2. **Trace**: Read the failing test file. Read the source file being tested. Identify the code path that broke.
-3. **Diagnose**: Is the test outdated (expectations changed) or is the code broken (regression)?
-4. **Fix**: Edit the appropriate file — either update the test or fix the source code
-5. **Verify**: Re-run ONLY the failing tier. If it passes, re-run the full suite to check for regressions.
-
-### Fix Loop Guardrails
-- Max 3 fix attempts per failure
-- NEVER modify the audio-thread files under `Sources/TranscriptedCore/Audio/` (`Audio.swift`, `CoreAudioSystemAudioCapture.swift`, `CoreAudioTapBufferRing.swift`, `AudioFileManager.swift`, `Audio+MicBufferWrite.swift`, `Audio+SystemAudioWrite.swift`, `Audio+BufferUtilities.swift`, `SystemAudioCaptureStartAttempt.swift`, `AudioLevelMonitor.swift`, `RealtimeAGC.swift`, `SCKAudioCapture.swift`) without asking the user
-- If you can't fix it in 3 attempts, report it as unresolved and move on
-
-## Key File Locations
-
-| Artifact | Path |
-|----------|------|
-| Transcripts | ~/Library/Application Support/Transcripted/captures/meetings/ (or the relocated capture library; see docs/storage-paths.md) |
-| Speaker DB | ~/Library/Application Support/Transcripted/state/speakers.sqlite |
-| Stats DB | ~/Library/Application Support/Transcripted/state/stats.sqlite |
-| Failed queue | ~/Library/Application Support/Transcripted/state/failed_transcriptions.json |
-| Speaker clips | ~/Library/Application Support/Transcripted/tmp/recordings/speaker_clips/ |
-| App logs | ~/Library/Application Support/Transcripted/logs/app.jsonl |
-| Crash reports | ~/Library/Logs/DiagnosticReports/ |
-| CLI tool | Tools/TranscriptedQA/ |
-
-## Known Baselines
-
-- Unit tests: ~552 across 44 test files (as of 2026-03-26)
-  - Core: 24 files (security, retry, pipeline, formatting, save chain, recording validator)
-  - Services: 9 files (speaker DB dangerous ops, lifecycle, embedding, QwenService, ParakeetService)
-  - UI: 5 files (ClipAudioPlayer regression, pill state, dimensions, sounds, error banner)
-  - Integration: 6 files (save chain, formatter round-trip, speaker lifecycle, AgentOutput, cross-artifact consistency, edge cases + fuzz)
-  - Helpers: 2 files (MockServices, TestFixtures)
-- CLI checks: 68 per validation run + 86 generated fixture checks + 21 corruption round-trip checks + 1030 stress test checks
-- CLI commands: `validate-all`, `round-trip`, `generate-fixtures`, `stress-test`, plus per-category validators
-- UI smoke tests: manual only, ~16 checks (process, menu bar, context menu, CPU, memory, accessibility, UserDefaults) — no runner script exists
-- E2E tests: manual only, ~30 checks across 8 flows (idle, menu, settings, recording, transcript verification, short recording, rapid stress, YouTube comparison) — no runner script exists
-- Expected warnings: transcript permissions (644), log error rate if > 10%, empty speaker embeddings
-- Prebuilt dependency modules must match the current Swift toolchain version — rebuild with `bash build-deps.sh --force` if module errors occur
-- YouTube test uses JFK Moon Speech (NASA Video, `WZyRbnpGyzQ` at t=90s) — expects words: condense, history, century, animals, caves, years
+# Transcripted QA
+
+Use the repository's current runners and owner guides to choose and explain
+the QA checks.
+
+## Scope and sources
+
+1. Read `AGENTS.md` and identify the requested scope. Fetch `origin/main` before
+   comparing a PR; include staged, unstaged, and untracked changes when working
+   locally. Local `main` may be stale.
+2. Run `python3 scripts/dev/agent-context.py <changed paths>` before planning,
+   then read the nearest `AGENTS.md` for the affected area. For a symptom without
+   known paths, use the context tool's `--symptom` option.
+3. Use `.agents/test-matrix.yml` for mapped checks, `Tests/README.md` for test
+   rules, and `docs/repo-layout.md` for the command map. Preserve the product
+   flows and privacy requirements in `AGENTS.md`.
+
+## Run the checks that apply
+
+- Start with `bash check.sh`. It selects checks for the diff and writes
+  `build/agent-proof.json`. Run build and test commands sequentially because
+  they share build output. Keep the source unchanged while a check runs.
+- `bash check.sh quick` is the Linux-safe tier; it does not prove Swift builds
+  or app behavior. Select the full and hardware tiers when `AGENTS.md` or the test matrix
+  requires them.
+- For app behavior, use the `verify` skill at
+  `.claude/skills/verify/SKILL.md`. Preview with
+  `bash scripts/dev/verify-change.sh --list`, then run the applicable checks.
+  Its summary is `.build/verify/summary.md`; docs-only changes need no app run.
+- Meaningful code needs an independent full-diff review against the real base.
+  Broad or release-impacting work also needs
+  `bash scripts/ops/transcripted-qa-bench.sh --mode full`, as required by
+  `AGENTS.md`. Read `docs/qa-test-bench.md` for bench modes and their limits.
+- For artifact validators and native UI/import/package smoke commands, read
+  `Tools/TranscriptedQA/AGENTS.md` and the selected command's help. Do not run
+  the CLI's default artifact validation against the owner's library merely to
+  establish baseline counts. Use explicit owned fixtures for automated tests.
+
+## State, privacy, and native checks
+
+Automated harnesses never write to the real capture library or preferences.
+Use owned fixture roots, check ownership before deleting, and set
+`TRANSCRIPTED_DISABLE_FILE_LOGGER=1` when running binaries directly. Storage
+locations and relocation rules live in `docs/storage-paths.md`.
+
+Native app-launch checks require a separate OS account or verified CI
+isolation; a temporary `HOME` does not isolate preferences or TCC. Respect the
+existing isolation guards and running-app checks. Never override a running
+app's rebuild guard or quit the owner's app to make a check run. Real mic,
+Bluetooth, system audio, and paste-back proof remain separate from synthetic
+results; follow the live-check handoff in `AGENTS.md` and the `verify` skill.
+
+Keep raw transcripts, writing, audio references, private log content, and other
+sensitive values out of shared reports and off-device telemetry. Report fixed
+failure identifiers and redacted diagnostics instead of quoting user content.
+
+## Investigate and report
+
+Trace a failure through the test inputs and actual owning code, fix its cause,
+and rerun the affected check. Follow `Tests/README.md`: no retry-until-green,
+source-text assertions, or assertions on wall-clock time. Do not weaken a check to
+make it pass. Apply the subsystem's existing rules to fixes, including the
+real-time audio and AirPods guidance.
+
+Report the exact head and base, commands and exit status, review verdict,
+receipt locations, failures, skipped or blocked checks, and remaining manual
+work. SKIP or BLOCKED is incomplete proof. Do not equate a build, fixture pass,
+or published feed with native capture, installed-app upgrade, or live behavior.

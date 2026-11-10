@@ -218,4 +218,4 @@ The old beta backend (`archive/`) was removed on 2026-09-25. It's still in git h
 
 `docs/archive/` holds finished records that no code, script, or test reads.
 
-`.claude/` is live tooling, not a historical zone: `skills/` holds the `transcripted-qa` skill, `commands/` the `humanize`/`tests`/`push` slash commands, and `agents/` subagent definitions (`test-writer` and the `writing-*` agents used for the Tilde port).
+`.claude/` is live tooling, not a historical zone: `skills/` holds the `correct`, `transcripted-qa` and `verify` skills, `commands/` the `humanize`/`tests`/`push` slash commands, and `agents/` subagent definitions (`test-writer` and the `writing-*` agents used for the Tilde port).
