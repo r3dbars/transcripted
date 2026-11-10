@@ -169,13 +169,30 @@ enum ReliabilityPacketRecorder {
         return true
     }
 
+    static let recentReadByteLimit = 512 * 1024
+
+    /// Parse only a bounded tail. Oversized, torn, or unreadable records can
+    /// reduce the result; an empty result does not prove the log is empty.
     static func recentPacketSummaries(limit: Int = defaultRecentLimit, fileURL: URL = defaultFileURL()) -> [String] {
-        guard limit > 0,
-              let data = try? Data(contentsOf: fileURL),
-              let text = String(data: data, encoding: .utf8) else {
+        guard limit > 0, let handle = try? FileHandle(forReadingFrom: fileURL) else { return [] }
+        defer { try? handle.close() }
+        do {
+            let end = try handle.seekToEnd()
+            let count = min(end, UInt64(recentReadByteLimit))
+            let offset = end - count
+            try handle.seek(toOffset: offset)
+            guard var data = try handle.read(upToCount: Int(count)) else { return [] }
+            if offset > 0 {
+                // Discard the first partial row before decoding: the byte
+                // boundary may also split a UTF-8 scalar.
+                guard let newline = data.firstIndex(of: 0x0A) else { return [] }
+                data = Data(data.suffix(from: data.index(after: newline)))
+            }
+            guard let text = String(data: data, encoding: .utf8) else { return [] }
+            return packetSummaries(fromJSONL: text, limit: limit)
+        } catch {
             return []
         }
-        return packetSummaries(fromJSONL: text, limit: limit)
     }
 
     static func packetSummaries(fromJSONL text: String, limit: Int = defaultRecentLimit) -> [String] {
