@@ -203,7 +203,7 @@ let package = Package(
             name: "TranscriptedKeyboard",
             dependencies: ["TranscriptedWritingCore"],
             path: "Sources/TranscriptedKeyboard",
-            exclude: ["Info.plist"],
+            exclude: ["Info.plist", "AGENTS.md"],
             linkerSettings: [.linkedFramework("InputMethodKit")]
         ),
     ] + coreTestTargets
