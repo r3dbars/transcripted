@@ -9,7 +9,7 @@ never reach Sentry/PostHog), see `docs/privacy-first-observability.md`.
 | Sink | Lives in | Writes to | Rotation |
 | --- | --- | --- | --- |
 | `AppLogger` | `Sources/TranscriptedCore/Logging/AppLogger.swift` | `~/Library/Application Support/Transcripted/logs/app.jsonl` (via `FileLogger`) + `os.Logger`/Console.app | Line-count gated: trims to 1500 lines once past 2000, checked every 100 writes |
-| `AppLogSink` | `Sources/Observability/AppLogSink.swift` | `~/Library/Application Support/Transcripted/logs/debug.log` (it also keeps the last 200 lines in memory as `entries`, which nothing in the app reads) | Byte-size gated: trims to 1000 lines once past 500 KB, checked at session start and after each append |
+| `AppLogSink` | `Sources/Observability/AppLogSink.swift` | `~/Library/Application Support/Transcripted/logs/debug.log` | Byte-size gated: trims to 1000 lines once past 500 KB, checked at session start and after each append |
 | `FileLogger` | `Sources/TranscriptedCore/Logging/FileLogger.swift` | `app.jsonl` (this is `AppLogger`'s file backend, not a separate log) | Same as `AppLogger` above — it's the same file |
 | `EventReporter` | `Sources/Observability/EventReporter.swift` | `~/Library/Application Support/Transcripted/logs/events.jsonl` + optional Sentry forwarding (errors only, allowlisted) | Rename-based: `ObservabilityLogRotation` renames the active file to `events.jsonl.1` once past the shared JSONL threshold (`TranscriptedConstants.jsonlLogRotationThreshold`) |
 | `ReliabilityPacketRecorder` | `Sources/Observability/ReliabilityPacketRecorder.swift` | `~/Library/Application Support/Transcripted/logs/reliability.jsonl` | Same rename-based `ObservabilityLogRotation` strategy as `EventReporter`, same threshold |
@@ -38,11 +38,11 @@ independently for different audiences:
   up live in Console.app) and to `FileLogger`'s `app.jsonl` (so an agent or a
   support engineer can grep structured records after the fact).
 - **`AppLogSink`** (`Sources/Observability/`, renamed from `AppLogger` in the
-  2026-07 observability cleanup) is a `@MainActor` `ObservableObject` that
-  writes a plain-text `debug.log`, not JSONL, for the app's user-action trail.
-  Nothing in the app shows its lines, and feedback emails don't include them
-  (`TranscriptedSupportActions.feedbackEmailURL` passes no log lines). Engine
-  code should prefer `TranscriptedCore.AppLogger`.
+  2026-07 observability cleanup) is a `@MainActor` logger that writes a
+  plain-text `debug.log`, not JSONL, for the app's user-action trail. No app
+  view displays its lines, and `TranscriptedSupportActions.feedbackEmailURL`
+  passes no log lines into feedback emails. Engine code should prefer
+  `TranscriptedCore.AppLogger`.
 
 Because both types lived in the same app target (no module boundary between
 `Sources/Observability/` and `Sources/TranscriptedCore/`'s consumers), any
