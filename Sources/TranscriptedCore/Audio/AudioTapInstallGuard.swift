@@ -17,7 +17,7 @@ import Foundation
 /// 5) so field logs can tell a caught raise from a pre-check rejection.
 public enum AudioTapInstallGuard {
     public static let errorDomain = "Audio"
-    /// Nothing branches on "Audio" error codes; this only marks the source.
+    /// Start-failure classification reads this code (`isTapInstallRaise`).
     public static let tapInstallRaisedErrorCode = 12
 
     /// True for the error `run` throws after catching a raise.

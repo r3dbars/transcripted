@@ -44,8 +44,8 @@ extension Audio {
     private static let systemRecoverySilencePadChunkSeconds: TimeInterval = 1
 
     /// Writes a bounded silence pad into the current system writer on the
-    /// file queue. Called after confirmed SCK recovery, before new buffers
-    /// are accepted (writes are held until this returns).
+    /// file queue and waits for it. Synchronous form of the pad write, for
+    /// tests; capture uses `enqueueSystemRecoverySilencePad`.
     func writeSystemRecoverySilencePad(duration: TimeInterval, generation: UInt64) {
         systemAudioFileQueue.sync {
             self.writeSystemRecoverySilencePadOnFileQueue(duration: duration, generation: generation)
