@@ -1,6 +1,6 @@
 # Humanize: Remove AI Writing Patterns
 
-Remove signs of AI-generated writing from text to make it sound more natural and human. Particularly useful for reviewing Draft output before sending — if a generated message triggers any of the patterns below, it needs another pass.
+Remove signs of AI-generated writing from text to make it sound more natural and human. Particularly useful for reviewing generated messages before sending — if a message triggers any of the patterns below, it needs another pass.
 
 Based on [Wikipedia's "Signs of AI writing"](https://en.wikipedia.org/wiki/Wikipedia:Signs_of_AI_writing) guide, maintained by WikiProject AI Cleanup. Credit: [blader/humanizer](https://github.com/blader/humanizer).
 
