@@ -42,7 +42,6 @@ enum TranscriptedSupportActions {
 
     static func feedbackEmailURL(appState: TranscriptedAppState) async -> URL? {
         FeedbackIssueBuilder.emailURL(
-            rawLogLines: [],
             diagnostics: await diagnosticsText(appState: appState),
             diagnosticReportID: lastDiagnosticReportID
         )
