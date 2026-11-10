@@ -73,8 +73,19 @@ source component prints `automated` and passes; it does not launch the app.
 The harness decision worksheet now records #2512 candidate retirement without
 selecting an automation policy. Proposal patch trailing whitespace was removed.
 
-Safe static suite and hosted run identities will be recorded in the follow-up
-validation commit. Full unfiltered fast/Core/integration suites, native GUI,
+Additional safe components: prompt delivery passed 48/48 assertions with zero
+skips under network denial. The automation-gate component printed `automated`.
+All 1,040 app-source files passed Swift syntax parsing (not typechecking).
+Final changed-source pin checks pass (17 resolved pins checked).
+Verifier selection identifies paste, meetings, UI, speed and real hardware work;
+execution is blocked locally by the owner-profile boundary.
+The initial safe static suite found retired harness paths; the corrected
+standalone documentation-path check passes. The initial suite remains FAIL because of that recorded failure; later offline
+checks are still running at this checkpoint. No failed initial run is rewritten
+as a pass. A final clean complete quick-suite verdict is not claimed.
+
+Independent final review and all exact-head hosted outcomes remain pending.
+Hosted run IDs are returned to the parent rather than claimed as completed proof. Full unfiltered fast/Core/integration suites, native GUI,
 keyboard/microphone/TCC and full QA bench are not executed on the owner's profile.
 No running app was quit, relaunched or rebuilt. Local app signing/distribution is
 not performed. A native verifier selection alone is not a passing verifier run.

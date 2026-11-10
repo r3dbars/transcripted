@@ -11,18 +11,18 @@ index 2b3bdef31..fba75441e 100644
 --- a/README.md
 +++ b/README.md
 @@ -7,7 +7,7 @@
- 
+
  <h1 align="center">Transcripted</h1>
- 
+
 -<h3 align="center">Private meeting notes that never leave your Mac. No bot joins your call.</h3>
 +<h3 align="center">Meeting notes saved on your Mac. No bot joins your call.</h3>
- 
+
  <p align="center">
    Transcripted is a free, open-source Mac app for meeting notes and dictation.
 @@ -183,7 +183,14 @@ Then do steps 3 and 4 above.
- 
+
  ## Privacy
- 
+
 -- Your audio, transcripts, and voice profiles never leave your Mac.
 +- Recording, transcription, and speaker matching run on your Mac.
 +- **Developer Preview → Write for Me** is off by default. When you enable it
@@ -55,12 +55,12 @@ index 2b3bdef31..fba75441e 100644
 +- Connecting an agent gives it access to saved captures. Requested content
 +  can be sent to that agent's service. The recent-meetings widget can also
 +  return retained audio to the connected host.
- 
+
  Where everything is stored: [docs/storage-paths.md](docs/storage-paths.md).
- 
+
 @@ -217,9 +226,9 @@ It saves the full transcript, not an AI summary. For a summary, decisions, or
  action items, ask your AI. It answers from your notes.
- 
+
  **Does it work offline?**
 -Yes. Recording, transcription, and speaker labels need no internet. The app
 -only goes online to check for updates, download optional models, and send the
@@ -68,7 +68,7 @@ index 2b3bdef31..fba75441e 100644
 +Yes. Recording, transcription, and speaker labels need no internet. Updates
 +and optional model downloads use the internet, as do enabled crash reports
 +and usage stats, feedback you send, and Developer Preview → Write for Me.
- 
+
  **What languages does it understand?**
  The default model, Parakeet V3, covers 25 European languages, English
 ```
