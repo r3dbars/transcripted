@@ -361,7 +361,9 @@ extension TranscriptedSettingsView {
         ) else { return }
         let work = SettingsClosedWindowRefreshPolicy.appActivationWork(isWindowOpen: navigation.isWindowOpen)
         if work.permissions { refreshPermissions() }
-        if work.recentCaptures { refreshRecentCaptures(reloadDashboard: work.dashboard) }
+        if work.recentCaptures {
+            refreshRecentCaptures(reloadDashboard: work.dashboard, preservingVisibleState: true)
+        }
         if work.shortcuts { refreshShortcutState() }
         // Coming back from Login Items should clear a stale approval or
         // failure line.
@@ -378,7 +380,8 @@ extension TranscriptedSettingsView {
     /// Retained hidden pages invalidate lazily; presenting the window refreshes
     /// them once, while their last snapshot remains available for the first frame.
     func refreshRecentCaptures(
-        force: Bool = false, reloadDashboard: Bool = true, isLibraryChange: Bool = false
+        force: Bool = false, reloadDashboard: Bool = true, isLibraryChange: Bool = false,
+        preservingVisibleState: Bool = false
     ) {
         updateLibraryVisibility()
         guard navigation.isWindowOpen else { return }
@@ -390,13 +393,16 @@ extension TranscriptedSettingsView {
         case .homeDashboard:
             // Saves cannot be dropped by the activation throttle. The model
             // coalesces them and retains one trailing read of the latest files.
-            refreshHomeDashboard(force: force || isLibraryChange)
+            refreshHomeDashboard(
+                force: force || isLibraryChange,
+                preservingVisibleState: preservingVisibleState || isLibraryChange
+            )
         case .none:
             break
         }
     }
 
-    private func refreshHomeDashboard(force: Bool) {
+    private func refreshHomeDashboard(force: Bool, preservingVisibleState: Bool) {
         let now = Date()
         guard SettingsRecentCaptureRefreshPolicy.shouldStartDashboardRefresh(
             for: navigation.selectedPage,
@@ -412,7 +418,11 @@ extension TranscriptedSettingsView {
         let generation = homeDashboardRefreshGeneration.begin()
         lastHomeDashboardRefreshStartedAt = now
         homeDashboardRefreshInFlight = true
-        homeViewModel.refresh()
+        if preservingVisibleState {
+            homeViewModel.refreshAfterCaptureArtifactsChanged()
+        } else {
+            homeViewModel.refresh()
+        }
 
         homeDashboardRefreshTask = Task { @MainActor in
             await Task.yield()
