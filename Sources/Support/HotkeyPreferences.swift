@@ -291,6 +291,7 @@ enum HotkeyPreferences {
         default: return "Key\(keyCode)"
         }
     }
+
 }
 
 // MARK: - Notification
