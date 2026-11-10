@@ -10,6 +10,7 @@
 - `TranscriptedQA/` — artifact validation and QA CLI
 - `SpeakerEvalHarness/` — headless AMI speaker-naming eval harness for diarization, embedding, clustering, and cross-meeting match sweeps
 - `TranscriptedLab/` — native experiment workbench plus `transcripted-lab` CLI; orchestrates the real speaker, transcription, dictation, and QA lanes and writes comparable regression reports
+- `TranscriptedLive/` — experiment: the meeting Transcripted is recording, live inside Claude Code (a `transcripted-live` helper plus a Claude Code mod)
 
 ## Read first
 
@@ -19,6 +20,7 @@ Each package has its own local `AGENTS.md` and `Package.swift`.
 - `Tools/TranscriptedCaptureKit/AGENTS.md`
 - `Tools/TranscriptedCLI/AGENTS.md`
 - `Tools/TranscriptedLab/AGENTS.md`
+- `Tools/TranscriptedLive/AGENTS.md`
 - `Tools/TranscriptedMCP/AGENTS.md`
 - `Tools/TranscriptedQA/AGENTS.md`
 
