@@ -74,9 +74,6 @@ auto-accept sites in `TranscriptionPipelineRunner` via
 
 - `SpeakerReviewPrioritizer` orders review rows most-informative-first:
   doubtful suggestions (lowest similarity) lead, unknown voices follow.
-- The sheet shows the payoff line "Transcripted recognizes N people
-  automatically" (`SpeakerNamingRequest.recognizedPeopleCount`) so confirming
-  visibly makes the app smarter.
 
 ### 3. Fleet calibration (better for everyone)
 
