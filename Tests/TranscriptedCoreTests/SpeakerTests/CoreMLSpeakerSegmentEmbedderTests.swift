@@ -321,8 +321,9 @@ final class CoreMLSpeakerSegmentEmbedderModelTests: XCTestCase {
         else { throw XCTSkip("no application support dir") }
         let url = appSupport.appendingPathComponent("FluidAudio/Models/eres2net-embedding/Model.mlmodelc")
         guard FileManager.default.fileExists(atPath: url.path) else { throw XCTSkip("ERes2Net model not staged") }
-        let fixtureURL = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/eres2net_swift_golden.json")
+        let fixtureURL = try XCTUnwrap(Bundle.module.url(
+            forResource: "eres2net_swift_golden", withExtension: "json", subdirectory: "Fixtures"
+        ))
         let fixture = try JSONDecoder().decode(Fixture.self, from: Data(contentsOf: fixtureURL))
 
         let embedder = try CoreMLSpeakerSegmentEmbedder(configuration: CoreMLSpeakerEmbedderConfiguration(

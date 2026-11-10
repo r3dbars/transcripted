@@ -46,6 +46,14 @@ final class ERes2NetEmbedderParityTests: XCTestCase {
         XCTAssertEqual(norm, 1.0, accuracy: 1e-3)
     }
 
+    func testGoldenFixtureIsBundledAndSelfConsistent() throws {
+        let fixture = try loadFixture()
+        XCTAssertGreaterThan(fixture.sampleRate, 0)
+        XCTAssertFalse(fixture.samples.isEmpty)
+        XCTAssertGreaterThan(fixture.dim, 0)
+        XCTAssertEqual(fixture.embedding.count, fixture.dim)
+    }
+
     // MARK: - Helpers
 
     private func stagedModelURL() -> URL? {
@@ -60,9 +68,9 @@ final class ERes2NetEmbedderParityTests: XCTestCase {
     /// (needs the PyTorch reference model). The CoreML model it checks parity
     /// against is produced by `scripts/convert_eres2net_fused.py`.
     private func loadFixture() throws -> Fixture {
-        let url = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .appendingPathComponent("Fixtures/eres2net_swift_golden.json")
+        let url = try XCTUnwrap(Bundle.module.url(
+            forResource: "eres2net_swift_golden", withExtension: "json", subdirectory: "Fixtures"
+        ))
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(Fixture.self, from: data)
     }
