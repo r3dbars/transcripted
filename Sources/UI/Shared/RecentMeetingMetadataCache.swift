@@ -111,6 +111,13 @@ extension CachedRecentMeetingMetadata {
 final class RecentMeetingMetadataCache: @unchecked Sendable {
     private static let pruneInterval: TimeInterval = 60
 
+    // Older app versions read only meeting_metadata. Keep bounded Today rows
+    // outside that table so an old decoder cannot mistake them for full rows.
+    private enum Table: String, CaseIterable {
+        case full = "meeting_metadata"
+        case today = "today_meeting_metadata"
+    }
+
     /// App-wide cache, persisted under the app cache directory. Safe to delete;
     /// it is rebuilt lazily from disk on the next refresh.
     static let shared = RecentMeetingMetadataCache(
@@ -153,8 +160,14 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     }
 
     private func createTable() {
+        for table in Table.allCases {
+            createTable(table)
+        }
+    }
+
+    private func createTable(_ table: Table) {
         let sql = """
-        CREATE TABLE IF NOT EXISTS meeting_metadata (
+        CREATE TABLE IF NOT EXISTS \(table.rawValue) (
             path TEXT PRIMARY KEY,
             transcript_modified REAL NOT NULL,
             transcript_size INTEGER NOT NULL,
@@ -169,12 +182,26 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     /// Return the cached metadata for `path` only when the stored stamp matches
     /// the on-disk stamp exactly.
     func lookup(path: String, stamp: RecentMeetingCacheStamp) -> CachedRecentMeetingMetadata? {
+        lookup(path: path, stamp: stamp, table: .full)
+    }
+
+    /// Today can use a complete row, but a bounded row never satisfies lookup().
+    func lookupForToday(path: String, stamp: RecentMeetingCacheStamp) -> Row? {
+        if let metadata = lookup(path: path, stamp: stamp, table: .full) {
+            return Row(stamp: stamp, metadata: metadata)
+        }
+        return lookup(path: path, stamp: stamp, table: .today).map {
+            Row(stamp: stamp, metadata: $0, includesSpeakerDetails: false)
+        }
+    }
+
+    private func lookup(path: String, stamp: RecentMeetingCacheStamp, table: Table) -> CachedRecentMeetingMetadata? {
         lock.lock()
         defer { lock.unlock() }
         guard let db else { return nil }
 
         let sql = """
-        SELECT payload FROM meeting_metadata
+        SELECT payload FROM \(table.rawValue)
         WHERE path = ? AND transcript_modified = ? AND transcript_size = ?
           AND summary_modified = 0 AND summary_size = -1;
         """
@@ -200,6 +227,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     struct Row: Sendable {
         let stamp: RecentMeetingCacheStamp
         let metadata: CachedRecentMeetingMetadata
+        var includesSpeakerDetails: Bool = true
     }
 
     /// Every decodable cached row, keyed by path, in one query. The Home
@@ -208,10 +236,24 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
     /// the file on disk before trusting it. Rows that fail to decode (older
     /// payload shapes) are left out, which the caller treats as a miss.
     func allRows() -> [String: Row] {
+        allRows(table: .full)
+    }
+
+    /// Full rows come first, but callers must match stamps before choosing one:
+    /// a stale full row must not hide a newer bounded row at the same path.
+    func allRowsForToday() -> [String: [Row]] {
+        var rows = allRows().mapValues { [$0] }
+        for (path, row) in allRows(table: .today) {
+            rows[path, default: []].append(row)
+        }
+        return rows
+    }
+
+    private func allRows(table: Table) -> [String: Row] {
         // Copy the raw rows out under the lock, then decode after releasing
         // it, so Home's per-row lookups aren't stuck behind thousands of JSON
         // decodes.
-        let rawRows = rawRowsForAllRows()
+        let rawRows = rawRowsForAllRows(table: table)
         let decoder = JSONDecoder()
         var rows: [String: Row] = [:]
         rows.reserveCapacity(rawRows.count)
@@ -220,18 +262,18 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
                   let metadata = try? decoder.decode(CachedRecentMeetingMetadata.self, from: data) else {
                 continue
             }
-            rows[raw.path] = Row(stamp: raw.stamp, metadata: metadata)
+            rows[raw.path] = Row(stamp: raw.stamp, metadata: metadata, includesSpeakerDetails: table == .full)
         }
         return rows
     }
 
-    private func rawRowsForAllRows() -> [(path: String, stamp: RecentMeetingCacheStamp, json: String)] {
+    private func rawRowsForAllRows(table: Table) -> [(path: String, stamp: RecentMeetingCacheStamp, json: String)] {
         lock.lock()
         defer { lock.unlock() }
         guard let db else { return [] }
 
         let sql = """
-        SELECT path, transcript_modified, transcript_size, payload FROM meeting_metadata
+        SELECT path, transcript_modified, transcript_size, payload FROM \(table.rawValue)
         WHERE summary_modified = 0 AND summary_size = -1;
         """
         var stmt: OpaquePointer?
@@ -253,6 +295,18 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
 
     /// Insert or replace many rows in one transaction.
     func store(_ rows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)]) {
+        store(rows, table: .full)
+    }
+
+    /// Bounded Today parses have their own namespace even on a shared cache.
+    func storeToday(_ rows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)]) {
+        store(rows, table: .today)
+    }
+
+    private func store(
+        _ rows: [(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata)],
+        table: Table
+    ) {
         guard !rows.isEmpty else { return }
         let encoded: [(path: String, stamp: RecentMeetingCacheStamp, json: String)] = rows.compactMap { row in
             guard let json = try? encoder.encode(row.metadata),
@@ -265,7 +319,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         guard let db else { return }
 
         let sql = """
-        INSERT OR REPLACE INTO meeting_metadata
+        INSERT OR REPLACE INTO \(table.rawValue)
             (path, transcript_modified, transcript_size, summary_modified, summary_size, payload)
         VALUES (?, ?, ?, 0, -1, ?);
         """
@@ -287,27 +341,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
 
     /// Insert or replace the cached row for `path`.
     func store(path: String, stamp: RecentMeetingCacheStamp, metadata: CachedRecentMeetingMetadata) {
-        guard let json = try? encoder.encode(metadata),
-              let jsonString = String(data: json, encoding: .utf8) else { return }
-
-        lock.lock()
-        defer { lock.unlock() }
-        guard let db else { return }
-
-        let sql = """
-        INSERT OR REPLACE INTO meeting_metadata
-            (path, transcript_modified, transcript_size, summary_modified, summary_size, payload)
-        VALUES (?, ?, ?, 0, -1, ?);
-        """
-        var stmt: OpaquePointer?
-        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
-        defer { sqlite3_finalize(stmt) }
-
-        sqlite3_bind_text(stmt, 1, path, -1, SQLITE_TRANSIENT)
-        sqlite3_bind_double(stmt, 2, stamp.transcriptModified)
-        sqlite3_bind_int64(stmt, 3, stamp.transcriptSize)
-        sqlite3_bind_text(stmt, 4, jsonString, -1, SQLITE_TRANSIENT)
-        sqlite3_step(stmt)
+        store([(path, stamp, metadata)])
     }
 
     /// Drop cached rows whose transcript file no longer exists on disk, and report
@@ -347,15 +381,17 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
         guard !missing.isEmpty else { return 0 }
 
         sqlite3_exec(db, "BEGIN;", nil, nil, nil)
-        var deleteStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "DELETE FROM meeting_metadata WHERE path = ?;", -1, &deleteStmt, nil) == SQLITE_OK {
-            for path in missing {
-                sqlite3_bind_text(deleteStmt, 1, path, -1, SQLITE_TRANSIENT)
-                sqlite3_step(deleteStmt)
-                sqlite3_reset(deleteStmt)
+        for table in Table.allCases {
+            var deleteStmt: OpaquePointer?
+            if sqlite3_prepare_v2(db, "DELETE FROM \(table.rawValue) WHERE path = ?;", -1, &deleteStmt, nil) == SQLITE_OK {
+                for path in missing {
+                    sqlite3_bind_text(deleteStmt, 1, path, -1, SQLITE_TRANSIENT)
+                    sqlite3_step(deleteStmt)
+                    sqlite3_reset(deleteStmt)
+                }
             }
+            sqlite3_finalize(deleteStmt)
         }
-        sqlite3_finalize(deleteStmt)
         sqlite3_exec(db, "COMMIT;", nil, nil, nil)
         return missing.count
     }
@@ -367,7 +403,7 @@ final class RecentMeetingMetadataCache: @unchecked Sendable {
 
         var paths: [String] = []
         var selectStmt: OpaquePointer?
-        if sqlite3_prepare_v2(db, "SELECT path FROM meeting_metadata;", -1, &selectStmt, nil) == SQLITE_OK {
+        if sqlite3_prepare_v2(db, "SELECT path FROM meeting_metadata UNION SELECT path FROM today_meeting_metadata;", -1, &selectStmt, nil) == SQLITE_OK {
             while sqlite3_step(selectStmt) == SQLITE_ROW {
                 if let cString = sqlite3_column_text(selectStmt, 0) {
                     paths.append(String(cString: cString))
