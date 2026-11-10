@@ -34,28 +34,24 @@ if [ ! -f "$DEPS_ARCHIVE" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "$DEPS_MOD
     exit 1
 fi
 
-newest_input="$(newest_dependency_input)"
-build_stamp="$(deps_build_stamp_info)"
-IFS=$'\t' read -r newest_input_mtime newest_input_path <<< "$newest_input"
-IFS=$'\t' read -r build_stamp_mtime build_stamp_path <<< "$build_stamp"
-if [ -n "$newest_input_mtime" ] && [ -n "$build_stamp_mtime" ] && [ "$newest_input_mtime" -gt "$build_stamp_mtime" ]; then
-    echo "Dependencies are stale for TranscriptedCore."
-    echo "Newest input:"
-    echo "  $newest_input_path"
-    echo "Built deps stamp:"
-    echo "  $build_stamp_path"
-    echo ""
-    echo "Run: bash build-deps.sh --force"
-    exit 1
-fi
+if ! dependency_inputs_match_stamp; then
+    newest_input="$(newest_dependency_input)"
+    build_stamp="$(deps_build_stamp_info)"
+    IFS=$'\t' read -r newest_input_mtime newest_input_path <<< "$newest_input"
+    IFS=$'\t' read -r build_stamp_mtime build_stamp_path <<< "$build_stamp"
+    if [ -n "$newest_input_mtime" ] && [ -n "$build_stamp_mtime" ] && [ "$newest_input_mtime" -gt "$build_stamp_mtime" ]; then
+        echo "Dependencies are stale for TranscriptedCore."
+        echo "Newest input:"
+        echo "  $newest_input_path"
+        echo "Built deps stamp:"
+        echo "  $build_stamp_path"
+        echo ""
+        echo "Run: bash build-deps.sh --force"
+        exit 1
+    fi
 
-current_digest="$(dependency_input_digest)"
-stamp_digest="$(deps_build_stamp_digest)"
-if [ -z "$stamp_digest" ] || [ "$current_digest" != "$stamp_digest" ]; then
     echo "Dependencies are stale for TranscriptedCore."
-    echo "Dependency input digest changed."
-    echo "  current: ${current_digest:-missing}"
-    echo "  stamp:   ${stamp_digest:-missing}"
+    echo "Dependency input digest is missing, invalid, unreadable, or changed."
     echo ""
     echo "Run: bash build-deps.sh --force"
     exit 1

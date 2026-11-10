@@ -88,10 +88,11 @@ ensure_deps_ready() {
     local newest_input_path
     local build_stamp_mtime
     local build_stamp_path
-    local current_digest
-    local stamp_digest
 
     if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ] && [ -x "$LLAMA_SERVER_BINARY" ]; then
+        if dependency_inputs_match_stamp; then
+            return 0
+        fi
         newest_input="$(newest_dependency_input)"
         build_stamp="$(deps_build_stamp_info)"
 
@@ -109,19 +110,11 @@ ensure_deps_ready() {
             exit 1
         fi
 
-        current_digest="$(dependency_input_digest)"
-        stamp_digest="$(deps_build_stamp_digest)"
-        if [ -z "$stamp_digest" ] || [ "$current_digest" != "$stamp_digest" ]; then
-            echo "Dependencies are stale for TranscriptedCore."
-            echo "Dependency input digest changed."
-            echo "  current: ${current_digest:-missing}"
-            echo "  stamp:   ${stamp_digest:-missing}"
-            echo ""
-            echo "Run: bash build-deps.sh --force"
-            exit 1
-        fi
-
-        return 0
+        echo "Dependencies are stale for TranscriptedCore."
+        echo "Dependency input digest is missing, invalid, unreadable, or changed."
+        echo ""
+        echo "Run: bash build-deps.sh --force"
+        exit 1
     fi
 
     echo "Dependencies missing or stale for TranscriptedCore."

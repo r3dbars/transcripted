@@ -6,9 +6,9 @@
 # proof). Every one of those scripts needs to answer the same question
 # before doing expensive work: "is deps-libs/.build-deps-stamp still fresh
 # for the current Sources/TranscriptedCore + Package.swift + build-deps.sh
-# inputs?" — first via a cheap mtime comparison, then via a sha256 digest
-# comparison that catches touched-but-unchanged files a plain mtime check
-# would treat as stale.
+# inputs?" A valid matching sha256 digest takes precedence over mtimes, so
+# touched-but-unchanged inputs remain fresh. Callers retain conservative
+# stale checks when the stamp is missing, invalid, or no longer matches.
 #
 # NOTE: scripts/entrypoints/build-beta.sh intentionally does NOT source this
 # file. It carries its own narrower copy (dependency_input_listing,
@@ -31,6 +31,7 @@
 #   newest_dependency_input()   — the single newest "<mtime>\t<path>" row
 #   deps_build_stamp_info()     — "<mtime>\t<path>" row for the stamp file itself
 #   deps_build_stamp_digest()   — the digest recorded inside the stamp file
+#   dependency_inputs_match_stamp() — valid current content matches the stamp
 
 dependency_input_paths() {
     {
@@ -48,10 +49,15 @@ dependency_input_listing() {
 }
 
 dependency_input_digest() {
-    dependency_input_paths | while IFS= read -r path; do
-        [ -f "$path" ] || continue
-        shasum -a 256 "$path"
-    done | shasum -a 256 | awk '{print $1}'
+    # Callers commonly use this inside a conditional, where errexit does not
+    # stop a failed per-file hash. Preserve every pipeline/iteration failure.
+    (
+        set -o pipefail
+        dependency_input_paths | while IFS= read -r path; do
+            [ -f "$path" ] || continue
+            shasum -a 256 "$path" || exit 1
+        done | shasum -a 256 | awk '{print $1}'
+    )
 }
 
 newest_dependency_input() {
@@ -66,6 +72,17 @@ deps_build_stamp_info() {
 
 deps_build_stamp_digest() {
     if [ -f "$DEPS_BUILD_STAMP" ]; then
-        awk -F= '$1 == "dependency_inputs_sha256" { print $2; exit }' "$DEPS_BUILD_STAMP"
+        awk -F= '$1 == "dependency_inputs_sha256" {
+            count++; value = substr($0, index($0, "=") + 1)
+        } END { if (count == 1) print value; else exit 1 }' "$DEPS_BUILD_STAMP"
     fi
+}
+
+dependency_inputs_match_stamp() {
+    local stamp_digest current_digest
+    stamp_digest="$(deps_build_stamp_digest)" || return 1
+    [[ "$stamp_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    current_digest="$(dependency_input_digest)" || return 1
+    [[ "$current_digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [ "$current_digest" = "$stamp_digest" ]
 }
