@@ -27,9 +27,12 @@ Markdown.
    `meeting_summary_items` with a `kind` discriminator.
 4. The rollup tools query those rows and join `meetings` for dates.
 
-Today, saved summaries carry action item `text` and optional `owner`. They do
-not carry reliable `done` or `due` metadata, so `status: "done"` is accepted for
-forward compatibility but returns no derived rows until that metadata exists.
+Action items carry `text`, an optional `owner`, and optional `status` and `due`
+parsed from trailing parenthesized markers such as `(done)`, `(status: blocked)`,
+or `(due: Friday)`. `status: "done"` returns items whose parsed status is `done`,
+`complete`, `completed`, `resolved`, `closed`, `cancelled`, or `canceled`. The
+default `open` returns the rest, including items without a status; `all` applies
+no status filter.
 
 ## Verification
 
