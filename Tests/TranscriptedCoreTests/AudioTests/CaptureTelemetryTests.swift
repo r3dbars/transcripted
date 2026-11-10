@@ -21,9 +21,7 @@ final class CaptureTelemetryTests: XCTestCase {
     // MARK: Switch
 
     func testPreferenceIsOffByDefaultAndEnvWins() throws {
-        let suite = "CaptureTelemetryTests.\(UUID().uuidString)"
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = CaptureTelemetryTestDefaults()
         XCTAssertFalse(CaptureTelemetryPreferences.isEnabled(userDefaults: defaults, environment: [:]))
         defaults.set(true, forKey: CaptureTelemetryPreferences.userDefaultsKey)
         XCTAssertTrue(CaptureTelemetryPreferences.isEnabled(userDefaults: defaults, environment: [:]))
@@ -197,4 +195,16 @@ final class CaptureTelemetryTests: XCTestCase {
         capture.stopSync()
         XCTAssertNil(capture.signalTelemetry, "Stop drops the window")
     }
+}
+
+/// This fixture only needs the telemetry Boolean switch. Every accessor used
+/// by the test and production preference reader is backed by this dictionary.
+private final class CaptureTelemetryTestDefaults: UserDefaults, @unchecked Sendable {
+    private var values: [String: Any] = [:]
+
+    init(inMemory: Void = ()) { super.init(suiteName: nil)! }
+    override func object(forKey key: String) -> Any? { values[key] }
+    override func set(_ value: Any?, forKey key: String) { values[key] = value }
+    override func set(_ value: Bool, forKey key: String) { set(value as Any, forKey: key) }
+    override func removeObject(forKey key: String) { values[key] = nil }
 }
