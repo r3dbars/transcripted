@@ -267,18 +267,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// While held, system-file writes are dropped so a recovery silence pad
-    /// can be written first. Not a second PCM queue — writes are discarded.
-    ///
-    /// A count, not a flag: recoveries can overlap (a reconnect can start
-    /// again before the previous one's `.gap` or `.recoveryAbandoned`
-    /// arrives), so a successor can arm before the predecessor's release
-    /// runs. With a flag that release would drop the
-    /// successor's hold and its post-restart buffers would land ahead of
-    /// its pad. Each arm is balanced by exactly one release (`.gap` or
-    /// `.recoveryAbandoned`), and a new recording resets the count.
-    let systemRecoveryWriteHoldLock = NSLock()
-    var _systemRecoveryWriteHoldCount = 0
     var watchdogTimer: Timer?
     /// Watches `AVAudioEngineConfigurationChange` so an output or default
     /// device switch restarts the mic right away instead of waiting for the
@@ -468,10 +456,56 @@ public class Audio: ObservableObject, @unchecked Sendable {
             return _systemAudioCapture
         }
         set {
+            // Preserve existing injected/test setter behavior. Retain the old
+            // value before assignment, then retire our ownership outside locks.
             systemAudioCaptureStateLock.lock()
+            let retired = _systemAudioCapture.map { Self.retirementBox(for: $0) }
             _systemAudioCapture = newValue
             systemAudioCaptureStateLock.unlock()
+            retired?.retire()
         }
+    }
+    private static let systemAudioRetirementQueue = DispatchQueue(
+        label: "SystemAudioReferenceRetirement", qos: .utility
+    )
+    private static func retirementBox(
+        for capture: any SystemAudioCaptureEngine & Sendable
+    ) -> DeferredReferenceRetirement {
+        DeferredReferenceRetirement(
+            retaining: capture,
+            enqueueMain: { job in DispatchQueue.main.async(execute: job) },
+            enqueueWorker: { job in systemAudioRetirementQueue.async(execute: job) }
+        )
+    }
+    func retireUnpublishedSystemCapture(_ capture: any SystemAudioCaptureEngine & Sendable) {
+        Self.retirementBox(for: capture).retire()
+    }
+    /// Lock order: recording generation, then raw capture. No scheduling,
+    /// cancellation or native release occurs in either critical section.
+    @discardableResult
+    func publishSystemAudioCapture(
+        _ capture: (any SystemAudioCaptureEngine & Sendable)?, generation: UInt64
+    ) -> Bool {
+        recordingSessionGenerationLock.lock()
+        guard recordingSessionGenerationEpoch.snapshot().rawValue == generation else {
+            recordingSessionGenerationLock.unlock()
+            return false
+        }
+        systemAudioCaptureStateLock.lock()
+        let retired = _systemAudioCapture.map { Self.retirementBox(for: $0) }
+        _systemAudioCapture = capture
+        systemAudioCaptureStateLock.unlock()
+        recordingSessionGenerationLock.unlock()
+        retired?.retire()
+        return true
+    }
+    private var systemAudioInfrastructureInstalled = false
+    func reserveSystemAudioInfrastructureInstallation() -> Bool {
+        systemAudioCaptureStateLock.lock()
+        defer { systemAudioCaptureStateLock.unlock() }
+        guard !systemAudioInfrastructureInstalled else { return false }
+        systemAudioInfrastructureInstalled = true
+        return true
     }
     let systemAudioCaptureFactory:
         () -> (any SystemAudioCaptureEngine & Sendable)?
@@ -592,15 +626,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
     var _recordingStartCapturedInputVolume = "unavailable"
     var _recordingStartCapturedInputDeviceID: AudioDeviceID?
 
-    // System audio status observation
-    var systemAudioCancellable: AnyCancellable?
-    // Recovery/health event observation (device-switch + gap parity with the
-    // mic path). Separate from `systemAudioCancellable` so re-wiring one
-    // subscription on a new capture attempt doesn't need to touch the other.
-    var systemAudioRecoveryEventCancellable: AnyCancellable?
-    /// Synchronous subscriber so recovery write-hold is armed on the sending
-    /// thread before SCK's async restart can deliver buffers.
-    var systemAudioRecoveryPadCancellable: AnyCancellable?
+    // Actual production subscriptions and recovery holds share one owner.
+    let systemAudioObservation = SystemAudioCaptureObservation(
+        enqueueDelivery: { job in DispatchQueue.main.async(execute: job) },
+        enqueueDelayedDelivery: { delay, job in
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: job)
+        }
+    )
     // Protected by systemSilenceLock — written from callback thread, reset on main thread
     private var _systemAudioSilenceStart: Date?
     private let systemSilenceLock = NSLock()
@@ -700,8 +732,12 @@ public class Audio: ObservableObject, @unchecked Sendable {
         self._systemAudioCapture = systemAudioCapture
         self.systemAudioCaptureFactory =
             systemAudioCaptureFactory ?? { systemAudioCapture }
+        systemAudioObservation.beginSession(generation: recordingSessionGeneration)
         if let systemAudioCapture {
-            wireSystemAudioStatusPublisher(from: systemAudioCapture)
+            wireSystemAudioStatusPublisher(
+                from: systemAudioCapture, generation: recordingSessionGeneration,
+                captureID: ObjectIdentifier(systemAudioCapture)
+            )
         }
     }
 
@@ -718,9 +754,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
         timer?.invalidate()
         watchdogTimer?.invalidate()
-        systemAudioCancellable?.cancel()
-        systemAudioRecoveryEventCancellable?.cancel()
-        systemAudioRecoveryPadCancellable?.cancel()
+        systemAudioObservation.cancel()
         systemAudioCapture?.stopSync()
         pinnedMicrophoneCapture?.stop()
 

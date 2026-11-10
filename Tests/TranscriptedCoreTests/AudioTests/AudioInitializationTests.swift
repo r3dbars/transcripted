@@ -658,8 +658,8 @@ final class AudioInitializationTests: XCTestCase {
             systemAudioCaptureFactoryForTesting: { captures.next() }
         )
 
-        let first = audio.makeSystemAudioCaptureForRecordingAttempt()
-        let second = audio.makeSystemAudioCaptureForRecordingAttempt()
+        let first = audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: audio.recordingSessionGeneration)
+        let second = audio.makeSystemAudioCaptureForRecordingAttempt(sessionGeneration: audio.recordingSessionGeneration)
 
         XCTAssertTrue((first as AnyObject) === firstCapture)
         XCTAssertTrue((second as AnyObject) === secondCapture)
