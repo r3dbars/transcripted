@@ -67,7 +67,7 @@ on:
         required: false
         default: ""
       staged_update_source_sha:
-        description: Run only the staged signed 1.1.68-to-1.1.69 updater proof against its verified full promotion SHA
+        description: Run only the signed 1.1.75-to-1.1.76 RC updater and offline packaged CLI proof against the fixed source SHA
         type: string
         required: false
         default: ""
@@ -711,7 +711,7 @@ jobs:
           echo '::error::Choose exactly one hosted validation mode, with run_hardware_smokes=false.'
           exit 1
 
-  # Exercise the signed 1.1.68 -> 1.1.69 updater against a local staging feed.
+  # Validate exact signed 1.1.75 -> final 1.1.76 RC bytes; no public release mutations.
   # Harness code is pinned to this workflow, independently of the candidate.
   staged-update-proof:
     if: >-
@@ -719,6 +719,9 @@ jobs:
       inputs.full_bench_source_sha == '' && !inputs.run_hardware_smokes
     runs-on: macos-26
     timeout-minutes: 90
+    permissions:
+      contents: read
+      actions: read
     env:
       SOURCE_SHA: ${{ inputs.staged_update_source_sha }}
       WORKFLOW_SHA: ${{ github.workflow_sha }}
@@ -728,7 +731,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$SOURCE_SHA" = e42ad0f759612e0080f2d11bb5de12fda6b590bd || { echo '::error::This updater proof is scoped to the verified 1.1.69 promotion SHA.'; exit 1; }
+          test "$SOURCE_SHA" = caa17f1bb522324bf8f756239347fb4c6308ab52 || { echo '::error::This updater proof is scoped to the verified 1.1.76 RC source SHA.'; exit 1; }
           [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Updater proof requires hosted Apple Silicon.'; exit 1; }
 
       - name: Checkout reviewed updater harness
@@ -758,9 +761,19 @@ jobs:
         shell: bash
         run: python3 harness/Tests/BuildDependencies/StagedSparkleUpdateTests.py
 
-      - name: Exercise signed full and delta updates
+      - name: Download exact final notarized RC artifact
         shell: bash
-        run: python3 harness/scripts/release/test-staged-sparkle-update.py --candidate-root candidate --output "$RUNNER_TEMP/staged-update-proof"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          umask 077
+          gh api repos/r3dbars/transcripted/actions/artifacts/13394641882 > "$RUNNER_TEMP/final-rc-metadata.json"
+          gh api repos/r3dbars/transcripted/actions/artifacts/13394641882/zip > "$RUNNER_TEMP/final-rc.zip"
+
+      - name: Exercise signed updater routes and offline packaged CLI
+        shell: bash
+        run: python3 harness/scripts/release/test-staged-sparkle-update.py --candidate-root candidate --output "$RUNNER_TEMP/staged-update-proof" --rc-archive "$RUNNER_TEMP/final-rc.zip" --rc-metadata "$RUNNER_TEMP/final-rc-metadata.json"
 
       - name: Upload bounded updater receipt
         if: always()
