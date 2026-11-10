@@ -20,10 +20,43 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     static let documentPrompt = "title: %@ | text: "
     static let queryPrompt = "task: search result | query: "
 
+    /// Production defaults are evaluated only when used. Fixtures supply every
+    /// external boundary so they never read preferences, launch a model, or use the network.
+    struct Dependencies {
+        var directories: () -> [(kind: String, url: URL)] = { NextSentenceSemanticIndex.captureDirectories() }
+        var cacheURL: () -> URL = {
+            FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Transcripted/next-sentence/embeddings-\(NextSentenceSemanticIndex.dimensions).json")
+        }
+        var listDirectory: (URL) throws -> [String] = { try FileManager.default.contentsOfDirectory(atPath: $0.path) }
+        var modifiedDate: (URL) throws -> Date = {
+            guard let date = try FileManager.default.attributesOfItem(atPath: $0.path)[.modificationDate] as? Date else {
+                throw CocoaError(.fileReadUnknown)
+            }
+            return date
+        }
+        var readMarkdown: (URL) throws -> String = { try String(contentsOf: $0, encoding: .utf8) }
+        var readCache: (URL) throws -> Data = { try Data(contentsOf: $0) }
+        var writeCache: (Data, URL) throws -> Void = { data, url in
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try data.write(to: url, options: .atomic)
+        }
+        var serverReady: (() -> Bool)?
+        var embeddings: (([String]) -> [[Float]]?)?
+    }
+
+    private let dependencies: Dependencies
+
+    init(dependencies: Dependencies = Dependencies()) {
+        self.dependencies = dependencies
+    }
+
     private let queue = DispatchQueue(label: "transcripted.next-sentence.semantic", qos: .utility)
     private var files: [String: (modified: Date, chunks: [NextSentenceChunker.Chunk])] = [:]
     private var cache: [String: [Float]] = [:]
     private var cacheLoaded = false
+    private var cacheWritable = false
+    private var cacheDirty = false
     /// The server this index started, and whether it's on. Behind `serverLock`, not `queue`, so `stop()`
     /// ends it at once even while the queue waits on the server.
     private let serverLock = NSLock()
@@ -34,14 +67,17 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     private var lastLaunchFailure: Date?
 
     /// Turns the index on and brings it up to date in the background, so the first press is quick.
-    func start() {
+    func start(completion: (@Sendable () -> Void)? = nil) {
         serverLock.lock(); active = true; serverLock.unlock()
-        refresh()
+        refresh(completion: completion)
     }
 
     /// Brings the index up to date in the background (only while it's on).
-    func refresh() {
-        queue.async { self.refreshNow() }
+    func refresh(completion: (@Sendable () -> Void)? = nil) {
+        queue.async {
+            self.refreshNow()
+            completion?()
+        }
     }
 
     /// Turns the index off and ends the server it started, right away.
@@ -72,7 +108,7 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     private func mentionsNow(of people: [String], relatedTo text: String, perPerson: Int) -> [(name: String, chunk: NextSentenceChunker.Chunk)] {
         refreshNow()
         let query = String(text.suffix(800)).trimmingCharacters(in: .whitespacesAndNewlines)
-        let vector = query.isEmpty ? nil : embed([Self.queryPrompt + query])?.first
+        let vector = queryVector(query)
         let all = files.values.flatMap(\.chunks)
         var found: [(name: String, chunk: NextSentenceChunker.Chunk)] = []
         for name in people {
@@ -95,7 +131,7 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     private func searchNow(_ text: String, screen: String, limit: Int) -> [Hit] {
         refreshNow()
         let query = String(text.suffix(800)).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, let vector = embed([Self.queryPrompt + query])?.first else { return [] }
+        guard let vector = queryVector(query) else { return [] }
         let screenKey = NextSentenceChunker.normalized(String(screen.suffix(4_000)))
         var scored: [Hit] = []
         for chunk in files.values.flatMap(\.chunks) {
@@ -120,34 +156,98 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
     // MARK: Indexing
 
     private func refreshNow() {
-        guard isActive, ensureServer() else { return }
+        guard isActive else { return }
         if !cacheLoaded { loadCache() }
-        let manager = FileManager.default
-        var current: [String: (modified: Date, chunks: [NextSentenceChunker.Chunk])] = [:]
-        for (kind, directory) in Self.captureDirectories() {
-            let names = (try? manager.contentsOfDirectory(atPath: directory.path)) ?? []
-            for name in names where name.hasSuffix(".md") {
-                let url = directory.appendingPathComponent(name)
-                let modified = (try? manager.attributesOfItem(atPath: url.path)[.modificationDate] as? Date) ?? .distantPast
-                if let known = files[url.path], known.modified == modified {
-                    current[url.path] = known
-                } else if let markdown = try? String(contentsOf: url, encoding: .utf8) {
-                    current[url.path] = (modified, NextSentenceChunker.chunks(markdown: markdown, kind: kind))
-                }
+        let scan = scanCaptures()
+        guard isActive else { return }
+        files = scan.files
+        let chunks = scan.files.values.flatMap(\.chunks)
+        // Even a readable new file cannot authorize a disk rewrite while
+        // another part of the corpus is unreadable or unavailable.
+        guard scan.complete else { return }
+        if cacheWritable {
+            // Keys describe content, not files. Keep a shared vector while any
+            // passage in the authoritative current corpus still references it.
+            let liveKeys = Set(chunks.map(Self.key))
+            let retained = cache.filter { liveKeys.contains($0.key) }
+            if retained.count != cache.count {
+                cache = retained
+                cacheDirty = true
             }
         }
-        files = current
-        let missing = current.values.flatMap(\.chunks).filter { cache[Self.key($0)] == nil }
-        guard !missing.isEmpty else { return }
+        saveCache()
+        let missing = chunks.filter { cache[Self.key($0)] == nil }
+        guard !missing.isEmpty, isActive,
+              serverIsReady() else { return }
         var added = 0
         for start in stride(from: 0, to: missing.count, by: 32) {
+            guard isActive else { break }
             let batch = Array(missing[start..<min(start + 32, missing.count)])
             let inputs = batch.map { String(format: Self.documentPrompt, $0.title.isEmpty ? "none" : $0.title) + $0.text }
-            guard let vectors = embed(inputs), vectors.count == batch.count else { break }
+            guard let vectors = embeddingVectors(inputs), vectors.count == batch.count else { break }
             for (chunk, vector) in zip(batch, vectors) { cache[Self.key(chunk)] = vector }
             added += batch.count
         }
-        if added > 0 { saveCache() }
+        if added > 0 {
+            cacheDirty = true
+            saveCache()
+        }
+    }
+
+    private func scanCaptures() -> (files: [String: (modified: Date, chunks: [NextSentenceChunker.Chunk])], complete: Bool) {
+        var current: [String: (modified: Date, chunks: [NextSentenceChunker.Chunk])] = [:]
+        var complete = true
+        // No count, byte, or chunk limit truncates this scan. A future limit
+        // must mark it incomplete before any unused cache keys can be pruned.
+        for (kind, directory) in dependencies.directories() {
+            guard isActive else { return (current, false) }
+            let names: [String]
+            do {
+                names = try dependencies.listDirectory(directory)
+            } catch {
+                // An optional kind folder can be absent in a reachable library.
+                // A missing/offline library or an unreadable existing child is
+                // not authoritative evidence of an empty corpus.
+                let cocoa = error as NSError
+                if cocoa.domain == NSCocoaErrorDomain, cocoa.code == CocoaError.fileReadNoSuchFile.rawValue,
+                   let siblings = try? dependencies.listDirectory(directory.deletingLastPathComponent()),
+                   !siblings.contains(directory.lastPathComponent) {
+                    continue
+                }
+                complete = false
+                continue
+            }
+            for name in names where name.hasSuffix(".md") {
+                guard isActive else { return (current, false) }
+                let url = directory.appendingPathComponent(name)
+                do {
+                    let modified = try dependencies.modifiedDate(url)
+                    if let known = files[url.path], known.modified == modified {
+                        current[url.path] = known
+                    } else {
+                        let markdown = try dependencies.readMarkdown(url)
+                        current[url.path] = (modified, NextSentenceChunker.chunks(markdown: markdown, kind: kind))
+                    }
+                } catch {
+                    complete = false
+                }
+            }
+        }
+        return (current, complete)
+    }
+
+    private func serverIsReady() -> Bool {
+        dependencies.serverReady?() ?? ensureServer()
+    }
+
+    private func queryVector(_ query: String) -> [Float]? {
+        guard !query.isEmpty, isActive, serverIsReady(), isActive else { return nil }
+        return embeddingVectors([Self.queryPrompt + query])?.first
+    }
+
+    private func embeddingVectors(_ inputs: [String]) -> [[Float]]? {
+        if let embeddings = dependencies.embeddings { return embeddings(inputs) }
+        return embed(inputs)
     }
 
     static func key(_ chunk: NextSentenceChunker.Chunk) -> String {
@@ -247,30 +347,46 @@ final class NextSentenceSemanticIndex: @unchecked Sendable {
 
     // MARK: The vector cache
 
-    private var cacheURL: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Transcripted/next-sentence/embeddings-\(Self.dimensions).json")
-    }
-
     private func loadCache() {
-        cacheLoaded = true
-        guard let data = try? Data(contentsOf: cacheURL),
-              let stored = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
-        for (key, encoded) in stored {
-            guard let bytes = Data(base64Encoded: encoded), bytes.count == Self.dimensions * 4 else { continue }
-            cache[key] = bytes.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        let data: Data
+        do {
+            data = try dependencies.readCache(dependencies.cacheURL())
+        } catch {
+            let cocoa = error as NSError
+            if cocoa.domain == NSCocoaErrorDomain, cocoa.code == CocoaError.fileReadNoSuchFile.rawValue {
+                cacheLoaded = true
+                cacheWritable = true
+            }
+            return
         }
+        guard let stored = try? JSONSerialization.jsonObject(with: data) as? [String: String] else { return }
+        var decoded: [String: [Float]] = [:]
+        for (key, encoded) in stored {
+            guard let bytes = Data(base64Encoded: encoded), bytes.count == Self.dimensions * 4 else { return }
+            decoded[key] = bytes.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+        }
+        cache = decoded
+        cacheDirty = false
+        cacheLoaded = true
+        cacheWritable = true
     }
 
     private func saveCache() {
+        guard cacheWritable, cacheDirty, isActive else { return }
         var stored: [String: String] = [:]
         for (key, vector) in cache {
             stored[key] = vector.withUnsafeBufferPointer { Data(buffer: $0) }.base64EncodedString()
         }
         guard let data = try? JSONSerialization.data(withJSONObject: stored) else { return }
-        try? FileManager.default.createDirectory(at: cacheURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? data.write(to: cacheURL, options: .atomic)
+        do {
+            try dependencies.writeCache(data, dependencies.cacheURL())
+            cacheDirty = false
+        } catch {
+            // Retry on the next complete scan, even if no new embeddings or
+            // additional unused keys appear in that scan.
+        }
     }
+
 }
 
 /// Carries a response out of URLSession's callback. Written once, before the semaphore is signaled.

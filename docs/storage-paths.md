@@ -18,6 +18,22 @@ and the original hasn't changed since it was copied; anything else stays in
 the old folder. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
+## Write for Me meaning index
+
+The local derived-vector cache is
+`~/Library/Application Support/Transcripted/next-sentence/embeddings-256.json`.
+It stays in app state when the capture library moves. It contains 256-dimensional
+vectors keyed by passage title/text hashes, not capture files or raw text; the
+existing format does not encode a model identifier.
+
+While the meaning index is active, a complete scan of its current meeting,
+dictation, and writing corpus removes vectors whose content keys are no longer
+referenced. Shared passage keys stay while any current passage references them.
+Prune-only refreshes do not start an embedding server. Failed or cancelled scans,
+unreachable libraries, and unreadable or corrupt cache files do not authorize
+pruning or replacement of unreadable cache data. This cleans derived cache data;
+it does not delete captures or change capture-retention settings.
+
 ## Dictation
 
 Dictation artifacts live under:
