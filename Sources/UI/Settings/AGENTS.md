@@ -7,7 +7,7 @@
 `UISettings` in `.agents/modules.json`.
 
 - **Public surface:** `TranscriptedSettingsWindowController`, `TranscriptedSettingsPage`, `PermissionsOnboardingView` and its window controller, `SpeakerNamingSheet`, `HomeView`, the `Pages/` views.
-- **May depend on:** UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab`. Only AppShell and UIMenuBar may depend on it.
+- **May depend on:** UIShared, UIOverlay, AppState, WritingBridge, WritingRuntime, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab`. Only AppShell and UIMenuBar may depend on it.
 - **Speaker persistence:** Settings reaches database edits, migration status, saved merge history and naming metadata through Meeting-owned `SpeakerSettingsStore`, `SpeakerSettingsMigration` and `SpeakerNamingMetadata`. Keep Core engine types behind those seams; presentation and edit completion stay in this directory.
 - **Start at:** `TranscriptedSettingsWindowController.swift` (opens the window), `TranscriptedSettingsView.swift` (the shell).
 - **Tests:** `bash run-tests.sh --filter Home`, `--filter Settings`, `--filter Speaker`, `--filter UIAutomationSurfaceContract`.

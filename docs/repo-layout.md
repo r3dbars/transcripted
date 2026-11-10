@@ -167,15 +167,15 @@ The app compiles as one Swift target (plus the `TranscriptedWritingCore` module)
 | Support | `Sources/Support/`, `Sources/Accessibility/`, `Sources/Reliability/` | Core `core-vocab` |
 | Observability | `Sources/Observability/` | Support, Core `core-vocab` |
 | Speech | `Sources/Speech/` | Support, Observability, Core `core-vocab` + `mic-primitives` |
-| Dictation | `Sources/Dictation/` | Speech, Support, Observability, Core `core-vocab` |
+| Dictation | `Sources/Dictation/` | Speech, Support, Core `core-vocab` |
 | Meeting | `Sources/Meeting/` | Dictation, Speech, Support, Observability, all of Core |
 | WritingBridge | `Sources/Writing/` | WritingCore, WritingRuntime, Support, Observability |
-| Capture | `Sources/Capture/` | UIOverlay, Dictation, Speech, Support, Observability |
-| UIShared | `Sources/UI/Shared/` | Meeting, Dictation, Speech, WritingBridge, Support, Observability, Core `core-vocab` |
+| Capture | `Sources/Capture/` | UIOverlay, Speech, Support, Observability |
+| UIShared | `Sources/UI/Shared/` | Meeting, Dictation, Speech, Support, Observability, Core `core-vocab` |
 | UIOverlay | `Sources/UI/Overlay/` | UIShared, AppState, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab` |
-| UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, and everything below |
-| UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, Capture, WritingBridge, WritingCore, WritingRuntime, and everything below |
-| AppState | `Sources/App/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, UIShared, Support, Observability, Core `core-vocab` |
+| UIMenuBar | `Sources/UI/MenuBar/` | UIShared, UIOverlay, UISettings, AppState, Capture, Meeting, Support, Observability |
+| UISettings | `Sources/UI/Settings/` | UIShared, UIOverlay, AppState, WritingBridge, WritingRuntime, Meeting, Dictation, Speech, Support, Observability, Core `core-vocab` |
+| AppState | `Sources/App/TranscriptedAppState.swift` | Capture, WritingBridge, Meeting, Dictation, Speech, Support, Observability |
 | AppShell | `Sources/App/` | anything; nothing depends on it |
 
 Each module's `AGENTS.md` (named in the manifest) says what it owns, its public surface, its entry points and its tests. A new `Sources/` folder needs a manifest entry and an `AGENTS.md`, or the check fails.

@@ -12,7 +12,7 @@ Presentation and library services that more than one surface uses: Home and Dict
 
 ## May depend on
 
-Meeting, Dictation, Speech, WritingBridge, Support, Observability, and Core's `core-vocab` tier. Not AppState, UISettings, UIOverlay or UIMenuBar: those sit above this module. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` prints it.
+Meeting, Dictation, Speech, Support, Observability, and Core's `core-vocab` tier. Not AppState, UISettings, UIOverlay or UIMenuBar: those sit above this module. `.agents/modules.json` is the source of truth; `python3 scripts/dev/check-module-boundaries.py --explain <file>` prints it.
 
 ## Files
 

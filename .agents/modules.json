@@ -49,7 +49,7 @@
     {
       "name": "Dictation",
       "paths": ["Sources/Dictation"],
-      "mayDependOn": ["Speech", "Support", "Observability", "Core:core-vocab"],
+      "mayDependOn": ["Speech", "Support", "Core:core-vocab"],
       "agentsDoc": "Sources/Dictation/AGENTS.md"
     },
     {
@@ -67,13 +67,13 @@
     {
       "name": "Capture",
       "paths": ["Sources/Capture"],
-      "mayDependOn": ["UIOverlay", "Dictation", "Speech", "Support", "Observability"],
+      "mayDependOn": ["UIOverlay", "Speech", "Support", "Observability"],
       "agentsDoc": "Sources/Capture/AGENTS.md"
     },
     {
       "name": "UIShared",
       "paths": ["Sources/UI/Shared"],
-      "mayDependOn": ["Meeting", "Dictation", "Speech", "WritingBridge", "Support", "Observability", "Core:core-vocab"],
+      "mayDependOn": ["Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
       "agentsDoc": "Sources/UI/Shared/AGENTS.md"
     },
     {
@@ -85,19 +85,19 @@
     {
       "name": "UIMenuBar",
       "paths": ["Sources/UI/MenuBar"],
-      "mayDependOn": ["UIShared", "UIOverlay", "UISettings", "AppState", "Capture", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
+      "mayDependOn": ["UIShared", "UIOverlay", "UISettings", "AppState", "Capture", "Meeting", "Support", "Observability"],
       "agentsDoc": "Sources/UI/MenuBar/AGENTS.md"
     },
     {
       "name": "UISettings",
       "paths": ["Sources/UI/Settings"],
-      "mayDependOn": ["UIShared", "UIOverlay", "AppState", "Capture", "WritingBridge", "WritingCore", "WritingRuntime", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
+      "mayDependOn": ["UIShared", "UIOverlay", "AppState", "WritingBridge", "WritingRuntime", "Meeting", "Dictation", "Speech", "Support", "Observability", "Core:core-vocab"],
       "agentsDoc": "Sources/UI/Settings/AGENTS.md"
     },
     {
       "name": "AppState",
       "paths": ["Sources/App/TranscriptedAppState.swift"],
-      "mayDependOn": ["Capture", "WritingBridge", "Meeting", "Dictation", "Speech", "UIShared", "Support", "Observability", "Core:core-vocab"],
+      "mayDependOn": ["Capture", "WritingBridge", "Meeting", "Dictation", "Speech", "Support", "Observability"],
       "agentsDoc": "Sources/AGENTS.md"
     },
     {
@@ -108,9 +108,7 @@
     }
   ],
   "cycleAllowedEdges": [
-    ["UIOverlay", "AppState"],
-    ["UIMenuBar", "AppState"],
-    ["UISettings", "AppState"]
+    ["UIOverlay", "AppState"]
   ],
   "coreTiers": {
     "core-vocab": [
