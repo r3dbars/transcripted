@@ -18,38 +18,6 @@ enum ImportedTranscriptionQueueJournal {
         case unsafeEntry
     }
 
-    static func persist(
-        id: UUID,
-        audioURL: URL,
-        recordingDate: Date,
-        enqueuedAt: Date = Date(),
-        sttModelRawValue: String,
-        languageRawValue: String = "auto",
-        journalDirectory: URL,
-        scratchDirectory: URL,
-        fileManager: FileManager = .default
-    ) throws {
-        let normalizedAudioURL = audioURL.standardizedFileURL
-        let normalizedScratchDirectory = scratchDirectory.standardizedFileURL
-        guard normalizedAudioURL.deletingLastPathComponent() == normalizedScratchDirectory else {
-            throw ImportedTranscriptionQueueJournalError.audioOutsideScratchDirectory
-        }
-
-        fileManager.ensurePrivateDirectory(
-            at: journalDirectory,
-            context: "imported transcription queue journal"
-        )
-        let record = ImportedTranscriptionQueueJournalRecord(
-            id: id,
-            audioFilename: normalizedAudioURL.lastPathComponent,
-            recordingDate: recordingDate,
-            enqueuedAt: enqueuedAt,
-            sttModelRawValue: sttModelRawValue,
-            languageRawValue: languageRawValue
-        )
-        try write(record, journalDirectory: journalDirectory, fileManager: fileManager)
-    }
-
     /// Creates the initial record only after taking its process lease, so no
     /// other process can observe recoverable work before its owner is live.
     static func createClaimed(
