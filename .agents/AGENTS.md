@@ -9,6 +9,9 @@ Machine-read config for agent workflow and the ratchet baselines behind the repo
 - `qa-gates.yml`, `board-scorecard.yml` — risk-to-gate map and per-board scoring registry (`docs/board-scorecard.md`).
 - `modules.json` — every `Sources/**/*.swift` file maps to one module, with the modules and Core tiers it may name. A new top-level `Sources/` folder needs an entry here and an `AGENTS.md`.
 - `plugins/marketplace.json` — local plugin marketplace entry for the companion build.
+- `rules.json` — check-rule registry. `scripts/dev/check-rule-registry.py --write` generates `docs/rules.md` from it together with `scripts/dev/lint_rules/`.
+- `window-inventory.json` — tracked AppKit window surfaces in `Sources/` and their screen-sharing policies; checked by `scripts/dev/check-window-inventory.py`.
+- `auto-merge-lanes.json` — lane eligibility and required reviewers for `scripts/ops/auto-merge-gate.py`; widening lanes requires owner review. See `docs/auto-merge-gate.md`.
 - `*-baseline.json` — grandfathered violations. See below.
 
 ## Baselines only shrink
@@ -19,6 +22,7 @@ Machine-read config for agent workflow and the ratchet baselines behind the repo
 | `test-shape-baseline.json` (source-text and wall-clock tests) | `scripts/dev/check-test-shape.py` | `--shrink` |
 | `source-pin-baseline.json` (`resolved-pins` counts per test file) | `scripts/dev/check-source-pins.py` | `--count-baseline --shrink` |
 | `concurrency-baseline.json` (Swift 6 warnings per `Sources/` folder) | `scripts/dev/concurrency-census.sh` | `--shrink` |
+| `lint-baseline.json` (grandfathered findings per rule and file) | `scripts/dev/lint.py` | `--shrink` |
 
 - The `--shrink` flags only lower existing counts and drop dead entries. They never add a folder or raise a count; new violations require a reviewed human edit.
 - Raising a baseline or adding an entry is a reviewed human edit with the reason in the PR. Don't do it to make a check pass; split the file, move the type down, or pass plain values instead.
