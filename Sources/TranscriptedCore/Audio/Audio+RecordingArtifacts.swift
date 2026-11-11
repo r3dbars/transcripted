@@ -8,88 +8,58 @@ import Synchronization
 // Stopped-recording finalization, journal abandon, artifact discard,
 // system-audio URL publish/resolve, and the mic host fan-out flush.
 extension Audio {
-    struct StoppingRecordingFinalization {
-        let journalSession: MeetingRecordingJournalSession?
-    }
     struct StoppedMicRecordingFinalization {
         let micURL: URL?
         let disposition: RecordingStopFinalizationDisposition
     }
 
-    func retainStoppingJournalSession(
-        _ session: MeetingRecordingJournalSession?,
-        generation: UInt64
-    ) {
-        stoppingJournalSessionsLock.lock()
-        stoppingRecordingFinalizations[generation] = StoppingRecordingFinalization(
-            journalSession: session
-        )
-        stoppingJournalSessionsLock.unlock()
+    // Existing internal fixture entry points now use the same artifact owner;
+    // production Stop uses RecordingArtifactCompletion after its real drains.
+    func retainStoppingJournalSession(_ session: MeetingRecordingJournalSession?, generation: UInt64) {
+        _ = recordingArtifactOwner.retainCompatibilityStop(compatibilityArtifactContext(), generation: generation, token: session)
     }
-
-    private func takeStoppingRecordingFinalization(
-        generation: UInt64
-    ) -> StoppingRecordingFinalization? {
-        stoppingJournalSessionsLock.lock()
-        defer { stoppingJournalSessionsLock.unlock() }
-        return stoppingRecordingFinalizations.removeValue(forKey: generation)
-    }
-
-    /// Claims this generation's finalizer before it mutates any recording
-    /// files. If recovery already took ownership, leave every segment and
-    /// merged artifact untouched for that canonical recovery path.
-    func finalizeStoppedMicRecordingResult(
-        primaryURL: URL?,
-        segments: [MicRecordingSegment],
-        generation: UInt64
-    ) -> StoppedMicRecordingFinalization {
-        guard let finalization = takeStoppingRecordingFinalization(generation: generation) else {
-            AppLogger.audioMic.info("Skipped abandoned mic finalization owned by recovery", [
-                "stopGeneration": "\(generation)"
-            ])
-            return StoppedMicRecordingFinalization(
-                micURL: nil,
-                disposition: .journalRecoveryOwned
-            )
+    func finalizeStoppedMicRecordingResult(primaryURL: URL?, segments: [MicRecordingSegment],
+                                          generation: UInt64) -> StoppedMicRecordingFinalization {
+        guard let ticket = recordingArtifactOwner.ticket(forStopGeneration: generation) else {
+            return StoppedMicRecordingFinalization(micURL: nil, disposition: .journalRecoveryOwned)
         }
-        let finalMicURL = finalizeMicRecording(primaryURL: primaryURL, segments: segments)
-        recordingJournal.markFinalized(
-            finalMicURL: finalMicURL,
-            session: finalization.journalSession
-        )
-        return StoppedMicRecordingFinalization(
-            micURL: finalMicURL,
-            disposition: .finalized
-        )
+        switch recordingArtifactOwner.claimQuiescentFinalization(ticket) {
+        case .recovery:
+            return StoppedMicRecordingFinalization(micURL: nil, disposition: .journalRecoveryOwned)
+        case .normal, .normalThenDiscard:
+            let finalURL = finalizeMicRecording(primaryURL: primaryURL, segments: segments)
+            if case .normalRelease(let snapshot, _) = recordingArtifactOwner.normalFinalizationFinished(ticket, actualFinalMicURL: finalURL),
+               let binding = snapshot.binding {
+                recordingArtifactDispatcher.enqueue(.markFinalized(binding, finalMicURL: finalURL, endingSession: true))
+            }
+            return StoppedMicRecordingFinalization(micURL: finalURL, disposition: .finalized)
+        case .notOwned:
+            return StoppedMicRecordingFinalization(micURL: nil, disposition: .journalRecoveryOwned)
+        }
     }
 
-    /// The host no longer retains a completion callback for this stopped
-    /// generation. Atomically invalidate its journal session before releasing
-    /// the live claim so recovery becomes the only remaining writer.
+    /// Select recovery ownership once. The exact claim is released only after
+    /// handed-off artifacts drain; a confirmed current discard cannot lose to
+    /// expiry/pruning, and a later current discard cannot override recovery.
     @discardableResult
-    public func abandonRecordingJournalFinalization(
-        forStopGeneration generation: UInt64
-    ) -> Bool {
-        stoppingJournalSessionsLock.lock()
-        guard let finalization = stoppingRecordingFinalizations.removeValue(forKey: generation) else {
-            stoppingJournalSessionsLock.unlock()
-            return false
-        }
-        if let session = finalization.journalSession {
-            recordingJournal.abandonFinalization(session: session)
-        }
-        stoppingJournalSessionsLock.unlock()
-        return true
+    public func abandonRecordingJournalFinalization(forStopGeneration generation: UInt64) -> Bool {
+        if case .selected = recordingArtifactOwner.requestAbandon(stopGeneration: generation) { return true }
+        return false
     }
 
-    /// Explicit discard owns the current journal's complete segment inventory,
-    /// including the no-callback case where the returned URL tuple is empty.
+    /// The caller selects its current context before suspension. Active files
+    /// are deleted only after that context's producers/writers have settled.
     public func discardCurrentRecordingArtifacts(micAudioURL: URL?, systemAudioURL: URL?) {
-        recordingJournal.discardCurrentRecordingArtifacts(
-            micAudioURL: micAudioURL,
-            systemAudioURL: systemAudioURL,
-            allowedRoot: paths.audioCaptures
-        )
+        guard let context = recordingArtifactOwner.currentContext() else { return }
+        // Standalone internal journal fixtures can build an already-quiescent
+        // journal without ever starting capture (generation zero).
+        if context.captureGeneration == 0, !isRecording, !isStarting,
+           recordingArtifactOwner.ticket(for: context) == nil {
+            _ = context.endpoint.discardCurrentRecordingArtifacts(micAudioURL: micAudioURL,
+                systemAudioURL: systemAudioURL, allowedRoot: paths.audioCaptures)
+            return
+        }
+        _ = recordingArtifactCompletion.requestDiscard(context: context)
     }
 
     /// A late generation-tagged callback has no access to the current journal;
@@ -114,21 +84,16 @@ extension Audio {
     }
 
     func assignSystemAudioFileURLIfCurrent(_ fileURL: URL, sessionGeneration: UInt64) {
-        guard recordingSessionGeneration == sessionGeneration else { return }
-
-        originalSystemAudioFileURL = fileURL
+        guard let context = artifactContext(for: sessionGeneration),
+              recordingArtifactOwner.bindSystemCandidate(context, url: fileURL) else { return }
         systemAudioFileURL = fileURL
-        recordingJournal.recordSystemAudio(fileURL, session: journalSession)
         restoreSystemAudioHealthyStatusAfterSuccessfulStart()
     }
 
-    /// Journal + publish the system URL as soon as the WAV exists. Generation
-    /// guarded like `assignSystemAudioFileURLIfCurrent`. The published
-    /// assignment hops to main; the original/journal write happens now.
+    /// Bind the created WAV to its exact recording before main publication.
     func publishSystemAudioFileURLAtCreation(_ fileURL: URL, sessionGeneration: UInt64) {
-        guard recordingSessionGeneration == sessionGeneration else { return }
-        originalSystemAudioFileURL = fileURL
-        recordingJournal.recordSystemAudio(fileURL, session: journalSession)
+        guard let context = artifactContext(for: sessionGeneration),
+              recordingArtifactOwner.bindSystemCandidate(context, url: fileURL) else { return }
         DispatchQueue.main.async { [weak self] in
             guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
             self.systemAudioFileURL = fileURL
@@ -149,16 +114,13 @@ extension Audio {
     }
 
     private func resolvedSystemAudioFileURLCandidate(generation: UInt64) -> URL? {
-        if let url = originalSystemAudioFileURL { return url }
-        if let url = systemAudioCaptureAttemptOwnership.fileURLOwned(by: generation) {
-            return url
-        }
+        let context = artifactContext(for: generation)
+        if let context, let url = recordingArtifactOwner.candidateSystemURL(in: context) { return url }
+        if let url = systemAudioCaptureAttemptOwnership.fileURLOwned(by: generation) { return url }
         if let attempt = systemAudioCaptureAttemptOwnership.current,
-           attempt.generation == generation,
-           let writer = attempt.writer {
-            return writer.url
-        }
-        if let url = recordingJournal.currentSystemAudioURL(session: journalSession) { return url }
-        return systemAudioFileURL
+           attempt.generation == generation, let writer = attempt.writer { return writer.url }
+        if let context, let binding = recordingArtifactOwner.binding(in: context),
+           let url = binding.endpoint.currentSystemAudioURL(session: binding.token) { return url }
+        return recordingSessionGeneration == generation ? systemAudioFileURL : nil
     }
 }

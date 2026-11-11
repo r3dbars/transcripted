@@ -1,107 +1,6 @@
 import Foundation
 import Darwin
 
-/// On-disk record of an in-progress meeting recording, kept next to the audio
-/// in the recordings scratch directory.
-///
-/// The journal exists from recording start until the meeting reaches a durable
-/// state elsewhere (transcript saved, or failed-queue entry persisted). The
-/// failed-transcription queue only records meetings whose preservation code
-/// actually ran — a crash, force-kill, or power loss before that point leaves
-/// audio on disk with no record at all. The journal is that record: the launch
-/// recovery scan reads any journal left behind and turns its audio into a
-/// visible, retryable failed-queue entry.
-struct MeetingRecordingJournal: Codable, Equatable {
-    enum State: String, Codable {
-        case recording
-        case stopping
-        case finalized
-    }
-
-    struct SegmentRecord: Codable, Equatable {
-        var filename: String
-        var gapBefore: TimeInterval
-    }
-
-    var version: Int
-    var state: State
-    var startedAt: Date
-    var updatedAt: Date
-    /// Filenames are relative to the journal's own directory so records stay
-    /// valid if Application Support is relocated.
-    var primaryMicFilename: String?
-    var micSegments: [SegmentRecord]
-    var systemAudioFilename: String?
-    /// Set when finalization completed: the merged file, or the primary.
-    var finalMicFilename: String?
-    /// Optional for journals written before language selection existed.
-    var languageSelection: TranscriptionLanguageSelection? = nil
-    /// True for a "Record Just My Mic" recording, so crash recovery keeps the
-    /// choice on its failed-queue row. Nil (not false) for two-sided ones.
-    var micOnlyByChoice: Bool? = nil
-}
-
-enum MeetingRecordingJournalStartError: Error, Equatable {
-    case alreadyExists
-    case persistenceFailed
-}
-
-/// Opaque ownership token for one recording session's journal writes. Issued
-/// by `begin()`; every mutation must present the matching token or it is
-/// dropped. Stop-path finalization can land seconds after `stop()` returns
-/// (multi-segment merges), so without the token a previous session's late
-/// writes would corrupt the journal of the recording that is now active.
-struct MeetingRecordingJournalSession: Equatable, Hashable, Sendable {
-    private let id: UUID
-    private let liveOwnership: MeetingRecordingJournalLiveOwnership
-
-    init(journalURL: URL) {
-        self.id = UUID()
-        self.liveOwnership = MeetingRecordingJournalLiveOwnership(
-            id: id,
-            journalURL: journalURL
-        )
-    }
-
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.id == rhs.id
-    }
-
-    func hash(into hasher: inout Hasher) {
-        hasher.combine(id)
-    }
-
-    func releaseLiveOwnership() {
-        liveOwnership.release()
-    }
-}
-
-private final class MeetingRecordingJournalLiveOwnership: @unchecked Sendable {
-    private let id: UUID
-    private let lock = NSLock()
-    private var isReleased = false
-
-    init(id: UUID, journalURL: URL) {
-        self.id = id
-        MeetingRecordingJournalStore.claimLiveOwnership(of: journalURL, id: id)
-    }
-
-    deinit {
-        release()
-    }
-
-    func release() {
-        lock.lock()
-        guard !isReleased else {
-            lock.unlock()
-            return
-        }
-        isReleased = true
-        lock.unlock()
-        MeetingRecordingJournalStore.releaseLiveOwnership(id: id)
-    }
-}
-
 final class MeetingRecordingJournalStore: @unchecked Sendable {
     static let filenameSuffix = ".recording.json"
 
@@ -110,17 +9,24 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
 
     private let directory: URL
     private let initialPersistenceForTesting: ((Data, URL) throws -> Void)?
-    private let queue = DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility)
+    private let queue: DispatchQueue
+    var artifactQueue: DispatchQueue { queue }
     private var journalURL: URL?
     private var journal: MeetingRecordingJournal?
     private var activeSession: MeetingRecordingJournalSession?
+    private var cacheSession: MeetingRecordingJournalSession?
 
-    init(
-        directory: URL,
-        initialPersistenceForTesting: ((Data, URL) throws -> Void)? = nil
-    ) {
+    convenience init(directory: URL, initialPersistenceForTesting: ((Data, URL) throws -> Void)? = nil) {
+        self.init(directory: directory, initialPersistenceForTesting: initialPersistenceForTesting,
+                  sharedQueue: DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility))
+    }
+    private init(directory: URL, initialPersistenceForTesting: ((Data, URL) throws -> Void)?, sharedQueue: DispatchQueue) {
         self.directory = directory
         self.initialPersistenceForTesting = initialPersistenceForTesting
+        self.queue = sharedQueue
+    }
+    func forkForRecording() -> MeetingRecordingJournalStore {
+        MeetingRecordingJournalStore(directory: directory, initialPersistenceForTesting: initialPersistenceForTesting, sharedQueue: queue)
     }
 
     @discardableResult
@@ -143,6 +49,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             }
             let session = MeetingRecordingJournalSession(journalURL: journalURL)
             self.activeSession = session
+            self.cacheSession = session
             self.journalURL = journalURL
             self.journal = MeetingRecordingJournal(
                 version: 1,
@@ -168,6 +75,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                 self.journal = nil
                 self.journalURL = nil
                 self.activeSession = nil
+                self.cacheSession = nil
                 session.releaseLiveOwnership()
                 throw MeetingRecordingJournalStartError.persistenceFailed
             }
@@ -209,8 +117,8 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         mutate(session: session) { $0.state = .stopping }
     }
 
-    func markFinalized(finalMicURL: URL?, session: MeetingRecordingJournalSession?) {
-        mutate(session: session, endingSession: true) {
+    func markFinalized(finalMicURL: URL?, session: MeetingRecordingJournalSession?, endingSession: Bool = true) {
+        mutate(session: session, endingSession: endingSession) {
             $0.state = .finalized
             $0.finalMicFilename = finalMicURL?.lastPathComponent
         }
@@ -219,12 +127,10 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     /// The host's bounded late-completion window expired without a callback.
     /// Transfer the unchanged journal to recovery and invalidate this session
     /// so a much later finalizer cannot race or overwrite recovered ownership.
-    func abandonFinalization(session: MeetingRecordingJournalSession) {
+    func abandonFinalization(session: MeetingRecordingJournalSession, completion: @escaping @Sendable () -> Void = {}) {
         queue.async {
-            session.releaseLiveOwnership()
-            if self.activeSession == session {
-                self.activeSession = nil
-            }
+            self.releaseRecoveryOnQueue(session: session)
+            completion()
         }
     }
 
@@ -238,6 +144,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             self.journal = nil
             self.journalURL = nil
             self.activeSession = nil
+            self.cacheSession = nil
         }
     }
 
@@ -259,6 +166,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             self.journalURL = nil
             self.activeSession?.releaseLiveOwnership()
             self.activeSession = nil
+            self.cacheSession = nil
             return snapshot
         }
         return Self.discardRecordingArtifacts(
@@ -279,44 +187,121 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         endingSession: Bool = false,
         _ change: @escaping (inout MeetingRecordingJournal) -> Void
     ) {
-        queue.async {
-            defer {
-                if endingSession {
-                    session?.releaseLiveOwnership()
-                }
-            }
-            // Only the session that began this journal may write to it. A nil
-            // session (a stop with no active recording) owns nothing.
-            guard let session, session == self.activeSession else { return }
-            guard var journal = self.journal, let journalURL = self.journalURL else { return }
-            // The file vanishing means the meeting already reached a durable
-            // state and `removeJournal(forMicAudioURL:)` deleted it without
-            // access to this instance. Drop the in-memory copy instead of
-            // re-persisting: a resurrected journal becomes a duplicate
-            // failed-queue entry on the next launch's recovery scan.
-            guard FileManager.default.fileExists(atPath: journalURL.path) else {
-                self.journal = nil
-                self.journalURL = nil
-                self.activeSession = nil
-                return
-            }
-            change(&journal)
-            journal.updatedAt = Date()
-            self.journal = journal
-            self.persistLocked()
-            if endingSession, self.activeSession == session {
-                self.activeSession = nil
+        queue.async { self.applyMutationOnQueue(session: session, endingSession: endingSession, change) }
+    }
+
+    private func applyMutationOnQueue(session: MeetingRecordingJournalSession?, endingSession: Bool = false,
+                                      _ change: (inout MeetingRecordingJournal) -> Void) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        defer {
+            if endingSession {
+                session?.releaseLiveOwnership()
             }
         }
+        // Only the session that began this journal may write to it. A nil
+        // session (a stop with no active recording) owns nothing.
+        guard let session, session == self.activeSession else { return }
+        guard var journal = self.journal, let journalURL = self.journalURL else { return }
+        // The file vanishing means the meeting already reached a durable
+        // state and `removeJournal(forMicAudioURL:)` deleted it without
+        // access to this instance. Drop the in-memory copy instead of
+        // re-persisting: a resurrected journal becomes a duplicate
+        // failed-queue entry on the next launch's recovery scan.
+        guard FileManager.default.fileExists(atPath: journalURL.path) else {
+            self.journal = nil
+            self.journalURL = nil
+            self.activeSession = nil
+            return
+        }
+        change(&journal)
+        journal.updatedAt = Date()
+        self.journal = journal
+        self.persistLocked()
+        if endingSession, self.activeSession == session {
+            self.activeSession = nil
+        }
+    }
+
+    // The concrete dispatcher shares queue and calls these applications
+    // directly. They never reacquire G/O or wait back into capture queues.
+    func recordSegmentsOnQueue(_ segments: [MicRecordingSegment], session: MeetingRecordingJournalSession) {
+        applyMutationOnQueue(session: session) { journal in
+            journal.micSegments = segments.map { .init(filename: $0.url.lastPathComponent, gapBefore: $0.gapBeforeDuration) }
+        }
+    }
+    func recordSystemURLOnQueue(_ url: URL?, session: MeetingRecordingJournalSession) {
+        applyMutationOnQueue(session: session) { $0.systemAudioFilename = url?.lastPathComponent }
+    }
+    func markStoppingOnQueue(session: MeetingRecordingJournalSession) {
+        applyMutationOnQueue(session: session) { $0.state = .stopping }
+    }
+    func markFinalizedOnQueue(finalMicURL: URL?, session: MeetingRecordingJournalSession, endingSession: Bool) {
+        applyMutationOnQueue(session: session, endingSession: endingSession) {
+            $0.state = .finalized; $0.finalMicFilename = finalMicURL?.lastPathComponent
+        }
+    }
+    func snapshotForOwnedDiscard(session: MeetingRecordingJournalSession) -> RecordingArtifactInventory? {
+        queue.sync { snapshotForOwnedDiscardOnQueue(session: session) }
+    }
+    func snapshotForOwnedDiscardOnQueue(session: MeetingRecordingJournalSession) -> RecordingArtifactInventory? {
+        dispatchPrecondition(condition: .onQueue(queue))
+        guard cacheSession == session, let journal, let journalURL else { return nil }
+        func resolve(_ name: String?) -> URL? { name.map { directory.appendingPathComponent($0) } }
+        return RecordingArtifactInventory(primaryURL: resolve(journal.primaryMicFilename),
+            segments: journal.micSegments.map { MicRecordingSegment(url: directory.appendingPathComponent($0.filename), gapBeforeDuration: $0.gapBefore) },
+            finalMicURL: resolve(journal.finalMicFilename), finalSystemURL: resolve(journal.systemAudioFilename),
+            allowedRoot: directory, journalURL: journalURL, journalData: try? Self.encodeJournal(journal))
+    }
+    func finishOwnedDiscard(session: MeetingRecordingJournalSession, cleanupSucceeded: Bool,
+                            completion: @escaping @Sendable () -> Void) {
+        queue.async { self.finishOwnedDiscardOnQueue(session: session, cleanupSucceeded: cleanupSucceeded); completion() }
+    }
+    func finishOwnedDiscardOnQueue(session: MeetingRecordingJournalSession, cleanupSucceeded: Bool) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if cacheSession == session {
+            journal = nil; journalURL = nil; activeSession = nil; cacheSession = nil
+        }
+        // The physical cleanup attempt has already settled. A false result
+        // retains the safe helper's surviving disk bytes/journal unchanged.
+        session.releaseLiveOwnership()
+    }
+    func releaseRecoveryOnQueue(session: MeetingRecordingJournalSession) {
+        dispatchPrecondition(condition: .onQueue(queue))
+        session.releaseLiveOwnership()
+        if activeSession == session { activeSession = nil }
+    }
+    static func safelyDiscardOwnedInventory(_ inventory: RecordingArtifactInventory) -> Bool {
+        let journal: MeetingRecordingJournal?
+        if inventory.journalURL != nil {
+            guard let data = inventory.journalData, let captured = try? decodeJournal(data) else { return false }
+            journal = captured
+        } else { journal = nil }
+        // Preserve the existing helper's canonical mic/system-last ordering.
+        // Deduplicate before passing extras: its last-two ordering must not
+        // attempt the same canonical URL twice when the final mic is primary.
+        var seen: Set<String> = []
+        let ordered = ([inventory.finalMicURL ?? inventory.primaryURL, inventory.finalSystemURL].compactMap { $0 }
+            + inventory.audioURLs).filter { seen.insert(canonicalURL($0).path).inserted }
+        return discardRecordingArtifacts(journalURL: inventory.journalURL, journal: journal,
+            additionalAudioURLs: ordered, allowedRoots: [inventory.allowedRoot])
+    }
+
+    private static func encodeJournal(_ journal: MeetingRecordingJournal) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(journal)
+    }
+    private static func decodeJournal(_ data: Data) throws -> MeetingRecordingJournal {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(MeetingRecordingJournal.self, from: data)
     }
 
     @discardableResult
     private func persistLocked(initial: Bool = false) -> Bool {
         guard let journal, let journalURL else { return false }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
         do {
-            let data = try encoder.encode(journal)
+            let data = try Self.encodeJournal(journal)
             if initial, let initialPersistenceForTesting {
                 try initialPersistenceForTesting(data, journalURL)
             } else {
@@ -357,7 +342,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         return liveOwnership.values.contains(canonicalJournalURL)
     }
 
-    fileprivate static func claimLiveOwnership(
+    static func claimLiveOwnership(
         of journalURL: URL,
         id: UUID
     ) {
@@ -366,7 +351,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         liveOwnershipLock.unlock()
     }
 
-    fileprivate static func releaseLiveOwnership(id: UUID) {
+    static func releaseLiveOwnership(id: UUID) {
         liveOwnershipLock.lock()
         liveOwnership.removeValue(forKey: id)
         liveOwnershipLock.unlock()
@@ -383,9 +368,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
 
     static func load(at url: URL) -> MeetingRecordingJournal? {
         guard let data = try? Data(contentsOf: url) else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(MeetingRecordingJournal.self, from: data)
+        return try? decodeJournal(data)
     }
 
     static func hasJournal(forMicAudioURL micURL: URL) -> Bool {

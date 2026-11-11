@@ -8,30 +8,28 @@ import TranscriptedCore
 /// `Audio.onRecordingComplete` within `meetingStopTimeout`, so the WAV files
 /// at the returned URLs may not be fully finalized — the controller should
 /// route the audio to the failed queue rather than enqueuing for transcription.
-enum CaptureStopFinalizationOwner: Equatable {
-    case audioFinalizer
-    case recordingJournalRecovery
-}
-
 struct CaptureStopResult {
     let micURL: URL?
     let systemURL: URL?
     let didTimeOut: Bool
     let finalizationOwner: CaptureStopFinalizationOwner
     let systemAudioTimeline: RecordedSystemAudioTimeline?
+    let stopGeneration: UInt64?
 
     init(
         micURL: URL?,
         systemURL: URL?,
         didTimeOut: Bool,
         finalizationOwner: CaptureStopFinalizationOwner = .audioFinalizer,
-        systemAudioTimeline: RecordedSystemAudioTimeline? = nil
+        systemAudioTimeline: RecordedSystemAudioTimeline? = nil,
+        stopGeneration: UInt64? = nil
     ) {
         self.micURL = micURL
         self.systemURL = systemURL
         self.didTimeOut = didTimeOut
         self.finalizationOwner = finalizationOwner
         self.systemAudioTimeline = systemAudioTimeline
+        self.stopGeneration = stopGeneration
     }
 }
 

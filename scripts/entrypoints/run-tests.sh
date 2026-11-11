@@ -540,6 +540,7 @@ APP_SOURCES=(
     # AudioInputTapTeardownPolicy, the shared tap teardown order the
     # sequences' native teardown follows.
     "Sources/TranscriptedCore/Audio/AudioCaptureTypes.swift"
+    "Sources/TranscriptedCore/Audio/RecordingArtifactTypes.swift"
     "Sources/Speech/ParakeetTimedAudioEngineWorkLimiter.swift"
     "Sources/Speech/ParakeetRecoveryState.swift"
     "Sources/Speech/ParakeetConfigChangeAdmission.swift"
@@ -576,6 +577,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingCallAudioAsk.swift"
     "Sources/Meeting/MeetingMicOnlyNotice.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"
+    "Sources/Meeting/MeetingCaptureTerminalPolicy.swift"
     "Sources/Meeting/MeetingStopSequence.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"

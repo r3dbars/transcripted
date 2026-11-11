@@ -394,7 +394,7 @@ final class MeetingCaptureBridge: ObservableObject {
                     handler: onTimedOutCompletion
                 )
                 self.scheduleTimedOutStopCompletionExpiry(generation: stopGeneration)
-                let timedOutResult = self.currentStopResult(didTimeOut: true)
+                let timedOutResult = self.currentStopResult(didTimeOut: true, stopGeneration: stopGeneration)
                 for continuation in waiters {
                     continuation.resume(returning: timedOutResult)
                 }
@@ -405,18 +405,19 @@ final class MeetingCaptureBridge: ObservableObject {
     /// Stop the current recording, wait for file handles to close, then remove
     /// the just-captured scratch audio instead of handing it to transcription.
     func stopAndDiscardFiles() async -> CaptureStopResult {
+        audio.discardCurrentRecordingArtifacts(micAudioURL: nil, systemAudioURL: nil)
         let result = await stopAndAwaitFiles(timedOutOwner: .discard) { [weak self] lateResult in
+            guard MeetingCaptureTerminalPolicy.mayDiscardFinalizedAudio(finalizationOwner: lateResult.finalizationOwner) else { return }
             self?.audio.discardFinalizedRecordingArtifacts(
                 micAudioURL: lateResult.micURL,
                 systemAudioURL: lateResult.systemURL
             )
         }
-        audio.discardCurrentRecordingArtifacts(
-            micAudioURL: result.micURL,
-            systemAudioURL: result.systemURL
-        )
-        audio.micAudioFileURL = nil
-        audio.systemAudioFileURL = nil
+        if MeetingCaptureTerminalPolicy.mayClearPublishedURLs(resultStopGeneration: result.stopGeneration,
+                                                              currentGeneration: audio.currentRecordingSessionGeneration) {
+            audio.micAudioFileURL = nil
+            audio.systemAudioFileURL = nil
+        }
         return result
     }
 
@@ -599,15 +600,18 @@ final class MeetingCaptureBridge: ObservableObject {
                     finalizationOwner: disposition == .journalRecoveryOwned
                         ? .recordingJournalRecovery
                         : .audioFinalizer,
-                    systemAudioTimeline: timeline
+                    systemAudioTimeline: timeline,
+                    stopGeneration: generation
                 )
 
+                if disposition == .journalRecoveryOwned { self.onRecordingJournalFinalizationAbandoned?() }
                 switch self.timedOutStopCompletions.resolve(generation: generation) {
                 case .expired(let owner):
                     switch owner {
                     case .failedMeeting(let id):
                         self.onExpiredTimedOutRecordingComplete?(id, result)
                     case .discard:
+                        guard MeetingCaptureTerminalPolicy.mayDiscardFinalizedAudio(finalizationOwner: result.finalizationOwner) else { return }
                         self.audio.discardFinalizedRecordingArtifacts(
                             micAudioURL: result.micURL,
                             systemAudioURL: result.systemURL
@@ -731,12 +735,8 @@ final class MeetingCaptureBridge: ObservableObject {
         sinkStartAttemptTriggers(from: audio.$systemAudioStreaming)
     }
 
-    private func currentStopResult(didTimeOut: Bool = false) -> CaptureStopResult {
-        CaptureStopResult(
-            micURL: audio.micAudioFileURL,
-            systemURL: audio.systemAudioFileURL,
-            didTimeOut: didTimeOut
-        )
+    private func currentStopResult(didTimeOut: Bool = false, stopGeneration: UInt64? = nil) -> CaptureStopResult {
+        CaptureStopResult(micURL: audio.micAudioFileURL, systemURL: audio.systemAudioFileURL, didTimeOut: didTimeOut, stopGeneration: stopGeneration ?? audio.inFlightStopGeneration)
     }
 
     private func scheduleTimedOutStopCompletionExpiry(generation: UInt64) {
