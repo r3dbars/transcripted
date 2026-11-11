@@ -77,6 +77,28 @@ class FailureLocationsTests(unittest.TestCase):
             self.assertNotIn(temporary, result.stdout + result.stderr)
             self.assertNotIn("PRIVATE_CANARY", result.stdout + result.stderr)
 
+    def test_looping_source_directory_reports_no_path_or_traceback(self):
+        with tempfile.TemporaryDirectory(prefix="transcripted-failure-loop-") as temporary:
+            root = Path(temporary).resolve()
+            subprocess.run(["git", "init", "--quiet", str(root)], check=True)
+            directory = root / "Tests/Loop"
+            directory.mkdir(parents=True)
+            source = directory / "Check.swift"
+            source.write_text("fixture\n")
+            subprocess.run(["git", "-C", str(root), "add", "Tests/Loop/Check.swift"], check=True)
+            source.unlink()
+            directory.rmdir()
+            directory.symlink_to("Loop", target_is_directory=True)
+            log = root / "input.log"
+            log.write_text("  FAIL [Check.swift:1] PRIVATE_CANARY\n")
+            result = subprocess.run(["python3", str(SPEC.origin), "--root", str(root), "--log", str(log)],
+                                    capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stderr, "")
+            self.assertEqual(json.loads(result.stdout)["diagnostic_status"], "unavailable")
+            self.assertNotIn(str(root), result.stdout)
+            self.assertNotIn("PRIVATE_CANARY", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

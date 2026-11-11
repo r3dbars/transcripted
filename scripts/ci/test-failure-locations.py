@@ -72,7 +72,7 @@ def main():
             raise ValueError("oversized input")
         root = args.root.resolve(strict=True)
         report = locations(raw.decode("utf-8", errors="replace"), root, inventory(root))
-    except (OSError, ValueError, UnicodeError, subprocess.SubprocessError):
+    except (OSError, RuntimeError, ValueError, UnicodeError, subprocess.SubprocessError):
         print('{"failure_locations": [], "diagnostic_status": "unavailable"}')
         return 1
     print(json.dumps(report, sort_keys=True))

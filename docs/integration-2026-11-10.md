@@ -78,10 +78,13 @@ App build, deterministic E2E, synthetic pasteback, integration smoke, imported
 audio and synthetic audio passed; artifact validation had one warning. Its
 test details were not retained. Future failed fast/Core bench steps now print
 only bounded, tracked repository Swift file/line locations, with no assertion
-messages, transcript values or absolute paths. Five offline diagnostic tests
+messages, transcript values or absolute paths. Six offline diagnostic tests
 cover format handling, privacy, ambiguity, output bounds and unavailable input.
-They run in the quick suite. Full/native validation on the replacement head
-and review of this diagnostic follow-up remain pending.
+They run in the quick suite. Independent follow-up review caught Python 3.9
+symlink-loop RuntimeError tracebacks bypassing the generic failure handler.
+The CLI regression reproduced that leak, then passed after the exception was
+handled. The parent checked this narrow correction. Full/native validation on
+the replacement head remains pending.
 
 Original assembly ancestry: PASS, all 198 frozen heads verified fetched and retained.
 Expansion ancestry: PASS, all 225 exact frozen heads verified retained.
