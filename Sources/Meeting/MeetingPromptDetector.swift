@@ -209,13 +209,7 @@ final class MeetingPromptDetector {
     // prompt re-offers a couple of times before inheriting the full dismissal.
     var promptExpiryHistory: [String: (count: Int, lastExpiredAt: Date)] = [:]
     var browserTitleReadCounter = 0
-    /// Call shortcut bundle IDs already classified. A missing key has not been
-    /// read; a present nil is a shortcut that is not a call app.
-    var callShortcutProviders: [String: MeetingPromptProvider] = [:]
-    var callShortcutLookupDone: Set<String> = []
-    /// The latest call shortcut that launched or came forward. Used only when
-    /// that was as the mic was taken; an old activation does not count.
-    var recentCallShortcutActivation: (bundleID: String, provider: MeetingPromptProvider, at: Date)?
+    let callShortcutCache = BrowserShortcutLookupCache()
     // Set by `adHocCandidate` during one evaluate pass when a browser session's
     // first title read has not landed yet.
     var browserFirstTitleReadPending = false
@@ -324,6 +318,7 @@ final class MeetingPromptDetector {
     }
 
     func stop() {
+        callShortcutCache.removeAll()
         pollingTask?.cancel()
         pollingTask = nil
         browserEvidenceRecheckTask?.cancel()

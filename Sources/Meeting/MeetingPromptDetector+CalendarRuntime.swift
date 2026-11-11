@@ -69,12 +69,7 @@ extension MeetingPromptDetector {
         // even though the shortcut is not a native runtime app: its mic is
         // the main browser's helper, and the shortcut is the call.
         guard MeetingPromptProvider.isBrowserBundleID(bundleIdentifier) else { return }
-        let activatedAt = Date()
-        let lookup = callShortcutProvider
-        Task { @MainActor [weak self] in
-            guard let site = await lookup(bundleIdentifier) else { return }
-            self?.noteCallShortcutActivation(bundleID: bundleIdentifier, provider: site, at: activatedAt)
-        }
+        ensureCallShortcutLookup(bundleIdentifier, activatedAt: Date())
     }
 
     func seedNativeActivityIfNeeded(frontmostBundleID: String?, now: Date) {
