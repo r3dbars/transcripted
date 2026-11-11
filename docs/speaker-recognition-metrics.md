@@ -19,9 +19,13 @@ Every speaker profile moves through a funnel:
 Three numbers say whether the system works:
 
 1. **Confirmed meetings to graduation** — how many distinct meetings the user
-   confirms before the first silent auto-recognition. The policy requires 5
-   explicit confirmations plus similarity > 0.92 and margin ≥ 0.12 in
-   `SpeakerNamingPolicy`. Passive appearances never graduate a profile.
+   confirms before the first silent auto-recognition. The standard policy
+   requires 5 explicit confirmations plus the active voiceprint model's
+   similarity/margin gates in `SpeakerNamingPolicy`. The standard bars are
+   `SpeakerEmbeddingThresholds.autoAcceptSimilarity` / `autoAcceptMarginMin`:
+   0.946 / 0.128 for ReDimNet2 b4 (the default model choice), and 0.92 / 0.12
+   for WeSpeaker. Invitee-backed matches can use the separate `InviteeBars`
+   policy. Passive appearances never graduate a profile.
 2. **Recognition precision** — confirmed vs corrected verdicts. Should trend up.
 3. **Questions per meeting** — review rows requiring a user answer. Should
    trend down.
@@ -97,8 +101,8 @@ Two allowlisted, bucketed PostHog events (see
   same buckets plus `graduated` (a profile's first-ever auto-recognition).
 
 Correction rate by similarity/margin bucket across the fleet is exactly the
-curve needed to retune the auto-accept gates (0.92 similarity / 0.12 margin / 5
-explicitly confirmed meetings) from real living rooms instead of the AMI
+curve needed to retune the per-model auto-accept similarity/margin bars and
+standard explicit-confirmation gate from real living rooms instead of the AMI
 corpus. Validate any proposed threshold change offline with
 `Tools/SpeakerEvalHarness` before shipping it.
 
