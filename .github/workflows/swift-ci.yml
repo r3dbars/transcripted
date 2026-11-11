@@ -43,11 +43,16 @@ jobs:
           test "$(cat /var/run/transcripted-ci-firewall.ok)" = "$(sysctl -n kern.bootsessionuuid)"
           python3 scripts/ops/native-smoke-isolation.py
           python3 - <<'PYVERIFY'
-          import os, pwd, subprocess
+          import os, stat, subprocess
           import runpy
           guard = runpy.run_path('scripts/ops/native-smoke-isolation.py')
           assert guard['in_throwaway_ci_vm']()
-          assert guard['root_only']('/var/run/transcripted-ci-firewall.ok')
+          # The stamp lives under macOS /var/run; validate the file itself.
+          # root_only is for protected /Library chains, not /var/run ancestors.
+          stamp = os.lstat('/var/run/transcripted-ci-firewall.ok')
+          assert stat.S_ISREG(stamp.st_mode) and stamp.st_uid == 0
+          assert stamp.st_mode & 0o022 == 0
+          assert guard['root_only']('/Library/TranscriptedCI/firewall.sh')
           assert os.getuid() == os.stat('/dev/console').st_uid
           groups = subprocess.check_output(['id', '-Gn'], text=True).split()
           assert 'admin' not in groups
