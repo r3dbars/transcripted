@@ -6,6 +6,19 @@
 
 rules:
   - paths:
+      - ".agents/board-scorecard.yml"
+      - "scripts/ops/score-boards.py"
+      - "scripts/ops/score_boards_lib.py"
+      - "scripts/ops/score-detection.py"
+      - "scripts/ops/score-diarization.py"
+      - "scripts/ops/score-dictation.py"
+      - "scripts/ops/score-summary-judge.py"
+      - "scripts/ops/test-score-boards.py"
+      - "scripts/ops/fixtures/board-scorecard/**"
+    checks:
+      - "python3 scripts/ops/test-score-boards.py"
+
+  - paths:
       - "scripts/dev/bench-launch-latency.sh"
       - "scripts/dev/verify-change.sh"
       - "scripts/dev/test-verify-receipts.py"
