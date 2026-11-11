@@ -331,12 +331,8 @@ extension Audio {
             cleanupGroup.leave()
         }
 
-        // Snapshot every reference the teardown will need so the
-        // background queue closure isn't reading mutable instance state
-        // while UI updates happen in parallel.
-        let engineRef = self.engine
-        let inputNodeRef = self.inputNode
-        let pinnedMicrophoneRef = self.pinnedMicrophoneCapture
+        // System ownership is generation-bound. Graph references are acquired
+        // under their lock in the background teardown below.
         let systemAudioCapture = systemAudioCaptureAttemptOwnership.captureOwned(
             by: captureGeneration
         )
@@ -383,14 +379,17 @@ extension Audio {
             microphoneFileQueue: micAudioFileQueue,
             systemFileQueue: systemAudioFileQueue,
             stopMicrophone: {
-                self.withAudioGraphLock {
+                let retainedGraph = self.withAudioGraphLock { () -> (AVAudioEngine?, AVAudioInputNode?, PinnedMicrophoneCapture?) in
                     guard self.recordingSessionGeneration == stopGeneration else {
                         AppLogger.audio.info("Skipping stale audio graph teardown because a newer session exists", [
                             "stopGeneration": "\(stopGeneration)",
                             "currentGeneration": "\(self.recordingSessionGeneration)"
                         ])
-                        return
+                        return (nil, nil, nil)
                     }
+                    let engineRef = self.engine
+                    let inputNodeRef = self.inputNode
+                    let pinnedMicrophoneRef = self.pinnedMicrophoneCapture
 
                     if let engineRef, let inputNodeRef {
                         AppLogger.audio.info("Stopping audio capture")
@@ -412,7 +411,10 @@ extension Audio {
                     // carry into the next recording. Safe here because the
                     // engine has stopped — no more tap callbacks can fire.
                     self.realtimeAGC = nil
+                    return (engineRef, inputNodeRef, pinnedMicrophoneRef)
                 }
+                // Release retained native references only after the lock exits.
+                withExtendedLifetime(retainedGraph) {}
             },
             stopSystem: {
                 // Generation checks already reject late callbacks; ownership
