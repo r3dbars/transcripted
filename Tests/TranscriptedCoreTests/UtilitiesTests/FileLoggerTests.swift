@@ -208,11 +208,16 @@ final class FileLoggerTests: XCTestCase {
     }
 
     func testDisableFlagSkipsFileLogging() throws {
+        let inheritedDisableFlag = ProcessInfo.processInfo.environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"]
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("FileLoggerDisableTests-\(UUID().uuidString)", isDirectory: true)
         let logs = root.appendingPathComponent("logs", isDirectory: true)
         defer {
-            unsetenv("TRANSCRIPTED_DISABLE_FILE_LOGGER")
+            if let inheritedDisableFlag {
+                setenv("TRANSCRIPTED_DISABLE_FILE_LOGGER", inheritedDisableFlag, 1)
+            } else {
+                unsetenv("TRANSCRIPTED_DISABLE_FILE_LOGGER")
+            }
             try? FileManager.default.removeItem(at: root)
         }
 

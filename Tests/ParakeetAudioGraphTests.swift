@@ -957,7 +957,7 @@ private final class FakeRouteChangeHost: ParakeetConfigChangeRecoveryHost {
 
     func cancelAudioWatchdog() -> Bool {
         log.record("cancelWatchdog")
-        return false
+        return graph.replaceGraphHoldingPendingWork()
     }
 
     func cancelPrewarmRetry() { log.record("cancelPrewarm") }
@@ -1013,8 +1013,8 @@ private func runConfigChangeTeardownSuites() async {
         }
         assertEqual(
             log.events,
-            ["beginRecovery:41@gen1", "cancelWatchdog", "cancelPrewarm", "preserve", "removeTap:e1@q1"],
-            "the owner moves, recovery starts and zombie recovery is cancelled before the first suspension; speech is kept before the tap comes off"
+            ["cancelWatchdog", "unobserve", "beginRecovery:41@gen1", "cancelPrewarm", "preserve", "removeTap:e1@q1"],
+            "the old watchdog is cancelled before recovery owns work; the observer is suspended and speech kept before the tap comes off"
         )
         held.release.signal()
         assertEqual(await change.value, 41, "the change hands its recovery generation to the debounced recovery")
@@ -1023,46 +1023,38 @@ private func runConfigChangeTeardownSuites() async {
     }
 
     await runSuite("A route change that loses the graph cancels only its own recovery") {
-        // Lost during tap removal.
-        let duringTap = GraphFixture()
-        let tapHost = FakeRouteChangeHost(fixture: duringTap)
-        tapHost.isRecording = true
-        duringTap.graph.inputTapInstalled = true
-        let heldTap = duringTap.log.hold("removeTap")
-        let tapChange = await startHeld(heldTap) {
-            await ParakeetConfigChangeTeardown.run(graph: duringTap.graph, host: tapHost, strategy: .rebuildGraph, forceForMicrophoneSharing: false)
+        for call in ["removeTap", "stop", "reset"] {
+            let fixture = GraphFixture()
+            let host = FakeRouteChangeHost(fixture: fixture)
+            host.isRecording = call == "removeTap"
+            fixture.graph.inputTapInstalled = host.isRecording
+            let oldQueue = fixture.graph.queue
+            let held = fixture.log.hold(call)
+            let change = await startHeld(held) {
+                await ParakeetConfigChangeTeardown.run(graph: fixture.graph, host: host, strategy: .rebuildGraph, forceForMicrophoneSharing: false)
+            }
+            // A successor must claim the pending lease and replace resources;
+            // a generation bump alone still leaves the worker on the old engine.
+            fixture.graph.generation += 1
+            assertTrue(fixture.graph.replaceGraphHoldingPendingWork(), "a successor claims the held \(call) work")
+            let successor = fixture.graph.queueOwner
+            assertEqual(fixture.engineID, 2, "the successor has its own engine")
+            assertEqual(fixture.queueID, 2, "the successor has its own queue")
+            host.isRecording = true
+            fixture.graph.inputTapInstalled = true
+            fixture.graph.isPrewarmed = true
+            fixture.graph.workOwnership.begin(owner: successor, phase: .audioStart)
+            fixture.log.clear()
+            held.release.signal()
+            assertNil(await change.value, "losing the graph during \(call) ends the change")
+            await drain(oldQueue)
+            assertTrue(fixture.log.contains("cancelRecovery:41"), "it cancels only its recovery generation")
+            assertFalse(fixture.log.contains("markStopped"), "it leaves the successor recording alone")
+            assertEqual(fixture.log.events.filter { $0.contains("@q") }, ["removeTap:e1@q1", "reset:e1@q1"], "late cleanup touches only the old engine and queue")
+            assertTrue(fixture.graph.owns(successor), "late completion cannot replace the successor graph")
+            assertTrue(host.isRecording && fixture.graph.inputTapInstalled && fixture.graph.isPrewarmed, "successor recording state survives")
+            assertTrue(fixture.graph.workOwnership.isActive(owner: successor, phase: .audioStart), "old completion cannot release the successor lease")
         }
-        duringTap.graph.generation += 1
-        heldTap.release.signal()
-        assertNil(await tapChange.value, "losing the graph during tap removal ends the change")
-        assertTrue(duringTap.log.contains("cancelRecovery:41"), "it cancels its own recovery generation")
-        assertFalse(duringTap.log.contains("markStopped"), "it leaves the newer recording alone")
-        assertFalse(duringTap.log.events.contains { $0.hasPrefix("stop:") }, "it doesn't stop the newer graph")
-
-        // Lost while stopping the engine.
-        let duringStop = GraphFixture()
-        let stopHost = FakeRouteChangeHost(fixture: duringStop)
-        let heldStop = duringStop.log.hold("stop")
-        let stopChange = await startHeld(heldStop) {
-            await ParakeetConfigChangeTeardown.run(graph: duringStop.graph, host: stopHost, strategy: .rebuildGraph, forceForMicrophoneSharing: false)
-        }
-        duringStop.graph.generation += 1
-        heldStop.release.signal()
-        assertNil(await stopChange.value, "losing the graph during the engine stop ends the change")
-        assertTrue(duringStop.log.contains("cancelRecovery:41"), "it cancels its own recovery generation")
-        assertFalse(duringStop.log.contains("makeEngine:e2"), "it doesn't rebuild the newer graph")
-
-        // Lost while rebuilding.
-        let duringRebuild = GraphFixture()
-        let rebuildHost = FakeRouteChangeHost(fixture: duringRebuild)
-        let heldReset = duringRebuild.log.hold("reset")
-        let rebuildChange = await startHeld(heldReset) {
-            await ParakeetConfigChangeTeardown.run(graph: duringRebuild.graph, host: rebuildHost, strategy: .rebuildGraph, forceForMicrophoneSharing: false)
-        }
-        duringRebuild.graph.generation += 1
-        heldReset.release.signal()
-        assertNil(await rebuildChange.value, "a rebuild that lost the graph ends the change")
-        assertTrue(duringRebuild.log.contains("cancelRecovery:41"), "it cancels its own recovery generation")
 
         // A fresh graph was needed and the retirement store is full.
         let atLimit = GraphFixture()

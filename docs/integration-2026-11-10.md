@@ -64,6 +64,24 @@ Particularly important combinations:
 
 ## Validation record
 
+Hosted full bench `42933445765` at `872154bc8370c4fc0567e6d9275854f70e332f6a`
+built the app and passed E2E, synthetic pasteback, integration, imported-audio,
+QA round-trip/stress and synthetic-audio checks. Fast/Core suites failed; the
+bounded reporter identified their source locations. The logger-disable test
+was reproduced clearing the inherited safety flag and now restores its prior
+value. All 22 focused Core methods, including the reported fixture classes,
+pass after that correction; this is not an unfiltered Core-suite result.
+
+The two fast failures were stale graph-fixture assumptions. The fake watchdog
+now claims actual pending work, and held teardown cases install real successor
+fake resources rather than incrementing generation alone. The component first
+reproduced both failures (259/261), then passed 282/282 with zero skips, including
+successor engine/queue/state/lease isolation. Parent reran the patched component
+successfully. Mutations removing watchdog cancellation, removing old cleanup or
+stopping the successor fail 1, 3 and 3 assertions respectively. No production
+audio source changed. The test file shrank eight lines. The replacement-head
+full hosted result and physical-device proof remain pending.
+
 The independent 27-PR expansion review at `28905f2b6b76f973462118dbf0fe58080851a227`
 returned RED with one P2: a UUID lookup globally excluded all historical aliases,
 which hid a different co-speaker using an old name in another meeting. The
