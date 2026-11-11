@@ -13,6 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 # Fail before compiling or launching anything on the owner's account.
 python3 scripts/ops/native-smoke-isolation.py
+python3 scripts/dev/test-capture-list-fixture-paths.py
 if [ ! -f deps-libs/libDraftDeps.a ] || [ ! -d deps-modules/TranscriptedCore.swiftmodule ]; then
     echo "Dependencies not found — run build-deps.sh first."
     exit 1
@@ -40,6 +41,7 @@ for source in "${APP_SOURCE_FILES[@]}"; do
 done
 swiftc -Onone -j "$(sysctl -n hw.ncpu 2>/dev/null || printf 8)" -o "$OUT_DIR/scroll-smoke" \
     "${APP_SWIFTC_LINK_ARGS[@]}" "${smoke_sources[@]}" \
+    Tests/UI/CaptureListFixturePaths.swift \
     Tests/UI/CaptureListLoadMoreScrollSmoke.swift Tests/UI/CaptureListScrollDiagnostics.swift "${APP_SWIFTC_TAIL_ARGS[@]}" \
     -Xlinker -rpath -Xlinker "$PWD/deps-frameworks"
 fixture_parent=$(cd "${TMPDIR:-/tmp}" && pwd -P)
@@ -59,7 +61,7 @@ cleanup_fixture() {
     }
 }
 trap cleanup_fixture EXIT
-mkdir -p "$fixture_home/container"
+mkdir -m 700 "$fixture_home/container"
 # Fixture paths after native-account preflight; HOME alone is not preference isolation.
 harness_environment=(env HOME="$fixture_home" CFFIXED_USER_HOME="$fixture_home" TMPDIR="$fixture_home/"
     TRANSCRIPTED_CONTAINER_DIR="$fixture_home/container"

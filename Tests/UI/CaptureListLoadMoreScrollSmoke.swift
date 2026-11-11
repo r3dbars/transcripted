@@ -527,30 +527,23 @@ final class CaptureListHangGuard: @unchecked Sendable {
     private init() throws {
         let environment = ProcessInfo.processInfo.environment
         guard AutomatedLaunchEnvironment.isActive(environment: environment),
-              environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1",
-              let homePath = environment["HOME"], homePath.hasPrefix("/"),
-              let parentPath = environment["TRANSCRIPTED_CAPTURE_LIST_FIXTURE_PARENT"], parentPath.hasPrefix("/"),
-              let containerPath = environment["TRANSCRIPTED_CONTAINER_DIR"], containerPath.hasPrefix("/") else {
+              environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] == "1" else {
             throw IsolationError.unowned
         }
-        let home = URL(fileURLWithPath: homePath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-        let parent = URL(fileURLWithPath: parentPath, isDirectory: true).resolvingSymlinksInPath().standardizedFileURL
-        let actualContainer = URL(fileURLWithPath: containerPath, isDirectory: true)
-            .resolvingSymlinksInPath().standardizedFileURL
-        let expectedContainer = home.appendingPathComponent("container", isDirectory: true)
-        let expectedCaptures = expectedContainer.appendingPathComponent("captures", isDirectory: true)
-        let expectedMeetings = expectedCaptures.appendingPathComponent("meetings", isDirectory: true)
-        let expectedDictations = expectedCaptures.appendingPathComponent("dictations", isDirectory: true)
-        guard home.deletingLastPathComponent() == parent,
-              home.lastPathComponent.hasPrefix("transcripted-capture-list-scroll."),
-              FileManager.default.temporaryDirectory.resolvingSymlinksInPath().standardizedFileURL == home,
-              actualContainer == expectedContainer else { throw IsolationError.unowned }
+        let paths = try CaptureListFixturePaths(environment: environment)
+        let home = paths.home
+        let parent = paths.parent
+        let actualContainer = paths.container
+        let expectedCaptures = paths.captures
+        let expectedMeetings = paths.meetings
+        let expectedDictations = paths.dictations
         // Prepare only exact owned leaves before consulting app storage helpers.
         for directory in [expectedCaptures, expectedMeetings, expectedDictations] {
             guard directory.resolvingSymlinksInPath().standardizedFileURL == directory else {
                 throw IsolationError.unowned
             }
             try FileManager.default.createPrivateDirectory(at: directory)
+            try CaptureListFixturePaths.requirePrivateDirectory(directory)
         }
         // Pin the volatile capture location before app helpers can consult a
         // stale preference belonging to this executable in the test account.

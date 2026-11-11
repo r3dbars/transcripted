@@ -370,6 +370,9 @@ for script in "${SELF_TEST_SCRIPTS[@]}"; do
     check "self-test $(basename "$script")" "python3 $script --self-test"
 done
 
+# Pure filesystem Swift regression; safe to skip on Linux without Swift.
+check "capture list fixture admission" "python3 scripts/dev/test-capture-list-fixture-paths.py"
+
 # ---------------------------------------------------------------- script test suites
 for script in "${PY_TEST_SUITES[@]}"; do
     check "py tests $(basename "$script")" "python3 $script" slow

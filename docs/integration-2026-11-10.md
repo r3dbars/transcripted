@@ -64,6 +64,19 @@ Particularly important combinations:
 
 ## Validation record
 
+Ordinary hosted Swift CI attempt 2 reached the capture-list scroll smoke but
+refused fixture setup before exercising the lists. The fixture incorrectly
+equated Foundation's system temporary directory with the wrapper's explicit
+TMPDIR. A pure filesystem probe reproduced that mismatch. The follow-up binds
+admission to explicit TMPDIR and canonical owned HOME/container paths, validates
+UID/directory/0700 permissions, and rejects traversal, symlinks and unsafe leaves.
+The native-account preflight and exact-leaf deletion checks remain in place.
+All 36 offline admission promises pass; controls detect the old temp-directory
+equality and missing permission checks. Parent reviewed the full patch and
+reran the regression. This changes only test infrastructure; the existing owner
+test app's production code is unchanged. Hosted native scroll proof still needs
+to qualify the replacement head.
+
 Hosted full bench `42933445765` at `872154bc8370c4fc0567e6d9275854f70e332f6a`
 built the app and passed E2E, synthetic pasteback, integration, imported-audio,
 QA round-trip/stress and synthetic-audio checks. Fast/Core suites failed; the

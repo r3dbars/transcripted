@@ -291,10 +291,19 @@ rules:
       - "Sources/UI/Settings/Pages/HomeSettingsPage.swift"
       - "Tests/UI/CaptureListLoadMoreScrollSmoke.swift"
       - "Tests/UI/CaptureListScrollDiagnostics.swift"
+      - "Tests/UI/CaptureListFixturePaths.swift"
       - "scripts/dev/test-capture-list-load-more-scroll.sh"
     checks:
       - "bash -n scripts/dev/test-capture-list-load-more-scroll.sh"
       - "bash scripts/dev/test-capture-list-load-more-scroll.sh"
+
+  - paths:
+      - "Tests/UI/CaptureListFixturePaths*.swift"
+      - "Tests/UI/CaptureListLoadMoreScrollSmoke.swift"
+      - "scripts/dev/test-capture-list-fixture-paths.py"
+      - "scripts/dev/test-capture-list-load-more-scroll.sh"
+    checks:
+      - "python3 scripts/dev/test-capture-list-fixture-paths.py"
 
   - paths:
       - "run-daily-audio-reliability.sh"
