@@ -53,20 +53,23 @@ final class LiveMeetingTranscriptService {
             .sink { [weak self] _ in
                 MainActor.assumeIsolated { self?.updateDelivery() }
             }
-        // Turning "Live transcript" on or off mid-meeting applies at once.
+        // Apply live-transcript changes on main without making defaults writers
+        // wait for it: main may be waiting for a writer's lock or delivery queue.
         settingsObserver = NotificationCenter.default.addObserver(
-            forName: UserDefaults.didChangeNotification, object: nil, queue: .main
+            forName: UserDefaults.didChangeNotification, object: nil, queue: nil
         ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                let setting = NotchIslandPreferences.showsLiveTranscript()
-                guard setting != self.captionsSetting else { return }
-                self.captionsSetting = setting
-                self.refreshCaptions()
-                if setting {
-                    LiveMeetingCaptions.shared.prewarm()
-                } else {
-                    LiveMeetingCaptions.shared.cancelPrewarm()
+            DispatchQueue.main.async { [weak self] in
+                MainActor.assumeIsolated {
+                    guard let self else { return }
+                    let setting = NotchIslandPreferences.showsLiveTranscript()
+                    guard setting != self.captionsSetting else { return }
+                    self.captionsSetting = setting
+                    self.refreshCaptions()
+                    if setting {
+                        LiveMeetingCaptions.shared.prewarm()
+                    } else {
+                        LiveMeetingCaptions.shared.cancelPrewarm()
+                    }
                 }
             }
         }
