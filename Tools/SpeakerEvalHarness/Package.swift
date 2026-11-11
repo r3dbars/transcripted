@@ -4,9 +4,9 @@ import Foundation
 
 // SpeakerEvalHarness — headless eval harness for the speaker-naming pipeline.
 //
-// Reuses the APP'S OWN diarizer + 256-dim WeSpeaker embeddings (via TranscriptedCore,
-// which links FluidAudio through the prebuilt deps archive) so the thresholds we tune
-// here are calibrated against the exact embedding model the app ships.
+// Reuses the app's diarizer and voiceprint embedding implementations through
+// TranscriptedCore (linked to FluidAudio via the prebuilt deps archive): WeSpeaker,
+// ERes2Net, or an injected Core ML model. Calibration depends on the selected model.
 //
 // Depends on the root TranscriptedCore package (compiled from source). The unsafe
 // search/link flags mirror Package.swift + Tools/TranscriptedCLI/Package.swift so the
