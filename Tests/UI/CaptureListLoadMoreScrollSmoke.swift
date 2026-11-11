@@ -194,7 +194,7 @@ import TranscriptedCore
         var worstLayouts = 0
         var loadMoreCount = 0
         weak var initialDocument = scroll.documentView
-        func record(_ phase: Int, requestedY: CGFloat, maximumY: CGFloat,
+        func record(_ phase: Int, step: Int, requestedY: CGFloat, maximumY: CGFloat,
                     beforeDocument: CGFloat, beforeViewport: CGFloat, layouts: Int) {
             diagnostics.record(
                 phase: phase, step: step, viewModel: viewModel, kind: scenario.kind,
@@ -204,7 +204,7 @@ import TranscriptedCore
                 beforeDocument: beforeDocument, beforeViewport: beforeViewport, layouts: layouts
             )
         }
-        record(0, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
+        record(0, step: step, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
             beforeDocument: scroll.documentView?.frame.height ?? 0, beforeViewport: clip.bounds.height, layouts: 0)
 
         while visibleCount(viewModel, kind: scenario.kind) < scenario.itemCount {
@@ -234,7 +234,7 @@ import TranscriptedCore
             let y = clip.bounds.origin.y
             let layouts = hosting.layoutPasses - layoutsBefore
             worstLayouts = max(worstLayouts, layouts)
-            record(1, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
+            record(1, step: step, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
                 beforeDocument: documentHeightBefore, beforeViewport: viewportHeightBefore, layouts: layouts)
             if visibleCount(viewModel, kind: scenario.kind) != expected {
                 return diagnostics.failure("\(scenario.label): Load More \(loadMoreCount) left \(visibleCount(viewModel, kind: scenario.kind)) rows on screen, expected \(expected)")
@@ -264,7 +264,7 @@ import TranscriptedCore
         let settled = hosting.layoutPasses
         pump(1.0)
         let idleLayouts = hosting.layoutPasses - settled
-        record(2, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
+        record(2, step: step, requestedY: lastY, maximumY: (scroll.documentView?.frame.height ?? 0) - clip.bounds.height,
             beforeDocument: scroll.documentView?.frame.height ?? 0, beforeViewport: clip.bounds.height, layouts: idleLayouts)
         if idleLayouts > maximumIdleLayouts {
             return diagnostics.failure("\(scenario.label): the page kept laying out after scrolling stopped (\(idleLayouts) passes)")
@@ -282,7 +282,7 @@ import TranscriptedCore
         lastY: inout CGFloat,
         step: inout Int,
         worstLayouts: inout Int,
-        record: (Int, CGFloat, CGFloat, CGFloat, CGFloat, Int) -> Void,
+        record: (Int, Int, CGFloat, CGFloat, CGFloat, CGFloat, Int) -> Void,
         untilBottom: Bool = false
     ) -> String? {
         while true {
@@ -301,7 +301,9 @@ import TranscriptedCore
             scroll.reflectScrolledClipView(clip)
             pump(0.03)
             let y = clip.bounds.origin.y
-            record(1, requestedY, maxY, documentHeightBefore, viewportHeightBefore,
+            // Pass the current step by value: the caller's step is exclusively
+            // borrowed for this function and must not be read by the callback.
+            record(1, step, requestedY, maxY, documentHeightBefore, viewportHeightBefore,
                    layoutPasses() - layoutsBefore)
             if y < lastY - allowedBackwardPoints {
                 return "\(scenario.label): at step \(step) the scroll jumped back from y=\(Int(lastY)) to y=\(Int(y))"
