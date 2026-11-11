@@ -133,7 +133,7 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/Runtime/ScaffoldPrewarmer.swift` | `Sources/TranscriptedWriting/Runtime/ScaffoldPrewarmer.swift` | ported | 2 | Sends the helper's bearer key. |
 | `Sources/TildeApp/Runtime/TildeModelSelection.swift` | `Sources/TranscriptedWriting/Runtime/WritingModelSelection.swift` | ported | 2 | Type name kept (`TildeModelSelection`). Release-proof and `PreviewModelSelection` paths stripped. Qwen greyed out under 16 GB: P2-B. |
 | `Sources/TildeApp/ScreenMemory/AXWindowTextReader.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AXWindowTextReader.swift` | ported | 2 | Fable porter. Reads only the focused window whose frame matches the chosen one; no other-window search or unmatched fallback (2026-09-29). |
-| `Sources/TildeApp/ScreenMemory/AccessibilityPermission.swift` | `Sources/TranscriptedWriting/Runtime/ScreenMemory/AccessibilityPermission.swift` | ported | 2 | No launch-time prompt; Transcripted already holds Accessibility. `request()` stays; callers decide. |
+| `Sources/TildeApp/ScreenMemory/AccessibilityPermission.swift` | `—` | not-ported | 2 | Ported, then removed: no caller. Live Screen Memory readers check Accessibility directly; app permission actions are separate. |
 | `Sources/TildeApp/ScreenMemory/GLiNERRedactionHelperHost.swift` | `—` | not-ported | 2 | Dev-only GLiNER. |
 | `Sources/TildeApp/ScreenMemory/LocalOCREvaluationStore.swift` | `—` | not-ported | 2 | Dev-only. Strip call sites. |
 | `Sources/TildeApp/ScreenMemory/LuminanceGridSampler.swift` | `—` | not-ported | 2 | Incremental OCR only; removed with that flag. |
