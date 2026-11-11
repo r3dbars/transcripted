@@ -9,8 +9,6 @@ import SwiftUI
 struct TodaySettingsPage: View {
     @ObservedObject var todayViewModel: TodayViewModel
     let onOpenRecentItem: (TodayRecentItem) -> Void
-    let onShowMeetings: () -> Void
-    let onShowDictations: () -> Void
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
     let onStartDictation: () -> Void

@@ -266,14 +266,6 @@ extension TranscriptedSettingsView {
                     }
                 }
             },
-            onShowMeetings: {
-                trackSettingsAction("today_show_meetings", page: .today)
-                navigation.select(.home, source: .settingsAction)
-            },
-            onShowDictations: {
-                trackSettingsAction("today_show_dictations", page: .today)
-                navigation.select(.dictations, source: .settingsAction)
-            },
             onStartMeeting: {
                 trackSettingsAction("empty_start_meeting", page: .today)
                 actions.startMeeting()
