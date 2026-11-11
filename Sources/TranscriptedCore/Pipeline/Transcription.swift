@@ -10,7 +10,6 @@ public class Transcription: ObservableObject {
     @Published public var isProcessing: Bool = false
     @Published public var error: String?
     @Published public var processingStatus: String = ""
-    @Published public var lastSavedFileURL: URL?
 
     public let parakeet: any SpeechToTextEngine
     public let diarization: any DiarizationEngine
