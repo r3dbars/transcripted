@@ -65,7 +65,7 @@ func testHomeMeetingCacheIsolation() {
                 "fixture meeting should scan as a Home row (cold path writes the cache)"
             )
         } catch {
-            assertionFailure("fixture setup failed: \(error)")
+            assertTrue(false,"fixture setup failed: \(error)")
             return
         }
 
@@ -93,7 +93,7 @@ func testHomeMeetingCacheIsolation() {
         do {
             try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
         } catch {
-            assertionFailure("temp dir setup failed: \(error)")
+            assertTrue(false,"temp dir setup failed: \(error)")
             return
         }
 
