@@ -31,8 +31,6 @@ final class NextSentenceFnKey: @unchecked Sendable {
         self.onHoldCancel = onHoldCancel
     }
 
-    var isActive: Bool { tap != nil }
-
     @discardableResult
     func start() -> Bool {
         guard tap == nil else { return true }
