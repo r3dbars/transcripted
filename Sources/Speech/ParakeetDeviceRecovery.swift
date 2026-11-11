@@ -393,7 +393,10 @@ extension ParakeetEngine {
             routeTransitionDebounceState.discardPendingRoute()
             return
         }
-        routeTransitionDebounceState.observe(categoricalAudioRoute(for: selection))
+        guard routeTransitionDebounceState.observeReportableRoute(
+            categoricalAudioRoute(for: selection),
+            selectedInputID: selection.selectedInput.id
+        ) else { return }
         updateCachedInputDeviceSelection(selection)
         stableAudioRouteIdentity = ParakeetAudioRouteIdentity(selection: selection)
         guard let stableRoute = routeTransitionDebounceState.commitPendingRoute() else { return }

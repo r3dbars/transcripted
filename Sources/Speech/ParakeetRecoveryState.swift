@@ -342,6 +342,21 @@ struct ParakeetRouteTransitionDebounceState: Equatable {
         pendingRoute = route
     }
 
+    /// A failed lookup uses CoreAudio's zero device ID as a recovery sentinel.
+    /// It must invalidate the pending report without becoming a stable route.
+    /// Callers may refresh their exact identity/cache only when this returns true.
+    mutating func observeReportableRoute(
+        _ route: ParakeetCategoricalAudioRoute,
+        selectedInputID: UInt32
+    ) -> Bool {
+        guard selectedInputID != 0 else {
+            discardPendingRoute()
+            return false
+        }
+        observe(route)
+        return true
+    }
+
     mutating func commitPendingRoute() -> ParakeetCategoricalAudioRoute? {
         guard let pendingRoute else { return nil }
         self.pendingRoute = nil
