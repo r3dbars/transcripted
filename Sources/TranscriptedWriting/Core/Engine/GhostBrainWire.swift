@@ -1,6 +1,6 @@
 import Foundation
 
-/// The only messages exchanged between Tilde and its input method.
+/// The only messages exchanged between the Writing app and its input method.
 /// Completion context remains memory-only. Personal History events are the
 /// explicit local-persistence payload and are never sent off-device.
 public struct GhostBrainRequest: Codable, Equatable, Sendable {

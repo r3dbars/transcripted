@@ -487,16 +487,6 @@ public struct PersonalNextWordShadow: Sendable {
         )?.word
     }
 
-    /// Read-only production lookup for experimental personal-word serving
-    /// (`docs/plans/road-to-paid.md` Phase 3, the "Personal suggestions
-    /// (experimental)" menu toggle). Deliberately reuses the shadow
-    /// experiment's own conservative "baseline" recipe parameters
-    /// (`baselineRecipeID`'s 2-word context, 2x-support-over-runner-up
-    /// ratio) rather than the looser candidate recipe still under live A/B
-    /// test — serving a real suggestion should never lean on a threshold
-    /// that hasn't itself been vetted as a safe production bar. Purely a
-    /// lookup over `model`: no mutation, no interaction with `consume`'s
-    /// paired scoring, callable any number of times with no side effects.
     /// Splits `text` into the same letter-run tokens `consume` extracts one
     /// keystroke at a time while training the model: a run of Unicode
     /// letters is one token (a combining mark only extends it when the
@@ -537,6 +527,14 @@ public struct PersonalNextWordShadow: Sendable {
     /// next ("I think I " -> "ll").
     private static let contractionFragments: Set<String> = ["t", "s", "d", "m", "ll", "re", "ve"]
 
+    /// Read-only production lookup for personal-word serving. The upstream
+    /// Phase 3 roadmap called this "Personal suggestions (experimental)".
+    /// It uses `baselineRecipeID`'s conservative 2-word context and
+    /// 2x-support-over-runner-up ratio, with the serving-only minimum order
+    /// below. The original A/B validation rationale is upstream history,
+    /// not a claim that a live experiment is running in Transcripted.
+    /// Purely a lookup over `model`: no mutation or interaction with
+    /// `consume`'s paired scoring, callable repeatedly without side effects.
     public func predictNextWord(afterTailWords tailWords: [String]) -> PersonalNextWordPrediction? {
         let folded = tailWords.suffix(Self.maximumContextWords).map(Self.folded)
         guard let prediction = Self.winningPrediction(

@@ -39,12 +39,11 @@ public enum CaptureTriggerPolicy {
     /// Typing must be still this long, with a session active, before a pause
     /// counts as a trigger.
     public static let typingPauseThresholdSeconds: TimeInterval = 0.25
-    /// Hard ceiling regardless of how many triggers fire: never more than one
-    /// capture per this many seconds. Owner directive 2026-08-18: fresher
-    /// conversation context is worth the extra duty cycles — was 5.0; the
-    /// power probe (script/capture_power_probe.sh) still bounds per-capture
-    /// cost, so the ceiling change scales total cost by at most 2.5x while
-    /// typing, and captures still only fire on real triggers.
+    /// Minimum spacing for typing-pause captures. Owner directive 2026-08-18:
+    /// fresher conversation context is worth the extra duty cycles — was 5.0.
+    /// Focus and window changes use the separate floor below; captures still
+    /// only fire on real triggers. This is a cadence rule, not a measurement
+    /// of per-capture cost.
     public static let cadenceCapSeconds: TimeInterval = 2.0
     /// Focus and window changes signal that the content probably changed —
     /// the previous snapshot is the wrong conversation, and waiting out the

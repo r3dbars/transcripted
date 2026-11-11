@@ -7,7 +7,8 @@ import Foundation
 /// pixels into `OCRBlock`s; this type only reasons about the blocks it is
 /// handed.
 ///
-/// Screen Memory plan, Phase 2 PR 2a (`docs/plans/screen-memory.md`).
+/// Ported from the upstream Screen Memory plan, Phase 2 PR 2a. Current
+/// Transcripted parity notes are in `docs/writing-plan.md`, Screen Memory.
 public enum ScreenScene {
     /// A unit-square rectangle in the display's coordinate space
     /// (x/y/width/height all in `0...1`), origin at the **top-left** — y
