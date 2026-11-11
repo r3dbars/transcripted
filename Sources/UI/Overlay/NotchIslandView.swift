@@ -58,7 +58,7 @@ enum NotchIslandPalette {
     nonisolated(unsafe) static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold) // immutable, never mutated
 
     static var reduceMotion: Bool {
-        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        AccessibilityDisplayPolicy.reduceMotion
     }
 
     @MainActor static func label(_ text: String, font: NSFont, color: NSColor, wraps: Bool = false, width: CGFloat = 0) -> NSTextField {
