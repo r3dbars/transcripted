@@ -199,7 +199,6 @@ extension WritingController {
             let result = await installer.installOrUpdateIfNeeded()
             guard let self else { return result }
             self.keyboardInstallTask = nil
-            self.keyboardInstallResult = result
             self.log("WRITING | keyboard install: \(result)")
             if result == .installed, !wasInstalled {
                 WritingKeyboardFirstInstall.record(
@@ -218,7 +217,6 @@ extension WritingController {
     /// the keyboard is the selected input source.
     func enableAndSelectKeyboard() -> Bool {
         let enable = WritingKeyboardInputSource.enable(using: inputSources)
-        keyboardEnableResult = enable
         switch enable {
         case .enabled:
             log("WRITING | keyboard enable: enabled")
@@ -232,12 +230,10 @@ extension WritingController {
             log("WRITING | keyboard enable: TISEnableInputSource failed (\(status))")
         }
         guard enable.isEnabled else {
-            keyboardSelectSucceeded = false
             log("WRITING | keyboard select: skipped, keyboard not enabled")
             return false
         }
         let selected = keyboardInstaller.selectInputSourceIfAvailable()
-        keyboardSelectSucceeded = selected
         log("WRITING | keyboard select: \(selected ? "selected" : "not selected")")
         if selected {
             Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)

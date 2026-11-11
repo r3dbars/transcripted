@@ -108,7 +108,6 @@ final class WritingController {
     var selectedModel: TildeModelChoice
     /// The socket server is up and the runtime is live.
     private(set) var isRunning = false
-    var keyboardInstallResult: GhostKeyboardInstallerHost.KeyboardInstallResult?
     /// The keyboard install in flight. Launch and the Writing tab can ask at
     /// once; they share one copy instead of racing two into the same folder.
     var keyboardInstallTask: Task<GhostKeyboardInstallerHost.KeyboardInstallResult, Never>?
@@ -117,12 +116,6 @@ final class WritingController {
     private(set) var runtimeStopCount = 0
     /// Quit invalidates keyboard work even before a runtime has ever started.
     var keyboardActionAdmission: Int? { isTerminated ? nil : runtimeStopCount }
-    /// What enabling the keyboard did on the last try, if it ran. On macOS
-    /// 26 that's `.needsUserToAdd`: `TISEnableInputSource` returns `noErr`
-    /// and the source stays off.
-    var keyboardEnableResult: WritingKeyboardInputSource.EnableResult?
-    /// Whether selecting the keyboard on the first setup worked, if it ran.
-    var keyboardSelectSucceeded: Bool?
 
     var isQwenEligible: Bool {
         WritingModelEligibility.isEligible(.qwen35B9B, physicalMemoryBytes: physicalMemoryBytes)
@@ -174,8 +167,8 @@ final class WritingController {
             selectedOnce: Self.appDefaults().bool(forKey: Self.keyboardFirstSetupKey)
         )
         if let selected = refresh.selectSucceeded {
-            keyboardSelectSucceeded = selected && refresh.state == .selected
-            log("WRITING | keyboard select after it was added: \(keyboardSelectSucceeded == true ? "selected" : "not selected")")
+            let selectionSucceeded = selected && refresh.state == .selected
+            log("WRITING | keyboard select after it was added: \(selectionSucceeded ? "selected" : "not selected")")
         }
         if refresh.state == .selected {
             Self.appDefaults().set(true, forKey: Self.keyboardFirstSetupKey)
@@ -651,8 +644,8 @@ final class WritingController {
     // MARK: - Keyboard
 
     /// Install or update, register, and until the keyboard was selected
-    /// once, try the enable and select. Every result lands in the state
-    /// above and the app log. Never opens System Settings: the Writing tab
+    /// once, try the enable and select. Results are recorded in the app log.
+    /// Never opens System Settings: the Writing tab
     /// shows the guidance and its button does that.
     private func installKeyboard() {
         Task { @MainActor [weak self] in
