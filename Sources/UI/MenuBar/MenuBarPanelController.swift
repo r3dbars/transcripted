@@ -110,8 +110,8 @@ final class MenuBarPanelController: NSViewController {
 
         content.headerView.update(
             warmupStatus: warmupStatus,
-            // Shown even with dictation shortcuts off: the meeting and
-            // paste shortcuts need the same event tap.
+            // Shown even with dictation shortcuts off: the meeting shortcut
+            // needs the same event tap.
             shortcutWarning: shortcutWarningPresentation(),
             isMeetingRecording: isMeetingRecording,
             transcribingStatus: meetingTranscribingStatus(),
