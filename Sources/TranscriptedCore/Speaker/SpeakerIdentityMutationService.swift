@@ -421,7 +421,7 @@ public enum SpeakerIdentityMutationService {
         var results: [PlannedTranscript] = []
         var unreadableCount = 0
         for url in TranscriptSaver.transcriptMarkdownFiles(under: directory) {
-            guard needles.contains(where: { TranscriptSaver.scanFrontmatter(at: url, for: $0) != .notMatched }) else { continue }
+            guard TranscriptSaver.scanFrontmatter(at: url, forAny: needles) != .notMatched else { continue }
             guard let content = try? String(contentsOf: url, encoding: .utf8) else {
                 AppLogger.speakers.error("Speaker identity planning could not read a flagged transcript", [
                     "file": url.lastPathComponent

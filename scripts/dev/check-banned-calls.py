@@ -154,7 +154,7 @@ RULES: tuple[Rule, ...] = (
             "Sources/Observability/ReliabilityPacketRecorder.swift",
             "Sources/Observability/AppLogSink.swift",
             "Sources/TranscriptedCore/Logging/FileLogger.swift",
-            "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater+Scanning.swift",
+            "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
             "Sources/Observability/ObservabilityLogRotation.swift",
         ),
         strip_line_comments=True,
@@ -495,12 +495,12 @@ def self_test_filehandle_owners() -> None:
         "Sources/Observability/ReliabilityPacketRecorder.swift",
         "Sources/Observability/AppLogSink.swift",
         "Sources/TranscriptedCore/Logging/FileLogger.swift",
-        "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater+Scanning.swift",
+        "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
         "Sources/Observability/ObservabilityLogRotation.swift",
     )
     current_owners = (
         "Sources/Observability/EventFileWriter.swift",
-        "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater+Scanning.swift",
+        "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
         "Sources/Observability/ObservabilityLogRotation.swift",
     )
     legacy_calls = (
