@@ -330,6 +330,8 @@ SELF_TEST_SCRIPTS=(
     scripts/ops/release-watch.py
     scripts/ops/retention-cohort-report.py
     scripts/release/bump-release-version.py
+    scripts/release/freeze-legacy-appcast.py
+    scripts/release/mark-appcast-critical.py
     scripts/release/post-dmg-release-audit.py
     scripts/release/sentry-release-dry-run.py
     scripts/dev/mutation-probe.py
@@ -377,8 +379,12 @@ unlisted_candidates() {
     local listed=" ${SELF_TEST_SCRIPTS[*]} ${PY_TEST_SUITES[*]} ${RB_TEST_SUITES[*]+${RB_TEST_SUITES[*]}} "
     {
         grep -l -- '"--self-test"' scripts/ops/*.py scripts/release/*.py 2>/dev/null
+        # lint_rules/ contains modules exercised by lint.py, not standalone suites.
+        # The staged Sparkle script installs/relaunches an app; hosted CI owns it.
         find scripts \( -name 'test-*.py' -o -name 'test_*.py' -o -name '*-test.rb' -o -name '*_test.rb' -o -name 'test_*.rb' \) \
-            ! -name 'test-matrix-checks.py' -print 2>/dev/null
+            ! -name 'test-matrix-checks.py' \
+            ! -path 'scripts/dev/lint_rules/*' \
+            ! -path 'scripts/release/test-staged-sparkle-update.py' -print 2>/dev/null
     } | sort -u | while IFS= read -r candidate; do
         case "$listed" in *" $candidate "*) ;; *) echo "$candidate" ;; esac
     done
