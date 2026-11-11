@@ -194,6 +194,33 @@ def self_test(matrix_path: Path) -> None:
         if len(actual) != len(set(actual)):
             raise AssertionError(f"{changed_path} produced duplicate checks")
 
+    # Each independently named owner must schedule both guard commands. Include
+    # a future Settings extension to protect the wildcard, not just today's files.
+    guard_checks = {
+        "python3 scripts/dev/check-banned-calls.py --self-test",
+        "python3 scripts/dev/check-banned-calls.py",
+    }
+    guard_owners = (
+        "Sources/Speech/ParakeetEngine.swift",
+        "Sources/Observability/EventFileWriter.swift",
+        "Sources/TranscriptedCore/Logging/FileLogger.swift",
+        "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater+Scanning.swift",
+        "Sources/App/TranscriptedSupportActions.swift",
+        "Sources/App/TranscriptedApp.swift",
+        "Sources/App/TranscriptedMenuCommands.swift",
+        "Sources/UI/Settings/TranscriptedSettingsView.swift",
+        "Sources/UI/Settings/TranscriptedSettingsView+Future.swift",
+        "Sources/UI/Settings/TranscriptedSettingsFallbackView.swift",
+        "Sources/UI/Settings/PermissionsOnboardingView.swift",
+        "Sources/UI/Settings/AgentConnectionSettingsPage.swift",
+        "Sources/UI/Settings/HomeMeetingAudioPlayer.swift",
+        "scripts/dev/check-banned-calls.py",
+    )
+    for owner in guard_owners:
+        actual = select_checks(rules, [owner])
+        assert guard_checks.issubset(actual), f"{owner} must select both banned-call checks"
+        assert len(actual) == len(set(actual)), f"{owner} selected duplicate commands"
+
     if select_checks(rules, ["unmapped.file"]):
         raise AssertionError("an unmapped path unexpectedly selected checks")
 
