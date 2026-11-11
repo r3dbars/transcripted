@@ -9,6 +9,7 @@ import TranscriptedCore
 @MainActor
 final class WhisperEngine: ObservableObject {
     @Published private(set) var modelDownloadState: ParakeetModelState = .notLoaded
+    private var modelDownloadStateOwner: TranscriptionModelChoice?
 
     private let modelRepo = "argmaxinc/whisperkit-coreml"
     private var whisperKit: WhisperKit?
@@ -29,6 +30,28 @@ final class WhisperEngine: ObservableObject {
 
     func isModelLoaded(for model: TranscriptionModelChoice) -> Bool {
         loadedModel == model && whisperKit != nil && modelDownloadState.isReady
+    }
+
+    func modelDownloadState(
+        for model: TranscriptionModelChoice,
+        publishedState: ParakeetModelState? = nil
+    ) -> ParakeetModelState {
+        WhisperModelStatePolicy.state(
+            for: model,
+            owner: modelDownloadStateOwner,
+            storedState: modelDownloadState,
+            emittedState: publishedState
+        )
+    }
+
+    private func publishModelDownloadState(
+        _ state: ParakeetModelState,
+        for model: TranscriptionModelChoice?
+    ) {
+        // @Published delivers before storing the new state. Set its concrete
+        // owner first so subscribers can project the emitted payload safely.
+        modelDownloadStateOwner = model
+        modelDownloadState = state
     }
 
     func initialize(model: TranscriptionModelChoice) async {
@@ -374,7 +397,7 @@ final class WhisperEngine: ObservableObject {
         let pipe = whisperKit
         whisperKit = nil
         loadedModel = nil
-        modelDownloadState = .notLoaded
+        publishModelDownloadState(.notLoaded, for: nil)
         Task { [operationGate] in
             // Publication is cleared synchronously, but a running decode may
             // still retain this pipe. Do not unload it until that call returns.
@@ -401,11 +424,12 @@ final class WhisperEngine: ObservableObject {
             let existing = whisperKit
             whisperKit = nil
             loadedModel = nil
+            publishModelDownloadState(.notLoaded, for: nil)
             await existing?.unloadModels()
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
         }
 
-        modelDownloadState = .downloading(progress: 0)
+        publishModelDownloadState(.downloading(progress: 0), for: model)
         AppLogger.transcription.info("WHISPER | preparing \(model.title) (\(variant))...")
 
         do {
@@ -426,7 +450,7 @@ final class WhisperEngine: ObservableObject {
                 },
                 willLoad: { [weak self] folder, cached in
                     guard let self else { return }
-                    self.modelDownloadState = .loading
+                    self.publishModelDownloadState(.loading, for: model)
                     if cached {
                         AppLogger.transcription.info("WHISPER | using cached \(model.title) from \(folder.path)")
                     } else {
@@ -437,7 +461,7 @@ final class WhisperEngine: ObservableObject {
                     // Only after a failed cached load; the normal path is
                     // already .downloading(progress: 0) from above.
                     if let self, self.modelDownloadState == .loading {
-                        self.modelDownloadState = .downloading(progress: 0)
+                        self.publishModelDownloadState(.downloading(progress: 0), for: model)
                     }
                     return try await WhisperKit.download(
                         variant: variant,
@@ -451,7 +475,7 @@ final class WhisperEngine: ObservableObject {
                                 self.initializationGeneration.isCurrent(generation),
                                 self.initializingModel == model
                             else { return }
-                            self.modelDownloadState = .downloading(progress: progress.fractionCompleted)
+                            self.publishModelDownloadState(.downloading(progress: progress.fractionCompleted), for: model)
                         }
                     }
                 },
@@ -482,7 +506,7 @@ final class WhisperEngine: ObservableObject {
 
             whisperKit = pipe
             loadedModel = model
-            modelDownloadState = .ready
+            publishModelDownloadState(.ready, for: model)
             EventReporter.shared.capture(
                 level: .info,
                 engine: model.engineName,
@@ -499,7 +523,7 @@ final class WhisperEngine: ObservableObject {
             guard initializationGeneration.isCurrent(generation), !Task.isCancelled else { return }
             let friendlyMessage = "Couldn't load \(model.title): \(error.localizedDescription)"
             AppLogger.transcription.error("WHISPER | \(friendlyMessage)")
-            modelDownloadState = .failed(friendlyMessage)
+            publishModelDownloadState(.failed(friendlyMessage), for: model)
             EventReporter.shared.capture(
                 level: .error,
                 engine: model.engineName,

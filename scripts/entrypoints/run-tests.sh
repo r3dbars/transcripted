@@ -525,6 +525,7 @@ APP_SOURCES=(
     "Sources/TranscriptedCore/Pipeline/SpeechSegmentPacking.swift"
     "Sources/Speech/ParakeetModelInitDiagnostics.swift"
     "Sources/Speech/ParakeetModelState.swift"
+    "Sources/Speech/WhisperModelStatePolicy.swift"
     "Sources/Speech/WhisperCachedModelPolicy.swift"
     "Sources/Speech/WhisperVoicedSpeechGate.swift"
     "Sources/Speech/WhisperHallucinationFilter.swift"

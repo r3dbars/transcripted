@@ -115,7 +115,11 @@ class STTRouter: ObservableObject {
         whisperEngine.$modelDownloadState
             .sink { [weak self] state in
                 guard let self else { return }
-                self.refreshModelDownloadState(publishedState: self.selectedModel.isWhisper ? state : nil)
+                self.refreshModelDownloadState(
+                    publishedState: self.selectedModel.isWhisper
+                        ? self.whisperEngine.modelDownloadState(for: self.selectedModel, publishedState: state)
+                        : nil
+                )
             }
             .store(in: &cancellables)
 
@@ -782,7 +786,7 @@ class STTRouter: ObservableObject {
         case .parakeetUltraExperimental:
             return parakeetEngine.modelDownloadState(for: .ultra)
         case .whisperLargeV3Turbo, .whisperLargeV3:
-            return whisperEngine.modelDownloadState
+            return whisperEngine.modelDownloadState(for: model)
         case .appleSpeech:
             return appleSpeechEngine.modelDownloadState
         }
