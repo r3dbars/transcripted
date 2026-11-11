@@ -23,6 +23,7 @@ mkdir -p Sources/TranscriptedCore scripts/entrypoints deps-libs bin
 printf 'synthetic package\n' > Package.swift
 printf 'synthetic build script\n' > scripts/entrypoints/build-deps.sh
 printf 'first input\n' > Sources/TranscriptedCore/Input.swift
+printf 'punctuated input\n' > Sources/TranscriptedCore/Input+Capture.swift
 DEPS_BUILD_STAMP="$fixture_root/deps-libs/.build-deps-stamp"
 real_shasum="$(command -v shasum)"
 export real_shasum
@@ -49,6 +50,12 @@ PY
 }
 
 write_stamp
+if locale -a | grep -Ei '^en_US[.]UTF-?8$' >/dev/null; then
+    LC_ALL=C write_stamp
+    LC_ALL=en_US.UTF-8 expect_fresh 'unchanged inputs remain fresh across shell locales'
+    LC_ALL=en_US.UTF-8 write_stamp
+    LC_ALL=C expect_fresh 'locale choice does not change the recorded digest'
+fi
 set_times 200 100
 expect_fresh 'matching digest rescues newer input mtimes'
 set_times 100 200

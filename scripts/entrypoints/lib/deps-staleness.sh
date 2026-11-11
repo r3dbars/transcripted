@@ -41,7 +41,8 @@ dependency_input_paths() {
         printf '%s\n' "Package.swift"
         printf '%s\n' "scripts/entrypoints/build-deps.sh"
         find "Sources/TranscriptedCore" -type f ! -name "CLAUDE.md" ! -name "AGENTS.md"
-    } | sort
+    # The digest includes path order; login shells may change the locale.
+    } | LC_ALL=C sort
 }
 
 dependency_input_listing() {
