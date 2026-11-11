@@ -85,7 +85,6 @@ struct HomeMeetingPreview: Identifiable {
     let markdown: String
     let content: HomeMeetingPreviewContent
     let readError: String?
-    let feedbackTarget: HomeFeedbackTarget
 
     /// Pass `content` when it was already parsed off main (see
     /// `readMeetingMarkdown`); otherwise it's parsed here from `markdown`.
@@ -103,7 +102,6 @@ struct HomeMeetingPreview: Identifiable {
         self.markdown = markdown
         self.content = content ?? HomeMeetingPreviewContent.make(from: markdown)
         self.readError = readError
-        feedbackTarget = HomeFeedbackTarget.meeting(item)
     }
 
     private init(
@@ -114,8 +112,7 @@ struct HomeMeetingPreview: Identifiable {
         audio: MeetingAudioAttachment?,
         markdown: String,
         content: HomeMeetingPreviewContent,
-        readError: String?,
-        feedbackTarget: HomeFeedbackTarget
+        readError: String?
     ) {
         self.id = id
         self.title = title
@@ -125,7 +122,6 @@ struct HomeMeetingPreview: Identifiable {
         self.markdown = markdown
         self.content = content
         self.readError = readError
-        self.feedbackTarget = feedbackTarget
     }
 
     /// Returns a copy reflecting a renamed transcript while keeping the stable `id`
@@ -143,8 +139,7 @@ struct HomeMeetingPreview: Identifiable {
             audio: audio,
             markdown: markdown,
             content: content,
-            readError: readError,
-            feedbackTarget: feedbackTarget
+            readError: readError
         )
     }
 
@@ -162,8 +157,7 @@ struct HomeMeetingPreview: Identifiable {
             audio: audio,
             markdown: markdown,
             content: content ?? HomeMeetingPreviewContent.make(from: markdown),
-            readError: readError,
-            feedbackTarget: feedbackTarget
+            readError: readError
         )
     }
 }

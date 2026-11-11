@@ -34,25 +34,6 @@ func testHomePresentation() {
         assertTrue(small >= 0 && small < 3, "Custom slot count should be respected")
     }
 
-    runSuite("HomeStableReferenceID.id — deterministic FNV-1a derivation") {
-        // Same input -> same id.
-        assertEqual(
-            HomeStableReferenceID.id(for: "297F08B7-62AE-4291-9EA3-41EB0B17A64A"),
-            HomeStableReferenceID.id(for: "297F08B7-62AE-4291-9EA3-41EB0B17A64A"),
-            "Same capture id should derive the same stable reference id"
-        )
-
-        // Distinct inputs -> distinct ids.
-        let a = HomeStableReferenceID.id(for: "meeting-1")
-        let b = HomeStableReferenceID.id(for: "meeting-2")
-        assertTrue(a != b, "Distinct capture ids should derive distinct stable reference ids")
-
-        // Pinned outputs so the on-disk/telemetry shape stays byte-stable
-        // (offset basis matches the literal used in HomeView, not canonical FNV).
-        assertEqual(HomeStableReferenceID.id(for: ""), "14650fb0739d0383", "Empty input returns the offset basis in hex")
-        assertEqual(HomeStableReferenceID.id(for: "a"), "44bd8ad473cd9906", "Single-byte hash is pinned")
-    }
-
     runSuite("HomeDaySectionLabel.label — Today / Yesterday / formatted date") {
         let calendar = Calendar.current
         let now = Date()
