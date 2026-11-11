@@ -1,19 +1,36 @@
 # Disposable diagnostic only. Never merge this branch.
-name: Native capture scroll diagnostic
+name: Full candidate validation diagnostic
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
   spm-tests:
-    runs-on: [self-hosted, macOS, ARM64, transcripted-integration-2530-fdb]
-    timeout-minutes: 60
+    runs-on: [self-hosted, macOS, ARM64, transcripted-full-2530-fdb]
+    timeout-minutes: 150
+    defaults:
+      run:
+        working-directory: candidate
+    env:
+      TRANSCRIPTED_DISABLE_FILE_LOGGER: "1"
+      TZ: America/Chicago
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fdb0236ae0da9df0204c80d044e290fd489b9690
           persist-credentials: false
-      - name: Verify isolation and run focused native scroll smoke
+          path: candidate
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          path: diagnostic-harness
+      - uses: actions/checkout@v4
+        with:
+          ref: 8a38235eef00816a79daa1324387a21ef880204d
+          persist-credentials: false
+          path: reviewed-harness
+      - name: Verify isolation and run full validation
         shell: bash
         run: |
           set -euo pipefail
@@ -25,8 +42,9 @@ jobs:
             printf 'source=%s\nworkflow_sha=%s\nrun_id=%s\njob=%s\nstage=%s\nexit=%s\n' "$(git rev-parse HEAD)" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_JOB" "$stage" "$code" > diagnostic-proof/receipt.txt
             for log in diagnostic-proof/*.raw; do
               [ -f "$log" ] || continue
-              tail -c 524288 "$log" > "${log%.raw}.log"
-              rm "$log"
+              python3 ../diagnostic-harness/.github/diagnostics/bound-log.py "$log" > "${log%.raw}.log"
+              mkdir -p "$RUNNER_TEMP/private-diagnostic-logs"
+              mv "$log" "$RUNNER_TEMP/private-diagnostic-logs/"
             done
             exit "$code"
           }
@@ -59,16 +77,19 @@ jobs:
           assert subprocess.run(['sudo', '-n', '-k', 'true'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0
           print('isolation=throwaway-vm; desktop=dedicated; admin=false; arch=arm64; os=26')
           PYVERIFY
-          stage=build-deps
-          bash build-deps.sh > diagnostic-proof/build-deps.raw 2>&1
-          stage=native-scroll
-          bash scripts/dev/test-capture-list-load-more-scroll.sh > diagnostic-proof/native-scroll.raw 2>&1
+          stage=full-validation
+          bash ../diagnostic-harness/.github/diagnostics/run-full.sh
           stage=complete
       - name: Preserve bounded logs and exact-source receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: native-scroll-fdb-${{ github.run_id }}
-          path: diagnostic-proof/
+          name: full-validation-fdb-${{ github.run_id }}
+          path: |
+            candidate/diagnostic-proof/receipt.txt
+            candidate/diagnostic-proof/stages.tsv
+            candidate/diagnostic-proof/coverage.json
+            candidate/diagnostic-proof/fixture-receipt.json
+            candidate/diagnostic-proof/*.log
           if-no-files-found: error
           retention-days: 14
