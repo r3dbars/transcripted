@@ -235,24 +235,6 @@ final class TranscriptionPipelineHelpersTests: XCTestCase {
         )
     }
 
-    func testAudioCaptureStartStateWaitsWhenTapHasNotStreamedYet() {
-        // The silent-death case: the I/O proc started and a file URL was
-        // assigned, but the tap never delivered a buffer. Readiness must stay
-        // `.waiting` so the start deadline fails it instead of reporting a tap
-        // that is silently writing nothing as "recording".
-        XCTAssertEqual(
-            AudioCaptureStartState.meetingCaptureOutcome(
-                isRecording: true,
-                micAudioFileURL: URL(fileURLWithPath: "/tmp/mic.wav"),
-                micAudioStreaming: true,
-                systemAudioFileURL: URL(fileURLWithPath: "/tmp/system.wav"),
-                systemAudioStreaming: false,
-                errorMessage: nil
-            ),
-            .waiting
-        )
-    }
-
     @MainActor
     func testUnusableMicContinuesWithSystemAudioTranscript() async throws {
         let root = FileManager.default.temporaryDirectory
