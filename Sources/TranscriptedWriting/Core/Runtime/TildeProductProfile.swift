@@ -96,9 +96,9 @@ public enum TildeProductProfile: String, Equatable, Sendable {
     // MARK: - Behaviour, owned by the policy objects in TildeConfiguration.swift
 
     /// Gates, cleaning, and prompt shape this behaviour profile serves.
-    /// Production, the 26B preview, and the Model Preview keep the measured
-    /// stack; the 9B behaviour (also the official Qwen choice) runs the
-    /// Q12/Q13-nominated filters and the owner-directed scene changes.
+    /// Production uses `.conservative`; the 9B behaviour (also the official
+    /// Qwen choice) uses `.tuned9B`. The Q12/Q13 nominations and owner-directed
+    /// scene changes describe that policy's upstream provenance.
     public var decisionPolicy: DecisionPolicy {
         self == .preview9B ? .tuned9B : .conservative
     }

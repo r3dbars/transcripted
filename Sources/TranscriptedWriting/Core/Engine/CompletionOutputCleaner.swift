@@ -44,7 +44,7 @@ public struct CompletionCleanOutcome: Sendable {
     }
 }
 
-/// Lab-selectable cleanup behavior. Production call sites use `.production`;
+/// Selectable cleanup behavior. Production call sites use `.production`;
 /// experimental callers can ablate individual judgment rules without
 /// weakening unsafe-character rejection or changing the shipping defaults.
 public struct CompletionCleaningPolicy: Equatable, Sendable {

@@ -1,8 +1,8 @@
 import Foundation
 
-/// The single immutable model asset shared by Tilde and its local evaluation
-/// application. Keeping the pin in Core lets Tilde Lab verify the exact same
-/// bytes without depending on the app target or duplicating production truth.
+/// The immutable production model pin ported from Tilde's shared Core.
+/// `ModelDescriptor` in Runtime builds its download descriptor from these
+/// fields, keeping the production asset's identity and checksum in one place.
 public enum ProductionModelAsset {
     public static let identifier = "gemma-4-e2b-q4km"
     public static let revision = "3762686d74ff8db6c98f8d3c389f56fbdf994d5a"
