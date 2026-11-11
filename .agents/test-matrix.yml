@@ -567,7 +567,7 @@ rules:
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/nightly-security-check.py"
-      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast Tests/Fixtures/release-health-appcast-1.1.75.xml --github-release-json Tests/Fixtures/release-health-github-release-1.1.75.json --write-report build/nightly-security-report.json"
+      - "python3 scripts/ops/nightly-security-check.py --strict --automation-toml Tests/Fixtures/nightly-security-automation.toml --appcast Tests/Fixtures/release-health-appcast-1.1.76.xml --github-release-json Tests/Fixtures/release-health-github-release-1.1.76.json --write-report build/nightly-security-report.json"
 
   - paths:
       - "scripts/ops/release-gate-report.py"
