@@ -159,16 +159,32 @@ final class TranscriptIndexTests: XCTestCase {
     func testFTS5SpecialCharacters() throws {
         let fixture = makeFixtureJSON(utterances: [
             ("mic_0", 0.0, 5.0, "The C++ implementation is ready"),
+            ("mic_0", 5.0, 10.0, "Search for the quoted phrase here"),
+            ("mic_0", 10.0, 15.0, "Words like and or near are plain text"),
+            ("mic_0", 15.0, 20.0, "Notes in parentheses stay searchable"),
+            ("mic_0", 20.0, 25.0, "The test wildcard case"),
         ])
-        try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        let filename = "Call_2026-03-29_10-00-00"
+        try writeFixture(fixture, filename: filename, to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        // These should not crash even with FTS5 special chars
-        _ = try index.searchUtterances(query: "C++", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "\"quoted phrase\"", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "AND OR NEAR", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "(parentheses)", speaker: nil, dateFrom: nil, dateTo: nil)
-        _ = try index.searchUtterances(query: "test*wildcard", speaker: nil, dateFrom: nil, dateTo: nil)
+        // Search punctuation and FTS operators as text, and return the matching utterance.
+        let cases = [
+            ("C++", "The C++ implementation is ready"),
+            ("\"quoted phrase\"", "Search for the quoted phrase here"),
+            ("AND OR NEAR", "Words like and or near are plain text"),
+            ("(parentheses)", "Notes in parentheses stay searchable"),
+            ("test*wildcard", "The test wildcard case"),
+        ]
+        for (query, expectedText) in cases {
+            let result = try index.searchUtterances(
+                query: query, speaker: nil, dateFrom: nil, dateTo: nil
+            )
+            XCTAssertEqual(result.results.map(\.filename), [filename], "Query: \(query)")
+            XCTAssertEqual(
+                result.results.flatMap(\.snippets).map(\.text), [expectedText], "Query: \(query)"
+            )
+        }
     }
 
     func testSearchGroupsByMeeting() throws {
