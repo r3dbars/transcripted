@@ -38,8 +38,7 @@ enum FocusOrderContract {
 
     /// Utility action rows, top to bottom, as laid out in
     /// `MenuBarUtilityActionsView`. The slim menu keeps three rows: Settings
-    /// lives inside Open Transcripted, and Paste Last Dictation keeps its
-    /// shortcut but has no row.
+    /// lives inside Open Transcripted.
     static let menuBarUtilityOrder: [String] = [
         "transcripted.menubar.utility.open-transcripted",
         "transcripted.menubar.utility.check-updates",
