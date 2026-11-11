@@ -30,7 +30,7 @@ assignees: ""
 
 ## Handoff
 
-- Expected closeout shape: `COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action`
+- Expected closeout shape: `COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action`
 - For activation work, read `docs/activation-lane.md`.
 - For delegated work, read `docs/agent-closeout.md`.
 

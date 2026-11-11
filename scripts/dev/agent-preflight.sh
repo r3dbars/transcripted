@@ -152,7 +152,7 @@ echo "Matrix: .agents/test-matrix.yml"
 echo ""
 
 echo "Coordinator closeout:"
-echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | smallest next action"
+echo "COORD_DONE: GREEN/BRIEF/RED | PR URL if any | changes made | GitHub cleanup recommendations | decisions needed | tests/checks run | lanes used: Codex=...; Claude=...; Local=...; Windows=... | smallest next action"
 echo "See docs/agent-closeout.md for status meanings and cleanup boundaries."
 
 if [ "$run_checks" = "true" ]; then
