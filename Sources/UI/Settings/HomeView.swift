@@ -309,8 +309,8 @@ private struct HomeFailedMeetingPlayAudioButton: View {
             playback.toggle(audioAttachment)
         } label: {
             Label(
-                playback.isActive(audioAttachment) ? "Pause audio" : "Play audio",
-                systemImage: playback.isActive(audioAttachment) ? "pause.fill" : "play.fill"
+                playback.isActive(audioAttachment) && playback.isPlaying ? "Pause audio" : "Play audio",
+                systemImage: playback.isActive(audioAttachment) && playback.isPlaying ? "pause.fill" : "play.fill"
             )
         }
         .buttonStyle(.bordered)
