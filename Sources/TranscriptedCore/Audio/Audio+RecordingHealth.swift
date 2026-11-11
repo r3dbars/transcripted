@@ -81,13 +81,14 @@ extension Audio {
         recoverySegment: MicRecordingSegment?,
         sessionGeneration: UInt64
     ) -> Bool {
+        let context = compatibilityArtifactContext()
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
-        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+        guard recordingGenerationClock.currentWhileLocked() == sessionGeneration else { return false }
 
         appendRecordingGap(gap)
         if let recoverySegment {
-            appendMicSegment(recoverySegment)
+            recordingArtifactOwner.appendSegmentWhileGenerationLocked(recoverySegment, in: context)
         }
         recoveryAttemptCount = 0
         return true
@@ -100,11 +101,12 @@ extension Audio {
         _ segment: MicRecordingSegment,
         sessionGeneration: UInt64
     ) -> Bool {
+        let context = compatibilityArtifactContext()
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
-        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+        guard recordingGenerationClock.currentWhileLocked() == sessionGeneration else { return false }
 
-        appendMicSegment(segment)
+        recordingArtifactOwner.appendSegmentWhileGenerationLocked(segment, in: context)
         return true
     }
 
@@ -116,16 +118,12 @@ extension Audio {
         _ url: URL,
         sessionGeneration: UInt64
     ) -> Bool {
+        let context = compatibilityArtifactContext()
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
-        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+        guard recordingGenerationClock.currentWhileLocked() == sessionGeneration else { return false }
 
-        micSegmentsLock.lock()
-        _micSegments.removeAll { $0.url == url }
-        let segments = _micSegments
-        micSegmentsLock.unlock()
-        recordingJournal.recordSegments(segments, session: journalSession)
-        return true
+        return recordingArtifactOwner.unregisterSegmentWhileGenerationLocked(url, in: context)
     }
 
     /// Commit a recovery whose segment was registered up front: record the
@@ -136,20 +134,13 @@ extension Audio {
         segmentURL: URL,
         sessionGeneration: UInt64
     ) -> Bool {
+        let context = compatibilityArtifactContext()
         recordingSessionGenerationLock.lock()
         defer { recordingSessionGenerationLock.unlock() }
-        guard recordingSessionGenerationEpoch.snapshot().rawValue == sessionGeneration else { return false }
+        guard recordingGenerationClock.currentWhileLocked() == sessionGeneration else { return false }
 
         appendRecordingGap(gap)
-        micSegmentsLock.lock()
-        _micSegments = _micSegments.map {
-            $0.url == segmentURL
-                ? MicRecordingSegment(url: $0.url, gapBeforeDuration: gap.duration)
-                : $0
-        }
-        let segments = _micSegments
-        micSegmentsLock.unlock()
-        recordingJournal.recordSegments(segments, session: journalSession)
+        guard recordingArtifactOwner.updateGapWhileGenerationLocked(context, url: segmentURL, gapBefore: gap.duration) else { return false }
         recoveryAttemptCount = 0
         micRecoveryGapAnchor = nil
         return true

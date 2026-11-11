@@ -5,47 +5,6 @@ import Foundation
 // stop cleanup, lifecycle cues, system-audio status, recording-format
 // policy, input-tap teardown order, and sleep/wake notification names.
 
-public enum RecordingStopFinalizationDisposition: Sendable, Equatable {
-    case finalized
-    case journalRecoveryOwned
-}
-
-/// Keep independent audio backends independent during shutdown. Each writer
-/// closes only after its producer stops and its serial queue drains. Completion
-/// also waits for any host-buffer drain already registered in `group`.
-enum AudioStopCleanup {
-    static func schedule(
-        group: DispatchGroup,
-        microphoneFileQueue: DispatchQueue,
-        systemFileQueue: DispatchQueue,
-        stopMicrophone: @escaping () -> Void,
-        stopSystem: @escaping () -> Void,
-        closeMicrophone: @escaping () -> Void,
-        closeSystem: @escaping () -> Void,
-        completion: @escaping () -> Void
-    ) {
-        // Register both branches before dispatch or notify: either branch can
-        // finish immediately, including when recording never finished starting.
-        group.enter()
-        group.enter()
-        DispatchQueue.global(qos: .userInitiated).async {
-            stopMicrophone()
-            microphoneFileQueue.async {
-                closeMicrophone()
-                group.leave()
-            }
-        }
-        DispatchQueue.global(qos: .userInitiated).async {
-            stopSystem()
-            systemFileQueue.async {
-                closeSystem()
-                group.leave()
-            }
-        }
-        group.notify(queue: .global(qos: .utility), execute: completion)
-    }
-}
-
 /// Lifecycle cues emitted by `Audio` so embedders can react without `Audio`
 /// itself depending on AppKit / NSSound.
 ///

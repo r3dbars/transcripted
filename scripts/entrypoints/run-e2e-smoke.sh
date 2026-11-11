@@ -45,6 +45,8 @@ SWIFT_SOURCES=(
     "Sources/TranscriptedCore/Services/FailedTranscriptionManager+ConfirmationIdentity.swift"
     "Sources/TranscriptedCore/Services/RelocatedCaptureAudioPolicy.swift"
     "Sources/TranscriptedCore/Audio/MeetingRecordingJournal.swift"
+    "Sources/TranscriptedCore/Audio/MeetingRecordingJournalTypes.swift"
+    "Sources/TranscriptedCore/Audio/RecordingArtifactTypes.swift"
     "Sources/TranscriptedCore/Audio/WAVHeaderRepair.swift"
     "Sources/TranscriptedCore/Logging/AppLogger.swift"
     "Sources/TranscriptedCore/Logging/FileLogger.swift"

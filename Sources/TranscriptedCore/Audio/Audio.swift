@@ -76,44 +76,44 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // Base mic URL set at recording start. If recovery creates additional mic WAV
     // segments, this remains the anchor used to name any merged output passed to
     // the pipeline on stop.
-    var originalMicAudioFileURL: URL?
-    /// System-audio URL set when the WAV is created, not after I/O start
-    /// returns. Stop reads this (and ownership / journal) instead of relying
-    /// only on the @Published `systemAudioFileURL`, which can still be nil.
-    var originalSystemAudioFileURL: URL?
-    var _micSegments: [MicRecordingSegment] = []
-    let micSegmentsLock = NSLock()
+    var originalMicAudioFileURL: URL? {
+        get {
+            guard let context = recordingArtifactOwner.currentContext(), context.captureGeneration == recordingSessionGeneration else { return nil }
+            return recordingArtifactOwner.primaryURL(in: context)
+        }
+        set { recordingArtifactOwner.setPrimary(newValue, in: compatibilityArtifactContext()) }
+    }
+    var originalSystemAudioFileURL: URL? {
+        get {
+            guard let context = recordingArtifactOwner.currentContext(), context.captureGeneration == recordingSessionGeneration else { return nil }
+            return recordingArtifactOwner.candidateSystemURL(in: context)
+        }
+        set {
+            let context = compatibilityArtifactContext()
+            if let newValue { _ = recordingArtifactOwner.bindSystemCandidate(context, url: newValue) }
+            else { _ = recordingArtifactOwner.clearSystemCandidate(context) }
+        }
+    }
     var micSegments: [MicRecordingSegment] {
-        get { micSegmentsLock.lock(); defer { micSegmentsLock.unlock() }; return _micSegments }
-        set { micSegmentsLock.lock(); defer { micSegmentsLock.unlock() }; _micSegments = newValue }
+        get {
+            guard let context = recordingArtifactOwner.currentContext(), context.captureGeneration == recordingSessionGeneration else { return [] }
+            return recordingArtifactOwner.segments(in: context)
+        }
+        set { recordingArtifactOwner.setSegments(newValue, in: compatibilityArtifactContext()) }
     }
     func appendMicSegment(_ segment: MicRecordingSegment) {
-        micSegmentsLock.lock()
-        _micSegments.append(segment)
-        let segments = _micSegments
-        micSegmentsLock.unlock()
-        recordingJournal.recordSegments(segments, session: journalSession)
+        let context = compatibilityArtifactContext()
+        recordingSessionGenerationLock.lock()
+        recordingArtifactOwner.appendSegmentWhileGenerationLocked(segment, in: context)
+        recordingSessionGenerationLock.unlock()
     }
-
-    // Journal ownership for the in-flight recording session. Issued by the
-    // store when the start path calls `begin()`; consumed (read-and-cleared)
-    // by `stop()` so only the stop that ends an active session can write the
-    // stopping/finalized journal states.
-    private var _journalSession: MeetingRecordingJournalSession?
-    private let journalSessionLock = NSLock()
     var journalSession: MeetingRecordingJournalSession? {
-        get { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; return _journalSession }
-        set { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; _journalSession = newValue }
+        get {
+            guard let context = recordingArtifactOwner.currentContext(), context.captureGeneration == recordingSessionGeneration else { return nil }
+            return recordingArtifactOwner.binding(in: context)?.token
+        }
+        set { recordingArtifactOwner.setToken(newValue, in: compatibilityArtifactContext()) }
     }
-    func takeJournalSession() -> MeetingRecordingJournalSession? {
-        journalSessionLock.lock()
-        defer { journalSessionLock.unlock() }
-        let session = _journalSession
-        _journalSession = nil
-        return session
-    }
-    var stoppingRecordingFinalizations: [UInt64: StoppingRecordingFinalization] = [:]
-    let stoppingJournalSessionsLock = NSLock()
 
     // MARK: - Recording Health Tracking (Phase 1: Sleep/Wake + Gap Logging)
 
@@ -393,59 +393,22 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // system-audio — so a lock-free read keeps those callbacks from ever
     // blocking behind a start/stop mid-bump. (The tap thread is not the HAL real-time
     // thread, see calculateLevel: contention hygiene, not a real-time-safety need.)
-    var recordingSessionGenerationEpoch = SupersessionEpoch()
-    let recordingSessionGenerationLock = NSLock()
-    var _inFlightStopGeneration: UInt64?  // Guarded by recordingSessionGenerationLock.
-    private let recordingSessionGenerationMirror = Atomic<UInt64>(0)
+    let recordingGenerationClock = RecordingGenerationClock()
+    var recordingSessionGenerationLock: NSLock { recordingGenerationClock.generationLock }
     var recordingSessionGeneration: UInt64 {
-        get {
-            recordingSessionGenerationMirror.load(ordering: .acquiring)
-        }
-        set {
-            recordingSessionGenerationLock.lock()
-            defer { recordingSessionGenerationLock.unlock() }
-            recordingSessionGenerationEpoch = SupersessionEpoch(testRawValue: newValue)
-            recordingSessionGenerationMirror.store(newValue, ordering: .releasing)
-        }
+        get { recordingGenerationClock.current }
+        set { _ = recordingArtifactOwner.replaceGenerationForTesting(newValue) }
     }
-
-    // Test seam: runs on the advancing thread right after the generation
-    // moves, outside the lock. Lets a test deliver a buffer at the exact
-    // instant a stale one would arrive. Always nil in the app.
-    private var _afterRecordingSessionGenerationAdvance: ((UInt64) -> Void)?
     var afterRecordingSessionGenerationAdvanceForTesting: ((UInt64) -> Void)? {
-        get {
-            recordingSessionGenerationLock.lock()
-            defer { recordingSessionGenerationLock.unlock() }
-            return _afterRecordingSessionGenerationAdvance
-        }
-        set {
-            recordingSessionGenerationLock.lock()
-            defer { recordingSessionGenerationLock.unlock() }
-            _afterRecordingSessionGenerationAdvance = newValue
-        }
+        get { recordingGenerationClock.afterAdvanceForTesting }
+        set { recordingGenerationClock.afterAdvanceForTesting = newValue }
     }
-
     @discardableResult
     func beginRecordingSessionGeneration() -> UInt64 {
-        recordingSessionGenerationLock.lock()
-        let generation = recordingSessionGenerationEpoch.begin().rawValue
-        recordingSessionGenerationMirror.store(generation, ordering: .releasing)
-        let afterAdvance = _afterRecordingSessionGenerationAdvance
-        recordingSessionGenerationLock.unlock()
-        afterAdvance?(generation)
-        return generation
+        recordingArtifactOwner.replaceGenerationForTesting(nil)
     }
+    public func predictedNextRecordingSessionGeneration() -> UInt64 { recordingGenerationClock.predictedNext() }
 
-    // Public so callers that need "the generation the NEXT session will get"
-    // (e.g. MeetingCaptureBridge's stop-completion gating) ask the epoch
-    // instead of hand-predicting with `current &+ 1`, which races with a
-    // concurrent begin().
-    public func predictedNextRecordingSessionGeneration() -> UInt64 {
-        recordingSessionGenerationLock.lock()
-        defer { recordingSessionGenerationLock.unlock() }
-        return recordingSessionGenerationEpoch.predictedNext().rawValue
-    }
     let maxRecoveryAttempts = AudioRecoveryTuning.Mic.maxRecoveryAttempts
     let recoveryCooldown: TimeInterval = AudioRecoveryTuning.Mic.recoveryCooldownSeconds  // Min seconds between recovery attempts
 
@@ -683,7 +646,13 @@ public class Audio: ObservableObject, @unchecked Sendable {
     /// Durable record of the in-flight recording for crash recovery. Lives
     /// next to the scratch audio; cleared once the meeting reaches a durable
     /// state (transcript saved or failed-queue entry persisted).
-    let recordingJournal: MeetingRecordingJournalStore
+    let initialRecordingJournal: MeetingRecordingJournalStore
+    var recordingJournal: MeetingRecordingJournalStore { compatibilityArtifactContext().endpoint }
+    lazy var recordingArtifactDispatcher = makeRecordingArtifactDispatcher()
+    lazy var recordingArtifactOwner = AudioArtifactOwner(clock: recordingGenerationClock,
+        journalCommands: recordingArtifactDispatcher, allowedRoot: paths.audioCaptures)
+    lazy var micArtifactTransactions = makeMicArtifactTransactions()
+    lazy var recordingArtifactCompletion = makeRecordingArtifactCompletion()
 
     public init(
         paths: CoreStoragePaths = .default,
@@ -691,8 +660,9 @@ public class Audio: ObservableObject, @unchecked Sendable {
     ) {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
-        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        self.initialRecordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
         self.systemAudioCaptureFactory = { CoreAudioSystemAudioCapture() }
+        configureArtifactOwnership()
     }
 
     init(
@@ -704,10 +674,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
     ) {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
-        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        self.initialRecordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
         self._systemAudioCapture = systemAudioCapture
         self.systemAudioCaptureFactory =
             systemAudioCaptureFactory ?? { systemAudioCapture }
+        configureArtifactOwnership()
         if let systemAudioCapture {
             wireSystemAudioStatusPublisher(from: systemAudioCapture)
         }

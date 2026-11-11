@@ -36,22 +36,22 @@ extension Audio {
         // system track to call healthy.
         systemAudioStatus = capturesSystemAudioThisRecording ? .healthy : .unknown
         systemAudioSilenceStart = nil  // Reset system audio silence tracking
-        let sessionGeneration = beginRecordingSessionGeneration()
+        recordingLanguageLock.lock()
+        activeRecordingLanguage = requestedRecordingLanguage
+        recordingLanguageLock.unlock()
+        let context = recordingArtifactOwner.beginContext(facts: currentArtifactFacts(),
+            endpoint: initialRecordingJournal.forkForRecording())
+        let sessionGeneration = context.captureGeneration
         micAudioWriteBackpressure.begin(generation: sessionGeneration)
         systemAudioWriteBackpressure.begin(generation: sessionGeneration)
         micHostPCMBufferFanout.begin(generation: sessionGeneration)
         writeBackpressureStopAdmission.begin(generation: sessionGeneration)
         beginWriteErrorTracking(generation: sessionGeneration)
         resetMeetingRouteState(forNewRecording: true)
-        recordingLanguageLock.lock()
-        activeRecordingLanguage = requestedRecordingLanguage
-        recordingLanguageLock.unlock()
         recordVoiceProcessingStartFallback(.none)
 
         // Reset capture artifacts so a previous session cannot make a new start
         // look ready before the fresh mic/system files exist.
-        originalMicAudioFileURL = nil
-        originalSystemAudioFileURL = nil
         micAudioFileURL = nil
         systemAudioFileURL = nil
         lastSystemBufferTime = CACurrentMediaTime()
@@ -68,10 +68,6 @@ extension Audio {
         lastRecoveryEndTime = nil
         micRecoveryGapAnchor = nil
         systemAudioFailed = false
-        micSegments = []
-        // Any leftover journal ownership belongs to a session that never
-        // stopped cleanly; the new session gets a fresh token at begin().
-        journalSession = nil
     }
 
     public func recordStartFailureStage(_ stage: AudioCaptureStartFailureStage) {
@@ -292,17 +288,8 @@ extension Audio {
     /// no newer recording has started. A second stop joins it: finalizing the
     /// same segments twice deletes the merged mic file the first one made.
     public internal(set) var inFlightStopGeneration: UInt64? {
-        get {
-            recordingSessionGenerationLock.lock()
-            defer { recordingSessionGenerationLock.unlock() }
-            guard _inFlightStopGeneration == recordingSessionGenerationEpoch.snapshot().rawValue else { return nil }
-            return _inFlightStopGeneration
-        }
-        set {
-            recordingSessionGenerationLock.lock()
-            defer { recordingSessionGenerationLock.unlock() }
-            _inFlightStopGeneration = newValue
-        }
+        get { recordingGenerationClock.inFlightStopGeneration }
+        set { recordingGenerationClock.inFlightStopGeneration = newValue }
     }
 
     public func stop() {
@@ -333,8 +320,9 @@ extension Audio {
         // until the tap is gone; `closeMicrophone` closes it.
         micAudioWriteBackpressure.beginFinishing(generation: captureGeneration)
         pendingStartIntentId = nil
-        let stopGeneration = beginRecordingSessionGeneration()
-        inFlightStopGeneration = stopGeneration
+        _ = compatibilityArtifactContext()
+        guard let artifactTicket = recordingArtifactOwner.sealStop(expectedCaptureGeneration: captureGeneration) else { return }
+        let stopGeneration = artifactTicket.stopGeneration
         systemAudioWriteBackpressure.close(generation: captureGeneration)
         writeBackpressureStopAdmission.close(generation: captureGeneration)
         let cleanupGroup = DispatchGroup()
@@ -352,11 +340,6 @@ extension Audio {
         let systemAudioCapture = systemAudioCaptureAttemptOwnership.captureOwned(
             by: captureGeneration
         )
-        // Use the original mic URL (set at recording start), not the potentially-overwritten
-        // recovery URL. Device recovery creates a new WAV segment but the original file
-        // contains the bulk of the recording.
-        let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
-        let micSegmentsSnapshot = self.micSegments
         // A system setup still in flight treats this Stop as abandonment.
         // Claim the resolved file so that cleanup cannot delete a WAV this
         // Stop hands off; it gets nil if cleanup committed to deleting first.
@@ -367,23 +350,8 @@ extension Audio {
         } else {
             finalSystemURL = resolvedSystemURL
         }
+        recordingArtifactOwner.commitStopSystemHandoff(artifactTicket, url: finalSystemURL)
         let cueHandler = self.onCaptureLifecycleCue
-
-        // Take (read-and-clear) journal ownership: only the stop that ends an
-        // active session may write the stopping/finalized states. With no
-        // active session — a double stop, or cleanup after a start that failed
-        // before the journal began — the token is nil and the journal store
-        // drops both writes, so a previous meeting's already-handed-off
-        // journal cannot be resurrected into the next launch's recovery scan.
-        let journalSession = takeJournalSession()
-        retainStoppingJournalSession(journalSession, generation: stopGeneration)
-        // A setup that installed its WAV but lost the generation race before
-        // publishing never journaled it. Record what this Stop hands off so
-        // launch recovery still finds the call audio.
-        if let finalSystemURL {
-            recordingJournal.recordSystemAudio(finalSystemURL, session: journalSession)
-        }
-        recordingJournal.markStopping(session: journalSession)
 
         // Update UI state immediately so the meeting widget unfreezes
         // before any of the slow CoreAudio teardown begins. Without this
@@ -455,19 +423,7 @@ extension Audio {
                 // The tap is gone and every tail write it admitted is already
                 // ahead of this block on the serial mic file queue.
                 self.micAudioWriteBackpressure.close(generation: captureGeneration)
-                let micAudioFileRef = self.micAudioFileOwnership.takeWriterOwned(
-                    by: captureGeneration,
-                    invalidatingFor: stopGeneration
-                )
-                if let micAudioFileRef {
-                    // Close explicitly so the WAV header is finalized here on
-                    // the serial queue before cleanupGroup.notify hands the
-                    // file to the merger. Waiting for deinit is racy: other
-                    // closure captures can keep the writer alive past notify,
-                    // and an unpatched header reads back as a zero-length file.
-                    micAudioFileRef.close()
-                    AppLogger.audioMic.info("Audio file closed", ["file": primaryMicURL?.lastPathComponent ?? self.micAudioFileURL?.lastPathComponent ?? "unknown"])
-                }
+                _ = self.micArtifactTransactions.closeForStopOnQueue(ticket: artifactTicket)
                 self.endMicWriteErrorTracking(generation: captureGeneration)
             },
             closeSystem: {
@@ -486,36 +442,8 @@ extension Audio {
             },
             completion: { [weak self] in
                 guard let self else { return }
-                let micFinalization = self.finalizeStoppedMicRecordingResult(
-                    primaryURL: primaryMicURL,
-                    segments: micSegmentsSnapshot,
-                    generation: stopGeneration
-                )
                 let systemTimeline = systemAudioCapture?.writeTimeline.takeFinished()
-                DispatchQueue.main.async {
-                    if self.recordingSessionGeneration == stopGeneration {
-                        self.inFlightStopGeneration = nil
-                        self.originalMicAudioFileURL = nil
-                        self.micSegments = []
-                        self.micAudioFileURL = micFinalization.micURL
-                    } else {
-                        AppLogger.audio.info("Recording completion belongs to stale stop; preserving current capture state", [
-                            "stopGeneration": "\(stopGeneration)",
-                            "currentGeneration": "\(self.recordingSessionGeneration)"
-                        ])
-                    }
-                    self.onRecordingCompleteWithTimeline?(
-                        stopGeneration, micFinalization.micURL, finalSystemURL,
-                        micFinalization.disposition, systemTimeline
-                    )
-                    self.onRecordingCompleteWithGeneration?(
-                        stopGeneration,
-                        micFinalization.micURL,
-                        finalSystemURL,
-                        micFinalization.disposition
-                    )
-                    self.onRecordingComplete?(micFinalization.micURL, finalSystemURL)
-                }
+                self.completeArtifactStop(artifactTicket, systemTimeline: systemTimeline)
             }
         )
     }

@@ -14,10 +14,7 @@ struct MicRecoverySegmentAbandoned: Error {}
 
 /// What one mic recovery attempt made, so its cleanup knows what to undo.
 final class MicRecoverySegmentAttempt {
-    var url: URL?
-    var writer: AVAudioFile?
-    var writerWasInstalled = false
-    var wasRegistered = false
+    var artifactAttempt: RecordingArtifactRecoveryAttempt<AVAudioFile>?
     var shouldKeep = false
 }
 
@@ -60,100 +57,39 @@ extension Audio {
         }
 
         AppLogger.audioMic.warning("Closing current mic file and creating recovery segment")
-        // Close explicitly so the retiring segment's WAV header is finalized
-        // before the merger can ever read it. Even same-rate device switches
-        // need a new segment so the missing-buffer interval can be padded.
-        switch micAudioFileQueue.sync(execute: {
-            micAudioFileOwnership.retireWriterForRecovery(by: sessionGeneration)
-        }) {
-        case .retired(let retiringWriter):
-            retiringWriter.close()
-            micRecoveryGapAnchor = lastMicBufferTime
-        case .alreadyRetired:
-            // An earlier attempt closed the last segment and then failed.
-            // Its gap is still open; this attempt's segment pads all of it,
-            // from the last frame that segment kept. Frames a failed attempt
-            // wrote were deleted with its segment, so they don't count.
-            lastMicBufferTime = MicRecoveryGapAnchorPolicy.anchor(
-                storedAnchor: micRecoveryGapAnchor,
-                lastBufferTime: lastMicBufferTime
-            )
-            AppLogger.audioMic.info("Previous mic recovery left no open segment; creating a new one")
-        case .notOwned:
-            AppLogger.audioMic.info("Skipping recovery because mic writer ownership changed", [
-                "expectedSession": "\(sessionGeneration)",
-                "currentSession": "\(recordingSessionGeneration)"
-            ])
-            throw MicRecoverySegmentAbandoned()
-        }
-
-        let captureDir = self.paths.audioCaptures
-        try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
-        let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-        let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic_recovery.wav")
-        attempt.url = fileURL
-
-        let micWriteContext: MicPCMWriteContext
+        guard let context = artifactContext(for: sessionGeneration) else { throw MicRecoverySegmentAbandoned() }
+        let prepared: MicPCMWriteContext
+        let fileURL: URL
         do {
-            let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(
-                sampleRate: recordingSnapshot.sampleRate
-            )
-            self.monoOutputFormat = monoFormat
-            micWriteContext = MicPCMWriteContext(
-                generation: sessionGeneration,
-                monoFormat: monoFormat,
-                inputChannelCount: recordingSnapshot.channelCount
-            )
-
-            let newFile = try AVAudioFile(
-                forWriting: fileURL,
-                settings: monoFormat.settings,
-                commonFormat: monoFormat.commonFormat,
-                interleaved: monoFormat.isInterleaved
-            )
-            FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-            attempt.writer = newFile
-            let installed = micAudioFileQueue.sync {
-                micAudioFileOwnership.installRecoveryWriter(
-                    newFile,
-                    generation: sessionGeneration
-                )
+            let monoFormat = try AudioRecordingFormatPolicy.makeMonoOutputFormat(sampleRate: recordingSnapshot.sampleRate)
+            monoOutputFormat = monoFormat
+            prepared = MicPCMWriteContext(generation: sessionGeneration, monoFormat: monoFormat,
+                                          inputChannelCount: recordingSnapshot.channelCount)
+            switch try micArtifactTransactions.createRecovery(context: context, prepared: prepared,
+                afterRetirement: { retirement in
+                    switch retirement {
+                    case .retired: micRecoveryGapAnchor = lastMicBufferTime
+                    case .alreadyRetired:
+                        lastMicBufferTime = MicRecoveryGapAnchorPolicy.anchor(storedAnchor: micRecoveryGapAnchor,
+                                                                             lastBufferTime: lastMicBufferTime)
+                        AppLogger.audioMic.info("Previous mic recovery left no open segment; creating a new one")
+                    }
+                }, gapBefore: max(CACurrentMediaTime() - lastMicBufferTime, Date().timeIntervalSince(switchStart))) {
+            case .registered(let registered, _):
+                attempt.artifactAttempt = registered
+                fileURL = registered.url
+            case .notOwned: throw MicRecoverySegmentAbandoned()
             }
-            guard installed else {
-                AppLogger.audioMic.info("Skipping stale recovery writer replacement", [
-                    "expectedSession": "\(sessionGeneration)",
-                    "currentSession": "\(recordingSessionGeneration)"
-                ])
-                throw MicRecoverySegmentAbandoned()
-            }
-            attempt.writerWasInstalled = true
-            // List the segment with the recording before any buffer can
-            // reach it, so a Stop during the restart keeps its audio instead
-            // of deleting it. The gap is corrected once the first frame lands.
-            guard registerMicRecoverySegment(
-                MicRecordingSegment(
-                    url: fileURL,
-                    gapBeforeDuration: max(
-                        CACurrentMediaTime() - lastMicBufferTime,
-                        Date().timeIntervalSince(switchStart)
-                    )
-                ),
-                sessionGeneration: sessionGeneration
-            ) else {
-                AppLogger.audioMic.info("Skipping stale recovery before segment registration", [
-                    "expectedSession": "\(sessionGeneration)",
-                    "currentSession": "\(recordingSessionGeneration)"
-                ])
-                throw MicRecoverySegmentAbandoned()
-            }
-            attempt.wasRegistered = true
-            AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
         } catch let abandoned as MicRecoverySegmentAbandoned {
             throw abandoned
+        } catch MicArtifactTransactionFailure.stale {
+            throw MicRecoverySegmentAbandoned()
         } catch {
             AppLogger.audioMic.error("Failed to create recovery audio file", ["error": error.localizedDescription])
             throw MicRecoverySegmentAbandoned()
         }
+        let micWriteContext = prepared
+        AppLogger.audioMic.info("Created recovery audio file", ["file": fileURL.lastPathComponent])
 
         guard sessionGeneration == recordingSessionGeneration else {
             AppLogger.audioMic.info("Skipping stale recovery before engine restart", [
@@ -171,29 +107,11 @@ extension Audio {
         _ attempt: MicRecoverySegmentAttempt,
         sessionGeneration: UInt64
     ) {
-        guard let url = attempt.url, !attempt.shouldKeep else { return }
-        if attempt.wasRegistered,
-           !unregisterMicRecoverySegment(url, sessionGeneration: sessionGeneration) {
-            // Stop landed after the segment was registered. It already
-            // listed, closed and will merge this file, including any
-            // audio that arrived before the tap came down.
-            AppLogger.audioMic.info("Stop took the in-progress recovery segment", [
-                "file": url.lastPathComponent
-            ])
-            return
+        guard let registered = attempt.artifactAttempt else { return }
+        do { _ = try micArtifactTransactions.finishRecovery(attempt: registered, keep: attempt.shouldKeep) }
+        catch {
+            AppLogger.audioMic.warning("Could not finish recovery segment cleanup", ["error": error.localizedDescription])
         }
-        if let writer = attempt.writer {
-            let shouldCloseWriter = !attempt.writerWasInstalled || micAudioFileQueue.sync {
-                micAudioFileOwnership.removeIfOwned(
-                    writer,
-                    generation: sessionGeneration
-                )
-            }
-            if shouldCloseWriter {
-                writer.close()
-            }
-        }
-        try? FileManager.default.removeItem(at: url)
     }
 
     func logMicRecoveryGraphPrepareFailure(_ error: Error) {
