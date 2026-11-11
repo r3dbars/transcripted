@@ -145,16 +145,6 @@ final class DefaultInputDeviceMonitor: DefaultInputDeviceSubscribing, @unchecked
         )
     }
 
-    /// Discards pending and late HAL results if the monitor is torn down.
-    /// A later `start()` installs a fresh dispatcher and generation. A stop
-    /// while the add is still pending lets the add finish, then removes it.
-    func stop() {
-        guard registrar.stop() else { return }
-        notificationLookupDispatcher?.close()
-        notificationLookupDispatcher = nil
-        selfWriteTracker.cancelPendingWrite()
-    }
-
     private static var defaultInputAddress: AudioObjectPropertyAddress {
         AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
