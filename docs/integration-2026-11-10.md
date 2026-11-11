@@ -8,7 +8,12 @@ No release, main promotion, original-branch update or PR cleanup is authorized h
 
 Base: `8a38235eef00816a79daa1324387a21ef880204d` (freshly fetched origin/main before assembly).
 Branch: `codex/integration-open-prs-20261110`.
-Exactly 198 frozen PR heads are retained as ancestors. No frozen PR was omitted.
+Exactly 225 frozen PR heads are retained as ancestors: the original 198 plus the
+explicitly authorized 27-head expansion (#2531–#2557). No frozen PR was omitted.
+The original 198 provenance/hash and entries are preserved. The dated
+[expansion manifest](integration-2026-11-10-expansion-27.json) omits bodies and private
+proof details; its SHA-256 and the original additional-input SHA-256 are in the ledger.
+No arrivals after #2557 are added.
 See [machine-readable ledger](integration-2026-11-10-manifest.json) for exact heads,
 14 base-branch dependencies, changed paths, merge commits and every conflict resolution.
 The manifest omits PR bodies, private proof paths, credentials and user data.
@@ -59,7 +64,8 @@ Particularly important combinations:
 
 ## Validation record
 
-Assembly ancestry: PASS, all 198 frozen heads verified fetched and retained.
+Original assembly ancestry: PASS, all 198 frozen heads verified fetched and retained.
+Expansion ancestry: PASS, all 225 exact frozen heads verified retained.
 Build source lists: PASS. Duplicate declarations: PASS.
 System-SQLite resource component: PASS, 12 control assertions and 148/148 behavior
 assertions across 32 opens. This compiled actual SQLiteHandle/FilePermissions in an
@@ -317,3 +323,94 @@ conflicts, dependency IDs, test scope and any pending owner decision.
 | #2527 | `ee8beb8d1335bdd65d68b6502fec5a3cc28d0b48` | included | #2527 and #2336 already require host-owned Audio injection. Keep focused host wording and existing NSWorkspace notification-center injection; no fallback Audio construction is restored. |
 | #2528 | `bb9b0f29e1138db1de2404f79f8c171ca2d467b4` | included | Exact frozen history retained; no manual conflict. |
 | #2529 | `1cd0ad996b62a3eab0032881793aa421a5b22af7` | included | Exact frozen history retained; no manual conflict. |
+
+## Authorized expansion — 2026-11-11 UTC
+
+Starting integration head: `0f558e7fc3577e0bd1ba8b545a4dc6fb69d8dbbf`.
+All additional bases are main, with no stacked base-branch dependencies.
+Saved-audio status/timings (#2539/#2547) and saved-person presentation
+(#2554/#2556) are semantic combinations, not ancestry-only proof.
+Three conflicts were resolved: hidden-transcript clock wording with existing
+private immutable clock retained; metric-only speaker merge diagnostics replacing
+UUID fields; and confirmation-progress comment wording with behavior retained.
+No blanket file strategy was used. Prior full-gate and scroll-smoke fixes remain.
+
+New decision worksheets remain unselected. The recent-lineup worksheet describes
+main: the earlier broad #2336 candidate already removes its public convenience
+value, while retaining the model-specific factory. That retirement/compatibility
+choice remains pending owner review; importing #2555 does not approve it.
+
+| PR | Frozen head | Disposition | Actual behavior / reconciliation |
+| --- | --- | --- | --- |
+| #2531 | `f3d3f7a131e76d53100eaf1197c36823fa7d3e0c` | reconciled | Whisper publications carry their concrete variant owner; both router query and emitted-state paths use the same projection. |
+| #2532 | `0e8d3f1e74f01c06f14c92313a1bbaf444642bd1` | history retained; proposal unselected | Unselected backend role worksheet only; no backend deletion or permission choice. |
+| #2533 | `9f0196f779e7da8d470fd53befeaa835fe44243e` | history retained; behavior already present | Unused promptsObserver declaration and shutdown cleanup already absent through #2336; exact history retained without reintroducing them. |
+| #2534 | `8b0430f332b98d89224b1f32841e0780699b7689` | history retained; proposal unselected | Unselected automatic speaker-merge worksheet only; no thresholds or identity mutation policy chosen. |
+| #2535 | `93378cb67e94eb6e04f8ab959a9c4ff1656525f3` | history retained; behavior already present | File-drop/JSON-or-argv transport wording already corrected through #2336; exact history retained. |
+| #2536 | `567280c50fc77eea9f3547be731e75146c19c12d` | history retained; proposal unselected | Unselected companion-access worksheet only; no tool grants, defaults, consent or listing changes. |
+| #2537 | `1f8d1db8f725f634e1b90ecf94c4921bcf068b86` | reconciled | Remove unused monitor stop facade; keep registrar stop/generation cleanup and consumer unsubscribe behavior. |
+| #2538 | `6ed7e7f37e93af078cf13f34c40d512a2e982606` | history retained; behavior already present | Static glow wording already present through #2336; no visual behavior changes. |
+| #2539 | `b207ce087bfd58deecc165c6455b1b5603981dbf` | existing runtime reset retained; regression fixture added | Four-second rejected-input status reset already present through #2336; add actual manager publisher regression fixture. |
+| #2540 | `53b3882daa448a12f0370e7dc230189c88a7cb78` | history retained; proposal unselected | Unselected main-branch protection worksheet only; no remote branch or merge policy changes. |
+| #2541 | `f0b246ea5aab20182dc643cbb087dd05557bfe05` | reconciled | Unknown selected input ID zero discards the pending analytics report before cache/identity refresh; known categorical transitions retain debounce behavior. |
+| #2542 | `c633ddeb6aa6a4783e34e7857bc367c8835f5919` | history retained; proposal unselected | Unselected changelog worksheet only; no release flow or version policy chosen. |
+| #2543 | `267b34f0629c2adb47a8470eb5d39275bdb65d49` | reconciled | Use accurate flush-policy test comment while retaining existing private immutable clock; do not reintroduce mutable injection seam. |
+| #2544 | `6eac465675ed3d3a6c0495388ec65c1fb74a12fb` | reconciled | Stop displayed review clips on off-screen transition and explicitly mark the retained view off-screen before releasing sheet ownership. |
+| #2545 | `b55508504e2717b70e50b2218be0c311c8d4b2de` | history retained; behavior already present | Final dictation placeholder already hidden through #2336; exact history retained. |
+| #2546 | `f7621a22c828d116c711c445fdf7974a911cf2d4` | history retained; proposal unselected | Unselected monthly mutation worksheet only; no workflow, runner admission or schedule changes. |
+| #2547 | `4004cc38d86746e14ba4d93d6b0978caef6354c1` | reconciled | Saved-audio pipeline holds process activity and binds a job-local timing recorder; successful save publishes its snapshot. Preserve replacement lease and cancellation ordering. |
+| #2548 | `9b4caac3119bb7d44fc5f71507ca08f819a555d4` | reconciled | Stable first-seen tie ordering for capped RRF candidate union; correct recall claims and add pure limit tests. Ranking-policy worksheet remains unselected. |
+| #2549 | `c6804dc713667e80d462ab116eb9f531140d5310` | history retained; proposal unselected | Unselected display-placement worksheet only; no AX, latency or placement contract changes. |
+| #2550 | `3b7570894835fddd589726bc41fc99e4348c6758` | reconciled | Aggregate matched speaker rows by capture filename, preserving matched totals and representative name/quote; exclude every matched alias from profile co-speakers. |
+| #2551 | `ec34d38492c969819d23ceb0ace78b72f5ae3f07` | history retained; proposal unselected | Unselected Personal History retention worksheet only; no deletion, consent, preference or learning policy changes. |
+| #2552 | `fad2489ca2fe6722a5e1824051055e2c3bb48517` | reconciled | Remove UUID identity fields retained by broad #2336 diagnostics; use metric-only explicit/duplicate metadata helpers and preserve merge transactions. |
+| #2553 | `911c23de3abb4c203c070885ab65475d8da5e0c6` | history retained; proposal unselected | Unselected Writing model-copy worksheet only; no model picker, runtime or public API choices adopted. |
+| #2554 | `ef6a30194d5518008765b89b6dca1df63ac79b19` | reconciled | Clarify saved-person comment and ring progress wording; existing afterYes behavior remains unchanged. |
+| #2555 | `d98c97c73fc0517418e0ed369e9f5e9d906dbb5e` | history retained; proposal unselected | Unselected recent-lineup public API worksheet only. Existing #2336 candidate removes the convenience value, while the model-specific factory remains; compatibility/retirement remains an explicit unresolved owner decision, not approved by this worksheet. |
+| #2556 | `1896bcbf85a31b174c9f6eeabae0be62fde5821f` | reconciled | Thread optional meeting-specific confirmation requirement from pipeline identity options through SpeakerNameChoice into saved-person review progress; nil retains standard fallback. |
+| #2557 | `a1bd1203362f3583da009754c980a3cf64313914` | history retained; behavior already present | Capture comments already anonymized through #2336; exact history retained with no runtime audio changes. |
+
+### Expansion proof limits
+
+The additional exact heads were fetched through one batch of namespaced Git PR
+refs and compared with the frozen manifest before merging. All 225 ancestry
+checks pass, and all original 198 ledger entries and the original frozen-input
+hash compare byte-for-byte as JSON values with the starting ledger.
+
+On the expanded runtime tree, a network-denied pure component passed 168/168
+assertions across the actual Whisper projection, route-reporting debounce, and
+speaker-progress fixtures. It compiles the actual model-choice declarations
+without invoking preference methods and extracts only the actual two pure route
+value/state declarations from their larger source file. No engine/router/native
+object is constructed. The actual MCP value models/fusion with its committed
+standalone fixture passed 11/11 assertions under network denial. A separate
+actual merge-metadata/sanitizer component passed 13/13 assertions; this is a
+plain-value fixture, not the Core XCTest runner. Three standalone XCTest runner
+setup attempts failed before execution (missing XCTest module, missing Swift
+assertion overlay, then unavailable XCTMain/testCase); their raw compiler logs
+are preserved locally. These setup failures are not rewritten as passing tests.
+
+All 1,042 app-source Swift files pass syntax parsing. This does not typecheck or
+link the app. Source lists, module boundaries, documentation paths, source pins
+(17 resolved pins), and diff whitespace checks pass. The verifier selection
+lists meetings, UI, speed and real-mic/AirPods work, with MCP integration outside
+its coverage. Selection is not execution or app proof. No owner-profile native
+verifier, full unfiltered suite, app build/launch, model, clipboard or hardware
+check was executed for this expansion. Saved-audio manager XCTest and actual MCP
+index/profile runtime tests remain pending on the trusted isolated pathway.
+
+The earlier 0f558e7 normal Swift CI run 42900322086 was still QUEUED at the one
+GraphQL observation during expansion. Its three accessible associated completed
+runs (42900321825, 42900321953, 42900322171) reported SUCCESS. The old literal
+full-bench run 42900362954 outcome was not refreshed through rate-limited REST.
+None of these older-source outcomes is proof of this expanded tree.
+
+The expansion `bash check.sh quick` completed PASS: 111 passed, 0 failed,
+0 skipped (268 seconds). This ran against the expanded runtime merge head
+`89f0b3f03` while the provenance documentation was being extended; no scripts or
+runtime sources changed during it. Final documentation-path and whitespace
+checks pass after the documentation edits. The earlier failed 198-head checks
+remain historical failures; this is a separate expanded-tree result. Full gate
+CI-parity contract tests included in this run pass. The parent still must review
+the added diff, and exact pushed-head hosted compilation/full bench and native
+acceptance remain pending.

@@ -3,7 +3,7 @@
   "frozenDate": "2026-11-10",
   "base": "8a38235eef00816a79daa1324387a21ef880204d",
   "frozenManifestSHA256": "4bda189a4331e6f53e21156dd7b150f98f1cf5b2e64b58ca15560a81f46d3d2a",
-  "scopeCount": 198,
+  "scopeCount": 225,
   "entries": [
     {
       "number": 2330,
@@ -6600,6 +6600,823 @@
         "nativeVerification": "Pending isolated app verification and separate real hardware evidence where affected; no skips counted as pass.",
         "historicalEvidence": "Frozen PR body is not combined-head proof; not copied into public ledger."
       }
+    },
+    {
+      "number": 2531,
+      "title": "fix(speech): keep Whisper state with its model variant",
+      "headRefOid": "f3d3f7a131e76d53100eaf1197c36823fa7d3e0c",
+      "headRefName": "codex/review-speech-b-4",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/Speech/STTRouter.swift",
+        "Sources/Speech/WhisperEngine.swift",
+        "Sources/Speech/WhisperModelStatePolicy.swift",
+        "Tests/WhisperModelStatePolicyTests.swift",
+        "scripts/entrypoints/run-tests.sh"
+      ],
+      "disposition": "reconciled",
+      "reason": "Whisper publications carry their concrete variant owner; both router query and emitted-state paths use the same projection.",
+      "integrationCommit": "2b0516d3144ce777e13232f9dbe829b0b575f256",
+      "integrationChangedFiles": [
+        "Sources/Speech/STTRouter.swift",
+        "Sources/Speech/WhisperEngine.swift",
+        "Sources/Speech/WhisperModelStatePolicy.swift",
+        "Tests/WhisperModelStatePolicyTests.swift",
+        "scripts/entrypoints/run-tests.sh"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tests/WhisperModelStatePolicyTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2532,
+      "title": "docs: frame CORE-AUDIO-6 backend retirement decision",
+      "headRefOid": "0e8d3f1e74f01c06f14c92313a1bbaf444642bd1",
+      "headRefName": "codex/review-core-audio-6-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/screen-capture-backend-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected backend role worksheet only; no backend deletion or permission choice.",
+      "integrationCommit": "d0039974cbf0b296008b971d30d35a66c8e28877",
+      "integrationChangedFiles": [
+        "docs/proposals/screen-capture-backend-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2533,
+      "title": "cleanup: remove unused app prompt observer (APP-DICTATION-2)",
+      "headRefOid": "9f0196f779e7da8d470fd53befeaa835fe44243e",
+      "headRefName": "codex/review-app-dictation-2",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/App/TranscriptedAppState.swift"
+      ],
+      "disposition": "history retained; behavior already present",
+      "reason": "Unused promptsObserver declaration and shutdown cleanup already absent through #2336; exact history retained without reintroducing them.",
+      "integrationCommit": "431decd71d20f61e6f9de6e0a56bb7b042d94dfe",
+      "integrationChangedFiles": [],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2534,
+      "title": "docs: frame CORE-SPEAKER-5 automatic merge decision",
+      "headRefOid": "8b0430f332b98d89224b1f32841e0780699b7689",
+      "headRefName": "codex/review-core-speaker-5-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/automatic-speaker-merge-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected automatic speaker-merge worksheet only; no thresholds or identity mutation policy chosen.",
+      "integrationCommit": "42d1dad03b6aeaea161ede74f3507f07aeabc2d5",
+      "integrationChangedFiles": [
+        "docs/proposals/automatic-speaker-merge-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2535,
+      "title": "docs: correct debug control transport (APP-DICTATION-6)",
+      "headRefOid": "93378cb67e94eb6e04f8ab959a9c4ff1656525f3",
+      "headRefName": "codex/review-app-dictation-6",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/App/AGENTS.md",
+        "Sources/App/DebugControlChannel.swift"
+      ],
+      "disposition": "history retained; behavior already present",
+      "reason": "File-drop/JSON-or-argv transport wording already corrected through #2336; exact history retained.",
+      "integrationCommit": "773678f8fed94d2a41a900b4137e3c6d03ea69dc",
+      "integrationChangedFiles": [],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2536,
+      "title": "docs: frame TOOLS-MCP-6 companion access decision",
+      "headRefOid": "567280c50fc77eea9f3547be731e75146c19c12d",
+      "headRefName": "codex/review-tools-mcp-6-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/mcp-companion-tool-access-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected companion-access worksheet only; no tool grants, defaults, consent or listing changes.",
+      "integrationCommit": "61bcdd63523c87345133339fe00a95e308289707",
+      "integrationChangedFiles": [
+        "docs/proposals/mcp-companion-tool-access-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2537,
+      "title": "Remove unused default-input monitor stop facade (SPEECH-A-10)",
+      "headRefOid": "1f8d1db8f725f634e1b90ecf94c4921bcf068b86",
+      "headRefName": "codex/review-speech-a-10",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/Speech/DefaultInputDeviceMonitor.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Remove unused monitor stop facade; keep registrar stop/generation cleanup and consumer unsubscribe behavior.",
+      "integrationCommit": "5fbe9e9dbe46a71337edfec160319236aa7af51a",
+      "integrationChangedFiles": [
+        "Sources/Speech/DefaultInputDeviceMonitor.swift"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2538,
+      "title": "docs: describe static island dot glow (UI-OVERLAY-B-5)",
+      "headRefOid": "6ed7e7f37e93af078cf13f34c40d512a2e982606",
+      "headRefName": "codex/review-ui-overlay-b-5",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/UI/Overlay/NotchIslandView.swift"
+      ],
+      "disposition": "history retained; behavior already present",
+      "reason": "Static glow wording already present through #2336; no visual behavior changes.",
+      "integrationCommit": "140a12cc2a1b6f650a5d11c539d4320642dfce0a",
+      "integrationChangedFiles": [],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2539,
+      "title": "fix(core): reset rejected saved-audio request status",
+      "headRefOid": "b207ce087bfd58deecc165c6455b1b5603981dbf",
+      "headRefName": "codex/review-core-rest-20",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager+Start.swift",
+        "Tests/TranscriptedCoreTests/PipelineTests/SavedAudioInputOwnershipStatusTests.swift"
+      ],
+      "disposition": "existing runtime reset retained; regression fixture added",
+      "reason": "Four-second rejected-input status reset already present through #2336; add actual manager publisher regression fixture.",
+      "integrationCommit": "07325b27d90f79a4307982a9c6babdb50e0a450e",
+      "integrationChangedFiles": [
+        "Tests/TranscriptedCoreTests/PipelineTests/SavedAudioInputOwnershipStatusTests.swift"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tests/TranscriptedCoreTests/PipelineTests/SavedAudioInputOwnershipStatusTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2540,
+      "title": "docs: frame DOCS-15 branch protection decision",
+      "headRefOid": "53b3882daa448a12f0370e7dc230189c88a7cb78",
+      "headRefName": "codex/review-docs-15-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/main-branch-protection-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected main-branch protection worksheet only; no remote branch or merge policy changes.",
+      "integrationCommit": "3e00c05fb11b66b258be263c8dc5877e6515cfd8",
+      "integrationChangedFiles": [
+        "docs/proposals/main-branch-protection-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2541,
+      "title": "fix(speech): exclude unknown input from stable route reports (SPEECH-A-4)",
+      "headRefOid": "f0b246ea5aab20182dc643cbb087dd05557bfe05",
+      "headRefName": "codex/review-speech-a-4",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/Speech/ParakeetDeviceRecovery.swift",
+        "Sources/Speech/ParakeetRecoveryState.swift",
+        "Tests/ParakeetRouteReportingTests.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Unknown selected input ID zero discards the pending analytics report before cache/identity refresh; known categorical transitions retain debounce behavior.",
+      "integrationCommit": "63080f7acf57ce32172338edac2fe8310ef3fe70",
+      "integrationChangedFiles": [
+        "Sources/Speech/ParakeetDeviceRecovery.swift",
+        "Sources/Speech/ParakeetRecoveryState.swift",
+        "Tests/ParakeetRouteReportingTests.swift"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tests/ParakeetRouteReportingTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2542,
+      "title": "docs: frame DOCS-8 versioned changelog decision",
+      "headRefOid": "c633ddeb6aa6a4783e34e7857bc367c8835f5919",
+      "headRefName": "codex/review-docs-8-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/changelog-record-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected changelog worksheet only; no release flow or version policy chosen.",
+      "integrationCommit": "b0b2c4f3e5400e578b89f3b2f0fbd2d9de375d84",
+      "integrationChangedFiles": [
+        "docs/proposals/changelog-record-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2543,
+      "title": "docs: correct hidden transcript clock comment (UI-OVERLAY-B-10)",
+      "headRefOid": "267b34f0629c2adb47a8470eb5d39275bdb65d49",
+      "headRefName": "codex/review-ui-overlay-b-10",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/UI/Overlay/NotchIslandLiveTranscriptView.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Use accurate flush-policy test comment while retaining existing private immutable clock; do not reintroduce mutable injection seam.",
+      "integrationCommit": "3c795f6484c7b2601d3011867c65e69c58e751e6",
+      "integrationChangedFiles": [
+        "Sources/UI/Overlay/NotchIslandLiveTranscriptView.swift"
+      ],
+      "conflicts": [
+        {
+          "file": "Sources/UI/Overlay/NotchIslandLiveTranscriptView.swift",
+          "resolution": "Use accurate flush-policy test comment while retaining existing private immutable clock; do not reintroduce mutable injection seam."
+        }
+      ],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2544,
+      "title": "Stop speaker-review clips when the island leaves screen (UI-OVERLAY-B-8)",
+      "headRefOid": "6eac465675ed3d3a6c0495388ec65c1fb74a12fb",
+      "headRefName": "codex/review-ui-overlay-b-8",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift",
+        "Sources/UI/Settings/SpeakerNamingSheet.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Stop displayed review clips on off-screen transition and explicitly mark the retained view off-screen before releasing sheet ownership.",
+      "integrationCommit": "1cc16ecce6445269ace4861df0392bed038252ee",
+      "integrationChangedFiles": [
+        "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift",
+        "Sources/UI/Settings/SpeakerNamingSheet.swift"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2545,
+      "title": "fix(ui): hide listening placeholder for finished dictation (UI-OVERLAY-B-2)",
+      "headRefOid": "b55508504e2717b70e50b2218be0c311c8d4b2de",
+      "headRefName": "codex/review-ui-overlay-b-2",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/UI/Overlay/NotchIslandDictationPreviewView.swift"
+      ],
+      "disposition": "history retained; behavior already present",
+      "reason": "Final dictation placeholder already hidden through #2336; exact history retained.",
+      "integrationCommit": "1152b46e955a8197ef45de6063608f44b79f68b0",
+      "integrationChangedFiles": [],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2546,
+      "title": "docs: frame BUILD-CI-1 monthly mutation decision",
+      "headRefOid": "f7621a22c828d116c711c445fdf7974a911cf2d4",
+      "headRefName": "codex/review-build-ci-1-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/monthly-mutation-ci-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected monthly mutation worksheet only; no workflow, runner admission or schedule changes.",
+      "integrationCommit": "5caf0460b60eb1f42f1b8bde781b0e847bb4f1bb",
+      "integrationChangedFiles": [
+        "docs/proposals/monthly-mutation-ci-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2547,
+      "title": "fix(core): protect saved-audio jobs and collect pipeline timings",
+      "headRefOid": "4004cc38d86746e14ba4d93d6b0978caef6354c1",
+      "headRefName": "codex/review-core-rest-9",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager+Start.swift",
+        "Tests/TranscriptedCoreTests/PipelineTests/SavedAudioJobTimingsTests.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Saved-audio pipeline holds process activity and binds a job-local timing recorder; successful save publishes its snapshot. Preserve replacement lease and cancellation ordering.",
+      "integrationCommit": "5c17f19a1d4f90a9f4038ac2ccb1931fb51851b4",
+      "integrationChangedFiles": [
+        "Sources/TranscriptedCore/Pipeline/TranscriptionTaskManager+Start.swift",
+        "Tests/TranscriptedCoreTests/PipelineTests/SavedAudioJobTimingsTests.swift"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tests/TranscriptedCoreTests/PipelineTests/SavedAudioJobTimingsTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      },
+      "semanticDependencies": [
+        2539
+      ]
+    },
+    {
+      "number": 2548,
+      "title": "Correct hybrid-search recall claims and tie ordering (TOOLS-MCP-2)",
+      "headRefOid": "9b4caac3119bb7d44fc5f71507ca08f819a555d4",
+      "headRefName": "codex/review-tools-mcp-2",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Tools/TranscriptedMCP/AGENTS.md",
+        "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingProvider.swift",
+        "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticSearchFusion.swift",
+        "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SemanticFusionLimitTests.swift",
+        "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SemanticSearchTests.swift",
+        "docs/proposals/hybrid-search-ranking-decision.md"
+      ],
+      "disposition": "reconciled",
+      "reason": "Stable first-seen tie ordering for capped RRF candidate union; correct recall claims and add pure limit tests. Ranking-policy worksheet remains unselected.",
+      "integrationCommit": "265840596ed73623221604a5842416c0455191a4",
+      "integrationChangedFiles": [
+        "Tools/TranscriptedMCP/AGENTS.md",
+        "Tools/TranscriptedMCP/Sources/TranscriptedMCP/EmbeddingProvider.swift",
+        "Tools/TranscriptedMCP/Sources/TranscriptedMCP/SemanticSearchFusion.swift",
+        "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SemanticFusionLimitTests.swift",
+        "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SemanticSearchTests.swift",
+        "docs/proposals/hybrid-search-ranking-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SemanticFusionLimitTests.swift",
+          "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SemanticSearchTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2549,
+      "title": "UI-OVERLAY-A-2: prepare dictation display placement decision",
+      "headRefOid": "c6804dc713667e80d462ab116eb9f531140d5310",
+      "headRefName": "codex/review-ui-overlay-a-2-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/dictation-display-selection-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected display-placement worksheet only; no AX, latency or placement contract changes.",
+      "integrationCommit": "948243e627101fd14497984eb68ae368040ff14a",
+      "integrationChangedFiles": [
+        "docs/proposals/dictation-display-selection-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2550,
+      "title": "fix(mcp): count distinct meetings in speaker profiles (TOOLS-MCP-3)",
+      "headRefOid": "3b7570894835fddd589726bc41fc99e4348c6758",
+      "headRefName": "codex/review-tools-mcp-3",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+MeetingQueries.swift",
+        "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SpeakerHistoryDedupTests.swift",
+        "docs/mcp-speaker-identity-review.md"
+      ],
+      "disposition": "reconciled",
+      "reason": "Aggregate matched speaker rows by capture filename, preserving matched totals and representative name/quote; exclude every matched alias from profile co-speakers.",
+      "integrationCommit": "c4b4bad4e4714425823564970c13400fdcfbd351",
+      "integrationChangedFiles": [
+        "Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex+MeetingQueries.swift",
+        "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SpeakerHistoryDedupTests.swift",
+        "docs/mcp-speaker-identity-review.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/SpeakerHistoryDedupTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2551,
+      "title": "WRITING-RUNTIME-11: prepare Personal History retention decision",
+      "headRefOid": "ec34d38492c969819d23ceb0ace78b72f5ae3f07",
+      "headRefName": "codex/review-writing-runtime-11-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/personal-history-retention-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected Personal History retention worksheet only; no deletion, consent, preference or learning policy changes.",
+      "integrationCommit": "74366d4ad55bfce4b9f1962b4b752fcf73ffedc1",
+      "integrationChangedFiles": [
+        "docs/proposals/personal-history-retention-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2552,
+      "title": "fix(core): omit speaker identities from merge diagnostics",
+      "headRefOid": "fad2489ca2fe6722a5e1824051055e2c3bb48517",
+      "headRefName": "codex/review-core-speaker-3",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/TranscriptedCore/Speaker/SpeakerMergeLogMetadata.swift",
+        "Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift",
+        "Tests/TranscriptedCoreTests/UtilitiesTests/SpeakerMergeLogMetadataTests.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Remove UUID identity fields retained by broad #2336 diagnostics; use metric-only explicit/duplicate metadata helpers and preserve merge transactions.",
+      "integrationCommit": "cec3a14cd174b585e78fcfe864708e70eb6b51b6",
+      "integrationChangedFiles": [
+        "Sources/TranscriptedCore/Speaker/SpeakerMergeLogMetadata.swift",
+        "Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift",
+        "Tests/TranscriptedCoreTests/UtilitiesTests/SpeakerMergeLogMetadataTests.swift"
+      ],
+      "conflicts": [
+        {
+          "file": "Sources/TranscriptedCore/Speaker/SpeakerProfileMerger.swift",
+          "resolution": "Remove UUID identity fields retained by broad #2336 diagnostics; use metric-only explicit/duplicate metadata helpers and preserve merge transactions."
+        }
+      ],
+      "testScope": {
+        "changedTests": [
+          "Tests/TranscriptedCoreTests/UtilitiesTests/SpeakerMergeLogMetadataTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2553,
+      "title": "Document unselected Writing model-picker copy choices (WRITING-CORE-5)",
+      "headRefOid": "911c23de3abb4c203c070885ab65475d8da5e0c6",
+      "headRefName": "codex/review-writing-core-5-owner-decision",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/writing-model-picker-copy-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected Writing model-copy worksheet only; no model picker, runtime or public API choices adopted.",
+      "integrationCommit": "5a2c0b5ca6489f218df1e6d3da7b45bd177ced08",
+      "integrationChangedFiles": [
+        "docs/proposals/writing-model-picker-copy-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2554,
+      "title": "docs(ui): clarify saved-person confirmation rings (UI-OVERLAY-B-6)",
+      "headRefOid": "ef6a30194d5518008765b89b6dca1df63ac79b19",
+      "headRefName": "codex/review-ui-overlay-b-6",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Clarify saved-person comment and ring progress wording; existing afterYes behavior remains unchanged.",
+      "integrationCommit": "e6c6cf2518441fdde847c4f3579436a4b189ce8b",
+      "integrationChangedFiles": [
+        "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift"
+      ],
+      "conflicts": [
+        {
+          "file": "Sources/UI/Overlay/NotchIslandSpeakerReviewPolicy.swift",
+          "resolution": "Clarify saved-person comment and ring progress wording; existing afterYes behavior remains unchanged."
+        }
+      ],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2555,
+      "title": "docs(core): prepare recent-lineup API compatibility decision",
+      "headRefOid": "d98c97c73fc0517418e0ed369e9f5e9d906dbb5e",
+      "headRefName": "codex/review-core-speaker-8",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "docs/proposals/recent-lineup-public-api-decision.md"
+      ],
+      "disposition": "history retained; proposal unselected",
+      "reason": "Unselected recent-lineup public API worksheet only. Existing #2336 candidate removes the convenience value, while the model-specific factory remains; compatibility/retirement remains an explicit unresolved owner decision, not approved by this worksheet.",
+      "integrationCommit": "84b079c293e14a6b3e3c43ae4256d8e6f3e23e87",
+      "integrationChangedFiles": [
+        "docs/proposals/recent-lineup-public-api-decision.md"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    },
+    {
+      "number": 2556,
+      "title": "Preserve meeting confirmation bars for picked saved people (UI-OVERLAY-B-7)",
+      "headRefOid": "1896bcbf85a31b174c9f6eeabae0be62fde5821f",
+      "headRefName": "codex/review-ui-overlay-b-7",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/Support/SpeakerNameSelectionPolicy.swift",
+        "Sources/TranscriptedCore/Models/TranscriptionTypes.swift",
+        "Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift",
+        "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift",
+        "Sources/UI/Overlay/NotchIslandVoiceRowView.swift",
+        "Tests/SpeakerNamingTierPresentationTests.swift"
+      ],
+      "disposition": "reconciled",
+      "reason": "Thread optional meeting-specific confirmation requirement from pipeline identity options through SpeakerNameChoice into saved-person review progress; nil retains standard fallback.",
+      "integrationCommit": "a0269271390b415f9b54fe372af91c143ec3eb46",
+      "integrationChangedFiles": [
+        "Sources/Support/SpeakerNameSelectionPolicy.swift",
+        "Sources/TranscriptedCore/Models/TranscriptionTypes.swift",
+        "Sources/TranscriptedCore/Pipeline/TranscriptionPipelineRunner.swift",
+        "Sources/UI/Overlay/NotchIslandSpeakerReviewView.swift",
+        "Sources/UI/Overlay/NotchIslandVoiceRowView.swift",
+        "Tests/SpeakerNamingTierPresentationTests.swift"
+      ],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [
+          "Tests/SpeakerNamingTierPresentationTests.swift"
+        ],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      },
+      "semanticDependencies": [
+        2554
+      ]
+    },
+    {
+      "number": 2557,
+      "title": "CORE-AUDIO-8: anonymize two capture comments",
+      "headRefOid": "a1bd1203362f3583da009754c980a3cf64313914",
+      "headRefName": "codex/review-core-audio-8",
+      "baseRefName": "main",
+      "dependencies": [],
+      "mergeBase": "8a38235eef00816a79daa1324387a21ef880204d",
+      "files": [
+        "Sources/TranscriptedCore/Audio/Audio+CaptureLifecycle.swift",
+        "Sources/TranscriptedCore/Audio/Audio.swift"
+      ],
+      "disposition": "history retained; behavior already present",
+      "reason": "Capture comments already anonymized through #2336; exact history retained with no runtime audio changes.",
+      "integrationCommit": "89f0b3f030485a9040224c4213252e51adef5b54",
+      "integrationChangedFiles": [],
+      "conflicts": [],
+      "testScope": {
+        "changedTests": [],
+        "requiredCombinedValidation": [
+          "exact-head hosted Swift CI",
+          "literal hosted full QA bench",
+          "owner native/hardware checks where applicable"
+        ]
+      }
+    }
+  ],
+  "originalScopeCount": 198,
+  "expansions": [
+    {
+      "dateUTC": "2026-11-11",
+      "startingHead": "0f558e7fc3577e0bd1ba8b545a4dc6fb69d8dbbf",
+      "additionalScopeCount": 27,
+      "manifest": "integration-2026-11-10-expansion-27.json",
+      "manifestSHA256": "a5577a589b0afc22d6bbee41a03c842b5d0faa3ee1551eda127976c03f8061af",
+      "sourceManifestSHA256": "8f1c1b71d17006dc663debcb6df914d84a5f0e3f8ec6f8039bbaa18790308e8e",
+      "firstPR": 2531,
+      "lastPR": 2557
     }
   ]
 }

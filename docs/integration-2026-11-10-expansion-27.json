@@ -1,0 +1,197 @@
+{
+  "schemaVersion": 1,
+  "frozenDateUTC": "2026-11-11",
+  "scopeCount": 27,
+  "sourceManifestSHA256": "8f1c1b71d17006dc663debcb6df914d84a5f0e3f8ec6f8039bbaa18790308e8e",
+  "entries": [
+    {
+      "number": 2531,
+      "title": "fix(speech): keep Whisper state with its model variant",
+      "headRefOid": "f3d3f7a131e76d53100eaf1197c36823fa7d3e0c",
+      "headRefName": "codex/review-speech-b-4",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2532,
+      "title": "docs: frame CORE-AUDIO-6 backend retirement decision",
+      "headRefOid": "0e8d3f1e74f01c06f14c92313a1bbaf444642bd1",
+      "headRefName": "codex/review-core-audio-6-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2533,
+      "title": "cleanup: remove unused app prompt observer (APP-DICTATION-2)",
+      "headRefOid": "9f0196f779e7da8d470fd53befeaa835fe44243e",
+      "headRefName": "codex/review-app-dictation-2",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2534,
+      "title": "docs: frame CORE-SPEAKER-5 automatic merge decision",
+      "headRefOid": "8b0430f332b98d89224b1f32841e0780699b7689",
+      "headRefName": "codex/review-core-speaker-5-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2535,
+      "title": "docs: correct debug control transport (APP-DICTATION-6)",
+      "headRefOid": "93378cb67e94eb6e04f8ab959a9c4ff1656525f3",
+      "headRefName": "codex/review-app-dictation-6",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2536,
+      "title": "docs: frame TOOLS-MCP-6 companion access decision",
+      "headRefOid": "567280c50fc77eea9f3547be731e75146c19c12d",
+      "headRefName": "codex/review-tools-mcp-6-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2537,
+      "title": "Remove unused default-input monitor stop facade (SPEECH-A-10)",
+      "headRefOid": "1f8d1db8f725f634e1b90ecf94c4921bcf068b86",
+      "headRefName": "codex/review-speech-a-10",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2538,
+      "title": "docs: describe static island dot glow (UI-OVERLAY-B-5)",
+      "headRefOid": "6ed7e7f37e93af078cf13f34c40d512a2e982606",
+      "headRefName": "codex/review-ui-overlay-b-5",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2539,
+      "title": "fix(core): reset rejected saved-audio request status",
+      "headRefOid": "b207ce087bfd58deecc165c6455b1b5603981dbf",
+      "headRefName": "codex/review-core-rest-20",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2540,
+      "title": "docs: frame DOCS-15 branch protection decision",
+      "headRefOid": "53b3882daa448a12f0370e7dc230189c88a7cb78",
+      "headRefName": "codex/review-docs-15-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2541,
+      "title": "fix(speech): exclude unknown input from stable route reports (SPEECH-A-4)",
+      "headRefOid": "f0b246ea5aab20182dc643cbb087dd05557bfe05",
+      "headRefName": "codex/review-speech-a-4",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2542,
+      "title": "docs: frame DOCS-8 versioned changelog decision",
+      "headRefOid": "c633ddeb6aa6a4783e34e7857bc367c8835f5919",
+      "headRefName": "codex/review-docs-8-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2543,
+      "title": "docs: correct hidden transcript clock comment (UI-OVERLAY-B-10)",
+      "headRefOid": "267b34f0629c2adb47a8470eb5d39275bdb65d49",
+      "headRefName": "codex/review-ui-overlay-b-10",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2544,
+      "title": "Stop speaker-review clips when the island leaves screen (UI-OVERLAY-B-8)",
+      "headRefOid": "6eac465675ed3d3a6c0495388ec65c1fb74a12fb",
+      "headRefName": "codex/review-ui-overlay-b-8",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2545,
+      "title": "fix(ui): hide listening placeholder for finished dictation (UI-OVERLAY-B-2)",
+      "headRefOid": "b55508504e2717b70e50b2218be0c311c8d4b2de",
+      "headRefName": "codex/review-ui-overlay-b-2",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2546,
+      "title": "docs: frame BUILD-CI-1 monthly mutation decision",
+      "headRefOid": "f7621a22c828d116c711c445fdf7974a911cf2d4",
+      "headRefName": "codex/review-build-ci-1-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2547,
+      "title": "fix(core): protect saved-audio jobs and collect pipeline timings",
+      "headRefOid": "4004cc38d86746e14ba4d93d6b0978caef6354c1",
+      "headRefName": "codex/review-core-rest-9",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2548,
+      "title": "Correct hybrid-search recall claims and tie ordering (TOOLS-MCP-2)",
+      "headRefOid": "9b4caac3119bb7d44fc5f71507ca08f819a555d4",
+      "headRefName": "codex/review-tools-mcp-2",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2549,
+      "title": "UI-OVERLAY-A-2: prepare dictation display placement decision",
+      "headRefOid": "c6804dc713667e80d462ab116eb9f531140d5310",
+      "headRefName": "codex/review-ui-overlay-a-2-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2550,
+      "title": "fix(mcp): count distinct meetings in speaker profiles (TOOLS-MCP-3)",
+      "headRefOid": "3b7570894835fddd589726bc41fc99e4348c6758",
+      "headRefName": "codex/review-tools-mcp-3",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2551,
+      "title": "WRITING-RUNTIME-11: prepare Personal History retention decision",
+      "headRefOid": "ec34d38492c969819d23ceb0ace78b72f5ae3f07",
+      "headRefName": "codex/review-writing-runtime-11-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2552,
+      "title": "fix(core): omit speaker identities from merge diagnostics",
+      "headRefOid": "fad2489ca2fe6722a5e1824051055e2c3bb48517",
+      "headRefName": "codex/review-core-speaker-3",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2553,
+      "title": "Document unselected Writing model-picker copy choices (WRITING-CORE-5)",
+      "headRefOid": "911c23de3abb4c203c070885ab65475d8da5e0c6",
+      "headRefName": "codex/review-writing-core-5-owner-decision",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2554,
+      "title": "docs(ui): clarify saved-person confirmation rings (UI-OVERLAY-B-6)",
+      "headRefOid": "ef6a30194d5518008765b89b6dca1df63ac79b19",
+      "headRefName": "codex/review-ui-overlay-b-6",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2555,
+      "title": "docs(core): prepare recent-lineup API compatibility decision",
+      "headRefOid": "d98c97c73fc0517418e0ed369e9f5e9d906dbb5e",
+      "headRefName": "codex/review-core-speaker-8",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2556,
+      "title": "Preserve meeting confirmation bars for picked saved people (UI-OVERLAY-B-7)",
+      "headRefOid": "1896bcbf85a31b174c9f6eeabae0be62fde5821f",
+      "headRefName": "codex/review-ui-overlay-b-7",
+      "baseRefName": "main"
+    },
+    {
+      "number": 2557,
+      "title": "CORE-AUDIO-8: anonymize two capture comments",
+      "headRefOid": "a1bd1203362f3583da009754c980a3cf64313914",
+      "headRefName": "codex/review-core-audio-8",
+      "baseRefName": "main"
+    }
+  ]
+}
