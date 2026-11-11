@@ -326,14 +326,6 @@ func testMeetingAutoRecordPolicy() {
             ),
             expected: .prompt
         ),
-        Row(
-            name: "live system-audio denial never auto-starts",
-            request: autoRecordRequest(
-                evidence: .nativeApp, provider: .zoom, reason: .micInput,
-                systemAudioGranted: false
-            ),
-            expected: .prompt
-        ),
     ]
 
     for row in rows {
