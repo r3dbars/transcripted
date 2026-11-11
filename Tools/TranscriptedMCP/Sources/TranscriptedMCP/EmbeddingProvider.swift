@@ -5,8 +5,8 @@ import NaturalLanguage
 ///
 /// - `lexical`  — the original SQLite FTS5 path (exact/stemmed token match).
 /// - `semantic` — vector cosine match only (paraphrase recall).
-/// - `hybrid`   — both, fused with reciprocal-rank fusion. Strict superset of
-///                lexical recall, so it never drops an FTS hit.
+/// - `hybrid`   — both, fused with reciprocal-rank fusion and capped. Semantic
+///                candidates can displace lexical hits within the result limit.
 enum SearchMode: String, Codable, Sendable {
     case lexical
     case semantic

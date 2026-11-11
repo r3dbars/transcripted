@@ -166,7 +166,7 @@ final class SemanticSearchTests: XCTestCase {
         XCTAssertTrue(semantic.results[0].snippets[0].text.contains("balked"))
     }
 
-    // MARK: - Hybrid is a strict superset of lexical recall
+    // MARK: - Hybrid retains both sources when their candidate union fits
 
     func testHybridUnionsLexicalAndSemantic() throws {
         let index = try makeIndex()
@@ -518,7 +518,7 @@ final class SemanticSearchFusionTests: XCTestCase {
         )
     }
 
-    func testFusionPreservesLexicalAndAppendsSemanticOnly() {
+    func testFusionRetainsBothSourcesWhenCandidateUnionFits() {
         let lexical = GroupedSearchResult(results: [meetingGroup("A"), meetingGroup("B")], totalMeetingsMatched: 2, truncated: false)
         let semantic = GroupedSearchResult(results: [meetingGroup("B"), meetingGroup("C")], totalMeetingsMatched: 2, truncated: false)
 
