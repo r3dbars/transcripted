@@ -42,14 +42,6 @@ extension ScreenCaptureService {
         }
     }
 
-    /// Whole milliseconds between two instants, floored at zero so a clock
-    /// that does not advance (the common case in tests, which hold `now`
-    /// fixed) reports `0` rather than a negative number. Internal, not
-    /// private, so `ScreenCaptureServiceTests` can prove the rounding/floor
-    /// behavior directly — `performCapture` itself stays untestable at unit
-    /// level like the rest of ScreenCaptureKit-shaped code in this type (see
-    /// the type doc comment), so this is the one piece of the duty-cycle
-    /// math that CAN be proven without a live display.
     /// Backing pixels per point for the display being captured; 2 on
     /// Retina panels, 1 otherwise. Falls back to 1 when the display has no
     /// pixel dimensions (mirrored/virtual displays during setup).
@@ -67,6 +59,14 @@ extension ScreenCaptureService {
         return max(1, (Double(pixelWidth) / Double(pointWidth)).rounded())
     }
 
+    /// Whole milliseconds between two instants, floored at zero so a clock
+    /// that does not advance (the common case in tests, which hold `now`
+    /// fixed) reports `0` rather than a negative number. Internal, not
+    /// private, so `ScreenCaptureServiceTests` can prove the rounding/floor
+    /// behavior directly — `performCapture` itself stays untestable at unit
+    /// level like the rest of ScreenCaptureKit-shaped code in this type (see
+    /// the type doc comment), so this is the one piece of the duty-cycle
+    /// math that CAN be proven without a live display.
     static func milliseconds(from start: Date, to end: Date) -> Int {
         max(0, Int((end.timeIntervalSince(start) * 1000).rounded()))
     }
