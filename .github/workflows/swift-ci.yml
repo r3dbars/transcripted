@@ -6,8 +6,8 @@ permissions:
   contents: read
 jobs:
   spm-tests:
-    runs-on: [self-hosted, macOS, ARM64, transcripted-full-2530-fdb]
-    timeout-minutes: 150
+    runs-on: [self-hosted, macOS, ARM64, transcripted-e66-proof-1111]
+    timeout-minutes: 180
     defaults:
       run:
         working-directory: candidate
@@ -17,17 +17,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fdb0236ae0da9df0204c80d044e290fd489b9690
+          ref: e66e3e4fb7c4e73e5a6825a8f66458425ca12d16
+          fetch-depth: 0
           persist-credentials: false
           path: candidate
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
           path: diagnostic-harness
       - uses: actions/checkout@v4
         with:
           ref: 8a38235eef00816a79daa1324387a21ef880204d
+          fetch-depth: 0
           persist-credentials: false
           path: reviewed-harness
       - name: Verify isolation and run full validation
@@ -49,7 +52,7 @@ jobs:
             exit "$code"
           }
           trap finish EXIT
-          test "$(git rev-parse HEAD)" = fdb0236ae0da9df0204c80d044e290fd489b9690
+          test "$(git rev-parse HEAD)" = e66e3e4fb7c4e73e5a6825a8f66458425ca12d16
           test "$GITHUB_EVENT_NAME" = workflow_dispatch
           test "$GITHUB_REPOSITORY" = r3dbars/transcripted
           test "$GITHUB_JOB" = spm-tests
@@ -81,15 +84,18 @@ jobs:
           bash ../diagnostic-harness/.github/diagnostics/run-full.sh
           stage=complete
       - name: Preserve bounded logs and exact-source receipt
+        timeout-minutes: 3
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: full-validation-fdb-${{ github.run_id }}
+          name: replacement-proof-e66-${{ github.run_id }}
           path: |
             candidate/diagnostic-proof/receipt.txt
             candidate/diagnostic-proof/stages.tsv
             candidate/diagnostic-proof/coverage.json
             candidate/diagnostic-proof/fixture-receipt.json
-            candidate/diagnostic-proof/*.log
+            candidate/diagnostic-proof/concurrency.json
+            candidate/diagnostic-proof/toolchain.txt
+            candidate/diagnostic-proof/locale.json
           if-no-files-found: error
           retention-days: 14
