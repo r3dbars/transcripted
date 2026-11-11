@@ -47,7 +47,6 @@ actor ScreenCaptureService {
     private var activeTextFieldSessionIdentifier: String?
     private var activeTypingTarget: TypingTargetIdentity?
     private var typingTargetGeneration: UInt64 = 0
-    private var textFieldRequiresFullRefresh = false
 
     /// Injectable for tests: the real system checks (TCC, lock screen,
     /// secure input, ScreenCaptureKit itself) are not something a unit test
@@ -149,10 +148,9 @@ actor ScreenCaptureService {
         activeTextFieldSessionIdentifier = sessionIdentifier
         adoptTarget(target, sessionIdentifier: sessionIdentifier, forceNewGeneration: true)
         lastActivityAt = now()
-        textFieldRequiresFullRefresh = true
         pendingTextFieldCaptureTask?.cancel()
         pendingTextFieldCaptureTask = nil
-        let outcome = await attemptTextFieldCapture(trigger: .textFieldFocused)
+        let outcome = await attemptCapture(trigger: .textFieldFocused)
         scheduleRetryAfterCadenceIfNeeded(outcome, trigger: .textFieldFocused)
         return outcome
     }
@@ -168,10 +166,9 @@ actor ScreenCaptureService {
         activeTextFieldSessionIdentifier = sessionIdentifier
         adoptTarget(target, sessionIdentifier: sessionIdentifier, forceNewGeneration: false)
         lastActivityAt = now()
-        textFieldRequiresFullRefresh = true
         pendingTextFieldCaptureTask?.cancel()
         pendingTextFieldCaptureTask = nil
-        let outcome = await attemptTextFieldCapture(trigger: .textFieldFocused)
+        let outcome = await attemptCapture(trigger: .textFieldFocused)
         scheduleRetryAfterCadenceIfNeeded(outcome, trigger: .textFieldFocused)
         return outcome
     }
@@ -192,7 +189,7 @@ actor ScreenCaptureService {
         let trigger = CaptureTriggerPolicy.Trigger.typingPause(
             elapsedSeconds: CaptureTriggerPolicy.typingPauseThresholdSeconds
         )
-        let outcome = await attemptTextFieldCapture(trigger: trigger)
+        let outcome = await attemptCapture(trigger: trigger)
         scheduleRetryAfterCadenceIfNeeded(outcome, trigger: trigger)
         return outcome
     }
@@ -331,7 +328,6 @@ actor ScreenCaptureService {
         latestSnapshot = nil
         activeTypingTarget = nil
         activeTextFieldSessionIdentifier = nil
-        textFieldRequiresFullRefresh = false
         lastContentResetAt = moment
     }
 
@@ -386,7 +382,6 @@ actor ScreenCaptureService {
                 activeTypingTarget = nil
                 latestSnapshot = nil
                 lastContentResetAt = now()
-                textFieldRequiresFullRefresh = true
             }
             return
         }
@@ -409,21 +404,6 @@ actor ScreenCaptureService {
         )
         latestSnapshot = nil
         lastContentResetAt = now()
-        textFieldRequiresFullRefresh = true
-    }
-
-    @discardableResult
-    private func attemptTextFieldCapture(
-        trigger: CaptureTriggerPolicy.Trigger
-    ) async -> CaptureOutcome {
-        let outcome = await attemptCapture(
-            trigger: trigger,
-            forceFullOCR: textFieldRequiresFullRefresh
-        )
-        if case .captured = outcome {
-            textFieldRequiresFullRefresh = false
-        }
-        return outcome
     }
 
     private func scheduleRetryAfterCadenceIfNeeded(
@@ -437,14 +417,13 @@ actor ScreenCaptureService {
             let nanoseconds = UInt64(max(0, secondsRemaining) * 1_000_000_000)
             try? await Task.sleep(nanoseconds: nanoseconds)
             guard !Task.isCancelled, let self else { return }
-            let retry = await self.attemptTextFieldCapture(trigger: trigger)
+            let retry = await self.attemptCapture(trigger: trigger)
             await self.scheduleRetryAfterCadenceIfNeeded(retry, trigger: trigger)
         }
     }
 
     private func attemptCapture(
-        trigger: CaptureTriggerPolicy.Trigger,
-        forceFullOCR: Bool = false
+        trigger: CaptureTriggerPolicy.Trigger
     ) async -> CaptureOutcome {
         let moment = now()
         let isEnabled = enabled()
@@ -532,8 +511,7 @@ actor ScreenCaptureService {
             let outcome = await performCapture(
                 content: content,
                 moment: moment,
-                target: captureTarget,
-                forceFullOCR: forceFullOCR
+                target: captureTarget
             )
             if case .captured = outcome {
                 return outcome
@@ -588,8 +566,7 @@ actor ScreenCaptureService {
     private func performCapture(
         content: SCShareableContent,
         moment: Date,
-        target: TypingTargetIdentity,
-        forceFullOCR: Bool
+        target: TypingTargetIdentity
     ) async -> CaptureOutcome {
         let zRanks = Self.onScreenZOrderRanks()
         let candidates = content.windows.compactMap { window -> FocusedWindowCapturePolicy.Window? in
@@ -663,8 +640,7 @@ actor ScreenCaptureService {
             window: targetWindow,
             display: display,
             moment: moment,
-            target: target,
-            forceFullOCR: forceFullOCR
+            target: target
         )
     }
 
@@ -678,8 +654,7 @@ actor ScreenCaptureService {
         window: SCWindow,
         display: SCDisplay,
         moment: Date,
-        target: TypingTargetIdentity,
-        forceFullOCR: Bool
+        target: TypingTargetIdentity
     ) async -> CaptureOutcome {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let configuration = SCStreamConfiguration()
@@ -734,12 +709,8 @@ actor ScreenCaptureService {
             }
 
             let (blocks, ocrMilliseconds) = try await fullWindowOCR()
-            let ocrScope = "full"
 
             let dutyCycleMilliseconds = Self.milliseconds(from: dutyCycleStart, to: now())
-            let source: ScreenTextExtractionSource = .visionFull
-            let reuseCount = 0
-            let recognizedAt = moment
             guard activeTypingTarget == target else {
                 record(.skip(.targetChanged))
                 return .skipped(.targetChanged)
@@ -756,12 +727,12 @@ actor ScreenCaptureService {
                 displayID: display.displayID,
                 blocks: blocks,
                 evidence: ScreenTextExtractionEvidence(
-                    source: source,
+                    source: .visionFull,
                     completed: true,
                     confidence: Self.aggregateConfidence(of: blocks),
                     observedAt: moment,
-                    recognizedAt: recognizedAt,
-                    reuseCount: reuseCount,
+                    recognizedAt: moment,
+                    reuseCount: 0,
                     target: target
                 )
             )
@@ -775,7 +746,7 @@ actor ScreenCaptureService {
                     "duration_ms": String(dutyCycleMilliseconds),
                     "ocrMilliseconds": String(ocrMilliseconds),
                     "kind": "window",
-                    "ocrScope": ocrScope,
+                    "ocrScope": "full",
                 ]
             )
             return .captured(blockCount: blocks.count)
