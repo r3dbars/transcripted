@@ -1,6 +1,7 @@
 import Foundation
 
-/// Writes structured log entries as JSON Lines to ~/Library/Logs/Transcripted/app.jsonl
+/// Writes structured log entries as JSON Lines to `app.jsonl` in `paths.logs`.
+/// Normally this is `~/Library/Application Support/Transcripted/logs/`.
 ///
 /// Design decisions:
 /// - JSON Lines format: one JSON object per line, machine-parseable, grep-friendly
