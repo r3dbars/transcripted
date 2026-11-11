@@ -7,7 +7,6 @@ import UniformTypeIdentifiers
 struct TranscriptedSettingsView: View {
     @Bindable var navigation: TranscriptedSettingsNavigationModel
     @ObservedObject var speakerPeopleModel: SpeakerPeopleSettingsViewModel
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     @ObservedObject var sttRouter: STTRouter
     /// Not observed (it publishes every tick): `meetingRender` redraws only
     /// on what the shell shows, `recordingClock` feeds Home's elapsed label.
