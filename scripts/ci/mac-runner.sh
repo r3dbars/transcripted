@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Runs Swift CI's `checks` and `spm-tests` jobs on the owner's Mac, each in a
-# fresh throwaway macOS VM. See docs/self-hosted-mac-runner.md.
+# Runs Swift CI's `checks`, `spm-tests` and `app-build` jobs on the owner's Mac,
+# each in a fresh throwaway macOS VM. See docs/self-hosted-mac-runner.md.
 #
 # Usage (as the owner, never with sudo): bash scripts/ci/mac-runner.sh <command>
 #   install           install Tart, build the CI VM image, start the service

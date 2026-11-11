@@ -105,8 +105,9 @@ env:
 jobs:
   # Picks the runner for `checks`, `spm-tests` and `app-build`: the owner's Mac
   # when its heartbeat says it is free and nothing is waiting for it, hosted
-  # macos-26 otherwise. The Mac runs one job VM at a time, so the three jobs
-  # run one after another there. Linux, so it never takes one of the 5 hosted macOS slots.
+  # macos-26 otherwise. The Mac runner supports up to two concurrent job VMs,
+  # so these jobs can overlap within that cap. This picker runs on Linux and
+  # does not consume a hosted macOS slot.
   # actions: read lets it count jobs already queued for the Mac. Runs stuck
   # behind a Mac that went quiet are re-run by mac-runner-sweep.yml, from main.
   pick-runner:
