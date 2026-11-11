@@ -47,13 +47,6 @@ private final class ReplacementTranscriptReservations: @unchecked Sendable {
         }
     }
 
-    func reservedIdentity(at url: URL) -> UUID? {
-        lock.lock()
-        defer { lock.unlock() }
-        let path = key(for: url)
-        return entries.values.first { $0.path == path }?.transcriptId
-    }
-
     func reservedExpectation(at url: URL) -> TranscriptReplacementExpectation? {
         let path = key(for: url)
         lock.lock()
