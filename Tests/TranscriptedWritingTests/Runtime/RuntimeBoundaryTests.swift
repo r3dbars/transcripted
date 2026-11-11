@@ -4,16 +4,8 @@ import Testing
 
 @Suite("Runtime boundaries")
 struct RuntimeBoundaryTests {
-    @Test("Runtime snapshots have explicit status-menu copy")
-    func statusMenuCopy() {
-        #expect(LlamaRuntimeSnapshot.starting.menuLine == "Engine: Gemma (starting…)")
-        #expect(LlamaRuntimeSnapshot.ready.menuLine == "Engine: Gemma (ready)")
-        #expect(LlamaRuntimeSnapshot.retrying(.portInUse).menuLine == "⚠️ Engine port busy — retrying")
-        #expect(LlamaRuntimeSnapshot.retrying(.launchFailed).menuLine == "⚠️ Engine couldn't start — retrying")
-        #expect(LlamaRuntimeSnapshot.retrying(.healthTimeout).menuLine == "⚠️ Engine didn't become ready — retrying")
-        #expect(LlamaRuntimeSnapshot.retrying(.processExited).menuLine == "⚠️ Engine stopped — retrying")
-        #expect(LlamaRuntimeSnapshot.retrying(.completionFailed).menuLine == "⚠️ Engine stopped responding — retrying")
-        #expect(LlamaRuntimeSnapshot.failed(.assetsMissing).menuLine == "⚠️ Engine files missing — reinstall Transcripted")
+    @Test("Runtime snapshots retain the restart reason after exit")
+    func restartReasonAfterExit() {
         #expect(LlamaRuntimeSnapshot.retrying(.healthTimeout).restartReasonAfterExit == .healthTimeout)
         #expect(LlamaRuntimeSnapshot.ready.restartReasonAfterExit == .processExited)
     }

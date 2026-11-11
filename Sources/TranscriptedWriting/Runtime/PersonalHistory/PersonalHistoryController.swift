@@ -22,48 +22,8 @@ enum PersonalNextWordShadowPhase: Equatable, Sendable {
 }
 
 struct PersonalNextWordShadowStatus: Equatable, Sendable {
-    static let reportingOpportunityMinimum = 2_000
-    static let reportingPredictionMinimum = 200
-    static let reportingDisagreementMinimum = 100
-    static let reportingActiveDayMinimum = 14
-
     let phase: PersonalNextWordShadowPhase
     let snapshot: PersonalNextWordShadowSnapshot
-
-    var menuLine: String {
-        let capacity = snapshot.capacityLimited ? " · memory limit reached" : ""
-        let shadowOnly = " · shadow-only"
-        switch phase {
-        case .inactive:
-            return "Next-word test: off\(shadowOnly)"
-        case .loading:
-            return "Next-word test: loading recent history…\(shadowOnly)"
-        case .unavailable:
-            return "Next-word test: unavailable\(shadowOnly)"
-        case .ready where !isDescriptive:
-            let words = "\(snapshot.opportunities.formatted())/2,000 shared fresh words"
-            let predictions = "\(snapshot.predictions)/\(Self.reportingPredictionMinimum) candidate predictions"
-            let differences = "\(snapshot.predictionDisagreements)/\(Self.reportingDisagreementMinimum) disagreements"
-            let days = "\(snapshot.activeDays)/\(Self.reportingActiveDayMinimum) active days"
-            return "Next-word test: \(words) · \(predictions) · \(differences) · \(days)\(capacity)\(shadowOnly)"
-        case .ready:
-            let candidate = Self.percent(snapshot.exactHits, of: snapshot.opportunities)
-            let baseline = Self.percent(snapshot.baselineExactHits, of: snapshot.opportunities)
-            return "Next-word test: candidate \(candidate) vs baseline \(baseline) effective · \(snapshot.opportunities.formatted()) shared fresh words\(capacity)\(shadowOnly)"
-        }
-    }
-
-    private var isDescriptive: Bool {
-        snapshot.opportunities >= Self.reportingOpportunityMinimum
-            && snapshot.predictions >= Self.reportingPredictionMinimum
-            && snapshot.predictionDisagreements >= Self.reportingDisagreementMinimum
-            && snapshot.activeDays >= Self.reportingActiveDayMinimum
-    }
-
-    private static func percent(_ hits: Int, of opportunities: Int) -> String {
-        guard opportunities > 0 else { return "0.0%" }
-        return String(format: "%.1f%%", Double(hits) * 100 / Double(opportunities))
-    }
 }
 
 enum PersonalHistoryStorageHealth: String, Equatable, Sendable {
@@ -83,15 +43,6 @@ enum PersonalHistoryStorageHealth: String, Equatable, Sendable {
         case .invalidKey, .missingKey: return .keyUnavailable
         case .keychain: return .storageUnavailable
         case .invalidEvent: return duringReplay ? nil : .internalError
-        }
-    }
-
-    var menuLine: String? {
-        switch self {
-        case .healthy: return nil
-        case .storeCorrupt, .keyUnavailable: return "History: not saving — reset required"
-        case .storageUnavailable: return "History: not saving — storage unavailable"
-        case .internalError: return "History: not saving — restart Transcripted"
         }
     }
 }

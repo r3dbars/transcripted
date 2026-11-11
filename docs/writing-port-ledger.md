@@ -106,14 +106,14 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Sources/TildeApp/App/TildeApplicationState.swift` | `Sources/Writing/WritingController.swift` | replaced | 2 |  |
 | `Sources/TildeApp/App/TildeInstallationLocation.swift` | `—` | not-ported | 2 | Transcripted handles its own install location. |
 | `Sources/TildeApp/App/TildeLocalOutcomeStores.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingLocalOutcomeStores.swift` | ported | 2 | Type name kept (`TildeLocalOutcomeStores`). |
-| `Sources/TildeApp/App/TildeProgress.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingProgress.swift` | ported | 2 | Type name kept (`TildeProgress`). |
+| `Sources/TildeApp/App/TildeProgress.swift` | `—` | not-ported | 2 | Ported, then removed: unused status-menu/progress facade. The Writing tab has its own model and outcome-ledger presentation. |
 | `Sources/TildeApp/App/TildeSettings.swift` | `Sources/TranscriptedWriting/Runtime/TildeSettings.swift` | ported | 2 | Straight port, type name kept; the H01, local-OCR-evaluation and incremental-OCR keys are stripped. The bridge's `WritingPreferences` (P2-B) wraps it. |
 | `Sources/TildeApp/App/TildeSettingsSupportingViews.swift` | `Sources/UI/Settings/Writing/WritingComponents.swift` | replaced | 4 | (phase 4). |
 | `Sources/TildeApp/App/TildeSettingsViewModel.swift` | `Sources/Writing/WritingSettingsModel.swift` | replaced | 4 | Writing tab model (phase 4). |
 | `Sources/TildeApp/App/TildeSettingsWindowController.swift` | `Sources/UI/Settings/Writing/WritingSettingsSection.swift` | replaced | 4 | Writing tab settings section (phase 4). |
 | `Sources/TildeApp/App/TildeSetupState.swift` | `Sources/Writing/WritingSetupState.swift` | replaced | 4 | Approved three-step setup (phase 4). |
 | `Sources/TildeApp/App/TildeSetupWindowController.swift` | `Sources/UI/Settings/Writing/WritingIntroView.swift, WritingSetupFlowView.swift` | replaced | 4 | Intro pages and setup steps (phase 4). |
-| `Sources/TildeApp/App/TildeStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingStats.swift` | ported | 2 | Type name kept (`TildeStats`). |
+| `Sources/TildeApp/App/TildeStats.swift` | `Sources/TranscriptedWriting/Runtime/Stats/WritingStats.swift` | ported | 2 | Live accepted-suggestion counter retained; unused word/lifetime and menu aggregation helpers removed. |
 | `Sources/TildeApp/App/YourTildeView.swift` | `Sources/UI/Settings/Writing/WritingEverydayView.swift` | replaced | 4 | Everyday view stats in plain Transcripted words; the personalization-stage progress isn't shown (phase 4). |
 | `Sources/TildeApp/App/main.swift` | `—` | not-ported | 2 | Dev flags only. |
 | `Sources/TildeApp/Mac/DiagnosticsLog.swift` | `Sources/TranscriptedWriting/Runtime/DiagnosticsLog.swift` | ported | 2 | Write under Transcripted's logs. Deviation: never writes under tests or with `TRANSCRIPTED_DISABLE_FILE_LOGGER=1`, same as `FileLogger`. |
@@ -271,9 +271,9 @@ python3 ~/tilde-port/parity-diff.py --ledger docs/writing-port-ledger.md --repo 
 | `Tests/TildeAppTests/TildeApplicationStateTests.swift` | — | replaced | 2 | Tests `TildeApplicationState`, replaced by `WritingController`. |
 | `Tests/TildeAppTests/TildeInstallationLocationTests.swift` | — | not-ported | 2 | Tests `TildeInstallationLocation` (not-ported). |
 | `Tests/TildeAppTests/TildeLocalOutcomeStoresTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeLocalOutcomeStoresTests.swift` | ported | 2 | Path assertion checks `Transcripted/writing` instead of `Tilde`. |
-| `Tests/TildeAppTests/TildeProgressTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeProgressTests.swift` | ported | 2 | Trimmed `milestoneCopy` (`TildeProgressPresentation` lives in the replaced YourTildeView). |
+| `Tests/TildeAppTests/TildeProgressTests.swift` | `Tests/TranscriptedWritingTests/Runtime/PersonalSuggestionStatsTests.swift` | replaced | 2 | Retired progress/menu assertions removed; the live recorder's local-day bucket test is retained here. |
 | `Tests/TildeAppTests/TildeSettingsPresentationTests.swift` | — | replaced | 2 | Tests `TildeSettingsPresentation` in the replaced TildeSettingsViewModel. |
 | `Tests/TildeAppTests/TildeSettingsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeSettingsTests.swift` | ported | 2 | Trimmed `localOCREvaluationPreference`, `incrementalOCRToggle`, `incrementalOCRExplicitOffPersists` and the incremental-OCR default assertion in `absentKeysUseProductDefaults` (keys stripped), plus `modelPresentation` (`TildeModelPresentation` lives in the replaced view model). |
 | `Tests/TildeAppTests/TildeSettingsViewModelTests.swift` | — | replaced | 2 | Tests the replaced TildeSettingsViewModel. |
 | `Tests/TildeAppTests/TildeSetupStateTests.swift` | — | replaced | 2 | Tests the replaced TildeSetupState. |
-| `Tests/TildeAppTests/TildeStatsTests.swift` | `Tests/TranscriptedWritingTests/Runtime/TildeStatsTests.swift` | ported | 2 |  |
+| `Tests/TildeAppTests/TildeStatsTests.swift` | `—` | not-ported | 2 | Ported, then removed with unused lifetime/menu aggregation helpers. Live keyboard counters and the Writing outcome ledger remain. |

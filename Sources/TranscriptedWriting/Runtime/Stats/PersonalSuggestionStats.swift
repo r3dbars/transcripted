@@ -3,9 +3,7 @@ import TranscriptedWritingCore
 #endif
 import Foundation
 
-/// Count-only daily split of the "Personal suggestions (experimental)"
-/// policy's outcome (`PersonalSuggestionSource`), so the menu can show
-/// today's personal/agreed/base split without reading the diagnostics log.
+/// Count-only daily split of served personal-suggestion sources.
 /// Same daily-bucket-in-the-keyboard-suite convention as `TildeStats`/
 /// `GhostStats` (a `"personal-suggestions.\(yyyy-MM-dd)"` key holding a
 /// `[String: Int]` dict) — three integers per local calendar day, never any
@@ -24,13 +22,6 @@ enum PersonalSuggestionStats {
             var counts = suite.dictionary(forKey: key) as? [String: Int] ?? [:]
             counts[source.rawValue, default: 0] += 1
             suite.set(counts, forKey: key)
-        }
-    }
-
-    static func todayCounts(now: Date = Date()) -> [String: Int] {
-        let suite = UserDefaults(suiteName: TildeSettings.keyboardSuiteName) ?? .standard
-        return lock.withLock {
-            suite.dictionary(forKey: dayKey(for: now)) as? [String: Int] ?? [:]
         }
     }
 
