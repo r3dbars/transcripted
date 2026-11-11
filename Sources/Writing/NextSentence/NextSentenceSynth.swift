@@ -8,6 +8,9 @@ import Foundation
 final class NextSentenceSynth {
     static let shared = NextSentenceSynth()
 
+    // Output only: players/source feed the mixer, reverb and mainMixerNode;
+    // outputNode supplies the sample rate. inputNode is never accessed, so a
+    // Bluetooth default-input headset is not selected for capture by this graph.
     private let engine = AVAudioEngine()
     private let reverb = AVAudioUnitReverb()
     /// Mono voices meet here; it hands the reverb the stereo it needs.

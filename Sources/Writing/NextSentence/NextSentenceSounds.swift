@@ -24,6 +24,9 @@ enum NextSentenceSound {
 final class NextSentenceSounds {
     static let shared = NextSentenceSounds()
 
+    // Output only: player/varispeed nodes feed mainMixerNode. This graph never
+    // accesses inputNode, including with a Bluetooth headset as the Mac default
+    // input; it does not select that microphone for capture.
     private let engine = AVAudioEngine()
     private var players: [AVAudioPlayerNode] = []
     private var next = 0
