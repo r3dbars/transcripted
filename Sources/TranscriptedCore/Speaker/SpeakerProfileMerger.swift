@@ -403,11 +403,7 @@ extension SpeakerDatabase {
         }
 
         if !transactionAlreadyOpen {
-            AppLogger.speakers.info("Merged profiles", [
-                "sourceId": sourceId.uuidString,
-                "targetId": targetId.uuidString,
-                "newCallCount": "\(newCallCount)"
-            ])
+            AppLogger.speakers.info("Merged profiles", SpeakerMergeLogMetadata.explicit(newCallCount: newCallCount))
         }
     }
 
@@ -530,7 +526,7 @@ extension SpeakerDatabase {
 
                 mergedIds.insert(absorbed.id)
                 mergeCount += 1
-                AppLogger.speakers.info("Merged duplicate speaker", ["absorbedId": absorbed.id.uuidString, "keeperId": keeper.id.uuidString, "similarity": String(format: "%.3f", similarity)])
+                AppLogger.speakers.info("Merged duplicate speaker", SpeakerMergeLogMetadata.duplicate(similarity: similarity))
                 if absorbed.id == speakers[i].id { break }
             }
         }
