@@ -34,8 +34,6 @@ enum NotchIslandPalette {
     static func color(for tint: NotchIslandTint) -> NSColor {
         switch tint {
         case .accent: return accent
-        case .primary: return primaryText
-        case .secondary: return secondaryText
         case .warning: return warning
         }
     }

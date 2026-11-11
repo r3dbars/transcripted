@@ -201,7 +201,6 @@ final class NotchIslandWingView: NSView {
             let buttonStyle: NotchIslandButton.Style
             switch style {
             case .plain: buttonStyle = .subtle
-            case .accent: buttonStyle = .accent
             case .destructive: buttonStyle = .destructive
             case .warning: buttonStyle = .warning
             }
