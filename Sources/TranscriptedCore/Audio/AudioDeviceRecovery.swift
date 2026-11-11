@@ -531,7 +531,7 @@ extension Audio {
             guard finalized else {
                 throw AudioCaptureStaleSessionError()
             }
-            if segmentAttempt.url != nil {
+            if segmentAttempt.artifactAttempt != nil {
                 segmentAttempt.shouldKeep = true
             }
             AppLogger.audioMic.info("Device recovery complete, recording continues", ["gap": gap.description])
