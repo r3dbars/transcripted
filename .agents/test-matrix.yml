@@ -104,6 +104,13 @@ rules:
 
   # Offline contracts for the hosted harnesses; never invoke their native CLIs.
   - paths:
+      - "scripts/ci/test-failure-locations.py"
+      - "Tests/BuildDependencies/TestFailureLocationsTests.py"
+      - "scripts/ops/transcripted-qa-bench.sh"
+    checks:
+      - "python3 Tests/BuildDependencies/TestFailureLocationsTests.py"
+
+  - paths:
       - "scripts/ci/prepare-hosted-qa-artifacts.py"
       - "Tests/BuildDependencies/HostedQAArtifactsTests.py"
       - ".github/workflows/repo-hygiene.yml"

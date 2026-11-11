@@ -267,6 +267,10 @@ run_step() {
 
   append_result "${id}" "${title}" "${status}" "${exit_code}" "${duration}" "${log_path}"
   echo "[qa] ${status} ${title} (${duration}s)"
+  if [[ "${exit_code}" -ne 0 && ( "${id}" == "02-fast-tests" || "${id}" == "11-core-swift-test" ) ]]; then
+    # Publish tracked source locations only, never assertion values or raw logs.
+    python3 scripts/ci/test-failure-locations.py --root "${REPO_ROOT}" --log "${log_path}" || true
+  fi
   return "${exit_code}"
 }
 

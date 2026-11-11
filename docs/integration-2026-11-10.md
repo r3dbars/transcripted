@@ -64,6 +64,25 @@ Particularly important combinations:
 
 ## Validation record
 
+The independent 27-PR expansion review at `28905f2b6b76f973462118dbf0fe58080851a227`
+returned RED with one P2: a UUID lookup globally excluded all historical aliases,
+which hid a different co-speaker using an old name in another meeting. The
+follow-up excludes only the actual matched `(filename, speaker_name)` rows.
+The distinct-UUID collision fixture first failed two assertions, then passed
+with the correction; existing deduplication/alias controls still pass. Local
+`swift build --build-tests` compiled the expanded Core test targets without
+executing them; that is compilation proof only.
+
+The older 198-PR full bench `42900362954` remains FAIL (fast/Core suites).
+App build, deterministic E2E, synthetic pasteback, integration smoke, imported
+audio and synthetic audio passed; artifact validation had one warning. Its
+test details were not retained. Future failed fast/Core bench steps now print
+only bounded, tracked repository Swift file/line locations, with no assertion
+messages, transcript values or absolute paths. Five offline diagnostic tests
+cover format handling, privacy, ambiguity, output bounds and unavailable input.
+They run in the quick suite. Full/native validation on the replacement head
+and review of this diagnostic follow-up remain pending.
+
 Original assembly ancestry: PASS, all 198 frozen heads verified fetched and retained.
 Expansion ancestry: PASS, all 225 exact frozen heads verified retained.
 Build source lists: PASS. Duplicate declarations: PASS.

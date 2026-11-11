@@ -275,7 +275,7 @@ extension TranscriptIndex {
 
     private func speakerHistoryMatches(
         speaker: String
-    ) throws -> (history: SpeakerHistoryResult, matchedNames: [String]) {
+    ) throws -> (history: SpeakerHistoryResult, matchedNamesByMeeting: [String: Set<String>]) {
         return try queue.sync {
             var matchCondition: String
             var matchBindings: [SQLBinding]
@@ -363,7 +363,7 @@ extension TranscriptIndex {
                 totalSpeakingSeconds: meetings.reduce(0.0) { $0 + $1.speakingSeconds },
                 meetings: uniqueMeetings
             )
-            return (history, Array(Set(meetings.map(\.speakerName))).sorted())
+            return (history, grouped.mapValues { Set($0.map(\.speakerName)) })
         }
     }
 
@@ -511,19 +511,20 @@ extension TranscriptIndex {
         if !allFilenames.isEmpty {
             queue.sync {
                 let placeholders = allFilenames.map { _ in "?" }.joined(separator: ", ")
-                let namePlaceholders = matches.matchedNames.map { _ in "?" }.joined(separator: ", ")
-                let sql = "SELECT filename, speaker_name FROM meeting_speakers WHERE filename IN (\(placeholders)) AND speaker_name COLLATE NOCASE NOT IN (\(namePlaceholders)) AND speaker_name NOT LIKE 'Speaker %'"
+                let sql = "SELECT filename, speaker_name FROM meeting_speakers WHERE filename IN (\(placeholders)) AND speaker_name NOT LIKE 'Speaker %'"
                 var stmt: OpaquePointer?
                 guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else { return }
                 defer { sqlite3_finalize(stmt) }
                 for (i, f) in allFilenames.enumerated() {
                     sqlite3_bind_text(stmt, Int32(i + 1), (f as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 }
-                for (i, name) in matches.matchedNames.enumerated() {
-                    sqlite3_bind_text(stmt, Int32(allFilenames.count + i + 1), (name as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                }
                 while sqlite3_step(stmt) == SQLITE_ROW {
-                    coSpeakersByMeeting[colText(stmt, 0), default: []].append(colText(stmt, 1))
+                    let filename = colText(stmt, 0)
+                    let name = colText(stmt, 1)
+                    // (filename, speaker_name) is the stored row's primary key.
+                    // An alias from another meeting can belong to someone else.
+                    guard matches.matchedNamesByMeeting[filename]?.contains(name) != true else { continue }
+                    coSpeakersByMeeting[filename, default: []].append(name)
                 }
             }
         }

@@ -344,6 +344,7 @@ SELF_TEST_SCRIPTS=(
     scripts/hillclimb/hillclimb.py
 )
 PY_TEST_SUITES=(
+    Tests/BuildDependencies/TestFailureLocationsTests.py
     Tools/TranscriptedCompanion/test-package.py
     Tools/TranscriptedCompanion/test-launcher.py
     scripts/release/test-register-sentry-release.py

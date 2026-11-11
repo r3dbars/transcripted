@@ -6,7 +6,7 @@ import XCTest
 @testable import transcripted_mcp
 
 final class SpeakerHistoryDedupTests: XCTestCase {
-    func testHistoryCountsFilesAndProfilesExcludeEveryMatchedName() throws {
+    func testHistoryCountsFilesAndProfilesExcludeMatchedRows() throws {
         try runSpeakerHistoryDedupFixture { condition, promise in
             XCTAssertTrue(condition, promise)
         }
@@ -128,6 +128,19 @@ func runSpeakerHistoryDedupFixture(check: (Bool, String) -> Void) throws {
         let uuidProfile = try index.getPersonProfile(speaker: sharedID)
         check(uuidProfile.frequentCoSpeakers == ["Riley"], "UUID lookup excludes every matched alias from co-speakers")
         check(uuidProfile.recentMeetings.allSatisfy { $0.otherSpeakers == ["Riley"] }, "all recent UUID meetings exclude all aliases")
+
+        let renamedID = "44444444-4444-4444-8444-444444444444"
+        let otherID = "55555555-5555-4555-8555-555555555555"
+        try meeting("renamed-new", "2026-08-03")
+        try meeting("renamed-old", "2026-08-01")
+        try speaker("renamed-new", "Jordan", renamedID, 8, 16)
+        try speaker("renamed-new", "Alex", otherID, 3, 6)
+        try speaker("renamed-old", "Alex", renamedID, 5, 10)
+        let renamedProfile = try index.getPersonProfile(speaker: renamedID)
+        check(renamedProfile.meetingCount == 2, "a renamed identity retains both meetings")
+        check(renamedProfile.recentMeetings.first?.otherSpeakers == ["Alex"], "a different UUID using a historical alias remains a co-speaker")
+        check(renamedProfile.recentMeetings.last?.otherSpeakers.isEmpty == true, "the historical row itself is excluded in its own meeting")
+        check(renamedProfile.frequentCoSpeakers == ["Alex"], "historical aliases do not hide distinct co-speakers from frequency counts")
 
         let empty = try index.getPersonProfile(speaker: "Nobody Matched")
         check(empty.meetingCount == 0 && empty.recentMeetings.isEmpty, "an unknown speaker still has empty history")
