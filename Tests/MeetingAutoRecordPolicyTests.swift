@@ -383,7 +383,7 @@ func testMeetingAutoRecordPolicy() {
     }
 
     runSuite("MeetingAutoRecordPolicy declines the rest of the call only on Stop or Discard") {
-        for reason in ["hotkey_toggle", "overlay_stop_button", "menu_bar_stop_button"] {
+        for reason in ["hotkey_toggle", "overlay_stop_button", "menu_bar_stop_button", "companion_request"] {
             assertTrue(
                 MeetingAutoRecordPolicy.recordsDeclineOnEnd(
                     wasAutoStarted: true, stopReason: reason
@@ -431,6 +431,12 @@ func testMeetingAutoRecordPolicy() {
                 wasAutoStarted: false, stopReason: "hotkey_toggle"
             ),
             "a recording the user started themselves is not an auto-start decline"
+        )
+        assertFalse(
+            MeetingAutoRecordPolicy.recordsDeclineOnEnd(
+                wasAutoStarted: false, stopReason: "companion_request"
+            ),
+            "a companion Stop of a manually started recording is not an auto-start decline"
         )
         assertEqual(
             MeetingAutoRecordPolicy.runtimeSuppressionReason(
