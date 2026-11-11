@@ -213,7 +213,8 @@ final class SpeakerSettingsStore: Sendable {
         // failed people merge then deletes the copied target clip only if
         // that wav still hashes to the bytes that were copied. Same-id merges
         // are rejected by the service itself now (MutationError.sameSourceAndTarget), so
-        // the `source.id != target.id` guard above is defense in depth, not the only guard.
+        // the caller's `source.id != target.id` guard in SpeakerPeopleSettingsViewModel
+        // is defense in depth, not the only guard.
         let transfer = transferClipOnMerge(from: sourceId, to: targetId)
         guard transfer.succeeded else { return false }
 
