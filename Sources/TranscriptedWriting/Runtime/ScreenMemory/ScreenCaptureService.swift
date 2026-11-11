@@ -477,10 +477,9 @@ actor ScreenCaptureService {
         // Actor reentrancy means another trigger can run its own synchronous
         // prefix while this call is suspended on `await shareableContent()`;
         // without reserving here, both calls would read the same stale
-        // `lastCaptureAt`, both pass the 1-per-5s cadence check, and both go
-        // on to capture. Recording `moment` now closes that window; if this
-        // attempt turns out not to actually capture (enumeration failure,
-        // excluded window, etc.), the reservation is rolled back below.
+        // `lastCaptureAt` and pass the trigger-specific cadence check (2 s typing
+        // pause / 0.5 s focus or window change). Recording `moment` now closes
+        // that window; an attempt that doesn't capture rolls the reservation back.
         let priorCaptureAt: Date?
         switch reserveCaptureSlot(trigger: trigger, at: moment) {
         case let .reserved(previous): priorCaptureAt = previous
