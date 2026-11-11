@@ -139,9 +139,9 @@ public enum ScreenScene {
 
     /// At most this many conversation turns survive into the scene.
     /// Paragraph-style chats (Claude/ChatGPT-like) carry turns several
-    /// sentences long, so the caps allow one more turn and a bigger shared
-    /// budget than the bubble-era 3/600 — still under
-    /// `RawContinuationPrompt.maxSceneContextCharacters` (1,000).
+    /// sentences long, so the caps allow 8 turns and 2,000 raw characters.
+    /// `RawContinuationPrompt.maxSceneContextCharacters` separately caps
+    /// the rendered scene block at 3,000 characters.
     public static let maxTurns = 8
     /// Combined character budget across every surviving turn's text.
     public static let maxTurnsCharacterBudget = 2_000

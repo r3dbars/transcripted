@@ -223,10 +223,11 @@ public struct RawContinuationPrompt: Equatable, Sendable {
         }
     }
 
-    /// Screen Memory plan Phase 2 PR 2b: the most a screen-context block may
-    /// spend of the shared budget, regardless of how much the field text
-    /// left over. Keeps a near-empty field from handing the whole 3,000-char
-    /// budget to OCR'd screen text.
+    /// Screen Memory plan Phase 2 PR 2b: an independent ceiling on a
+    /// screen-context block when the configured shared budget is larger.
+    /// The default shared budget is also 3,000 characters, so this ceiling
+    /// does not further restrict that default; the remaining shared budget
+    /// can still give the scene less room.
     /// Raised 1,000 -> 3,000 on 2026-08-23 (owner call): the scaffold+scene
     /// prefix is cache_prompt-cached across keystrokes within a scene, so a
     /// larger block costs one prefill per scene change, not per keystroke.
@@ -368,10 +369,10 @@ public struct RawContinuationPrompt: Equatable, Sendable {
     }
 
     /// Renders the classified scene into the prompt shape the plan
-    /// specifies per mode, then truncates to whatever budget is left —
-    /// truncation only ever bites when the field text has already claimed
-    /// most of `maxContextCharacters`, since `ScreenScene` itself already
-    /// caps turns/snippets well under `maxSceneContextCharacters`.
+    /// specifies per mode, within the scene's share of the shared budget.
+    /// `ScreenScene` caps raw turn/snippet text, while JSON quoting and
+    /// secret scrubbing can expand the rendered text. The rendered block
+    /// must still fit its budget, including its header and trailer.
     ///
     /// OCR'd screen text is untrusted the same way pasted or typed text is:
     /// it can contain a card number, an API key, a JWT sitting in a log

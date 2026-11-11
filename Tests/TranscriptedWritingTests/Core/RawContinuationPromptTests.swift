@@ -320,11 +320,11 @@ struct ScreenContextPromptAssemblyTests {
     }
 
     @Test("Scene context is capped at its own limit even when far more budget remains")
-    func sceneContextCappedAtOneThousandRegardlessOfRemainingBudget() {
+    func sceneContextRespectsIndependentSceneCapWithLargerTotalBudget() {
         let manyTurns = (1...120).map {
             ScreenScene.ConversationTurn(speaker: $0.isMultiple(of: 2) ? .selfSpeaker : .other, text: "turn number \($0) with some extra words padding it out")
         }
-        // ScreenScene itself caps turns to 3 / 600 chars, but this proves
+        // ScreenScene itself caps turns to 8 / 2,000 raw chars, but this proves
         // RawContinuationPrompt's OWN cap holds independently of that,
         // against a scene built directly (not through ScreenScene.classify).
         let bigScene = ScreenScene.Scene(mode: .replying, conversationTurns: manyTurns, referenceSnippets: [])
