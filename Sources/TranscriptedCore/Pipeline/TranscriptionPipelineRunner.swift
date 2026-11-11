@@ -564,7 +564,11 @@ extension TranscriptionTaskManager {
                     return SpeakerIdentityOption(
                         id: profile.id,
                         displayName: name,
-                        callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0), earnsConfirmation: earnsConfirmationByProfile[profile.id] ?? false
+                        callCount: profile.callCount, confirmedMeetings: profile.confirmedMeetingCount, isTrusted: SpeakerNamingPolicy.isAutoRecognizable(profile: profile, recentOutcomes: cachedRecentOutcomes(profile), requiredConfirmations: 0), earnsConfirmation: earnsConfirmationByProfile[profile.id] ?? false,
+                        requiredMeetings: SpeakerNamingPolicy.inviteeBars(
+                            for: profile, invitedNameKeys: invitedNameKeys,
+                            lineupIsFromInvite: lineupIsFromInvite, thresholds: speakerThresholds
+                        )?.requiredConfirmedMeetings ?? SpeakerNamingPolicy.requiredConfirmedMeetings
                     )
                 }
 

@@ -51,7 +51,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     var progress: Policy.Progress? {
         if case .named(.savedPerson) = rowState, let id = namedTarget?.personID,
            let picked = knownPeopleByLabel.values.first(where: { $0.id == id }) {
-            return Policy.Progress(confirmed: picked.confirmedMeetings, required: SpeakerNamingPolicy.requiredConfirmedMeetings, isTrusted: picked.isTrusted, earnsConfirmation: picked.earnsConfirmation)
+            return Policy.Progress(confirmed: picked.confirmedMeetings, required: picked.confirmationRequirement(fallback: SpeakerNamingPolicy.requiredConfirmedMeetings), isTrusted: picked.isTrusted, earnsConfirmation: picked.earnsConfirmation)
         }
         return entryProgress
     }
