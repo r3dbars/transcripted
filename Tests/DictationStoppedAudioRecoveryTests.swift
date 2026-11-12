@@ -43,6 +43,7 @@ func testDictationStoppedAudioRecoveryRetryRegistry() {
 @MainActor
 func testDictationStoppedAudioRecovery() async {
     testDictationStoppedAudioRecoveryRetryRegistry()
+    testStoppedAudioPersistCause()
 
     runSuite("Dictation stopped audio recovery writes a valid private WAV") {
         let directory = makeRecoveryTestDirectory("wav")
@@ -566,6 +567,69 @@ private final class FakePreparedRecordingTimeline: PreparedRecordingTimeline {
 
     func clearRecoveredRecordingTimeline(keepingCapacity: Bool) {
         clears.append(keepingCapacity)
+    }
+}
+
+func testStoppedAudioPersistCause() {
+    runSuite("A failed stopped-audio save tells Sentry a coarse cause, never the file") {
+        let cases: [(Error, StoppedAudioPersistCause, String)] = [
+            (CocoaError(.fileWriteOutOfSpace), .diskFull, "out of space"),
+            (POSIXError(.ENOSPC), .diskFull, "ENOSPC"),
+            (NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteUnknown.rawValue, userInfo: [
+                NSUnderlyingErrorKey: NSError(domain: NSPOSIXErrorDomain, code: Int(ENOSPC)),
+            ]), .diskFull, "generic write failure wrapping ENOSPC"),
+            (CocoaError(.fileWriteNoPermission), .permissionDenied, "no write permission"),
+            (CocoaError(.fileWriteVolumeReadOnly), .permissionDenied, "read-only volume"),
+            (POSIXError(.EACCES), .permissionDenied, "EACCES"),
+            (CocoaError(.fileNoSuchFile), .missingSource, "missing file"),
+            (POSIXError(.ENOENT), .missingSource, "ENOENT"),
+            (EncodingError.invalidValue(0, .init(codingPath: [], debugDescription: "x")), .encodeFailed, "metadata encode"),
+            (CocoaError(.fileWriteUnknown), .writeFailed, "unknown write failure"),
+            (POSIXError(.EIO), .writeFailed, "fsync EIO"),
+            (NSError(domain: "SomeOtherDomain", code: 7), .other, "foreign error"),
+        ]
+        for (error, expected, label) in cases {
+            assertEqual(StoppedAudioPersistCause.classify(error), expected, "\(label) maps to \(expected.rawValue)")
+        }
+
+        let pathError = NSError(domain: NSCocoaErrorDomain, code: CocoaError.fileWriteOutOfSpace.rawValue, userInfo: [
+            NSFilePathErrorKey: "/Users/someone/Library/dictation_secret.wav",
+        ])
+        let tags = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_stopped_audio_persistence_failed",
+            context: StoppedAudioPersistCause.eventContext(for: pathError)
+        )
+        assertEqual(tags, ["persist_cause": "disk_full"], "Sentry tags carry the cause and nothing else")
+
+        let forged = SentryEventPolicy.diagnosticTags(
+            forEngine: "dictation",
+            event: "dictation_stopped_audio_persistence_failed",
+            context: ["persist_cause": "The file dictation_secret.wav could not be saved"]
+        )
+        assertNil(forged["persist_cause"], "a raw description under persist_cause never leaves the device")
+    }
+
+    runSuite("Saving stopped audio into a folder the app cannot write reports permission_denied") {
+        // The store re-opens its own folder to 0700, so lock the parent: the
+        // recovery folder can't be created inside it.
+        let parent = makeRecoveryTestDirectory("readonly")
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: parent.path)
+            try? FileManager.default.removeItem(at: parent)
+        }
+        do {
+            try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+            try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: parent.path)
+            _ = try DictationStoppedAudioRecoveryStore.persist(
+                samples16k: [0, 0.25, -0.25],
+                sessionID: UUID(),
+                directory: parent.appendingPathComponent("recovery", isDirectory: true)
+            )
+            assertTrue(false, "a read-only folder should refuse the recovery WAV")
+        } catch {
+            assertEqual(StoppedAudioPersistCause.classify(error), .permissionDenied, "a refused write is a permission problem")
+        }
     }
 }
 
