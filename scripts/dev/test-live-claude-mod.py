@@ -20,6 +20,8 @@ ROOT = Path(__file__).resolve().parents[2]
 MOD = ROOT / 'Tools/TranscriptedLive/claude-mod'
 # Source gate: the pinned SDK still traps during Bun startup under this profile.
 # Keep all canonical invocations blocked until genuine isolated SDK proof exists.
+# scripts/dev/agent-check.py lists this script in MANUAL_COMMAND_FRAGMENTS so the
+# matrix reports it BLOCKED instead of FAIL; remove it there when this flips.
 SDK_BOOTSTRAP_VERIFIED = False
 
 
