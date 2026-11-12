@@ -389,6 +389,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
         }
     }
 
+    // Test seam: runs on the recovery thread right after a mic recovery
+    // retires its writer. Stands in for Stop reaching the mic file queue at
+    // that instant. Always nil in the app.
+    var afterMicRecoveryWriterRetiredForTesting: (() -> Void)?
+
     // Test seam: runs on the advancing thread right after the generation
     // moves, outside the lock. Lets a test deliver a buffer at the exact
     // instant a stale one would arrive. Always nil in the app.
