@@ -1527,12 +1527,31 @@ SOFTWARE.
 ## llama.cpp (llama-server)
 
 - **Component:** `Contents/Helpers/llama-server` (local text-model inference for Writing)
-- **Version:** the build shipped in Tilde 0.1.0 beta 1 (https://github.com/r3dbars/tilde/releases/tag/v0.1.0-beta.1), used unchanged and re-signed. The llama.cpp revision it was built from isn't recorded yet.
+- **Version:** upstream llama.cpp at commit `2115b73d8ebdbd659075cce66c609506863bc826` (2026-08-22), plus an embedded web UI snapshot, release b10612 (see "Embedded web UI" below). The helper is the build shipped in Tilde 0.1.0 beta 1 (https://github.com/r3dbars/tilde/releases/tag/v0.1.0-beta.1), used unchanged and re-signed. `docs/llama-server-provenance.md` records how those exact bytes were rebuilt from that commit and matched.
 - **Upstream:** https://github.com/ggml-org/llama.cpp
-- **License:** MIT
+- **License:** MIT, plus the notices for the vendored and embedded third-party code listed below.
 
-llama.cpp itself redistributes third-party components (for example nlohmann/json, MIT), whose
-license texts ship in the upstream repository's `licenses/` directory.
+llama.cpp vendors or embeds other projects' code, and each project's license text lives next
+to its code. Upstream's `licenses/` directory holds only `LICENSE-jsonhpp`, so the other texts
+are not found there. The table below lists what llama-server is built from at the commit above,
+taken from llama.cpp's CMake files (`vendor/CMakeLists.txt`, `common/CMakeLists.txt`,
+`tools/mtmd/CMakeLists.txt`, `tools/server/CMakeLists.txt`) and the license headers in its
+source files. The shipped helper is stripped, so this list was not read back from its symbols.
+
+| Component | Where in llama.cpp | License | Text |
+| --- | --- | --- | --- |
+| ggml and llama.cpp | repository root | MIT | License text, above |
+| nlohmann/json | `vendor/nlohmann/`, `licenses/LICENSE-jsonhpp` | MIT | below |
+| cpp-httplib | `vendor/cpp-httplib/` | MIT | below |
+| llamafile `sgemm` (Mozilla Foundation) | `ggml/src/ggml-cpu/llamafile/sgemm.cpp` | MIT | below |
+| YaRN rotary-embedding code | `ggml/src/ggml-cpu/ops.cpp`, `ggml/src/ggml-metal/ggml-metal.metal` | MIT | below |
+| xxHash | `vendor/hash/xxhash/` | BSD-2-Clause | below |
+| rotate-bits | `vendor/hash/rotate-bits/` | MIT | below |
+| subprocess.h, base64.hpp | `vendor/sheredom/`, `common/base64.hpp` | Unlicense (public domain) | below |
+| stb_image | `vendor/stb/` | MIT or public domain, at the user's choice | below |
+| miniaudio | `vendor/miniaudio/` | public domain or MIT-0, at the user's choice | below |
+| SHA-1 (Steve Reid), SHA-256 (Igor Pavlov) | `vendor/hash/sha1/`, `vendor/hash/sha256/` | public domain | no text required |
+| Web UI bundle | embedded assets | see "Embedded web UI" | partly a gap, see below |
 
 ### License text
 
@@ -1559,6 +1578,441 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
+
+### Vendored and embedded third-party code
+
+Each text below is copied from the file named in its heading, at llama.cpp commit
+`2115b73d8ebdbd659075cce66c609506863bc826` unless a different source is named.
+
+#### nlohmann/json (MIT)
+
+From `licenses/LICENSE-jsonhpp`.
+
+```text
+MIT License
+
+Copyright (c) 2013-2025 Niels Lohmann
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+#### cpp-httplib (MIT)
+
+From `vendor/cpp-httplib/LICENSE`. llama-server's HTTP server is built on it.
+
+```text
+The MIT License (MIT)
+
+Copyright (c) 2017 yhirose
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+```
+
+#### llamafile sgemm (MIT)
+
+From the header comment of `ggml/src/ggml-cpu/llamafile/sgemm.cpp`, with the `//` comment markers removed.
+
+```text
+Copyright 2024 Mozilla Foundation
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS
+BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+#### YaRN rotary-embedding code (MIT)
+
+`ggml/src/ggml-cpu/ops.cpp` and `ggml/src/ggml-metal/ggml-metal.metal` say their `rope_yarn` code is based on YaRN, "MIT licensed. Copyright (c) 2023 Jeffrey Quesnelle and Bowen Peng". The text below is the `LICENSE` file of https://github.com/jquesnelle/yarn at commit `995db5b575e75230b3384d658f8b944c9662f775` (the repository head when this notice was written; its copyright line matches the one quoted in llama.cpp's source).
+
+```text
+MIT License
+
+Copyright (c) 2023 Jeffrey Quesnelle and Bowen Peng
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+#### xxHash (BSD-2-Clause)
+
+From `vendor/hash/xxhash/LICENSE`.
+
+```text
+xxHash Library
+Copyright (c) 2012-2021 Yann Collet
+All rights reserved.
+
+BSD 2-Clause License (https://www.opensource.org/licenses/bsd-license.php)
+
+Redistribution and use in source and binary forms, with or without modification,
+are permitted provided that the following conditions are met:
+
+* Redistributions of source code must retain the above copyright notice, this
+  list of conditions and the following disclaimer.
+
+* Redistributions in binary form must reproduce the above copyright notice, this
+  list of conditions and the following disclaimer in the documentation and/or
+  other materials provided with the distribution.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR
+ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+(INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON
+ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+```
+
+#### rotate-bits (MIT)
+
+From `vendor/hash/rotate-bits/LICENSE.md`.
+
+```text
+MIT License
+
+Copyright (c) 2021 William Casarin <jb55@jb55.com>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+#### Public-domain code: subprocess.h and base64.hpp (Unlicense)
+
+`vendor/sheredom/subprocess.h` and `common/base64.hpp` carry the Unlicense dedication below (the text is from the header of `subprocess.h`; `base64.hpp` has the same dedication). `vendor/hash/sha1/sha1.c` is marked "100% Public Domain" by its author, Steve Reid, and `vendor/hash/sha256/` states "2010-06-11 : Igor Pavlov : Public domain". Public-domain material needs no notice; these lines are here so the list is complete.
+
+```text
+   This is free and unencumbered software released into the public domain.
+
+   Anyone is free to copy, modify, publish, use, compile, sell, or
+   distribute this software, either in source code form or as a compiled
+   binary, for any purpose, commercial or non-commercial, and by any
+   means.
+
+   In jurisdictions that recognize copyright laws, the author or authors
+   of this software dedicate any and all copyright interest in the
+   software to the public domain. We make this dedication for the benefit
+   of the public at large and to the detriment of our heirs and
+   successors. We intend this dedication to be an overt act of
+   relinquishment in perpetuity of all present and future rights to this
+   software under copyright law.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+   EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+   IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+   OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+   ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+   OTHER DEALINGS IN THE SOFTWARE.
+
+   For more information, please refer to <http://unlicense.org/>
+```
+
+#### stb_image (MIT or public domain)
+
+`vendor/stb/stb_image.h` (v2.30) is offered under both licenses below. Copied from the end of that file.
+
+```text
+------------------------------------------------------------------------------
+This software is available under 2 licenses -- choose whichever you prefer.
+------------------------------------------------------------------------------
+ALTERNATIVE A - MIT License
+Copyright (c) 2017 Sean Barrett
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+------------------------------------------------------------------------------
+ALTERNATIVE B - Public Domain (www.unlicense.org)
+This is free and unencumbered software released into the public domain.
+Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+software, either in source code form or as a compiled binary, for any purpose,
+commercial or non-commercial, and by any means.
+In jurisdictions that recognize copyright laws, the author or authors of this
+software dedicate any and all copyright interest in the software to the public
+domain. We make this dedication for the benefit of the public at large and to
+the detriment of our heirs and successors. We intend this dedication to be an
+overt act of relinquishment in perpetuity of all present and future rights to
+this software under copyright law.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+------------------------------------------------------------------------------
+```
+
+#### miniaudio (public domain or MIT-0)
+
+`vendor/miniaudio/miniaudio.h` (v0.11.25) is offered under both licenses below. Copied from the end of that file.
+
+```text
+This software is available as a choice of the following licenses. Choose
+whichever you prefer.
+
+===============================================================================
+ALTERNATIVE 1 - Public Domain (www.unlicense.org)
+===============================================================================
+This is free and unencumbered software released into the public domain.
+
+Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+software, either in source code form or as a compiled binary, for any purpose,
+commercial or non-commercial, and by any means.
+
+In jurisdictions that recognize copyright laws, the author or authors of this
+software dedicate any and all copyright interest in the software to the public
+domain. We make this dedication for the benefit of the public at large and to
+the detriment of our heirs and successors. We intend this dedication to be an
+overt act of relinquishment in perpetuity of all present and future rights to
+this software under copyright law.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+For more information, please refer to <http://unlicense.org/>
+
+===============================================================================
+ALTERNATIVE 2 - MIT No Attribution
+===============================================================================
+Copyright 2026 David Reid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+### Embedded web UI
+
+llama-server embeds a web UI as 70 gzipped assets (upstream's default, `LLAMA_BUILD_UI` on). The
+helper's assets are the `dist.tar.gz` that llama.cpp's build downloads for release b10612
+(https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b10612/dist.tar.gz, archive SHA-256
+`3f7a482b86620b5dfbaf3432927bd357e679440237d3d83c27c07423cecf1f6d`, built 2026-08-24).
+All 70 embedded assets, once decompressed, have the same SHA-256 as the 70 files in that archive
+(checked 2026-11-12 against a local copy of the pinned helper). Release b10612 is llama.cpp commit
+`7584430716ee229751771ed0d6bbcb780d105eeb`; the UI's own code is part of llama.cpp and covered by its MIT license above.
+
+The bundle also contains minified JavaScript built from the npm dependencies in
+`tools/ui/package.json` at that commit, and three libraries vendored in
+`tools/ui/src/lib/vendors/`. The sources import these packages directly (versions and license
+identifiers copied from `tools/ui/package-lock.json` at that commit):
+
+| Package | Version | License (per `package-lock.json`) |
+| --- | --- | --- |
+| `@lucide/svelte` | 1.25.0 | ISC |
+| `@modelcontextprotocol/sdk` | 1.30.0 | MIT |
+| `@sveltejs/kit` | 2.70.2 | MIT |
+| `bits-ui` | 2.18.1 | MIT |
+| `clsx` | 2.1.1 | MIT |
+| `dexie` | 4.4.3 | Apache-2.0 |
+| `dompurify` | 3.4.13 | (MPL-2.0 OR Apache-2.0) |
+| `fflate` | 0.8.3 | MIT |
+| `highlight.js` | 11.11.1 | BSD-3-Clause |
+| `lowlight` | 3.3.0 | MIT |
+| `mermaid` | 11.15.0 | MIT |
+| `mode-watcher` | 1.1.0 | MIT |
+| `pdfjs-dist` | 5.4.54 | Apache-2.0 |
+| `rehype-highlight` | 7.0.2 | MIT |
+| `rehype-katex` | 7.0.1 | MIT |
+| `rehype-stringify` | 10.0.1 | MIT |
+| `remark` | 15.0.1 | MIT |
+| `remark-breaks` | 4.0.0 | MIT |
+| `remark-gfm` | 4.0.1 | MIT |
+| `remark-math` | 6.0.0 | MIT |
+| `remark-rehype` | 11.1.2 | MIT |
+| `svelte` | 5.56.1 | MIT |
+| `svelte-sonner` | 1.1.1 | MIT |
+| `tailwind-merge` | 3.6.0 | MIT |
+| `tailwind-variants` | 3.2.2 | MIT |
+| `unified` | 11.0.5 | MIT |
+| `unist-util-visit` | 5.1.0 | MIT |
+| `unist-util-visit-parents` | 6.0.2 | MIT |
+
+Each of those packages pulls in more packages. The UI also ships a service worker built on
+`workbox` 7.4.0 (`workbox-b3c04f83.js`), and `package.json` lists `workbox-window` 7.4.1 for its
+PWA registration code (MIT per the lockfile).
+
+**GAP: the license texts and copyright notices for the UI's npm dependencies are not reproduced
+in this file.** The bundle is minified and carries no notice file, `package-lock.json` resolves
+1,213 packages (build tooling included), and the packages that actually ended up in the bundle
+cannot be read back from the shipped bytes, so listing them would be a guess. The sources of
+truth are `tools/ui/package.json` and `tools/ui/package-lock.json` at
+https://github.com/ggml-org/llama.cpp/tree/7584430716ee229751771ed0d6bbcb780d105eeb/tools/ui. One way to close the gap is the owned llama-server
+build that `docs/llama-server-provenance.md` describes, configured without the embedded UI. That
+needs `LLAMA_BUILD_UI=OFF` and also `LLAMA_USE_PREBUILT_UI=OFF`: reading `scripts/ui-assets.cmake`
+at the pinned commit, the prebuilt UI is still downloaded when only the first is off. The host
+already passes `--no-webui`, and a new build would still need a check that the helper no longer
+embeds the assets. The other way is to generate the full notice set from the lockfile.
+
+The three libraries vendored in `tools/ui/src/lib/vendors/` do have license files in llama.cpp's
+repository. Their texts, from commit `7584430716ee229751771ed0d6bbcb780d105eeb`:
+
+#### decimal.js (MIT)
+
+From `tools/ui/src/lib/vendors/decimal.js/LICENCE.md`.
+
+```text
+The MIT Licence.
+
+Copyright (c) 2025 Michael Mclaughlin
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+'Software'), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED 'AS IS', WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+```
+
+#### nerdamer-prime (MIT)
+
+From `tools/ui/src/lib/vendors/nerdamer-prime/LICENSE`.
+
+```text
+MIT License
+
+Copyright (c) 2023 together-science
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+`big-integer` (also vendored there) carries an Unlicense dedication, the same text as shown above for `subprocess.h`.
 
 ---
 
