@@ -40,8 +40,22 @@ SPEAKER_EVAL_SELF_TEST_ARGV = [
 DEPS_COMMAND = "bash build-deps.sh --force"
 DEPS_BUILD_STAMP = REPO_ROOT / "deps-libs/.build-deps-stamp"
 DEPS_COMMAND_PATTERN = re.compile(r"^bash[ \t]+build-deps\.sh(?:[ \t]|$)")
+# Dev scripts that compile against the prebuilt deps and stop with "Dependencies
+# not found" (or exit 3 BLOCKED) without them. Keep in step with the matrix: a
+# new smoke that links deps-libs/ belongs here.
+DEPS_LINKING_SCRIPTS = (
+    "scripts/dev/concurrency-census.sh",
+    "scripts/dev/run-imported-audio-smoke.sh",
+    "scripts/dev/test-capture-list-load-more-scroll.sh",
+    "scripts/dev/test-speaker-settings-model.sh",
+    "scripts/dev/test-speakers-directory-scroll.sh",
+    "scripts/dev/typecheck-lab-build.sh",
+)
 NEEDS_DEPS_PATTERN = re.compile(
-    r"^(?:bash[ \t]+(?:build|build-beta|run-integration-smoke)\.sh(?:[ \t]|$)"
+    r"^(?:bash[ \t]+(?:(?:build|build-beta|run-integration-smoke)\.sh"
+    + "|"
+    + "|".join(re.escape(script) for script in DEPS_LINKING_SCRIPTS)
+    + r")(?:[ \t]|$)"
     r"|swift[ \t]+test(?!.*--package-path))"
 )
 BOOTSTRAP_COMMANDS = {
@@ -742,6 +756,23 @@ def self_test() -> None:
         "bash run-tests.sh"
     ]:
         raise ProofError("checks that do not link deps must not trigger a deps build")
+    for script in DEPS_LINKING_SCRIPTS:
+        smoke = f"bash {script}"
+        if proof_commands([], [smoke], deps_ready=False) != [DEPS_COMMAND, smoke]:
+            raise ProofError("a smoke that links prebuilt deps must get a deps build first")
+        if proof_commands([], [f"bash -n {script}"], deps_ready=False) != [
+            f"bash -n {script}"
+        ]:
+            raise ProofError("a syntax check of a deps-linking smoke must not build deps")
+    if proof_commands(
+        [],
+        ["bash scripts/dev/run-imported-audio-smoke.sh --output build/imported-audio-mapped-proof"],
+        deps_ready=False,
+    ) != [
+        DEPS_COMMAND,
+        "bash scripts/dev/run-imported-audio-smoke.sh --output build/imported-audio-mapped-proof",
+    ]:
+        raise ProofError("deps-linking smokes keep their arguments and still get a deps build")
     summary = failure_summary(
         [
             {"command": "bash build.sh --no-open", "status": "FAIL", "exit_code": 1, "reason": None},
