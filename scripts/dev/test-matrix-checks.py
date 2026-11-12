@@ -202,6 +202,12 @@ def self_test(matrix_path: Path) -> None:
         # The SDK wrapper stays selected where it applies (reported BLOCKED by
         # agent-check.py), but the workflow only runs the offline contract tests.
         ".github/workflows/swift-ci.yml": {"python3 scripts/dev/test-live-claude-mod-tests.py"},
+        # The native Load More smoke is isolation-gated, so the fixture admission
+        # test is selected beside it and runs on every account.
+        "Sources/UI/Settings/HomeViewModel.swift": {
+            "python3 scripts/dev/test-capture-list-fixture-paths.py",
+            "bash scripts/dev/test-capture-list-load-more-scroll.sh",
+        },
         "scripts/dev/test-live-claude-mod.py": {"python3 scripts/dev/test-live-claude-mod.py"},
         ".github/claude-mod-tests/package.json": {"python3 scripts/dev/test-live-claude-mod.py"},
         "Tools/TranscriptedLive/Package.swift": {"python3 scripts/dev/test-live-claude-mod.py"},

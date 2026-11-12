@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import functools
 import hashlib
 import json
 import os
@@ -36,6 +37,21 @@ MANUAL_COMMAND_FRAGMENTS = (
     # Blocked at its source gate until genuine isolated SDK proof exists. When
     # SDK_BOOTSTRAP_VERIFIED flips to True in that script, remove this line.
     "scripts/dev/test-live-claude-mod.py",
+)
+# Smokes that open a native window and read the account's macOS preferences.
+# They run only where scripts/ops/native-smoke-isolation.py allows an app-launch
+# smoke (a separate OS account, a hosted runner or the throwaway CI VM). On the
+# owner's own account the guard exits 3, so they are reported BLOCKED
+# (native-smoke-isolation) there instead of failing; CI and `check.sh full` run them.
+ISOLATION_GATED_SCRIPTS = (
+    "scripts/dev/test-capture-list-load-more-scroll.sh",
+)
+NATIVE_SMOKE_ISOLATION_SCRIPT = "scripts/ops/native-smoke-isolation.py"
+# Commands that only check syntax never launch the script or hit its gates.
+SYNTAX_ONLY_PREFIXES = (
+    ["bash", "-n"],
+    ["python3", "-m", "py_compile"],
+    ["ruby", "-c"],
 )
 ALLOWED_EXECUTABLES = {"bash", "python3", "ruby", "swift"}
 # The trusted base matrix names this one model-free fixture proof directly.
@@ -313,13 +329,16 @@ def proof_commands(
     selected: list[str],
     required: list[str],
     deps_ready: bool = True,
+    will_run: Callable[[str], bool] = lambda command: True,
 ) -> list[str]:
     """Trusted checks first, but the deps build just before the first check
     that links prebuilt deps.
 
     The matrix lists build.sh ahead of build-deps.sh, so a Core change used to
     build against the stale archive. A fresh worktree has no deps-libs/ at all;
-    then the deps build is added even when no rule asked for it.
+    then the deps build is added even when no rule asked for it. A check that
+    will be reported BLOCKED instead of run (will_run is False) never asks for
+    a deps build, so minutes of build-deps.sh are not spent for nothing.
     """
     commands = list(dict.fromkeys([*required, *selected]))
     deps = [command for command in commands if DEPS_COMMAND_PATTERN.match(command)]
@@ -327,7 +346,11 @@ def proof_commands(
         deps = [DEPS_COMMAND]
     rest = [command for command in commands if command not in deps]
     first_needing = next(
-        (index for index, command in enumerate(rest) if NEEDS_DEPS_PATTERN.match(command)),
+        (
+            index
+            for index, command in enumerate(rest)
+            if NEEDS_DEPS_PATTERN.match(command) and will_run(command)
+        ),
         None,
     )
     if first_needing is None:
@@ -483,9 +506,33 @@ def validate_swift_arguments(arguments: list[str]) -> None:
         raise ProofError("swift command must use an allowed package subcommand")
 
 
+def command_runs_script(command: str, script: str) -> bool:
+    """True when the command would run the script, not just syntax-check it."""
+    try:
+        arguments = shlex.split(command)
+    except ValueError:
+        return script in command
+    if any(arguments[: len(prefix)] == prefix for prefix in SYNTAX_ONLY_PREFIXES):
+        return False
+    return any(argument.endswith(script) for argument in arguments)
+
+
+@functools.lru_cache(maxsize=1)
+def native_smoke_isolated() -> bool:
+    """Whether this account may run an app-launch smoke (the guard exits 0)."""
+    result = subprocess.run(
+        [sys.executable, str(REPO_ROOT / NATIVE_SMOKE_ISOLATION_SCRIPT)],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def classify_command(
     command: str,
     trusted_commands: set[str] | None = None,
+    isolation_probe: Callable[[], bool] | None = None,
 ) -> tuple[str, str | None]:
     if not command or len(command) > MAX_COMMAND_LENGTH or "\n" in command:
         return "BLOCKED", "invalid-command"
@@ -493,8 +540,12 @@ def classify_command(
         return "SKIPPED", "orchestration-command"
     if PLACEHOLDER_PATTERN.search(command):
         return "BLOCKED", "operator-input-required"
-    if any(fragment in command for fragment in MANUAL_COMMAND_FRAGMENTS):
+    if any(command_runs_script(command, script) for script in MANUAL_COMMAND_FRAGMENTS):
         return "BLOCKED", "manual-proof-required"
+    if any(
+        command_runs_script(command, script) for script in ISOLATION_GATED_SCRIPTS
+    ) and not (isolation_probe or native_smoke_isolated)():
+        return "BLOCKED", "native-smoke-isolation"
     if trusted_commands is not None and (
         command not in trusted_commands and command not in BOOTSTRAP_COMMANDS
     ):
@@ -518,15 +569,17 @@ def run_commands(
     commands: list[str],
     trusted_commands: set[str] | None = None,
     runner: Callable[[str], int] = command_runner,
+    isolation_probe: Callable[[], bool] | None = None,
 ) -> list[dict[str, Any]]:
     results: list[dict[str, Any]] = []
     runnable_total = sum(
-        classify_command(command, trusted_commands)[0] == "RUN" for command in commands
+        classify_command(command, trusted_commands, isolation_probe)[0] == "RUN"
+        for command in commands
     )
     runnable_index = 0
 
     for command in commands:
-        disposition, reason = classify_command(command, trusted_commands)
+        disposition, reason = classify_command(command, trusted_commands, isolation_probe)
         if disposition != "RUN":
             results.append(
                 {
@@ -593,6 +646,10 @@ def build_report(
     if any(result.get("reason") == "manual-proof-required" for result in results):
         manual_requirements.append(
             "Run the blocked manual check with its required local permissions and hardware."
+        )
+    if any(result.get("reason") == "native-smoke-isolation" for result in results):
+        manual_requirements.append(
+            "Run the blocked native smoke in a separate OS account or on CI (check.sh full)."
         )
     manual_requirements = list(dict.fromkeys(manual_requirements))
     return {
@@ -695,6 +752,42 @@ def self_test() -> None:
         actual = classify_command(command)
         if actual != expected:
             raise ProofError(f"unexpected command classification: {actual}")
+
+    capture_smoke = "bash scripts/dev/test-capture-list-load-more-scroll.sh"
+    syntax_checks = [
+        "bash -n scripts/dev/test-capture-list-load-more-scroll.sh",
+        "bash -n run-live-capture-smoke.sh",
+        "python3 -m py_compile scripts/dev/test-live-claude-mod.py",
+    ]
+    for isolated, expected in ((False, ("BLOCKED", "native-smoke-isolation")), (True, ("RUN", None))):
+        actual = classify_command(capture_smoke, isolation_probe=lambda: isolated)
+        if actual != expected:
+            raise ProofError("an isolation-gated smoke must run only where the guard allows it")
+    for command in syntax_checks:
+        if classify_command(command, isolation_probe=lambda: False) != ("RUN", None):
+            raise ProofError("a syntax-only check of a gated script must stay runnable")
+    if classify_command(
+        "python3 scripts/dev/test-live-claude-mod-tests.py",
+        isolation_probe=lambda: False,
+    ) != ("RUN", None):
+        raise ProofError("the wrapper-contract tests must not be classed with the blocked SDK wrapper")
+    gated_results = run_commands(
+        [capture_smoke],
+        runner=lambda command: 3,
+        isolation_probe=lambda: False,
+    )
+    if [(result["status"], result["reason"]) for result in gated_results] != [
+        ("BLOCKED", "native-smoke-isolation")
+    ]:
+        raise ProofError("a gated smoke must be reported BLOCKED, never FAIL, where it cannot run")
+    if deterministic_status(gated_results) != "BLOCKED":
+        raise ProofError("a blocked smoke must leave deterministic proof BLOCKED, not green")
+    if proof_commands([], [capture_smoke], deps_ready=False) != [DEPS_COMMAND, capture_smoke]:
+        raise ProofError("a runnable smoke that links deps must get a deps build first")
+    if proof_commands([], [capture_smoke], deps_ready=False, will_run=lambda command: False) != [
+        capture_smoke
+    ]:
+        raise ProofError("a check reported BLOCKED must not trigger a deps build")
 
     untrusted_command = "python3 scripts/dev/test-matrix-checks.py --self-test"
     if classify_command(
@@ -943,6 +1036,14 @@ def self_test() -> None:
     )
     if manual_report["proof"]["manual"]["status"] != "UNKNOWN":
         raise ProofError("blocked live checks must leave manual proof unknown")
+    isolation_report = build_report(
+        source_snapshot,
+        {"paths": ["scripts/dev/test-capture-list-load-more-scroll.sh"], "areas": [], "manual_proof": []},
+        gated_results,
+        source_stable=True,
+    )
+    if isolation_report["proof"]["manual"]["status"] != "UNKNOWN":
+        raise ProofError("a blocked native smoke must leave manual proof unknown")
     serialized_report = json.dumps(report)
     if any(key in serialized_report for key in forbidden_keys):
         raise ProofError("proof reports must not retain output or environment")
@@ -1035,6 +1136,7 @@ def main() -> int:
             checks,
             required_checks,
             deps_ready=DEPS_BUILD_STAMP.is_file(),
+            will_run=lambda command: classify_command(command, trusted_commands)[0] == "RUN",
         )
         if DEPS_COMMAND in commands and DEPS_COMMAND not in [*checks, *required_checks]:
             print("Prebuilt deps are missing in this checkout; building them first.")

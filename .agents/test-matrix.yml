@@ -296,6 +296,11 @@ rules:
   # Dictations and Meetings Load More: the shared day-grouped list in the
   # Settings detail column, scrolled and paged over a temporary library.
   # Fails on a hang, a scroll jump-back, or a Load More that does not add a page.
+  # The smoke opens a native window, so it runs only where
+  # scripts/ops/native-smoke-isolation.py allows it (CI, the throwaway VM or a
+  # separate OS account). On the owner's own account agent-check.py reports it
+  # BLOCKED (native-smoke-isolation) rather than FAIL; the fixture admission test
+  # ahead of it still runs everywhere, and check.sh full runs the smoke on CI.
   - paths:
       - "Sources/UI/Settings/HomeCaptureList.swift"
       - "Sources/UI/Settings/HomePresentation.swift"
@@ -308,6 +313,7 @@ rules:
       - "scripts/dev/test-capture-list-load-more-scroll.sh"
     checks:
       - "bash -n scripts/dev/test-capture-list-load-more-scroll.sh"
+      - "python3 scripts/dev/test-capture-list-fixture-paths.py"
       - "bash scripts/dev/test-capture-list-load-more-scroll.sh"
 
   - paths:
