@@ -610,6 +610,7 @@ APP_SOURCES=(
     "Sources/Meeting/CameraActivityMonitor.swift"
     "Sources/Meeting/SustainedActivityConfirmer.swift"
     "Sources/Meeting/BrowserCallEvidence.swift"
+    "Sources/Meeting/BrowserShortcutLookupCache.swift"
     "Sources/Meeting/BrowserWindowTitleReader.swift"
     "Sources/TranscriptedCore/Speaker/CallSpeakerActivity.swift"
     "Sources/TranscriptedCore/Audio/RecordedSystemAudioTimeline.swift"
