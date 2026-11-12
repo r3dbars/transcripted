@@ -22,7 +22,8 @@ extension MeetingPromptDetector {
                 provider: candidate.provider,
                 kind: kind,
                 candidateReason: cooldownReasons[candidate.id],
-                providerReason: runtimeSuppressionReasons[candidate.provider]
+                providerReason: runtimeSuppressionReasons[candidate.provider],
+                declinedAt: Date()
             )
         }
         return result
@@ -35,6 +36,11 @@ extension MeetingPromptDetector {
     func nativeNotNowCallEnded(_ session: DetectedCallSession, now: Date) {
         guard !session.nativeNotNows.isEmpty else { return }
         let until = now.addingTimeInterval(recordedCallEndGrace)
+        var ended = endedNativeNotNowCall.flatMap { $0.graceEndsAt > now ? $0 : nil }
+            ?? EndedNativeNotNowCall(notNows: [:], graceEndsAt: until)
+        ended.notNows.merge(session.nativeNotNows) { _, newer in newer }
+        ended.graceEndsAt = max(ended.graceEndsAt, until)
+        endedNativeNotNowCall = ended
         for (id, notNow) in session.nativeNotNows {
             if notNow.candidateReason != nil, cooldownReasons[id] == notNow.candidateReason {
                 if let current = snoozedUntil[id], current > until { snoozedUntil[id] = until }
@@ -48,6 +54,27 @@ extension MeetingPromptDetector {
             learnedBackoff.endQuiet(kind: notNow.kind, by: until)
         }
         scheduleQuietEndRecheck(at: until, now: now)
+    }
+
+    /// A detected-call session is starting. If a call with a native Not now
+    /// ended within the grace and this one is the same provider, it's that
+    /// call coming back after a signal gap (AirPods connecting restart the
+    /// app's audio): it stays declined, and its end cuts the quiet again.
+    func carryOverEndedNativeNotNows(into session: inout DetectedCallSession, now: Date) {
+        guard var ended = endedNativeNotNowCall else { return }
+        guard ended.graceEndsAt > now else {
+            endedNativeNotNowCall = nil
+            return
+        }
+        let carried = ended.notNows.filter { session.providers.contains($0.value.provider) }
+        guard !carried.isEmpty else { return }
+        for (id, notNow) in carried {
+            session.nativeNotNows[id] = notNow
+            session.declinedKinds[notNow.kind] = notNow.declinedAt
+            ended.notNows[id] = nil
+        }
+        session.userDeclined = true
+        endedNativeNotNowCall = ended.notNows.isEmpty ? nil : ended
     }
 
     /// Feeds an explicit Not now on an ad-hoc prompt into the persisted

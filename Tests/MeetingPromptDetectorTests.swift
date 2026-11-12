@@ -1013,9 +1013,10 @@ func testMeetingPromptDetector() async {
         await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "Not now must keep the call it answered quiet")
 
-        // Hang up, then a different unscheduled Teams call starts.
+        // Hang up, then a different unscheduled Teams call starts after the
+        // grace (inside it, the mic coming back is the same call).
         detector.updateMicInputUsers([])
-        await waitForPromptEvaluation(detector)
+        await waitForPromptEvaluation(detector, extraMilliseconds: 400)
         detector.updateMicInputUsers(["com.microsoft.teams2"])
         await waitForPromptEvaluation(detector, until: { box.promptCount == 2 })
         assertEqual(box.promptCount, 2, "the next Teams call must prompt once the declined call has ended")
@@ -1046,6 +1047,40 @@ func testMeetingPromptDetector() async {
         detector.updateMicInputUsers(["com.microsoft.teams2"])
         await waitForPromptEvaluation(detector)
         assertEqual(box.promptCount, 1, "the mic coming back inside the grace must not re-ask the declined call")
+    }
+
+    await runSuite("MeetingPromptDetector.dismiss — a declined native call whose signals drop and come back stays declined") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.recordedCallEndGrace = 1
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return .presented
+        }
+
+        detector.updateMicInputUsers(["com.microsoft.teams2"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate, candidate.provider == .teams else {
+            assertTrue(false, "a native Teams mic should prompt")
+            return
+        }
+        _ = detector.dismiss(candidate: candidate)
+
+        // A device switch mid-call: Teams drops its audio for one scan.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        detector.updateMicInputUsers(["com.microsoft.teams2"])
+        await waitForPromptEvaluation(detector, extraMilliseconds: 1_500)
+        assertEqual(box.promptCount, 1, "the same call must not be asked again once the grace runs out")
+
+        // That call really ends; the next Teams call still prompts.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector, extraMilliseconds: 1_200)
+        detector.updateMicInputUsers(["com.microsoft.teams2"])
+        await waitForPromptEvaluation(detector, until: { box.promptCount == 2 })
+        assertEqual(box.promptCount, 2, "the next Teams call must prompt after the declined call ends")
     }
 
     await runSuite("MeetingPromptDetector browser evidence — an unrecognized site waits before prompting") {

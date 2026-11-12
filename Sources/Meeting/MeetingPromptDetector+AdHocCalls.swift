@@ -122,6 +122,15 @@ extension MeetingPromptDetector {
         let kind: String
         let candidateReason: String?
         let providerReason: String?
+        /// When the user said Not now, so a carried-over decline keeps the
+        /// original `declinedThisCallLimit` clock.
+        let declinedAt: Date
+    }
+
+    /// Native Not nows from a call that just ended, kept until its grace ends.
+    struct EndedNativeNotNowCall {
+        var notNows: [String: NativeNotNow]
+        var graceEndsAt: Date
     }
 
     // MARK: - Detected-call session (missed-call nudge)
@@ -164,7 +173,7 @@ extension MeetingPromptDetector {
         guard var session = detectedCallSession else {
             if !providers.isEmpty {
                 recordedCallSessionStarted(now: now)
-                detectedCallSession = DetectedCallSession(
+                var session = DetectedCallSession(
                     providers: providers,
                     seenReasons: reasons,
                     startedAt: now,
@@ -172,6 +181,8 @@ extension MeetingPromptDetector {
                     userDeclined: false,
                     promptShown: false
                 )
+                carryOverEndedNativeNotNows(into: &session, now: now)
+                detectedCallSession = session
             }
             return
         }
