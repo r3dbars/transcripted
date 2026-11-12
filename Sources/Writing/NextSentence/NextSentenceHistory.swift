@@ -46,6 +46,9 @@ final class NextSentenceHistory: @unchecked Sendable {
 
     private func ensureStarted() throws -> NextSentenceLineProcess {
         if let helper, helper.isRunning { return helper }
+        // A helper that died still holds its pipes; end it before starting the next.
+        helper?.terminate()
+        helper = nil
         let binary = ClaudeDesktopIntegrationInstaller.installedMCPBinaryURL
         guard FileManager.default.isExecutableFile(atPath: binary.path) else {
             throw CocoaError(.fileNoSuchFile)

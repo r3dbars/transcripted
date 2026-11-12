@@ -58,6 +58,27 @@ func testNextSentenceExit() async {
         assertEqual(seen.outcomes, ["ended"], "output closure must be replayed after handler registration")
         await fixture.cleanup()
     }
+
+    await runSuite("A child that exited on its own stops reading its closed stderr instead of spinning on it") {
+        let process = NextSentenceLineProcess(executable: URL(fileURLWithPath: "/bin/sh"),
+                                              arguments: ["-c", "echo 'synthetic warning' >&2; exit 3"],
+                                              label: "test-stderr-eof")
+        do { try process.start() } catch { return recordFailure("the helper didn't start: \(error)") }
+        await process.waitForExit()
+        // Reads may still be landing just after exit; wait until stderr has had its EOF read.
+        var settled = false
+        var reads = process.stderrReadCount
+        for _ in 0..<100 where !settled {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            let now = process.stderrReadCount
+            settled = now == reads && process.stderrTail() == "synthetic warning"
+            reads = now
+        }
+        assertTrue(settled, "stderr reads stop once the dead child's stderr is closed")
+        assertTrue(reads < 100, "a closed stderr is read a handful of times, not in a loop (got \(reads))")
+        assertFalse(process.isRunning, "the child is gone")
+        process.terminate()
+    }
 }
 
 private final class NextSentenceExitResult: @unchecked Sendable {

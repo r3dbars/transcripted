@@ -12,6 +12,7 @@ final class NextSentenceLineProcess: @unchecked Sendable {
     private let lock = NSLock()
     private var buffer = Data()
     private var errorTail = Data()
+    private var errorReads = 0
     private var lineHandler: (([String: Any]) -> Void)?
     // The following state belongs to queue, alongside the stdout buffer.
     private var outputEnded = false
@@ -51,8 +52,11 @@ final class NextSentenceLineProcess: @unchecked Sendable {
         }
         errors.fileHandleForReading.readabilityHandler = { [weak self] handle in
             let data = handle.availableData
+            // At EOF the handler fires again and again with no data; clear it so a dead child doesn't spin.
+            if data.isEmpty { handle.readabilityHandler = nil }
             guard let self else { return }
             self.lock.lock()
+            self.errorReads += 1
             self.errorTail.append(data)
             if self.errorTail.count > 4_096 { self.errorTail = self.errorTail.suffix(4_096) }
             self.lock.unlock()
@@ -106,6 +110,12 @@ final class NextSentenceLineProcess: @unchecked Sendable {
     func stderrTail() -> String {
         lock.lock(); defer { lock.unlock() }
         return String(decoding: errorTail, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// How many times stderr has been read, EOF included. Stops growing once stderr closes.
+    var stderrReadCount: Int {
+        lock.lock(); defer { lock.unlock() }
+        return errorReads
     }
 
     func terminate() {
