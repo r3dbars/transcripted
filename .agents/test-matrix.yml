@@ -995,9 +995,17 @@ rules:
       - "swift test --package-path Tools/TranscriptedMCP"
       - "bash run-e2e-smoke.sh"
 
+  # ImportedAudioNativeSmokeTests runs scripts/dev/test-isolated-launch-environment.sh,
+  # which compiles the app's real AutomatedLaunchEnvironment.swift beside the QA
+  # child-environment adapter. It is the only automated check that QA's child
+  # environment turns the app's automation gate on, so edits to either side
+  # select the QA package tests.
   - paths:
       - "Tools/TranscriptedQA/**"
+      - "Sources/Support/AutomatedLaunchEnvironment.swift"
+      - "scripts/dev/test-isolated-launch-environment.sh"
     checks:
+      - "bash -n scripts/dev/test-isolated-launch-environment.sh"
       - "swift test --package-path Tools/TranscriptedQA"
 
   - paths:

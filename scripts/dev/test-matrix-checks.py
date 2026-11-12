@@ -192,6 +192,13 @@ def self_test(matrix_path: Path) -> None:
             "bash run-e2e-smoke.sh",
         },
         ".github/workflows/example.yml": {"scripts/dev/agent-preflight.sh"},
+        # The QA package test is the only runner of the automation-gate contract script.
+        "Sources/Support/AutomatedLaunchEnvironment.swift": {
+            "swift test --package-path Tools/TranscriptedQA",
+        },
+        "scripts/dev/test-isolated-launch-environment.sh": {
+            "swift test --package-path Tools/TranscriptedQA",
+        },
     }
     for changed_path, expected_checks in matching_cases.items():
         actual = select_checks(rules, [changed_path])
