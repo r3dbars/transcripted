@@ -726,6 +726,7 @@ rules:
 
   - paths:
       - "scripts/ops/release-health-card.py"
+      - "Tests/Fixtures/release-health-appcast-*.xml"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/release-health-card.py"
@@ -742,6 +743,7 @@ rules:
   - paths:
       - "scripts/ops/release-watch.py"
       - "scripts/ops/posthog_common.py"
+      - "Tests/Fixtures/release-health-appcast-*.xml"
     checks:
       - "scripts/dev/agent-preflight.sh"
       - "python3 -m py_compile scripts/ops/release-watch.py"

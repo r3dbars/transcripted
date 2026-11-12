@@ -182,6 +182,11 @@ def self_test(matrix_path: Path) -> None:
         "scripts/ops/nightly-security-check.py": {
             "python3 -m py_compile scripts/ops/nightly-security-check.py",
         },
+        # Both release self-tests read this fixture's version and pubDate.
+        "Tests/Fixtures/release-health-appcast-1.1.76.xml": {
+            "python3 scripts/ops/release-health-card.py --self-test",
+            "python3 scripts/ops/release-watch.py --self-test",
+        },
         "scripts/release/bump-release-version.py": {
             "python3 -m py_compile scripts/release/bump-release-version.py",
             "python3 scripts/release/bump-release-version.py --self-test",
