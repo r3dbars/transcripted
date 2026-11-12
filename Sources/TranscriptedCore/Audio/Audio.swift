@@ -91,8 +91,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // store when the start path calls `begin()`; consumed (read-and-cleared)
     // by `stop()` so only the stop that ends an active session can write the
     // stopping/finalized journal states.
-    private var _journalSession: MeetingRecordingJournalSession?
-    private let journalSessionLock = NSLock()
+    // Guarded by journalSessionLock. Internal only for the start handoff in
+    // Audio+StartSessionHandoff.swift.
+    var _journalSession: MeetingRecordingJournalSession?
+    let journalSessionLock = NSLock()
     var journalSession: MeetingRecordingJournalSession? {
         get { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; return _journalSession }
         set { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; _journalSession = newValue }
@@ -104,6 +106,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
         _journalSession = nil
         return session
     }
+
     var stoppingRecordingFinalizations: [UInt64: StoppingRecordingFinalization] = [:]
     let stoppingJournalSessionsLock = NSLock()
 
@@ -388,6 +391,11 @@ public class Audio: ObservableObject, @unchecked Sendable {
             recordingSessionGenerationMirror.store(newValue, ordering: .releasing)
         }
     }
+
+    // Test seam: runs on the recovery thread right after a mic recovery
+    // retires its writer. Stands in for Stop reaching the mic file queue at
+    // that instant. Always nil in the app.
+    var afterMicRecoveryWriterRetiredForTesting: (() -> Void)?
 
     // Test seam: runs on the advancing thread right after the generation
     // moves, outside the lock. Lets a test deliver a buffer at the exact
