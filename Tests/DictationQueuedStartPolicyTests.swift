@@ -88,6 +88,49 @@ func testDictationQueuedStartPolicy() async {
         assertFalse(tracker.isTap(releasedAt: 201), "a held press")
     }
 
+    runSuite("A too-short take names whether the key was tapped, held, or chorded") {
+        // Synthetic key timelines (uptime seconds), the way the event tap
+        // feeds the tracker.
+        var tracker = PushToTalkTapTracker()
+        tracker.pressed(at: 10)
+        assertEqual(tracker.release(at: 10.12), .tap, "a quick press and release is a tap")
+
+        tracker.pressed(at: 20)
+        assertEqual(tracker.release(at: 20.45), .hold, "a slow 450 ms tap stops like a hold")
+
+        tracker.pressed(at: 30)
+        tracker.otherKeyWentDown()
+        assertEqual(tracker.release(at: 30.25), .chord, "Fn+arrow is a chord, even when quick")
+
+        tracker.pressed(at: 40)
+        tracker.otherKeyWentDown()
+        assertEqual(tracker.release(at: 42), .chord, "a key during a long hold is still a chord")
+
+        assertEqual(
+            DictationTooShortDiagnostics.properties(keyRelease: .hold, pressSeconds: 0.45),
+            ["key_release": "hold", "press_bucket": "0_3_0_6s"],
+            "a slow tap reads as a hold just past the tap threshold"
+        )
+        assertEqual(
+            DictationTooShortDiagnostics.properties(keyRelease: .chord, pressSeconds: 0.8),
+            ["key_release": "chord", "press_bucket": "0_6_1s"],
+            "a chord on the dictation key under a second"
+        )
+        assertEqual(
+            DictationTooShortDiagnostics.properties(keyRelease: .tap, pressSeconds: 0.2),
+            ["key_release": "tap", "press_bucket": "lt_0_3s"],
+            "a tap that kept listening, then a second press right away"
+        )
+        assertEqual(
+            DictationTooShortDiagnostics.properties(keyRelease: nil, pressSeconds: 3),
+            ["key_release": "none", "press_bucket": "1_5s_plus"],
+            "no key release reached the take"
+        )
+        assertEqual(DictationTooShortDiagnostics.pressBucket(seconds: 0.3), "0_3_0_6s", "the tap threshold itself is a hold")
+        assertEqual(DictationTooShortDiagnostics.pressBucket(seconds: 1.0), "1_1_5s", "one second of press")
+        assertEqual(DictationTooShortDiagnostics.pressBucket(seconds: 1.5), "1_5s_plus", "the mis-tap limit")
+    }
+
     runSuite("Tapping Push to Talk keeps listening; tapping again pastes") {
         let session = HotkeySessionFake()
         session.tapKeepsListening = true

@@ -47,7 +47,11 @@ struct PushToTalkTapTracker {
     }
 
     func isTap(releasedAt uptime: TimeInterval) -> Bool {
-        DictationHoldKeyTapPolicy.isTap(heldSeconds: uptime - pressUptime, otherKeyPressed: otherKeyPressed)
+        release(at: uptime) == .tap
+    }
+
+    func release(at uptime: TimeInterval) -> DictationKeyRelease {
+        DictationHoldKeyTapPolicy.release(heldSeconds: uptime - pressUptime, otherKeyPressed: otherKeyPressed)
     }
 }
 

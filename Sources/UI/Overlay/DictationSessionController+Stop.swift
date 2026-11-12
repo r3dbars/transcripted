@@ -342,16 +342,25 @@ extension DictationSessionController {
                                     ]
                                 )
                             )
+                            var analyticsExtra = [
+                                "duration_bucket": AnalyticsReporter.durationBucket(
+                                    seconds: CFAbsoluteTimeGetCurrent() - self.sessionStartTime
+                                ),
+                                "trigger": self.currentDictationTrigger.rawValue,
+                            ]
+                            if emptyReason == .recordingTooShort {
+                                // Tap, hold or chord, and how long the press
+                                // ran, so the field names why it was short.
+                                analyticsExtra.merge(
+                                    DictationTooShortDiagnostics.properties(
+                                        keyRelease: self.currentDictationKeyRelease,
+                                        pressSeconds: stopRequestedAt - self.sessionStartTime
+                                    )
+                                ) { _, new in new }
+                            }
                             AnalyticsReporter.track(
                                 emptyReason.analyticsEventName,
-                                properties: self.dictationAnalyticsProperties(
-                                    extra: [
-                                        "duration_bucket": AnalyticsReporter.durationBucket(
-                                            seconds: CFAbsoluteTimeGetCurrent() - self.sessionStartTime
-                                        ),
-                                        "trigger": self.currentDictationTrigger.rawValue,
-                                    ]
-                                )
+                                properties: self.dictationAnalyticsProperties(extra: analyticsExtra)
                             )
                             ProductFrictionTelemetry.track(
                                 surface: .dictation,

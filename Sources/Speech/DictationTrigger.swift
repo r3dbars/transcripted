@@ -25,7 +25,53 @@ enum DictationHoldKeyTapPolicy {
     static let tapThresholdSeconds: TimeInterval = 0.3
 
     static func isTap(heldSeconds: TimeInterval, otherKeyPressed: Bool) -> Bool {
-        !otherKeyPressed && heldSeconds >= 0 && heldSeconds < tapThresholdSeconds
+        release(heldSeconds: heldSeconds, otherKeyPressed: otherKeyPressed) == .tap
+    }
+
+    /// Tap, hold, or chord. A chord (another key or modifier went down while
+    /// it was held) is still stopped like a hold; it is named apart only so
+    /// a too-short take can say which it was.
+    static func release(heldSeconds: TimeInterval, otherKeyPressed: Bool) -> DictationKeyRelease {
+        if otherKeyPressed { return .chord }
+        return heldSeconds >= 0 && heldSeconds < tapThresholdSeconds ? .tap : .hold
+    }
+}
+
+/// How the dictation key's last release went. The raw values are analytics
+/// values (`key_release` on `dictation_recording_too_short`).
+enum DictationKeyRelease: String, Equatable {
+    case tap
+    case hold
+    /// Another key or modifier went down while the key was held (Fn+arrow,
+    /// Right Option+letter after the chord window).
+    case chord
+}
+
+/// Coarse, telemetry-safe detail for `dictation_recording_too_short`, so the
+/// field can tell a slow tap, a short hold, a chord on the dictation key and
+/// a double tap apart. Every value is a fixed enum; nothing is user content.
+enum DictationTooShortDiagnostics {
+    /// Start request to stop request. The edges sit on the tap threshold
+    /// (0.3 s), the minimum audio Parakeet takes (1 s) and the mis-tap limit
+    /// (`DictationEmptyTranscriptionReason.accidentalStartMaximumPress`).
+    static func pressBucket(seconds: TimeInterval) -> String {
+        switch seconds {
+        case ..<0.3: return "lt_0_3s"
+        case ..<0.6: return "0_3_0_6s"
+        case ..<1.0: return "0_6_1s"
+        case ..<1.5: return "1_1_5s"
+        default: return "1_5s_plus"
+        }
+    }
+
+    /// `keyRelease` is the dictation key's release during this take, or nil
+    /// when no key release reached the take (menu, overlay button, the
+    /// hands-free key).
+    static func properties(keyRelease: DictationKeyRelease?, pressSeconds: TimeInterval) -> [String: String] {
+        [
+            "key_release": keyRelease?.rawValue ?? "none",
+            "press_bucket": pressBucket(seconds: pressSeconds),
+        ]
     }
 }
 

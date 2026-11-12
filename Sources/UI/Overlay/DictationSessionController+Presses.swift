@@ -172,6 +172,12 @@ extension DictationSessionController {
 
     // MARK: - Tap to keep listening
 
+    /// Remembers how the dictation key was let go, so a too-short take can
+    /// say whether it was a tap, a hold, or a chord.
+    func noteDictationKeyRelease(_ release: DictationKeyRelease) {
+        currentDictationKeyRelease = release
+    }
+
     /// A hands-free take is still recording, not finishing, so a Push to
     /// Talk press can stop it.
     var isHandsFreeTakeListening: Bool {
