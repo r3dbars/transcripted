@@ -27,12 +27,17 @@ struct SpeakerDatabaseArtifact {
         }
     }
 
+    /// Core moves an unreadable store aside as `speakers_corrupt_<timestamp>.sqlite`
+    /// and keeps it as evidence. That is a backup, not a live per-embedder database.
+    static let corruptBackupPrefix = "speakers_corrupt_"
+
     static func existing(in directory: URL) throws -> [Self] {
         guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
         return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isRegularFileKey])
             .filter {
                 let name = $0.lastPathComponent
-                return (name == "speakers.sqlite" || (name.hasPrefix("speakers_") && $0.pathExtension == "sqlite"))
+                return (name == "speakers.sqlite"
+                    || (name.hasPrefix("speakers_") && !name.hasPrefix(corruptBackupPrefix) && $0.pathExtension == "sqlite"))
                     && (try? $0.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
             }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
