@@ -22,8 +22,8 @@ sequence ownership and rebuild behavior as well as encrypted log records.
 
 `PersonalSuggestionStats` writes one `personal-suggestions.YYYY-MM-dd` dictionary
 of source counts per local calendar day in the keyboard preferences suite, with
-a standard-defaults fallback. It exposes today's counts and has no age/size prune
-in that writer. `WritingProgress` reads today's split. These buckets contain
+a standard-defaults fallback. It has no age/size prune in that writer, and
+nothing in the app reads the buckets back. These buckets contain
 counts, not suggestion text; they are separate from the encrypted history log.
 
 The existing Personal History delete path removes the log, trained model,
