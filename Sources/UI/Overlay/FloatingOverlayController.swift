@@ -267,9 +267,8 @@ class FloatingOverlayController {
 
     // MARK: - Show/Hide
 
-    /// Shows the session in the island. `anchorRect` is kept for callers;
-    /// the island picks its own place.
-    func showPanel(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
+    /// Shows the session in the island, which picks its own place.
+    func showPanel(near sourceApp: NSRunningApplication?) {
         // Cancel stale timers from a previous session
         errorDismissTask?.cancel()
         errorDismissTask = nil
@@ -284,7 +283,7 @@ class FloatingOverlayController {
         installEscapeMonitor()
     }
 
-    func showStartingState(near sourceApp: NSRunningApplication?, anchorRect: NSRect? = nil) {
+    func showStartingState(near sourceApp: NSRunningApplication?) {
         errorDismissTask?.cancel()
         errorDismissTask = nil
         loadingTimerTask?.cancel()
@@ -297,7 +296,7 @@ class FloatingOverlayController {
         listeningNotice = ""
         state = .starting
         if !isVisible {
-            showPanel(near: sourceApp, anchorRect: anchorRect)
+            showPanel(near: sourceApp)
         }
     }
 
@@ -331,8 +330,7 @@ class FloatingOverlayController {
 
     func showLoadingState(
         near sourceApp: NSRunningApplication? = nil,
-        presentation: LoadingPresentation? = nil,
-        anchorRect: NSRect? = nil
+        presentation: LoadingPresentation? = nil
     ) {
         errorDismissTask?.cancel()
         errorMessage = ""
@@ -347,7 +345,7 @@ class FloatingOverlayController {
         }
         state = .loading
         if !isVisible {
-            showPanel(near: sourceApp, anchorRect: anchorRect)
+            showPanel(near: sourceApp)
         }
         if enteringLoading || loadingTimerTask == nil {
             loadingTimerTask?.cancel()

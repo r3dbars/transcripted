@@ -40,7 +40,6 @@ protocol DictationSessionPipelineHost: AnyObject {
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger,
         shortcutMode: DictationShortcutMode?,
-        anchorRect: NSRect?,
         isRetry: Bool
     )
     @discardableResult
@@ -152,12 +151,11 @@ extension DictationSessionPipelineHost {
 
     /// A Try Again / Retry Dictation button restarting the failed take. It's
     /// marked as a retry, so four taps don't read as five separate attempts.
-    func retryDictation(sourceApp: NSRunningApplication?, anchorRect: NSRect?) {
+    func retryDictation(sourceApp: NSRunningApplication?) {
         startDictation(
             sourceApp: sourceApp,
             trigger: currentDictationTrigger,
             shortcutMode: nil,
-            anchorRect: anchorRect,
             isRetry: true
         )
     }
@@ -418,7 +416,7 @@ extension DictationSessionPipelineHost {
         isDictating = false
         showTimeout { [weak self] in
             guard let self else { return }
-            self.retryDictation(sourceApp: self.sessionSourceApp, anchorRect: nil)
+            self.retryDictation(sourceApp: self.sessionSourceApp)
         }
     }
 }
