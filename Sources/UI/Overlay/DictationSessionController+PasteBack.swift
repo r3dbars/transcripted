@@ -124,9 +124,11 @@ extension DictationSessionController {
         _ outcome: DictationPasteOutcome,
         target: DictationPasteTarget?
     ) {
+        let diagnostic = textPaster.lastConfirmationDiagnostic?.context
         staleAccessibilityGrant.record(StaleAccessibilityGrantTracker.observation(
             outcome: outcome,
-            pasteEvidence: textPaster.lastConfirmationDiagnostic?.context["paste_evidence"],
+            pasteEvidence: diagnostic?["paste_evidence"],
+            clipboardReadAfterDispatch: diagnostic?["clipboard_read_after_dispatch"],
             targetID: target?.bundleIdentifier
         ))
     }

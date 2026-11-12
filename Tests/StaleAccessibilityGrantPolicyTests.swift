@@ -59,14 +59,22 @@ private func runStaleAccessibilityGrantPolicySuites() {
         }
     }
 
-    runSuite("An unconfirmed paste that an app did read proves ⌘V arrived and resets") {
-        for evidence in ["clipboard_read", "read_outside_window", nil] as [String?] {
+    runSuite("An unconfirmed paste that an app read after ⌘V proves it arrived and resets") {
+        for evidence in ["clipboard_read", nil] as [String?] {
             assertEqual(
                 StaleAccessibilityGrantTracker.observation(outcome: unconfirmed, pasteEvidence: evidence, targetID: "app.one"),
                 .pasteReachedTarget,
                 "evidence \(evidence ?? "missing") is not a lost keystroke"
             )
         }
+        assertEqual(
+            StaleAccessibilityGrantTracker.observation(
+                outcome: unconfirmed, pasteEvidence: "read_outside_window",
+                clipboardReadAfterDispatch: "true", targetID: "app.one"
+            ),
+            .pasteReachedTarget,
+            "a late read after ⌘V means the keystroke arrived"
+        )
         var tracker = StaleAccessibilityGrantTracker()
         tracker.record(unconfirmedWithoutRead("app.one"))
         tracker.record(unconfirmedWithoutRead("app.two"))
@@ -75,6 +83,32 @@ private func runStaleAccessibilityGrantPolicySuites() {
         ))
         tracker.record(unconfirmedWithoutRead("app.one"))
         assertFalse(tracker.suggestsRegrant, "a read in the middle breaks the run")
+    }
+
+    runSuite("A clipboard read before ⌘V neither counts nor breaks the streak") {
+        // A clipboard history app can read the borrowed text before ⌘V is
+        // sent. Only that first read is stamped, so it says nothing about
+        // whether the keystroke landed.
+        for afterDispatch in ["false", nil] as [String?] {
+            assertEqual(
+                StaleAccessibilityGrantTracker.observation(
+                    outcome: unconfirmed, pasteEvidence: "read_outside_window",
+                    clipboardReadAfterDispatch: afterDispatch, targetID: "app.one"
+                ),
+                .unrelated,
+                "read before ⌘V (after_dispatch \(afterDispatch ?? "missing")) is not proof either way"
+            )
+        }
+        var tracker = StaleAccessibilityGrantTracker()
+        tracker.record(unconfirmedWithoutRead("app.one"))
+        tracker.record(unconfirmedWithoutRead("app.two"))
+        tracker.record(StaleAccessibilityGrantTracker.observation(
+            outcome: unconfirmed, pasteEvidence: "read_outside_window",
+            clipboardReadAfterDispatch: "false", targetID: "app.one"
+        ))
+        assertFalse(tracker.suggestsRegrant, "the early read doesn't add to the streak")
+        tracker.record(unconfirmedWithoutRead("app.one"))
+        assertTrue(tracker.suggestsRegrant, "and it doesn't wipe it either")
     }
 
     runSuite("Accessibility reported off resets; other copy and failure reasons don't count or reset") {
