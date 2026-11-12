@@ -275,35 +275,15 @@ extension DictationSessionController {
 
         case .timedOut(let info):
             let cleanupPlan = info.cleanupPlan
-            if !cleanupPlan.reportBeforeCleanup {
-                await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
-            }
             trackDictationStartFailed(
                 cleanupPlan.outcome,
                 extra: [
                     "start_attempt_bucket": AnalyticsReporter.countBucket(info.startAttempts)
                 ]
             )
-            if cleanupPlan.reportRuntimeStall {
-                appState.runtimeDiagnostics.recordStall(
-                    kind: "dictation",
-                    stage: cleanupPlan.outcome,
-                    durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
-                    extra: dictationAnalyticsProperties(extra: [
-                        "failure_kind": cleanupPlan.outcome,
-                        "format_ready": "\(appState.sttRouter.inputFormatReady)",
-                        "forced_readiness_recoveries": "\(info.forcedReadinessRecoveries)",
-                        "readiness_refreshes": "\(info.readinessRefreshes)",
-                        "recovering": "\(appState.sttRouter.isRecovering)",
-                        "recovery_start_attempts": "\(info.recoveryStartAttempts)",
-                        "start_attempts": "\(info.startAttempts)",
-                        "trigger": currentDictationTrigger.rawValue,
-                    ])
-                )
-            }
-            if cleanupPlan.reportBeforeCleanup {
-                await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
-            }
+            // This outcome is always a microphone-start timeout. Keep its
+            // failure report ahead of cleanup, which may block on audio work.
+            await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
             overlayController.showError(
                 info.message,
                 actionTitle: "Try Again",
