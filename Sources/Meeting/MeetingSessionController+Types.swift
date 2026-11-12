@@ -91,21 +91,6 @@ extension MeetingSessionController {
     static let accidentalStartFailureKind = "accidental_start"
 }
 
-extension MeetingSessionController.State {
-    var diagnosticName: String {
-        switch self {
-        case .idle: return "idle"
-        case .loadingModels: return "loading_models"
-        case .ready: return "ready"
-        case .startingRecording: return "starting_recording"
-        case .recording: return "recording"
-        case .stoppingRecording: return "stopping_recording"
-        case .transcribing: return "transcribing"
-        case .error: return "error"
-        }
-    }
-}
-
 extension DisplayStatus {
     var diagnosticName: String {
         switch self {

@@ -26,3 +26,29 @@ enum MeetingSessionState: Equatable {
     case transcribing        // Background transcription or speaker naming running
     case error(String)       // Fatal error — see message
 }
+
+extension MeetingSessionState {
+    var diagnosticName: String {
+        switch self {
+        case .idle: return "idle"
+        case .loadingModels: return "loading_models"
+        case .ready: return "ready"
+        case .startingRecording: return "starting_recording"
+        case .recording: return "recording"
+        case .stoppingRecording: return "stopping_recording"
+        case .transcribing: return "transcribing"
+        case .error: return "error"
+        }
+    }
+
+    /// Preserves the existing event-context spellings without changing the
+    /// diagnostic/control names or including an associated error message.
+    var legacyEventName: String {
+        switch self {
+        case .loadingModels: return "loadingModels"
+        case .startingRecording: return "startingRecording"
+        case .stoppingRecording: return "stoppingRecording"
+        default: return diagnosticName
+        }
+    }
+}
