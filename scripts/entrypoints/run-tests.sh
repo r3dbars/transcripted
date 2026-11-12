@@ -564,6 +564,7 @@ APP_SOURCES=(
     "Sources/Speech/SharedMeetingMicClaim.swift"
     "Sources/Speech/DictationAudioLevelMeter.swift"
     "Sources/Speech/DictationAudioLevels.swift"
+    "Sources/Speech/DictationPreviewSampleSink.swift"
     # SupersessionEpoch.swift now arrives via SHARED_PASTEBACK_SUPPORT_SOURCES
     "Sources/Speech/TranscriptionModelWarmupOwnership.swift"
     "Sources/Speech/DefaultInputDeviceMonitorSupport.swift"
