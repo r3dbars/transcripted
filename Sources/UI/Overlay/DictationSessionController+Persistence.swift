@@ -196,7 +196,7 @@ extension DictationSessionController {
                 guard let self, self.currentDictationSessionID == recovery.sessionID, !self.isDictating else { return }
                 if retried, !FileManager.default.fileExists(atPath: recovery.url.path) {
                     let keepsAudio = AudioStoragePreferences.dictationAudioKeepWindow().keepsAudio
-                    self.overlayController?.showSuccessAndDismiss(title: keepsAudio ? "Audio saved" : "Audio removed")
+                    self.overlayController?.showSuccessAndDismiss(title: keepsAudio ? "Audio saved" : "Audio removed", recordsDictationInsertion: false)
                 } else {
                     self.showPendingAudioRetention(result)
                 }
