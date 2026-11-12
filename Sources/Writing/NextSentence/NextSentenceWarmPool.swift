@@ -27,7 +27,8 @@ final class NextSentenceWarmPool<Kind: Hashable & Sendable, Process: NextSentenc
         self.background = background
     }
 
-    /// Starts a ready process for each kind that has none.
+    /// Starts a ready process for each kind that has none. A ready one that exited on its own counts
+    /// as none: it's ended and replaced.
     func prewarm(_ kinds: [Kind]) {
         let started = currentEpoch()
         for kind in kinds where !hasReady(kind) {
@@ -95,9 +96,15 @@ final class NextSentenceWarmPool<Kind: Hashable & Sendable, Process: NextSentenc
         return epoch
     }
 
+    /// True if a running process is ready for `kind`. One that exited is dropped and ended.
     private func hasReady(_ kind: Kind) -> Bool {
-        lock.lock(); defer { lock.unlock() }
-        return ready[kind] != nil
+        lock.lock()
+        guard let process = ready[kind] else { lock.unlock(); return false }
+        if process.isRunning { lock.unlock(); return true }
+        ready.removeValue(forKey: kind)
+        lock.unlock()
+        process.terminate()
+        return false
     }
 
     private func keep(_ process: Process, for kind: Kind, startedIn started: Int, replacing: Bool) {
