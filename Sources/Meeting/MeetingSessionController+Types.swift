@@ -13,6 +13,7 @@ extension MeetingSessionController {
     enum StartTrigger: String {
         case hotkey = "hotkey"
         case menu = "menu"
+        case companion = "companion"
         case onboarding = "onboarding"
         case detectedPrompt = "detected_prompt"
         case fileImport = "file_import"
@@ -24,6 +25,7 @@ extension MeetingSessionController {
         case hotkeyToggle = "hotkey_toggle"
         case overlayStopButton = "overlay_stop_button"
         case menuBarStopButton = "menu_bar_stop_button"
+        case companionRequest = "companion_request"
         case quitConfirmation = "quit_confirmation"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
