@@ -28,8 +28,14 @@ PREFLIGHT_COMMAND_PATTERN = re.compile(
     r"^(?:bash[ \t]+)?scripts/dev/agent-preflight\.sh(?:[ \t]|$)"
 )
 MAX_COMMAND_LENGTH = 512
+# Commands the matrix may select but this runner must never run: they need a
+# person, hardware or permissions, or they exit 3 by design. They are reported
+# BLOCKED (manual-proof-required), which keeps the proof "unknown", not FAIL.
 MANUAL_COMMAND_FRAGMENTS = (
     "run-live-capture-smoke.sh",
+    # Blocked at its source gate until genuine isolated SDK proof exists. When
+    # SDK_BOOTSTRAP_VERIFIED flips to True in that script, remove this line.
+    "scripts/dev/test-live-claude-mod.py",
 )
 ALLOWED_EXECUTABLES = {"bash", "python3", "ruby", "swift"}
 # The trusted base matrix names this one model-free fixture proof directly.
@@ -663,6 +669,11 @@ def self_test() -> None:
             "BLOCKED",
             "manual-proof-required",
         ),
+        "python3 scripts/dev/test-live-claude-mod.py": (
+            "BLOCKED",
+            "manual-proof-required",
+        ),
+        "python3 scripts/dev/test-live-claude-mod-tests.py": ("RUN", None),
         "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test": ("RUN", None),
         "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness meeting-series": ("BLOCKED", "invalid-command"),
         "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test --force": ("BLOCKED", "invalid-command"),

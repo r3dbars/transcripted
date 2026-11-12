@@ -23,6 +23,8 @@ rules:
       - "bash -n scripts/release/install-mcp-publisher.sh"
       - "python3 scripts/release/test-mcp-publish-tools.py"
 
+  # The offline wrapper-contract tests are the only Claude mod proof CI runs, so
+  # a workflow edit selects just these.
   - paths:
       - "scripts/dev/test-live-claude-mod.py"
       - "scripts/dev/test-live-claude-mod-tests.py"
@@ -30,6 +32,17 @@ rules:
       - ".github/workflows/swift-ci.yml"
     checks:
       - "python3 scripts/dev/test-live-claude-mod-tests.py"
+
+  # The canonical SDK wrapper is blocked at its source gate
+  # (SDK_BOOTSTRAP_VERIFIED) and exits 3 before it runs anything. It stays
+  # selected for the files it covers so the report says "SDK proof not run";
+  # agent-check.py lists it in MANUAL_COMMAND_FRAGMENTS and reports it BLOCKED
+  # (manual-proof-required) instead of running it into a FAIL. swift-ci.yml is
+  # not here: the workflow runs the contract tests above, never this wrapper.
+  - paths:
+      - "scripts/dev/test-live-claude-mod.py"
+      - ".github/claude-mod-tests/**"
+    checks:
       - "python3 scripts/dev/test-live-claude-mod.py"
 
   - paths:

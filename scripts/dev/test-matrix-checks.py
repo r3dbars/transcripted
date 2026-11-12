@@ -199,6 +199,12 @@ def self_test(matrix_path: Path) -> None:
         "scripts/dev/test-isolated-launch-environment.sh": {
             "swift test --package-path Tools/TranscriptedQA",
         },
+        # The SDK wrapper stays selected where it applies (reported BLOCKED by
+        # agent-check.py), but the workflow only runs the offline contract tests.
+        ".github/workflows/swift-ci.yml": {"python3 scripts/dev/test-live-claude-mod-tests.py"},
+        "scripts/dev/test-live-claude-mod.py": {"python3 scripts/dev/test-live-claude-mod.py"},
+        ".github/claude-mod-tests/package.json": {"python3 scripts/dev/test-live-claude-mod.py"},
+        "Tools/TranscriptedLive/Package.swift": {"python3 scripts/dev/test-live-claude-mod.py"},
     }
     for changed_path, expected_checks in matching_cases.items():
         actual = select_checks(rules, [changed_path])
@@ -207,6 +213,15 @@ def self_test(matrix_path: Path) -> None:
             raise AssertionError(f"{changed_path} is missing checks: {sorted(missing)}")
         if len(actual) != len(set(actual)):
             raise AssertionError(f"{changed_path} produced duplicate checks")
+
+    unselected_cases = {
+        # Selecting a command that can only exit 3 would fail every workflow edit.
+        ".github/workflows/swift-ci.yml": {"python3 scripts/dev/test-live-claude-mod.py"},
+    }
+    for changed_path, forbidden_checks in unselected_cases.items():
+        selected = forbidden_checks.intersection(select_checks(rules, [changed_path]))
+        if selected:
+            raise AssertionError(f"{changed_path} must not select: {sorted(selected)}")
 
     if select_checks(rules, ["unmapped.file"]):
         raise AssertionError("an unmapped path unexpectedly selected checks")
