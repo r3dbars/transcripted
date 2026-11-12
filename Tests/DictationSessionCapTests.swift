@@ -104,7 +104,7 @@ func testDictationSessionCap() {
         )
         assertEqual(
             DictationStopRoute.route(
-                stopDecision: .cancelPendingStart, trigger: .keyboardShortcut,
+                stopDecision: .cancelPendingStart, trigger: .menu,
                 isFinishingPreviousTake: false, isRecording: false, hasRecoverableRecording: false
             ),
             .cancelPendingStart,

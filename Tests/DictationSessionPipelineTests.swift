@@ -501,7 +501,7 @@ private final class PipelineFakeHost: DictationSessionPipelineHost {
     // Host state
     var isDictating = true
     var currentDictationSessionID = UUID()
-    var currentDictationTrigger: DictationTrigger = .keyboardShortcut
+    var currentDictationTrigger: DictationTrigger = .unknown
     var currentDictationShortcutMode: DictationShortcutMode? = .pushToTalk
     var sessionSourceApp: NSRunningApplication?
     var lastCompletedText: String?
