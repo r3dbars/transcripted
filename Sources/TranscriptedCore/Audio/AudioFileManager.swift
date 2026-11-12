@@ -646,12 +646,19 @@ extension Audio {
         }
         writerInstall.displacedWriter?.close()
         FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
+        let openedJournalSession: MeetingRecordingJournalSession?
         do {
-            journalSession = try recordingJournal.begin(
-                primaryMicURL: fileURL,
-                languageSelection: languageSelectionForCurrentRecording,
-                micOnlyByChoice: !currentRecordingCapturesSystemAudio
-            )
+            // Stop takes the journal session right after it advances the
+            // generation. Opening and publishing in one step means a Stop that
+            // lands here either gets this journal or none is opened, never a
+            // live "recording" journal nobody will mark stopped.
+            openedJournalSession = try openJournalSessionIfCurrent(sessionGeneration: sessionGeneration) {
+                try recordingJournal.begin(
+                    primaryMicURL: fileURL,
+                    languageSelection: languageSelectionForCurrentRecording,
+                    micOnlyByChoice: !currentRecordingCapturesSystemAudio
+                )
+            }
         } catch {
             // The input tap is not installed yet. Close only the writer
             // this start still owns, then remove only its newly-created
@@ -670,6 +677,11 @@ extension Audio {
                 }
             }
             throw error
+        }
+        guard openedJournalSession != nil else {
+            // Stop already ended this start. It owns the header-only WAV and
+            // its writer, same as when it lands after the journal opens.
+            throw AudioCaptureStaleSessionError()
         }
         if let systemURL = originalSystemAudioFileURL {
             recordingJournal.recordSystemAudio(systemURL, session: journalSession)
