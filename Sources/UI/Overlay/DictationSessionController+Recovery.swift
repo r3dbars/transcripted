@@ -126,8 +126,7 @@ extension DictationSessionController {
                                 detail: "Retrying the recording already captured.",
                                 progress: 0.2,
                                 status: "Saving"
-                            ),
-                            anchorRect: self.sessionAnchorRect
+                            )
                         )
                     }
                 )
@@ -183,8 +182,7 @@ extension DictationSessionController {
                                     action: { [weak self] in
                                         guard let self else { return }
                                         self.retryDictation(
-                                            sourceApp: self.sessionSourceApp,
-                                            anchorRect: self.sessionAnchorRect
+                                            sourceApp: self.sessionSourceApp
                                         )
                                     }
                                 )
@@ -201,7 +199,7 @@ extension DictationSessionController {
                         ))
                     }
                 case .retryDictation:
-                    self.retryDictation(sourceApp: self.sessionSourceApp, anchorRect: self.sessionAnchorRect)
+                    self.retryDictation(sourceApp: self.sessionSourceApp)
                 }
             }
         )

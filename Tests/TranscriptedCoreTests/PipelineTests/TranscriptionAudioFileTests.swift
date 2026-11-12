@@ -45,7 +45,6 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(progress.values.first, 0)
         XCTAssertEqual(progress.values.last, 1)
         XCTAssertEqual(try Data(contentsOf: input), original)
-        XCTAssertNil(transcription.lastSavedFileURL)
         XCTAssertFalse(FileManager.default.fileExists(atPath: clips.path))
         XCTAssertFalse(try FileManager.default.contentsOfDirectory(atPath: tempDirectory.path).contains { $0.hasSuffix(".md") })
     }
@@ -93,7 +92,6 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertEqual(engine.initializeCallCount, 1)
         XCTAssertTrue(engine.sampleCounts.isEmpty)
         XCTAssertEqual(try Data(contentsOf: input), original)
-        XCTAssertNil(transcription.lastSavedFileURL)
     }
 
     func testAudioFilePublicAPIPropagatesNoSpeechWithoutDeletingInput() async throws {
@@ -117,7 +115,6 @@ extension TranscriptionTaskManagerMetadataTests {
         XCTAssertTrue(engine.sampleCounts.isEmpty)
         XCTAssertEqual(try Data(contentsOf: input), original)
         XCTAssertFalse(transcription.isProcessing)
-        XCTAssertNil(transcription.lastSavedFileURL)
     }
 }
 

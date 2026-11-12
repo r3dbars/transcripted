@@ -7,9 +7,7 @@ import Foundation
 /// Top-level (it used to be nested in `DictationSessionController`) so the
 /// fast tests can check those raw values against the real enum.
 enum DictationTrigger: String {
-    case rightOptionTap = "right_option_tap"
     case physicalKey = "physical_key"
-    case keyboardShortcut = "keyboard_shortcut"
     case overlayButton = "overlay_button"
     case menu = "menu"
     case onboarding = "onboarding"

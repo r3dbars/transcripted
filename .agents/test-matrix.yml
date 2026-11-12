@@ -421,7 +421,7 @@ rules:
       - "Sources/Speech/Parakeet*.swift"
       - "Sources/Observability/**"
       - "Sources/TranscriptedCore/Logging/FileLogger.swift"
-      - "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater*.swift"
+      - "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift"
       - "Sources/App/TranscriptedSupportActions.swift"
       - "Sources/App/TranscriptedApp.swift"
       - "Sources/App/TranscriptedMenuCommands.swift"

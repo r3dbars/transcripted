@@ -123,7 +123,6 @@ class DictationSessionController: ObservableObject {
 
     var sessionSourceApp: NSRunningApplication?
     var sessionPasteTarget: DictationPasteTarget?
-    var sessionAnchorRect: NSRect?
     var startupTask: Task<Void, Never>?
     var streamingTask: Task<Void, Never>?
     var stopFinalizationGate = DictationStopFinalizationGate()
@@ -212,7 +211,6 @@ class DictationSessionController: ObservableObject {
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger = .unknown,
         shortcutMode: DictationShortcutMode? = nil,
-        anchorRect: NSRect? = nil,
         isRetry: Bool = false
     ) {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
@@ -273,7 +271,6 @@ class DictationSessionController: ObservableObject {
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         primeAutoEnterTargetAccessibility()
-        sessionAnchorRect = anchorRect
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
         currentDictationShortcutMode = shortcutMode
@@ -297,8 +294,7 @@ class DictationSessionController: ObservableObject {
             enterPendingStartStage(.awaitingMicrophonePermission)
             overlayController.showLoadingState(
                 near: sourceApp,
-                presentation: microphonePermissionPresentation(),
-                anchorRect: anchorRect
+                presentation: microphonePermissionPresentation()
             )
             startupTask?.cancel()
             startupTask = Task { @MainActor [weak self] in

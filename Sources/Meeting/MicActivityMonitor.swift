@@ -57,14 +57,11 @@
 // process, so the same browser's other tabs (YouTube, a voice assistant
 // talking back) do count; that is why it only shortens the wait.
 //
-// Scan cost: each read is a coreaudiod round trip, and a Mac has 30-60 audio
-// clients. A scan reads every new process's bundle ID first (known ones are
-// kept between scans; see `currentProcessAudioState`) and only probes the
-// running flags of processes that can map to a provider (`shouldProbe`:
-// native conferencing apps and browsers, plus any whose bundle read failed).
-// So the three emitted sets only ever hold such bundles; nothing downstream
-// uses others. Widen `shouldProbe` if a consumer ever needs more. The
-// one-shot `currentMicInputBundleIDs` (Boost Mic) stays unfiltered.
+// Call-end evidence reads every process identity fresh. Successful cold reads
+// also warm the start filter's label cache, avoiding a redundant label read.
+// Active start rows still revalidate identity; required fresh safety reads stay.
+// The start filter only probes provider-mappable bundles (and failed labels),
+// while the one-shot `currentMicInputBundleIDs` (Boost Mic) stays unfiltered.
 
 import CoreAudio
 import Foundation
@@ -143,7 +140,7 @@ final class MicActivityMonitor: @unchecked Sendable {
     private var lastEmittedOutput: Set<String>?
     private var lastEmittedBrowserOutput: Set<String>?
     /// Bundle IDs read in earlier scans, by process object. See
-    /// `currentProcessAudioState`.
+    /// `processAudioScan`.
     private var processBundleIDs: [AudioObjectID: String] = [:]
 
     init(
@@ -342,10 +339,21 @@ final class MicActivityMonitor: @unchecked Sendable {
     }
 
     private func scanAndEmit() {
-        let snapshot = Self.currentCallActivitySnapshot(ownBundleID: ownBundleID)
+        let sampledAt = ProcessInfo.processInfo.systemUptime
         let snapshotCallback = onCallActivitySnapshot
-        DispatchQueue.main.async { snapshotCallback?(snapshot) }
-        let processes = currentProcessAudioState()
+        let scan = Self.processAudioScan(
+            objects: Self.processObjectIDsIfAvailable(), ownBundleID: ownBundleID,
+            cachedLabels: &processBundleIDs, rawBundleID: Self.rawBundleIDProperty,
+            input: { Self.runningProperty($0, selector: kAudioProcessPropertyIsRunningInput) },
+            output: { Self.runningProperty($0, selector: kAudioProcessPropertyIsRunningOutput) },
+            snapshotReady: { reading in
+                var snapshot = reading
+                snapshot.sampledAt = sampledAt
+                let stampedSnapshot = snapshot
+                DispatchQueue.main.async { snapshotCallback?(stampedSnapshot) }
+            }
+        )
+        let processes = scan.processes
         let now = Date()
 
         let micRaw = Self.micUsingBundleIDs(
@@ -572,30 +580,44 @@ final class MicActivityMonitor: @unchecked Sendable {
     // MARK: - CoreAudio reads (on `queue`, or any background thread for the
     // static one-shot; read-only apart from the `processBundleIDs` cache)
 
-    /// The probe-filter label (each process's bundle ID) is the scan's
-    /// biggest cost: one coreaudiod round trip per audio client, every 5 s.
-    /// A process object's bundle ID doesn't change while the object lives,
-    /// so a non-empty one is kept from the last scan and objects that left
-    /// the list are dropped. Failed reads (`nil`) and `""` aren't kept, so
-    /// they're read again every scan exactly as before. The `bundleID` a row
-    /// reports for a process holding the mic or output is still read fresh.
-    private func currentProcessAudioState() -> [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)] {
-        let objects = Self.processObjectIDs()
-        let live = Set(objects)
-        processBundleIDs = processBundleIDs.filter { live.contains($0.key) }
-        return Self.probedProcessAudioState(
-            objects: objects,
-            ownBundleID: ownBundleID,
+    /// Shares one inventory and warms only missing filter labels from the fresh
+    /// end-evidence read. End evidence never falls back to a cached identity;
+    /// failed/empty cold reads still retry, and active rows revalidate identity.
+    static func processAudioScan<Object: Hashable>(
+        objects: [Object]?,
+        ownBundleID: String,
+        cachedLabels: inout [Object: String],
+        rawBundleID: (Object) -> String?,
+        input: (Object) -> Bool?,
+        output: (Object) -> Bool?,
+        snapshotReady: (MeetingCallActivitySnapshot) -> Void
+    ) -> (snapshot: MeetingCallActivitySnapshot, processes: [(bundleID: String?, isRunningInput: Bool, isRunningOutput: Bool)]) {
+        let live = Set(objects ?? [])
+        cachedLabels = cachedLabels.filter { live.contains($0.key) }
+        let snapshot = MeetingCallActivitySnapshot.read(
+            objects: objects, ownBundleID: ownBundleID,
+            bundleID: { object in
+                let fresh = rawBundleID(object)
+                if cachedLabels[object] == nil, let fresh, !fresh.isEmpty {
+                    cachedLabels[object] = fresh
+                }
+                return fresh
+            }, input: input, output: output
+        )
+        snapshotReady(snapshot)
+        let processes = probedProcessAudioState(
+            objects: objects ?? [], ownBundleID: ownBundleID,
             label: { object in
-                if let known = processBundleIDs[object] { return known }
-                let label = Self.rawBundleIDProperty(object)
-                if let label, !label.isEmpty { processBundleIDs[object] = label }
+                if let known = cachedLabels[object] { return known }
+                let label = rawBundleID(object)
+                if let label, !label.isEmpty { cachedLabels[object] = label }
                 return label
             },
-            bundleID: Self.bundleIDProperty,
-            isRunningInput: Self.isRunningInputProperty,
-            isRunningOutput: Self.isRunningOutputProperty
+            bundleID: { object in rawBundleID(object).flatMap { $0.isEmpty ? nil : $0 } },
+            isRunningInput: { input($0) ?? false },
+            isRunningOutput: { output($0) ?? false }
         )
+        return (snapshot, processes)
     }
 
     /// One-shot read of which non-self processes hold the mic input right

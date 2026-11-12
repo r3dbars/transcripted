@@ -231,9 +231,9 @@ extension MeetingPromptDetector {
         // Only a shortcut of the browser holding the mic can claim it: a Meet
         // shortcut in Helium says nothing about Chrome's mic.
         let isMicBrowser = { (bundleID: String) in !Self.browserAppFamilies(for: [bundleID]).isDisjoint(with: families) }
-        let recent = recentCallShortcutActivation.flatMap { isMicBrowser($0.bundleID) ? $0 : nil }
+        let recent = callShortcutCache.recentActivation.flatMap { isMicBrowser($0.bundleID) ? $0 : nil }
         session.claimedShortcut = BrowserCallEvidence.claimedCallShortcut(
-            frontmostShortcut: frontmostBundleID.flatMap { isMicBrowser($0) ? callShortcutProviders[$0] : nil },
+            frontmostShortcut: frontmostBundleID.flatMap { isMicBrowser($0) ? callShortcutCache.provider(for: $0) : nil },
             recentProvider: recent?.provider,
             recentActivationAt: recent?.at,
             sessionStartedAt: session.startedAt
@@ -359,32 +359,25 @@ extension MeetingPromptDetector {
     /// A browser app came forward or launched. If it is a call shortcut, remember
     /// it so a calendar-opened Meet PWA is not vetoed by another Helium window.
     func noteCallShortcutActivation(bundleID: String, provider: MeetingPromptProvider, at: Date) {
-        callShortcutProviders[bundleID] = provider
-        callShortcutLookupDone.insert(bundleID)
-        recentCallShortcutActivation = (bundleID: bundleID, provider: provider, at: at)
+        callShortcutCache.noteActivation(bundleID: bundleID, provider: provider, at: at)
         scheduleEvaluation()
     }
 
-    /// A call shortcut quit: it can no longer be the call that is starting.
+    /// A call shortcut quit: invalidate its classification and any pending read.
     func noteCallShortcutTermination(bundleID: String) {
-        guard recentCallShortcutActivation?.bundleID == bundleID else { return }
-        recentCallShortcutActivation = nil
+        callShortcutCache.invalidate(bundleID)
     }
 
-    /// Classify the frontmost app's shortcut URL once, off this pass. The next
-    /// evaluation uses the answer. A miss is remembered too, so a busy main
-    /// browser is not read again on every mic poll.
-    private func ensureCallShortcutLookup(_ bundleID: String?) {
+    /// Both mic evidence and workspace activation share hit, miss and pending reads.
+    func ensureCallShortcutLookup(_ bundleID: String?, activatedAt: Date? = nil) {
         guard let bundleID, MeetingPromptProvider.isBrowserBundleID(bundleID) else { return }
-        guard !callShortcutLookupDone.contains(bundleID) else { return }
-        callShortcutLookupDone.insert(bundleID)
+        guard activatedAt != nil || !callShortcutCache.hasLookup(for: bundleID) else { return }
         let lookup = callShortcutProvider
+        let cache = callShortcutCache
+        let request = cache.request(bundleID, activatedAt: activatedAt, resolver: lookup)
         Task { @MainActor [weak self] in
-            let site = await lookup(bundleID)
-            guard let self else { return }
-            if let site {
-                self.callShortcutProviders[bundleID] = site
-            }
+            let result = await request.value
+            guard let self, case .resolved = result else { return }
             self.scheduleEvaluation()
         }
     }

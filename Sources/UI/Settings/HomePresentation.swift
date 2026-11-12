@@ -90,25 +90,6 @@ enum HomeDaySectionLabel {
     }()
 }
 
-// MARK: - Stable feedback reference ids
-
-/// Foundation-pure stable id derivation for Home feedback targets.
-///
-/// `HomeFeedbackTarget` derives a deterministic short id from a capture's id
-/// string via FNV-1a so feedback payloads stay stable without leaking the raw
-/// identifier. The hashing lives here so it can be exercised by fast tests; the
-/// god-object delegates to keep output identical.
-enum HomeStableReferenceID {
-    static func id(for value: String) -> String {
-        var hash: UInt64 = 1_469_598_103_934_665_603
-        for byte in value.utf8 {
-            hash ^= UInt64(byte)
-            hash &*= 1_099_511_628_211
-        }
-        return String(hash, radix: 16)
-    }
-}
-
 // MARK: - Day-grouped row identity
 
 /// Identity and divider flags for one row in a Home / Dictations day section.

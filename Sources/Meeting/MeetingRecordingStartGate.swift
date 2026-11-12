@@ -71,14 +71,6 @@ enum MeetingRecordingStartGate {
         TranscriptedPermissionKind.systemAudioRecordingSummary
     }
 
-    static var systemAudioRecordingQuickStart: String {
-        "Transcripted will ask for System Audio Recording the first time you record a meeting so it can capture the other side of Zoom, Meet, and similar apps."
-    }
-
-    static var optionalPermissionsFootnote: String {
-        "System Audio Recording is requested when you record your first meeting. Calendar is optional if you want Transcripted to spot upcoming meetings and offer a record prompt."
-    }
-
     static func evaluate(
         microphoneGranted: Bool,
         systemAudioRecordingGranted: Bool

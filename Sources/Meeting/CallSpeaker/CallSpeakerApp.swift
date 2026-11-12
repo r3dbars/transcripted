@@ -65,7 +65,7 @@ enum CallSpeakerApp: String, Sendable, CaseIterable {
     static func needsManualAccessibility(bundleID: String) -> Bool {
         let families = [
             "com.google.Chrome", "com.microsoft.edgemac", "com.brave.Browser",
-            "company.thebrowser.Browser",
+            "company.thebrowser.Browser", "net.imput.helium",
         ]
         if families.contains(where: { bundleID.matchesBundleFamily($0) }) { return true }
         return teamsDesktopBundleIDs.contains(bundleID) || slackBundleIDs.contains(bundleID)

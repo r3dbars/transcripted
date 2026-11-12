@@ -144,7 +144,7 @@ RULES: tuple[Rule, ...] = (
             "Sources/Observability/ReliabilityPacketRecorder.swift",
             "Sources/Observability/AppLogSink.swift",
             "Sources/TranscriptedCore/Logging/FileLogger.swift",
-            "Sources/TranscriptedCore/Speaker/RetroactiveSpeakerUpdater+Scanning.swift",
+            "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
             "Sources/Observability/ObservabilityLogRotation.swift",
         ),
         strip_line_comments=True,
@@ -476,7 +476,62 @@ def run(root: Path) -> int:
     return 0
 
 
+def self_test_filehandle_owners() -> None:
+    # This ownership contract is independent of fixture paths derived from RULES.
+    # A future move must update both the guard and this input/output coverage.
+    expected_files = (
+        "Sources/Observability/LockedFileAppender.swift",
+        "Sources/Observability/EventFileWriter.swift",
+        "Sources/Observability/ReliabilityPacketRecorder.swift",
+        "Sources/Observability/AppLogSink.swift",
+        "Sources/TranscriptedCore/Logging/FileLogger.swift",
+        "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
+        "Sources/Observability/ObservabilityLogRotation.swift",
+    )
+    current_owners = (
+        "Sources/Observability/EventFileWriter.swift",
+        "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
+        "Sources/Observability/ObservabilityLogRotation.swift",
+    )
+    legacy_calls = (
+        ("seekToEndOfFile()", "handle.seekToEndOfFile()"),
+        ("readData(ofLength:", "handle.readData(ofLength: 1)"),
+        (".write(data)", "handle.write(data)"),
+        ("synchronizeFile()", "handle.synchronizeFile()"),
+        ("closeFile()", "handle.closeFile()"),
+    )
+    rule = next(rule for rule in RULES if rule.name ==
+                "diagnostic file writers avoid the NSException-throwing legacy FileHandle APIs")
+    assert rule.files == expected_files, "FileHandle coverage must name the seven current owners"
+    modern = (
+        "try handle.seekToEnd()\ntry handle.read(upToCount: 1)\n"
+        "try handle.write(contentsOf: data)\ntry handle.synchronize()\ntry handle.close()\n"
+        + "".join("// " + call + "\n" for _, call in legacy_calls)
+    )
+    with tempfile.TemporaryDirectory(prefix="transcripted-filehandle-rule-") as temporary:
+        root = Path(temporary)
+        for rel in expected_files:
+            path = root / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(modern, encoding="utf-8")
+        assert check(root, rules=(rule,)) == [], "modern calls and comment-only legacy calls must pass"
+        for rel in current_owners:
+            path = root / rel
+            for needle, call in legacy_calls:
+                path.write_text(call + "\n", encoding="utf-8")
+                assert check(root, rules=(rule,)) == [
+                    f"{rel}: calls `{needle}`: {rule.why}"
+                ], (rel, needle)
+                path.write_text(modern, encoding="utf-8")
+            path.unlink()
+            assert check(root, rules=(rule,)) == [
+                f"{rel}: cannot read it ({rule.name})"
+            ], rel
+            path.write_text(modern, encoding="utf-8")
+
+
 def self_test() -> None:
+    self_test_filehandle_owners()
     def build(files: dict[str, str]) -> Path:
         tmp = Path(tempfile.mkdtemp())
         for rel, text in files.items():

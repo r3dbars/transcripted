@@ -13,6 +13,7 @@ extension MeetingSessionController {
     enum StartTrigger: String {
         case hotkey = "hotkey"
         case menu = "menu"
+        case companion = "companion"
         case onboarding = "onboarding"
         case detectedPrompt = "detected_prompt"
         case fileImport = "file_import"
@@ -24,6 +25,7 @@ extension MeetingSessionController {
         case hotkeyToggle = "hotkey_toggle"
         case overlayStopButton = "overlay_stop_button"
         case menuBarStopButton = "menu_bar_stop_button"
+        case companionRequest = "companion_request"
         case quitConfirmation = "quit_confirmation"
         case audioInactivityPrompt = "audio_inactivity_prompt"
         case audioInactivityTimeout = "audio_inactivity_timeout"
@@ -89,21 +91,6 @@ extension MeetingSessionController {
     /// `MeetingFailureKind` on purpose: it is not a failure, and nothing on
     /// screen should ever classify or explain it as one.
     static let accidentalStartFailureKind = "accidental_start"
-}
-
-extension MeetingSessionController.State {
-    var diagnosticName: String {
-        switch self {
-        case .idle: return "idle"
-        case .loadingModels: return "loading_models"
-        case .ready: return "ready"
-        case .startingRecording: return "starting_recording"
-        case .recording: return "recording"
-        case .stoppingRecording: return "stopping_recording"
-        case .transcribing: return "transcribing"
-        case .error: return "error"
-        }
-    }
 }
 
 extension DisplayStatus {

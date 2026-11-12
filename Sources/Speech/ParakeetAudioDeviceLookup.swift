@@ -78,9 +78,6 @@ enum CoreAudioInputDeviceLookup {
     /// Metadata only: never opens a microphone or changes a route. Call off
     /// the main actor because even property reads can stall in a device driver.
     static func hasExternalInputActivity() throws -> Bool {
-        guard #available(macOS 14.2, *) else {
-            throw InputDeviceLookupError.unknownDevice
-        }
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyProcessObjectList,
             mScope: kAudioObjectPropertyScopeGlobal,

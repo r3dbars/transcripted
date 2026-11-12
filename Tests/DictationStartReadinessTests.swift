@@ -76,9 +76,7 @@ func testDictationStartReadiness() async {
 
         // `physical_key` is the only global-hotkey trigger anything emits —
         // ContextCaptureEngine uses it for push-to-talk press/release AND for
-        // the hands-free toggle. `keyboard_shortcut` and `right_option_tap`
-        // are declared on DictationTrigger but never constructed, so listing
-        // them would be coverage this policy does not have.
+        // the hands-free toggle. Retired trigger names stay rejected.
         assertTrue(DictationStartReadinessPolicy.isHotkeyTrigger("physical_key"))
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("keyboard_shortcut"))
         assertFalse(DictationStartReadinessPolicy.isHotkeyTrigger("right_option_tap"))
@@ -144,9 +142,9 @@ func testDictationStartReadiness() async {
             )
         }
 
-        // The raw values the suites below assert are NOT hotkeys have to be
-        // real cases too, or those assertions pass for the wrong reason.
-        for raw in ["keyboard_shortcut", "right_option_tap", "menu", "overlay_button", "onboarding", "session_cap"] {
+        // Current non-hotkey triggers must remain real cases. The retired
+        // trigger names checked above intentionally have no enum case.
+        for raw in ["menu", "overlay_button", "onboarding", "session_cap"] {
             assertNotNil(DictationTrigger(rawValue: raw), "\(raw) must still be a DictationTrigger raw value")
         }
 
