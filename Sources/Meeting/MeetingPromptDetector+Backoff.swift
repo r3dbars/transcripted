@@ -18,13 +18,21 @@ extension MeetingPromptDetector {
         // Not now means "not this call". Its quiet (the provider-wide one, the
         // learned one) holds until the call ends, then the next call prompts.
         if candidate.callEvidence == .nativeApp, let kind = candidate.learnedBackoffKind {
-            detectedCallSession?.nativeNotNows[candidate.id] = NativeNotNow(
+            let now = Date()
+            let notNow = NativeNotNow(
                 provider: candidate.provider,
                 kind: kind,
                 candidateReason: cooldownReasons[candidate.id],
                 providerReason: runtimeSuppressionReasons[candidate.provider],
-                declinedAt: Date()
+                declinedAt: now
             )
+            if detectedCallSession?.providers.contains(candidate.provider) == true {
+                detectedCallSession?.nativeNotNows[candidate.id] = notNow
+            } else {
+                // The prompt outlived its call (the countdown keeps running
+                // after hang-up): the call is already over, so cut now.
+                nativeNotNowCallEnded([candidate.id: notNow], now: now)
+            }
         }
         return result
     }
@@ -33,15 +41,15 @@ extension MeetingPromptDetector {
     /// to `recordedCallEndGrace` (a mic flap at hang-up stays quiet) and
     /// re-check then. Quiet something else wrote since (a calendar Not now,
     /// a Record) keeps its own window.
-    func nativeNotNowCallEnded(_ session: DetectedCallSession, now: Date) {
-        guard !session.nativeNotNows.isEmpty else { return }
+    func nativeNotNowCallEnded(_ notNows: [String: NativeNotNow], now: Date) {
+        guard !notNows.isEmpty else { return }
         let until = now.addingTimeInterval(recordedCallEndGrace)
         var ended = endedNativeNotNowCall.flatMap { $0.graceEndsAt > now ? $0 : nil }
             ?? EndedNativeNotNowCall(notNows: [:], graceEndsAt: until)
-        ended.notNows.merge(session.nativeNotNows) { _, newer in newer }
+        ended.notNows.merge(notNows) { _, newer in newer }
         ended.graceEndsAt = max(ended.graceEndsAt, until)
         endedNativeNotNowCall = ended
-        for (id, notNow) in session.nativeNotNows {
+        for (id, notNow) in notNows {
             if notNow.candidateReason != nil, cooldownReasons[id] == notNow.candidateReason {
                 if let current = snoozedUntil[id], current > until { snoozedUntil[id] = until }
                 if let current = pendingUntil[id], current > until { pendingUntil[id] = until }

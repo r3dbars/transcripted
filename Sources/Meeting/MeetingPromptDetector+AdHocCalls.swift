@@ -212,7 +212,7 @@ extension MeetingPromptDetector {
             }
             detectedCallSession = nil
             recordedCallSessionEnded(now: now)
-            nativeNotNowCallEnded(session, now: now)
+            nativeNotNowCallEnded(session.nativeNotNows, now: now)
             finishDetectedCallSession(session, endedAt: now)
         } else {
             session.providers.formUnion(providers)

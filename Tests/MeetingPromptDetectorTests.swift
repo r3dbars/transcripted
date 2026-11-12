@@ -1083,6 +1083,34 @@ func testMeetingPromptDetector() async {
         assertEqual(box.promptCount, 2, "the next Teams call must prompt after the declined call ends")
     }
 
+    await runSuite("MeetingPromptDetector.dismiss — Not now after a native call already ended does not mute the next call") {
+        let detector = makeIsolatedDetector()
+        detector.isOwnCaptureActive = { false }
+        detector.recordedCallEndGrace = 0.2
+        let box = CandidateBox()
+        detector.onPromptRequest = { candidate in
+            box.candidate = candidate
+            box.promptCount += 1
+            return .presented
+        }
+
+        detector.updateMicInputUsers(["com.microsoft.teams2"])
+        await waitForPromptEvaluation(detector)
+        guard let candidate = box.candidate, candidate.provider == .teams else {
+            assertTrue(false, "a native Teams mic should prompt")
+            return
+        }
+        // The call ends while the prompt is still up, then the user taps Not now.
+        detector.updateMicInputUsers([])
+        await waitForPromptEvaluation(detector)
+        _ = detector.dismiss(candidate: candidate)
+
+        await waitForPromptEvaluation(detector, extraMilliseconds: 400)
+        detector.updateMicInputUsers(["com.microsoft.teams2"])
+        await waitForPromptEvaluation(detector, until: { box.promptCount == 2 })
+        assertEqual(box.promptCount, 2, "the next Teams call must prompt after a Not now to a call that already ended")
+    }
+
     await runSuite("MeetingPromptDetector browser evidence — an unrecognized site waits before prompting") {
         let detector = makeIsolatedDetector()
         detector.isOwnCaptureActive = { false }
