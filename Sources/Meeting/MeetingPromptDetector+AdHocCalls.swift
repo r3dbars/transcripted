@@ -109,6 +109,19 @@ extension MeetingPromptDetector {
         /// auto-start. Cleared when this session ends; leftover signals must
         /// not decline an unrelated provider that joins later.
         var autoStartDeclinedProviders: Set<MeetingPromptProvider> = []
+        /// Not nows to a native call app's prompt during this call, keyed by
+        /// candidate id. Their quiet covers this call only, so the end of the
+        /// call lifts it (`nativeNotNowCallEnded`).
+        var nativeNotNows: [String: NativeNotNow] = [:]
+    }
+
+    /// What a Not now to a native call prompt quieted, and under which
+    /// cooldown reasons, so the end of the call lifts only that quiet.
+    struct NativeNotNow {
+        let provider: MeetingPromptProvider
+        let kind: String
+        let candidateReason: String?
+        let providerReason: String?
     }
 
     // MARK: - Detected-call session (missed-call nudge)
@@ -188,6 +201,7 @@ extension MeetingPromptDetector {
             }
             detectedCallSession = nil
             recordedCallSessionEnded(now: now)
+            nativeNotNowCallEnded(session, now: now)
             finishDetectedCallSession(session, endedAt: now)
         } else {
             session.providers.formUnion(providers)
