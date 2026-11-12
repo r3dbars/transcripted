@@ -254,30 +254,31 @@ struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
             }
 
             var conversionError: NSError?
-            var sourceReadError: NSError?
+            let input = ConverterInput(reader: self)
             let status = converter.convert(to: outputBuffer, error: &conversionError) { packetCount, outStatus in
-                if self.didReachInputEnd {
+                let reader = input.reader
+                if reader.didReachInputEnd {
                     outStatus.pointee = .endOfStream
                     return nil
                 }
 
                 do {
-                    let sourceBuffer = try self.readSourceBuffer(maximumFrames: packetCount)
+                    let sourceBuffer = try reader.readSourceBuffer(maximumFrames: packetCount)
                     guard let sourceBuffer else {
-                        self.didReachInputEnd = true
+                        reader.didReachInputEnd = true
                         outStatus.pointee = .endOfStream
                         return nil
                     }
                     outStatus.pointee = .haveData
                     return sourceBuffer
                 } catch {
-                    sourceReadError = error as NSError
+                    input.sourceReadError = error as NSError
                     outStatus.pointee = .noDataNow
                     return nil
                 }
             }
 
-            if let failure = sourceReadError ?? conversionError {
+            if let failure = input.sourceReadError ?? conversionError {
                 throw failure
             }
 
@@ -294,6 +295,21 @@ struct AVFoundationMeetingAudioPlaybackMixer: MeetingAudioPlaybackMixing {
                 throw MeetingAudioStorageError.unsupportedPlaybackMixFormat
             @unknown default:
                 throw MeetingAudioStorageError.unsupportedPlaybackMixFormat
+            }
+        }
+
+        /// What the converter's input block reads and writes. This is a mix
+        /// file reader, not a real-time callback: `convert(to:error:withInputFrom:)`
+        /// runs the block synchronously on the calling thread and never after
+        /// it returns, so only that one call touches this. It's
+        /// `@unchecked Sendable` because the macOS 26 SDK types the block as
+        /// sendable (the macOS 27 SDK marks it non-sendable and non-escaping).
+        private final class ConverterInput: @unchecked Sendable {
+            let reader: MixInputReader
+            var sourceReadError: NSError?
+
+            init(reader: MixInputReader) {
+                self.reader = reader
             }
         }
 

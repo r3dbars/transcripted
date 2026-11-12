@@ -637,20 +637,38 @@ final class AppleSpeechEngine: ObservableObject {
             throw AppleSpeechEngineError.audioConversionFailed
         }
 
-        var consumedInput = false
+        let input = SingleConverterInput(buffer)
         var conversionError: NSError?
         let status = converter.convert(to: output, error: &conversionError) { _, inputStatus in
-            if consumedInput {
+            guard let next = input.take() else {
                 inputStatus.pointee = .endOfStream
                 return nil
             }
-            consumedInput = true
             inputStatus.pointee = .haveData
-            return buffer
+            return next
         }
         guard status != .error, conversionError == nil, output.frameLength > 0 else {
             throw AppleSpeechEngineError.audioConversionFailed
         }
         return output
+    }
+}
+
+/// Hands the converter its one input buffer, then nothing. Not a real-time
+/// callback: `convert(to:error:withInputFrom:)` runs the input block
+/// synchronously on the calling thread and never after it returns, so only
+/// that one call touches this. It's `@unchecked Sendable` because the macOS 26
+/// SDK types the block as sendable (the macOS 27 SDK marks it non-sendable and
+/// non-escaping).
+private final class SingleConverterInput: @unchecked Sendable {
+    private var buffer: AVAudioPCMBuffer?
+
+    init(_ buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+
+    func take() -> AVAudioPCMBuffer? {
+        defer { buffer = nil }
+        return buffer
     }
 }
