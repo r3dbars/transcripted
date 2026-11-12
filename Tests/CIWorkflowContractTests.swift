@@ -258,6 +258,24 @@ func testCIWorkflowContract() {
         }
     }
 
+    runSuite("CI workflow contract - release candidate accepts exactly the files the version bump writes") {
+        let pinStep = release.job("build-unsigned")?.child("steps")?.children.first {
+            $0.child("name")?.scalar == "Verify trusted release-only diff"
+        }
+        let pinLines = pinStep?.child("run")?.commandLines ?? []
+        let expectedLine = pinLines.first { $0.hasPrefix("expected=") } ?? ""
+        let allowed = ["Info.plist", "Tools/TranscriptedMCP/Sources/TranscriptedMCP/BuildVersion.swift"]
+        let listed = expectedLine.components(separatedBy: " ").filter { $0.hasSuffix(".plist") || $0.hasSuffix(".swift") }
+        assertEqual(Set(listed), Set(allowed), "the prep-branch diff guard should allow exactly the files bump-release-version.py writes")
+        let guardIndex = pinLines.firstIndex { $0.contains("\"$changed\" != \"$expected\"") }
+        assertNotNil(guardIndex, "the changed paths must be compared against the expected list")
+        let checkIndex = pinLines.firstIndex { $0.contains("scripts/release/bump-release-version.py --check") }
+        assertNotNil(checkIndex, "the pin step should prove the generated MCP version matches Info.plist")
+        if let guardIndex, let checkIndex {
+            assertTrue(checkIndex > guardIndex, "the bump script must run only after the diff guard proves it is main's copy")
+        }
+    }
+
     runSuite("CI workflow contract - release candidate never publishes or commits the feed") {
         let allCommands = (release.child("jobs")?.children ?? []).flatMap(\.commands).joined(separator: "\n")
         for forbidden in ["gh release create", "gh release upload", "gh release edit", "git push", "git commit", "gh workflow run"] {
