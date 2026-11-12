@@ -121,6 +121,7 @@ install_kind
 install_uuid
 is_retry
 key_behavior
+key_release
 last_event
 location_type
 login_launch

@@ -1277,6 +1277,15 @@ func testAnalyticsEventPolicy() {
         assertEqual(dictationNoSpeech?.allowedProperties.contains("trigger"), true, "dictation no-speech should preserve trigger attribution")
         assertEqual(dictationRecordingTooShort?.allowedProperties.contains("duration_bucket"), true, "dictation too-short should keep a coarse duration bucket")
         assertEqual(dictationRecordingTooShort?.allowedProperties.contains("trigger"), true, "dictation too-short should preserve trigger attribution")
+        let tooShortDetail = AnalyticsPayloadSanitizer.sanitizeProperties(
+            DictationTooShortDiagnostics.properties(keyRelease: .chord, pressSeconds: 0.5),
+            allowedKeys: dictationRecordingTooShort?.allowedProperties ?? []
+        )
+        assertEqual(
+            tooShortDetail,
+            ["key_release": "chord", "press_bucket": "0_3_0_6s"],
+            "dictation too-short should keep how the key was let go and a coarse press bucket"
+        )
         assertEqual(meetingFailed?.allowedProperties.contains("failure_kind"), true, "meeting failures should allow normalized failure kinds")
         assertEqual(speakerFinalizationFailed?.allowedProperties.contains("failure_kind"), true, "speaker finalization failures should allow normalized failure kinds")
         assertEqual(meetingSkipped?.allowedProperties.contains("failure_kind"), true, "skipped meeting transcripts should allow normalized reasons")

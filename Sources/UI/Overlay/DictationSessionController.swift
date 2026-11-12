@@ -154,6 +154,10 @@ class DictationSessionController: ObservableObject {
     /// The shortcut that started this session, when a shortcut did. Read from
     /// the press itself, never from a stored setting.
     var currentDictationShortcutMode: DictationShortcutMode?
+    /// The dictation key's last release during this session (tap, hold or
+    /// chord), for `dictation_recording_too_short` only. Nil until one
+    /// arrives; a start queued behind a finishing take reports none.
+    var currentDictationKeyRelease: DictationKeyRelease?
     var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     var stoppedAudioRecoveryPreservationSessionID: UUID?
     var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
@@ -277,6 +281,7 @@ class DictationSessionController: ObservableObject {
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
         currentDictationShortcutMode = shortcutMode
+        currentDictationKeyRelease = nil
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
