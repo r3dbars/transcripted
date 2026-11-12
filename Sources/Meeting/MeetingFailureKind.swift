@@ -35,6 +35,26 @@ enum MeetingFailureKind: String {
     case stopTimeout = "stop_timeout"
     case unexpectedError = "unexpected_error"
 
+    /// `retry_outcome_kind` on a failed-meeting retry's terminal telemetry:
+    /// the kind the retry itself ended as, which the original row's
+    /// `failure_kind` can't say. Nil when the retry published a transcript.
+    /// A retry that never ran (busy pipeline, recording journal still owns
+    /// the audio, pending delete) leaves `retryCount` alone, so it reports
+    /// `retry_not_started` instead of re-reporting the original kind.
+    static let retryNotStartedOutcome = "retry_not_started"
+    static let retryRowRemovedOutcome = "retry_row_removed"
+
+    static func retryOutcomeKind(
+        published: Bool,
+        retryCountBefore: Int,
+        rowAfter: FailedTranscription?
+    ) -> String? {
+        guard !published else { return nil }
+        guard let rowAfter else { return retryRowRemovedOutcome }
+        guard rowAfter.retryCount > retryCountBefore else { return retryNotStartedOutcome }
+        return classify(errorKind: rowAfter.errorKind, message: rowAfter.errorMessage).rawValue
+    }
+
     var shouldReportAsSkippedTranscript: Bool {
         switch self {
         case .recordingTooShort, .emptyAudio, .noSpeechDetected:

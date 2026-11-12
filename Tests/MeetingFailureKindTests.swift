@@ -1,6 +1,55 @@
 import Foundation
 
 func testMeetingFailureKind() {
+    runSuite("MeetingFailureKind names what a failed-meeting retry ended as") {
+        let mic = URL(fileURLWithPath: "/tmp/retry-outcome-mic.wav")
+        func row(retryCount: Int, kind: PipelineErrorKind?, message: String) -> FailedTranscription {
+            FailedTranscription(
+                micAudioURL: mic,
+                systemAudioURL: nil,
+                errorMessage: message,
+                retryCount: retryCount,
+                errorKind: kind
+            )
+        }
+
+        assertNil(
+            MeetingFailureKind.retryOutcomeKind(
+                published: true,
+                retryCountBefore: 0,
+                rowAfter: nil
+            ),
+            "a published retry has no failure outcome"
+        )
+        assertEqual(
+            MeetingFailureKind.retryOutcomeKind(
+                published: false,
+                retryCountBefore: 0,
+                rowAfter: row(retryCount: 1, kind: .noSpeechDetected, message: "Retry failed: No speech detected")
+            ),
+            "no_speech_detected",
+            "a retry that ran reports the kind it re-failed with, not the original row's"
+        )
+        assertEqual(
+            MeetingFailureKind.retryOutcomeKind(
+                published: false,
+                retryCountBefore: 2,
+                rowAfter: row(retryCount: 2, kind: .pipelineFailed, message: "Recording stopped unexpectedly.")
+            ),
+            MeetingFailureKind.retryNotStartedOutcome,
+            "a retry the pipeline turned away must not re-report the original failure"
+        )
+        assertEqual(
+            MeetingFailureKind.retryOutcomeKind(
+                published: false,
+                retryCountBefore: 0,
+                rowAfter: nil
+            ),
+            MeetingFailureKind.retryRowRemovedOutcome,
+            "a row dropped during retry (audio gone) is its own outcome"
+        )
+    }
+
     runSuite("MeetingFailureKind classifies recording-too-short errors") {
         let kind = MeetingFailureKind.classify(
             message: "Invalid audio data provided. Must be at least 1 second of 16kHz audio."

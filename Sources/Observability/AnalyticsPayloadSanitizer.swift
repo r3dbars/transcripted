@@ -9,7 +9,7 @@ enum AnalyticsPayloadSanitizer {
     private static let categoryValuedKeys: Set<String> = [
         "failure_kind", "failure_stage", "start_failure_stage", "selection_reason", "trigger",
         "quality_reason", "capture_outcome", "finalization_reason", "review_mode", "mic_backend",
-        "hold_key", "toggle_key", "key_behavior",
+        "hold_key", "toggle_key", "key_behavior", "retry_outcome_kind",
     ]
 
     static func sanitizeProperties(

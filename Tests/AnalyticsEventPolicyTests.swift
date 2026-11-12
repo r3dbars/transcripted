@@ -520,14 +520,14 @@ func testAnalyticsEventPolicy() {
         let finished = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_finished")
         assertEqual(
             finished?.allowedProperties ?? Set<String>(),
-            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_source", "surface", "workflow_kind"],
+            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_outcome_kind", "retry_source", "surface", "workflow_kind"],
             "workflow recovery terminal events should preserve only buckets and terminal result"
         )
 
         let failed = AnalyticsEventPolicy.policy(forEvent: "workflow_recovery_failed")
         assertEqual(
             failed?.allowedProperties ?? Set<String>(),
-            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_source", "surface", "workflow_kind"],
+            ["artifact_retained", "elapsed_bucket", "failure_kind", "recovery_attempt_bucket", "result", "retry_outcome_kind", "retry_source", "surface", "workflow_kind"],
             "workflow recovery failed events should match the terminal payload without adding raw failure details"
         )
 
@@ -641,6 +641,61 @@ func testAnalyticsEventPolicy() {
         assertEqual(recorded[3].properties["result"], "failed", "failed event should carry the failed result")
         assertEqual(recorded[3].properties["artifact_retained"], "false", "artifact retention should be a boolean string")
         assertNil(recorded[3].properties["elapsed_bucket"], "no elapsed time means no elapsed bucket")
+    }
+
+    runSuite("WorkflowRecoveryTelemetry sends why a failed retry failed") {
+        var recorded: [(event: String, properties: [String: String])] = []
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "meeting_transcription",
+            failureKind: "failed_meeting",
+            retrySource: "failed_meeting_retry",
+            result: "failed",
+            elapsedSeconds: 4,
+            surface: "home",
+            artifactRetained: true,
+            retryOutcomeKind: "no_speech_detected",
+            track: { recorded.append((event: $0, properties: $1)) }
+        )
+
+        assertEqual(
+            recorded.map(\.event),
+            ["workflow_recovery_finished", "workflow_recovery_failed"],
+            "a failed retry sends both terminal events"
+        )
+        for entry in recorded {
+            assertEqual(entry.properties["failure_kind"], "failed_meeting", "\(entry.event) keeps the original failure")
+            guard let policy = AnalyticsEventPolicy.policy(forEvent: entry.event) else {
+                assertTrue(false, "\(entry.event) must be registered or AnalyticsReporter drops it")
+                continue
+            }
+            let sanitized = AnalyticsPayloadSanitizer.sanitizeProperties(
+                entry.properties,
+                allowedKeys: policy.allowedProperties
+            )
+            assertEqual(
+                sanitized["retry_outcome_kind"],
+                "no_speech_detected",
+                "\(entry.event) should carry the retry's own outcome kind past the sanitizer"
+            )
+        }
+
+        let rawValue = AnalyticsPayloadSanitizer.sanitizeProperties(
+            ["retry_outcome_kind": "Retry failed: /Users/jane/private.wav"],
+            allowedKeys: ["retry_outcome_kind"]
+        )
+        assertNil(rawValue["retry_outcome_kind"], "only category-shaped outcome kinds may leave the device")
+
+        recorded.removeAll()
+        WorkflowRecoveryTelemetry.finished(
+            workflowKind: "meeting_transcription",
+            failureKind: "failed_meeting",
+            retrySource: "failed_meeting_retry",
+            result: "success",
+            surface: "home",
+            artifactRetained: true,
+            track: { recorded.append((event: $0, properties: $1)) }
+        )
+        assertNil(recorded.first?.properties["retry_outcome_kind"], "a published retry has no failure outcome to send")
     }
 
     runSuite("AnalyticsEventPolicy allows product friction only as coarse enums and buckets") {
