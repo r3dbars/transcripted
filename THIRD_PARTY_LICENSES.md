@@ -4125,15 +4125,24 @@ not a claim that those exact bytes were bundled in an earlier release.
 ## FluidInference offline diarizer models
 
 - **Component:** Community-1-derived `Segmentation.mlmodelc`, `FBank.mlmodelc`, `Embedding.mlmodelc`, `PldaRho.mlmodelc`, and `plda-parameters.json` used by FluidAudio's offline diarizer.
-- **Version/source:** FluidAudio 0.17.2 pins the model repository to `df2625ac79a7ac6b65ad868fee6d80f320da4232`.
-- **Upstream:** https://huggingface.co/FluidInference/speaker-diarization-coreml/tree/df2625ac79a7ac6b65ad868fee6d80f320da4232
+- **Version/source:** FluidAudio 0.17.2's default pin for the model repository is `df2625ac79a7ac6b65ad868fee6d80f320da4232`, and the scope notice below was checked against that revision. The app does not run with that pin: it overrides the repository revision to `main` at runtime (see below).
+- **Upstream:** https://huggingface.co/FluidInference/speaker-diarization-coreml/tree/df2625ac79a7ac6b65ad868fee6d80f320da4232 (the checked revision)
 - **License:** CC-BY-4.0 for the exact Community-1 artifact scope in the upstream notice below. This is not a blanket grant for that repository's legacy compatibility files.
 - **Attribution:** pyannote, WeSpeaker, BUT Speech@FIT, and Fluid Inference. The shipped forms are modified Core ML conversions. The upstream notice identifies the original pipeline and PLDA sources.
 
-`build-beta.sh` copies the cache directory. If that directory contains legacy
-compatibility models, the notice below explicitly excludes them; those files
-need their own provenance and licensing review. Naming a current SDK revision
-does not establish which files a historical cache contained.
+The app resolves this repository at `main`, not at the pinned commit:
+`FluidAudioCompatibility.keepUnpinnedDiarizerCaches()` sets the revision override so caches
+written by older builds, which have no revision marker, are not purged. So an older cache is
+kept rather than replaced, and any runtime download of these models comes from `main`, which can
+differ from the commit named above. The revision above identifies what the notice
+below was checked against, not what the app is guaranteed to fetch.
+
+`build-beta.sh` copies the whole `speaker-diarization` cache directory from the build machine
+into the app. It checks that five paths exist, then copies everything in the directory, with no
+file allowlist and no hash check. If that directory contains legacy compatibility models, the
+notice below explicitly excludes them; those files need their own provenance and licensing
+review. Naming a current SDK revision does not establish which files a historical cache
+contained.
 
 The published v1.1.76 DMG (SHA-256
 `c9c59dd56244592c200cccbc659ec103fda9a3a2cf06b1c6200369a9ef83c913`)
