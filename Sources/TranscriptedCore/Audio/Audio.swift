@@ -91,8 +91,10 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // store when the start path calls `begin()`; consumed (read-and-cleared)
     // by `stop()` so only the stop that ends an active session can write the
     // stopping/finalized journal states.
-    private var _journalSession: MeetingRecordingJournalSession?
-    private let journalSessionLock = NSLock()
+    // Guarded by journalSessionLock. Internal only for the start handoff in
+    // Audio+StartSessionHandoff.swift.
+    var _journalSession: MeetingRecordingJournalSession?
+    let journalSessionLock = NSLock()
     var journalSession: MeetingRecordingJournalSession? {
         get { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; return _journalSession }
         set { journalSessionLock.lock(); defer { journalSessionLock.unlock() }; _journalSession = newValue }
@@ -105,27 +107,6 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return session
     }
 
-    /// Opens this recording's journal and publishes its session in one step
-    /// under the session lock. Stop advances the generation first and then
-    /// takes the session under this same lock, so it either gets the journal
-    /// this start opened or no journal is opened at all. Returns nil, without
-    /// calling `open`, when Stop already ended `sessionGeneration`.
-    ///
-    /// Reads the generation through its lock-free mirror on purpose: segment
-    /// registration holds the generation lock and then reads the session, so
-    /// taking the generation lock in here would invert that order. `open`
-    /// must not touch `journalSession`.
-    func openJournalSessionIfCurrent(
-        sessionGeneration: UInt64,
-        open: () throws -> MeetingRecordingJournalSession
-    ) rethrows -> MeetingRecordingJournalSession? {
-        journalSessionLock.lock()
-        defer { journalSessionLock.unlock() }
-        guard recordingSessionGeneration == sessionGeneration else { return nil }
-        let session = try open()
-        _journalSession = session
-        return session
-    }
     var stoppingRecordingFinalizations: [UInt64: StoppingRecordingFinalization] = [:]
     let stoppingJournalSessionsLock = NSLock()
 

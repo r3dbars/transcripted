@@ -80,6 +80,36 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
         XCTAssertEqual(takenByStop.value, expected, "Stop must receive the journal the start opened")
         XCTAssertNil(audio.journalSession, "Stop's take leaves nothing behind for a later writer")
     }
+
+    /// Promise: the start's mic WAV always has an owner. Either Stop's
+    /// snapshot names it, or the start learns Stop won before it creates the
+    /// file, so a header-only WAV is never left with no journal and no owner.
+    func testStopBeforeTheMicFileIsPublishedRejectsThePublish() throws {
+        let audio = try makeAudio()
+        audio.prepareForNewRecordingStart()
+        let startGeneration = audio.recordingSessionGeneration
+        audio.beginRecordingSessionGeneration()
+        let stopSnapshot = audio.snapshotStartedMicFiles()
+
+        let micURL = URL(fileURLWithPath: "/nonexistent/meeting_test_mic.wav")
+        XCTAssertFalse(audio.publishMeetingMicStartFileIfCurrent(micURL, sessionGeneration: startGeneration))
+        XCTAssertNil(stopSnapshot.primaryURL)
+        XCTAssertNil(audio.snapshotStartedMicFiles().primaryURL)
+    }
+
+    func testStopAfterTheMicFileIsPublishedSeesIt() throws {
+        let audio = try makeAudio()
+        audio.prepareForNewRecordingStart()
+        let startGeneration = audio.recordingSessionGeneration
+        let micURL = URL(fileURLWithPath: "/nonexistent/meeting_test_mic.wav")
+
+        XCTAssertTrue(audio.publishMeetingMicStartFileIfCurrent(micURL, sessionGeneration: startGeneration))
+        audio.beginRecordingSessionGeneration()
+        let stopSnapshot = audio.snapshotStartedMicFiles()
+
+        XCTAssertEqual(stopSnapshot.primaryURL, micURL)
+        XCTAssertEqual(stopSnapshot.segments.map(\.url), [micURL])
+    }
 }
 
 /// Written once on the Stop thread before `stopTook` signals, read after.

@@ -598,12 +598,11 @@ extension Audio {
             throw MeetingRecordingJournalStartError.alreadyExists
         }
 
-        guard sessionGeneration == recordingSessionGeneration else {
+        // Published under the lock Stop snapshots with, so a Stop that wins
+        // after this point is guaranteed to see the URL and own the file.
+        guard publishMeetingMicStartFileIfCurrent(fileURL, sessionGeneration: sessionGeneration) else {
             throw AudioCaptureStaleSessionError()
         }
-
-        self.originalMicAudioFileURL = fileURL
-        self.micSegments = [MicRecordingSegment(url: fileURL)]
         DispatchQueue.main.async {
             guard sessionGeneration == self.recordingSessionGeneration else { return }
             self.micAudioFileURL = fileURL
@@ -679,8 +678,9 @@ extension Audio {
             throw error
         }
         guard openedJournalSession != nil else {
-            // Stop already ended this start. It owns the header-only WAV and
-            // its writer, same as when it lands after the journal opens.
+            // Stop already ended this start. Stop advanced the generation
+            // after the URL was published above, so its snapshot names this
+            // header-only WAV and its close takes the writer; it owns both.
             throw AudioCaptureStaleSessionError()
         }
         if let systemURL = originalSystemAudioFileURL {
