@@ -20,7 +20,7 @@ final class MeetingInviteeCalendarReader: @unchecked Sendable {
     /// Everyone but you on the event the recording started with, or an empty
     /// list when there is no access, no such event, or two of them.
     func inviteeNames(recordingStart: Date) async -> [String] {
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return [] }
+        guard await CalendarAccessStatusCache.shared.refresh() else { return [] }
         let events = await eventSnapshots(recordingStart: recordingStart)
         return MeetingInviteeSuggestionPolicy.matchingEvent(
             recordingStart: recordingStart,
@@ -31,7 +31,7 @@ final class MeetingInviteeCalendarReader: @unchecked Sendable {
     /// How many people besides you are on that same event, including ones
     /// with no usable name; nil when there is no access or no single event.
     func invitedPeopleCount(recordingStart: Date) async -> Int? {
-        guard TranscriptedPermissionAccess.calendarAccessGranted() else { return nil }
+        guard await CalendarAccessStatusCache.shared.refresh() else { return nil }
         let events = await eventSnapshots(recordingStart: recordingStart)
         guard let event = MeetingInviteeSuggestionPolicy.matchingEvent(
             recordingStart: recordingStart,

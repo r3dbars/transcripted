@@ -419,6 +419,7 @@ APP_SOURCES=(
     "Sources/Support/ActivationPolicyController.swift"
     "Sources/Support/TranscriptedPermissionKind.swift"
     "Sources/Support/TranscriptedPermissionAccess.swift"
+    "Sources/Support/CalendarAccessStatusCache.swift"
     "Sources/Support/SystemAudioCaptureTCC.swift"
     "Sources/Support/SystemAudioPermissionRequester.swift"
     "Sources/Support/SystemAudioPermissionProbeClassifier.swift"

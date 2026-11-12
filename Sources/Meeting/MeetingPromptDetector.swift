@@ -136,7 +136,12 @@ final class MeetingPromptDetector {
     // State below that isn't `private` is only internal because the
     // MeetingPromptDetector+*.swift extensions use it. Treat it as private
     // to the type.
+    // Reads the last known calendar access; never calls EventKit, so main-actor
+    // paths (dismiss, the title closure, evaluate) can use it. EventKit's
+    // authorization check is synchronous XPC and hung the app when it ran here
+    // (Sentry APPLE-MACOS-6Y), so `refreshCalendarAccess` asks it off main.
     let calendarAccessGranted: () -> Bool
+    private let refreshCalendarAccess: () async -> Void
     private let fetchCalendarEventSnapshots: (Date, Date) async -> [MeetingPromptCalendarEventSnapshot]
     private let refreshesCalendarEventSnapshots: Bool
     // Cache of upcoming meeting-link events refreshed off-main on a TTL or
@@ -165,6 +170,7 @@ final class MeetingPromptDetector {
     private var settledWaiters: [CheckedContinuation<Void, Never>] = []
     var workspaceObservers: [NSObjectProtocol] = []
     private var calendarStoreObserver: NSObjectProtocol?
+    private var permissionsObserver: NSObjectProtocol?
     var snoozedUntil: [String: Date] = [:]
     var pendingUntil: [String: Date] = [:]
     var recentNativeActivity: [MeetingPromptProvider: Date] = [:]
@@ -270,7 +276,9 @@ final class MeetingPromptDetector {
     let meetingShortcutDisplay: () -> String
 
     init(
-        calendarAccessGranted: @escaping () -> Bool = { TranscriptedPermissionAccess.calendarAccessGranted() },
+        // A fixed answer (unit tests) replaces the cache and is never refreshed.
+        calendarAccessGranted: (() -> Bool)? = nil,
+        calendarAccess: CalendarAccessStatusCache? = nil,
         calendarEventSnapshots: [MeetingPromptCalendarEventSnapshot] = [],
         refreshesCalendarEventSnapshots: Bool = true,
         fetchCalendarEventSnapshots: ((Date, Date) async -> [MeetingPromptCalendarEventSnapshot])? = nil,
@@ -281,7 +289,14 @@ final class MeetingPromptDetector {
     ) {
         self.learnedBackoff = MeetingPromptLearnedBackoff(userDefaults: learnedBackoffDefaults)
         self.meetingShortcutDisplay = meetingShortcutDisplay
-        self.calendarAccessGranted = calendarAccessGranted
+        if let calendarAccessGranted {
+            self.calendarAccessGranted = calendarAccessGranted
+            self.refreshCalendarAccess = {}
+        } else {
+            let cache = calendarAccess ?? .shared
+            self.calendarAccessGranted = { cache.isGranted }
+            self.refreshCalendarAccess = { await cache.refresh() }
+        }
         self.calendarEventSnapshots = calendarEventSnapshots
         self.refreshesCalendarEventSnapshots = refreshesCalendarEventSnapshots
         if let fetchCalendarEventSnapshots {
@@ -300,6 +315,7 @@ final class MeetingPromptDetector {
         guard pollingTask == nil else { return }
         installWorkspaceObservers()
         installCalendarStoreObserver()
+        installPermissionsObserver()
 
         evaluationsInFlight += 1
         pollingTask = Task { [weak self] in
@@ -335,6 +351,10 @@ final class MeetingPromptDetector {
         if let calendarStoreObserver {
             NotificationCenter.default.removeObserver(calendarStoreObserver)
             self.calendarStoreObserver = nil
+        }
+        if let permissionsObserver {
+            NotificationCenter.default.removeObserver(permissionsObserver)
+            self.permissionsObserver = nil
         }
     }
 
@@ -373,6 +393,8 @@ final class MeetingPromptDetector {
     }
 
     func evaluate(forceCalendarRefresh: Bool = false) async {
+        // Off the main thread; every check below reads the refreshed cache.
+        await refreshCalendarAccess()
         await refreshCalendarEventSnapshots(force: forceCalendarRefresh)
 
         // Off the main thread: reading bundle IDs can block on LaunchServices.
@@ -597,6 +619,8 @@ final class MeetingPromptDetector {
                 requestedAt.addingTimeInterval(-MeetingPromptHeuristics.calendarReminderPostStartGrace),
                 requestedAt.addingTimeInterval(calendarLookaheadInterval)
             )
+            // Re-read off main: access may have been revoked during the fetch.
+            await refreshCalendarAccess()
             guard calendarAccessGranted() else {
                 calendarEventSnapshots = []
                 lastCalendarAccessGranted = false
@@ -620,6 +644,22 @@ final class MeetingPromptDetector {
             MainActor.assumeIsolated {
                 self?.calendarSnapshotsNeedRefresh = true
                 // Already invalidated here; the queued pass must not dirty it again.
+                self?.scheduleEvaluation()
+            }
+        }
+    }
+
+    // A calendar grant or revocation from Settings or onboarding re-evaluates
+    // now; that pass refreshes the access cache before it reads it.
+    private func installPermissionsObserver() {
+        guard permissionsObserver == nil else { return }
+        permissionsObserver = NotificationCenter.default.addObserver(
+            forName: .transcriptedPermissionsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard (notification.object as? TranscriptedPermissionKind) == .calendar else { return }
+            MainActor.assumeIsolated {
                 self?.scheduleEvaluation()
             }
         }
