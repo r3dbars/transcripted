@@ -35,11 +35,7 @@ extension TranscriptSaver {
     }
 
     /// Verdict from the cheap frontmatter pre-scan that gates retroactive rewrites.
-    enum FrontmatterScanResult {
-        case matched
-        case notMatched
-        case needsFullRead
-    }
+    typealias FrontmatterScanResult = TranscriptFrontmatterScanner.Result
 
     /// Cheap pre-filter for the library-wide rename/merge scans. `db_id` lines are
     /// only ever written inside the YAML frontmatter `speakers:` block
@@ -52,37 +48,13 @@ extension TranscriptSaver {
     /// `\n---\n` within the scan cap) falls back to the historical full read so no
     /// file is ever silently skipped on ambiguity.
     static func scanFrontmatter(at url: URL, for needle: String) -> FrontmatterScanResult {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return .needsFullRead }
-        defer { try? handle.close() }
+        scanFrontmatter(at: url, forAny: [needle])
+    }
 
-        let needleBytes = Data(needle.utf8)
-        let openDelimiter = Data("---\n".utf8)
-        let closeDelimiter = Data("\n---\n".utf8)
-        let chunkSize = 64 * 1024
-        let maxScanBytes = 1024 * 1024
-        var buffer = Data()
-
-        while buffer.count < maxScanBytes {
-            guard let chunk = autoreleasepool(invoking: { try? handle.read(upToCount: chunkSize) }),
-                  !chunk.isEmpty else {
-                return .needsFullRead
-            }
-            buffer.append(chunk)
-
-            if buffer.count >= openDelimiter.count, !buffer.starts(with: openDelimiter) {
-                return .needsFullRead
-            }
-
-            // Mirrors frontmatterContentRange: the frontmatter ends at the first
-            // "\n---\n" after the opening "---\n".
-            if buffer.count > openDelimiter.count,
-               let closeRange = buffer.range(of: closeDelimiter, in: openDelimiter.count..<buffer.count) {
-                return buffer[..<closeRange.lowerBound].range(of: needleBytes) != nil
-                    ? .matched
-                    : .notMatched
-            }
-        }
-        return .needsFullRead
+    /// Scans the header once for the complete alias set, instead of reopening it
+    /// for every candidate. The full-content validation still belongs to callers.
+    static func scanFrontmatter(at url: URL, forAny needles: [String]) -> FrontmatterScanResult {
+        TranscriptFrontmatterScanner.scan(at: url, for: needles)
     }
 
     struct FrontmatterSpeakerRow {
