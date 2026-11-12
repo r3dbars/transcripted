@@ -38,21 +38,27 @@ extension Audio {
                 self.diskCheckCounter = 0
                 if let attrs = try? FileManager.default.attributesOfFileSystem(forPath: self.paths.audioCaptures.path),
                    let freeSpace = attrs[FileAttributeKey.systemFreeSize] as? Int64 {
-                    if freeSpace < 50_000_000 { // 50MB
-                        AppLogger.audio.error("Disk space critically low during recording, stopping", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
-                        let generation = self.recordingSessionGeneration
-                        DispatchQueue.main.async {
-                            guard self.recordingSessionGeneration == generation, self.isRecording else { return }
-                            self.error = "Recording stopped — disk space critically low (\(freeSpace / 1_000_000)MB free)"
-                            self.internalStopCause = .diskLow
-                            self.stop()
-                        }
-                        return
-                    } else if freeSpace < 100_000_000 { // 100MB
-                        AppLogger.audio.warning("Disk space low during recording", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
-                    }
+                    self.reactToFreeDiskSpace(freeSpace)
                 }
             }
+        }
+    }
+
+    /// What the ~30 s disk check does with the free bytes it read on the
+    /// recording volume: warn under 100 MB, stop under 50 MB. Split out so a
+    /// test can hand it a number instead of needing a nearly full disk.
+    func reactToFreeDiskSpace(_ freeSpace: Int64) {
+        if freeSpace < 50_000_000 { // 50MB
+            AppLogger.audio.error("Disk space critically low during recording, stopping", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
+            let generation = self.recordingSessionGeneration
+            DispatchQueue.main.async {
+                guard self.recordingSessionGeneration == generation, self.isRecording else { return }
+                self.error = "Recording stopped — disk space critically low (\(freeSpace / 1_000_000)MB free)"
+                self.internalStopCause = .diskLow
+                self.stop()
+            }
+        } else if freeSpace < 100_000_000 { // 100MB
+            AppLogger.audio.warning("Disk space low during recording", ["freeSpace": "\(freeSpace / 1_000_000)MB"])
         }
     }
 
