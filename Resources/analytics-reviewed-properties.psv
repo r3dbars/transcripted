@@ -191,6 +191,7 @@ required
 resample_ms
 restart_trigger
 result
+retry_outcome_kind
 retry_source
 review_action
 review_mode
