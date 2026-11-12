@@ -203,6 +203,56 @@ final class AudioDiagnosticsSnapshotTests: XCTestCase {
         XCTAssertEqual(audio.recordingStartCapturedInputVolume(matching: originalInput), "unavailable")
     }
 
+    /// Promise: a diagnostics snapshot never waits on the audio graph lock.
+    /// Device recovery holds that lock across a whole graph rebuild, and the
+    /// main thread takes a snapshot when a route-stability warning fires, so
+    /// a waiting snapshot hangs the app. While the lock is busy the snapshot
+    /// reports graph fields as unknown and reads the mic backend from the
+    /// lock-free mirror.
+    func testSnapshotDoesNotWaitForBusyAudioGraphLock() throws {
+        let audio = makeAudio()
+        audio.prepareForNewRecordingStart()
+        XCTAssertNotNil(audio.graphStateForDiagnostics(), "a free lock is read normally")
+
+        // Mirror says pinned while no capture object exists, so the backend
+        // label shows which path the snapshot took.
+        audio.pinnedMicrophoneRecording.store(true, ordering: .releasing)
+
+        let lockHeld = DispatchSemaphore(value: 0)
+        let releaseLock = DispatchSemaphore(value: 0)
+        let holderDone = DispatchSemaphore(value: 0)
+        let resultLock = NSLock()
+        var holderReleasedBySignal = false
+        DispatchQueue.global(qos: .userInitiated).async {
+            audio.withAudioGraphLock {
+                lockHeld.signal()
+                // Bounded so a regression fails instead of deadlocking.
+                let released = releaseLock.wait(timeout: .now() + 30) == .success
+                resultLock.lock()
+                holderReleasedBySignal = released
+                resultLock.unlock()
+            }
+            holderDone.signal()
+        }
+        lockHeld.wait()
+
+        let busyState = audio.graphStateForDiagnostics()
+        let snapshot = audio.createPipelineDiagnosticsSnapshot()
+        releaseLock.signal()
+        holderDone.wait()
+
+        resultLock.lock()
+        let releasedBySignal = holderReleasedBySignal
+        resultLock.unlock()
+        XCTAssertTrue(releasedBySignal, "the snapshot returned while another thread still held the graph lock")
+        XCTAssertNil(busyState)
+        XCTAssertEqual(snapshot.micBackend, AudioPipelineDiagnosticsSnapshot.pinnedMicBackend)
+
+        // Once the lock is free again the snapshot reads the graph itself.
+        let freeSnapshot = audio.createPipelineDiagnosticsSnapshot()
+        XCTAssertEqual(freeSnapshot.micBackend, AudioPipelineDiagnosticsSnapshot.engineMicBackend)
+    }
+
     func testRouteVolumeDiagnosticsExposeBeforeAndAfterKeys() {
         let audio = makeAudio()
         audio.prepareForNewRecordingStart()

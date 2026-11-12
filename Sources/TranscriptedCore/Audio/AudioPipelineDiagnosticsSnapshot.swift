@@ -255,9 +255,15 @@ extension Audio {
         let inputDevice = try? AudioObjectID.readDefaultInputDevice()
         let outputDevice = try? AudioObjectID.readDefaultOutputDevice()
         let systemOutputDevice = try? AudioObjectID.readDefaultSystemOutputDevice()
-        let currentCapturedInputDevice = currentInputDeviceID()
+        // Main-thread callers (route-stability warning, analytics) must not
+        // wait on the graph lock: device recovery holds it across a whole
+        // graph rebuild, including voice-processing arming and HAL reads that
+        // can stall for seconds. When it's busy, report the graph fields as
+        // unknown instead of hanging the UI.
+        let graphState = graphStateForDiagnostics()
+        let currentCapturedInputDevice = graphState?.inputDeviceID
         let actualInputDevice = currentCapturedInputDevice ?? inputDevice
-        let inputFormat = currentInputFormatSnapshot()
+        let inputFormat = graphState?.inputFormat
         // A mic-only recording has no tap. Don't report the previous
         // meeting's backend, format, or buffer health as this one's.
         let recordingSystemCapture = recordingSystemAudioCapture
@@ -270,8 +276,12 @@ extension Audio {
         let tapDiagnostics = tapCapture?.diagnostics ?? .empty
         // Take the reference under the graph lock, then read the counters
         // (a hop onto the capture's own queue) after releasing it.
-        let pinnedCapture = withAudioGraphLock { pinnedMicrophoneCapture }
+        let pinnedCapture = graphState?.pinnedCapture
         let pinnedDiagnostics = pinnedCapture?.diagnostics
+        // The lock-free mirror keeps the backend label right while the graph
+        // lock is busy.
+        let recordsThroughPinnedMicrophone = graphState.map { $0.pinnedCapture != nil }
+            ?? isRecordingThroughPinnedMicrophone
 
         return AudioPipelineDiagnosticsSnapshot(
             inputDeviceClass: Self.deviceClass(for: actualInputDevice),
@@ -315,9 +325,9 @@ extension Audio {
             systemTapFailedStatus: tapFailure.status,
             systemTap: tapDiagnostics,
             micFormatRebuildCount: micFormatRebuildCount,
-            micBackend: pinnedCapture == nil
-                ? AudioPipelineDiagnosticsSnapshot.engineMicBackend
-                : AudioPipelineDiagnosticsSnapshot.pinnedMicBackend,
+            micBackend: recordsThroughPinnedMicrophone
+                ? AudioPipelineDiagnosticsSnapshot.pinnedMicBackend
+                : AudioPipelineDiagnosticsSnapshot.engineMicBackend,
             pinnedMicrophoneDiagnostics: pinnedDiagnostics
         )
     }
@@ -331,18 +341,23 @@ extension Audio {
         )
     }
 
-    private func currentInputFormatSnapshot() -> AudioRecordingFormatSnapshot? {
-        withAudioGraphLock {
-            guard let inputNode else { return nil }
-            return AudioRecordingFormatPolicy.snapshot(recordingFormat(for: inputNode))
-        }
+    struct DiagnosticsGraphState {
+        var inputDeviceID: AudioDeviceID?
+        var inputFormat: AudioRecordingFormatSnapshot?
+        var pinnedCapture: PinnedMicrophoneCapture?
     }
 
-    private func currentInputDeviceID() -> AudioDeviceID? {
-        withAudioGraphLock {
-            guard let inputNode else { return nil }
-            let deviceID = inputNode.auAudioUnit.deviceID
-            return deviceID.isValid ? deviceID : nil
+    /// One non-blocking read of the graph fields the snapshot needs. Nil when
+    /// another thread holds the graph lock.
+    func graphStateForDiagnostics() -> DiagnosticsGraphState? {
+        withAudioGraphLockIfAvailable {
+            var state = DiagnosticsGraphState(pinnedCapture: pinnedMicrophoneCapture)
+            if let inputNode {
+                let deviceID = inputNode.auAudioUnit.deviceID
+                state.inputDeviceID = deviceID.isValid ? deviceID : nil
+                state.inputFormat = AudioRecordingFormatPolicy.snapshot(recordingFormat(for: inputNode))
+            }
+            return state
         }
     }
 
