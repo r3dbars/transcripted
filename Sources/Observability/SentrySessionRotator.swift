@@ -23,6 +23,7 @@ final class SentrySessionRotator: @unchecked Sendable {
     private let sink: any SentrySessionSink
     private let isCrashReportingEnabled: @Sendable () -> Bool
     private let now: @Sendable () -> Date
+    private let sleepEndGrace: DispatchTimeInterval
 
     // Touched only on `queue`.
     private var sessionsAllowed = false
@@ -32,11 +33,13 @@ final class SentrySessionRotator: @unchecked Sendable {
         sink: any SentrySessionSink,
         isCrashReportingEnabled: @escaping @Sendable () -> Bool,
         now: @escaping @Sendable () -> Date = { Date() },
+        sleepEndGrace: DispatchTimeInterval = .milliseconds(200),
         label: String = "com.transcripted.sentry-session-rotation"
     ) {
         self.sink = sink
         self.isCrashReportingEnabled = isCrashReportingEnabled
         self.now = now
+        self.sleepEndGrace = sleepEndGrace
         self.queue = DispatchQueue(label: label, qos: .utility)
     }
 
@@ -55,10 +58,16 @@ final class SentrySessionRotator: @unchecked Sendable {
         }
     }
 
-    /// Sleep, wake, or the periodic age check. Returns at once; the SDK call
-    /// happens on the rotation queue.
+    /// Sleep, wake, or the periodic age check. The SDK call happens on the
+    /// rotation queue. Wake and the periodic check return at once.
+    ///
+    /// Sleep waits up to `sleepEndGrace` for the end to land. `endSession`
+    /// stamps the end time when it runs, so an end that slips past suspension
+    /// would count the whole sleep as session time. A slow write still can't
+    /// hold main longer than the grace; it just finishes after wake, ahead of
+    /// the wake start, because the queue is serial.
     func rotate(for trigger: SentrySessionRotationPolicy.Trigger) {
-        queue.async { [self] in
+        let work = DispatchWorkItem { [self] in
             let action = SentrySessionRotationPolicy.action(
                 for: trigger,
                 sessionStartedAt: sessionStartedAt,
@@ -76,6 +85,10 @@ final class SentrySessionRotator: @unchecked Sendable {
                 endOnQueue()
                 startOnQueue()
             }
+        }
+        queue.async(execute: work)
+        if trigger == .willSleep {
+            _ = work.wait(timeout: .now() + sleepEndGrace)
         }
     }
 

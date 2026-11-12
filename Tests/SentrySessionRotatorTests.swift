@@ -20,6 +20,31 @@ func testSentrySessionRotator() {
         assertEqual(fixture.sink.callsOnMainThread, 0, "no session call ran on the main thread")
     }
 
+    runSuite("sleep records the session end before the observer returns") {
+        let fixture = RotatorFixture(now: start, sleepEndGrace: .seconds(60))
+        fixture.fromMain { $0.applyPreference() }
+        fixture.rotator.waitUntilIdle()
+
+        fixture.fromMain { $0.rotate(for: .willSleep) }
+        assertEqual(fixture.sink.calls, ["start", "end"], "the end is on record when the sleep notice returns")
+        assertEqual(fixture.sink.callsOnMainThread, 0, "no session call ran on the main thread")
+    }
+
+    runSuite("a stuck session write doesn't hold the sleep observer past its grace") {
+        let fixture = RotatorFixture(now: start, sleepEndGrace: .milliseconds(0))
+        fixture.fromMain { $0.applyPreference() }
+        fixture.rotator.waitUntilIdle()
+
+        fixture.sink.blockEnds()
+        fixture.fromMain { $0.rotate(for: .willSleep) }
+        fixture.fromMain { $0.rotate(for: .didWake) }
+        assertEqual(fixture.sink.calls, ["start"], "both notices returned while the end was still stuck")
+
+        fixture.sink.releaseEnds()
+        fixture.rotator.waitUntilIdle()
+        assertEqual(fixture.sink.calls, ["start", "end", "start"], "the late end still lands before the wake start")
+    }
+
     runSuite("a wake with no sleep notice still splits the session") {
         let fixture = RotatorFixture(now: start)
         fixture.fromMain { rotator in
@@ -96,7 +121,7 @@ private struct RotatorFixture {
     let enabled = LockedBox(true)
     let rotator: SentrySessionRotator
 
-    init(now: Date) {
+    init(now: Date, sleepEndGrace: DispatchTimeInterval = .milliseconds(200)) {
         let clock = LockedBox(now)
         let enabled = self.enabled
         self.clock = clock
@@ -104,6 +129,7 @@ private struct RotatorFixture {
             sink: sink,
             isCrashReportingEnabled: { enabled.get() },
             now: { clock.get() },
+            sleepEndGrace: sleepEndGrace,
             label: "test.sentry-session-rotation"
         )
     }
@@ -141,12 +167,21 @@ private final class RecordingSessionSink: SentrySessionSink, @unchecked Sendable
     private let lock = NSLock()
     private var recorded: [String] = []
     private var mainThreadCount = 0
+    private var endGate: DispatchSemaphore?
 
     var calls: [String] { lock.withLock { recorded } }
     var callsOnMainThread: Int { lock.withLock { mainThreadCount } }
 
+    /// Makes `endSession` wait until `releaseEnds()`, like a session file
+    /// write stuck on slow disk at sleep.
+    func blockEnds() { lock.withLock { endGate = DispatchSemaphore(value: 0) } }
+    func releaseEnds() { lock.withLock { endGate }?.signal() }
+
     func startSession() { record("start") }
-    func endSession() { record("end") }
+    func endSession() {
+        lock.withLock { endGate }?.wait()
+        record("end")
+    }
 
     private func record(_ call: String) {
         let onMain = Thread.isMainThread
