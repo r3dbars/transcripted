@@ -210,9 +210,9 @@ extension DictationSessionPipelineHost {
     /// open still failed.
     ///
     /// The guard reads `allowsForegroundActivationEscalation` rather than
-    /// listing triggers inline as PR #1744 did. That list named
-    /// `keyboardShortcut` and `rightOptionTap`, neither of which anything in
-    /// the tree constructs, so it read as coverage it did not have.
+    /// listing triggers inline as PR #1744 did. That list named two trigger
+    /// cases nothing constructed, so it read as coverage it did not have;
+    /// those cases have since been removed.
     func recoverBackgroundHotkeyStart(sessionID: UUID) async {
         guard let usesMeetingMic = activeMeetingMicCheck,
               startActivationRecoveryGate.admit(
