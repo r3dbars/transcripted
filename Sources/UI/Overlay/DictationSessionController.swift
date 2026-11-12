@@ -37,6 +37,8 @@ class DictationSessionController: ObservableObject {
     let textPaster = ClipboardRestoringTextPaster()
     let autoSender = DictationAutoSender()
     let accessibilityPrimer = DictationTargetAccessibilityPrimer()
+    /// Unconfirmed pastes in a row with Accessibility on (a stale grant).
+    var staleAccessibilityGrant = StaleAccessibilityGrantTracker()
     /// Owns the engine-facing half of a dictation session: the recovery
     /// wait-loop state machine and the other STTRouter control-flow
     /// decisions. See Sources/Speech/DictationSession.swift.

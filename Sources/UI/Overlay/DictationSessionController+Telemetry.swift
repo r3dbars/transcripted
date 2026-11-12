@@ -230,6 +230,11 @@ extension DictationSessionController {
         if let copyReason = pasteOutcome.copyReason?.diagnosticName {
             analyticsProperties["copy_reason"] = copyReason
         }
+        if pasteOutcome.copyReason == .pasteNotConfirmed {
+            // Boolean: whether this take showed the "re-grant Accessibility"
+            // notice (a run of unconfirmed pastes no app read).
+            analyticsProperties["ax_regrant_suggested"] = "\(staleAccessibilityGrant.suggestsRegrant)"
+        }
         analyticsProperties.merge(autoSendTelemetry.analyticsProperties) { _, new in new }
         analyticsProperties["target_confirmation_mode"] = targetConfirmationMode.rawValue
         let timingBuckets: [(metric: String, bucket: String)] = [

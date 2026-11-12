@@ -37,19 +37,37 @@ extension DictationSessionController {
         unconfirmed: Bool = false,
         overlayController: FloatingOverlayController
     ) {
+        // Several unconfirmed pastes in a row that no app read, with
+        // Accessibility on, point at a stale grant: say so and offer the
+        // Accessibility pane. Paste-back itself is unchanged.
+        let suggestsRegrant = unconfirmed && staleAccessibilityGrant.suggestsRegrant
+        if suggestsRegrant {
+            appState?.logger.log("DICTATION | paste keeps going unconfirmed with Accessibility on; suggesting a re-grant")
+        }
         overlayController.showNotPastedNotice(
             text,
-            fallbackMessage: message,
-            unconfirmed: unconfirmed
+            fallbackMessage: suggestsRegrant ? StaleAccessibilityGrantCopy.fallbackMessage : message,
+            unconfirmed: unconfirmed,
+            openAccessibilitySettings: suggestsRegrant
+                ? { TranscriptedPermissionAccess.openSettings(for: .accessibility) }
+                : nil
         ) { [weak self, weak overlayController] in
             guard let self, let overlayController else { return }
             let frontmost = NSWorkspace.shared.frontmostApplication
             guard frontmost?.bundleIdentifier != Bundle.main.bundleIdentifier else { return }
-            switch self.textPaster.paste(text, target: DictationPasteTarget.capture(sourceApp: frontmost)) {
+            let target = DictationPasteTarget.capture(sourceApp: frontmost)
+            let outcome = self.textPaster.paste(text, target: target)
+            self.recordStaleAccessibilityGrantObservation(outcome, target: target)
+            switch outcome {
             case .pasted, .likelyPasted:
                 overlayController.showSuccessAndDismiss(title: "Pasted")
-            case .copied(let retryMessage, reason: _):
-                self.showNotPasted(text, message: retryMessage, overlayController: overlayController)
+            case .copied(let retryMessage, reason: let reason):
+                self.showNotPasted(
+                    text,
+                    message: retryMessage,
+                    unconfirmed: reason == .pasteNotConfirmed,
+                    overlayController: overlayController
+                )
             case .failed(let failure, reason: _):
                 overlayController.showError(failure)
             }
@@ -96,7 +114,21 @@ extension DictationSessionController {
             }
         )
         recordPasteAttemptOutcome(outcome, attempt: "initial")
+        recordStaleAccessibilityGrantObservation(outcome, target: sessionPasteTarget)
         return outcome
+    }
+
+    /// Feeds one paste result to the stale-grant streak. The target's bundle
+    /// id stays in memory for this launch and is never logged or sent.
+    private func recordStaleAccessibilityGrantObservation(
+        _ outcome: DictationPasteOutcome,
+        target: DictationPasteTarget?
+    ) {
+        staleAccessibilityGrant.record(StaleAccessibilityGrantTracker.observation(
+            outcome: outcome,
+            pasteEvidence: textPaster.lastConfirmationDiagnostic?.context["paste_evidence"],
+            targetID: target?.bundleIdentifier
+        ))
     }
 
     /// The paste already ended its wait as a likely paste (and reported

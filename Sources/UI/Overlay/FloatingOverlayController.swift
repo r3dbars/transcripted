@@ -393,10 +393,20 @@ class FloatingOverlayController {
         _ text: String,
         fallbackMessage: String,
         unconfirmed: Bool = false,
+        openAccessibilitySettings: (() -> Void)? = nil,
         paste: @escaping () -> Void
     ) {
         guard isIslandMode else {
             showClipboardNotice(fallbackMessage, kind: .other)
+            return
+        }
+        // Paste keeps going nowhere with Accessibility on: Paste would fail
+        // the same way, so the button opens Accessibility settings instead.
+        if let openAccessibilitySettings {
+            showMessage(StaleAccessibilityGrantCopy.islandTitle, tone: .notice, kind: .other, notPasted: NotPastedNotice(
+                text: text, actionTitle: StaleAccessibilityGrantCopy.islandActionTitle,
+                hint: StaleAccessibilityGrantCopy.islandHint, watchesForManualPaste: true, action: openAccessibilitySettings
+            ))
             return
         }
         showMessage(unconfirmed ? "Maybe pasted" : "Not pasted", tone: .notice, kind: .other, notPasted: NotPastedNotice(
