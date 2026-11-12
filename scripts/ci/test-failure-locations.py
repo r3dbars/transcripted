@@ -19,6 +19,13 @@ def inventory(root):
         if not SOURCE_PATH.fullmatch(name) or ".." in Path(name).parts:
             continue
         path = root / name
+        try:
+            # A tracked file that's gone is skipped. Any other lstat failure,
+            # such as a symlink loop, makes the whole report unavailable.
+            # Python 3.13+ no longer raises from resolve() on a loop.
+            path.lstat()
+        except (FileNotFoundError, NotADirectoryError):
+            continue
         if path.is_symlink() or not path.resolve().is_relative_to(root) or not path.is_file():
             continue
         if path.stat().st_size > 1024 * 1024:
