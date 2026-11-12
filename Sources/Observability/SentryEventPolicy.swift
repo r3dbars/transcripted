@@ -88,6 +88,9 @@ struct SentryEventPolicy: Equatable {
         "mic_format_rebuilds_bucket",
         "output_ducking_detected",
         "pending_stage",
+        // Coarse reason a stopped dictation's recovery WAV wasn't saved
+        // (`StoppedAudioPersistCause`); SentryPayloadSanitizer keeps only its codes.
+        "persist_cause",
         "pinned_mic_dropped_callback_bucket",
         "pinned_mic_gap_bucket",
         "pinned_mic_padded_bucket",

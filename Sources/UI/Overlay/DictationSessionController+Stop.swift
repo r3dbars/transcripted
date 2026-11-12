@@ -231,12 +231,16 @@ extension DictationSessionController {
                     hasRecoverableRecording: { appState.sttRouter.hasRecoverableRecording },
                     checkpointSettled: { await checkpointSignal.complete() },
                     reportCheckpointFailure: { error in
-                        appState.logger.log("DICTATION | failed to preserve stopped audio: \(error.localizedDescription)")
+                        let cause = StoppedAudioPersistCause.classify(error)
+                        appState.logger.log("DICTATION | failed to preserve stopped audio (\(cause.rawValue)): \(error.localizedDescription)")
+                        // The description names files, so Sentry gets the
+                        // coarse cause only.
                         EventReporter.shared.capture(
                             level: .error,
                             engine: "dictation",
                             event: "dictation_stopped_audio_persistence_failed",
-                            message: error.localizedDescription
+                            message: "Stopped dictation audio was not saved: \(cause.rawValue)",
+                            context: StoppedAudioPersistCause.eventContext(for: error)
                         )
                     },
                     clearSession: { outcome in
