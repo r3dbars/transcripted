@@ -285,12 +285,14 @@ publication and feed metadata alone do not establish that result.
 The legacy hash guard runs separately; the frozen entry is not treated as the
 active release.
 
-Two legacy-only helper paths remain in the operations tools:
-`release-health-card.py` prints the committed feed's version, and
-`release-watch.py` uses its `pubDate` for the default watch window. For a release
-newer than the frozen entry, give release-watch an explicit `--since` or
-`--hours` window. These are current tooling limitations, rather than work to do
-before a future second release.
+`release-health-card.py` and `release-watch.py` read the same active feed: they
+fetch `SUFeedURL` from `Info.plist`, or read a local `--appcast` snapshot. The
+health card's `appcast` line shows the active feed's newest version, and prints
+an `unavailable` line naming the frozen legacy version when the feed can't be
+read. release-watch takes its default window start from the new version's
+pubDate in the active feed. It falls back to the frozen `docs/appcast.xml` only
+for versions in it (1.1.75 and older). Offline, or for a version in neither,
+it exits with a usage error that asks for `--appcast`, `--since` or `--hours`.
 
 ## Release flow
 

@@ -6,8 +6,9 @@ crashing more, failing to start meetings more, losing call audio more, or
 starting dictation slower than the version it replaced?
 
 Both versions are measured over the same wall-clock window, starting at the
-new version's publish time (its `docs/appcast.xml` pubDate by default, or
-``--since`` / ``--hours``), so a quiet weekend hits both columns equally and
+new version's publish time (its pubDate in the active release-asset feed named
+by Info.plist ``SUFeedURL`` by default, or ``--appcast`` / ``--since`` /
+``--hours``), so a quiet weekend hits both columns equally and
 release-candidate testing before publish is left out.
 
 Sources, all read-only:
@@ -43,8 +44,11 @@ import argparse
 import importlib.util
 import json
 import os
+import plistlib
 import sys
+import urllib.error
 import urllib.parse
+import urllib.request
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
@@ -82,7 +86,9 @@ MISSING_DSYM_ERRORS = ("native_missing_dsym", "native_bad_dsym")
 DEFAULT_ORG = crash_free.DEFAULT_ORG
 DEFAULT_PROJECT = crash_free.DEFAULT_PROJECT
 RELEASE_PREFIX = crash_free.DEFAULT_RELEASE_PREFIX
-APPCAST_PATH = REPO_ROOT / "docs" / "appcast.xml"
+APPCAST_PATH = REPO_ROOT / "docs" / "appcast.xml"  # frozen legacy feed: 1.1.75 and older only
+INFO_PLIST_PATH = REPO_ROOT / "Info.plist"
+FEED_HEADERS = {"User-Agent": "TranscriptedReleaseWatch/1.0"}
 SPARKLE_NS = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 
 # Below these a rate is shown but never judged: in the first hours after a
@@ -377,13 +383,73 @@ def render_table(new: str, old: str, new_m: dict[str, Any], old_m: dict[str, Any
 
 
 def appcast_pub_date(version: str, path: Path = APPCAST_PATH) -> datetime | None:
-    """The new version's pubDate from the checked-in appcast, if it's there."""
+    """The version's pubDate from a local appcast file, if it's there."""
     if not path.is_file():
         return None
     try:
-        root = ET.parse(path).getroot()
-    except ET.ParseError:
+        return feed_pub_date(version, path.read_text(encoding="utf-8"))
+    except (OSError, ET.ParseError):
         return None
+
+
+def active_feed_url(plist_path: Path = INFO_PLIST_PATH) -> str | None:
+    try:
+        with plist_path.open("rb") as handle:
+            url = str(plistlib.load(handle).get("SUFeedURL") or "")
+    except (OSError, plistlib.InvalidFileException):
+        return None
+    return url if url.startswith("https://") else None
+
+
+def fetch_feed(url: str) -> str:
+    request = urllib.request.Request(url, headers=FEED_HEADERS)
+    with urllib.request.urlopen(request, timeout=15) as response:
+        return response.read().decode("utf-8", errors="replace")
+
+
+def default_pub_date(
+    version: str,
+    override: str | None = None,
+    fetch: Any = None,
+    plist_path: Path = INFO_PLIST_PATH,
+    legacy_path: Path = APPCAST_PATH,
+) -> tuple[datetime | None, str]:
+    """(pubDate, problem) from --appcast or the active feed, then the frozen legacy feed.
+
+    The legacy feed is frozen at 1.1.75, so it only answers for that and older.
+    The problem string is safe to print: no URLs, paths or exception text.
+    """
+    problem = ""
+    if override:
+        try:
+            start = feed_pub_date(version, Path(override).read_text(encoding="utf-8"))
+        except OSError as exc:
+            return None, f"--appcast file unreadable ({type(exc).__name__})"
+        except ET.ParseError:
+            return None, "--appcast file is not valid XML"
+        return (start, "") if start else (None, f"no pubDate for {version} in the --appcast snapshot")
+    url = active_feed_url(plist_path)
+    if url is None:
+        problem = "Info.plist has no https SUFeedURL"
+    else:
+        try:
+            start = feed_pub_date(version, (fetch or fetch_feed)(url))
+            if start:
+                return start, ""
+            problem = f"no pubDate for {version} in the active release feed"
+        except (urllib.error.URLError, TimeoutError, OSError) as exc:
+            problem = f"active release feed unreachable ({type(exc).__name__})"
+        except ET.ParseError:
+            problem = "active release feed is not valid XML"
+    legacy = appcast_pub_date(version, legacy_path)
+    if legacy:
+        return legacy, ""
+    return None, f"{problem}; not in the frozen legacy feed either"
+
+
+def feed_pub_date(version: str, text: str) -> datetime | None:
+    """The version's pubDate from appcast XML text, if it's there."""
+    root = ET.fromstring(text)
     for item in root.iter("item"):
         short = item.findtext(f"{SPARKLE_NS}shortVersionString") or item.findtext("title") or ""
         if short.strip() == version:
@@ -592,6 +658,44 @@ def run_self_test() -> int:
         assert iso_z(appcast_pub_date("1.1.62", appcast)) == "2026-09-23T22:04:10Z"
         assert appcast_pub_date("1.1.99", appcast) is None
     assert iso_z(parse_since("2026-09-23T22:04:10Z")) == "2026-09-23T22:04:10Z"
+
+    # S4: releases after the legacy freeze get their start from the active feed.
+    fixture = REPO_ROOT / "Tests" / "Fixtures" / "release-health-appcast-1.1.76.xml"
+    fixture_text = fixture.read_text(encoding="utf-8")
+    start, problem = default_pub_date("1.1.76", str(fixture))
+    assert iso_z(start) == "2026-11-05T06:37:37Z" and problem == "", (start, problem)
+    seen: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        seen.append(url)
+        return fixture_text
+
+    start, problem = default_pub_date("1.1.76", fetch=fake_fetch)
+    assert iso_z(start) == "2026-11-05T06:37:37Z" and problem == "", (start, problem)
+    assert seen == [active_feed_url()] and seen[0].endswith("/appcast.xml") and "docs/" not in seen[0], seen
+
+    def offline(url: str) -> str:
+        raise urllib.error.URLError("offline")
+
+    with tempfile.TemporaryDirectory() as tmp:
+        legacy = Path(tmp) / "appcast.xml"
+        legacy.write_text(
+            "<?xml version='1.0'?><rss xmlns:sparkle='http://www.andymatuschak.org/xml-namespaces/sparkle'>"
+            "<channel><item><title>1.1.75</title><pubDate>Tue, 03 Nov 2026 20:09:35 +0000</pubDate>"
+            "<sparkle:shortVersionString>1.1.75</sparkle:shortVersionString></item></channel></rss>",
+            encoding="utf-8",
+        )
+        # Offline, a frozen-era version still resolves from the legacy feed...
+        start, problem = default_pub_date("1.1.75", fetch=offline, legacy_path=legacy)
+        assert iso_z(start) == "2026-11-03T20:09:35Z" and problem == "", (start, problem)
+        # ...and a newer one gets a clear reason with no URL in it.
+        start, problem = default_pub_date("1.1.77", fetch=offline, legacy_path=legacy)
+        assert start is None, start
+        assert problem == "active release feed unreachable (URLError); not in the frozen legacy feed either", problem
+        start, problem = default_pub_date("1.1.77", str(Path(tmp) / "missing.xml"))
+        assert start is None and problem == "--appcast file unreadable (FileNotFoundError)", problem
+        start, problem = default_pub_date("1.1.77", fetch=lambda url: "<rss>", legacy_path=legacy)
+        assert start is None and problem.startswith("active release feed is not valid XML"), problem
     print("release-watch self-test passed")
     return 0
 
@@ -607,10 +711,11 @@ def resolve_start(args: argparse.Namespace, parser: argparse.ArgumentParser, now
         except ValueError:
             parser.error(f"--since must be an ISO time like 2026-09-23T22:04:10Z, got {args.since!r}")
     else:
-        start = appcast_pub_date(args.new)
+        start, problem = default_pub_date(args.new, args.appcast)
         if start is None:
             parser.error(
-                f"no pubDate for {args.new} in docs/appcast.xml; pass --since <publish time in UTC> or --hours"
+                f"can't find the {args.new} publish time: {problem}. "
+                "Pass --appcast <release-asset snapshot>, --since <publish time in UTC>, or --hours"
             )
     if start >= now:
         parser.error(f"window start {iso_z(start)} is in the future")
@@ -622,11 +727,17 @@ def main() -> int:
     parser.add_argument("--new", help="New release version, e.g. 1.1.62.")
     parser.add_argument("--old", help="Previous release version, e.g. 1.1.61.")
     window = parser.add_mutually_exclusive_group()
-    window.add_argument("--since", help="Window start in UTC. Default: the new version's appcast pubDate.")
+    window.add_argument(
+        "--since", help="Window start in UTC. Default: the new version's pubDate in the active release feed."
+    )
     window.add_argument("--hours", type=int, help="Use the last N hours instead of the publish time.")
+    parser.add_argument(
+        "--appcast",
+        help="Local release-asset appcast snapshot for the default window. Default: fetch Info.plist SUFeedURL.",
+    )
     parser.add_argument("--org", default=os.environ.get("SENTRY_ORG", DEFAULT_ORG))
     parser.add_argument("--project", default=os.environ.get("SENTRY_PROJECT", DEFAULT_PROJECT))
-    parser.add_argument("--print-queries", action="store_true", help="Print the queries and exit; no network.")
+    parser.add_argument("--print-queries", action="store_true", help="Print the queries and exit; no credentials. Without --since, --hours or --appcast the window still reads the active feed.")
     parser.add_argument("--show-crash-titles", action="store_true", help="List new issue titles (local output only).")
     parser.add_argument("--json", action="store_true", help="Print machine-readable JSON instead of the table.")
     parser.add_argument("--self-test", action="store_true", help="Run offline checks and exit.")
