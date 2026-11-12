@@ -68,7 +68,7 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptIdentityDuplicated)
         XCTAssertEqual(try Data(contentsOf: fixture.original), originalBytes)
         XCTAssertEqual(try Data(contentsOf: first), originalBytes)
         XCTAssertEqual(try Data(contentsOf: second), originalBytes)
@@ -84,7 +84,7 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptFolderUnreadable)
         XCTAssertEqual(try Data(contentsOf: fixture.original), originalBytes)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.currentLibrary.path))
     }
@@ -98,7 +98,7 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptLibraryUnavailable)
         XCTAssertEqual(try Data(contentsOf: fixture.original), originalBytes)
     }
 
@@ -111,7 +111,7 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptUnresolved)
         XCTAssertFalse(FileManager.default.fileExists(atPath: fixture.original.path))
         XCTAssertTrue(try FileManager.default.contentsOfDirectory(atPath: fixture.currentLibrary.path).isEmpty)
     }
@@ -129,7 +129,7 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptNotWritable)
         XCTAssertEqual(try Data(contentsOf: fixture.original), originalBytes)
         XCTAssertEqual(try Data(contentsOf: copy), originalBytes)
     }
@@ -147,7 +147,7 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptUnresolved)
         XCTAssertEqual(try String(contentsOf: unrelated, encoding: .utf8), unrelatedBytes)
     }
 
@@ -165,8 +165,78 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
 
         await save(fixture)
 
-        assertRejected(fixture)
+        assertRejected(fixture, because: .transcriptUnresolved)
         XCTAssertEqual(try Data(contentsOf: outside), outsideBytes)
+    }
+
+    @MainActor
+    func testTitleRenameInTheSameLibraryStillSavesNames() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let renamed = fixture.oldLibrary.appendingPathComponent("Synthetic weekly sync.md")
+        try FileManager.default.moveItem(at: fixture.original, to: renamed)
+
+        await save(fixture)
+
+        XCTAssertEqual(fixture.manager.displayStatus, .transcriptSaved)
+        XCTAssertEqual(fixture.manager.lastSavedTranscriptURL, renamed)
+        XCTAssertNil(fixture.manager.lastSpeakerFinalizationFailure)
+        XCTAssertEqual(fixture.database.getSpeaker(id: fixture.profileID)?.displayName, "Synthetic Person")
+        XCTAssertTrue(try String(contentsOf: renamed, encoding: .utf8).contains("[System/Synthetic Person]"))
+    }
+
+    @MainActor
+    func testLibraryReachedThroughASymlinkStillSavesARenamedTranscript() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let renamed = fixture.oldLibrary.appendingPathComponent("Synthetic weekly sync.md")
+        try FileManager.default.moveItem(at: fixture.original, to: renamed)
+        let linkedLibrary = fixture.root.appendingPathComponent("linked-meetings", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: linkedLibrary, withDestinationURL: fixture.oldLibrary)
+        fixture.directory.set(linkedLibrary)
+
+        await save(fixture)
+
+        XCTAssertEqual(fixture.manager.displayStatus, .transcriptSaved)
+        XCTAssertNil(fixture.manager.lastSpeakerFinalizationFailure)
+        XCTAssertEqual(fixture.database.getSpeaker(id: fixture.profileID)?.displayName, "Synthetic Person")
+        XCTAssertTrue(try String(contentsOf: renamed, encoding: .utf8).contains("[System/Synthetic Person]"))
+    }
+
+    @MainActor
+    func testStableIDLookupWithoutAHostFolderFindsARenamedTranscriptThroughASymlinkedFolder() throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let linkedLibrary = fixture.root.appendingPathComponent("linked-meetings", isDirectory: true)
+        try FileManager.default.createSymbolicLink(at: linkedLibrary, withDestinationURL: fixture.oldLibrary)
+        try FileManager.default.moveItem(
+            at: fixture.original, to: fixture.oldLibrary.appendingPathComponent("Synthetic weekly sync.md")
+        )
+
+        let resolved = TranscriptSaver.resolveTranscriptURL(
+            linkedLibrary.appendingPathComponent(fixture.original.lastPathComponent),
+            transcriptId: fixture.transcriptID
+        )
+
+        XCTAssertEqual(resolved?.lastPathComponent, "Synthetic weekly sync.md")
+    }
+
+    @MainActor
+    func testUnreadableNeighborAfterRenameRejectsWithAnEntryUnreadableCode() async throws {
+        let fixture = try Fixture()
+        defer { fixture.remove() }
+        let renamed = fixture.oldLibrary.appendingPathComponent("Synthetic weekly sync.md")
+        try FileManager.default.moveItem(at: fixture.original, to: renamed)
+        let renamedBytes = try Data(contentsOf: renamed)
+        let neighbor = fixture.oldLibrary.appendingPathComponent("Locked note.md")
+        try Data("---\ntitle: locked\n---\n".utf8).write(to: neighbor)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: neighbor.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: neighbor.path) }
+
+        await save(fixture)
+
+        assertRejected(fixture, because: .transcriptEntryUnreadable)
+        XCTAssertEqual(try Data(contentsOf: renamed), renamedBytes)
     }
 
     @MainActor
@@ -257,8 +327,13 @@ final class SpeakerLibraryMoveNamingTests: XCTestCase {
     }
 
     @MainActor
-    private func assertRejected(_ fixture: Fixture, file: StaticString = #filePath, line: UInt = #line) {
-        XCTAssertEqual(fixture.manager.lastSpeakerFinalizationFailure?.reason, .transcriptUnresolved, file: file, line: line)
+    private func assertRejected(
+        _ fixture: Fixture,
+        because reason: SpeakerFinalizationFailureReason,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        XCTAssertEqual(fixture.manager.lastSpeakerFinalizationFailure?.reason, reason, file: file, line: line)
         XCTAssertNil(fixture.manager.lastSavedTranscriptURL, file: file, line: line)
         XCTAssertNil(fixture.database.getSpeaker(id: fixture.profileID)?.displayName, file: file, line: line)
         XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.mic.path), file: file, line: line)

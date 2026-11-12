@@ -231,17 +231,23 @@ extension TranscriptionTaskManager {
                             failureReason: SpeakerFinalizationFailureReason?.none
                         )
                     }
-                    guard let resolvedURL = TranscriptSaver.resolveTranscriptURL(
+                    let resolvedURL: URL
+                    switch TranscriptSaver.resolveTranscript(
                         transcriptURL,
                         transcriptId: transcriptId,
                         currentDirectoryProvider: currentTranscriptDirectory
-                    ) else {
+                    ) {
+                    case .resolved(let url):
+                        resolvedURL = url
+                    case .unresolved(let miss):
+                        // The coarse miss code tells telemetry which lookup step
+                        // failed; it never carries a path, filename or title.
                         return (
                             didFinalize: false,
                             resolvedURL: transcriptURL,
                             superseded: false,
                             replacementInProgress: false,
-                            failureReason: SpeakerFinalizationFailureReason?.some(.transcriptUnresolved)
+                            failureReason: SpeakerFinalizationFailureReason?.some(miss.failureReason)
                         )
                     }
                     guard let originalTranscriptData = try? Data(contentsOf: resolvedURL) else {

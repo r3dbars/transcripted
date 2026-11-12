@@ -8,6 +8,18 @@ public enum SpeakerFinalizationFailureReason: String, Sendable, CaseIterable {
     case planMissingEmbedding = "plan_missing_embedding"
     /// The saved transcript could not be found by path or stable id.
     case transcriptUnresolved = "transcript_unresolved"
+    /// The host named no current capture library to look in (for example a
+    /// custom library that is offline), so the lookup failed closed.
+    case transcriptLibraryUnavailable = "transcript_library_unavailable"
+    /// A meetings folder the lookup had to search could not be listed.
+    case transcriptFolderUnreadable = "transcript_folder_unreadable"
+    /// A Markdown file in the searched folder could not be inspected, so the
+    /// stable id could not be proven unique.
+    case transcriptEntryUnreadable = "transcript_entry_unreadable"
+    /// More than one transcript in the searched folder has the same stable id.
+    case transcriptIdentityDuplicated = "transcript_identity_duplicated"
+    /// The matching transcript or its folder is not writable.
+    case transcriptNotWritable = "transcript_not_writable"
     /// The saved transcript could not be read before the rewrite.
     case transcriptUnreadable = "transcript_unreadable"
     /// Rewriting the speaker names in the transcript failed.
