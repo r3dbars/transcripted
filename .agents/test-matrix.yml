@@ -145,6 +145,14 @@ rules:
       - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
 
   - paths:
+      - "scripts/release/write-model-manifest.py"
+      - "scripts/release/test-write-model-manifest.py"
+      - "scripts/entrypoints/build-beta.sh"
+    checks:
+      - "python3 scripts/release/test-write-model-manifest.py"
+      - "bash -n scripts/entrypoints/build-beta.sh"
+
+  - paths:
       - "scripts/release/generate-sparkle-appcast.sh"
       - "scripts/release/verify-sparkle-release.sh"
       - "scripts/release/provision-release-models.sh"

@@ -163,6 +163,21 @@ update the pins (and upload a new ReDimNet2 asset under a new tag) in the same
 PR. On any Mac you can fill a cache with
 `bash scripts/release/provision-release-models.sh "$HOME/Library/Application Support/FluidAudio/Models"`.
 
+After copying the models, `build-beta.sh` writes
+`build/Transcripted-model-manifest.json` next to the app (not inside it, so the
+signed bundle doesn't change) and prints a one-line summary per model. For each
+bundled model it records the id, the source cache folder's name, the path inside
+the app, the SHA-256 and size of every copied file, and the upstream revision
+the cache kept, if any: `.fluidaudio-revision`, `.fluidaudio-nemotron3-weights`,
+a `provenance.json` snapshot, or Hugging Face download metadata. When the cache
+has none, the manifest says `null` instead of guessing; that's the gap the
+licensing notes flag. A `provenance.json` with per-file hashes is also checked
+against the bundled bytes and the counts land in the manifest. The step fails
+the build if a bundled model folder is missing or empty. The script is
+`scripts/release/write-model-manifest.py`; its fixture test is
+`python3 scripts/release/test-write-model-manifest.py`. Keep the manifest with
+the release's build artifacts when you need to show what shipped.
+
 If you deliberately want a thin local test artifact, make every opt-out explicit:
 
 ```bash
