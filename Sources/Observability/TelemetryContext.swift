@@ -9,7 +9,15 @@ enum TelemetryContext {
         "hdmi", "displayport", "airplay", "thunderbolt", "firewire", "pci", "unknown", "none",
     ]
 
+    /// Telemetry's permission context, from memory only. See
+    /// `TelemetryPermissionSnapshot` for the unknown and staleness rules.
     static func permissions() -> [String: String] {
+        TelemetryPermissionSnapshot.shared.current()
+    }
+
+    /// The live reads behind the snapshot. They can wait on tccd and the
+    /// preferences service, so only the snapshot's background queue calls them.
+    static func livePermissionReads() -> [String: String] {
         [
             "mic_permission_granted": String(TranscriptedPermissionAccess.isGranted(.microphone)),
             "screen_permission_granted": String(TranscriptedPermissionAccess.isGranted(.systemAudioRecording)),
@@ -36,8 +44,11 @@ enum TelemetryContext {
         }
         result["selection_reason"] = category(result["selection_reason"]) ?? "unknown"
         result["trigger"] = category(result["trigger"]) ?? "unknown"
-        for key in ["mic_permission_granted", "screen_permission_granted", "accessibility_permission_granted"] {
-            result[key] = result[key] == "true" ? "true" : "false"
+        // `unknown` only comes from a snapshot that hasn't been read yet;
+        // keep it rather than reporting a permission as denied.
+        for key in TelemetryPermissionSnapshot.keys {
+            let value = result[key]
+            result[key] = value == "true" || value == TelemetryPermissionSnapshot.unknownValue ? value : "false"
         }
         let outcome = category(result["capture_outcome"]) ?? "unknown"
         let outcomeFailure = ["no_audio", "timed_out", "stop_timed_out", "failed"].contains(outcome)
