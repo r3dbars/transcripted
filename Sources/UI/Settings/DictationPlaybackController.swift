@@ -187,6 +187,12 @@ final class DictationAudioInfoStore: ObservableObject {
         Self.key(for: entry).flatMap { infos[$0] }
     }
 
+    /// Repeated misses must not publish and redraw the page on every appearance.
+    func updateInfo(_ info: Info, for key: String) {
+        guard infos[key] != info else { return }
+        infos[key] = info
+    }
+
     /// Reads the entry's kept-audio facts. A found file is cached for good;
     /// a miss isn't, because a just-saved take's audio lands in the archive a
     /// moment after its text: a recent entry retries a few times, and any
@@ -211,8 +217,7 @@ final class DictationAudioInfoStore: ObservableObject {
                 }
                 return Info(isAvailable: true, duration: Self.duration(of: url))
             }.value
-            // Writing an unchanged value still publishes and redraws the whole page.
-            if infos[key] != info { infos[key] = info }
+            updateInfo(info, for: key)
             guard !info.isAvailable, attempt < retryDelays.count, !Task.isCancelled else { return }
             try? await Task.sleep(nanoseconds: retryDelays[attempt] * 1_000_000_000)
             attempt += 1
@@ -228,9 +233,8 @@ final class DictationAudioInfoStore: ObservableObject {
             dictationsFolder: entry.url.deletingLastPathComponent(),
             recoveryDirectory: DictationStoppedAudioRecoveryStore.defaultDirectory
         )
-        let miss = Info(isAvailable: false, duration: nil)
-        if url == nil, let key = Self.key(for: entry), infos[key] != miss {
-            infos[key] = miss
+        if url == nil, let key = Self.key(for: entry) {
+            updateInfo(Info(isAvailable: false, duration: nil), for: key)
         }
         return url
     }
