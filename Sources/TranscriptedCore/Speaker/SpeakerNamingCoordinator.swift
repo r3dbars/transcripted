@@ -19,7 +19,7 @@ extension TranscriptionTaskManager {
         let mutations: [PlannedSpeakerMutation]
     }
 
-    enum NamingFlowFinishOutcome {
+    enum NamingFlowFinishOutcome: Sendable {
         case completed
         case transcriptFinalizationFailed
         case metadataPublicationFailed
@@ -442,8 +442,11 @@ extension TranscriptionTaskManager {
                 )
             }
 
-            Task { @MainActor in
-                let outcome = self.finishNamingFlow(
+            // Publish on the main actor, but keep synchronous file cleanup on
+            // a background executor. The review stays owned until cleanup
+            // returns, including its durable recovery acknowledgement.
+            Task.detached(priority: .utility) {
+                let outcome = await self.finishNamingFlow(
                     didFinalizeTranscript: didFinalizeTranscript,
                     finalizedTranscriptData: finalizedData,
                     failure: failure,
@@ -484,7 +487,7 @@ extension TranscriptionTaskManager {
                 case .superseded:
                     return
                 }
-                self.clearCompletedSpeakerNamingRequest(
+                await self.clearCompletedSpeakerNamingRequest(
                     transcriptId: transcriptId,
                     requestId: requestId
                 )
