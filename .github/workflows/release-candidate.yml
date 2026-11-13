@@ -231,6 +231,7 @@ jobs:
           set -euo pipefail
           ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app "build/Transcripted-$RELEASE_VERSION-unsigned-app.zip"
           ditto -c -k --sequesterRsrc --keepParent build/Transcripted.app.dSYM "build/Transcripted-$RELEASE_VERSION.dSYM.zip"
+          test -s build/Transcripted-model-manifest.json
           shasum -a 256 "build/Transcripted-$RELEASE_VERSION-unsigned-app.zip" | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Upload unsigned build
@@ -243,6 +244,7 @@ jobs:
           path: |
             build/Transcripted-${{ inputs.version }}-unsigned-app.zip
             build/Transcripted-${{ inputs.version }}.dSYM.zip
+            build/Transcripted-model-manifest.json
 
   sign-and-notarize:
     needs: build-unsigned
@@ -616,7 +618,10 @@ jobs:
 
       - name: Stage the release candidate
         shell: bash
-        run: cp "$RUNNER_TEMP/unsigned-build/Transcripted-$RELEASE_VERSION.dSYM.zip" build/
+        run: |
+          set -euo pipefail
+          cp "$RUNNER_TEMP/unsigned-build/Transcripted-$RELEASE_VERSION.dSYM.zip" build/
+          cp "$RUNNER_TEMP/unsigned-build/Transcripted-model-manifest.json" build/
 
       - name: Upload notarized candidate and metadata
         uses: actions/upload-artifact@v4
@@ -629,6 +634,7 @@ jobs:
             build/Transcripted-${{ inputs.version }}.dmg
             build/Transcripted-${{ inputs.version }}.dSYM.zip
             build/sparkle-deltas/*.delta
+            build/Transcripted-model-manifest.json
             build/appcast.xml
             build/packaged-app-smoke.json
             build/privacy-leak-sweep-report.json

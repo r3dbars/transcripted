@@ -276,6 +276,28 @@ func testCIWorkflowContract() {
         }
     }
 
+    runSuite("CI workflow contract - the model manifest travels with the release candidate") {
+        func step(_ name: String, in job: String) -> WorkflowNode? {
+            release.job(job)?.child("steps")?.children.first { $0.child("name")?.scalar == name }
+        }
+        let manifest = "build/Transcripted-model-manifest.json"
+        let packaging = step("Package unsigned app and debug symbols", in: "build-unsigned")?
+            .child("run")?.commandLines ?? []
+        let unsignedPaths = step("Upload unsigned build", in: "build-unsigned")?
+            .child("with")?.child("path")?.commandLines ?? []
+        let candidatePaths = step("Upload notarized candidate and metadata", in: "verify-candidate")?
+            .child("with")?.child("path")?.commandLines ?? []
+        let staging = step("Stage the release candidate", in: "verify-candidate")?
+            .child("run")?.commandLines ?? []
+        assertTrue(packaging.contains("test -s \(manifest)"), "a missing manifest must fail before the signing job starts")
+        assertTrue(unsignedPaths.contains(manifest), "the manifest must leave the unsigned build runner")
+        assertTrue(
+            staging.contains("cp \"$RUNNER_TEMP/unsigned-build/Transcripted-model-manifest.json\" build/"),
+            "candidate verification must recover the manifest from the same unsigned build artifact"
+        )
+        assertTrue(candidatePaths.contains(manifest), "the final downloadable candidate must retain the manifest")
+    }
+
     runSuite("CI workflow contract - release candidate never publishes or commits the feed") {
         let allCommands = (release.child("jobs")?.children ?? []).flatMap(\.commands).joined(separator: "\n")
         for forbidden in ["gh release create", "gh release upload", "gh release edit", "git push", "git commit", "gh workflow run"] {

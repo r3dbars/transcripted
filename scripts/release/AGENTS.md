@@ -24,6 +24,7 @@ Packaging helpers for shipping a build: version bump, Sparkle appcast, Homebrew 
 - `update-cask.sh <version>`: downloads the published `Transcripted-<version>.dmg`, hashes it, rewrites `version` and `sha256` in `Casks/transcripted.rb`. Run it only after the release is public; then commit the cask.
 - `register-sentry-release.sh`, `sentry-release-metadata.py`, `sentry-release-dry-run.py`: create and finalize the Sentry release for the `Info.plist` version and upload the matching dSYM. Defaults `SENTRY_ORG=r3dbars`, `SENTRY_PROJECT=apple-macos`.
 - `provision-release-models.sh <models-dir>`: places the Nemotron 3 diarizer and ReDimNet2 b4 models exactly as `build-beta.sh` expects to bundle them. Release builds fail or ship without models if this drifts.
+- `write-model-manifest.py --app <app> --output <json> --model <id> <cache-dir> <bundled-dir>...`: called by `build-beta.sh` after the model copies; writes `build/Transcripted-model-manifest.json` (per-file SHA-256, source cache folder name, cached upstream revision or `null`) and fails on a missing or empty model folder. Never writes absolute paths. Test: `test-write-model-manifest.py`.
 - `generate-dmg-background.swift`, `assets/dmg-background.png`: DMG window art.
 
 ## Before you change one
