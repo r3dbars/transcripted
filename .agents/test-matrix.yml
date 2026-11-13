@@ -46,6 +46,14 @@ rules:
       - "python3 scripts/dev/test-live-claude-mod.py"
 
   - paths:
+      - "scripts/entrypoints/build-beta.sh"
+      - "scripts/entrypoints/lib/beta-build-arguments.sh"
+      - "Tests/BuildDependencies/BetaBuildArgumentsTests.py"
+    checks:
+      - "bash -n scripts/entrypoints/lib/beta-build-arguments.sh"
+      - "python3 Tests/BuildDependencies/BetaBuildArgumentsTests.py"
+
+  - paths:
       - "scripts/dev/bench-launch-latency.sh"
       - "scripts/dev/verify-change.sh"
       - "scripts/dev/test-verify-receipts.py"
