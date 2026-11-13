@@ -6,8 +6,8 @@ import Foundation
 /// which passes only `enabled` and `permissionGranted`, so the two
 /// capture-paused cases below are reached only from tests.
 ///
-/// Owner directive, in full: Screen Recording permission is required for
-/// Tilde to suggest at all, not merely to enrich a suggestion with screen
+/// Upstream owner directive of 2026-08-16, in full: Screen Recording
+/// permission is required for Tilde to suggest at all, not merely to enrich a suggestion with screen
 /// context. If the toggle is off, or the permission is missing, Tilde
 /// withholds every suggestion — `allowsSuggestions` is `false`. Screen lock
 /// and Secure Event Input, by contrast, only ever paused CAPTURE
@@ -35,7 +35,7 @@ public enum ScreenMemoryStatus: Equatable, Sendable {
     /// Enabled, permitted, and capturing normally.
     case on
 
-    /// Whether Tilde may answer a completion request at all. `false` only
+    /// Whether Writing may answer a completion request at all. `false` only
     /// for the two states that mean "the user or the OS withheld the
     /// permission this now requires" — never for a merely momentary capture
     /// pause.
