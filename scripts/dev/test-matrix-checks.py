@@ -259,6 +259,32 @@ def self_test(matrix_path: Path) -> None:
         actual = select_checks(rules, [owner])
         assert guard_checks.issubset(actual), f"{owner} must select both banned-call checks"
         assert len(actual) == len(set(actual)), f"{owner} selected duplicate commands"
+    # The scorecard's registry, implementation and fixture inputs all schedule
+    # the actual scorer regression suite; similar unrelated paths do not.
+    scorecard_check = "python3 scripts/ops/test-score-boards.py"
+    scorecard_inputs = (
+        ".agents/board-scorecard.yml",
+        "scripts/ops/score-boards.py",
+        "scripts/ops/score_boards_lib.py",
+        "scripts/ops/score-detection.py",
+        "scripts/ops/score-diarization.py",
+        "scripts/ops/score-dictation.py",
+        "scripts/ops/score-summary-judge.py",
+        "scripts/ops/test-score-boards.py",
+        "scripts/ops/fixtures/board-scorecard/diarization-sample.json",
+        "scripts/ops/fixtures/board-scorecard/dictation-corrections.json",
+        "scripts/ops/fixtures/board-scorecard/meeting-detection.json",
+        "scripts/ops/fixtures/board-scorecard/future/nested.json",
+    )
+    for changed_path in scorecard_inputs:
+        actual = select_checks(rules, [changed_path])
+        assert actual.count(scorecard_check) == 1, f"{changed_path} must select the scorecard suite exactly once"
+    for unrelated_path in (
+        ".agents/board-scorecard.yml.backup",
+        "scripts/ops/score-boards-notes.py",
+        "scripts/ops/fixtures/another-scorecard/fixture.json",
+    ):
+        assert scorecard_check not in select_checks(rules, [unrelated_path]), unrelated_path
 
     if select_checks(rules, ["unmapped.file"]):
         raise AssertionError("an unmapped path unexpectedly selected checks")
