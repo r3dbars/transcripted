@@ -10,8 +10,9 @@ import AppKit
 import Foundation
 import Sentry
 
-// `@unchecked Sendable`: the mutable session state below is only touched on the
-// main thread, and the instance methods Sentry calls from its own threads
+// `@unchecked Sendable`: the mutable state below is only touched on the main
+// thread (session state lives in the queue-confined `SentrySessionRotator`),
+// and the instance methods Sentry calls from its own threads
 // (`sanitize`, the capture helpers) read no mutable state.
 final class CrashReporter: @unchecked Sendable {
     static let shared = CrashReporter()
@@ -23,12 +24,15 @@ final class CrashReporter: @unchecked Sendable {
     private init() {}
 
     private var hasStarted = false
-    // Session state is only touched on the main thread: launch, Settings,
-    // onboarding, termination, and the sleep/wake and timer callbacks below.
-    private var sessionsAllowed = false
-    private var sessionStartedAt: Date?
+    // The observers and timer are only touched on the main thread: launch,
+    // Settings, onboarding and termination. Session state and every SDK
+    // session call live in `sessionRotator`, on its own serial queue.
     private var sessionLifecycleObservers: [NSObjectProtocol] = []
     private var sessionRotationTimer: Timer?
+    private let sessionRotator = SentrySessionRotator(
+        sink: SentrySDKSessionSink(),
+        isCrashReportingEnabled: { CrashReportingPreferences.isEnabled() }
+    )
 
     static func setup(dsn: String? = SentryRuntimeConfiguration.dsn()) {
         guard let dsn, !shared.hasStarted else { return }
@@ -75,17 +79,8 @@ final class CrashReporter: @unchecked Sendable {
     static func applySessionTrackingPreference() {
         guard shared.hasStarted else { return }
 
-        shared.sessionsAllowed = true
         startSessionLifecycleObservers()
-
-        let shouldTrack = CrashReportingPreferences.isEnabled()
-        guard shouldTrack != (shared.sessionStartedAt != nil) else { return }
-
-        if shouldTrack {
-            startTrackedSession()
-        } else {
-            endTrackedSession()
-        }
+        shared.sessionRotator.applyPreference()
     }
 
     /// Ends an opted-in session before normal app termination so Release
@@ -94,7 +89,7 @@ final class CrashReporter: @unchecked Sendable {
     static func endSession() {
         shared.sessionRotationTimer?.invalidate()
         shared.sessionRotationTimer = nil
-        endTrackedSession()
+        shared.sessionRotator.endBeforeTermination()
     }
 
     // MARK: - Session rotation
@@ -123,35 +118,10 @@ final class CrashReporter: @unchecked Sendable {
         shared.sessionRotationTimer = timer
     }
 
+    /// Only enqueues: the SDK's session file write runs on the rotator's queue,
+    /// never in the main-thread observer or timer callback.
     private static func rotateSession(for trigger: SentrySessionRotationPolicy.Trigger) {
-        let action = SentrySessionRotationPolicy.action(
-            for: trigger,
-            sessionStartedAt: shared.sessionStartedAt,
-            wantsSession: shared.sessionsAllowed && CrashReportingPreferences.isEnabled(),
-            now: Date()
-        )
-        switch action {
-        case .none:
-            break
-        case .end:
-            endTrackedSession()
-        case .start:
-            startTrackedSession()
-        case .restart:
-            endTrackedSession()
-            startTrackedSession()
-        }
-    }
-
-    private static func startTrackedSession() {
-        SentrySDK.startSession()
-        shared.sessionStartedAt = Date()
-    }
-
-    private static func endTrackedSession() {
-        guard shared.sessionStartedAt != nil else { return }
-        shared.sessionStartedAt = nil
-        SentrySDK.endSession()
+        shared.sessionRotator.rotate(for: trigger)
     }
 
     // MARK: - Unrecognized-selector enrichment
@@ -418,3 +388,10 @@ private func transcriptedUnrecognizedSelectorHandler(_ exception: NSException) {
 }
 
 extension Options: SentryPrivacyOptionsSettable {}
+
+/// Forwards `SentrySessionRotator`'s calls to the SDK. Sentry's session calls
+/// are thread-safe, and the rotator makes them off the main thread.
+private struct SentrySDKSessionSink: SentrySessionSink {
+    func startSession() { SentrySDK.startSession() }
+    func endSession() { SentrySDK.endSession() }
+}

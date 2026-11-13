@@ -240,16 +240,7 @@ enum LabControlMeetingPolicy {
     }
 
     static func stateName(_ state: MeetingSessionState) -> String {
-        switch state {
-        case .idle: return "idle"
-        case .loadingModels: return "loading_models"
-        case .ready: return "ready"
-        case .startingRecording: return "starting_recording"
-        case .recording: return "recording"
-        case .stoppingRecording: return "stopping_recording"
-        case .transcribing: return "transcribing"
-        case .error: return "error"
-        }
+        state.diagnosticName
     }
 
     static func isCaptureActive(_ state: MeetingSessionState) -> Bool {

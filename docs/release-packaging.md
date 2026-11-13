@@ -202,7 +202,10 @@ python3 scripts/ops/release-gate-report.py --qa-mode deep --skip-qa-build --stri
 
 After packaging, `--skip-qa-build` keeps QA from replacing the signed release
 app with a development build. Tests still run, and packaged-app smoke verifies
-the existing app, DMG, and matching dSYM.
+the existing app, DMG, and matching dSYM. The gate passes a feed snapshot to
+the smoke only when you give it `--appcast <snapshot>`; `build-beta.sh` doesn't
+write one, so without it the appcast check stays yellow (proof incomplete)
+rather than failing on a missing `build/appcast.xml`.
 
 Yellow is expected when notarization is intentionally skipped or the appcast has
 not yet been updated for a new version. Red means the package itself is broken.

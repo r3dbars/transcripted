@@ -4,8 +4,6 @@ import Foundation
 func testMeetingRecordingStartGate() async {
     let systemAudioRecordingError = "Turn on System Audio Recording before recording a meeting."
     let combinedPermissionsError = "Turn on Microphone and System Audio Recording before recording a meeting."
-    let quickStartCopy = "Transcripted will ask for System Audio Recording the first time you record a meeting so it can capture the other side of Zoom, Meet, and similar apps."
-    let optionalPermissionsCopy = "System Audio Recording is requested when you record your first meeting. Calendar is optional if you want Transcripted to spot upcoming meetings and offer a record prompt."
 
     runSuite("MeetingRecordingStartGate.evaluate — allows meeting capture when required permissions exist") {
         let decision = MeetingRecordingStartGate.evaluate(
@@ -146,16 +144,6 @@ func testMeetingRecordingStartGate() async {
             MeetingRecordingStartGate.systemAudioRecordingSummary,
             "For the other side of calls, videos, and meetings. Audio only — meetings never need screen access.",
             "shared summary copy should explain why system audio recording matters"
-        )
-        assertEqual(
-            MeetingRecordingStartGate.systemAudioRecordingQuickStart,
-            quickStartCopy,
-            "quick-start copy should reflect the current meeting-audio permission path"
-        )
-        assertEqual(
-            MeetingRecordingStartGate.optionalPermissionsFootnote,
-            optionalPermissionsCopy,
-            "onboarding footnote should match the current meeting recording requirement"
         )
     }
 

@@ -14,10 +14,16 @@ The pinned bytes were rebuilt independently and matched exactly, twice, from fre
 - **Toolchain:** Command Line Tools 26.6 (AppleClang 21.0.0.21000101, ld-1267, macOS SDK 26.5). Xcode 27 produces different bytes.
 - **Configure:** `cmake -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DGGML_NATIVE=OFF -DGGML_METAL=ON -DGGML_METAL_EMBED_LIBRARY=ON -DLLAMA_OPENSSL=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=26.0`, with `-ffile-prefix-map` mapping the source path onto Tilde's original temporary build path (235 absolute paths are embedded).
 - **Build:** `cmake --build build --target llama-server`, then `strip -S -x`.
-- **Web UI:** the embedded web UI assets (70 gzipped files) came from Hugging Face's `ggml-org/llama-ui` "latest" at build time (built 2026-08-24, likely release b10612). They aren't pinned by the llama.cpp commit.
+- **Web UI:** the embedded web UI assets (70 gzipped files) came from Hugging Face's `ggml-org/llama-ui` "latest" at build time (built 2026-08-24). They aren't pinned by the llama.cpp commit. Confirmed 2026-11-12 as release b10612 (llama.cpp commit `7584430716ee229751771ed0d6bbcb780d105eeb`): every one of the 70 assets in the pinned helper decompresses to a file whose SHA-256 matches the same file in `https://huggingface.co/buckets/ggml-org/llama-ui/resolve/b10612/dist.tar.gz` (archive SHA-256 `3f7a482b86620b5dfbaf3432927bd357e679440237d3d83c27c07423cecf1f6d`).
 - **Hash comparison:** `codesign --remove-signature` leaves `__LINKEDIT` sized for the removed signature. To compare, ad-hoc sign with `--digest-algorithm=sha1,sha256`, then remove the signature again. That yields `3f6895ab…`.
 
 Conclusion: the shipped helper is upstream llama.cpp `2115b73` plus that web UI snapshot, and nothing else.
+
+## Notices (what the helper must ship with)
+
+`THIRD_PARTY_LICENSES.md` carries the notices for this helper. At `2115b73`, llama-server is built from llama.cpp's own code plus the vendored nlohmann/json, cpp-httplib, xxHash, rotate-bits, subprocess.h, stb_image, miniaudio and base64 sources, Mozilla's llamafile `sgemm`, and YaRN-derived rotary code (see that section's table for the files and licenses). Upstream's `licenses/` directory holds only `LICENSE-jsonhpp`; the other texts sit next to their code, for example `vendor/cpp-httplib/LICENSE` and `vendor/hash/xxhash/LICENSE`.
+
+Open gap: the embedded web UI is minified JavaScript from the npm dependencies of `tools/ui` (about 1,200 packages in its lockfile, build tooling included), and the shipped bytes carry no notices for them. `THIRD_PARTY_LICENSES.md` marks this as a gap. An owned build (below) without the embedded UI would close it, but `LLAMA_BUILD_UI=OFF` alone may not be enough: at `2115b73`, llama.cpp's UI provisioning script (`ui-assets.cmake`) still downloads the prebuilt UI when `LLAMA_USE_PREBUILT_UI` stays ON, so set both to OFF and check the resulting binary for embedded assets. If the helper moves to a new llama.cpp commit or a new UI snapshot, redo the vendored-component list from `vendor/CMakeLists.txt`, `common/CMakeLists.txt` and `tools/mtmd/CMakeLists.txt` at that commit.
 
 Reproduced again on 2026-10-03 (CLT 26.6, CMake 4.4.3 from PyPI, `npm` kept off `PATH` so the UI comes from Hugging Face, `HF_UI_VERSION=b10612`, `DEVELOPER_DIR=/Library/Developer/CommandLineTools`, `-ffile-prefix-map=<src>=/var/folders/rm/99g7pxgn6d72plzypdcy18j40000gn/T/tilde-llama-static.ZlYSXG/llama.cpp` in the C, C++, ObjC and ASM flags). The normalized hash came out `3f6895ab…` again.
 
@@ -52,4 +58,4 @@ What's left before `build-deps.sh` moves off Tilde's zip: the owner OKs leaving 
 
 ## Recommendation
 
-Don't build from source in `build-deps.sh`. It would break on the next Command Line Tools update, on any machine without CLT 26.6, and whenever the web UI source can't be pinned. Ship prebuilt bytes instead: today Tilde's, and once it's hosted, the owned build above. Any later owned build should also use `LLAMA_BUILD_UI=OFF` (the host passes `--no-webui`) and pin its own hash of the stripped output.
+Don't build from source in `build-deps.sh`. It would break on the next Command Line Tools update, on any machine without CLT 26.6, and whenever the web UI source can't be pinned. Ship prebuilt bytes instead: today Tilde's, and once it's hosted, the owned build above. Any later owned build should also use `LLAMA_BUILD_UI=OFF` and `LLAMA_USE_PREBUILT_UI=OFF` (the host passes `--no-webui`; see "Notices" above for why both) and pin its own hash of the stripped output.

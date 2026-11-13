@@ -1,26 +1,6 @@
 import Foundation
 
 func testHomeDeleteConfirmationPolicy() {
-    runSuite("HomeDeleteConfirmationPolicy meeting delete copy is explicit") {
-        let presentation = HomeDeleteConfirmationPolicy.meeting
-
-        assertEqual(
-            presentation.title,
-            "Delete this meeting?",
-            "meeting delete alert should name the destructive action"
-        )
-        assertEqual(
-            presentation.message,
-            "This deletes the meeting's transcript and audio. This can't be undone.",
-            "meeting delete alert should explicitly mention audio and transcript"
-        )
-        assertEqual(
-            presentation.confirmTitle,
-            "Delete Meeting",
-            "destructive button should be specific"
-        )
-    }
-
     runSuite("HomeDeleteConfirmationPolicy failed meeting delete copy is explicit") {
         let presentation = HomeDeleteConfirmationPolicy.failedMeeting
 

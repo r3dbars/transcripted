@@ -48,7 +48,8 @@ extension ContextCaptureEngine {
         sessionController?.abandonDictationStartForModifierCombo(sessionID: sessionID)
     }
 
-    func handlePhysicalDictationPushToTalkRelease(wasTap: Bool) {
+    func handlePhysicalDictationPushToTalkRelease(_ release: DictationKeyRelease) {
+        let wasTap = release == .tap
         guard let session = sessionController else { return }
         if pushToTalkPressStoppedTake {
             pushToTalkPressStoppedTake = false
@@ -63,6 +64,7 @@ extension ContextCaptureEngine {
             context: [
                 "trigger": "physical_key",
                 "was_tap": wasTap ? "true" : "false",
+                "key_release": release.rawValue,
                 "session_state": dictationSessionStateName(session),
                 "overlay_state": overlayStateName(session.overlayController?.state)
             ]
@@ -71,6 +73,7 @@ extension ContextCaptureEngine {
         // Let go before the remembered press could start: nothing was
         // recorded, so say the last one is still finishing.
         // A quick tap keeps listening hands-free when that's on.
+        session.noteDictationKeyRelease(release)
         dictationHotkeyRouter(session: session, sourceApp: nil).pushToTalkReleased(wasTap: wasTap)
     }
 

@@ -92,6 +92,69 @@ func testCaptureLibraryMeetingAudioCollision() {
             assertFalse(fixture.exists(audio, in: fixture.destination))
         }
     }
+
+    runSuite("Retrying a copy that stopped before a meeting's audio still copies that audio") {
+        withMeetingCollisionFixture { fixture in
+            let transcript = "meetings/Retry.md"
+            let audio = "meetings/audio/Retry_audio/microphone.m4a"
+            try fixture.write("retry meeting", transcript, in: fixture.source)
+            try fixture.write("retry audio", audio, in: fixture.source)
+
+            let failing = AudioCopyFailingFileManager()
+            let firstPlanner = fixture.planner(fileManager: failing)
+            let firstPlan = firstPlanner.makePlan(from: fixture.source, to: fixture.destination)
+            assertEqual(firstPlan.itemsToCopy.map(\.kind), [.meetingTranscript, .meetingAudioDirectory])
+            var firstAttemptThrew = false
+            do { _ = try firstPlanner.copy(firstPlan) } catch { firstAttemptThrew = true }
+            assertTrue(firstAttemptThrew, "the first attempt stops at the audio folder")
+            assertEqual(try? fixture.read(transcript, in: fixture.destination), "retry meeting")
+            assertFalse(fixture.exists(audio, in: fixture.destination))
+
+            let planner = fixture.planner()
+            let retryPlan = planner.makePlan(from: fixture.source, to: fixture.destination)
+            assertEqual(retryPlan.skippedExisting.map(\.sourceURL.lastPathComponent), ["Retry.md"])
+            assertEqual(retryPlan.itemsToCopy.map(\.sourceURL.lastPathComponent), ["Retry_audio"],
+                        "an identical destination transcript is the same meeting, so its audio is still planned")
+            let copied = try planner.copy(retryPlan)
+            let removed = planner.removeOriginals(of: copied.copiedItems)
+
+            assertEqual(copied.copiedCount, 1)
+            assertEqual(copied.skippedExistingCount, 1)
+            assertEqual(try? fixture.read(audio, in: fixture.destination), "retry audio")
+            assertEqual(removed, CaptureLibraryOriginalsRemovalResult(removedCount: 1, keptChangedCount: 0, failedCount: 0))
+            assertEqual(fixture.removedNames, ["Retry_audio"])
+            assertEqual(try? fixture.read(transcript, in: fixture.source), "retry meeting",
+                        "the skipped transcript is never removed")
+        }
+    }
+
+    runSuite("A same-named destination transcript added after planning with identical bytes lets the audio copy") {
+        withMeetingCollisionFixture { fixture in
+            let transcript = "meetings/Twin.md"
+            let audio = "meetings/audio/Twin_audio/microphone.m4a"
+            try fixture.write("twin meeting", transcript, in: fixture.source)
+            try fixture.write("twin audio", audio, in: fixture.source)
+            let planner = fixture.planner()
+            let plan = planner.makePlan(from: fixture.source, to: fixture.destination)
+            try fixture.write("twin meeting", transcript, in: fixture.destination)
+
+            let copied = try planner.copy(plan)
+            assertEqual(copied.copiedCount, 1)
+            assertEqual(copied.skippedExistingCount, 1)
+            assertEqual(try? fixture.read(audio, in: fixture.destination), "twin audio")
+        }
+    }
+}
+
+/// Fails the copy of any retained `_audio` folder, like a drive unplugged
+/// after the small transcripts already landed.
+private final class AudioCopyFailingFileManager: FileManager {
+    struct InjectedFailure: Error {}
+
+    override func copyItem(at srcURL: URL, to dstURL: URL) throws {
+        if srcURL.lastPathComponent.hasSuffix("_audio") { throw InjectedFailure() }
+        try super.copyItem(at: srcURL, to: dstURL)
+    }
 }
 
 private enum MeetingCollisionFixtureError: Error { case outsideOwnedRoot }
@@ -109,8 +172,8 @@ private final class MeetingCollisionFixture {
         destination = root.appendingPathComponent("destination", isDirectory: true)
     }
 
-    func planner() -> CaptureLibraryMigrationPlanner {
-        CaptureLibraryMigrationPlanner(removeOriginal: { [self] url in
+    func planner(fileManager: FileManager = .default) -> CaptureLibraryMigrationPlanner {
+        CaptureLibraryMigrationPlanner(fileManager: fileManager, removeOriginal: { [self] url in
             let resolved = url.resolvingSymlinksInPath().standardizedFileURL
             let ownedSource = source.resolvingSymlinksInPath().standardizedFileURL
             guard resolved.path.hasPrefix(ownedSource.path + "/"),

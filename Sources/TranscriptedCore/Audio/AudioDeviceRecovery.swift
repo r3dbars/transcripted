@@ -241,8 +241,15 @@ extension Audio {
         // A failed earlier attempt can leave no published graph. Rebuild from
         // scratch then; returning here would skip the attempt count, so the
         // watchdog would never give up and the meeting would record silence.
-        let currentEngine = engine
-        let currentInputNode = inputNode
+        // The types are spelled out because older Swift toolchains infer the
+        // unannotated tuple's elements as non-optional and then reject the
+        // `if let` bindings below.
+        let graphSnapshot = withAudioGraphLock { () -> (AVAudioEngine?, AVAudioInputNode?, Bool) in
+            (self.engine, self.inputNode, self.voiceProcessingEnabled)
+        }
+        let currentEngine: AVAudioEngine? = graphSnapshot.0
+        let currentInputNode: AVAudioInputNode? = graphSnapshot.1
+        let currentVoiceProcessingEnabled: Bool = graphSnapshot.2
 
         // Track device switch for health monitoring. Deliberate processing
         // restarts and the restart after the Mac wakes stay out of
@@ -285,7 +292,8 @@ extension Audio {
             reason: reason,
             freshGraphRequested: freshGraphRequested || recoveryAttemptCount > 1,
             engine: currentEngine,
-            inputNode: currentInputNode
+            inputNode: currentInputNode,
+            voiceProcessingEnabled: currentVoiceProcessingEnabled
         )
 
         // Stop engine (but keep recording flag true), then reset to system
@@ -569,7 +577,8 @@ extension Audio {
         reason: MicCaptureRestartReason,
         freshGraphRequested: Bool,
         engine: AVAudioEngine?,
-        inputNode: AVAudioInputNode?
+        inputNode: AVAudioInputNode?,
+        voiceProcessingEnabled: Bool
     ) -> MeetingInputDeviceSelection? {
         guard engine != nil, let inputNode,
               let selection = meetingInputSelectionSnapshot() else { return nil }

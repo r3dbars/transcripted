@@ -215,7 +215,8 @@ allowlist.
   `permissions`, `speaker_review`, and `update_settings`
 - workflow recovery fields limited to `workflow_kind`, `failure_kind`,
   `retry_source`, `recovery_attempt_bucket`, `surface`, `artifact_retained`,
-  `result`, and `elapsed_bucket`
+  `result`, `elapsed_bucket`, and `retry_outcome_kind` (a `MeetingFailureKind`
+  raw value or `retry_not_started` / `retry_row_removed`, terminal events only)
 - product friction fields limited to `surface`, `stage`, `result`,
   `failure_kind`, `elapsed_bucket`, `route_shape`, and `model_state`
 - meeting prompt decision/outcome fields limited to `prompt_reason`, `source`,

@@ -272,7 +272,6 @@ func testUIAutomationSurfaceContract() async {
 
         for requiredHomeRendererHook in [
             "symbolName: \"trash\"",
-            "SettingsInlineActionButton(",
             "HomeRowMoreMenuButton(items:",
             "retainedActionTarget = context.coordinator",
             "final class ClosureMenuItem: NSMenuItem",

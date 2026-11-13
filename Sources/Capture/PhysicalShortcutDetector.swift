@@ -18,6 +18,10 @@ enum PhysicalShortcutPhase {
     /// A Push to Talk release after a quick press with no other key in
     /// between (`DictationHoldKeyTapPolicy`).
     case tapRelease
+    /// A Push to Talk release after another key or modifier went down while
+    /// it was held (Fn+arrow). Stops like `.release`; named apart for
+    /// diagnostics only.
+    case chordRelease
     /// Another key went down while a hands-free modifier that fired on press
     /// was held, or inside a shared Push to Talk modifier's chord window.
     case comboInterrupted
@@ -622,7 +626,11 @@ final class PhysicalShortcutDetector: @unchecked Sendable { // tap thread + main
     }
 
     private func pushToTalkReleasePhase() -> PhysicalShortcutPhase {
-        pushToTalkTap.isTap(releasedAt: ProcessInfo.processInfo.systemUptime) ? .tapRelease : .release
+        switch pushToTalkTap.release(at: ProcessInfo.processInfo.systemUptime) {
+        case .tap: return .tapRelease
+        case .hold: return .release
+        case .chord: return .chordRelease
+        }
     }
 
     private func reconcileActivePushToTalkAfterTapDisabled() {

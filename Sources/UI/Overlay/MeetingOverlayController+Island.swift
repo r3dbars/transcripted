@@ -204,7 +204,10 @@ extension MeetingOverlayController {
                 countdown: $0.countdownText,
                 primaryTitle: $0.primaryTitle,
                 secondaryTitle: $0.secondaryTitle,
-                tertiaryTitle: $0.tertiaryTitle
+                tertiaryTitle: $0.tertiaryTitle,
+                primaryAccessibilityLabel: $0.primaryAccessibilityLabel,
+                secondaryAccessibilityLabel: $0.secondaryAccessibilityLabel,
+                tertiaryAccessibilityLabel: $0.tertiaryAccessibilityLabel
             )
         }
         var callAudioNote: NotchIslandMeetingContent.CallAudioNote?

@@ -29,6 +29,7 @@ enum SentryPayloadSanitizer {
         for (key, value) in tags {
             guard !shouldDrop(key: key) else { continue }
             guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
+            guard StoppedAudioPersistCause.allows(key: key, value: value) else { continue }
             if ["session_id", "correlation_id", "install_uuid"].contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
@@ -44,6 +45,7 @@ enum SentryPayloadSanitizer {
         for (key, value) in context {
             guard !shouldDrop(key: key) else { continue }
             guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
+            guard StoppedAudioPersistCause.allows(key: key, value: value) else { continue }
             if ["session_id", "correlation_id", "install_uuid"].contains(key), PayloadSanitizationCore.uuid(value) == nil { continue }
             let cleaned = sanitizeText(value)
             guard !cleaned.isEmpty else { continue }
@@ -68,6 +70,7 @@ enum SentryPayloadSanitizer {
         for (key, value) in dictionary {
             guard !shouldDrop(key: key) else { continue }
             guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
+            guard StoppedAudioPersistCause.allows(key: key, value: value) else { continue }
             guard let cleaned = sanitizeAnyValue(value) else { continue }
             sanitized[key] = cleaned
         }
@@ -81,6 +84,7 @@ enum SentryPayloadSanitizer {
         for (key, value) in contexts {
             guard !shouldDrop(key: key) else { continue }
             guard WorkCircuitDiagnostics.allows(key: key, value: value) else { continue }
+            guard StoppedAudioPersistCause.allows(key: key, value: value) else { continue }
             let cleaned = sanitizeAnyDictionary(value)
             guard !cleaned.isEmpty else { continue }
             sanitized[key] = cleaned

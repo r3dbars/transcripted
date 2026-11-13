@@ -36,6 +36,7 @@ enum WorkflowRecoveryTelemetry {
         elapsedSeconds: TimeInterval? = nil,
         surface: String,
         artifactRetained: Bool,
+        retryOutcomeKind: String? = nil,
         track: (String, [String: String]) -> Void = { event, properties in
             AnalyticsReporter.track(event, properties: properties)
         }
@@ -49,6 +50,11 @@ enum WorkflowRecoveryTelemetry {
             artifactRetained: artifactRetained
         )
         properties["result"] = result
+        // `failure_kind` names the failure being recovered from; this names
+        // what the recovery attempt itself ended as, so a failed retry says why.
+        if let retryOutcomeKind {
+            properties["retry_outcome_kind"] = retryOutcomeKind
+        }
         if let elapsedSeconds {
             properties["elapsed_bucket"] = AnalyticsReporter.durationBucket(seconds: elapsedSeconds)
         }

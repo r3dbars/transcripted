@@ -132,9 +132,12 @@ struct CaptureLibraryMigrationPlanner {
 
         // A skipped transcript keeps its own audio too. Otherwise Move could
         // leave its Markdown behind while attaching that audio to a different
-        // same-named destination meeting and removing the source audio.
+        // same-named destination meeting and removing the source audio. A
+        // byte-identical destination transcript is this same meeting, left by
+        // an earlier copy that stopped before its audio, so that audio is still
+        // planned and a retry finishes the job.
         let stayingMeetingAudioPaths = Set(skippedExisting
-            .filter { $0.kind == .meetingTranscript }
+            .filter { $0.kind == .meetingTranscript && !isSameMeetingTranscript($0) }
             .map { pairedMeetingAudioPath(for: $0.sourceURL) })
         let destinationAudio = audioDirectory(in: destinationMeetings)
         for retainedAudio in retainedAudioDirectories(in: audioDirectory(in: sourceMeetings))
@@ -182,7 +185,7 @@ struct CaptureLibraryMigrationPlanner {
         let total = plan.itemsToCopy.count
         var copiedItems: [CaptureLibraryCopiedItem] = []
         var stayingMeetingAudioPaths = Set(plan.skippedExisting
-            .filter { $0.kind == .meetingTranscript }
+            .filter { $0.kind == .meetingTranscript && !isSameMeetingTranscript($0) }
             .map { pairedMeetingAudioPath(for: $0.sourceURL) })
 
         // Meeting transcripts precede their audio in makePlan. A collision
@@ -194,7 +197,7 @@ struct CaptureLibraryMigrationPlanner {
                 continue
             }
             if fileManager.fileExists(atPath: item.destinationURL.path) {
-                if item.kind == .meetingTranscript {
+                if item.kind == .meetingTranscript, !isSameMeetingTranscript(item) {
                     stayingMeetingAudioPaths.insert(pairedMeetingAudioPath(for: item.sourceURL))
                 }
                 skipped += 1
@@ -324,6 +327,12 @@ struct CaptureLibraryMigrationPlanner {
 
     private func writingDirectory(in library: URL) -> URL {
         FileManager.writingDirectory(in: library)
+    }
+
+    /// True when the destination already holds this exact transcript (same
+    /// bytes): the same meeting, not a different one that shares its name.
+    private func isSameMeetingTranscript(_ item: CaptureLibraryMigrationItem) -> Bool {
+        fileManager.contentsEqual(atPath: item.sourceURL.path, andPath: item.destinationURL.path)
     }
 
     private func pairedMeetingAudioPath(for transcript: URL) -> String {
