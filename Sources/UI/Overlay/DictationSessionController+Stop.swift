@@ -18,6 +18,13 @@ extension DictationSessionController {
     ) {
         guard let (appState, overlayController) = readyState() else { return }
         let stopRequestedAt = CFAbsoluteTimeGetCurrent()
+        // Read now: a press queued behind this take can be let go before
+        // its too-short report runs, and that overwrites the shared release.
+        let tooShortSnapshot = DictationTooShortDiagnostics.StopSnapshot(
+            keyRelease: currentDictationKeyRelease,
+            sessionStartedAt: sessionStartTime,
+            stopRequestedAt: stopRequestedAt
+        )
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -355,12 +362,7 @@ extension DictationSessionController {
                             if emptyReason == .recordingTooShort {
                                 // Tap, hold or chord, and how long the press
                                 // ran, so the field names why it was short.
-                                analyticsExtra.merge(
-                                    DictationTooShortDiagnostics.properties(
-                                        keyRelease: self.currentDictationKeyRelease,
-                                        pressSeconds: stopRequestedAt - self.sessionStartTime
-                                    )
-                                ) { _, new in new }
+                                analyticsExtra.merge(tooShortSnapshot.properties) { _, new in new }
                             }
                             AnalyticsReporter.track(
                                 emptyReason.analyticsEventName,

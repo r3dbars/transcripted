@@ -73,6 +73,24 @@ enum DictationTooShortDiagnostics {
             "press_bucket": pressBucket(seconds: pressSeconds),
         ]
     }
+
+    /// One take's key release and press length, taken when its stop starts.
+    /// The too-short report runs after transcription, and by then a press
+    /// queued behind this take may already have been let go and overwritten
+    /// the controller's shared release, so the report reads this instead.
+    struct StopSnapshot: Equatable {
+        let keyRelease: DictationKeyRelease?
+        let pressSeconds: TimeInterval
+
+        init(keyRelease: DictationKeyRelease?, sessionStartedAt: CFAbsoluteTime, stopRequestedAt: CFAbsoluteTime) {
+            self.keyRelease = keyRelease
+            self.pressSeconds = stopRequestedAt - sessionStartedAt
+        }
+
+        var properties: [String: String] {
+            DictationTooShortDiagnostics.properties(keyRelease: keyRelease, pressSeconds: pressSeconds)
+        }
+    }
 }
 
 /// Turns the physical dictation keys into dictation session commands.

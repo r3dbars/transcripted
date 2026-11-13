@@ -131,6 +131,30 @@ func testDictationQueuedStartPolicy() async {
         assertEqual(DictationTooShortDiagnostics.pressBucket(seconds: 1.5), "1_5s_plus", "the mis-tap limit")
     }
 
+    runSuite("A too-short report names its own take's release, not a queued press's") {
+        // Take A is held 0.5 s and let go (a hold); its stop starts. Then a
+        // quick second press is queued behind it and released (a tap)
+        // before take A's report runs.
+        var sharedRelease: DictationKeyRelease? = .hold
+        let takeA = DictationTooShortDiagnostics.StopSnapshot(
+            keyRelease: sharedRelease,
+            sessionStartedAt: 100,
+            stopRequestedAt: 100.5
+        )
+        sharedRelease = .tap
+        assertEqual(sharedRelease, .tap, "the queued press's release reached the controller")
+        assertEqual(
+            takeA.properties,
+            ["key_release": "hold", "press_bucket": "0_3_0_6s"],
+            "take A still reports the hold it stopped on"
+        )
+        assertEqual(
+            DictationTooShortDiagnostics.StopSnapshot(keyRelease: nil, sessionStartedAt: 5, stopRequestedAt: 5.1).properties,
+            ["key_release": "none", "press_bucket": "lt_0_3s"],
+            "a menu stop with no key release"
+        )
+    }
+
     runSuite("Tapping Push to Talk keeps listening; tapping again pastes") {
         let session = HotkeySessionFake()
         session.tapKeepsListening = true
