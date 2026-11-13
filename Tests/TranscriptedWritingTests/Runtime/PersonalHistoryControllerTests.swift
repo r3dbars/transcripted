@@ -186,8 +186,8 @@ struct PersonalHistoryControllerTests {
         #expect(await fixture.controller.nextWordStatus().snapshot.opportunities == 0)
     }
 
-    @Test("Storage errors map to fixed privacy-safe menu copy")
-    func storageErrorCopy() {
+    @Test("Storage errors map to fixed health categories")
+    func storageErrorClassification() {
         enum UnexpectedFailure: Error { case value }
         let corrupt = PersonalHistoryStorageHealth.failure(
             error: PersonalHistoryStorageError.corruptStore
@@ -197,7 +197,6 @@ struct PersonalHistoryControllerTests {
         )
 
         #expect(corrupt == .storeCorrupt)
-        #expect(corrupt?.menuLine == "History: not saving — reset required")
         #expect(PersonalHistoryStorageHealth.failure(
             error: PersonalHistoryStorageError.missingKey
         ) == .keyUnavailable)
@@ -205,16 +204,12 @@ struct PersonalHistoryControllerTests {
             error: PersonalHistoryStorageError.invalidKey
         ) == .keyUnavailable)
         #expect(transientKeychain == .storageUnavailable)
-        #expect(transientKeychain?.menuLine == "History: not saving — storage unavailable")
         #expect(PersonalHistoryStorageHealth.failure(
             error: CocoaError(.fileWriteNoPermission)
         ) == .storageUnavailable)
         #expect(PersonalHistoryStorageHealth.failure(
             error: UnexpectedFailure.value
         ) == .internalError)
-        #expect(PersonalHistoryStorageHealth.healthy.menuLine == nil)
-        #expect(PersonalHistoryStorageHealth.internalError.menuLine
-            == "History: not saving — restart Transcripted")
     }
 
     @Test("Repeated failures log once and the next stored event logs recovery")
@@ -262,8 +257,6 @@ struct PersonalHistoryControllerTests {
 
         #expect(await settledStatus(fixture.controller).phase == .unavailable)
         #expect(fixture.controller.storageHealthSnapshot == .keyUnavailable)
-        #expect(fixture.controller.storageHealthSnapshot.menuLine
-            == "History: not saving — reset required")
         #expect(!(await fixture.controller.ingest([fixture.event(id: "same-failure")])))
 
         diagnostics.flush()
@@ -447,91 +440,6 @@ struct PersonalHistoryControllerTests {
         let eventAfterDeletion = fixture.event()
         #expect(await fixture.controller.ingest([eventAfterDeletion]))
         #expect(await fixture.store.events == [eventAfterDeletion])
-    }
-
-    @Test("Menu copy stays honest until every paired next-word threshold is met")
-    func nextWordStatusCopy() {
-        let empty = PersonalNextWordShadow(evaluationStartMilliseconds: 0).snapshot
-        #expect(PersonalNextWordShadowStatus(phase: .ready, snapshot: empty).menuLine
-            == "Next-word test: 0/2,000 shared fresh words · 0/200 candidate predictions · 0/100 disagreements · 0/14 active days · shadow-only")
-        #expect(PersonalNextWordShadowStatus(phase: .inactive, snapshot: empty).menuLine
-            == "Next-word test: off · shadow-only")
-        #expect(PersonalNextWordShadowStatus(phase: .loading, snapshot: empty).menuLine
-            == "Next-word test: loading recent history… · shadow-only")
-
-        let early = PersonalNextWordShadowSnapshot(
-            opportunities: 20,
-            predictions: 7,
-            exactHits: 3,
-            learnedContexts: 12,
-            learnedTransitions: 18,
-            capacityLimited: false,
-            baselinePredictions: 5,
-            baselineExactHits: 2,
-            predictionDisagreements: 4,
-            activeDays: 2
-        )
-        #expect(PersonalNextWordShadowStatus(phase: .ready, snapshot: early).menuLine
-            == "Next-word test: 20/2,000 shared fresh words · 7/200 candidate predictions · 4/100 disagreements · 2/14 active days · shadow-only")
-        #expect(PersonalNextWordShadowStatus(phase: .unavailable, snapshot: empty).menuLine
-            == "Next-word test: unavailable · shadow-only")
-
-        let reportable = PersonalNextWordShadowSnapshot(
-            opportunities: 2_000,
-            predictions: 200,
-            exactHits: 100,
-            learnedContexts: 80,
-            learnedTransitions: 120,
-            capacityLimited: false,
-            baselinePredictions: 180,
-            baselineExactHits: 80,
-            predictionDisagreements: 100,
-            activeDays: 14
-        )
-        #expect(PersonalNextWordShadowStatus(phase: .ready, snapshot: reportable).menuLine
-            == "Next-word test: candidate 5.0% vs baseline 4.0% effective · 2,000 shared fresh words · shadow-only")
-
-        let thresholdMisses = [
-            PersonalNextWordShadowSnapshot(
-                opportunities: 1_999, predictions: 200, exactHits: 100,
-                learnedContexts: 1, learnedTransitions: 1, capacityLimited: false,
-                predictionDisagreements: 100, activeDays: 14
-            ),
-            PersonalNextWordShadowSnapshot(
-                opportunities: 2_000, predictions: 199, exactHits: 100,
-                learnedContexts: 1, learnedTransitions: 1, capacityLimited: false,
-                predictionDisagreements: 100, activeDays: 14
-            ),
-            PersonalNextWordShadowSnapshot(
-                opportunities: 2_000, predictions: 200, exactHits: 100,
-                learnedContexts: 1, learnedTransitions: 1, capacityLimited: false,
-                predictionDisagreements: 99, activeDays: 14
-            ),
-            PersonalNextWordShadowSnapshot(
-                opportunities: 2_000, predictions: 200, exactHits: 100,
-                learnedContexts: 1, learnedTransitions: 1, capacityLimited: false,
-                predictionDisagreements: 100, activeDays: 13
-            ),
-        ]
-        for snapshot in thresholdMisses {
-            #expect(PersonalNextWordShadowStatus(phase: .ready, snapshot: snapshot).menuLine
-                .contains("candidate predictions"))
-        }
-
-        let capacityLimited = PersonalNextWordShadowSnapshot(
-            opportunities: 20,
-            predictions: 7,
-            exactHits: 3,
-            learnedContexts: 12,
-            learnedTransitions: 18,
-            capacityLimited: true,
-            predictionDisagreements: 4,
-            activeDays: 2
-        )
-        #expect(PersonalNextWordShadowStatus(
-            phase: .ready,
-            snapshot: capacityLimited
-        ).menuLine == "Next-word test: 20/2,000 shared fresh words · 7/200 candidate predictions · 4/100 disagreements · 2/14 active days · memory limit reached · shadow-only")
     }
 
     @Test("Enabled startup replays only allowed encrypted history")

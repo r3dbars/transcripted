@@ -123,7 +123,6 @@ class DictationSessionController: ObservableObject {
 
     var sessionSourceApp: NSRunningApplication?
     var sessionPasteTarget: DictationPasteTarget?
-    var sessionAnchorRect: NSRect?
     var startupTask: Task<Void, Never>?
     var streamingTask: Task<Void, Never>?
     var stopFinalizationGate = DictationStopFinalizationGate()
@@ -154,6 +153,10 @@ class DictationSessionController: ObservableObject {
     /// The shortcut that started this session, when a shortcut did. Read from
     /// the press itself, never from a stored setting.
     var currentDictationShortcutMode: DictationShortcutMode?
+    /// The dictation key's last release during this session (tap, hold or
+    /// chord), for `dictation_recording_too_short` only. Nil until one
+    /// arrives; a start queued behind a finishing take reports none.
+    var currentDictationKeyRelease: DictationKeyRelease?
     var stoppedAudioRecovery: DictationStoppedAudioRecovery?
     var stoppedAudioRecoveryPreservationSessionID: UUID?
     var stoppedAudioCheckpointSignal: DictationStoppedAudioCheckpointSignal?
@@ -212,7 +215,6 @@ class DictationSessionController: ObservableObject {
         sourceApp: NSRunningApplication?,
         trigger: DictationTrigger = .unknown,
         shortcutMode: DictationShortcutMode? = nil,
-        anchorRect: NSRect? = nil,
         isRetry: Bool = false
     ) {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
@@ -273,10 +275,10 @@ class DictationSessionController: ObservableObject {
         sessionSourceApp = sourceApp
         sessionPasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         primeAutoEnterTargetAccessibility()
-        sessionAnchorRect = anchorRect
         sessionStartTime = requestStartedAt
         currentDictationTrigger = trigger
         currentDictationShortcutMode = shortcutMode
+        currentDictationKeyRelease = nil
         autoSendRequestDecision = .notEvaluated
         lastCompletedText = nil
         appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "start_requested")
@@ -297,8 +299,7 @@ class DictationSessionController: ObservableObject {
             enterPendingStartStage(.awaitingMicrophonePermission)
             overlayController.showLoadingState(
                 near: sourceApp,
-                presentation: microphonePermissionPresentation(),
-                anchorRect: anchorRect
+                presentation: microphonePermissionPresentation()
             )
             startupTask?.cancel()
             startupTask = Task { @MainActor [weak self] in

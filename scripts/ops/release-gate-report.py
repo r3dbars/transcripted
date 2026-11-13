@@ -316,8 +316,6 @@ def run_packaged_app_smoke(
     command = [
         "python3",
         "scripts/ops/packaged-app-smoke.py",
-        "--appcast",
-        args.appcast or "build/appcast.xml",
         "--out-dir",
         str(out_dir / "packaged-app-smoke"),
         "--write-report",
@@ -325,6 +323,12 @@ def run_packaged_app_smoke(
         "--markdown-out",
         str(markdown_report),
     ]
+    # Only forward a feed snapshot the operator chose. build-beta.sh never
+    # writes build/appcast.xml, so defaulting to it turns the documented
+    # post-package flow red on a missing (or stale) file; without a snapshot
+    # the smoke reports appcast proof as incomplete (yellow) instead.
+    if args.appcast:
+        command.extend(["--appcast", args.appcast])
     if args.require_release_debug_files:
         command.append("--require-dsym")
     if args.require_packaged_app_dmg:
@@ -1018,8 +1022,10 @@ def self_test() -> int:
             with patch(__name__ + ".run_command", return_value=(record, "")) as runner:
                 run_packaged_app_smoke(arguments, owned, owned / "output", [])
                 command = runner.call_args.kwargs["command"]
-            expected_appcast = supplied or "build/appcast.xml"
-            if command[command.index("--appcast") + 1] != expected_appcast:
+            if supplied is None:
+                if "--appcast" in command:
+                    raise AssertionError("Packaged smoke must not invent an appcast path the operator never supplied")
+            elif command[command.index("--appcast") + 1] != supplied:
                 raise AssertionError("Packaged smoke must receive the selected local appcast")
 
     root = repo_root()

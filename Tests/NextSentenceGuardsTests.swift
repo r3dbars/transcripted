@@ -216,6 +216,22 @@ func testNextSentenceGuards() {
         assertEqual(pool.liveCount, 0, "and stopping ends those too")
     }
 
+    runSuite("Write for Me: warming again replaces a ready Claude process that exited on its own") {
+        FakeBackground.pending = []
+        let pool = NextSentenceWarmPool<String, FakeWarmProcess>(spawn: { _ in FakeWarmProcess() }, background: { FakeBackground.pending.append($0) })
+        pool.prewarm(["swaps"])
+        guard let first = FakeWarmProcess.made.last else { return recordFailure("nothing was warmed") }
+        pool.prewarm(["swaps"])
+        assertTrue(FakeWarmProcess.made.last === first, "a running ready process is kept, not started twice")
+        first.died = true
+        pool.prewarm(["swaps"])
+        assertTrue(first.terminated, "the dead one is ended, so its pipes close")
+        let replacement = FakeWarmProcess.made.last
+        assertTrue(replacement !== first && replacement?.isRunning == true, "a fresh one is started in its place")
+        assertEqual(pool.liveCount, 1, "the pool holds only the fresh one")
+        pool.stop()
+    }
+
     runSuite("Write for Me's embedding server stops when its tether closes") {
         let pidFile = FileManager.default.temporaryDirectory.appendingPathComponent("ns-tether-\(UUID().uuidString).pid")
         defer { try? FileManager.default.removeItem(at: pidFile) }
@@ -276,7 +292,9 @@ private final class StderrTailProbe: @unchecked Sendable {
 private final class FakeWarmProcess: NextSentenceWarmProcess, @unchecked Sendable {
     nonisolated(unsafe) static var made: [FakeWarmProcess] = []
     var terminated = false
-    var isRunning: Bool { !terminated }
+    /// Exited on its own, without the pool ending it.
+    var died = false
+    var isRunning: Bool { !terminated && !died }
     init() { Self.made.append(self) }
     func terminate() { terminated = true }
 }

@@ -234,6 +234,30 @@ public class TranscriptSaver {
         )[transcriptId]
     }
 
+    /// Non-recursive listing of a transcript folder, hidden files skipped.
+    /// `contentsOfDirectory(at:)` refuses a folder whose own last path
+    /// component is a symlink (ENOTDIR), so a meetings folder linked in from
+    /// elsewhere listed as empty or unreadable and every stable-id lookup in it
+    /// missed. The folder the host chose is still the authority, so list its
+    /// target. Entries inside are still checked one by one, and callers keep
+    /// refusing symlinked transcript files.
+    static func transcriptDirectoryContents(
+        of directory: URL,
+        fileManager: FileManager = .default
+    ) -> [URL]? {
+        let keys: [URLResourceKey] = [.isRegularFileKey, .isSymbolicLinkKey]
+        if let files = try? fileManager.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
+        ) {
+            return files
+        }
+        let target = directory.resolvingSymlinksInPath()
+        guard target.standardizedFileURL.path != directory.standardizedFileURL.path else { return nil }
+        return try? fileManager.contentsOfDirectory(
+            at: target, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
+        )
+    }
+
     /// Resolves a recovery batch in one bounded directory scan so many stale
     /// journals cannot multiply transcript-directory I/O.
     public static func existingTranscriptURLs(
@@ -242,11 +266,7 @@ public class TranscriptSaver {
         fileManager: FileManager = .default
     ) -> [UUID: URL] {
         guard !transcriptIds.isEmpty else { return [:] }
-        guard let files = try? fileManager.contentsOfDirectory(
-            at: directory,
-            includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-            options: [.skipsHiddenFiles]
-        ) else { return [:] }
+        guard let files = transcriptDirectoryContents(of: directory, fileManager: fileManager) else { return [:] }
 
         var matches: [UUID: URL] = [:]
         let markdownFiles = files

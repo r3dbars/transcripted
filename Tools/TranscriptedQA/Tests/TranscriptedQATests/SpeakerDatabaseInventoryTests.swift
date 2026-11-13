@@ -33,6 +33,20 @@ final class SpeakerDatabaseInventoryTests: XCTestCase {
         XCTAssertTrue(try SpeakerDatabaseArtifact.existing(in: root.appendingPathComponent("absent")).isEmpty)
     }
 
+    func testCorruptionBackupIsNotTreatedAsALiveDatabase() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        _ = try makeDatabase(in: root, filename: "speakers.sqlite", embeddingBytes: 1024)
+        for filename in ["speakers_corrupt_2026-11-12_09-30-00.sqlite", "speakers_corrupt_2026-11-12_09-30-00.sqlite-wal"] {
+            try Data("not a database".utf8).write(to: root.appendingPathComponent(filename))
+        }
+        XCTAssertEqual(try SpeakerDatabaseArtifact.existing(in: root).map(\.url.lastPathComponent), ["speakers.sqlite"])
+        let results = SpeakerDBValidator.validateAll(in: root)
+        XCTAssertFalse(results.contains { $0.status == .fail }, "a kept corruption backup must not fail validate-all")
+        XCTAssertTrue(results.allSatisfy { $0.target == "speakers.sqlite" })
+    }
+
     func testWrongDimensionsStillFailForEveryShippingDatabase() throws {
         for (filename, bytes) in [("speakers.sqlite", 768), ("speakers_eres2net.sqlite", 1024), ("speakers_redimnet2-b4.sqlite", 1024)] {
             let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

@@ -276,9 +276,11 @@ class ContextCaptureEngine: ObservableObject {
         case (.dictationPushToTalk, .press):
             handlePhysicalDictationPushToTalkPress()
         case (.dictationPushToTalk, .release):
-            handlePhysicalDictationPushToTalkRelease(wasTap: false)
+            handlePhysicalDictationPushToTalkRelease(.hold)
         case (.dictationPushToTalk, .tapRelease):
-            handlePhysicalDictationPushToTalkRelease(wasTap: true)
+            handlePhysicalDictationPushToTalkRelease(.tap)
+        case (.dictationPushToTalk, .chordRelease):
+            handlePhysicalDictationPushToTalkRelease(.chord)
         case (.dictationHandsFree, .press):
             handlePhysicalDictationHandsFreePress()
         case (.dictationHandsFree, .comboInterrupted):
@@ -288,7 +290,8 @@ class ContextCaptureEngine: ObservableObject {
         case (.dictationPushToTalk, .comboInterrupted):
             handlePhysicalDictationPushToTalkComboInterrupted()
         case (.dictationHandsFree, .release), (.meeting, .release), (.meeting, .comboInterrupted),
-             (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease):
+             (.dictationHandsFree, .tapRelease), (.meeting, .tapRelease),
+             (.dictationHandsFree, .chordRelease), (.meeting, .chordRelease):
             break
         }
     }

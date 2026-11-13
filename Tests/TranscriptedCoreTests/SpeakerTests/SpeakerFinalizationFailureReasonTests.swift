@@ -11,6 +11,11 @@ final class SpeakerFinalizationFailureReasonTests: XCTestCase {
             [
                 "plan_missing_embedding",
                 "transcript_unresolved",
+                "transcript_library_unavailable",
+                "transcript_folder_unreadable",
+                "transcript_entry_unreadable",
+                "transcript_identity_duplicated",
+                "transcript_not_writable",
                 "transcript_unreadable",
                 "name_rewrite_failed",
                 "deferred_marker_failed",

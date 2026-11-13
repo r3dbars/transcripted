@@ -166,7 +166,7 @@ final class CompanionConnectionService: ObservableObject {
                 return failure(request, code: "capture_busy", message: "A meeting is already starting, recording, or stopping.")
             }
             controlInFlight = true
-            let started = await meetingSession.startRecording(trigger: .menu)
+            let started = await meetingSession.startRecording(trigger: .companion)
             controlInFlight = false
             guard started else {
                 return failure(request, code: "start_failed", message: "The meeting couldn’t start. Check Transcripted for permissions or capture details.")
@@ -187,7 +187,7 @@ final class CompanionConnectionService: ObservableObject {
                 return failure(request, code: "capture_busy", message: "This meeting is not currently recording. Refresh meeting status.")
             }
             controlInFlight = true
-            await meetingSession.stopRecordingJoiningPendingStart(reason: .menuBarStopButton)
+            await meetingSession.stopRecordingJoiningPendingStart(reason: .companionRequest)
             controlInFlight = false
             refreshCaptureState()
             var snapshot = status()

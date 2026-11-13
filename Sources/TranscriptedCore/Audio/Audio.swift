@@ -435,6 +435,15 @@ public class Audio: ObservableObject, @unchecked Sendable {
         return try body()
     }
 
+    /// Runs `body` only if the graph lock is free (or already held by this
+    /// thread); returns nil instead of waiting. For diagnostics readers that
+    /// must never block, such as the main thread during device recovery.
+    func withAudioGraphLockIfAvailable<T>(_ body: () -> T) -> T? {
+        guard audioGraphLock.try() else { return nil }
+        defer { audioGraphLock.unlock() }
+        return body()
+    }
+
     // Write errors are generation-scoped. A fast successor can begin while the
     // previous recording's bounded tail is still draining, so an old write must
     // never increment, reset, or trip the successor's failure counter.

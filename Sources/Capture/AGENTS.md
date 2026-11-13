@@ -36,7 +36,7 @@ The paste-last-dictation shortcut is no longer registered. The unused paste-last
 
 ## Invariants
 
-- **Tap vs hold is decided on the tap thread** (`PushToTalkTapTracker`, phase `.tapRelease`), not the main actor, so a busy main thread can't stretch a tap into a hold.
+- **Tap vs hold is decided on the tap thread** (`PushToTalkTapTracker`, phase `.tapRelease`), not the main actor, so a busy main thread can't stretch a tap into a hold. A release after another key went down is `.chordRelease`; it stops exactly like `.release` and only feeds `key_release` on `dictation_recording_too_short` (`DictationTooShortDiagnostics`).
 - **A modifier that other shortcuts share** (Right Option vs Option-M) fires on press, so no start waits for a release. It waits out `modifierChordDelay` (0.14 s) instead only if a key was typed in the last second (`typingWindowForModifierCombos`) or the press would stop a running take, since a stop can't be undone.
 - **Combo drops the start.** A key down inside that 0.14 s window (`PushToTalkModifierComboWindow`) sends `.comboInterrupted`, and the dictation that press started is dropped with no sound (`abandonDictationStartForModifierCombo`). A key later in the hold is typing and never drops the take. On a built-in or wired mic the start click can still play first, so Right Option+M after a pause can click and flash the island.
 - **Tap to toggle is followed too.** `HandsFreeModifierComboTracker` follows a press that starts a take until release, so Fn+arrow can't leave dictation running. It trusts only the tap's own events. Never gate it on `CGEventSource.keyState(.combinedSessionState, ...)`: the tap consumes the modifier's flagsChanged, so that state never sees it go down, and every Option+M left a stray dictation running.

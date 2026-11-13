@@ -50,12 +50,10 @@ extension DictationSession {
     // MARK: - Meeting-mic sharing / availability
 
     func canUseActiveMeetingMicForDictation(appState: DictationSessionHost) -> Bool {
-        guard #available(macOS 14.0, *) else { return false }
         return appState.canShareMeetingMicWithDictation
     }
 
     func dictationStartUnavailableReason(appState: DictationSessionHost) -> String? {
-        guard #available(macOS 14.0, *) else { return nil }
         return DictationStartAvailabilityPolicy.unavailableReason(
             hasActiveMeetingCapture: appState.shouldBlockDictationForActiveMeetingCapture,
             canShareMeetingMic: appState.canShareMeetingMicWithDictation,

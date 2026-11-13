@@ -100,6 +100,9 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
         secondsPerHostTick = Self.secondsPerHostTick
         storageByteCount = capacity * bufferCount * maximumFrames * bytesPerFrame
         storage = .allocate(byteCount: storageByteCount, alignment: 16)
+        // Write the PCM storage on the construction queue before the IOProc
+        // first copies into it. This does not wire pages against later faults.
+        memset(storage, 0, storageByteCount)
         lengths = .allocate(capacity: capacity)
         lengths.initialize(repeating: 0, count: capacity)
         hostSeconds = .allocate(capacity: capacity)

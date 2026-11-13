@@ -509,6 +509,7 @@ func testSentryEventPolicy() {
             "work_source": "system_input",
             "work_step": "selection",
             "inflight_bucket": "2_3",
+            "persist_cause": "disk_full",
         ]
 
         for key in keys {
