@@ -191,15 +191,15 @@ final class NotchIslandDropView: NSView {
             }
             var leading: [NSView] = []
             if let tertiary = prompt.tertiaryTitle, !tertiary.isEmpty {
-                leading.append(button(tertiary, .subtle, .meetingTertiary))
+                leading.append(button(tertiary, .subtle, .meetingTertiary, accessibilityLabel: prompt.tertiaryAccessibilityLabel))
             }
             var trailing: [NSView] = []
             if !prompt.secondaryTitle.isEmpty {
-                trailing.append(button(prompt.secondaryTitle, .plain, .meetingSecondary))
+                trailing.append(button(prompt.secondaryTitle, .plain, .meetingSecondary, accessibilityLabel: prompt.secondaryAccessibilityLabel))
             }
             if !prompt.primaryTitle.isEmpty {
                 let style: NotchIslandButton.Style = prompt.primaryTitle == "Stop" ? .destructive : .accent
-                trailing.append(button(prompt.primaryTitle, style, .meetingPrimary))
+                trailing.append(button(prompt.primaryTitle, style, .meetingPrimary, accessibilityLabel: prompt.primaryAccessibilityLabel))
             }
             add(buttonRow(leading: leading, trailing: trailing))
         case .meetingSaved(let title):
@@ -344,8 +344,11 @@ final class NotchIslandDropView: NSView {
         return button
     }
 
-    func button(_ title: String, _ style: NotchIslandButton.Style, _ action: NotchIslandAction, symbol: String? = nil, appIcon: NSImage? = nil) -> NSView {
+    func button(_ title: String, _ style: NotchIslandButton.Style, _ action: NotchIslandAction, symbol: String? = nil, appIcon: NSImage? = nil, accessibilityLabel: String? = nil) -> NSView {
         let button = NotchIslandButton(title: title, style: style, symbolName: symbol, appIcon: appIcon)
+        if let accessibilityLabel {
+            button.setAccessibilityLabel(accessibilityLabel)
+        }
         button.onPress = { [weak self] in self?.onAction?(action) }
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)

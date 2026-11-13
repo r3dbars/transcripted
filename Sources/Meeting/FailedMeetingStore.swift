@@ -81,6 +81,8 @@ final class FailedMeetingStore {
             return false
         }
 
+        let retryCountBefore = failedManager.failedTranscriptions
+            .first(where: { $0.id == id })?.retryCount ?? 0
         failedAudioCompressionTask?.cancel()
         retryingFailedMeetingIDs.insert(id)
         markRetryStarted()
@@ -114,7 +116,8 @@ final class FailedMeetingStore {
                     result: "failed",
                     elapsedSeconds: CFAbsoluteTimeGetCurrent() - retryStartedAt,
                     surface: "home",
-                    artifactRetained: true
+                    artifactRetained: true,
+                    retryOutcomeKind: MeetingFailureKind.modelNotLoaded.rawValue
                 )
                 return
             }
@@ -124,7 +127,8 @@ final class FailedMeetingStore {
                 outputFolder: MeetingStoragePaths.transcriptsFolder
             )
             self.retryingFailedMeetingIDs.remove(id)
-            if !self.failedManager.failedTranscriptions.contains(where: { $0.id == id }) {
+            let rowAfterRetry = self.failedManager.failedTranscriptions.first(where: { $0.id == id })
+            if rowAfterRetry == nil {
                 self.finishTimedOutFinalizationWithDiscard(id: id)
             }
             self.publishRefresh()
@@ -135,7 +139,12 @@ final class FailedMeetingStore {
                 result: retryPublished ? "success" : "failed",
                 elapsedSeconds: CFAbsoluteTimeGetCurrent() - retryStartedAt,
                 surface: "home",
-                artifactRetained: true
+                artifactRetained: true,
+                retryOutcomeKind: MeetingFailureKind.retryOutcomeKind(
+                    published: retryPublished,
+                    retryCountBefore: retryCountBefore,
+                    rowAfter: rowAfterRetry
+                )
             )
         }
         return true

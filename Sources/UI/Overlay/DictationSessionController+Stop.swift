@@ -18,6 +18,13 @@ extension DictationSessionController {
     ) {
         guard let (appState, overlayController) = readyState() else { return }
         let stopRequestedAt = CFAbsoluteTimeGetCurrent()
+        // Read now: a press queued behind this take can be let go before
+        // its too-short report runs, and that overwrites the shared release.
+        let tooShortSnapshot = DictationTooShortDiagnostics.StopSnapshot(
+            keyRelease: currentDictationKeyRelease,
+            sessionStartedAt: sessionStartTime,
+            stopRequestedAt: stopRequestedAt
+        )
         DiagnosticsTrail.record(
             logger: appState.logger,
             engine: "dictation",
@@ -231,12 +238,16 @@ extension DictationSessionController {
                     hasRecoverableRecording: { appState.sttRouter.hasRecoverableRecording },
                     checkpointSettled: { await checkpointSignal.complete() },
                     reportCheckpointFailure: { error in
-                        appState.logger.log("DICTATION | failed to preserve stopped audio: \(error.localizedDescription)")
+                        let cause = StoppedAudioPersistCause.classify(error)
+                        appState.logger.log("DICTATION | failed to preserve stopped audio (\(cause.rawValue)): \(error.localizedDescription)")
+                        // The description names files, so Sentry gets the
+                        // coarse cause only.
                         EventReporter.shared.capture(
                             level: .error,
                             engine: "dictation",
                             event: "dictation_stopped_audio_persistence_failed",
-                            message: error.localizedDescription
+                            message: "Stopped dictation audio was not saved: \(cause.rawValue)",
+                            context: StoppedAudioPersistCause.eventContext(for: error)
                         )
                     },
                     clearSession: { outcome in
@@ -342,16 +353,20 @@ extension DictationSessionController {
                                     ]
                                 )
                             )
+                            var analyticsExtra = [
+                                "duration_bucket": AnalyticsReporter.durationBucket(
+                                    seconds: CFAbsoluteTimeGetCurrent() - self.sessionStartTime
+                                ),
+                                "trigger": self.currentDictationTrigger.rawValue,
+                            ]
+                            if emptyReason == .recordingTooShort {
+                                // Tap, hold or chord, and how long the press
+                                // ran, so the field names why it was short.
+                                analyticsExtra.merge(tooShortSnapshot.properties) { _, new in new }
+                            }
                             AnalyticsReporter.track(
                                 emptyReason.analyticsEventName,
-                                properties: self.dictationAnalyticsProperties(
-                                    extra: [
-                                        "duration_bucket": AnalyticsReporter.durationBucket(
-                                            seconds: CFAbsoluteTimeGetCurrent() - self.sessionStartTime
-                                        ),
-                                        "trigger": self.currentDictationTrigger.rawValue,
-                                    ]
-                                )
+                                properties: self.dictationAnalyticsProperties(extra: analyticsExtra)
                             )
                             ProductFrictionTelemetry.track(
                                 surface: .dictation,

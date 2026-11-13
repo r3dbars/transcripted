@@ -79,20 +79,39 @@ final class DictationPreviewSampleSink: @unchecked Sendable {
         samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
         let capacity = AVAudioFrameCount((Double(samples.count) * 16_000 / sampleRate).rounded(.up)) + 64
         guard let out = AVAudioPCMBuffer(pcmFormat: outputFormat, frameCapacity: capacity) else { return [] }
-        var fed = false
+        let feed = PreviewConverterInput(input)
         var error: NSError?
         // `.noDataNow`, not end of stream: the filter state carries to the
         // next take() so chunk edges don't click.
         _ = converter.convert(to: out, error: &error) { _, status in
-            if fed {
+            guard let next = feed.take() else {
                 status.pointee = .noDataNow
                 return nil
             }
-            fed = true
             status.pointee = .haveData
-            return input
+            return next
         }
         guard error == nil, let data = out.floatChannelData?[0] else { return [] }
         return Array(UnsafeBufferPointer(start: data, count: Int(out.frameLength)))
+    }
+}
+
+/// Hands the converter one segment's buffer, then nothing. Runs on the
+/// preview's pump task inside `take()`, never the capture queue or the
+/// real-time thread: `convert(to:error:withInputFrom:)` calls the input block
+/// synchronously on the calling thread and never after it returns, so only
+/// that one call touches this. It's `@unchecked Sendable` because the macOS 26
+/// SDK types the block as sendable (the macOS 27 SDK marks it non-sendable and
+/// non-escaping).
+private final class PreviewConverterInput: @unchecked Sendable {
+    private var buffer: AVAudioPCMBuffer?
+
+    init(_ buffer: AVAudioPCMBuffer) {
+        self.buffer = buffer
+    }
+
+    func take() -> AVAudioPCMBuffer? {
+        defer { buffer = nil }
+        return buffer
     }
 }

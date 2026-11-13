@@ -12,6 +12,7 @@ import subprocess
 import sys
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,8 @@ POSTHOG_FAILURE_EVENTS = (
     "meeting_recording_start_failed",
     "meeting_transcript_failed",
 )
+LEGACY_APPCAST = "docs/appcast.xml"
+SPARKLE_NS = "{http://www.andymatuschak.org/xml-namespaces/sparkle}"
 HTTP_HEADERS = {
     "User-Agent": "TranscriptedReleaseHealth/1.0",
 }
@@ -105,10 +108,70 @@ def info_plist_version(root: Path) -> str:
     return str(plist.get("CFBundleShortVersionString") or "unknown")
 
 
-def appcast_latest_version(root: Path) -> str:
-    text = (root / "docs/appcast.xml").read_text(encoding="utf-8")
+def legacy_appcast_latest_version(root: Path) -> str:
+    """Newest item in the frozen legacy feed (1.1.75); never the active release."""
+    try:
+        text = (root / LEGACY_APPCAST).read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
     match = re.search(r"<sparkle:version>([^<]+)</sparkle:version>", text)
     return match.group(1) if match else "unknown"
+
+
+class FeedUnavailable(Exception):
+    """The active appcast could not be read; the message is safe to print."""
+
+
+def active_feed_url(root: Path) -> str:
+    try:
+        with (root / "Info.plist").open("rb") as handle:
+            url = str(plistlib.load(handle).get("SUFeedURL") or "")
+    except (OSError, plistlib.InvalidFileException) as exc:
+        raise FeedUnavailable(f"Info.plist unreadable ({type(exc).__name__})") from None
+    if not url.startswith("https://"):
+        raise FeedUnavailable("Info.plist has no https SUFeedURL")
+    return url
+
+
+def feed_latest_version(text: str) -> str:
+    try:
+        channel = ET.fromstring(text).find("channel")
+    except ET.ParseError:
+        raise FeedUnavailable("feed is not valid XML") from None
+    item = channel.find("item") if channel is not None else None
+    if item is None:
+        raise FeedUnavailable("feed has no release item")
+    version = item.findtext(f"{SPARKLE_NS}shortVersionString") or item.findtext(f"{SPARKLE_NS}version") or ""
+    if not version.strip():
+        raise FeedUnavailable("feed item has no version")
+    return version.strip()
+
+
+def active_appcast_version(root: Path, override: str | None = None, fetch=None) -> tuple[str, str]:
+    """(newest version, source label) from --appcast or the Info.plist SUFeedURL feed."""
+    if override:
+        try:
+            text = Path(override).read_text(encoding="utf-8")
+        except OSError as exc:
+            raise FeedUnavailable(f"--appcast file unreadable ({type(exc).__name__})") from None
+        return feed_latest_version(text), "--appcast snapshot"
+    url = active_feed_url(root)
+    try:
+        text = (fetch or fetch_text)(url)
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise FeedUnavailable(f"active feed fetch failed ({type(exc).__name__})") from None
+    return feed_latest_version(text), "active feed"
+
+
+def appcast_status_line(root: Path, override: str | None = None, fetch=None) -> str:
+    try:
+        version, source = active_appcast_version(root, override, fetch)
+    except FeedUnavailable as exc:
+        return (
+            f"unavailable: {exc}; pass --appcast <release-asset snapshot> "
+            f"(frozen legacy feed: {legacy_appcast_latest_version(root)})"
+        )
+    return f"{version} ({source})"
 
 
 def cask_version(root: Path) -> str:
@@ -528,8 +591,50 @@ def run_self_test() -> int:
     if "coalesce(properties['build_channel'], 'unknown') NOT IN" not in query_text:
         print("self-test failed: release health query must exclude local/unknown workflow channels", file=sys.stderr)
         return 1
+    feed_failure = self_test_active_feed()
+    if feed_failure:
+        print(f"self-test failed: {feed_failure}", file=sys.stderr)
+        return 1
     print("self-test passed")
     return 0
+
+
+def self_test_active_feed() -> str | None:
+    """The appcast line reads the active feed, and offline is a clear line, not a traceback."""
+    root = Path(__file__).resolve().parents[2]
+    fixture = root / "Tests/Fixtures/release-health-appcast-1.1.76.xml"
+    if appcast_status_line(root, str(fixture)) != "1.1.76 (--appcast snapshot)":
+        return "--appcast fixture should report 1.1.76"
+    fixture_text = fixture.read_text(encoding="utf-8")
+    seen: list[str] = []
+
+    def fake_fetch(url: str) -> str:
+        seen.append(url)
+        return fixture_text
+
+    if appcast_status_line(root, None, fake_fetch) != "1.1.76 (active feed)":
+        return "active feed should come from SUFeedURL"
+    if seen != [active_feed_url(root)] or "docs/appcast.xml" in seen[0]:
+        return "active feed must be fetched from Info.plist SUFeedURL"
+
+    def offline(url: str) -> str:
+        raise urllib.error.URLError("offline")
+
+    line = appcast_status_line(root, None, offline)
+    if not line.startswith("unavailable: active feed fetch failed (URLError)") or "--appcast" not in line:
+        return f"offline feed should be a clear unavailable line, got {line!r}"
+    if "frozen legacy feed: " not in line or "https://" in line:
+        return "offline line should name the frozen feed and print no URL"
+    if not appcast_status_line(root, str(root / "Tests/Fixtures/missing-appcast.xml")).startswith(
+        "unavailable: --appcast file unreadable"
+    ):
+        return "missing --appcast file should be a clear unavailable line"
+    if appcast_status_line(root, None, lambda url: "<rss><channel></channel></rss>") != (
+        "unavailable: feed has no release item; pass --appcast <release-asset snapshot> "
+        f"(frozen legacy feed: {legacy_appcast_latest_version(root)})"
+    ):
+        return "empty feed should be a clear unavailable line"
+    return None
 
 
 def main() -> int:
@@ -537,6 +642,11 @@ def main() -> int:
     parser.add_argument("--version", default=None, help="Release version, e.g. 1.1.47. Defaults to Info.plist.")
     parser.add_argument("--hours", type=int, default=24, help="PostHog lookback window.")
     parser.add_argument("--version-limit", type=int, default=12, help="Maximum installed app_version/build_version rows to show.")
+    parser.add_argument(
+        "--appcast",
+        default=None,
+        help="Local release-asset appcast snapshot. Defaults to fetching Info.plist SUFeedURL.",
+    )
     parser.add_argument("--self-test", action="store_true", help="Run offline formatting checks without network access.")
     args = parser.parse_args()
     if args.self_test:
@@ -554,7 +664,7 @@ def main() -> int:
     print("")
     print("Release surfaces")
     print(f"- Info.plist: {info_plist_version(root)}")
-    print(f"- appcast: {appcast_latest_version(root)}")
+    print(f"- appcast: {appcast_status_line(root, args.appcast)}")
     print(f"- cask: {cask_version(root)}")
     print(f"- GitHub release: {'yes' if gh_release['available'] else 'missing'} ({gh_release.get('download_count') or 0} downloads)")
     print(f"- /download/latest.dmg: {'ok' if surfaces['download_matches'] else 'check'}")

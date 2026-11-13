@@ -7,34 +7,10 @@ import Security
 enum LlamaRuntimeSnapshot: Equatable, Sendable {
     enum FailureReason: Equatable, Sendable {
         case assetsMissing, portInUse, launchFailed, healthTimeout, processExited, completionFailed
-
-        fileprivate var menuDescription: String {
-            switch self {
-            case .assetsMissing: "Engine files missing — reinstall Transcripted"
-            case .portInUse: "Engine port busy"
-            case .launchFailed: "Engine couldn't start"
-            case .healthTimeout: "Engine didn't become ready"
-            case .processExited: "Engine stopped"
-            case .completionFailed: "Engine stopped responding"
-            }
-        }
     }
 
     case starting, ready
     case retrying(FailureReason), failed(FailureReason)
-
-    var menuLine: String {
-        menuLine(modelName: "Gemma")
-    }
-
-    func menuLine(modelName: String) -> String {
-        switch self {
-        case .starting: "Engine: \(modelName) (starting…)"
-        case .ready: "Engine: \(modelName) (ready)"
-        case let .retrying(reason): "⚠️ \(reason.menuDescription) — retrying"
-        case let .failed(reason): "⚠️ \(reason.menuDescription)"
-        }
-    }
 
     var restartReasonAfterExit: FailureReason {
         if case let .retrying(reason) = self { return reason }

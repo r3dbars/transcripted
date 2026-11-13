@@ -32,6 +32,7 @@ enum MeetingAutoRecordPolicy {
         "hotkey_toggle",
         "overlay_stop_button",
         "menu_bar_stop_button",
+        "companion_request",
     ]
 
     /// Discard is the only cancel that declines the rest of this call.
@@ -122,8 +123,8 @@ enum MeetingAutoRecordPolicy {
         }
     }
 
-    /// Explicit menu, hotkey, or Discard of an auto-started recording
-    /// declines the rest of this call. Call-end, inactivity, quit, warning
+    /// Explicit menu, hotkey, companion Stop, or Discard of an auto-started
+    /// recording declines the rest of this call. Call-end, inactivity, quit, warning
     /// stops, and a failed start do not.
     static func recordsDeclineOnEnd(
         wasAutoStarted: Bool,

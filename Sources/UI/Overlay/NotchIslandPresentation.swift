@@ -102,6 +102,10 @@ struct NotchIslandMeetingContent: Equatable {
         var primaryTitle: String
         var secondaryTitle: String
         var tertiaryTitle: String?
+        /// Explicit action descriptions from the meeting prompt; nil uses the visible title.
+        var primaryAccessibilityLabel: String? = nil
+        var secondaryAccessibilityLabel: String? = nil
+        var tertiaryAccessibilityLabel: String? = nil
     }
 
     enum CallAudioNote: Equatable {

@@ -99,7 +99,7 @@ extension DictationSessionController {
             // Fast path — engine is ready right now. The actual CoreAudio start
             // still runs asynchronously so a slow device graph never blocks UI.
             enterPendingStartStage(.openingMicrophone)
-            overlayController.showStartingState(near: sourceApp, anchorRect: sessionAnchorRect)
+            overlayController.showStartingState(near: sourceApp)
             // The start click is queued before the mic start task, so it
             // doesn't wait on the microphone opening. The open starts in this
             // turn except for a borrowed meeting mic, the first start since
@@ -130,7 +130,7 @@ extension DictationSessionController {
                         let requestToRecordingMs = Int((CFAbsoluteTimeGetCurrent() - self.sessionStartTime) * 1000)
                         overlayController.state = .listening
                         if !overlayController.isVisible {
-                            overlayController.showPanel(near: sourceApp, anchorRect: self.sessionAnchorRect)
+                            overlayController.showPanel(near: sourceApp)
                         }
                         self.finishRecordingStart(appState: appState) {
                             appState.runtimeDiagnostics.recordSession(kind: "dictation", stage: "recording")
@@ -191,8 +191,7 @@ extension DictationSessionController {
                     isRecovering: appState.sttRouter.isRecovering,
                     inputFormatReady: appState.sttRouter.inputFormatReady,
                     startAttempts: 0
-                ),
-                anchorRect: sessionAnchorRect
+                )
             )
         }
         recordingStartRetryTask?.cancel()
@@ -248,8 +247,7 @@ extension DictationSessionController {
                         isRecovering: status.isRecovering,
                         inputFormatReady: status.inputFormatReady,
                         startAttempts: status.startAttempts
-                    ),
-                    anchorRect: self.sessionAnchorRect
+                    )
                 )
             },
             onRecordingStarted: { [weak self] in
@@ -277,41 +275,21 @@ extension DictationSessionController {
 
         case .timedOut(let info):
             let cleanupPlan = info.cleanupPlan
-            if !cleanupPlan.reportBeforeCleanup {
-                await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
-            }
             trackDictationStartFailed(
                 cleanupPlan.outcome,
                 extra: [
                     "start_attempt_bucket": AnalyticsReporter.countBucket(info.startAttempts)
                 ]
             )
-            if cleanupPlan.reportRuntimeStall {
-                appState.runtimeDiagnostics.recordStall(
-                    kind: "dictation",
-                    stage: cleanupPlan.outcome,
-                    durationSeconds: TranscriptedConstants.dictationRecoveryBudget,
-                    extra: dictationAnalyticsProperties(extra: [
-                        "failure_kind": cleanupPlan.outcome,
-                        "format_ready": "\(appState.sttRouter.inputFormatReady)",
-                        "forced_readiness_recoveries": "\(info.forcedReadinessRecoveries)",
-                        "readiness_refreshes": "\(info.readinessRefreshes)",
-                        "recovering": "\(appState.sttRouter.isRecovering)",
-                        "recovery_start_attempts": "\(info.recoveryStartAttempts)",
-                        "start_attempts": "\(info.startAttempts)",
-                        "trigger": currentDictationTrigger.rawValue,
-                    ])
-                )
-            }
-            if cleanupPlan.reportBeforeCleanup {
-                await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
-            }
+            // This outcome is always a microphone-start timeout. Keep its
+            // failure report ahead of cleanup, which may block on audio work.
+            await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
             overlayController.showError(
                 info.message,
                 actionTitle: "Try Again",
                 action: { [weak self] in
                     guard let self else { return }
-                    self.retryDictation(sourceApp: sourceApp, anchorRect: nil)
+                    self.retryDictation(sourceApp: sourceApp)
                 }
             )
         }
@@ -378,13 +356,13 @@ extension DictationSessionController {
                             )
                             return
                         }
-                        self.retryDictation(sourceApp: sourceApp, anchorRect: self.sessionAnchorRect)
+                        self.retryDictation(sourceApp: sourceApp)
                     }
                 case .denied, .restricted:
                     overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 case .authorized:
-                    self.retryDictation(sourceApp: sourceApp, anchorRect: self.sessionAnchorRect)
+                    self.retryDictation(sourceApp: sourceApp)
                 @unknown default:
                     overlayController.dismissError()
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
@@ -431,7 +409,7 @@ extension DictationSessionController {
                     "Dictation couldn't start: \(message)",
                     actionTitle: "Try Again",
                     action: { [weak self] in
-                        self?.retryDictation(sourceApp: sourceApp, anchorRect: self?.sessionAnchorRect)
+                        self?.retryDictation(sourceApp: sourceApp)
                     }
                 )
             case .timedOut:
@@ -448,7 +426,7 @@ extension DictationSessionController {
                     "The voice model is still warming up. Try again in a moment.",
                     actionTitle: "Try Again",
                     action: { [weak self] in
-                        self?.retryDictation(sourceApp: sourceApp, anchorRect: self?.sessionAnchorRect)
+                        self?.retryDictation(sourceApp: sourceApp)
                     }
                 )
             case .aborted:
@@ -474,8 +452,7 @@ extension DictationSessionController {
         )
         overlayController?.showLoadingState(
             near: sourceApp,
-            presentation: presentation,
-            anchorRect: sessionAnchorRect
+            presentation: presentation
         )
     }
 

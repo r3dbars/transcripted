@@ -79,7 +79,8 @@ python3 scripts/ops/release-watch.py --new <version> --old <previous version>
 ```
 
 It measures both versions over the same window, starting at the new version's
-`docs/appcast.xml` pubDate (or `--since <UTC time>`), release builds only.
+pubDate in the active release feed (`Info.plist` `SUFeedURL`, or a local
+`--appcast` snapshot; or `--since <UTC time>`), release builds only.
 The pubDate is written when the candidate is built, before it is tested and
 published, so pass `--since` with the GitHub release's publish time to keep
 release-candidate testing out of the new column. It

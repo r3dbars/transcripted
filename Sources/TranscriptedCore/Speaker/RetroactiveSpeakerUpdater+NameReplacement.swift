@@ -14,38 +14,93 @@ extension TranscriptSaver {
         transcriptId: UUID,
         currentDirectoryProvider: (@Sendable () -> URL?)? = nil
     ) -> URL? {
+        if case .resolved(let resolvedURL) = resolveTranscript(
+            url, transcriptId: transcriptId, currentDirectoryProvider: currentDirectoryProvider
+        ) {
+            return resolvedURL
+        }
+        return nil
+    }
+
+    /// Which step of the lookup missed. Coarse on purpose: each case maps to an
+    /// off-device failure code, so none may carry a path, filename or error text.
+    enum TranscriptLookupMiss: Equatable, Sendable {
+        /// The host named no current capture library (for example a custom
+        /// library that is offline).
+        case libraryUnavailable
+        /// A searched meetings folder could not be listed.
+        case folderUnreadable
+        /// A Markdown entry in a searched folder could not be inspected, so the
+        /// lookup cannot prove the stable id is unique.
+        case entryUnreadable
+        /// More than one transcript in a searched folder has this stable id.
+        case identityDuplicated
+        /// The matching transcript, or its folder, is not writable.
+        case notWritable
+        /// No transcript with this stable id is where the lookup may look.
+        case notFound
+
+        var failureReason: SpeakerFinalizationFailureReason {
+            switch self {
+            case .libraryUnavailable: return .transcriptLibraryUnavailable
+            case .folderUnreadable: return .transcriptFolderUnreadable
+            case .entryUnreadable: return .transcriptEntryUnreadable
+            case .identityDuplicated: return .transcriptIdentityDuplicated
+            case .notWritable: return .transcriptNotWritable
+            case .notFound: return .transcriptUnresolved
+            }
+        }
+    }
+
+    enum TranscriptResolution: Equatable, Sendable {
+        case resolved(URL)
+        case unresolved(TranscriptLookupMiss)
+    }
+
+    /// The same lookup as `resolveTranscriptURL`; a miss says which step failed.
+    static func resolveTranscript(
+        _ url: URL,
+        transcriptId: UUID,
+        currentDirectoryProvider: (@Sendable () -> URL?)? = nil
+    ) -> TranscriptResolution {
         if let currentDirectoryProvider {
             // The app can move or copy its capture library while this review is
             // open. Re-read its authority at each serialized save/publication.
-            guard let currentDirectory = currentDirectoryProvider() else { return nil }
+            guard let currentDirectory = currentDirectoryProvider() else { return .unresolved(.libraryUnavailable) }
             let isOriginalDirectory = currentDirectory.standardizedFileURL.resolvingSymlinksInPath()
                 == url.deletingLastPathComponent().standardizedFileURL.resolvingSymlinksInPath()
             if isOriginalDirectory, isRegularTranscript(url),
                let values = try? TranscriptFrontmatter.readValues(from: url),
                TranscriptFrontmatter.captureID(in: values) == transcriptId {
-                return isWritableTranscript(url) ? url : nil
+                return isWritableTranscript(url) ? .resolved(url) : .unresolved(.notWritable)
             }
             switch uniqueReviewTranscript(in: currentDirectory, transcriptId: transcriptId) {
             case .found(let currentURL):
-                return isWritableTranscript(currentURL) ? currentURL : nil
-            case .rejected:
+                return isWritableTranscript(currentURL) ? .resolved(currentURL) : .unresolved(.notWritable)
+            case .rejected(let miss):
                 // Never fall back to a stale original after an ambiguous or
                 // unavailable current lookup (including a read-only match).
-                return nil
+                return .unresolved(miss)
             case .missing:
-                guard !isOriginalDirectory else { return nil }
+                guard !isOriginalDirectory else { return .unresolved(.notFound) }
                 // Switch-without-copy leaves a pending review's capture in its
                 // original library. Only a complete, empty current lookup may
                 // fall back to that exact stable identity.
-                guard case .found(let originalURL) = uniqueReviewTranscript(
-                    in: url.deletingLastPathComponent(), transcriptId: transcriptId
-                ) else { return nil }
-                return isWritableTranscript(originalURL) ? originalURL : nil
+                switch uniqueReviewTranscript(in: url.deletingLastPathComponent(), transcriptId: transcriptId) {
+                case .found(let originalURL):
+                    return isWritableTranscript(originalURL) ? .resolved(originalURL) : .unresolved(.notWritable)
+                case .missing, .rejected(.folderUnreadable):
+                    // An original library that is gone (moved away or offline)
+                    // while the current one has no copy: nothing left to find.
+                    return .unresolved(.notFound)
+                case .rejected(let miss):
+                    return .unresolved(miss)
+                }
             }
         }
         if let frontmatter = try? TranscriptFrontmatter.readValues(from: url),
            TranscriptFrontmatter.captureID(in: frontmatter) == transcriptId {
-            return url
+            return .resolved(url)
         }
 
         let dir = url.deletingLastPathComponent()
@@ -54,7 +109,7 @@ extension TranscriptSaver {
                 "expected": url.lastPathComponent,
                 "transcriptId": transcriptId.uuidString
             ])
-            return nil
+            return .unresolved(.notFound)
         }
 
         let logicalResolvedURL = dir.appendingPathComponent(resolvedURL.lastPathComponent)
@@ -64,34 +119,31 @@ extension TranscriptSaver {
                 "to": logicalResolvedURL.lastPathComponent
             ])
         }
-        return logicalResolvedURL
+        return .resolved(logicalResolvedURL)
     }
 
     private enum ReviewTranscriptLookup {
         case found(URL)
         case missing
-        case rejected
+        case rejected(TranscriptLookupMiss)
     }
 
     /// Exactly one non-recursive directory, chosen by the host. A copied
     /// library is authoritative only when its stable identity is unambiguous.
     private static func uniqueReviewTranscript(in directory: URL, transcriptId: UUID) -> ReviewTranscriptLookup {
         guard FileManager.default.isReadableFile(atPath: directory.path),
-              let files = try? FileManager.default.contentsOfDirectory(
-                at: directory, includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey],
-                options: [.skipsHiddenFiles]
-              ) else { return .rejected }
+              let files = transcriptDirectoryContents(of: directory) else { return .rejected(.folderUnreadable) }
         var match: URL?
         for file in files where file.pathExtension.lowercased() == "md" {
             guard let properties = try? file.resourceValues(forKeys: [.isRegularFileKey, .isSymbolicLinkKey]) else {
-                return .rejected
+                return .rejected(.entryUnreadable)
             }
             guard properties.isRegularFile == true, properties.isSymbolicLink != true else { continue }
             let values: [String: String]?
             do { values = try TranscriptFrontmatter.readValues(from: file) }
-            catch { return .rejected }
+            catch { return .rejected(.entryUnreadable) }
             guard let values, TranscriptFrontmatter.captureID(in: values) == transcriptId else { continue }
-            guard match == nil else { return .rejected }
+            guard match == nil else { return .rejected(.identityDuplicated) }
             // Directory enumeration can canonicalize /var to /private/var.
             // Keep the host's logical library URL, as the legacy resolver does.
             match = directory.appendingPathComponent(file.lastPathComponent)
