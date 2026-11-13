@@ -348,6 +348,7 @@ PY_TEST_SUITES=(
     Tools/TranscriptedCompanion/test-package.py
     Tools/TranscriptedCompanion/test-launcher.py
     scripts/release/test-register-sentry-release.py
+    scripts/release/test-write-model-manifest.py
     scripts/release/test-mcp-publish-tools.py
     scripts/dev/test-live-claude-mod-tests.py
     scripts/dev/test-verify-receipts.py
@@ -393,12 +394,12 @@ unlisted_candidates() {
     local listed=" ${SELF_TEST_SCRIPTS[*]} ${PY_TEST_SUITES[*]} ${RB_TEST_SUITES[*]+${RB_TEST_SUITES[*]}} "
     {
         grep -l -- '"--self-test"' scripts/ops/*.py scripts/release/*.py 2>/dev/null
-        # lint_rules/ modules are run by lint.py; test-staged-sparkle-update.py is
-        # the hosted-CI Sparkle install harness, not a test suite.
+        # lint_rules/ contains modules exercised by lint.py, not standalone suites.
+        # The staged Sparkle script installs/relaunches an app; hosted CI owns it.
         find scripts \( -name 'test-*.py' -o -name 'test_*.py' -o -name '*-test.rb' -o -name '*_test.rb' -o -name 'test_*.rb' \) \
             ! -name 'test-matrix-checks.py' \
             ! -path 'scripts/dev/lint_rules/*' \
-            ! -name 'test-staged-sparkle-update.py' -print 2>/dev/null
+            ! -path 'scripts/release/test-staged-sparkle-update.py' -print 2>/dev/null
     } | sort -u | while IFS= read -r candidate; do
         case "$listed" in *" $candidate "*) ;; *) echo "$candidate" ;; esac
     done

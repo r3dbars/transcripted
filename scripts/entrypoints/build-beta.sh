@@ -1,7 +1,8 @@
 #!/bin/bash
 # Build Transcripted for beta distribution
-# Usage: ./build-beta.sh <beta-token> <user-name>
-# Example: ./build-beta.sh transcripted-beta-nate Nate
+# Usage: ./build-beta.sh --user-name <user-name>
+# Example: ./build-beta.sh --user-name Nate
+# Legacy [ignored-token [user-name]] arguments remain accepted.
 #
 # Prerequisites:
 # - Developer ID Application certificate installed
@@ -15,12 +16,8 @@ ENTRYPOINT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$ENTRYPOINT_DIR/../.." && pwd)"
 cd "$REPO_ROOT"
 
-BETA_TOKEN="${1:-}"
-USER_NAME="${2:-beta}"
-
-# BETA_TOKEN is retained as a positional arg for backwards-compatible invocations,
-# but it is no longer injected into the app binary — the app no longer has a beta
-# proxy client. Builds without a token are fine.
+source "$ENTRYPOINT_DIR/lib/beta-build-arguments.sh"
+parse_beta_build_arguments "$@"
 # Release guard: the lab control channel (#if TRANSCRIPTED_LAB_CONTROL) must
 # never ship. Refuse the lab flag here; the binary is checked after compile.
 if [ "${TRANSCRIPTED_LAB_BUILD:-0}" != "0" ]; then
@@ -51,10 +48,6 @@ SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || pri
 SENTRY_METADATA="$(python3 scripts/release/sentry-release-metadata.py --format shell Info.plist)"
 eval "$SENTRY_METADATA"
 
-if [ -n "$BETA_TOKEN" ]; then
-    echo "ℹ️  BETA_TOKEN passed but no longer injected into the binary. Continuing."
-fi
-
 if [ -z "$APP_VERSION" ]; then
     echo "❌ Could not read CFBundleShortVersionString from Info.plist"
     exit 1
@@ -65,7 +58,7 @@ if [ "$BUNDLE_PARAKEET_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" !
     echo "   Distribution builds bundle Parakeet by default so first launch does not"
     echo "   depend on a runtime model download."
     echo "   If you intentionally want a thin local test build, rerun with:"
-    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh --user-name <user-name>"
     exit 1
 fi
 
@@ -74,7 +67,7 @@ if [ "$BUNDLE_DIARIZER_MODELS" = "0" ] && [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" !
     echo "   Distribution builds bundle offline diarizer models by default so meetings"
     echo "   do not depend on a runtime model download."
     echo "   If you intentionally want a thin local test build, rerun with:"
-    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+    echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh --user-name <user-name>"
     exit 1
 fi
 
@@ -83,7 +76,7 @@ if [ "$BUNDLE_VOICEPRINT_MODEL" = "0" ] && [ "$REQUIRE_BUNDLED_VOICEPRINT_MODEL"
     echo "   Distribution builds bundle the ReDimNet2 voiceprint model by default so"
     echo "   meetings name people with it instead of the fallback voiceprint model."
     echo "   If you intentionally want a build without it, rerun with:"
-    echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>"
+    echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh --user-name <user-name>"
     exit 1
 fi
 
@@ -146,23 +139,6 @@ deps_build_stamp_info() {
     if [ -f "$DEPS_BUILD_STAMP" ]; then
         printf '%s\t%s\n' "$(stat -f '%m' "$DEPS_BUILD_STAMP")" "$DEPS_BUILD_STAMP"
     fi
-}
-
-mask_secret() {
-    local value="$1"
-
-    if [ -z "$value" ]; then
-        printf '%s' "[redacted]"
-        return
-    fi
-
-    local length=${#value}
-    if [ "$length" -le 6 ]; then
-        printf '%s' "[redacted]"
-        return
-    fi
-
-    printf '%s...%s' "${value:0:4}" "${value: -2}"
 }
 
 cleanup_swift_saved_temps() {
@@ -263,7 +239,7 @@ if [ -n "${newest_input_mtime:-}" ] && [ -n "${build_stamp_mtime:-}" ] && [ "$ne
     exit 1
 fi
 
-echo "🔨 Building Transcripted Beta for $USER_NAME (token: $(mask_secret "$BETA_TOKEN"))..."
+echo "🔨 Building Transcripted Beta for $USER_NAME..."
 echo "Sentry metadata: release=$SENTRY_RELEASE dist=$SENTRY_DIST"
 
 # Clean app bundle only (preserve previously built DMGs)
@@ -274,6 +250,10 @@ mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 mkdir -p "$APP_BUNDLE/Contents/Helpers"
+
+# Every model folder copied below is added here as "<id> <source> <bundled>";
+# write-model-manifest.py hashes the bundled copies after the last one.
+MODEL_MANIFEST_ARGS=()
 
 # Bundle the Parakeet CoreML directory used by FluidAudio 0.15.x at runtime.
 PARAKEET_MODELS_ROOT="$HOME/Library/Application Support/FluidAudio/Models"
@@ -292,6 +272,7 @@ elif [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ] && [ -d "$PARAKEET_SRC/JointDecisio
     mkdir -p "$(dirname "$PARAKEET_DEST")"
     rm -rf "$PARAKEET_DEST"
     ditto "$PARAKEET_SRC" "$PARAKEET_DEST"
+    MODEL_MANIFEST_ARGS+=(--model parakeet-tdt-0.6b-v3 "$PARAKEET_SRC" "$PARAKEET_DEST")
 else
     if [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" = "0" ]; then
         echo "⚠️  Parakeet models not found — proceeding because REQUIRE_BUNDLED_PARAKEET_MODELS=0"
@@ -301,7 +282,7 @@ else
         echo "   build-beta.sh now requires bundled Parakeet models by default so"
         echo "   distribution builds do not fall back to a runtime download on first launch."
         echo "   If you intentionally want a thin local test build, rerun with:"
-        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 bash build-beta.sh --user-name <user-name>"
         exit 1
     fi
 fi
@@ -327,6 +308,7 @@ elif [ -d "$DIARIZER_SRC/Segmentation.mlmodelc" ] \
     # is valid, so never ship a marker from a cache a pinned build wrote: it would
     # make the app try to delete files inside its own signed bundle.
     rm -f "$DIARIZER_RUNTIME_DIR/.fluidaudio-revision"
+    MODEL_MANIFEST_ARGS+=(--model offline-diarizer "$DIARIZER_SRC" "$DIARIZER_RUNTIME_DIR")
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
@@ -336,7 +318,7 @@ else
         echo "   build-beta.sh now requires bundled diarizer models by default so"
         echo "   distribution builds do not fall back to a runtime download on first meeting."
         echo "   If you intentionally want a thin local test build, rerun with:"
-        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh <beta-token> <user-name>"
+        echo "   REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 bash build-beta.sh --user-name <user-name>"
         exit 1
     fi
 fi
@@ -359,6 +341,7 @@ elif [ -f "$NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE/coremldata.bin" ]
     mkdir -p "$NEMOTRON_DEST"
     ditto "$NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE" "$NEMOTRON_DEST/$NEMOTRON_PRESET_BUNDLE"
     cp "$NEMOTRON_SRC/learnable_sil_emb.bin" "$NEMOTRON_DEST/learnable_sil_emb.bin"
+    MODEL_MANIFEST_ARGS+=(--model nemotron-3-diarizer "$NEMOTRON_SRC" "$NEMOTRON_DEST")
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Nemotron diarizer not cached — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
@@ -383,6 +366,7 @@ if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.m
     mkdir -p "$ERES2NET_DEST"
     rm -rf "$ERES2NET_DEST/Model.mlmodelc"
     ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
+    MODEL_MANIFEST_ARGS+=(--model eres2net-embedding "$ERES2NET_SRC" "$ERES2NET_DEST")
 else
     echo "ℹ️  ERes2Net model not bundled (default; VoxCeleb2 research-only license)."
 fi
@@ -403,6 +387,7 @@ elif voiceprint_problems="$(voiceprint_model_problems "$VOICEPRINT_MODEL_CACHE")
     rm -rf "$VOICEPRINT_MODEL_DEST"
     mkdir -p "$VOICEPRINT_MODEL_DEST"
     ditto "$VOICEPRINT_MODEL_CACHE" "$VOICEPRINT_MODEL_DEST/Model.mlmodelc"
+    MODEL_MANIFEST_ARGS+=(--model redimnet2-b4-voiceprint "$VOICEPRINT_MODEL_CACHE_DIR" "$VOICEPRINT_MODEL_DEST")
 else
     if [ "$REQUIRE_BUNDLED_VOICEPRINT_MODEL" = "0" ]; then
         echo "⚠️  ReDimNet2 voiceprint model not usable — proceeding because REQUIRE_BUNDLED_VOICEPRINT_MODEL=0"
@@ -415,9 +400,21 @@ else
         echo "   distribution builds do not fall back to the previous voiceprint model."
         echo "   Install it with: bash scripts/models/redimnet2/install.sh"
         echo "   If you intentionally want a build without it, rerun with:"
-        echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>"
+        echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh --user-name <user-name>"
         exit 1
     fi
+fi
+
+# Record what was bundled: per-file SHA-256 plus whatever upstream revision the
+# cache kept (THIRD_PARTY_LICENSES.md notes the copy step records none itself).
+# Written next to the app, not inside it, so the signed bundle is unchanged.
+MODEL_MANIFEST="$BUILD_DIR/$APP_NAME-model-manifest.json"
+rm -f "$MODEL_MANIFEST"
+if [ "${#MODEL_MANIFEST_ARGS[@]}" -gt 0 ]; then
+    /usr/bin/python3 "$REPO_ROOT/scripts/release/write-model-manifest.py" \
+        --app "$APP_BUNDLE" --output "$MODEL_MANIFEST" "${MODEL_MANIFEST_ARGS[@]}"
+else
+    echo "ℹ️  No models bundled; no model manifest written."
 fi
 
 # Copy Info.plist
@@ -597,7 +594,7 @@ elif [[ "$SIGNING_DISPLAY_NAME" == Developer\ ID* ]]; then
     if [ -z "$NOTARY_PROFILE" ]; then
         echo "❌ NOTARY_PROFILE is not set."
         echo "   Store credentials with: xcrun notarytool store-credentials <profile-name> ..."
-        echo "   Then run: NOTARY_PROFILE=<profile-name> ./build-beta.sh <beta-token> <user-name>"
+        echo "   Then run: NOTARY_PROFILE=<profile-name> ./build-beta.sh --user-name <user-name>"
         exit 1
     fi
 

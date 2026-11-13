@@ -164,16 +164,26 @@ final class TranscriptIndexTests: XCTestCase {
             ("system_0", 15.0, 20.0, "Notes in parentheses stay searchable"),
             ("mic_0", 20.0, 25.0, "The test wildcard case"),
         ])
-        try writeFixture(fixture, filename: "Call_2026-03-29_10-00-00", to: tempDir)
+        let filename = "Call_2026-03-29_10-00-00"
+        try writeFixture(fixture, filename: filename, to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        // FTS5 operators and punctuation in a query are treated as plain words.
-        // A query that became an FTS5 syntax error would come back empty, so each
-        // one must still find the meeting whose utterance carries those words.
-        let queries = ["C++", "\"quoted phrase\"", "AND OR NEAR", "(parentheses)", "test*wildcard"]
-        for query in queries {
-            let result = try index.searchUtterances(query: query, speaker: nil, dateFrom: nil, dateTo: nil)
-            XCTAssertEqual(result.results.map(\.filename), ["Call_2026-03-29_10-00-00"], "query: \(query)")
+        // Search punctuation and FTS operators as text, and return the matching utterance.
+        let cases = [
+            ("C++", "The C++ implementation is ready"),
+            ("\"quoted phrase\"", "Search for the quoted phrase here"),
+            ("AND OR NEAR", "Words like and or near are plain text"),
+            ("(parentheses)", "Notes in parentheses stay searchable"),
+            ("test*wildcard", "The test wildcard case"),
+        ]
+        for (query, expectedText) in cases {
+            let result = try index.searchUtterances(
+                query: query, speaker: nil, dateFrom: nil, dateTo: nil
+            )
+            XCTAssertEqual(result.results.map(\.filename), [filename], "Query: \(query)")
+            XCTAssertEqual(
+                result.results.flatMap(\.snippets).map(\.text), [expectedText], "Query: \(query)"
+            )
         }
     }
 

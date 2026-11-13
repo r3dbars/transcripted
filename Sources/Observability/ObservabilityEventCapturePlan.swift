@@ -37,7 +37,8 @@ struct ObservabilityEventCapturePlan {
         timestamp: String,
         appVersion: String,
         osVersion: String,
-        forwardToSentry: Bool = true
+        forwardToSentry: Bool = true,
+        permissions: [String: String] = TelemetryContext.permissions()
     ) -> ObservabilityEventCapturePlan {
         // Merge caller context with live engine state
         var mergedContext = context ?? [:]
@@ -56,7 +57,9 @@ struct ObservabilityEventCapturePlan {
             mergedContext["build_revision"] = AnalyticsRuntimeConfiguration.buildRevision(infoDictionary: infoDictionary)
         }
 
-        mergedContext = TelemetryContext.enrich(event: event, properties: mergedContext, isFailure: level == .error)
+        mergedContext = TelemetryContext.enrich(
+            event: event, properties: mergedContext, isFailure: level == .error, environment: permissions
+        )
         let entry = ObservabilityEvent(
             timestamp: timestamp,
             level: level.rawValue,

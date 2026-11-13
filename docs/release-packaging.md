@@ -29,9 +29,10 @@ swift scripts/release/generate-dmg-background.swift
 the built-in Finder-layout fallback, so polished install windows no longer
 depend on `create-dmg` being present just to avoid a blank DMG.
 
-`build-beta.sh` still accepts a positional beta-token argument for
-backwards-compatible invocations, but the value is no longer injected into the
-binary — the app no longer has a beta proxy client. The packaged
+Use `build-beta.sh --user-name <user-name>` to name a local build. The legacy
+`build-beta.sh <ignored-token> <user-name>` shape remains accepted, but its first
+argument is discarded without printing it; a lone legacy argument still selects
+the default `beta` name. The app no longer has a beta proxy client. The packaged
 release archive is versioned from `Info.plist`, so published artifacts keep the
 stable `Transcripted-<version>.dmg` name expected by Sparkle and Homebrew.
 The same `Info.plist` metadata also drives Sentry release reporting:
@@ -131,7 +132,7 @@ To force a specific certificate for either build flow:
 
 ```bash
 SIGN_IDENTITY=<sha-or-name-fragment> bash build.sh --no-open
-SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh <beta-token> <user-name>
+SIGNING_IDENTITY=<sha-or-name-fragment> bash build-beta.sh --user-name <user-name>
 ```
 
 `build-beta.sh` bundles Parakeet, the offline (pyannote/WeSpeaker) diarizer,
@@ -163,16 +164,35 @@ update the pins (and upload a new ReDimNet2 asset under a new tag) in the same
 PR. On any Mac you can fill a cache with
 `bash scripts/release/provision-release-models.sh "$HOME/Library/Application Support/FluidAudio/Models"`.
 
+After copying the models, `build-beta.sh` writes
+`build/Transcripted-model-manifest.json` next to the app (not inside it, so the
+signed bundle doesn't change) and prints a one-line summary per model. For each
+bundled model it records the id, the source cache folder's name, the path inside
+the app, the SHA-256 and size of every copied file, and the upstream revision
+the cache kept, if any: `.fluidaudio-revision`, `.fluidaudio-nemotron3-weights`,
+a `provenance.json` snapshot, or Hugging Face download metadata. When the cache
+has none, the manifest says `null` instead of guessing; that's the gap the
+licensing notes flag. A `provenance.json` with per-file hashes is also checked
+against the bundled bytes and the counts land in the manifest. The step fails
+the build if a bundled model folder is missing or empty. The script is
+`scripts/release/write-model-manifest.py`; its fixture test is
+`python3 scripts/release/test-write-model-manifest.py`, also run by the Linux
+CI checks. Release Candidate carries the manifest from the unsigned build
+into the verification job, which retains it in the final candidate artifact
+beside the DMG and debug symbols. This transfer does not recompute the model
+hashes from the signed DMG. Keep the manifest with the release's build artifacts
+when you need to show what shipped.
+
 If you deliberately want a thin local test artifact, make every opt-out explicit:
 
 ```bash
-REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>
+REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh --user-name <user-name>
 ```
 
 For a thin packaging smoke that also skips notarization, keep every opt-out visible:
 
 ```bash
-SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>
+SKIP_NOTARIZATION=1 REQUIRE_BUNDLED_PARAKEET_MODELS=0 BUNDLE_PARAKEET_MODELS=0 REQUIRE_BUNDLED_DIARIZER_MODELS=0 BUNDLE_DIARIZER_MODELS=0 REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh --user-name <user-name>
 ```
 
 After `build-beta.sh` succeeds, run the packaged app smoke described below
@@ -254,8 +274,10 @@ local `build-beta.sh` only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
 
 1. Branch off `origin/main` and run
    `python3 scripts/release/bump-release-version.py --version <version>`. The
-   branch must differ from main only by that `Info.plist` bump; the workflow
-   checks.
+   branch must differ from main only by the two files it writes, `Info.plist`
+   and the generated `Tools/TranscriptedMCP/Sources/TranscriptedMCP/BuildVersion.swift`
+   (the version the bundled `transcripted-mcp` helper reports). Commit both;
+   the workflow checks the path list and runs `bump-release-version.py --check`.
 2. `gh workflow run release-candidate.yml --ref main -f source_ref=<branch> -f version=<version>`,
    then approve the `release` environment deployment. Always dispatch with
    `--ref main`: the signing secrets live in the main-only `release`
@@ -292,7 +314,7 @@ profile:
 
 ```bash
 bash build-deps.sh --force
-NOTARY_PROFILE=<profile-name> bash build-beta.sh <beta-token> <user-name>
+NOTARY_PROFILE=<profile-name> bash build-beta.sh --user-name <user-name>
 ```
 
 Before you publish a user-facing release note, sanity-check the release state:
@@ -410,7 +432,7 @@ Gatekeeper rejection or “developer cannot be verified” block.
 For a dry run that still validates the signed app and DMG assembly:
 
 ```bash
-SKIP_NOTARIZATION=1 bash build-beta.sh <beta-token> <user-name>
+SKIP_NOTARIZATION=1 bash build-beta.sh --user-name <user-name>
 ```
 
 For an unattended local smoke without Finder automation, add

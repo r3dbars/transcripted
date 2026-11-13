@@ -370,10 +370,10 @@ public struct RawContinuationPrompt: Equatable, Sendable {
     }
 
     /// Renders the classified scene into the prompt shape the plan
-    /// specifies per mode, then truncates to whatever budget is left —
-    /// truncation only ever bites when the field text has already claimed
-    /// most of `maxContextCharacters`, since `ScreenScene` itself already
-    /// caps turns/snippets well under `maxSceneContextCharacters`.
+    /// specifies per mode, within the scene's share of the shared budget.
+    /// `ScreenScene` caps raw turn/snippet text, while JSON quoting and
+    /// secret scrubbing can expand the rendered text. The rendered block
+    /// must still fit its budget, including its header and trailer.
     ///
     /// OCR'd screen text is untrusted the same way pasted or typed text is:
     /// it can contain a card number, an API key, a JWT sitting in a log

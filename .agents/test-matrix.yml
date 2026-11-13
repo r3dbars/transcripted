@@ -46,6 +46,14 @@ rules:
       - "python3 scripts/dev/test-live-claude-mod.py"
 
   - paths:
+      - "scripts/entrypoints/build-beta.sh"
+      - "scripts/entrypoints/lib/beta-build-arguments.sh"
+      - "Tests/BuildDependencies/BetaBuildArgumentsTests.py"
+    checks:
+      - "bash -n scripts/entrypoints/lib/beta-build-arguments.sh"
+      - "python3 Tests/BuildDependencies/BetaBuildArgumentsTests.py"
+
+  - paths:
       - "scripts/dev/bench-launch-latency.sh"
       - "scripts/dev/verify-change.sh"
       - "scripts/dev/test-verify-receipts.py"
@@ -156,6 +164,14 @@ rules:
       - "bash Tests/BuildDependencies/CLIPackagingTests.sh"
       - "bash -n Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
       - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
+
+  - paths:
+      - "scripts/release/write-model-manifest.py"
+      - "scripts/release/test-write-model-manifest.py"
+      - "scripts/entrypoints/build-beta.sh"
+    checks:
+      - "python3 scripts/release/test-write-model-manifest.py"
+      - "bash -n scripts/entrypoints/build-beta.sh"
 
   - paths:
       - "scripts/release/generate-sparkle-appcast.sh"

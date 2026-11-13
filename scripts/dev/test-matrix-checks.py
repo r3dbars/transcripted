@@ -233,6 +233,58 @@ def self_test(matrix_path: Path) -> None:
         selected = forbidden_checks.intersection(select_checks(rules, [changed_path]))
         if selected:
             raise AssertionError(f"{changed_path} must not select: {sorted(selected)}")
+    # Each independently named owner must schedule both guard commands. Include
+    # a future Settings extension to protect the wildcard, not just today's files.
+    guard_checks = {
+        "python3 scripts/dev/check-banned-calls.py --self-test",
+        "python3 scripts/dev/check-banned-calls.py",
+    }
+    guard_owners = (
+        "Sources/Speech/ParakeetEngine.swift",
+        "Sources/Observability/EventFileWriter.swift",
+        "Sources/TranscriptedCore/Logging/FileLogger.swift",
+        "Sources/TranscriptedCore/Speaker/TranscriptFrontmatterScanner.swift",
+        "Sources/App/TranscriptedSupportActions.swift",
+        "Sources/App/TranscriptedApp.swift",
+        "Sources/App/TranscriptedMenuCommands.swift",
+        "Sources/UI/Settings/TranscriptedSettingsView.swift",
+        "Sources/UI/Settings/TranscriptedSettingsView+Future.swift",
+        "Sources/UI/Settings/TranscriptedSettingsFallbackView.swift",
+        "Sources/UI/Settings/PermissionsOnboardingView.swift",
+        "Sources/UI/Settings/AgentConnectionSettingsPage.swift",
+        "Sources/UI/Settings/HomeMeetingAudioPlayer.swift",
+        "scripts/dev/check-banned-calls.py",
+    )
+    for owner in guard_owners:
+        actual = select_checks(rules, [owner])
+        assert guard_checks.issubset(actual), f"{owner} must select both banned-call checks"
+        assert len(actual) == len(set(actual)), f"{owner} selected duplicate commands"
+    # The scorecard's registry, implementation and fixture inputs all schedule
+    # the actual scorer regression suite; similar unrelated paths do not.
+    scorecard_check = "python3 scripts/ops/test-score-boards.py"
+    scorecard_inputs = (
+        ".agents/board-scorecard.yml",
+        "scripts/ops/score-boards.py",
+        "scripts/ops/score_boards_lib.py",
+        "scripts/ops/score-detection.py",
+        "scripts/ops/score-diarization.py",
+        "scripts/ops/score-dictation.py",
+        "scripts/ops/score-summary-judge.py",
+        "scripts/ops/test-score-boards.py",
+        "scripts/ops/fixtures/board-scorecard/diarization-sample.json",
+        "scripts/ops/fixtures/board-scorecard/dictation-corrections.json",
+        "scripts/ops/fixtures/board-scorecard/meeting-detection.json",
+        "scripts/ops/fixtures/board-scorecard/future/nested.json",
+    )
+    for changed_path in scorecard_inputs:
+        actual = select_checks(rules, [changed_path])
+        assert actual.count(scorecard_check) == 1, f"{changed_path} must select the scorecard suite exactly once"
+    for unrelated_path in (
+        ".agents/board-scorecard.yml.backup",
+        "scripts/ops/score-boards-notes.py",
+        "scripts/ops/fixtures/another-scorecard/fixture.json",
+    ):
+        assert scorecard_check not in select_checks(rules, [unrelated_path]), unrelated_path
 
     if select_checks(rules, ["unmapped.file"]):
         raise AssertionError("an unmapped path unexpectedly selected checks")

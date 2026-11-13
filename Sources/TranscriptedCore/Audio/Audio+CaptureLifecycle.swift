@@ -353,8 +353,11 @@ extension Audio {
         // Use the original mic URL (set at recording start), not the potentially-overwritten
         // recovery URL. Device recovery creates a new WAV segment but the original file
         // contains the bulk of the recording.
-        let primaryMicURL = originalMicAudioFileURL ?? micAudioFileURL
-        let micSegmentsSnapshot = self.micSegments
+        // Locked read: a start publishing its mic file either lands before
+        // this (and Stop owns that file) or sees the advanced generation.
+        let startedMicFiles = snapshotStartedMicFiles()
+        let primaryMicURL = startedMicFiles.primaryURL ?? micAudioFileURL
+        let micSegmentsSnapshot = startedMicFiles.segments
         // A system setup still in flight treats this Stop as abandonment.
         // Claim the resolved file so that cleanup cannot delete a WAV this
         // Stop hands off; it gets nil if cleanup committed to deleting first.
