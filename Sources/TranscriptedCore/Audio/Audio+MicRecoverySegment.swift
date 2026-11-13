@@ -60,14 +60,10 @@ extension Audio {
         }
 
         AppLogger.audioMic.warning("Closing current mic file and creating recovery segment")
-        // Close explicitly so the retiring segment's WAV header is finalized
-        // before the merger can ever read it. Even same-rate device switches
-        // need a new segment so the missing-buffer interval can be padded.
-        switch micAudioFileQueue.sync(execute: {
-            micAudioFileOwnership.retireWriterForRecovery(by: sessionGeneration)
-        }) {
-        case .retired(let retiringWriter):
-            retiringWriter.close()
+        // Even same-rate device switches need a new segment so the
+        // missing-buffer interval can be padded.
+        switch retireMicWriterForRecovery(sessionGeneration: sessionGeneration) {
+        case .retired:
             micRecoveryGapAnchor = lastMicBufferTime
         case .alreadyRetired:
             // An earlier attempt closed the last segment and then failed.
@@ -163,6 +159,24 @@ extension Audio {
             throw MicRecoverySegmentAbandoned()
         }
         return MicRecoverySegmentStart(url: fileURL, writeContext: micWriteContext)
+    }
+
+    /// Detaches the writer a recovery is replacing and closes it in the same
+    /// mic-file-queue block. Stop's writer close and the segment merge run
+    /// behind that queue, so a Stop that lands right after retirement can
+    /// never read the retired segment with its WAV header still unpatched.
+    func retireMicWriterForRecovery(
+        sessionGeneration: UInt64
+    ) -> MicWriterOwnership<AVAudioFile>.RecoveryRetirement {
+        let retirement = micAudioFileQueue.sync {
+            let retirement = micAudioFileOwnership.retireWriterForRecovery(by: sessionGeneration)
+            if case .retired(let retiringWriter) = retirement {
+                retiringWriter.close()
+            }
+            return retirement
+        }
+        afterMicRecoveryWriterRetiredForTesting?()
+        return retirement
     }
 
     /// Runs when a recovery attempt ends. Removes a segment the attempt did
