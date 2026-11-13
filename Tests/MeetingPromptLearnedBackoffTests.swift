@@ -67,6 +67,17 @@ func testMeetingPromptLearnedBackoff() {
         assertNil(backoff.quietUntil(for: unverified, now: start.addingTimeInterval(31 * minute)), "the first quiet window ends after 30 minutes")
     }
 
+    runSuite("MeetingPromptLearnedBackoff — ending a call's quiet keeps its streak") {
+        let backoff = MeetingPromptLearnedBackoff()
+        backoff.recordDismissal(kind: zoom, now: start)
+        let callEnd = start.addingTimeInterval(10 * minute)
+        backoff.endQuiet(kind: zoom, by: callEnd)
+        assertNil(backoff.quietUntil(for: zoom, now: callEnd.addingTimeInterval(1)), "the quiet ends with the call it covered")
+        assertEqual(backoff.dismissStreak(for: zoom, now: callEnd), 1, "the Not now still counts toward the streak")
+        backoff.endQuiet(kind: zoom, by: start.addingTimeInterval(8 * hour))
+        assertNil(backoff.quietUntil(for: zoom, now: callEnd.addingTimeInterval(1)), "ending the quiet never lengthens it")
+    }
+
     runSuite("MeetingPromptLearnedBackoff — Record resets the streak and the quiet") {
         let backoff = MeetingPromptLearnedBackoff()
         backoff.recordDismissal(kind: zoom, now: start)

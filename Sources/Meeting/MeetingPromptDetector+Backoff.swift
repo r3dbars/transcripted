@@ -13,7 +13,76 @@ extension MeetingPromptDetector {
         detectedCallSession?.userDeclined = true
         dismissStreaks[candidate.provider, default: 0] += 1
         let decision = dismiss(candidate: candidate, interval: nil)
-        return applyLearnedDismissal(candidate: candidate, decision: decision)
+        let result = applyLearnedDismissal(candidate: candidate, decision: decision)
+        // A native call app holding the mic is a real call with clear edges:
+        // Not now means "not this call". Its quiet (the provider-wide one, the
+        // learned one) holds until the call ends, then the next call prompts.
+        if candidate.callEvidence == .nativeApp, let kind = candidate.learnedBackoffKind {
+            let now = Date()
+            let notNow = NativeNotNow(
+                provider: candidate.provider,
+                kind: kind,
+                candidateReason: cooldownReasons[candidate.id],
+                providerReason: runtimeSuppressionReasons[candidate.provider],
+                declinedAt: now
+            )
+            if detectedCallSession?.providers.contains(candidate.provider) == true {
+                detectedCallSession?.nativeNotNows[candidate.id] = notNow
+            } else {
+                // The prompt outlived its call (the countdown keeps running
+                // after hang-up): the call is already over, so cut now.
+                nativeNotNowCallEnded([candidate.id: notNow], now: now)
+            }
+        }
+        return result
+    }
+
+    /// The call a native Not now covered has ended. Cut that Not now's quiet
+    /// to `recordedCallEndGrace` (a mic flap at hang-up stays quiet) and
+    /// re-check then. Quiet something else wrote since (a calendar Not now,
+    /// a Record) keeps its own window.
+    func nativeNotNowCallEnded(_ notNows: [String: NativeNotNow], now: Date) {
+        guard !notNows.isEmpty else { return }
+        let until = now.addingTimeInterval(recordedCallEndGrace)
+        var ended = endedNativeNotNowCall.flatMap { $0.graceEndsAt > now ? $0 : nil }
+            ?? EndedNativeNotNowCall(notNows: [:], graceEndsAt: until)
+        ended.notNows.merge(notNows) { _, newer in newer }
+        ended.graceEndsAt = max(ended.graceEndsAt, until)
+        endedNativeNotNowCall = ended
+        for (id, notNow) in notNows {
+            if notNow.candidateReason != nil, cooldownReasons[id] == notNow.candidateReason {
+                if let current = snoozedUntil[id], current > until { snoozedUntil[id] = until }
+                if let current = pendingUntil[id], current > until { pendingUntil[id] = until }
+            }
+            if notNow.providerReason != nil,
+               runtimeSuppressionReasons[notNow.provider] == notNow.providerReason,
+               let current = runtimeSuppressedUntil[notNow.provider], current > until {
+                runtimeSuppressedUntil[notNow.provider] = until
+            }
+            learnedBackoff.endQuiet(kind: notNow.kind, by: until)
+        }
+        scheduleQuietEndRecheck(at: until, now: now)
+    }
+
+    /// A detected-call session is starting. If a call with a native Not now
+    /// ended within the grace and this one is the same provider, it's that
+    /// call coming back after a signal gap (AirPods connecting restart the
+    /// app's audio): it stays declined, and its end cuts the quiet again.
+    func carryOverEndedNativeNotNows(into session: inout DetectedCallSession, now: Date) {
+        guard var ended = endedNativeNotNowCall else { return }
+        guard ended.graceEndsAt > now else {
+            endedNativeNotNowCall = nil
+            return
+        }
+        let carried = ended.notNows.filter { session.providers.contains($0.value.provider) }
+        guard !carried.isEmpty else { return }
+        for (id, notNow) in carried {
+            session.nativeNotNows[id] = notNow
+            session.declinedKinds[notNow.kind] = notNow.declinedAt
+            ended.notNows[id] = nil
+        }
+        session.userDeclined = true
+        endedNativeNotNowCall = ended.notNows.isEmpty ? nil : ended
     }
 
     /// Feeds an explicit Not now on an ad-hoc prompt into the persisted
@@ -348,6 +417,12 @@ extension MeetingPromptDetector {
             }
         }
         recordSelectedAdHocCandidateIDs.removeAll()
+        scheduleQuietEndRecheck(at: until, now: now)
+    }
+
+    /// Re-evaluates once a cut quiet window ends, so a call already going on
+    /// then still prompts without waiting for the next signal change.
+    private func scheduleQuietEndRecheck(at until: Date, now: Date) {
         recordedCallQuietEndTask?.cancel()
         recordedCallQuietEndTask = nil
         let delay = until.timeIntervalSince(now)

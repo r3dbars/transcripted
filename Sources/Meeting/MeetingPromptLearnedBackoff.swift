@@ -122,6 +122,15 @@ final class MeetingPromptLearnedBackoff {
         return until
     }
 
+    /// The call a Not now was about has ended: its quiet window ends by
+    /// `until`. The streak stays, so the next Not now still counts as a repeat.
+    func endQuiet(kind: String, by until: Date) {
+        guard var entry = entries[kind], let current = entry.quietUntil, current > until else { return }
+        entry.quietUntil = until
+        entries[kind] = entry
+        persist()
+    }
+
     /// The user recorded this kind of call (from the prompt, or by starting a
     /// meeting while it was going on). Clears the streak and any quiet window.
     func recordAccepted(kind: String, now: Date) {

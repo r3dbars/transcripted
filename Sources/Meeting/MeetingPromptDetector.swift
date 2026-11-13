@@ -243,6 +243,11 @@ final class MeetingPromptDetector {
     var recordedCallQuietCutPending = false
     var recordedCallEndGrace: TimeInterval = MeetingPromptHeuristics.recordedCallEndGrace
     var recordedCallQuietEndTask: Task<Void, Never>?
+    // A call with a native Not now ended and its quiet was cut to the grace.
+    // A session for the same provider that starts before the grace ends is
+    // the same call coming back (a device switch restarts the app's audio),
+    // so it inherits the decline (`carryOverEndedNativeNotNows`).
+    var endedNativeNotNowCall: EndedNativeNotNowCall?
     // One suppression event per candidate + reason per window. It was 90s,
     // which re-sent the same "still snoozed" event every poll for the whole
     // call and made suppressions most of the prompt event volume.
@@ -343,6 +348,7 @@ final class MeetingPromptDetector {
         browserEvidenceRecheckAt = nil
         recordedCallQuietEndTask?.cancel()
         recordedCallQuietEndTask = nil
+        endedNativeNotNowCall = nil
         endBrowserMicSession()
         for observer in workspaceObservers {
             NSWorkspace.shared.notificationCenter.removeObserver(observer)
