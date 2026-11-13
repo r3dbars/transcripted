@@ -113,6 +113,13 @@ extension MeetingPromptDetector {
         /// candidate id. Their quiet covers this call only, so the end of the
         /// call lifts it (`nativeNotNowCallEnded`).
         var nativeNotNows: [String: NativeNotNow] = [:]
+        // A signal gap can carry a decline into a new session, but cannot
+        // extend the original quiet window or count as a fresh user answer.
+        var inheritedNativeDeclinesUntil: [String: Date] = [:]
+
+        func hasActiveUserDecline(at now: Date) -> Bool {
+            userDeclined || inheritedNativeDeclinesUntil.values.contains { $0 > now }
+        }
     }
 
     /// What a Not now to a native call prompt quieted, and under which
@@ -125,6 +132,7 @@ extension MeetingPromptDetector {
         /// When the user said Not now, so a carried-over decline keeps the
         /// original `declinedThisCallLimit` clock.
         let declinedAt: Date
+        let quietUntil: Date
     }
 
     /// Native Not nows from a call that just ended, kept until its grace ends.
@@ -207,7 +215,7 @@ extension MeetingPromptDetector {
             if !session.autoStartDeclinedProviders.isEmpty {
                 clearPromptPendingWindows(for: session)
             }
-            if session.sawMeetingRecording || session.userDeclined || !session.autoStartDeclinedProviders.isEmpty {
+            if session.sawMeetingRecording || session.hasActiveUserDecline(at: now) || !session.autoStartDeclinedProviders.isEmpty {
                 autoStartBlockedUntil = now.addingTimeInterval(MeetingAutoRecordPolicy.autoStartBlockAfterCall)
             }
             detectedCallSession = nil
@@ -273,7 +281,7 @@ extension MeetingPromptDetector {
                     promptOutcome: MeetingPromptCallTelemetry.promptOutcome(
                         promptShown: session.promptShown,
                         wasRecorded: session.sawMeetingRecording,
-                        userDeclined: session.userDeclined
+                        userDeclined: session.hasActiveUserDecline(at: endedAt)
                     ),
                     signalKinds: MeetingPromptCallTelemetry.signalKinds(
                         micSeen: session.seenReasons.contains(.micInput),
@@ -297,7 +305,7 @@ extension MeetingPromptDetector {
         guard MissedCallNudgePolicy.shouldNudge(
             duration: duration,
             sawMeetingRecording: session.sawMeetingRecording,
-            userDeclined: session.userDeclined,
+            userDeclined: session.hasActiveUserDecline(at: endedAt),
             lastNudgeAt: lastMissedCallNudgeAt,
             now: endedAt
         ) else { return }
@@ -360,7 +368,9 @@ extension MeetingPromptDetector {
             }
 
             if let learned = learnedSuppression(for: candidate, now: now) {
-                detectedCallSession?.learnedQuietSeen = true
+                if learned.reason == .learnedQuiet {
+                    detectedCallSession?.learnedQuietSeen = true
+                }
                 recordSuppression(
                     candidate: candidate,
                     reason: learned.reason,
@@ -499,7 +509,7 @@ extension MeetingPromptDetector {
     func isAutoStartBlockedThisCall(now: Date) -> Bool {
         if let until = autoStartBlockedUntil, until > now { return true }
         guard let session = detectedCallSession else { return false }
-        if session.userDeclined || !session.autoStartDeclinedProviders.isEmpty { return true }
+        if session.hasActiveUserDecline(at: now) || !session.autoStartDeclinedProviders.isEmpty { return true }
         return session.sawMeetingRecording && currentOwnCaptureActivity() != .meetingRecording
     }
 

@@ -243,6 +243,7 @@ final class MeetingPromptDetector {
     var recordedCallQuietCutPending = false
     var recordedCallEndGrace: TimeInterval = MeetingPromptHeuristics.recordedCallEndGrace
     var recordedCallQuietEndTask: Task<Void, Never>?
+    var recordedCallQuietEndAt: Date?
     // A call with a native Not now ended and its quiet was cut to the grace.
     // A session for the same provider that starts before the grace ends is
     // the same call coming back (a device switch restarts the app's audio),
@@ -348,6 +349,7 @@ final class MeetingPromptDetector {
         browserEvidenceRecheckAt = nil
         recordedCallQuietEndTask?.cancel()
         recordedCallQuietEndTask = nil
+        recordedCallQuietEndAt = nil
         endedNativeNotNowCall = nil
         endBrowserMicSession()
         for observer in workspaceObservers {

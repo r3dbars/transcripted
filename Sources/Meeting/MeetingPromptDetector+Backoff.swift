@@ -24,7 +24,8 @@ extension MeetingPromptDetector {
                 kind: kind,
                 candidateReason: cooldownReasons[candidate.id],
                 providerReason: runtimeSuppressionReasons[candidate.provider],
-                declinedAt: now
+                declinedAt: now,
+                quietUntil: result.until
             )
             if detectedCallSession?.providers.contains(candidate.provider) == true {
                 detectedCallSession?.nativeNotNows[candidate.id] = notNow
@@ -74,14 +75,17 @@ extension MeetingPromptDetector {
             endedNativeNotNowCall = nil
             return
         }
-        let carried = ended.notNows.filter { session.providers.contains($0.value.provider) }
+        let carried = ended.notNows.filter {
+            session.providers.contains($0.value.provider) && $0.value.quietUntil > now
+        }
         guard !carried.isEmpty else { return }
         for (id, notNow) in carried {
             session.nativeNotNows[id] = notNow
             session.declinedKinds[notNow.kind] = notNow.declinedAt
+            session.inheritedNativeDeclinesUntil[notNow.kind] = notNow.quietUntil
+            scheduleQuietEndRecheck(at: notNow.quietUntil, now: now)
             ended.notNows[id] = nil
         }
-        session.userDeclined = true
         endedNativeNotNowCall = ended.notNows.isEmpty ? nil : ended
     }
 
@@ -103,6 +107,7 @@ extension MeetingPromptDetector {
             : [kind]
         for declinedKind in declined {
             detectedCallSession?.declinedKinds[declinedKind] = now
+            detectedCallSession?.inheritedNativeDeclinesUntil[declinedKind] = nil
         }
         if declined.count > 1 {
             // Also on the browser session, which outlives a muted Safari
@@ -423,14 +428,18 @@ extension MeetingPromptDetector {
     /// Re-evaluates once a cut quiet window ends, so a call already going on
     /// then still prompts without waiting for the next signal change.
     private func scheduleQuietEndRecheck(at until: Date, now: Date) {
+        if let scheduled = recordedCallQuietEndAt, scheduled <= until { return }
         recordedCallQuietEndTask?.cancel()
         recordedCallQuietEndTask = nil
+        recordedCallQuietEndAt = nil
         let delay = until.timeIntervalSince(now)
         guard delay > 0 else { return }
+        recordedCallQuietEndAt = until
         recordedCallQuietEndTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             self.recordedCallQuietEndTask = nil
+            self.recordedCallQuietEndAt = nil
             self.scheduleEvaluation()
         }
     }
@@ -450,7 +459,8 @@ extension MeetingPromptDetector {
     ) -> (reason: MeetingPromptSuppressionReason, cooldownReason: String)? {
         guard let kind = candidate.learnedBackoffKind else { return nil }
         if let declinedAt = detectedCallSession?.declinedKinds[kind] ?? browserTitles?.declinedKinds[kind],
-           now.timeIntervalSince(declinedAt) < declinedThisCallLimit {
+           now.timeIntervalSince(declinedAt) < declinedThisCallLimit,
+           (detectedCallSession?.inheritedNativeDeclinesUntil[kind] ?? .distantFuture) > now {
             return (.declinedThisCall, MeetingPromptSuppressionReason.declinedThisCall.rawValue)
         }
         // Turning a kind off for good needs the titles: without them a real
