@@ -1,7 +1,10 @@
 # DEAD-CODE-12: duplicate microphone-monitor compatibility shim
 
+> Historical record, written against main `8a38235`. Since then #2476 landed
+> (`d0ecd3d2f`) and the shim file is gone. See `docs/expanded-117-integration.md`.
+
 DEAD-CODE-12 and SUPPORT-2 identify the same obsolete compatibility file,
-`ZoomMicrophoneSharingMonitor.swift`. Its removal is proposed in
+the `ZoomMicrophoneSharingMonitor` shim source. Its removal is proposed in
 [PR #2476](https://github.com/r3dbars/transcripted/pull/2476), at commit
 `d0ecd3d2f52866ac40224beb1349664d623e87e1`, based on audited main
 `8a38235eef00816a79daa1324387a21ef880204d`. SUPPORT-2 remains its primary ID.
