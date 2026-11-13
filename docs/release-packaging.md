@@ -175,8 +175,12 @@ licensing notes flag. A `provenance.json` with per-file hashes is also checked
 against the bundled bytes and the counts land in the manifest. The step fails
 the build if a bundled model folder is missing or empty. The script is
 `scripts/release/write-model-manifest.py`; its fixture test is
-`python3 scripts/release/test-write-model-manifest.py`. Keep the manifest with
-the release's build artifacts when you need to show what shipped.
+`python3 scripts/release/test-write-model-manifest.py`, also run by the Linux
+CI checks. Release Candidate carries the manifest from the unsigned build
+into the verification job, which retains it in the final candidate artifact
+beside the DMG and debug symbols. This transfer does not recompute the model
+hashes from the signed DMG. Keep the manifest with the release's build artifacts
+when you need to show what shipped.
 
 If you deliberately want a thin local test artifact, make every opt-out explicit:
 

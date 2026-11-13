@@ -348,6 +348,7 @@ PY_TEST_SUITES=(
     Tools/TranscriptedCompanion/test-package.py
     Tools/TranscriptedCompanion/test-launcher.py
     scripts/release/test-register-sentry-release.py
+    scripts/release/test-write-model-manifest.py
     scripts/release/test-mcp-publish-tools.py
     scripts/dev/test-live-claude-mod-tests.py
     scripts/dev/test-verify-receipts.py
