@@ -254,8 +254,10 @@ local `build-beta.sh` only makes un-notarized test DMGs (`SKIP_NOTARIZATION=1`).
 
 1. Branch off `origin/main` and run
    `python3 scripts/release/bump-release-version.py --version <version>`. The
-   branch must differ from main only by that `Info.plist` bump; the workflow
-   checks.
+   branch must differ from main only by the two files it writes, `Info.plist`
+   and the generated `Tools/TranscriptedMCP/Sources/TranscriptedMCP/BuildVersion.swift`
+   (the version the bundled `transcripted-mcp` helper reports). Commit both;
+   the workflow checks the path list and runs `bump-release-version.py --check`.
 2. `gh workflow run release-candidate.yml --ref main -f source_ref=<branch> -f version=<version>`,
    then approve the `release` environment deployment. Always dispatch with
    `--ref main`: the signing secrets live in the main-only `release`
