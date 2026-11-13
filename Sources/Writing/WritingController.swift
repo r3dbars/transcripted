@@ -659,8 +659,8 @@ final class WritingController {
     // MARK: - Keyboard
 
     /// Install or update, register, and until the keyboard was selected
-    /// once, try the enable and select. Every result lands in the state
-    /// above and the app log. Never opens System Settings: the Writing tab
+    /// once, try the enable and select. Results are recorded in the app log.
+    /// Never opens System Settings: the Writing tab
     /// shows the guidance and its button does that.
     private func installKeyboard() {
         Task { @MainActor [weak self] in
