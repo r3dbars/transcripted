@@ -420,6 +420,9 @@ microphone/screen/accessibility permission booleans. Session and correlation IDs
 must be app-generated UUIDs. Missing route observations are explicitly `unknown`;
 a missing observation is not evidence of a healthy route or a denied permission.
 Screen permission reflects the app's cached System Audio Recording grant.
+Permission values come from an in-memory snapshot read off the main thread,
+so they can trail a change made in System Settings by a few seconds, and they
+are `unknown` (not `false`) on events sent before the first read finishes.
 
 Failure, friction, and health events also carry `failure_kind` and `failure_stage`.
 Health snapshots always carry `quality_reason` and `capture_outcome`; cancelled
