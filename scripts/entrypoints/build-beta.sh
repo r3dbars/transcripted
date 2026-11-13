@@ -275,6 +275,10 @@ mkdir -p "$APP_BUNDLE/Contents/Resources"
 mkdir -p "$APP_BUNDLE/Contents/Frameworks"
 mkdir -p "$APP_BUNDLE/Contents/Helpers"
 
+# Every model folder copied below is added here as "<id> <source> <bundled>";
+# write-model-manifest.py hashes the bundled copies after the last one.
+MODEL_MANIFEST_ARGS=()
+
 # Bundle the Parakeet CoreML directory used by FluidAudio 0.15.x at runtime.
 PARAKEET_MODELS_ROOT="$HOME/Library/Application Support/FluidAudio/Models"
 PARAKEET_MODEL_DIR="parakeet-tdt-0.6b-v3"
@@ -292,6 +296,7 @@ elif [ -d "$PARAKEET_SRC/Encoder.mlmodelc" ] && [ -d "$PARAKEET_SRC/JointDecisio
     mkdir -p "$(dirname "$PARAKEET_DEST")"
     rm -rf "$PARAKEET_DEST"
     ditto "$PARAKEET_SRC" "$PARAKEET_DEST"
+    MODEL_MANIFEST_ARGS+=(--model parakeet-tdt-0.6b-v3 "$PARAKEET_SRC" "$PARAKEET_DEST")
 else
     if [ "$REQUIRE_BUNDLED_PARAKEET_MODELS" = "0" ]; then
         echo "⚠️  Parakeet models not found — proceeding because REQUIRE_BUNDLED_PARAKEET_MODELS=0"
@@ -327,6 +332,7 @@ elif [ -d "$DIARIZER_SRC/Segmentation.mlmodelc" ] \
     # is valid, so never ship a marker from a cache a pinned build wrote: it would
     # make the app try to delete files inside its own signed bundle.
     rm -f "$DIARIZER_RUNTIME_DIR/.fluidaudio-revision"
+    MODEL_MANIFEST_ARGS+=(--model offline-diarizer "$DIARIZER_SRC" "$DIARIZER_RUNTIME_DIR")
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Offline diarizer models not found — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
@@ -359,6 +365,7 @@ elif [ -f "$NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE/coremldata.bin" ]
     mkdir -p "$NEMOTRON_DEST"
     ditto "$NEMOTRON_SRC/monolithic/v2/$NEMOTRON_PRESET_BUNDLE" "$NEMOTRON_DEST/$NEMOTRON_PRESET_BUNDLE"
     cp "$NEMOTRON_SRC/learnable_sil_emb.bin" "$NEMOTRON_DEST/learnable_sil_emb.bin"
+    MODEL_MANIFEST_ARGS+=(--model nemotron-3-diarizer "$NEMOTRON_SRC" "$NEMOTRON_DEST")
 else
     if [ "$REQUIRE_BUNDLED_DIARIZER_MODELS" = "0" ]; then
         echo "⚠️  Nemotron diarizer not cached — proceeding because REQUIRE_BUNDLED_DIARIZER_MODELS=0"
@@ -383,6 +390,7 @@ if [ "${TRANSCRIPTED_BUNDLE_ERES2NET:-0}" = "1" ] && [ -d "$ERES2NET_SRC/Model.m
     mkdir -p "$ERES2NET_DEST"
     rm -rf "$ERES2NET_DEST/Model.mlmodelc"
     ditto "$ERES2NET_SRC/Model.mlmodelc" "$ERES2NET_DEST/Model.mlmodelc"
+    MODEL_MANIFEST_ARGS+=(--model eres2net-embedding "$ERES2NET_SRC" "$ERES2NET_DEST")
 else
     echo "ℹ️  ERes2Net model not bundled (default; VoxCeleb2 research-only license)."
 fi
@@ -403,6 +411,7 @@ elif voiceprint_problems="$(voiceprint_model_problems "$VOICEPRINT_MODEL_CACHE")
     rm -rf "$VOICEPRINT_MODEL_DEST"
     mkdir -p "$VOICEPRINT_MODEL_DEST"
     ditto "$VOICEPRINT_MODEL_CACHE" "$VOICEPRINT_MODEL_DEST/Model.mlmodelc"
+    MODEL_MANIFEST_ARGS+=(--model redimnet2-b4-voiceprint "$VOICEPRINT_MODEL_CACHE_DIR" "$VOICEPRINT_MODEL_DEST")
 else
     if [ "$REQUIRE_BUNDLED_VOICEPRINT_MODEL" = "0" ]; then
         echo "⚠️  ReDimNet2 voiceprint model not usable — proceeding because REQUIRE_BUNDLED_VOICEPRINT_MODEL=0"
@@ -418,6 +427,18 @@ else
         echo "   REQUIRE_BUNDLED_VOICEPRINT_MODEL=0 BUNDLE_VOICEPRINT_MODEL=0 bash build-beta.sh <beta-token> <user-name>"
         exit 1
     fi
+fi
+
+# Record what was bundled: per-file SHA-256 plus whatever upstream revision the
+# cache kept (THIRD_PARTY_LICENSES.md notes the copy step records none itself).
+# Written next to the app, not inside it, so the signed bundle is unchanged.
+MODEL_MANIFEST="$BUILD_DIR/$APP_NAME-model-manifest.json"
+rm -f "$MODEL_MANIFEST"
+if [ "${#MODEL_MANIFEST_ARGS[@]}" -gt 0 ]; then
+    /usr/bin/python3 "$REPO_ROOT/scripts/release/write-model-manifest.py" \
+        --app "$APP_BUNDLE" --output "$MODEL_MANIFEST" "${MODEL_MANIFEST_ARGS[@]}"
+else
+    echo "ℹ️  No models bundled; no model manifest written."
 fi
 
 # Copy Info.plist
