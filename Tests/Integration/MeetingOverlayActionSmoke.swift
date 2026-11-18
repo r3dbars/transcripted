@@ -43,6 +43,18 @@ enum MeetingOverlayActionSmoke {
             }
             return nil
         }
+        func renderPrompt(_ expected: MeetingIslandPromptIdentity, line: UInt = #line) async {
+            // Combine schedules the session and warning changes separately.
+            for _ in 0..<20 {
+                await drain()
+                if overlay.islandContent().prompt?.identity == expected {
+                    render()
+                    return
+                }
+            }
+            failures.append("Expected meeting prompt did not render at line \(line)")
+            render()
+        }
         func click(_ button: NSButton?, line: UInt = #line) {
             guard let button, let action = button.action else {
                 failures.append("Missing rendered control in MeetingOverlayActionSmoke.swift at line \(line)")
@@ -53,9 +65,11 @@ enum MeetingOverlayActionSmoke {
 
         overlay.setup(meetingSession: session)
         view.onAction = overlay.handleIslandAction
+        await drain()
         let firstID = UUID()
         session.activeRecordingIdentity = firstID
         session.transition(to: .recording, reason: "overlay_smoke")
+        await drain()
         let start = Date()
         let event = MeetingPromptDetector.Candidate(id: "fixture", title: "Meeting", detail: "",
             provider: .teams, reason: .calendarNearby, source: .calendarEvent, startDate: start,
@@ -65,26 +79,25 @@ enum MeetingOverlayActionSmoke {
             splitRequests += 1
             return false // Exercise admission without starting another capture.
         }
-        session.meetingSplitOffer = MeetingSplitOffer(recordingIdentity: firstID, candidate: event)
-        await drain()
-        render()
+        let firstOffer = MeetingSplitOffer(recordingIdentity: firstID, candidate: event)
+        session.meetingSplitOffer = firstOffer
+        await renderPrompt(.split(firstOffer))
         // Keep the drop alive too. Its weak forwarding closure must run, so a
         // deallocated view cannot make a broken stale-action test pass.
         let oldSplit = button("Split", in: view)
         let originalDrop = drop(containing: oldSplit)
         let oldKeep = button("Keep recording", in: view)
         session.meetingSplitOffer = nil
-        session.meetingSplitOffer = MeetingSplitOffer(recordingIdentity: firstID, candidate: event)
-        let replacement = session.meetingSplitOffer
-        await drain()
-        render()
+        let replacement = MeetingSplitOffer(recordingIdentity: firstID, candidate: event)
+        session.meetingSplitOffer = replacement
+        await renderPrompt(.split(replacement))
         expect(originalDrop !== drop(containing: button("Split", in: view)), "Identical-copy replacement needs fresh controls")
         withExtendedLifetime(originalDrop) {
             click(oldSplit)
             click(oldKeep)
         }
         await drain()
-        expect(replacement != nil && session.meetingSplitOffer == replacement, "Replacement offer survived both stale buttons")
+        expect(session.meetingSplitOffer == replacement, "Replacement offer survived both stale buttons")
         expect(splitRequests == 0, "Stale Split never reached acceptance")
         click(button("Split", in: view))
         await drain()
@@ -140,8 +153,7 @@ enum MeetingOverlayActionSmoke {
         }
         let first = observe(.failed)
         expect(observe(.failed) == first, "Refreshing a failure preserved its occurrence")
-        await drain()
-        render()
+        await renderPrompt(.systemAudio(session.activeRecordingIdentity!, first))
         let firstStop = button("Stop", in: view)
         let firstContinue = button("Continue", in: view)
         let firstDrop = drop(containing: firstStop)
@@ -150,7 +162,7 @@ enum MeetingOverlayActionSmoke {
         let degraded = observe(.failed)
         await drain()
         expect(session.isRecording, "Queued warning Stop preserved the next equal-copy failure")
-        render()
+        await renderPrompt(.systemAudio(session.activeRecordingIdentity!, degraded))
         expect(firstDrop !== drop(containing: button("Stop", in: view)), "A recurring failure replaced its controls")
         withExtendedLifetime(firstDrop) {
             click(firstStop)
@@ -178,7 +190,7 @@ enum MeetingOverlayActionSmoke {
             if timer != nil { for await _ in started.stream {} }
             return (timer, gate.continuation)
         }
-        render()
+        await renderPrompt(.systemAudio(recoveredID, recoveredAgain))
         let oldOK = button("OK", in: view)
         let recoveredDrop = drop(containing: oldOK)
         let (oldTimer, resumeOldTimer) = await suspendedTimer(for: recoveredAgain)
@@ -186,8 +198,7 @@ enum MeetingOverlayActionSmoke {
         let latestRecovery = observe(.healthy)
         resumeOldTimer.finish()
         await oldTimer?.value
-        await drain()
-        render()
+        await renderPrompt(.systemAudio(recoveredID, latestRecovery))
         withExtendedLifetime(recoveredDrop) { click(oldOK) }
         expect(oldTimer != nil && session.systemAudioDegradationWarning == latestRecovery,
                "Suspended timer and retained OK preserved the recurring recovery")
@@ -201,24 +212,22 @@ enum MeetingOverlayActionSmoke {
         expect(session.systemAudioDegradationWarning?.isPromptDismissed == true, "Current timer dismissed recovered warning")
         session.systemAudioDegradationWarning = nil
         session.audioRouteWarning = .switchFailed
-        await drain()
-        render()
+        await renderPrompt(.route(session.activeRecordingIdentity!, .switchFailed))
         click(button("Stop", in: view))
         session.audioRouteWarning = .builtInUnavailable
         await drain()
         expect(session.isRecording, "Dispatched route Stop rechecked the warning")
         session.audioRouteWarning = nil
-        session.audioInactivityWarning = .init(inactiveDuration: 300, countdownSeconds: 12)
-        await drain()
-        render()
+        let inactivity = MeetingAudioInactivityWarning(inactiveDuration: 300, countdownSeconds: 12)
+        session.audioInactivityWarning = inactivity
+        await renderPrompt(.inactivity(session.activeRecordingIdentity!, inactivity))
         click(button("Stop", in: view))
         session.activeRecordingIdentity = UUID()
         await drain()
         expect(session.isRecording, "Dispatched inactivity Stop rechecked the recording")
         session.audioInactivityWarning = nil
         session.systemAudioDegradationWarning = degraded
-        await drain()
-        render()
+        await renderPrompt(.systemAudio(session.activeRecordingIdentity!, degraded))
         click(button("Stop", in: view))
         await drain()
         expect(!session.isRecording, "Current warning Stop ended the fixture recording")
