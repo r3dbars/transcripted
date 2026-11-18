@@ -1,13 +1,13 @@
 import AppKit
 import SwiftUI
 
-/// Settings' Agent page. Reads as a connection state, not a feature list: one
-/// status line up top, then a plain row per detected agent that still needs a
-/// Connect click. A connected agent collapses into the status line instead of
-/// keeping its own row — the page should look empty once everything's wired
-/// up. Every row points the agent's own config at the same installed
-/// `transcripted-mcp` helper; the universal copy-prompt row covers everything
-/// else. The long tail (folders) lives behind Advanced; the Codex inbox
+/// Settings' Agent page, connecting first: one status line, then a row per
+/// detected agent (connected ones stay listed with a check), the universal
+/// copy-prompt row, and Get Claude Desktop when it isn't installed. The
+/// ChatGPT companion card follows, then the capture folders behind Folders.
+/// Every row points the agent's own config at the same installed
+/// `transcripted-mcp` helper. There is no Disconnect: the connector has no
+/// safe way to remove its entry from an agent's config yet. The Codex inbox
 /// automation stays implemented but off the view tree (see
 /// `codexInboxDetails`).
 struct AgentConnectionSettingsPage: View {
@@ -34,16 +34,22 @@ struct AgentConnectionSettingsPage: View {
     @State private var codexInboxSetupError: String?
     @State private var codexInboxSetupErrorDetails: String?
     @State private var showAdvancedAgentSetup = false
+    /// False until the first detection pass finishes, so the empty state
+    /// doesn't flash "No agents found" while it's still looking.
+    @State private var hasLoadedAgentStates = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             SettingsPageIntro(
                 title: "Agent",
-                summary: "Give your AI tools access to your meetings and dictations."
+                summary: "Let your AI tools read your meetings, dictations and writing."
             )
+            VStack(alignment: .leading, spacing: 10) {
+                statusLine
+                agentListSection
+            }
+            .frame(maxWidth: 620, alignment: .leading)
             CompanionSettingsCard()
-            statusLine
-            agentListSection
             advancedSection
         }
         .accessibilityElement(children: .contain)
@@ -56,9 +62,10 @@ struct AgentConnectionSettingsPage: View {
     private var statusLine: some View {
         HStack(spacing: 8) {
             if connectedAgents.isEmpty {
-                Text("Not connected yet — pick your agent below.")
+                Text(emptyStatusText)
                     .font(LibraryTokens.body)
                     .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 // Connected is fine, not live: neutral ink.
                 Circle()
@@ -71,6 +78,14 @@ struct AgentConnectionSettingsPage: View {
             }
         }
         .accessibilityElement(children: .combine)
+    }
+
+    private var emptyStatusText: String {
+        guard hasLoadedAgentStates else { return "Looking for agents on this Mac…" }
+        if detectedAgents.isEmpty {
+            return "No agents found on this Mac. Copy the prompt into any chat, or get Claude Desktop."
+        }
+        return "Pick one to connect."
     }
 
     /// "Connected · <first agent> reads your meetings and dictations", naming
@@ -101,28 +116,18 @@ struct AgentConnectionSettingsPage: View {
                 }
             }
 
-            copyPromptRow
-
-            if !detectedAgents.contains(.claudeDesktop) {
+            if hasLoadedAgentStates, !detectedAgents.contains(.claudeDesktop) {
                 getClaudeDesktopRow
             }
+
+            copyPromptRow
         }
     }
 
-    /// A connected agent collapses into the status line and stops rendering
-    /// its own row — unless it still has something the user needs to act on
-    /// (a failed retry, a config-repair notice that dropped their other MCP
-    /// servers and must stay visible, or a connect that just finished and
-    /// still needs the agent restarted before its first question works).
+    /// Every detected agent keeps its row; connected ones show a check, so
+    /// you can see what's wired up.
     private func shouldShowRow(for agent: AgentMCPAgent) -> Bool {
-        guard detectedAgents.contains(agent) else { return false }
-        guard connectedAgents.contains(agent) else { return true }
-        switch rowPhases[agent] ?? .idle {
-        case .failed, .connected:
-            return true
-        case .idle, .connecting:
-            return configRepairNotices[agent] != nil
-        }
+        detectedAgents.contains(agent)
     }
 
     private func agentRow(_ agent: AgentMCPAgent) -> some View {
@@ -132,7 +137,7 @@ struct AgentConnectionSettingsPage: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: agentSymbol(agent))
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(TextRole.body.font(weight: .semibold))
                     .foregroundStyle(LibraryTokens.ink2)
                     .frame(width: 20, alignment: .center)
 
@@ -149,12 +154,14 @@ struct AgentConnectionSettingsPage: View {
                 Spacer(minLength: 12)
 
                 if isConnected, phase != .connecting {
-                    Text("Connected")
+                    Label("Connected", systemImage: "checkmark")
+                        .labelStyle(.titleAndIcon)
                         .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
+                        .accessibilityIdentifier("transcripted.settings.agent.connected.\(agent.rawValue)")
                 } else {
                     SettingsInlineActionButton(
-                        title: phase == .connecting ? "Connecting..." : "Connect",
+                        title: phase == .connecting ? "Connecting…" : "Connect",
                         symbolName: phase == .connecting ? "hourglass" : "link",
                         tone: .accent,
                         automationIdentifier: "transcripted.settings.agent.connect.\(agent.rawValue)"
@@ -194,7 +201,7 @@ struct AgentConnectionSettingsPage: View {
     private var copyPromptRow: some View {
         HStack(alignment: .center, spacing: 12) {
             Image(systemName: "ellipsis.circle")
-                .font(.system(size: 14, weight: .semibold))
+                .font(TextRole.body.font(weight: .semibold))
                 .foregroundStyle(LibraryTokens.ink2)
                 .frame(width: 20, alignment: .center)
 
@@ -202,7 +209,7 @@ struct AgentConnectionSettingsPage: View {
                 Text("Something else")
                     .font(LibraryTokens.rowTitle)
 
-                Text("Windsurf, Zed, web chats — paste one prompt.")
+                Text("Any other app or chat: paste one prompt.")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink2)
                     .lineLimit(1)
@@ -236,21 +243,36 @@ struct AgentConnectionSettingsPage: View {
         .libraryRowDivider()
     }
 
+    /// Claude Desktop isn't installed: listed like the others, with Get in
+    /// place of Connect.
     private var getClaudeDesktopRow: some View {
-        Button {
-            openClaudeDesktopDownload()
-        } label: {
-            HStack(spacing: 6) {
-                Text("Get Claude Desktop")
-                    .font(LibraryTokens.body)
-                    .foregroundStyle(LibraryTokens.ink)
-                Spacer(minLength: 0)
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: agentSymbol(.claudeDesktop))
+                .font(TextRole.body.font(weight: .semibold))
+                .foregroundStyle(LibraryTokens.ink2)
+                .frame(width: 20, alignment: .center)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(AgentMCPAgent.claudeDesktop.displayName)
+                    .font(LibraryTokens.rowTitle)
+                Text("Not on this Mac")
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .lineLimit(1)
             }
-            .frame(minHeight: LibraryTokens.minimumHitTarget)
-            .contentShape(Rectangle())
+
+            Spacer(minLength: 12)
+
+            SettingsInlineActionButton(
+                title: "Get",
+                symbolName: "arrow.down.circle",
+                automationIdentifier: "transcripted.settings.agent.get-claude-desktop"
+            ) {
+                openClaudeDesktopDownload()
+            }
         }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier("transcripted.settings.agent.get-claude-desktop")
+        .padding(.vertical, 10)
+        .libraryRowDivider()
     }
 
     private func agentSymbol(_ agent: AgentMCPAgent) -> String {
@@ -263,11 +285,8 @@ struct AgentConnectionSettingsPage: View {
     }
 
     private func agentRowDetail(_ agent: AgentMCPAgent, isConnected: Bool, phase: RowPhase) -> String {
-        // A running agent only loads the new tools when it starts, so the
-        // first question after Connect fails until it's restarted.
-        if phase == .connected {
-            return "Restart \(agent.displayName) to finish connecting."
-        }
+        // Just connected: the status line already says to restart, so the
+        // row only names what kind of app it is.
         if isConnected && phase == .idle {
             switch agent {
             case .claudeDesktop:
@@ -276,15 +295,23 @@ struct AgentConnectionSettingsPage: View {
                 return "Restart \(agent.displayName) if it's running."
             }
         }
-        return agent.detail
+        return agentKind(agent)
+    }
+
+    /// Plain words for what each agent is ("Terminal", not "CLI").
+    private func agentKind(_ agent: AgentMCPAgent) -> String {
+        switch agent {
+        case .claudeDesktop: return "Desktop app"
+        case .claudeCode: return "Terminal"
+        case .codex: return "App and terminal"
+        case .cursor: return "Editor"
+        }
     }
 
     // MARK: - Advanced
 
     private var advancedSection: some View {
         VStack(alignment: .leading, spacing: 10) {
-            LibrarySectionLabel(text: "Advanced")
-
             AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
                 folderDetails
             }
@@ -295,7 +322,6 @@ struct AgentConnectionSettingsPage: View {
         VStack(alignment: .leading, spacing: 14) {
             AgentFolderRow(
                 name: "Meetings",
-                detail: "Meeting Markdown files.",
                 path: meetingsFolderURL.path,
                 isAvailable: folderExists(meetingsFolderURL)
             ) {
@@ -303,8 +329,7 @@ struct AgentConnectionSettingsPage: View {
             }
 
             AgentFolderRow(
-                name: "Dictation",
-                detail: "Dictation Markdown files.",
+                name: "Dictations",
                 path: dictationsFolderURL.path,
                 isAvailable: folderExists(dictationsFolderURL)
             ) {
@@ -313,7 +338,6 @@ struct AgentConnectionSettingsPage: View {
 
             AgentFolderRow(
                 name: "Writing",
-                detail: "Writing Markdown files.",
                 path: writingFolderURL.path,
                 isAvailable: folderExists(writingFolderURL)
             ) {
@@ -321,7 +345,7 @@ struct AgentConnectionSettingsPage: View {
             }
 
             SettingsInlineActionButton(
-                title: copiedFolderPaths ? "Copied" : "Copy Paths",
+                title: copiedFolderPaths ? "Copied" : "Copy folder paths",
                 symbolName: "folder",
                 automationIdentifier: "transcripted.settings.agent.copy-folder-paths"
             ) {
@@ -395,6 +419,7 @@ struct AgentConnectionSettingsPage: View {
             // the user clearly has the agent if its config points at us.
             detectedAgents = states.detected.union(states.connected)
             connectedAgents = states.connected
+            hasLoadedAgentStates = true
             // Fresh on-disk state supersedes stale per-row phases (e.g. an
             // old failure message); only in-flight connects survive.
             rowPhases = rowPhases.filter { $0.value == .connecting }
@@ -421,8 +446,8 @@ struct AgentConnectionSettingsPage: View {
                 Button(AgentSetupFailureCopy.detailsTitle) {
                     copyText(details)
                 }
-                .buttonStyle(.link)
-                .font(LibraryTokens.meta)
+                .buttonStyle(.transcriptedQuiet)
+                .controlSize(.small)
                 .accessibilityIdentifier(detailsAutomationIdentifier)
             }
         }
@@ -511,7 +536,10 @@ struct AgentConnectionSettingsPage: View {
                     // An unreadable config was backed up and replaced — that
                     // dropped the user's other MCP servers, so say so instead
                     // of reporting a clean "Connected".
-                    configRepairNotices[agent] = AgentMCPConnector.replacedConfigNotice(for: agent, backupURL: backupURL)
+                    configRepairNotices[agent] = AgentSetupFailureCopy.replacedSettingsFile(
+                        agentName: agent.displayName,
+                        backupFilename: backupURL.lastPathComponent
+                    )
                 }
                 AgentSetupLifecycleTelemetry.track(
                     agentTarget: lifecycleTarget,

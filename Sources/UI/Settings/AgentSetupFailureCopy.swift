@@ -16,7 +16,13 @@ enum AgentSetupFailureCopy {
     static let detailsTitle = "Copy Details"
 
     static func connect(agentName: String) -> String {
-        "Transcripted couldn't connect \(agentName). Check that it's installed and not already running, then try Connect again."
+        "Transcripted couldn't connect \(agentName). Check that \(agentName) is installed, then try Connect again."
+    }
+
+    /// When an agent's settings file couldn't be read: it was saved aside and
+    /// replaced, which dropped any other tools the user had added there.
+    static func replacedSettingsFile(agentName: String, backupFilename: String) -> String {
+        "\(agentName)'s settings file couldn't be read, so Transcripted saved a copy (\(backupFilename)) and started fresh. Other tools you'd added there may need adding again."
     }
 
     static let codexInbox =

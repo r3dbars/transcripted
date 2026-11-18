@@ -17,6 +17,8 @@ extension View {
     }
 }
 
+/// The Agent page's Folders disclosure: where the Markdown files live, for
+/// pointing an agent at them by hand.
 struct AgentSetupDetailsDisclosure<Content: View>: View {
     @Binding var isExpanded: Bool
     // Stored as a closure so collapsed renders never build the content (its
@@ -38,88 +40,71 @@ struct AgentSetupDetailsDisclosure<Content: View>: View {
                     isExpanded.toggle()
                 }
             } label: {
-                HStack(spacing: 10) {
+                HStack(spacing: 6) {
+                    Text("Folders")
+                        .font(LibraryTokens.rowTitle)
+                        .foregroundStyle(LibraryTokens.ink)
                     Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundStyle(.secondary)
+                        .font(TextRole.small.font(weight: .semibold))
+                        .foregroundStyle(LibraryTokens.ink3)
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                        .frame(width: 16, height: 16)
-
-                    Text("Show setup details")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.primary)
-
-                    Spacer(minLength: 12)
-
-                    Text(isExpanded ? "Hide" : "Show")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 0)
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .frame(maxWidth: .infinity, minHeight: LibraryTokens.minimumHitTarget, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(SettingsHoverButtonStyle(
-                tone: .neutral,
-                cornerRadius: 8,
-                normalFill: Color.primary.opacity(0.018),
-                normalStroke: Color.primary.opacity(0.07),
-                hoverFill: Color.primary.opacity(0.04),
-                pressedFill: Color.primary.opacity(0.06),
-                hoverStroke: Color.primary.opacity(0.12)
-            ))
-            .accessibilityLabel(Text("Show setup details"))
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text("Folders"))
             .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
-            .accessibilityHint(Text(isExpanded ? "Hide advanced agent setup details" : "Show advanced agent setup details"))
+            .accessibilityHint(Text(isExpanded ? "Hide the capture folders" : "Show the capture folders"))
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 14) {
                     content()
                 }
-                .padding(.top, 14)
+                .padding(.top, 6)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
+        .frame(maxWidth: 620, alignment: .leading)
     }
 }
 
 struct AgentFolderRow: View {
     let name: String
-    let detail: String
     let path: String
     let isAvailable: Bool
     let action: () -> Void
 
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 8) {
                     Text(name)
-                        .font(.subheadline.weight(.semibold))
+                        .font(LibraryTokens.rowTitle)
 
                     if !isAvailable {
                         Text("Not written yet")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(LibraryTokens.attention)
+                            .font(LibraryTokens.small)
+                            .foregroundStyle(LibraryTokens.ink3)
                     }
                 }
 
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                Text(path)
-                    .font(.system(.caption2, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                // Home-relative, so it reads as a place, not a file path dump.
+                Text((path as NSString).abbreviatingWithTildeInPath)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
                     .textSelection(.enabled)
+                    .help(path)
             }
 
             Spacer(minLength: 12)
 
-            SettingsInlineActionButton(title: "Reveal", action: action)
+            SettingsInlineActionButton(title: "Show in Finder", action: action)
                 .disabled(!isAvailable)
-                .help(isAvailable ? "" : "This location hasn't been created yet.")
+                .help(isAvailable ? "" : "This folder hasn't been created yet.")
         }
     }
 }

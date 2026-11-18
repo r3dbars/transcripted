@@ -104,15 +104,16 @@ enum AgentConnectionGuide {
         agentSkillsFolder.appendingPathComponent(skill.relativeSkillPath, isDirectory: false)
     }
 
+    /// The two tools a fresh agent should reach for first. The full set is
+    /// `directToolNames`; an agent with the tools connected already sees them.
+    static let starterToolNames = ["recent_context", "search_context"]
+
     static func starterPrompt(filename: String?) -> String {
-        let directToolsList = directToolNames
-            .map { "- \($0)" }
-            .joined(separator: "\n")
+        let starterTools = starterToolNames.joined(separator: " and ")
         var prompt = """
         I use Transcripted on this Mac.
 
-        Use Transcripted direct tools first if they are connected:
-        \(directToolsList)
+        Use the Transcripted tools first if they are connected (start with \(starterTools)).
 
         If direct tools are not connected, read my saved Transcripted Markdown files directly:
 
