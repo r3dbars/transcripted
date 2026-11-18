@@ -104,7 +104,7 @@ struct StaleAccessibilityGrantTracker: Equatable {
 enum StaleAccessibilityGrantCopy {
     static let islandTitle = "Not pasted"
     static let islandHint = "Paste keeps failing. Turn Accessibility off and on."
-    static let islandActionTitle = "Settings"
+    static let islandActionTitle = "Open Settings"
     static let fallbackMessage =
         "Paste keeps not landing, even though Accessibility is on. macOS may be holding an old permission: in System Settings > Privacy & Security > Accessibility, turn Transcripted off and back on. Your text is on the clipboard — press ⌘V."
 }

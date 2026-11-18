@@ -7,7 +7,7 @@ func testDictationWarmupPresentationPolicy() {
         assertEqual(copy.title, "Warming up", "pre-recording warmup should read as a warmup, not an error")
         assertEqual(
             copy.detail,
-            "Dictation starts automatically as soon as the voice model is ready.",
+            "Starts on its own when ready.",
             "pre-recording warmup must tell the user dictation starts on its own"
         )
         assertEqual(copy.status, "Preparing the voice model", "warmup should surface the concrete stage")
@@ -19,7 +19,7 @@ func testDictationWarmupPresentationPolicy() {
             phase: .beforeRecording
         )
 
-        assertEqual(copy.title, "Downloading the voice model", "download should be named plainly")
+        assertEqual(copy.title, "Downloading", "download should be named plainly, in one wing word")
         assertEqual(copy.status, "50% downloaded", "download status must show percent complete")
         assertTrue(
             copy.progress > 0.12 && copy.progress < 0.84,
@@ -33,8 +33,8 @@ func testDictationWarmupPresentationPolicy() {
 
             assertEqual(
                 copy.title,
-                "Getting ready to transcribe",
-                "post-stop warmup should say transcription is coming, not that recording will start"
+                "Warming up",
+                "post-stop warmup uses the same short wing word as before recording"
             )
             assertTrue(
                 copy.detail.contains("Your recording is safe"),
@@ -59,17 +59,27 @@ func testDictationWarmupPresentationPolicy() {
 
     runSuite("DictationWarmupPresentationPolicy ready and failed states stay direct") {
         let readyBefore = DictationWarmupPresentationPolicy.copy(modelState: .ready, phase: .beforeRecording)
-        assertEqual(readyBefore.title, "Starting dictation", "ready pre-recording state should start dictation")
+        assertEqual(readyBefore.title, "Mic starting", "ready pre-recording state opens the mic")
 
         let readyAfter = DictationWarmupPresentationPolicy.copy(modelState: .ready, phase: .afterRecording)
-        assertEqual(readyAfter.title, "Transcribing", "ready post-stop state should say it is transcribing")
+        assertEqual(readyAfter.title, "Writing", "ready post-stop state uses the same word as the writing beat")
 
         let failed = DictationWarmupPresentationPolicy.copy(
             modelState: .failed("The model download was interrupted."),
             phase: .beforeRecording
         )
-        assertEqual(failed.title, "Dictation couldn't start", "failed warmup should say dictation could not start")
+        assertEqual(failed.title, "Couldn't start", "failed warmup should say dictation could not start")
         assertEqual(failed.detail, "The model download was interrupted.", "failed warmup should pass through the reason")
+    }
+
+    runSuite("DictationWarmupPresentationPolicy keeps every wing title to two words") {
+        let states: [ParakeetModelState] = [.notLoaded, .downloading(progress: 0.3), .cached, .loading, .ready, .failed("x")]
+        for phase in [DictationWarmupPresentationPolicy.Phase.beforeRecording, .afterRecording] {
+            for state in states {
+                let title = DictationWarmupPresentationPolicy.copy(modelState: state, phase: phase).title
+                assertTrue(title.split(separator: " ").count <= 2, "\(title) fits the wing without ballooning the island")
+            }
+        }
     }
 
     runSuite("DictationPostStopModelWaitPolicy keeps the original paste target after a long model wait") {

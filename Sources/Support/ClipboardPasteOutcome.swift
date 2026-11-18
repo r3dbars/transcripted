@@ -41,13 +41,13 @@ enum ClipboardSnapshotCause: String, Equatable {
     var notPastedHint: String {
         switch self {
         case .tooLarge:
-            return "Your clipboard holds something too big to set aside."
+            return "Your clipboard is too big to set aside."
         case .timeout:
             return "Your clipboard took too long to read."
         case .unreadable:
-            return "Something on your clipboard couldn't be read."
+            return "Your clipboard couldn't be read."
         case .changed:
-            return "Your clipboard changed before it could be set aside."
+            return "Your clipboard changed mid-paste."
         }
     }
 

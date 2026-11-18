@@ -112,6 +112,19 @@ struct NotchIslandMeetingContent: Equatable {
         /// action that throws the recording away is red.
         var primaryRole: NotchIslandPromptButtonRole = .primary
         var secondaryRole: NotchIslandPromptButtonRole = .standard
+        var tertiaryRole: NotchIslandPromptButtonRole = .quiet
+        /// A prompt that closes or acts on its own shows that as a ring on
+        /// the button that fires when time runs out, never as a text line.
+        var countdownRing: NotchIslandCountdownRing? = nil
+
+        /// The same prompt with only its countdown moved, so the drop-down
+        /// updates in place instead of rebuilding its buttons each second.
+        func matchesIgnoringCountdown(_ other: Prompt) -> Bool {
+            var mine = self
+            mine.countdown = other.countdown
+            mine.countdownRing?.secondsLeft = other.countdownRing?.secondsLeft ?? 0
+            return mine == other
+        }
     }
 
     enum CallAudioNote: Equatable {
@@ -137,6 +150,9 @@ struct NotchIslandMeetingContent: Equatable {
     var showsLiveTranscript = false
     /// Opt-in auto-start from a proven detected call. Yields to `prompt`.
     var autoRecordNote = false
+    /// "Discard this recording?" is asking, with this many seconds before
+    /// it gives up and keeps the recording. Nil while nobody asked.
+    var discardConfirmSecondsLeft: Double? = nil
 
     var isRecording: Bool { phase == .recording }
 
@@ -192,14 +208,17 @@ enum NotchIslandSymbol: String, Equatable {
     case saved = "tray.and.arrow.down.fill"
 }
 
-/// A meeting prompt button's meaning, which picks its island style.
+/// A button's meaning, which picks its island style. One primary per
+/// drop-down at most; red only on the confirm step of something destructive.
 enum NotchIslandPromptButtonRole: Equatable {
-    /// A quiet grey pill (Continue, Skip, Keep recording).
+    /// A grey pill: Dismiss, Skip, Cancel, a first Discard that only asks.
     case standard
-    /// The white primary pill (Stop and transcribe, Boost, Split, OK).
+    /// The white primary pill (Stop, Paste, Record, Boost, Split, Keep).
     case primary
-    /// Red: the action loses the recording (Discard).
+    /// Red: the confirm that loses the recording ("Discard this recording?").
     case destructive
+    /// A darker, quieter pill for a side action (Check access).
+    case quiet
 }
 
 enum NotchIslandTint: Equatable {
@@ -226,6 +245,8 @@ enum NotchIslandLiveValue: Equatable {
 
 enum NotchIslandChipStyle: Equatable {
     case plain
+    /// The white primary (the collapsed call prompt's Record).
+    case primary
     case destructive
     case warning
 }
@@ -238,6 +259,8 @@ enum MeetingIslandPromptIdentity: Equatable {
     case boost(UUID)
     case missedCall(UUID)
     case autoRecord(UUID)
+    /// The island's own "Discard this recording?" for this recording.
+    case discardConfirm(UUID)
 }
 
 enum MeetingIslandPromptButton { case primary, secondary, tertiary }
@@ -308,6 +331,9 @@ enum NotchIslandDrop: Equatable {
     case dictationTarget(appName: String?, showsPreview: Bool, isWriting: Bool = false)
     case dictationLoading(title: String, detail: String)
     case dictationMessage(NotchIslandDictationContent.Message)
+    /// A passing note's full sentence, only on hover ("No speech heard.
+    /// Hold the dictation key while you talk."). No buttons.
+    case dictationNote(String)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
     case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, micAction: NotchIslandAction? = nil)
@@ -329,7 +355,7 @@ enum NotchIslandDrop: Equatable {
         case .callPrompt(let title, _): return "call:\(title)"
         case .speakerReview(let review): return "speaker-review:\(review.reviewID.uuidString)"
         case .meetingCallAudioAsk: return "meeting-call-audio-ask"
-        case .dictationTarget, .dictationLoading, .justInserted, .meetingPreparing,
+        case .dictationTarget, .dictationLoading, .dictationNote, .justInserted, .meetingPreparing,
              .meetingControls, .meetingSaved:
             return ""
         }
@@ -474,17 +500,16 @@ enum NotchIslandPresentation {
         } else if let dictation {
             (result.left, result.right) = dictationWings(dictation)
         } else if callPrompt != nil, !(meeting?.isBusy ?? false) {
+            // The countdown is the ring on Skip, so the wing doesn't repeat it.
             result.left = [.symbol(.video, .neutral), .text("Call", .title)]
-            result.right = dropIsOpen
-                ? [.live(.callSeconds, .secondary)]
-                : [.chip("Record", .destructive, .callRecord)]
+            result.right = dropIsOpen ? [] : [.chip("Record", .primary, .callRecord)]
         } else if let speakerReview, !(meeting?.isBusy ?? false) {
             result.left = [.symbol(.check, .neutral), .text(speakerReview.meetingTitle ?? "Saved", .title)]
             result.right = []
         } else if let meeting {
             (result.left, result.right) = meetingWings(meeting, dropIsOpen: dropIsOpen)
         } else if let recentInsert {
-            result.left = [.symbol(.check, .accent), .text(recentInsert.title, .title)]
+            result.left = [.symbol(.check, successTint(recentInsert.title)), .text(recentInsert.title, .title)]
             let words = recentInsert.words
             result.right = words > 0 ? [.text(words == 1 ? "1 word" : "\(words) words", .secondary)] : []
         }
@@ -523,18 +548,25 @@ enum NotchIslandPresentation {
 
     /// A short wing label for a dictation message; the drop-down has the rest.
     static func messageLabel(_ message: NotchIslandDictationContent.Message) -> String {
+        // Words that didn't land ("Not pasted", "Maybe pasted") name themselves.
+        if message.preview != nil { return message.text }
+        if let note = NotchIslandPassingNote.make(message) { return note.label }
         switch message.tone {
         case .error:
             return "Dictation"
         case .notice:
-            // A notice with the words ("Not pasted", "Maybe pasted") names itself.
-            if message.preview != nil { return message.text }
             return message.text.hasPrefix("Pasted") ? "Pasted" : "Copied"
         case .saved:
             return "Saved"
         case .noSpeech:
-            return "No speech"
+            return DictationNoSpeechPresentationPolicy.wingLabel(for: message.text)
         }
+    }
+
+    /// Green only for words that just went in; "Copied" and "Audio saved"
+    /// are done, not live.
+    static func successTint(_ title: String) -> NotchIslandTint {
+        title.hasPrefix("Pasted") ? .accent : .neutral
     }
 
     // MARK: Drops
@@ -546,10 +578,18 @@ enum NotchIslandPresentation {
         speakerReview: NotchIslandSpeakerReviewContent?
     ) -> NotchIslandDrop? {
         if let dictation, case .message(let message) = dictation.phase {
-            return .dictationMessage(message)
+            // A passing note stays in the wing; only a message with words to
+            // rescue or something to decide opens the drop-down.
+            return NotchIslandPassingNote.make(message) == nil ? .dictationMessage(message) : nil
         }
         // A prompt waits while a dictation runs; it opens once the words land.
         guard dictation == nil else { return nil }
+        // Someone is deciding whether to throw this recording away: that
+        // question owns the drop-down until it's answered or times out.
+        if let meeting, meeting.isRecording, let id = meeting.recordingID,
+           let secondsLeft = meeting.discardConfirmSecondsLeft {
+            return .meetingPrompt(MeetingDiscardConfirmCopy.prompt(recordingID: id, secondsLeft: secondsLeft))
+        }
         if let callPrompt {
             return .callPrompt(title: callPrompt.title, detail: callPrompt.detail)
         }
@@ -600,8 +640,9 @@ enum NotchIslandPresentation {
                 return dictation.showsLivePreview
                     ? .dictationTarget(appName: dictation.targetAppName, showsPreview: true, isWriting: true)
                     : nil
-            case .message:
-                return nil
+            case .message(let message):
+                // A passing note's whole sentence, for someone who hovers.
+                return NotchIslandPassingNote.make(message)?.hoverText.map(NotchIslandDrop.dictationNote)
             }
         }
         if !meetingRecords, let recentInsert, let text = recentInsert.text, !text.isEmpty {
@@ -649,13 +690,23 @@ enum NotchIslandPresentation {
                 return ([.symbol(.mic, .accent), .text("Listening", .title)],
                         [.dictationBars(count: 9), .text(countdown, .warning)])
             }
-            return ([.symbol(.warning, .warning), .text(notice, .warning)], [.dictationBars(count: 9)])
+            // The Esc confirm takes the timer's place too, so "Listening"
+            // never moves and the island doesn't lurch wider for 3 s.
+            let wingNotice = notice == DictationEscapeCancelPolicy.confirmNotice
+                ? DictationEscapeCancelPolicy.confirmWingNotice
+                : notice
+            return ([.symbol(.mic, .accent), .text("Listening", .title)],
+                    [.dictationBars(count: 9), .text(wingNotice, .warning)])
         case .writing:
             return ([.dots, .text("Writing", .title)], [.shimmer])
         case .success(let title):
-            return ([.symbol(.check, .accent), .text(title, .title)], [])
+            return ([.symbol(.check, successTint(title)), .text(title, .title)], [])
         case .message(let message):
-            return ([messageSymbol(message.tone), .text(messageLabel(message), .title)], [])
+            if let note = NotchIslandPassingNote.make(message) {
+                return ([.symbol(note.symbol, note.tint), .text(note.label, .title)],
+                        note.trailing.map { [.text($0, .secondary)] } ?? [])
+            }
+            return ([messageSymbol(message), .text(messageLabel(message), .title)], [])
         }
     }
 
@@ -667,15 +718,18 @@ enum NotchIslandPresentation {
             return [.symbol(.mic, .accent), .dictationBars(count: 9)]
         case .writing:
             return [.dots]
-        case .success:
-            return [.symbol(.check, .accent)]
+        case .success(let title):
+            return [.symbol(.check, successTint(title))]
         case .message(let message):
-            return [messageSymbol(message.tone)]
+            if let note = NotchIslandPassingNote.make(message) { return [.symbol(note.symbol, note.tint)] }
+            return [messageSymbol(message)]
         }
     }
 
-    private static func messageSymbol(_ tone: NotchIslandDictationContent.Message.Tone) -> NotchIslandItem {
-        switch tone {
+    private static func messageSymbol(_ message: NotchIslandDictationContent.Message) -> NotchIslandItem {
+        // Every "your words didn't land" notice wears the same clipboard.
+        if message.preview != nil { return .symbol(.clipboard, .neutral) }
+        switch message.tone {
         case .error, .noSpeech:
             return .symbol(.warning, .warning)
         case .notice:
@@ -705,12 +759,12 @@ enum NotchIslandPresentation {
                 case .off?:
                     right = [.chip("Mic only", .warning, .meetingCallAudio)]
                 case .onForNextMeeting?:
-                    right = [.text("Call audio next time", .secondary)]
+                    right = [.text(NotchIslandMeetingCopy.callAudioNextMeeting, .secondary)]
                 case nil:
                     right = [.meetingMeters]
                 }
             }
-            if meeting.prompt != nil, !dropIsOpen {
+            if meeting.prompt != nil || meeting.discardConfirmSecondsLeft != nil, !dropIsOpen {
                 right.insert(.symbol(.warning, .warning), at: 0)
             }
             return (meetingLeading, right)
@@ -727,26 +781,5 @@ enum NotchIslandPresentation {
     private static func statusOnly(_ item: NotchIslandItem) -> NotchIslandItem {
         guard case .chip(let title, let style, _) = item else { return item }
         return .text(title, style == .warning || style == .destructive ? .warning : .secondary)
-    }
-}
-
-// MARK: - Live transcript while the drop-down is closed
-
-extension NotchIslandPresentation {
-    /// How often a closed drop-down's live transcript catches up.
-    static let hiddenTranscriptFlushInterval: TimeInterval = 5
-
-    /// Whether a closed drop-down's live transcript applies this update now.
-    /// At most every 5 s, so opening lays out at most 5 s of text. A trim
-    /// rebuilds the whole text, so that one still waits for the open.
-    static func flushesHiddenTranscript(
-        now: TimeInterval,
-        lastFlush: TimeInterval?,
-        trimGeneration: Int,
-        renderedTrimGeneration: Int
-    ) -> Bool {
-        guard trimGeneration == renderedTrimGeneration else { return false }
-        guard let lastFlush else { return true }
-        return now - lastFlush >= hiddenTranscriptFlushInterval
     }
 }

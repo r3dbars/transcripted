@@ -65,7 +65,7 @@ enum MeetingOverlayActionSmoke {
         // deallocated view cannot make a broken stale-action test pass.
         let oldSplit = button("Split", in: view)
         let originalDrop = drop(containing: oldSplit)
-        let oldKeep = button("Keep recording", in: view)
+        let oldKeep = button("Dismiss", in: view)
         session.meetingSplitOffer = nil
         session.meetingSplitOffer = MeetingSplitOffer(recordingIdentity: firstID, candidate: event)
         let replacement = session.meetingSplitOffer
@@ -82,8 +82,8 @@ enum MeetingOverlayActionSmoke {
         click(button("Split", in: view))
         await drain()
         expect(splitRequests == 1, "Current Split requested calendar confirmation")
-        click(button("Keep recording", in: view))
-        expect(session.meetingSplitOffer == nil, "Current Keep recording declined the displayed offer")
+        click(button("Dismiss", in: view))
+        expect(session.meetingSplitOffer == nil, "Current Dismiss declined the displayed offer")
 
         await drain()
         defaults.set(true, forKey: key)

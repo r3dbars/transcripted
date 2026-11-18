@@ -27,7 +27,8 @@ enum NotchIslandPalette {
     static let primaryText = NSColor.white
     static let secondaryText = NSColor(white: 1, alpha: 0.64)
     static let bodyText = NSColor(white: 1, alpha: 0.9)
-    static let warning = NSColor.systemOrange
+    /// Needs attention: no speech, a warning, Mic only. The shared amber.
+    static let warning = DesignTokens.NS.attentionOnDark
     static let recording = DesignTokens.NS.danger
     static let buttonPlain = NSColor(white: 0.17, alpha: 1)
     static let buttonSubtle = NSColor(white: 0.11, alpha: 1)

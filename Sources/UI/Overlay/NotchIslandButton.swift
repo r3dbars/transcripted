@@ -19,6 +19,7 @@ final class NotchIslandButton: NSButton {
     var onPress: (() -> Void)?
     private let style: Style
     private var countdownSeconds: Double?
+    private var countdownFromFraction: Double = 1
     private var countdownStarted = false
     private var countdownPaused = false
     private let ringTrack = CAShapeLayer()
@@ -83,9 +84,12 @@ final class NotchIslandButton: NSButton {
         setAccessibilityLabel(title)
     }
 
-    /// Traces a ring around the button that runs down over `seconds`.
-    func startCountdown(seconds: Double) {
+    /// Traces a ring around the button that runs down over `seconds`,
+    /// starting from `fromFraction` of a full ring (a countdown already
+    /// under way when the drop-down was built).
+    func startCountdown(seconds: Double, fromFraction: Double = 1) {
         countdownSeconds = seconds
+        countdownFromFraction = min(1, max(0, fromFraction))
         needsLayout = true
     }
 
@@ -150,7 +154,7 @@ final class NotchIslandButton: NSButton {
         guard !countdownStarted else { return }
         countdownStarted = true
         let run = CABasicAnimation(keyPath: "strokeEnd")
-        run.fromValue = 1
+        run.fromValue = countdownFromFraction
         run.toValue = 0
         run.duration = seconds
         ring.strokeEnd = 0

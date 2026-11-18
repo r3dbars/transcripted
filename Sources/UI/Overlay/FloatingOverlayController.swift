@@ -469,7 +469,15 @@ class FloatingOverlayController {
         }
     }
 
-    /// Calm "it's saved" message, with an optional action such as Paste It.
+    /// Cap-saved words in the same notice as any take that didn't paste; they're in Dictations too.
+    func showSavedNotPastedNotice(_ text: String, hint: String, fallbackMessage: String, paste: @escaping () -> Void) {
+        guard isIslandMode else { return showSavedNotice(fallbackMessage, actionTitle: "Paste", action: paste) }
+        showMessage("Not pasted", tone: .saved, kind: .other, notPasted: NotPastedNotice(
+            text: text, actionTitle: "Paste", hint: hint, watchesForManualPaste: false, action: paste
+        ))
+    }
+
+    /// Calm "it's saved" message, with an optional action.
     func showSavedNotice(
         _ message: String,
         actionTitle: String? = nil,
@@ -560,12 +568,7 @@ class FloatingOverlayController {
         errorDismissTask = nil
         errorMessage = ""
         discardActionableMessageIfNeeded()
-        // Only real problems shake on the way out.
-        if messageTone == .error {
-            hideWithCancelAnimation()
-        } else {
-            hideWithConfirmAnimation()
-        }
+        _performHide()
     }
 
     private func discardActionableMessageIfNeeded() {

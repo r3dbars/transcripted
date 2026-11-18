@@ -7,30 +7,31 @@
 import AppKit
 
 extension MeetingOverlayController {
-    /// Discard lives behind the island's right-click menu (with this confirmation)
-    /// rather than as a permanent button: deleting a recording is a rare,
-    /// deliberate act and must never sit one mis-click from Stop.
+    /// Discard lives behind the island's right-click menu (and the
+    /// auto-record note) rather than as a permanent button: deleting a
+    /// recording is a rare, deliberate act and must never sit one mis-click
+    /// from Stop. The first click only asks, on the island itself ("Discard
+    /// this recording?"), without bringing Transcripted to the front; the
+    /// red Discard there is the second. Keep, Escape and the timeout keep it.
     private func handleDiscardRequested() {
-        guard !isShowingCancelConfirmation else { return }
         guard let session = meetingSession, let id = session.activeRecordingIdentity else { return }
         guard MeetingSessionStateMachine.mayDiscardRecording(sessionState: session.state) else { return }
+        discardConfirmation.onChange = { [weak self] in self?.pushToView() }
+        discardConfirmation.isPointerOverIsland = { [weak self] in self?.island?.isPointerOverIsland == true }
+        discardConfirmation.ask(recordingID: id)
+    }
 
-        isShowingCancelConfirmation = true
-        defer {
-            isShowingCancelConfirmation = false
+    /// The question's two answers. Only a Discard for the recording it asked
+    /// about, after it has been up a moment, reaches the discard; then the
+    /// same flow as always rechecks the session before canceling.
+    private func handleDiscardAnswer(_ button: MeetingIslandPromptButton, recordingID id: UUID) {
+        guard button == .tertiary else {
+            discardConfirmation.keep()
+            return
         }
-
-        MeetingSessionStateMachine.discardRecordingIfConfirmed(sessionState: { session.state }, confirm: {
-            NSApp.activate(ignoringOtherApps: true)
-            let alert = NSAlert()
-            alert.alertStyle = .warning
-            alert.messageText = "Discard this meeting recording?"
-            alert.informativeText = "This will stop the meeting recording and delete the captured audio. No transcript will be saved."
-            alert.addButton(withTitle: "Keep Recording")
-            alert.addButton(withTitle: "Discard Recording")
-            alert.buttons.last?.hasDestructiveAction = true
-            return alert.runModal() == .alertSecondButtonReturn
-        }, discard: {
+        guard let session = meetingSession, session.activeRecordingIdentity == id,
+              discardConfirmation.confirm(recordingID: id) else { return }
+        MeetingSessionStateMachine.discardRecordingIfConfirmed(sessionState: { session.state }, confirm: { true }, discard: {
             // A confirm can outlive Stop; the flow rechecks before canceling.
             Task { [weak session] in
                 guard let session, session.activeRecordingIdentity == id else { return }
@@ -69,7 +70,7 @@ extension MeetingOverlayController {
                 current: promptKind, isRecording: true, splitOffered: session.meetingSplitOffer != nil
               ) == promptKind else { return false }
         switch identity {
-        case .autoRecord, .missedCall: return false
+        case .autoRecord, .missedCall, .discardConfirm: return false
         case .split(let offer):
             return currentID == offer.recordingIdentity
                 && offer.matches(session.meetingSplitOffer)
@@ -120,7 +121,7 @@ extension MeetingOverlayController {
         if MeetingSessionStateMachine.stripMenuOffersDiscard(overlayIsRecording: state == .recording, sessionState: meetingSession?.state) {
             let menu = NSMenu()
             let discardItem = NSMenuItem(
-                title: "Discard Recording…",
+                title: MeetingDiscardConfirmCopy.menuTitle,
                 action: #selector(handleMenuDiscard),
                 keyEquivalent: ""
             )
@@ -182,7 +183,7 @@ extension MeetingOverlayController {
             )
         }
         let prompt = currentPrompt.map {
-            NotchIslandMeetingContent.Prompt(
+            var prompt = NotchIslandMeetingContent.Prompt(
                 title: $0.title,
                 detail: $0.detail,
                 countdown: $0.countdownText,
@@ -194,6 +195,8 @@ extension MeetingOverlayController {
                 secondaryAccessibilityLabel: $0.secondaryAccessibilityLabel,
                 tertiaryAccessibilityLabel: $0.tertiaryAccessibilityLabel
             )
+            prompt.countdownRing = promptCountdownRing()
+            return prompt
         }
         var callAudioNote: NotchIslandMeetingContent.CallAudioNote?
         switch showsMicOnlyNote ? micOnlyNotice : nil {
@@ -214,8 +217,28 @@ extension MeetingOverlayController {
             micMuted: meetingSession?.isMeetingMicMuted == true,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             asksAboutCallAudio: islandCallAudioAskPending,
-            autoRecordNote: autoRecordNoteVisible
+            autoRecordNote: autoRecordNoteVisible,
+            discardConfirmSecondsLeft: discardConfirmation.isAsking(about: meetingSession?.activeRecordingIdentity)
+                && MeetingSessionStateMachine.mayDiscardRecording(sessionState: sessionState)
+                ? discardConfirmation.secondsLeft : nil
         )
+    }
+
+    /// A prompt that acts on its own when time runs out shows a ring on the
+    /// button that fires: Stop on "No sound" / "Call ended", Dismiss on the
+    /// missed-call nudge. The timers themselves are unchanged.
+    private func promptCountdownRing() -> NotchIslandCountdownRing? {
+        switch promptKind {
+        case .audioInactivity:
+            guard case .inactivity(_, let warning) = renderedPromptIdentity, warning.automaticStopAllowed else { return nil }
+            return NotchIslandCountdownRing(button: .primary, secondsLeft: Double(promptSecondsRemaining),
+                                            totalSeconds: Double(max(1, warning.countdownSeconds)), holdsWhileHovered: false)
+        case .missedCall:
+            return NotchIslandCountdownRing(button: .primary, secondsLeft: Double(promptSecondsRemaining),
+                                            totalSeconds: Double(Self.missedCallNudgeTimeoutSeconds), holdsWhileHovered: false)
+        default:
+            return nil
+        }
     }
 
     /// Quiet for a few seconds after an opt-in auto-start. Yields to the
@@ -232,6 +255,10 @@ extension MeetingOverlayController {
         func autoRecordRoute() -> MeetingAutoRecordIslandActionPolicy.Route {
             MeetingAutoRecordIslandActionPolicy.route(action: action, noteVisible: autoRecordNoteVisible,
                 recordingID: meetingSession?.activeRecordingIdentity)
+        }
+        if case .meetingPrompt(let button, .discardConfirm(let id)) = action {
+            handleDiscardAnswer(button, recordingID: id)
+            return
         }
         switch autoRecordRoute() {
         case .stop:
