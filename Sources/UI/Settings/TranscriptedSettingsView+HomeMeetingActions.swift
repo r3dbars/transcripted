@@ -72,7 +72,7 @@ extension TranscriptedSettingsView {
         alert.addButton(withTitle: "Cancel")
 
         let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
-        field.stringValue = item.title
+        field.stringValue = item.displayTitle
         field.placeholderString = "Meeting title"
         field.setAccessibilityLabel("Meeting title")
         alert.accessoryView = field
@@ -81,7 +81,7 @@ extension TranscriptedSettingsView {
         guard alert.runModal() == .alertFirstButtonReturn,
               let newTitle = HomeMeetingTitleEditPolicy.titleToCommit(
                   draft: field.stringValue,
-                  currentTitle: item.title
+                  currentTitle: item.displayTitle
               )
         else { return }
 

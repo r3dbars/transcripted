@@ -27,6 +27,19 @@ struct RecentMeetingItem: Identifiable, Sendable {
     var isStarred: Bool = false
     /// Stable identity for mutations; a cached path alone is never authority.
     var captureID: UUID? = nil
+    /// The opt-in on-device title, line and summary (`ai_*` frontmatter).
+    var titles: MeetingTitlesFields = .empty
+
+    /// What the row shows: a title the person set with Rename, then the
+    /// on-device title, then the app's own. `title` stays the saved
+    /// `title:` (Transcribe again and Rename work from it).
+    var displayTitle: String { titles.displayTitle(savedTitle: title) }
+
+    /// One or two sentences on what was decided, when the model wrote one.
+    var summaryLine: String? { titles.line }
+
+    /// Two or three sentences on the meeting, when the model wrote them.
+    var summary: String? { titles.summary }
 
     /// Where Home lists the row: an import sits under the day it was
     /// imported, so it shows up at the top instead of weeks back. Everything

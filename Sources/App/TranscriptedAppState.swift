@@ -111,6 +111,17 @@ class TranscriptedAppState: ObservableObject {
             }
             sparkleUpdater.performStartupUpdateCheckIfNeeded()
         }
+        if !Self.isLaunchSmokeMode, #available(macOS 14.0, *) {
+            // On-device meeting titles (opt-in) never start a job while a
+            // meeting records or transcribes, or while dictation runs.
+            let meetingTitles = MeetingTitlesController.shared
+            meetingTitles.busyProvider = { [weak self] in
+                guard let self else { return true }
+                return self.sttRouter.isRecording || self.sttRouter.isTranscribing
+                    || self.meetingSession.hasRuntimeDiagnosticsWork
+            }
+            meetingTitles.launch()
+        }
         AppSoundPlayer.shared.setWarningReporter { cue in
             Task { @MainActor in
                 EventReporter.shared.capture(
@@ -256,6 +267,9 @@ class TranscriptedAppState: ObservableObject {
         sttRouter.cleanup()
         writingController.stop()
         nextSentence.stop()
+        if !Self.isLaunchSmokeMode, #available(macOS 14.0, *) {
+            MeetingTitlesController.shared.shutDownNow()
+        }
         contextCapture.unregisterHotkey()
         if #available(macOS 14.0, *) {
             MeetingSessionController.runtimeDiagnosticsRecorder = nil

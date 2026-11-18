@@ -125,7 +125,9 @@ The combined settings page is card-based: four visible groups (Dictation, Meetin
 
 ### Pages/
 
-One file per page split out of the shell: `AboutSettingsPage.swift` (version, Automatic updates and the Feedback row, in Advanced; also `SendDiagnosticsSettingsRow` for Privacy and `SupportFilesSettingsRow` for Advanced › App), `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift` (Settings › Library: folder, meeting and dictation audio windows, Free up space with its breakdown, including Writing's model size read-only), `TodaySettingsPage.swift`, `WritingSettingsPage.swift`. The Beta and Support pages were dissolved; Nemotron is the diarization default with no toggle (`Sources/Support/DiarizationBackendPreferences.swift`), while Core itself defaults to pyannote (`Sources/TranscriptedCore/AGENTS.md`).
+`MeetingTitlesSettingsRow.swift` / `MeetingTitlesSettingsCopy.swift` — Settings › Meetings "Titles and summaries" (off by default), the last row of the visible Meetings group: observes only `MeetingTitlesController.shared`, so download progress redraws this row and nothing else; the words live in the copy file (tested).
+
+One file per page split out of the shell: `AboutSettingsPage.swift` (version, Automatic updates and the Feedback row, in Advanced; also `SendDiagnosticsSettingsRow` for Privacy and `SupportFilesSettingsRow` for Advanced › App), `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift` (Settings › Library: folder, meeting and dictation audio windows, Free up space with its breakdown, including Writing's model size read-only and the meeting titles model, which can go only while Titles and summaries is off), `TodaySettingsPage.swift`, `WritingSettingsPage.swift`. The Beta and Support pages were dissolved; Nemotron is the diarization default with no toggle (`Sources/Support/DiarizationBackendPreferences.swift`), while Core itself defaults to pyannote (`Sources/TranscriptedCore/AGENTS.md`).
 
 ### Writing/
 

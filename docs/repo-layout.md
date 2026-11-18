@@ -96,7 +96,7 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `Sources/TranscriptedWriting/` — Writing's autocomplete library, ported from Tilde: `Core/` (pure policy, built as the `TranscriptedWritingCore` module) and `Runtime/` (model, `llama-server` host, socket, Screen Memory); see `docs/writing-plan.md`
 - `Sources/TranscriptedKeyboard/` — Writing's IMKit keyboard; built by `scripts/entrypoints/lib/bundle-input-method.sh` into `Contents/Library/Input Methods/`, never into the app binary
 - `Sources/UI/` — app-facing UI grouped into `Overlay/`, `MenuBar/`, `Settings/`, and `Shared/`
-- `Tests/` — fast tests, package tests, and integration smoke sources
+- `Tests/` — fast tests, package tests, and integration smoke sources; `Tests/Labs/` holds opt-in lab binaries that need real models
 - `Tools/` — standalone sibling packages; see `Tools/README.md`
 - `docs/` — live project docs, indexed in `docs/README.md`
 - `docs/qa/` — manual QA checklists

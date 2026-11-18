@@ -6,9 +6,16 @@ struct ModelCacheSnapshot: Equatable {
     let whisperModelsBytes: Int64
     let staleFluidAudioModelBytes: Int64
     let staleFluidAudioModelNames: [String]
+    /// The on-device meeting titles model (Settings > Meetings > Titles and
+    /// summaries), plus any partial download.
+    var meetingTitlesModelBytes: Int64 = 0
 
     var totalKnownBytes: Int64 {
-        fluidAudioModelsBytes + transcriptedCacheBytes
+        fluidAudioModelsBytes + transcriptedCacheBytes + meetingTitlesModelBytes
+    }
+
+    var formattedMeetingTitlesModelSize: String {
+        ModelCacheInventory.formattedByteCount(meetingTitlesModelBytes)
     }
 
     var formattedTotalKnownSize: String {
@@ -31,12 +38,18 @@ struct ModelCacheSnapshot: Equatable {
         ModelCacheInventory.formattedByteCount(staleFluidAudioModelBytes)
     }
 
-    func reclaimableBytes(includeWhisper: Bool) -> Int64 {
-        staleFluidAudioModelBytes + (includeWhisper ? whisperModelsBytes : 0)
+    /// `includeMeetingTitles` is true while Titles and summaries is off, so
+    /// its downloaded model is no longer needed.
+    func reclaimableBytes(includeWhisper: Bool, includeMeetingTitles: Bool = false) -> Int64 {
+        staleFluidAudioModelBytes
+            + (includeWhisper ? whisperModelsBytes : 0)
+            + (includeMeetingTitles ? meetingTitlesModelBytes : 0)
     }
 
-    func formattedReclaimableSize(includeWhisper: Bool) -> String {
-        ModelCacheInventory.formattedByteCount(reclaimableBytes(includeWhisper: includeWhisper))
+    func formattedReclaimableSize(includeWhisper: Bool, includeMeetingTitles: Bool = false) -> String {
+        ModelCacheInventory.formattedByteCount(
+            reclaimableBytes(includeWhisper: includeWhisper, includeMeetingTitles: includeMeetingTitles)
+        )
     }
 
     var staleModelSummary: String {
@@ -88,7 +101,8 @@ enum ModelCacheInventory {
         fileManager: FileManager = .default,
         fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
         transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
-        whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
+        whisperModelsDirectory: URL = defaultWhisperModelsDirectory(),
+        meetingTitlesModelsDirectory: URL = defaultMeetingTitlesModelsDirectory()
     ) -> ModelCacheSnapshot {
         let staleEntries = knownStaleFluidAudioModelDirectories
             .sorted()
@@ -105,7 +119,8 @@ enum ModelCacheInventory {
             transcriptedCacheBytes: directorySize(at: transcriptedCacheDirectory, fileManager: fileManager),
             whisperModelsBytes: directorySize(at: whisperModelsDirectory, fileManager: fileManager),
             staleFluidAudioModelBytes: staleEntries.reduce(0) { $0 + $1.1 },
-            staleFluidAudioModelNames: staleEntries.map(\.0)
+            staleFluidAudioModelNames: staleEntries.map(\.0),
+            meetingTitlesModelBytes: directorySize(at: meetingTitlesModelsDirectory, fileManager: fileManager)
         )
     }
 
@@ -240,24 +255,62 @@ enum ModelCacheInventory {
 
     static func removeReclaimableCaches(
         includeWhisper: Bool,
+        includeMeetingTitles: Bool = false,
         fileManager: FileManager = .default,
         fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
         transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
-        whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
+        whisperModelsDirectory: URL = defaultWhisperModelsDirectory(),
+        modelsRootDirectory: URL = defaultLocalModelsDirectory()
     ) throws -> ModelCacheCleanupResult {
-        let staleResult = try removeKnownStaleFluidAudioModels(
+        var result = try removeKnownStaleFluidAudioModels(
             fileManager: fileManager,
             fluidAudioModelsDirectory: fluidAudioModelsDirectory
         )
 
-        guard includeWhisper else { return staleResult }
+        if includeWhisper {
+            result = result.merging(try removeWhisperModels(
+                fileManager: fileManager,
+                transcriptedCacheDirectory: transcriptedCacheDirectory,
+                whisperModelsDirectory: whisperModelsDirectory
+            ))
+        }
+        if includeMeetingTitles {
+            result = result.merging(try removeMeetingTitlesModels(
+                fileManager: fileManager,
+                modelsRootDirectory: modelsRootDirectory
+            ))
+        }
+        return result
+    }
 
-        let whisperResult = try removeWhisperModels(
-            fileManager: fileManager,
-            transcriptedCacheDirectory: transcriptedCacheDirectory,
-            whisperModelsDirectory: whisperModelsDirectory
-        )
-        return staleResult.merging(whisperResult)
+    /// Where the on-device meeting titles model lives. The model store in
+    /// `Sources/Meeting` reads this too, so the path has one home.
+    static func defaultMeetingTitlesModelsDirectory() -> URL {
+        meetingTitlesModelsDirectory(in: defaultLocalModelsDirectory())
+    }
+
+    static func meetingTitlesModelsDirectory(in modelsRoot: URL) -> URL {
+        modelsRoot.appendingPathComponent("meeting-titles", isDirectory: true)
+    }
+
+    /// Removes only `<models>/meeting-titles`, and only when neither it nor
+    /// the models folder is a link that points somewhere else.
+    static func removeMeetingTitlesModels(
+        fileManager: FileManager = .default,
+        modelsRootDirectory: URL = defaultLocalModelsDirectory()
+    ) throws -> ModelCacheCleanupResult {
+        let root = modelsRootDirectory.standardizedFileURL
+        let directory = meetingTitlesModelsDirectory(in: root).standardizedFileURL
+        guard !isSymbolicLink(at: root, fileManager: fileManager),
+              !isSymbolicLink(at: directory, fileManager: fileManager),
+              directory.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/"),
+              fileManager.fileExists(atPath: directory.path)
+        else {
+            return .empty
+        }
+        let bytes = directorySize(at: directory, fileManager: fileManager)
+        try fileManager.removeItem(at: directory)
+        return ModelCacheCleanupResult(removedBytes: bytes, removedNames: ["meeting titles model"])
     }
 
     static func directorySize(at url: URL, fileManager: FileManager = .default) -> Int64 {

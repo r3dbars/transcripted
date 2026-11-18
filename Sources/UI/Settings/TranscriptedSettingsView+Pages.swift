@@ -612,6 +612,7 @@ extension TranscriptedSettingsView {
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
             writingModelRoot: writingController.modelRoot,
+            meetingTitlesModelIsReclaimable: !MeetingTitlesController.shared.isEnabled,
             onChooseCaptureLibrary: {
                 trackSettingsAction("choose_capture_library", page: .general)
                 chooseCaptureLibrary()

@@ -279,15 +279,20 @@ extension TranscriptedSettingsView {
     func removeReclaimableModelCaches() {
         guard !modelCacheCleanupInProgress else { return }
         let includeWhisper = !effectiveTranscriptionModel.isWhisper
+        let includeMeetingTitles = !MeetingTitlesController.shared.isEnabled
         modelCacheCleanupInProgress = true
         modelCacheCleanupStatus = nil
         modelCacheCleanupStatusDetails = nil
 
         Task.detached(priority: .utility) {
             do {
-                let result = try ModelCacheInventory.removeReclaimableCaches(includeWhisper: includeWhisper)
+                let result = try ModelCacheInventory.removeReclaimableCaches(
+                    includeWhisper: includeWhisper,
+                    includeMeetingTitles: includeMeetingTitles
+                )
                 let snapshot = ModelCacheInventory.snapshot()
                 await MainActor.run {
+                    if includeMeetingTitles { MeetingTitlesController.shared.noteModelRemoved() }
                     modelCacheSnapshot = snapshot
                     modelCacheCleanupInProgress = false
                     if result.removedNames.isEmpty {

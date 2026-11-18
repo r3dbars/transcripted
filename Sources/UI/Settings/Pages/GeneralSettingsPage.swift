@@ -102,7 +102,9 @@ struct GeneralSettingsPage<
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )
 
-                NotchIslandLiveTranscriptRow(showsDivider: false)
+                NotchIslandLiveTranscriptRow()
+
+                MeetingTitlesSettingsRow(showsDivider: false)
             }
             .padding(.top, 16)
 

@@ -8,17 +8,22 @@ struct StyledMeetingTranscript {
     let title: String
     let artifactRecoveryNotice: MeetingArtifactRecoveryNotice?
     let artifactPostProcessingBlocked: Bool
+    /// True only when this pass generated `title` from the app's own rule
+    /// (the file had no saved title), not when it kept a saved one.
+    let titleWasGenerated: Bool
 
     init(
         url: URL,
         title: String,
         artifactRecoveryNotice: MeetingArtifactRecoveryNotice? = nil,
-        artifactPostProcessingBlocked: Bool = false
+        artifactPostProcessingBlocked: Bool = false,
+        titleWasGenerated: Bool = false
     ) {
         self.url = url
         self.title = title
         self.artifactRecoveryNotice = artifactRecoveryNotice
         self.artifactPostProcessingBlocked = artifactPostProcessingBlocked
+        self.titleWasGenerated = titleWasGenerated
     }
 }
 
@@ -213,7 +218,9 @@ enum MeetingTranscriptStyler {
             url: finalURL,
             title: title,
             artifactRecoveryNotice: renameOutcome.recoveryNotice,
-            artifactPostProcessingBlocked: renameOutcome.postProcessingBlocked
+            artifactPostProcessingBlocked: renameOutcome.postProcessingBlocked,
+            titleWasGenerated: document.explicitTitle?.isEmpty != false
+                && renameOutcome.shouldPersistStyling && updated != raw
         )
     }
 
@@ -454,7 +461,33 @@ enum MeetingTranscriptStyler {
            !explicitTitle.isEmpty {
             return explicitTitle
         }
+        return ruleTitle(for: document)
+    }
 
+    /// The title the app would give this meeting on its own, ignoring any
+    /// saved `title:`. Nil when the Markdown isn't a meeting transcript.
+    static func ruleTitle(forMeetingMarkdown raw: String, fallbackURL: URL) -> String? {
+        guard let frontmatter = TranscriptFrontmatter.document(in: raw),
+              isMeetingTranscript(frontmatter),
+              let document = parseDocument(frontmatter, fallbackURL: fallbackURL) else { return nil }
+        return ruleTitle(for: document)
+    }
+
+    /// True when `title` has the shape of one of `ruleTitle`'s templates:
+    /// "Quick notes", "Meeting with <names>", or "Meeting at <time>" in any
+    /// time format (12 or 24 hour, any AM/PM marker). Matching the shape, not
+    /// recomputing, means a time-zone or locale change and speaker names added
+    /// after the save don't hide that the app made the title.
+    static func hasRuleTitleShape(_ title: String) -> Bool {
+        let normalized = title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if normalized == "Quick notes" { return true }
+        if normalized.hasPrefix("Meeting with "), normalized.count > "Meeting with ".count { return true }
+        return normalized.range(of: ruleTimeTitlePattern, options: .regularExpression) != nil
+    }
+
+    private static let ruleTimeTitlePattern = #"^Meeting at (?:[^\d\s]{1,8} ?)?\d{1,2}[:.h]\d{2}(?: ?[^\d\s]{1,8})?$"#
+
+    private static func ruleTitle(for document: ParsedDocument) -> String {
         let namedRemoteParticipants = Array(
             LinkedSet(document.transcriptEntries.compactMap { entry -> String? in
                 guard entry.label.hasPrefix("System/") else { return nil }

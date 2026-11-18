@@ -46,7 +46,7 @@ enum RecentMeetingsWidgetBuilder {
                 continue
             }
             let content = CaptureMarkdown.readBoundedContents(of: mdURL) ?? ""
-            let title = CaptureMarkdown.extractTitle(from: content) ?? summary.title ?? summary.filename
+            let title = CaptureMarkdown.displayTitle(from: content) ?? summary.title ?? summary.filename
             let transcript = transcriptText(from: content, filename: summary.filename)
             let speakerNames = summary.speakers.map(\.name)
 

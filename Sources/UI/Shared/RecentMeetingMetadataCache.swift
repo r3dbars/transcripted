@@ -57,6 +57,9 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // identity comes from disk before a saved-row mutation is offered.
     var captureIdentitySchemaVersion: Int = 1
     var captureID: UUID? = nil
+    // Optional on decode: rows cached before on-device titles came from
+    // files without `ai_*` keys, and writing those keys changes the stamp.
+    var titles: MeetingTitlesFields? = nil
 }
 
 extension CachedRecentMeetingMetadata {
@@ -79,6 +82,7 @@ extension CachedRecentMeetingMetadata {
         self.importedAt = item.importedAt
         self.isStarred = item.isStarred
         self.captureID = item.captureID
+        self.titles = item.titles
     }
 
     /// Rebuild a Home row from a cached payload. The audio attachment is resolved
@@ -100,7 +104,8 @@ extension CachedRecentMeetingMetadata {
             transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
             importedAt: importedAt,
             isStarred: isStarred ?? false,
-            captureID: captureID
+            captureID: captureID,
+            titles: titles ?? .empty
         )
     }
 }

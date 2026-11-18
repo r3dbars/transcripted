@@ -226,8 +226,33 @@ rewrites still tolerate and preserve the legacy form.
 
 Older files may contain `auto_summary_*`, `local_summary_*`, or other summary
 frontmatter and trailing sections. These are legacy data: current meeting
-writers leave them untouched, and current Home surfaces do not create new AI
-summary content.
+writers leave them untouched.
+
+On-device title and summary (optional; only with Settings › Meetings ›
+**Titles and summaries** on). After a meeting is transcribed, imported or
+transcribed again, a small model on the Mac (Gemma 4 E2B instruct) reads the
+transcript and the app appends these flat keys. It never changes `title:`, the
+filename or the body:
+
+| Key | Example | Notes |
+|-----|---------|-------|
+| `ai_title` | `"Billing provider switch"` | 6 words at most (20 characters for Chinese or Japanese). Only written on positive evidence that the app made `title:`: the restyle generated it in that pass, an import named the file and the title is unchanged, `ai_title` already stood in for it, or it has the shape of the app's rule titles (`Meeting with …`, `Meeting at <time>` in any clock format, `Quick notes`). A calendar event's title, a name the person gave the meeting, or a title nothing vouches for is kept, and only the line and summary are written. |
+| `ai_title_replaces` | `"Meeting with Priya"` | Written with `ai_title`: the exact `title:` it stands in for. When `title:` is later anything else, `title:` shows again. |
+| `ai_summary_line` | `"The team switches providers next month."` | One or two sentences, about 45 words at most (90 characters unspaced). Optional. |
+| `ai_summary` | `"…"` | Two or three sentences. Optional. |
+| `ai_summary_model` | `"gemma-4-e2b-it-q4km"` | Which model wrote the keys. |
+| `ai_summary_version` | `"1"` | A file already at the current version is skipped; a newer version replaces every `ai_*` key. |
+| `ai_summary_generated_at` | `"2026-11-18T18:44:53Z"` | When the keys were written, UTC ISO 8601. |
+| `ai_summary_status` | `too_short` | Only when this version had nothing to write: `too_short` (under about 40 words) or `no_usable_reply`. With `ai_summary_version`, it stops the meeting being read again until the version changes. A failed request or a helper that couldn't start records nothing and retries on the next launch. |
+| `title_set_by_user` | `true` | The person chose `title:`. Written only by Home's Rename; never inferred. "Transcribe again" writes a fresh file without it, and the next titles job carries it back over. |
+
+Which title to show: `title:` when `title_set_by_user: true` or when it differs
+from `ai_title_replaces`; otherwise `ai_title` when present; else `title:`.
+Agents reading the files should follow the same rule. Sentences that hand the
+recorder a task ("You will…", "Your next step…") are dropped before saving,
+and a transcript under about 40 words gets no `ai_*` keys. "Transcribe again"
+drops the `ai_*` keys and the job runs again. Transcript text, titles and
+summaries never leave the Mac.
 
 ## Meeting body: raw form (`transcript_style: raw`)
 

@@ -194,7 +194,7 @@ struct QuietMeetingCard: View {
             }
 
             Button(action: onToggleExpanded) {
-                Text(item.title)
+                Text(item.displayTitle)
                     .font(TextRole.body.font(weight: .semibold))
                     .foregroundStyle(LibraryTokens.ink)
                     .lineLimit(1)

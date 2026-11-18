@@ -28,6 +28,8 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     /// Where Writing keeps its model, so the breakdown can list its size.
     /// Read-only here; Writing's own page deletes it.
     let writingModelRoot: URL?
+    /// Titles and summaries is off, so its downloaded model can go.
+    let meetingTitlesModelIsReclaimable: Bool
 
     let onChooseCaptureLibrary: () -> Void
     let onResetCaptureLibrary: () -> Void
@@ -229,9 +231,12 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 if modelCacheLoading, modelCacheSnapshot == nil {
                     ProgressView().controlSize(.small)
                 } else if let snapshot = modelCacheSnapshot {
-                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInCleanup)
+                    let reclaimableBytes = snapshot.reclaimableBytes(
+                        includeWhisper: includeWhisperInCleanup,
+                        includeMeetingTitles: meetingTitlesModelIsReclaimable
+                    )
                     Text(reclaimableBytes > 0
-                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInCleanup)) can go"
+                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInCleanup, includeMeetingTitles: meetingTitlesModelIsReclaimable)) can go"
                         : "Nothing to clean up")
                         .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
@@ -261,7 +266,10 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     /// What each store takes, then the cleanup. Sizes only; nothing here
     /// opens a file.
     private func modelBreakdown(_ snapshot: ModelCacheSnapshot) -> some View {
-        let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInCleanup)
+        let reclaimableBytes = snapshot.reclaimableBytes(
+            includeWhisper: includeWhisperInCleanup,
+            includeMeetingTitles: meetingTitlesModelIsReclaimable
+        )
         return VStack(alignment: .leading, spacing: 10) {
             Text("Voice models on this Mac")
                 .textRole(.heading)
@@ -277,6 +285,11 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         : "\(snapshot.formattedWhisperModelsSize), in use")
                     : "None")
                 breakdownLine("App cache", snapshot.formattedTranscriptedCacheSize)
+                breakdownLine("Meeting titles", snapshot.meetingTitlesModelBytes > 0
+                    ? (meetingTitlesModelIsReclaimable
+                        ? "\(snapshot.formattedMeetingTitlesModelSize), can go"
+                        : "\(snapshot.formattedMeetingTitlesModelSize), in use")
+                    : "None")
                 if writingModelRoot != nil {
                     breakdownLine("Writing model", writingModelBytes.map { bytes in
                         bytes > 0 ? "\(ModelCacheInventory.formattedByteCount(bytes)), on the Writing page" : "None"
@@ -465,9 +478,11 @@ private extension StorageSettingsPage {
         case .dictationAudio:
             Text(retentionPrompts.pendingDictation.map(StorageConfirmationPolicy.dictationAudioMessage(for:)) ?? "")
         case .freeUpSpace:
-            Text(effectiveTranscriptionModelIsWhisper
-                ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
-                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. The Parakeet model you use stays.")
+            Text(StorageConfirmationPolicy.freeUpSpaceMessage(
+                whisperIsSelected: effectiveTranscriptionModelIsWhisper,
+                removesMeetingTitlesModel: meetingTitlesModelIsReclaimable
+                    && (modelCacheSnapshot?.meetingTitlesModelBytes ?? 0) > 0
+            ))
         }
     }
 }

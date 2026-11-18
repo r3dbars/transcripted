@@ -55,6 +55,7 @@ SHARED_TEST_STORAGE_SOURCES=(
     "Sources/Meeting/MeetingTranscriptStyler.swift"
     "Sources/Meeting/MeetingArtifactRenamer.swift"
     "Sources/Meeting/MeetingStarFrontmatter.swift"
+    "Sources/Meeting/MeetingTitlesDisplay.swift"
     "Sources/Observability/ObservabilityTextRedactor.swift"
     "Sources/Observability/PayloadSanitizationCore.swift"
     "Sources/Observability/WorkCircuitDiagnostics.swift"

@@ -217,7 +217,7 @@ final class TodayViewModel: ObservableObject {
             TodayRecentItem(
                 kind: .meeting,
                 id: "meeting-\(item.id)",
-                title: item.title,
+                title: item.displayTitle,
                 date: item.date,
                 durationSeconds: durationSeconds(of: item),
                 transcriptURL: item.transcriptURL
