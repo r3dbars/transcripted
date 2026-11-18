@@ -8,7 +8,7 @@ import Foundation
 
 extension WritingController: WritingSetupFeatureControl {}
 
-/// The Writing tab's state and actions: which screen shows (intro, setup,
+/// The Writing tab's state and actions: which screen shows (the two setup screens,
 /// everyday), the setup draft, and a read of `WritingController` refreshed
 /// while the tab is on screen. Replaces Tilde's `TildeSettingsViewModel` and
 /// `YourTildeViewModel`. Every runtime change goes through the controller;
@@ -21,9 +21,8 @@ final class WritingSettingsModel: ObservableObject {
     typealias Presentation = WritingSetupPresentation
 
     enum Screen: Equatable {
-        /// Intro page 1 or 2.
-        case intro(page: Int)
-        /// Setup step 1, 2 or 3.
+        /// Setup screen 1 (Turn on Writing: what it does, which apps) or 2
+        /// (Allow and download). Owner-approved two-screen setup, 2026-11-18.
         case setup(step: Int)
         case everyday
     }
@@ -75,7 +74,7 @@ final class WritingSettingsModel: ObservableObject {
     /// The Transcripted keyboard is the selected input source. `nil` until
     /// first read.
     @Published private(set) var keyboardOn: Bool?
-    /// Where the keyboard stands, for the guidance in step 3 and the
+    /// Where the keyboard stands, for the guidance on setup screen 2 and the
     /// everyday view. `nil` until first read, and while the keyboard isn't
     /// installed yet.
     @Published private(set) var keyboardSetup: WritingKeyboardSetupState?
@@ -119,7 +118,8 @@ final class WritingSettingsModel: ObservableObject {
     init(controller: WritingController) {
         self.controller = controller
         selectedModel = controller.selectedModel
-        screen = controller.setupCompleted ? .everyday : .intro(page: 1)
+        screen = controller.setupCompleted ? .everyday : .setup(step: 1)
+        draft = Presentation.Draft(model: controller.selectedModel)
         refreshLive()
     }
 
@@ -135,7 +135,7 @@ final class WritingSettingsModel: ObservableObject {
 
     func pageAppeared() {
         if !controller.setupCompleted, screen == .everyday {
-            screen = .intro(page: 1)
+            beginSetup()
         }
         isPageMounted = true
         todayRefresh.isEnabled = isOnScreen
@@ -365,7 +365,8 @@ final class WritingSettingsModel: ObservableObject {
         }
     }
 
-    private func loadInstalledAppsIfNeeded() {
+    /// Screen 1's app chips. Runs the scan once, off the main thread.
+    func loadInstalledAppsIfNeeded() {
         guard !hasLoadedInstalledApps else { return }
         hasLoadedInstalledApps = true
         let excluded = WritingController.settings().personalHistoryExcludedApps
@@ -390,18 +391,15 @@ final class WritingSettingsModel: ObservableObject {
 
     // MARK: - Intro and setup
 
-    func showIntroPage(_ page: Int) {
-        screen = .intro(page: min(max(1, page), Presentation.introPageCount))
-    }
-
-    /// "Set up writing": a fresh draft with both features on and all apps.
-    /// "Not now" on the intro: Writing stays off and the sidebar's "New"
-    /// badge goes away (plan: it stays until setup finishes or the intro is
-    /// dismissed).
+    /// "Not now" on setup screen 1: Writing stays off and the sidebar's
+    /// "New" badge goes away (plan: it stays until setup finishes or setup
+    /// is dismissed).
     func dismissNewBadge() {
         UserDefaults.standard.set(true, forKey: WritingSidebarNewBadge.dismissedDefaultsKey)
     }
 
+    /// A fresh draft with both features on, all apps, and the saved model
+    /// (the smaller one unless changed).
     func beginSetup() {
         isEditingSetup = false
         draft = Presentation.Draft(model: controller.selectedModel)
@@ -424,7 +422,11 @@ final class WritingSettingsModel: ObservableObject {
 
     func cancelSetup() {
         isEditingSetup = false
-        screen = controller.setupCompleted ? .everyday : .intro(page: 1)
+        if controller.setupCompleted {
+            screen = .everyday
+        } else {
+            beginSetup()
+        }
     }
 
     func finishSetupStep1() {
@@ -444,8 +446,8 @@ final class WritingSettingsModel: ObservableObject {
 
     func showStep(_ step: Int) {
         let clamped = min(max(1, step), Presentation.setupStepCount)
-        if clamped == 2 { loadInstalledAppsIfNeeded() }
-        if clamped == 3 {
+        if clamped == 1 { loadInstalledAppsIfNeeded() }
+        if clamped == 2 {
             refreshLive()
             refreshKeyboard()
         }
@@ -475,7 +477,7 @@ final class WritingSettingsModel: ObservableObject {
         // emptying, and Autocomplete would read on with no model.
         guard !isDeleting else { return }
         let choices = draft
-        guard choices.canContinueStep1, choices.canContinueStep2 else { return }
+        guard choices.canContinueStep1, choices.canContinueApps else { return }
 
         controller.setAppScope(
             choices.scope == .all ? .all : .picked(choices.pickedBundleIdentifiers)

@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Intro page 2's autocomplete demo, drawn in SwiftUI (not a video) so it
+/// Setup screen 1's autocomplete demo, drawn in SwiftUI (not a video) so it
 /// stays sharp in dark mode and costs nothing to download. It plays
 /// `WritingDemoScript.allFrames` on a loop while it's on screen, and holds
 /// still on `WritingDemoScript.stillFrame` when Reduce Motion is on.
@@ -77,7 +77,7 @@ struct WritingDemoView: View {
                 .opacity(ghostOpacity)
                 .animation(.easeIn(duration: 0.35), value: ghostOpacity)
         }
-        .font(.system(size: 14))
+        .font(LibraryTokens.body)
         .frame(maxWidth: .infinity, minHeight: 40, alignment: .topLeading)
         .fixedSize(horizontal: false, vertical: true)
     }

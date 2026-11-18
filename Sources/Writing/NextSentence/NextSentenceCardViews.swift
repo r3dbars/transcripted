@@ -19,7 +19,8 @@ enum NextSentenceCardStyle {
     static let primaryText = NSColor.black
     /// Selection and the picked part of the text: neutral, not a hue.
     static let selection = NSColor(white: 1, alpha: 0.26)
-    static var send: NSColor { NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1) }
+    /// The send flash and ripple: just worked, so the same capture green.
+    static var send: NSColor { accent }
     static var listening: NSColor { NSColor(srgbRed: 1, green: 0.27, blue: 0.23, alpha: 1) }
     /// Mood pad, left to right: direct (cool blue), casual (neutral), warm (amber).
     static var toneColors: [NSColor] {

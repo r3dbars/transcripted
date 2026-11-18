@@ -44,13 +44,7 @@ enum WritingSetupPresentation {
         autocomplete && !granted && !captureBusy
     }
 
-    // MARK: - Intro, page 1 of 2
-
-    struct ContextItem: Equatable {
-        let title: String
-        /// Meetings and Dictations are already saved; Writing is the one to add.
-        let isAdded: Bool
-    }
+    // MARK: - Setup, screen 1 of 2: Turn on Writing
 
     struct Point: Equatable {
         let symbolName: String
@@ -58,93 +52,65 @@ enum WritingSetupPresentation {
         let line: String
     }
 
-    enum IntroPage1 {
-        static let smallTitle = "Writing"
-        static let headline = "Your AI knows what you said. Not what you wrote."
-        static let body = "Transcripted already saves your meetings and dictations. But a lot of your work happens in writing: Slack replies, emails, notes. Writing in Transcripted adds that context, and helps you write faster."
-        static let contextLabel = "Your context"
-        static let contextItems = [
-            ContextItem(title: "Meetings", isAdded: false),
-            ContextItem(title: "Dictations", isAdded: false),
-            ContextItem(title: "Writing", isAdded: true),
-        ]
-        static let points = [
-            Point(
-                symbolName: "sparkles",
-                title: "Fuller context for your AI.",
-                line: "Your notes and replies sit next to your meetings, so your AI can pick up where you left off."
-            ),
-            Point(
-                symbolName: "hand.raised",
-                title: "You're in control.",
-                line: "Pick the apps. Pause or delete anytime."
-            ),
-            Point(
-                symbolName: "lock",
-                title: "Stays on your Mac.",
-                line: "No account. It's saved as plain files you can point any AI agent at. Only Write for Me sends text, and only when you press its key."
-            ),
-        ]
-        static let next = "Next"
-    }
-
-    // MARK: - Intro, page 2 of 2
-
     struct KeyHint: Equatable {
         /// The key cap, or `nil` for "keep typing", which has no single key.
         let key: String?
         let text: String
     }
 
-    enum IntroPage2 {
-        static let headline = "Autocomplete finishes your sentences."
-        static let body = "As you type, Transcripted suggests the next few words right where you're typing. Take them or leave them."
+    /// The pitch at the top of screen 1 (first setup only): what Writing is,
+    /// the autocomplete demo, and where the writing lives. Owner-approved
+    /// two-screen setup, 2026-11-18 (docs/writing-plan.md).
+    enum Intro {
+        static let smallTitle = "Writing"
+        static let headline = "Your AI knows what you said. Not what you wrote."
+        static let body = "A lot of your work happens in writing: Slack replies, emails, notes. Writing saves it next to your meetings and dictations, and helps you finish your sentences."
         /// The `~` key is named by its cap only: on ISO keyboards it isn't
         /// "the key above Tab" (a Tilde help-text bug the plan fixes).
         static let keyHints = [
             KeyHint(key: "Tab", text: "adds the next word"),
             KeyHint(key: "~", text: "takes the whole suggestion"),
-            KeyHint(key: nil, text: "Keep typing to ignore it"),
             KeyHint(key: "Esc", text: "hides it"),
         ]
-        static let back = "Back"
-        static let setUp = "Set up writing"
+        /// True with Write for Me on too: it's the one thing that sends text,
+        /// and only when its key is pressed.
+        static let privacy = Point(
+            symbolName: "lock",
+            title: "Stays on your Mac.",
+            line: "No account. It's saved as plain files you can point any AI agent at. Only Write for Me sends text, and only when you press its key."
+        )
     }
-
-    static let introPageCount = 2
 
     // MARK: - Setup
 
-    static let setupStepCount = 3
+    static let setupStepCount = 2
 
-    static func stepLabel(_ step: Int) -> String {
-        "Step \(step) of \(setupStepCount)"
-    }
-
+    /// Screen 1's two questions: what Writing does, and in which apps.
     enum Step1 {
-        static let title = "What should writing do?"
+        static let title = "What should Writing do?"
         static let saveTitle = "Save my writing"
         static let saveLine = "Your AI can read what you wrote. Files stay on this Mac, only in apps you choose."
         static let autocompleteTitle = "Autocomplete"
-        static let autocompleteLine = "Suggests the next words. Hit Tab to accept."
+        static let autocompleteLine = "Suggests the next words. Tab to accept."
+        static let appsTitle = "Which apps?"
+        static let allApps = "All apps"
+        static let allAppsLine = "Password managers are always skipped."
+        static let pickedApps = "Only apps I pick"
+        static let sameApps = "Both use the same apps."
+        static let needsOneApp = "Pick at least one app."
+        static let moreApps = "More apps"
+        static let fewerApps = "Fewer apps"
         static let continueTitle = "Continue"
         static let needsOne = "Turn on at least one to continue."
         static let turnOffTitle = "Turn off writing"
         static let turnOffMessage = "Both off turns writing off."
+        /// Screen 1's heading while editing a finished setup (no pitch).
+        static let editTitle = "Edit setup"
     }
 
+    /// Screen 2: the keyboard, Screen Recording, and the model picked for
+    /// you. The other model is a row in Settings on the Writing page.
     enum Step2 {
-        static let title = "Which apps?"
-        static let allApps = "All apps"
-        static let allAppsLine = "Password managers are always skipped."
-        static let pickedApps = "Only apps I pick"
-        static let sameApps = "Autocomplete uses the same apps."
-        static let needsOne = "Pick at least one app."
-        static let moreApps = "More apps"
-        static let fewerApps = "Fewer apps"
-    }
-
-    enum Step3 {
         static let title = "Allow and download"
         static let keyboardTitle = "Transcripted keyboard"
         /// Before the keyboard is installed. macOS 26 won't let an app turn a
@@ -159,6 +125,14 @@ enum WritingSetupPresentation {
         static let turnOn = "Turn on writing"
     }
 
+    /// The model row on screen 2: the pick, its size, and where to change it.
+    static func modelLine(for choice: TildeModelChoice) -> String {
+        let option = modelOptions.first { $0.choice == choice }
+        let name = option?.name ?? choice.shortName
+        let size = option.map { " (\($0.size))" } ?? ""
+        return "\(name)\(size) downloads after you turn on writing. You can switch models later on this page."
+    }
+
     static let back = "Back"
     /// Only while editing a finished setup: leaves the steps unchanged.
     static let cancel = "Cancel"
@@ -169,16 +143,16 @@ enum WritingSetupPresentation {
     static let finishRecordingFirst = "Finish recording and transcribing first"
     static let notNow = "Not now"
 
-    /// The rows step 3 shows: only what the step 1 toggles need
+    /// The rows screen 2 shows: only what the screen 1 toggles need
     /// (docs/writing-plan.md, "Permissions").
-    enum Step3Row: Equatable, CaseIterable {
+    enum Step2Row: Equatable, CaseIterable {
         case keyboard
         case screenRecording
         case model
     }
 
-    static func step3Rows(saveMyWriting: Bool, autocomplete: Bool) -> [Step3Row] {
-        var rows: [Step3Row] = []
+    static func step2Rows(saveMyWriting: Bool, autocomplete: Bool) -> [Step2Row] {
+        var rows: [Step2Row] = []
         if saveMyWriting || autocomplete { rows.append(.keyboard) }
         if autocomplete { rows += [.screenRecording, .model] }
         return rows
@@ -196,7 +170,7 @@ enum WritingSetupPresentation {
         static let openKeyboardSettings = "Open Keyboard Settings"
     }
 
-    /// The keyboard row in step 3 and the everyday view.
+    /// The keyboard row on screen 2 and in the everyday view.
     struct KeyboardStep: Equatable {
         let line: String
         /// "Open Keyboard Settings", or `nil` when that wouldn't help.
@@ -204,14 +178,14 @@ enum WritingSetupPresentation {
         let isDone: Bool
     }
 
-    /// `nil` means the keyboard isn't installed yet (step 3 before "Turn on
+    /// `nil` means the keyboard isn't installed yet (screen 2 before "Turn on
     /// writing"): the plain line, no button.
     static func keyboardStep(_ state: WritingKeyboardSetupState?) -> KeyboardStep {
         switch state {
         case nil:
-            KeyboardStep(line: Step3.keyboardLine, buttonTitle: nil, isDone: false)
+            KeyboardStep(line: Step2.keyboardLine, buttonTitle: nil, isDone: false)
         case .selected?:
-            KeyboardStep(line: Step3.keyboardLine, buttonTitle: nil, isDone: true)
+            KeyboardStep(line: Step2.keyboardLine, buttonTitle: nil, isDone: true)
         case .enabledNotSelected?:
             KeyboardStep(line: KeyboardGuidance.enabledNotSelected, buttonTitle: nil, isDone: false)
         case .needsUserToAdd?:
@@ -247,7 +221,7 @@ enum WritingSetupPresentation {
         return isEditing ? Step1.turnOffMessage : Step1.needsOne
     }
 
-    /// What step 1's primary button does.
+    /// What screen 1's primary button does.
     enum Step1Primary: Equatable {
         case continueSetup
         case turnOffWriting
@@ -266,9 +240,9 @@ enum WritingSetupPresentation {
         controls.applyRunState()
     }
 
-    /// `nil` when step 2 can continue.
-    static func step2Message(scope: ScopeMode, pickedCount: Int) -> String? {
-        scope == .picked && pickedCount == 0 ? Step2.needsOne : nil
+    /// `nil` when the apps question is answered.
+    static func appsMessage(scope: ScopeMode, pickedCount: Int) -> String? {
+        scope == .picked && pickedCount == 0 ? Step1.needsOneApp : nil
     }
 
     // MARK: - Setup choices
@@ -278,7 +252,9 @@ enum WritingSetupPresentation {
         case picked
     }
 
-    /// What the three steps collect before "Turn on writing" applies it.
+    /// What the two screens collect before "Turn on writing" applies it.
+    /// The model isn't asked: it starts on the smaller one (or what's saved)
+    /// and the Settings card on the Writing page switches it.
     struct Draft: Equatable {
         var saveMyWriting = true
         var autocomplete = true
@@ -286,17 +262,21 @@ enum WritingSetupPresentation {
         var pickedBundleIdentifiers: Set<String> = []
         var model: TildeModelChoice = .gemma4E2B
 
+        /// At least one feature is on.
         var canContinueStep1: Bool {
             step1Message(saveMyWriting: saveMyWriting, autocomplete: autocomplete) == nil
         }
 
-        /// Whether step 1's primary button is enabled.
-        func canFinishStep1(isEditing: Bool) -> Bool {
-            isEditing || canContinueStep1
+        /// "All apps", or at least one picked.
+        var canContinueApps: Bool {
+            appsMessage(scope: scope, pickedCount: pickedBundleIdentifiers.count) == nil
         }
 
-        var canContinueStep2: Bool {
-            step2Message(scope: scope, pickedCount: pickedBundleIdentifiers.count) == nil
+        /// Whether screen 1's primary button is enabled. Editing with both
+        /// features off is Turn off writing, which doesn't need apps.
+        func canFinishStep1(isEditing: Bool) -> Bool {
+            if isEditing, !saveMyWriting, !autocomplete { return true }
+            return canContinueStep1 && canContinueApps
         }
     }
 
@@ -305,13 +285,14 @@ enum WritingSetupPresentation {
     struct ModelOption: Equatable {
         let choice: TildeModelChoice
         let name: String
+        let size: String
         let detail: String
         let isDefault: Bool
     }
 
     static let modelOptions = [
-        ModelOption(choice: .gemma4E2B, name: "Gemma 4 E2B", detail: "3.4 GB, faster", isDefault: true),
-        ModelOption(choice: .qwen35B9B, name: "Qwen 3.5 9B", detail: "5.6 GB, better", isDefault: false),
+        ModelOption(choice: .gemma4E2B, name: "Gemma 4 E2B", size: "3.4 GB", detail: "3.4 GB, faster", isDefault: true),
+        ModelOption(choice: .qwen35B9B, name: "Qwen 3.5 9B", size: "5.6 GB", detail: "5.6 GB, better", isDefault: false),
     ]
 
     static let defaultTag = "(default)"
@@ -322,7 +303,7 @@ enum WritingSetupPresentation {
 
     /// The line under a model the Mac can't run, or `nil`.
     static func ineligibleLine(for choice: TildeModelChoice, isEligible: Bool) -> String? {
-        isEligible ? nil : Step3.qwenIneligible
+        isEligible ? nil : Step2.qwenIneligible
     }
 
     // MARK: - App chips
@@ -378,13 +359,13 @@ enum WritingSetupPresentation {
     // MARK: - Everyday view
 
     static let everydayTitle = "Writing"
-    static let autocompleteOnly = "Autocomplete only"
     /// Setup finished but both features are off now.
     static let writingOff = "Writing is off"
 
-    static func summary(saveMyWriting: Bool, autocomplete: Bool, wordsToday: Int) -> String {
-        if saveMyWriting { return wordsToday == 1 ? "1 word today" : "\(wordsToday.formatted()) words today" }
-        return autocomplete ? autocompleteOnly : writingOff
+    /// The line under the title. Today owns the day's word count, so this
+    /// only speaks up when Writing is off.
+    static func summary(saveMyWriting: Bool, autocomplete: Bool) -> String? {
+        saveMyWriting || autocomplete ? nil : writingOff
     }
 
     static func suggestionsAcceptedLine(_ count: Int) -> String {
@@ -458,7 +439,7 @@ enum WritingSetupPresentation {
 
     static func scopeText(scope: ScopeMode, pickedCount: Int) -> String {
         switch scope {
-        case .all: Step2.allApps
+        case .all: Step1.allApps
         case .picked: pickedCount == 1 ? "1 app" : "\(pickedCount) apps"
         }
     }
@@ -525,5 +506,15 @@ enum WritingSetupPresentation {
         var parts = [sourceApp, words == 1 ? "1 word" : "\(words.formatted()) words"]
         if acceptedWords > 0 { parts.append("\(acceptedWords.formatted()) accepted") }
         return parts.joined(separator: " · ")
+    }
+}
+
+extension WritingSetupPresentation {
+    /// Write for Me's sound switch, on the Writing page while Write for Me is
+    /// on. Same preference as Settings › Advanced (`NextSentenceSounds`).
+    enum WriteForMeSounds {
+        static let title = "Write for Me sounds"
+        static let onLine = "Plays soft sounds as the card opens, listens and sends."
+        static let offLine = "Write for Me is silent."
     }
 }
