@@ -24,7 +24,7 @@ struct MeetingFailureCopy: Equatable {
             )
         case .microphonePermission:
             return MeetingFailureCopy(
-                title: "Allow the mic",
+                title: "Allow mic",
                 detail: "Turn on Microphone for Transcripted in System Settings, then try again."
             )
         case .microphoneStartFailed:

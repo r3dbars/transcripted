@@ -162,9 +162,11 @@ struct OnboardingPracticeStage: View {
         }
     }
 
-    /// Paste-back is the honest path, but it can miss (focus moved, or no
-    /// paste access). The take was still saved, so after a short grace
-    /// period show the saved words here instead of an empty field.
+    /// Paste-back is the real path: a take aimed at this window goes straight
+    /// into the focused field (`OwnWindowTextDelivery`), counts as pasted and
+    /// the island says Pasted. It can still miss (the field lost focus, or
+    /// focus moved to another app). The take was saved either way, so after a
+    /// short grace period show the saved words here instead of an empty field.
     private func showSavedWordsIfPasteMissed() {
         let before = textAtTakeStart
         fillTask?.cancel()

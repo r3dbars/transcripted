@@ -20,8 +20,9 @@ struct NotchIslandLiveValues: Equatable {
 // MARK: - Palette
 
 /// The island is always black, so it takes the dark side of the shared
-/// tokens (`DesignTokens`): the same capture green for live, the same danger
-/// red and attention amber. Geometry and motion stay in `NotchIslandGeometry`.
+/// tokens (`DesignTokens`): the same capture green for live (recording
+/// included), the same attention amber, and danger red only for a
+/// destructive confirm. Geometry and motion stay in `NotchIslandGeometry`.
 enum NotchIslandPalette {
     static let background = NSColor.black
     static let primaryText = NSColor.white
@@ -29,7 +30,8 @@ enum NotchIslandPalette {
     static let bodyText = NSColor(white: 1, alpha: 0.9)
     /// Needs attention: no speech, a warning, Mic only. The shared amber.
     static let warning = DesignTokens.NS.attentionOnDark
-    static let recording = DesignTokens.NS.danger
+    /// The live meeting dot: recording is live, so capture green.
+    static let recording = DesignTokens.NS.liveOnDark
     static let buttonPlain = NSColor(white: 0.17, alpha: 1)
     static let buttonSubtle = NSColor(white: 0.11, alpha: 1)
     static let destructive = DesignTokens.NS.danger

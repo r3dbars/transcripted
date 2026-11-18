@@ -24,7 +24,8 @@ enum MenuTokens {
     static let statusLiveNS = DesignTokens.NS.live
     static let statusReadyNS = DesignTokens.NS.ink3
     static let statusOrangeNS = DesignTokens.NS.attention
-    static let statusRedNS = DesignTokens.NS.danger
+    /// The recording mark. Recording is live, so it is the same green.
+    static let statusRecordingNS = DesignTokens.NS.live
     static let textPrimaryNS = DesignTokens.NS.ink
     static let textSecondaryNS = DesignTokens.NS.ink2
     static let textMutedNS = DesignTokens.NS.ink3

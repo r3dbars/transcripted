@@ -10,9 +10,9 @@ One source for the look ("quiet paper, live green"): `Sources/UI/Shared/DesignTo
 | `ink`, `ink2`, `ink3` | Text: primary, secondary (meta), tertiary (hints, labels). `ink` is also the primary-button fill |
 | `hairline`, `hairlineStrong` | Dividers; the secondary-button border |
 | `fill`, `fillStrong` | The one neutral fill (hover, raised cards, chips); selected or pressed |
-| `live` (`NS.liveOnDark` on the island) | Capture green. Live or just-worked only: listening, recording, pasted, live progress, played audio |
+| `live` (`NS.liveOnDark` on the island) | Capture green. Live or just-worked only: listening, recording, pasted, live progress, played audio. The recording dot is this green everywhere (`LibraryTokens.recording`, `MenuTokens.statusRecordingNS`, `NotchIslandPalette.recording`) |
 | `attention` (`NS.attentionOnDark` on the island) | Failed or needs action |
-| `danger` | Recording dot, the truly destructive confirm |
+| `danger` | Only the confirm step of a destructive action (Discard this recording?, Move to Trash). Never recording, never a button at rest |
 | `dictationStream`, `meetingsStream`, `writingStream` | Small marks per stream, never fills |
 | `controlTint` | The window-root tint (below) |
 

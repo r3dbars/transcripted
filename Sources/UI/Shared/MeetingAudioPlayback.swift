@@ -259,16 +259,6 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         return min(max(currentTime / duration, 0), 1)
     }
 
-    func timeLabel(for attachment: MeetingAudioAttachment) -> String {
-        guard isActive(attachment), duration > 0 else { return "0:00" }
-        return "\(Self.formatTime(currentTime)) / \(Self.formatTime(duration))"
-    }
-
-    func compactTimeLabel(for attachment: MeetingAudioAttachment) -> String {
-        guard isActive(attachment), duration > 0 else { return "0:00 / --:--" }
-        return "\(Self.formatTime(currentTime)) / \(Self.formatTime(duration))"
-    }
-
     func buttonTitle(for attachment: MeetingAudioAttachment, choice: MeetingAudioPlaybackChoice? = nil) -> String {
         if isUnavailable(attachment, choice: choice) { return "Unavailable" }
         guard isActive(attachment, choice: choice) else { return "Play" }

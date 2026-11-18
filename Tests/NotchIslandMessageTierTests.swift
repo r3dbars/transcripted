@@ -43,8 +43,8 @@ func testNotchIslandMessageTier() {
         let decisions: [(NotchIslandDictationContent.Message, String)] = [
             (.init(tone: .noSpeech, text: silent, actionTitle: nil), "Mic is silent"),
             (.init(tone: .noSpeech, text: failed, actionTitle: nil), "Model failed"),
-            (.init(tone: .error, text: "Mic didn't start.", actionTitle: "Try again"), "Dictation"),
-            (.init(tone: .error, text: "Couldn't save this dictation.", actionTitle: nil), "Dictation"),
+            (.init(tone: .error, text: "Mic didn't start.", actionTitle: "Try again"), "Didn't start"),
+            (.init(tone: .error, text: "Couldn't save this dictation.", actionTitle: nil), "Not saved"),
             (.init(tone: .noSpeech, text: "No speech heard. Hold the dictation key while you talk.", actionTitle: "Transcribe"), "No speech"),
         ]
         for (message, label) in decisions {
@@ -52,6 +52,26 @@ func testNotchIslandMessageTier() {
             assertEqual(layout.drop, .dictationMessage(message), "\(message.text) opens the drop-down")
             assertTrue(layout.dropIsSticky)
             assertEqual(layout.left.last, .text(label, .title), "the wing names it: \(label)")
+        }
+    }
+
+    runSuite("An error's wing names its cause, and an unknown one still reads Dictation") {
+        let cases: [(String, String)] = [
+            ("Dictation couldn't start: The input device is busy.", "Didn't start"),
+            ("Microphone access is off. Turn it on in System Settings.", "Mic off"),
+            ("Transcripted needs microphone access before dictation can listen.", "Mic off"),
+            ("Microphone unavailable. Check your audio input and try again.", "Mic problem"),
+            ("The voice model is still warming up. Try again in a moment.", "Not ready"),
+            (DictationStopRoute.stillFinishingMessage, "Not ready"),
+            ("Audio couldn't be saved safely. Keep Transcripted open and contact support.", "Not saved"),
+            ("The captured audio is no longer available. Start a new dictation.", "Audio gone"),
+            ("Couldn't copy your words. They're saved in Dictations.", "Not copied"),
+            ("Quit paused. This recording isn't safely saved.", "Quit paused"),
+            ("Something nobody wrote a label for.", "Dictation"),
+        ]
+        for (text, label) in cases {
+            let message = NotchIslandDictationContent.Message(tone: .error, text: text, actionTitle: nil)
+            assertEqual(NotchIslandPresentation.messageLabel(message), label, "\(text) reads \(label)")
         }
     }
 

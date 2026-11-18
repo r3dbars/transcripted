@@ -48,7 +48,8 @@ enum DesignTokens {
         static let attention = dynamic(dark: rgb(0xE0A33E), light: rgb(0xB07E1F))
         /// Attention amber on an always-dark surface (the island).
         static let attentionOnDark = rgb(0xE0A33E)
-        /// Recording dot and the truly destructive confirm.
+        /// The truly destructive confirm, and nothing else. Recording is
+        /// live, so its dot is `live` green.
         static let danger = NSColor.systemRed
 
         /// Stream marks: one hue per capture stream.

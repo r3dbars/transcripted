@@ -166,7 +166,7 @@ struct DoneStage: View {
                 .foregroundStyle(LibraryTokens.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Open Microphone Settings", action: onOpenMicrophoneSettings)
+            Button("Open Settings", action: onOpenMicrophoneSettings)
                 .buttonStyle(.transcriptedSecondary)
                 .accessibilityIdentifier("transcripted.onboarding.done.open-microphone-settings")
         }
@@ -192,7 +192,7 @@ struct DoneStage: View {
                 .foregroundStyle(LibraryTokens.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Open Keyboard Settings") {
+            Button("Open Settings") {
                 PhysicalDictationTriggerPreferences.openKeyboardSettings()
             }
             .buttonStyle(.transcriptedQuiet)

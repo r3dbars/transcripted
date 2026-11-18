@@ -121,7 +121,7 @@ private struct OptionalToggleValue: ViewModifier {
 /// In-flight transcription, shown in the same card as a saved meeting:
 /// title, then one status line with a spinner and percent. Appears above the
 /// day list while work is running. Ink buttons only; the recording dot is
-/// the one red.
+/// live green.
 struct QuietWorkingRow: View {
     let title: String
     let status: String

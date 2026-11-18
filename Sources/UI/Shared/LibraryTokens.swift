@@ -17,8 +17,9 @@ enum LibraryTokens {
     /// Attention amber for failed / needs-action states only.
     static let attention = DesignTokens.attention
 
-    /// Recording red. Recording, and nothing but recording.
-    static let recording = DesignTokens.danger
+    /// The recording dot. Recording is live, so it is capture green, the
+    /// same as every other live mark. Red is only a destructive confirm.
+    static let recording = DesignTokens.live
 
     /// Stream colors: one hue per capture stream, used as small marks where
     /// meetings, dictation and writing sit side by side. Not a second accent;

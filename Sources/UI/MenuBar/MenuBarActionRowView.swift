@@ -222,7 +222,7 @@ final class MenuBarActionRowView: NSControl {
         case .warning:
             return (MenuTokens.statusOrangeNS, MenuTokens.statusOrangeNS)
         case .recording:
-            return (MenuTokens.statusRedNS, MenuTokens.statusRedNS)
+            return (MenuTokens.statusRecordingNS, MenuTokens.statusRecordingNS)
         }
     }
 

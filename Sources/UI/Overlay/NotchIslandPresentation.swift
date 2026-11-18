@@ -553,7 +553,7 @@ enum NotchIslandPresentation {
         if let note = NotchIslandPassingNote.make(message) { return note.label }
         switch message.tone {
         case .error:
-            return "Dictation"
+            return NotchIslandErrorWingLabel.make(message.text)
         case .notice:
             return message.text.hasPrefix("Pasted") ? "Pasted" : "Copied"
         case .saved:

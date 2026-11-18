@@ -1,3 +1,9 @@
+// PasteLastDictationFeedback.swift
+// The small card by the pointer after the island's Paste again, used only
+// when a new take already holds the island by the time the paste finishes
+// (`DictationSessionController.showPasteAgainOutcome` returns false).
+// Otherwise the island shows the result itself.
+
 import AppKit
 
 enum PasteLastDictationFeedbackTone: Equatable {
@@ -15,18 +21,11 @@ struct PasteLastDictationFeedback: Equatable {
         detail.isEmpty ? title : "\(title). \(detail)"
     }
 
-    static let noSavedDictation = PasteLastDictationFeedback(
-        title: "No saved dictation yet",
-        detail: "Dictate once, then copy it from Dictations.",
-        tone: .caution,
-        dismissDelayNanoseconds: 3_000_000_000
-    )
-
     static func presentation(for outcome: TextPasteOutcome) -> PasteLastDictationFeedback {
         switch outcome {
         case .pasted, .likelyPasted:
             return PasteLastDictationFeedback(
-                title: "Last dictation pasted",
+                title: "Pasted",
                 detail: "Text went to the focused app.",
                 tone: .success,
                 dismissDelayNanoseconds: 1_500_000_000

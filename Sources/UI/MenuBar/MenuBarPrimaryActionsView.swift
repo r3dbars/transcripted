@@ -37,8 +37,8 @@ final class MenuBarPrimaryActionsView: NSView {
         meetingState: MenuBarPrimaryActionState,
         isMeetingRecording: Bool
     ) {
-        // Buttons stay monochrome; color is reserved for state, so the one red
-        // icon in the popover always means "recording right now".
+        // Buttons stay monochrome; color is reserved for state, so the one
+        // green icon in the popover always means "recording right now".
         dictationRow.update(
             symbolName: dictationState.symbolName,
             title: dictationState.title,

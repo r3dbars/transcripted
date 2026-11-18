@@ -82,7 +82,7 @@ enum SettingsInteractionPalette {
         case .warning:
             return LibraryTokens.attention.opacity(0.12)
         case .destructive:
-            return Color.red.opacity(0.10)
+            return DesignTokens.danger.opacity(0.10)
         }
     }
 
@@ -95,7 +95,7 @@ enum SettingsInteractionPalette {
         case .warning:
             return LibraryTokens.attention.opacity(0.17)
         case .destructive:
-            return Color.red.opacity(0.15)
+            return DesignTokens.danger.opacity(0.15)
         }
     }
 
@@ -108,7 +108,7 @@ enum SettingsInteractionPalette {
         case .warning:
             return LibraryTokens.attention.opacity(0.26)
         case .destructive:
-            return Color.red.opacity(0.22)
+            return DesignTokens.danger.opacity(0.22)
         }
     }
 }
@@ -254,7 +254,7 @@ struct SettingsInlineActionButton: View {
         case .warning:
             return LibraryTokens.attention.opacity(0.08)
         case .destructive:
-            return Color.red.opacity(0.06)
+            return DesignTokens.danger.opacity(0.06)
         }
     }
 
@@ -267,7 +267,7 @@ struct SettingsInlineActionButton: View {
         case .warning:
             return LibraryTokens.attention.opacity(0.16)
         case .destructive:
-            return Color.red.opacity(0.14)
+            return DesignTokens.danger.opacity(0.14)
         }
     }
 }

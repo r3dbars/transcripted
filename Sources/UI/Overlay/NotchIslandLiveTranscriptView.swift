@@ -189,7 +189,7 @@ final class NotchIslandLiveTranscriptView: NSView {
     private static func placeholderText(_ status: LiveMeetingCaptions.Status) -> String {
         switch status {
         case .preparing: return "Getting the live transcript ready…"
-        case .listening: return "Listening… words show up here as people talk."
+        case .listening: return "Words show up here as people talk."
         case .unavailable: return "The live transcript couldn't start. The meeting is still recording."
         case .off: return "Live transcript is off."
         }

@@ -189,7 +189,7 @@ final class MenuBarHeaderView: NSView {
         let color: NSColor
         switch currentStatusTone {
         case .recording:
-            color = MenuTokens.statusRedNS
+            color = MenuTokens.statusRecordingNS
         case .ready:
             // Ready is neutral; green is only for something happening now.
             color = MenuTokens.statusReadyNS
@@ -233,8 +233,8 @@ final class MenuBarHeaderView: NSView {
         return MenuBarHeaderLayoutPolicy.warningTextHeight(measured: measured)
     }
 
-    /// A steady recording has no status line: the red Stop button with its
-    /// timer already says so. Saving has none either: the button reads
+    /// A steady recording has no status line: the Stop button with its green
+    /// mark and timer already says so. Saving has none either: the button reads
     /// "Saving…", and saying it twice was noise.
     private var showsStatusRow: Bool {
         guard currentStatusTone != .recording, currentCapturePhase != .saving else { return false }
