@@ -17,8 +17,9 @@
 //     people already saved in Speakers
 //   - a calendar 1:1 with one unnamed remote voice fills that voice's field
 //     with the other invitee; it saves on Done like a typed name
-//   - local mic voices sit under an "All me" toggle; an open name field
-//     offers "Not a person" for a voice that isn't one
+//   - local mic voices are you: one quiet "On your mic · You" line, with
+//     "Not just me?" to name each one (+Mic); an open name field offers
+//     "Not a person" for a voice that isn't one
 //
 // The footer lists, with glowing dots, the people named automatically on this
 // call, then Later and Done. Done saves the answers through the same
@@ -29,8 +30,8 @@
 // live in NotchIslandSpeakerReviewPolicy; rows are NotchIslandVoiceRowView.
 //
 // Settings › Speakers draws the same review as a card, one meeting at a time
-// (`Chrome.page`, +Page): no ring, a quote under each voice, Skip and
-// "Done, next meeting"; the page shows what happens after Done.
+// (`Chrome.page`, +Page): no ring, a quote under each voice, Skip and Done;
+// the page shows what happens after Done.
 
 import AppKit
 import TranscriptedCore
@@ -134,10 +135,13 @@ final class NotchIslandSpeakerReviewView: NSView {
     private var invitees: [String] = []
     /// The calendar 1:1 name has been offered (it is offered once).
     private var didOfferOneOnOnePrefill = false
-    /// "All me" is on: every asked local mic voice saves as You.
-    private var keepMicAsYou = false
-    /// "All me" is on (for the page's draft check).
-    var keepsMicAsYou: Bool { keepMicAsYou }
+    /// Every asked local mic voice saves as You. On by default: the mic is
+    /// the owner. "Not just me?" turns it off (+Mic).
+    var keepMicAsYou = false
+    /// Mic voices started as You (there are some to ask about).
+    private(set) var micDefaultsToYou = false
+    /// The mic line was changed from its default (for the page's draft check).
+    var micAsYouChanged: Bool { keepMicAsYou != micDefaultsToYou }
     /// The button carrying the countdown ring: Later, or Done when nothing is asked.
     private var countdownButton: NotchIslandButton?
     private var laterTask: Task<Void, Never>?
@@ -195,6 +199,11 @@ final class NotchIslandSpeakerReviewView: NSView {
         // A name the call app showed is only a hint on its row (tap to fill);
         // it never fills a box here.
         rows = ranked.map { makeRow(for: $0, recognized: false) }
+        // The mic is the owner: its voices start as You, asked about only
+        // when someone says it wasn't just them.
+        micDefaultsToYou = rows.contains { $0.isMic }
+        keepMicAsYou = micDefaultsToYou
+        for row in rows where row.isMic { row.setKeptAsYou(true) }
         recognizedRows = input.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
         let correctable = Set(input.recognizedSpeakers.compactMap {
             $0.currentName.map(SpeakerNameSelectionPolicy.normalizedSearchText)
@@ -261,6 +270,13 @@ final class NotchIslandSpeakerReviewView: NSView {
         guard !isFinished else { return }
         setAccessibilityLabel(accessibilityTitle)
         rebuild()
+    }
+
+    /// The page's words changed: draw again with every answer in place.
+    func redrawKeepingAnswers() {
+        guard !isFinished else { return }
+        rebuild()
+        onLayoutChange?()
     }
 
     /// The calendar invitees, and how many remote voices the whole meeting
@@ -345,12 +361,14 @@ final class NotchIslandSpeakerReviewView: NSView {
         let firstMicRow = rows.first(where: { $0.isMic })
         for row in rows {
             if row === firstMicRow {
-                // The local mic voices get their own small header with the
-                // review window's "Keep Local Mic as You" escape hatch.
-                let micHeader = micSectionHeader()
-                stack.addArrangedSubview(micHeader)
-                stack.setCustomSpacing(0, after: micHeader)
+                // The mic's voices are you: one quiet line, or (after "Not
+                // just me?") a small header over each voice (+Mic).
+                let micLine = micSectionHeader()
+                stack.addArrangedSubview(micLine)
+                stack.setCustomSpacing(0, after: micLine)
+                lastRow = micLine
             }
+            if row.isMic, keepMicAsYou { continue }
             stack.addArrangedSubview(row)
             lastRow = row
         }
@@ -496,42 +514,6 @@ final class NotchIslandSpeakerReviewView: NSView {
         button.setCountdownPaused(!laterRuns)
     }
 
-    private func micSectionHeader() -> NSView {
-        let label = NotchIslandPalette.label(
-            "Local mic voices",
-            font: .systemFont(ofSize: 12, weight: .semibold),
-            color: NSColor(white: 1, alpha: 0.42)
-        )
-        let keep = NotchIslandTextButton(
-            title: NotchIslandSpeakerReviewPolicy.keepAsYouTitle(keepMicAsYou: keepMicAsYou),
-            restAlpha: 0.6
-        )
-        keep.onPress = { [weak self] in self?.toggleKeepMicAsYou() }
-        keep.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.keepAsYouAccessibilityLabel(keepMicAsYou: keepMicAsYou))
-        keep.setAccessibilityHelp(NotchIslandSpeakerReviewPolicy.keepAsYouHelp(keepMicAsYou: keepMicAsYou))
-        let line = NSStackView(views: [label, NSView(), keep])
-        line.orientation = .horizontal
-        line.alignment = .centerY
-        line.spacing = 8
-        line.edgeInsets = NSEdgeInsets(top: 6, left: 0, bottom: 0, right: 0)
-        line.translatesAutoresizingMaskIntoConstraints = false
-        line.widthAnchor.constraint(equalToConstant: width).isActive = true
-        return line
-    }
-
-    /// "All me": every asked local mic voice saves as You (`.collapsedToMe`),
-    /// whatever was typed for it. Pressing it again ("Undo") lifts that.
-    private func toggleKeepMicAsYou() {
-        stopLaterCountdown()
-        keepMicAsYou.toggle()
-        for row in rows where row.isMic {
-            row.setKeptAsYou(keepMicAsYou)
-        }
-        assignColors()
-        rebuild()
-        onLayoutChange?()
-    }
-
     private func refreshInvitees() {
         let used = Set((recognizedRows + rows).compactMap(\.chosenName) + plainRecognizedNames)
         for row in recognizedRows + rows {
@@ -608,7 +590,7 @@ final class NotchIslandSpeakerReviewView: NSView {
     }
 
     /// Someone started answering: the review waits for them now.
-    private func stopLaterCountdown() {
+    func stopLaterCountdown() {
         guard !laterStopped else { return }
         laterStopped = true
         laterTask?.cancel()
@@ -628,6 +610,12 @@ final class NotchIslandSpeakerReviewView: NSView {
         var updates = recognizedRows.compactMap { $0.buildUpdate(finish: finish) }
         var unanswered = 0
         for row in rows {
+            // The island's Later (or its ring) saves only what was answered;
+            // the mic's default You waits for a Done, here or on Speakers.
+            if finish == .later, !isPage, row.isMic, keepMicAsYou, !micAsYouChanged {
+                unanswered += 1
+                continue
+            }
             if let update = row.buildUpdate(finish: finish) {
                 updates.append(update)
             } else {
