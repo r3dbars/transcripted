@@ -71,13 +71,12 @@ extension Audio {
         forStopGeneration generation: UInt64
     ) -> Bool {
         stoppingJournalSessionsLock.lock()
-        guard let finalization = stoppingRecordingFinalizations.removeValue(forKey: generation) else {
+        guard let session = stoppingRecordingFinalizations[generation]?.journalSession else {
             stoppingJournalSessionsLock.unlock()
             return false
         }
-        if let session = finalization.journalSession {
-            recordingJournal.abandonFinalization(session: session)
-        }
+        stoppingRecordingFinalizations.removeValue(forKey: generation)
+        recordingJournal.abandonFinalization(session: session)
         stoppingJournalSessionsLock.unlock()
         return true
     }

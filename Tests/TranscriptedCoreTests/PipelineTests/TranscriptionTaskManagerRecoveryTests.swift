@@ -22,6 +22,47 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         tempDirectory = nil
     }
 
+    func testLaunchRecoversStartupSystemSamplesAcrossAnotherFailedFirstPersist() async throws {
+        let (manager, paths) = makeManager()
+        let samples: [Float] = (0..<9600).map { $0.isMultiple(of: 2) ? 0.5 : -0.25 }
+        let systemURL: URL
+        do {
+            let audio = Audio(paths: paths)
+            let tracks = try audio.openMeetingStartTracks(
+                capturesSystemAudio: true, sessionGeneration: audio.recordingSessionGeneration
+            )
+            systemURL = try XCTUnwrap(tracks.system)
+            try writeMonoWAV(to: systemURL, sampleRate: 48_000, samples: samples)
+            try corruptHeaderSizes(at: systemURL)
+            XCTAssertFalse(FileManager.default.fileExists(atPath: tracks.mic.path))
+            // Drop the recorder without Stop or a later journal mutation, as at restart.
+        }
+        let failed = Audio(paths: paths, systemAudioCaptureForTesting: nil,
+                           initialJournalPersistenceForTesting: { data, url in
+            try data.write(to: url, options: .atomic)
+            throw CocoaError(.fileWriteUnknown)
+        })
+        XCTAssertThrowsError(try failed.openJournalSessionIfCurrent(
+            primaryMicURL: paths.audioCaptures.appendingPathComponent("meeting_failed_mic.wav"),
+            systemURL: paths.audioCaptures.appendingPathComponent("meeting_failed_system.wav"),
+            sessionGeneration: failed.recordingSessionGeneration
+        )) { XCTAssertEqual($0 as? MeetingRecordingJournalStartError, .persistenceFailed) }
+        XCTAssertNil(failed.journalSession)
+
+        let recovered = await manager.recoverOrphanedRecordings(in: paths.audioCaptures, livenessWindow: 0, waitForRecentJournals: false)
+        XCTAssertEqual(recovered, 1)
+        let rows = FailedTranscriptionManager(paths: paths).failedTranscriptions
+        XCTAssertEqual(rows.count, 1)
+        let file = try AVAudioFile(forReading: XCTUnwrap(rows.first?.systemAudioURL))
+        XCTAssertEqual(file.length, AVAudioFramePosition(samples.count))
+        let buffer = try XCTUnwrap(AVAudioPCMBuffer(pcmFormat: file.processingFormat,
+                                                   frameCapacity: AVAudioFrameCount(samples.count)))
+        try file.read(into: buffer)
+        let channel = try XCTUnwrap(buffer.floatChannelData?[0])
+        XCTAssertEqual(Array(UnsafeBufferPointer(start: channel, count: Int(buffer.frameLength))), samples)
+        XCTAssertTrue(MeetingRecordingJournalStore.journalURLs(in: paths.audioCaptures).isEmpty)
+    }
+
     func testRecoversOrphanedRecordingWithCorruptHeader() async throws {
         let (manager, paths) = makeManager()
 

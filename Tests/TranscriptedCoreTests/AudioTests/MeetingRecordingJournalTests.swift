@@ -147,54 +147,6 @@ final class MeetingRecordingJournalTests: XCTestCase {
         XCTAssertFalse(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL))
     }
 
-    func testFailedJournalStartRemovesOnlyStillOwnedNewMicWriter() throws {
-        let paths = CoreStoragePaths(
-            transcripts: temporaryDirectory.appendingPathComponent("transcripts", isDirectory: true),
-            speakerDB: temporaryDirectory.appendingPathComponent("speakers.sqlite"),
-            statsDB: temporaryDirectory.appendingPathComponent("stats.sqlite"),
-            failedQueue: temporaryDirectory.appendingPathComponent("failed.json"),
-            speakerClips: temporaryDirectory.appendingPathComponent("speaker_clips", isDirectory: true),
-            audioCaptures: temporaryDirectory,
-            logs: temporaryDirectory.appendingPathComponent("logs", isDirectory: true)
-        )
-        let audio = Audio(paths: paths)
-        let generation = audio.currentRecordingSessionGeneration
-        let format = try XCTUnwrap(AVAudioFormat(
-            commonFormat: .pcmFormatFloat32,
-            sampleRate: 48_000,
-            channels: 1,
-            interleaved: false
-        ))
-
-        let newURL = temporaryDirectory.appendingPathComponent("meeting_new_mic.wav")
-        let newWriter = try AVAudioFile(forWriting: newURL, settings: format.settings)
-        XCTAssertTrue(audio.micAudioFileOwnership.installSessionWriter(
-            newWriter,
-            generation: generation
-        ).didInstall)
-        XCTAssertTrue(audio.discardUnjournaledMicStartFileIfOwned(
-            newURL,
-            sessionGeneration: generation
-        ))
-        XCTAssertNil(audio.micAudioFileOwnership.writerOwned(by: generation))
-        XCTAssertFalse(FileManager.default.fileExists(atPath: newURL.path))
-
-        let stopOwnedURL = temporaryDirectory.appendingPathComponent("meeting_stop_owned_mic.wav")
-        let stopOwnedWriter = try AVAudioFile(forWriting: stopOwnedURL, settings: format.settings)
-        XCTAssertTrue(audio.micAudioFileOwnership.installSessionWriter(
-            stopOwnedWriter,
-            generation: generation
-        ).didInstall)
-        let claimedByStop = audio.micAudioFileOwnership.takeWriterOwned(by: generation)
-        XCTAssertTrue(claimedByStop === stopOwnedWriter)
-        claimedByStop?.close()
-        XCTAssertFalse(audio.discardUnjournaledMicStartFileIfOwned(
-            stopOwnedURL,
-            sessionGeneration: generation
-        ))
-        XCTAssertTrue(FileManager.default.fileExists(atPath: stopOwnedURL.path))
-    }
-
     func testAbandonedFinalizerTransfersJournalToRecoveryAndDropsLateWrite() throws {
         let store = MeetingRecordingJournalStore(directory: temporaryDirectory)
         let micURL = temporaryDirectory.appendingPathComponent("meeting_abandoned_mic.wav")

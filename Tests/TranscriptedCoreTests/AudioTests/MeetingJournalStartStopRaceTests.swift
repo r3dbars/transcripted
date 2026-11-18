@@ -43,12 +43,12 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
     }
 
     @MainActor
-    func testStopDuringPersistTransfersOldAudioToRecoveryAcrossSuccessorStart() throws {
+    func testStopDuringPersistPreventsStaleTrackAdmissionAcrossSuccessorStart() throws {
         try exerciseStopDuringPersist(failOldWrite: false)
     }
 
     @MainActor
-    func testLateFailedPersistPreservesStoppedAudioAndSuccessorJournal() throws {
+    func testFailedFirstPersistCannotTransferOwnershipToRecovery() throws {
         try exerciseStopDuringPersist(failOldWrite: true)
     }
 
@@ -77,8 +77,8 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
         let oldStartFinished = expectation(description: "old start observed Stop")
         DispatchQueue.global().async {
             do {
-                _ = try audio.createMeetingMicStartFile(
-                    recordingSnapshot: AudioRecordingFormatSnapshot(sampleRate: 16_000, channelCount: 1),
+                _ = try audio.openMeetingStartTracks(
+                    capturesSystemAudio: true,
                     sessionGeneration: oldGeneration
                 )
                 XCTFail("Stopped start returned as current")
@@ -88,18 +88,16 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
             oldStartFinished.fulfill()
         }
         wait(for: [persisting], timeout: 5)
-        let completed = expectation(description: "old finalizer yielded to recovery")
+        let completed = expectation(description: "old stop completed without recovery ownership")
         audio.onRecordingCompleteWithGeneration = { _, mic, system, disposition in
             XCTAssertNil(system)
             XCTAssertNil(mic)
-            XCTAssertEqual(disposition, .journalRecoveryOwned)
+            XCTAssertEqual(disposition, .finalized)
             completed.fulfill()
         }
         audio.stop()
-        let oldMic = try XCTUnwrap(audio.snapshotStartedMicFiles().primaryURL)
-        let oldJournal = oldMic.deletingPathExtension().appendingPathExtension("recording.json")
         XCTAssertNil(audio.journalSession)
-        XCTAssertTrue(audio.abandonRecordingJournalFinalization(forStopGeneration: audio.recordingSessionGeneration))
+        XCTAssertFalse(audio.abandonRecordingJournalFinalization(forStopGeneration: audio.recordingSessionGeneration))
         audio.prepareForNewRecordingStart()
         let successorGeneration = audio.recordingSessionGeneration
         release.signal()
@@ -109,13 +107,8 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
         audio.recordingJournal.flush()
 
         XCTAssertEqual(audio.journalSession, successor)
-        if failOldWrite {
-            XCTAssertFalse(FileManager.default.fileExists(atPath: oldJournal.path))
-        } else {
-            XCTAssertEqual(MeetingRecordingJournalStore.load(at: oldJournal)?.state, .stopping)
-        }
-        XCTAssertFalse(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: oldJournal))
-        XCTAssertFalse(try Data(contentsOf: oldMic).isEmpty)
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: directory.path),
+                       ["meeting_new_mic.recording.json"])
         let newJournal = directory.appendingPathComponent("meeting_new_mic.recording.json")
         XCTAssertEqual(MeetingRecordingJournalStore.load(at: newJournal)?.state, .recording)
         XCTAssertTrue(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: newJournal))
