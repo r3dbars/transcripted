@@ -374,8 +374,8 @@ func testUIAutomationSurfaceContract() async {
         // remapped to surviving profiles) is covered by
         // HomeMeetingPreviewFormatterTests through HomeMeetingSpeakerNamingPolicy.
 
-        assertTrue(
-            contractSource("Sources/UI/Overlay/MeetingOverlayController+Island.swift").contains("Discard Recording…"),
+        assertEqual(
+            MeetingDiscardConfirmCopy.menuTitle, "Discard recording…",
             "the island's meeting right-click menu should keep a stable Discard title for automation"
         )
 
