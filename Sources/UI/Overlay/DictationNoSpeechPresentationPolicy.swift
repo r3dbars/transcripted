@@ -34,7 +34,7 @@ enum DictationNoSpeechPresentationPolicy {
                 // Not "No speech heard": the mic did pick up sound.
                 return "Didn't catch that. Try again."
             }
-            return "Captured audio did not become text. Transcribe It adds it to Meetings."
+            return "Captured audio did not become text. Choose Transcribe to add it to Meetings."
         }
 
         if trigger == "physical_key" {
@@ -49,13 +49,35 @@ enum DictationNoSpeechPresentationPolicy {
     }
 }
 
+extension DictationNoSpeechPresentationPolicy {
+    /// The wing's few words when the message is only a passing note: a take
+    /// with no speech, one too short, or one that didn't turn into words.
+    /// Nothing to rescue and nothing to press, so the island never opens its
+    /// drop-down for these; hovering shows the full sentence. Nil for a
+    /// message that needs reading or acting on (a muted mic, a model failure).
+    static func passingLabel(for message: String) -> String? {
+        if message.hasPrefix("No speech heard.") { return "No speech" }
+        if message.hasPrefix("Only a moment of audio") { return "Too short" }
+        if message == "Didn't catch that. Try again." { return "Didn't catch that" }
+        return nil
+    }
+
+    /// The wing's words for any no-speech message.
+    static func wingLabel(for message: String) -> String {
+        if let passing = passingLabel(for: message) { return passing }
+        if message.contains("sent only silence") { return "Mic is silent" }
+        if message.hasPrefix("The local speech model failed") { return "Model failed" }
+        return "No speech"
+    }
+}
+
 /// The button on dictation messages about a saved recording. It runs the
 /// same import as Capture → Transcribe Audio File on that recording.
 enum DictationSavedAudioActionCopy {
-    static let transcribeTitle = "Transcribe It"
+    static let transcribeTitle = "Transcribe"
 }
 
 /// The button on the wrong-language message. It pastes the held-back text.
 enum DictationHeldTextActionCopy {
-    static let pasteAnywayTitle = "Paste Anyway"
+    static let pasteAnywayTitle = "Paste anyway"
 }

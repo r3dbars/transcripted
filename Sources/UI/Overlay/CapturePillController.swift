@@ -174,12 +174,23 @@ final class CapturePillController {
         // Start the clock first: showing the prompt reports whether it
         // is on screen, which may hold it straight away.
         apply(timeoutClock.start(timeout: timeout, now: Date()))
+        let title = candidate.suggestedTranscriptTitle ?? candidate.title
         island.updateCallPrompt(NotchIslandCallPromptContent(
-            title: candidate.suggestedTranscriptTitle ?? candidate.title,
-            detail: detailOverride ?? candidate.detail,
+            title: title,
+            detail: detailOverride ?? Self.promptDetail(title: title, detail: candidate.detail),
             secondsLeft: timeoutSeconds
         ))
         return true
+    }
+
+    /// A calendar prompt's detail starts with the event title the prompt's
+    /// title already shows ("Weekly sync - starts in 3 min"); show only the
+    /// rest, capitalized ("Starts in 3 min"). Words only; detection is unchanged.
+    nonisolated static func promptDetail(title: String, detail: String) -> String {
+        let prefix = "\(title) - "
+        guard !title.isEmpty, detail.hasPrefix(prefix), detail.count > prefix.count else { return detail }
+        let rest = detail.dropFirst(prefix.count)
+        return rest.prefix(1).uppercased() + rest.dropFirst()
     }
 
     func dismiss(notify: Bool) {

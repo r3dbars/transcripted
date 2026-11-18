@@ -67,11 +67,13 @@ extension DictationSessionController {
         ) {
         case .error(let message):
             overlayController.showError(message)
-        case .savedNotice(let message, let actionTitle):
-            overlayController.showSavedNotice(
-                message,
-                actionTitle: actionTitle,
-                action: { [weak self] in
+        case .savedNotice(let message, _):
+            // Same notice as any take that didn't paste: the words, Dismiss, Paste.
+            overlayController.showSavedNotPastedNotice(
+                text,
+                hint: DictationSessionCapSavePolicy.islandHint(audioRetentionPending: saveResult.pendingAudioRetention != nil),
+                fallbackMessage: message,
+                paste: { [weak self] in
                     guard let self else { return }
                     switch DictationSessionCapSavePolicy.pasteItResult(self.pasteWithClipboardRestore(text)) {
                     case .pasted:
@@ -184,7 +186,7 @@ extension DictationSessionController {
     func showPendingAudioRetention(_ result: DictationTranscriptPersistenceResult) {
         guard let recovery = result.pendingAudioRetention,
               let message = result.audioRetentionFailureMessage else { return }
-        overlayController?.showError(message, actionTitle: "Retry Saving Audio", action: { [weak self] in
+        overlayController?.showError(message, actionTitle: "Retry saving audio", action: { [weak self] in
             let window = AudioStoragePreferences.dictationAudioKeepWindow()
             Task { @MainActor [weak self] in
                 let retried = await Task.detached(priority: .utility) {

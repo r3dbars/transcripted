@@ -2,11 +2,12 @@ import Foundation
 
 /// Island copy and routing for an auto-started detected call. Stop and
 /// Discard sit together here on purpose: the recording began without a
-/// prompt, so discarding must be one tap (then a confirmation) rather than
-/// buried in the right-click menu.
+/// prompt, so discarding must be one tap (then the island's own
+/// confirmation) rather than buried in the right-click menu.
 enum MeetingAutoRecordNoteCopy {
     static let title = "Recording automatically"
-    static let detail = "This call started without asking."
+    /// No second line: the title already says it.
+    static let detail = ""
     static let primaryTitle = "Stop"
     static let secondaryTitle = "Discard"
     /// Short enough to get out of the way of the call-audio ask.
@@ -28,10 +29,11 @@ enum MeetingAutoRecordNoteCopy {
             primaryTitle: primaryTitle,
             secondaryTitle: secondaryTitle,
             tertiaryTitle: nil,
-            // Stop keeps the recording, so it's the safe primary; Discard
-            // throws it away (after a confirmation), so it's the red one.
+            // Stop keeps the recording, so it's the safe primary. Discard
+            // only asks ("Discard this recording?"); red is saved for the
+            // answer that actually deletes it.
             primaryRole: .primary,
-            secondaryRole: .destructive
+            secondaryRole: .standard
         )
     }
 }

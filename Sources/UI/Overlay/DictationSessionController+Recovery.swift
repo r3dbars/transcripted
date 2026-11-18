@@ -35,7 +35,7 @@ extension DictationSessionController {
     /// recording up once its transcript is saved.
     func savedDictationAudioAction(for url: URL) -> (title: String, action: () -> Void) {
         guard let onTranscribeSavedAudio else {
-            return ("Show Audio", {
+            return ("Show in Finder", {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             })
         }
@@ -56,7 +56,7 @@ extension DictationSessionController {
 
     func showFailedCheckpointRecoveryError() {
         guard let overlayController else { return }
-        let message = "Audio is only in memory. Keep Transcripted open; check storage, then Retry Saving."
+        let message = "Audio is only in memory. Keep Transcripted open; check storage, then Retry saving."
         guard !isDictating,
               appState?.sttRouter.hasRecoverableRecording == true,
               stoppedAudioCheckpointSignal != nil,
@@ -68,7 +68,7 @@ extension DictationSessionController {
         }
         overlayController.showError(
             message,
-            actionTitle: "Retry Saving",
+            actionTitle: "Retry saving",
             action: { [weak self] in self?.retrySavingRetainedDictationAudio() }
         )
     }
@@ -178,7 +178,7 @@ extension DictationSessionController {
                             audioGone: {
                                 self.overlayController?.showError(
                                     "The captured audio is no longer available. Start a new dictation.",
-                                    actionTitle: "Try Again",
+                                    actionTitle: "Try again",
                                     action: { [weak self] in
                                         guard let self else { return }
                                         self.retryDictation(

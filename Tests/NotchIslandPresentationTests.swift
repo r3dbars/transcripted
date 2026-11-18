@@ -60,12 +60,13 @@ func testNotchIslandPresentation() {
         assertEqual(layout.right, [.dictationBars(count: 9), .text("28s left", .warning)])
     }
 
-    runSuite("NotchIslandPresentation shows the Esc confirm prompt as a warning") {
+    runSuite("NotchIslandPresentation shows the Esc confirm prompt where the timer was") {
         var content = listening()
-        content.notice = "Press Esc again to discard"
+        content.notice = DictationEscapeCancelPolicy.confirmNotice
         let layout = notchLayout(dictation: content)
-        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Press Esc again to discard", .warning)])
-        assertEqual(layout.right, [.dictationBars(count: 9)])
+        assertEqual(layout.left, [.symbol(.mic, .accent), .text("Listening", .title)],
+                    "Listening never moves, so the island doesn't lurch wider")
+        assertEqual(layout.right, [.dictationBars(count: 9), .text("Esc again to discard", .warning)])
     }
 
     runSuite("NotchIslandPresentation shows loading with a ring only for a real number") {
@@ -205,12 +206,12 @@ func testNotchIslandPresentation() {
         assertEqual(open.left, [.symbol(.video, .neutral), .text("Call", .title)])
         assertEqual(open.drop, .callPrompt(title: "Zoom call", detail: "Record this meeting?"))
         assertTrue(open.dropIsSticky)
-        assertEqual(open.right, [.live(.callSeconds, .secondary)], "the drop-down has the Record button, so the wing just counts")
+        assertEqual(open.right, [], "the countdown is the ring on Skip, so the wing doesn't repeat it")
 
         let key = NotchIslandPresentation.stickyKey(dictation: nil, meeting: nil, callPrompt: prompt)
         let closed = notchLayout(callPrompt: prompt, collapsedStickyKey: key)
         assertNil(closed.drop)
-        assertEqual(closed.right, [.chip("Record", .destructive, .callRecord)], "closed, the wing offers Record")
+        assertEqual(closed.right, [.chip("Record", .primary, .callRecord)], "closed, the wing offers Record as the white primary, never red")
     }
 
     runSuite("NotchIslandPresentation holds a prompt while a dictation runs") {
@@ -291,7 +292,7 @@ func testNotchIslandPresentation() {
 
         var callAudioOn = recording()
         callAudioOn.callAudioNote = .onForNextMeeting
-        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio next time", .secondary)])
+        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio: next meeting", .secondary)])
 
         var unverified = recording()
         unverified.systemAudioUnverified = true

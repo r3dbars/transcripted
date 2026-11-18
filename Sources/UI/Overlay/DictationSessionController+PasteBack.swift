@@ -74,6 +74,28 @@ extension DictationSessionController {
         }
     }
 
+    /// Paste again from the island's recent take: its result shows in the
+    /// island like any take's, in the same not-pasted notice with the same
+    /// Paste. The paste itself already ran; this only shows how it went.
+    /// False when a take is under way, so the caller shows it elsewhere.
+    func showPasteAgainOutcome(_ outcome: TextPasteOutcome, text: String) -> Bool {
+        guard !isDictating, let overlayController, overlayController.island != nil,
+              !overlayController.state.isActiveDictationState else { return false }
+        switch outcome {
+        case .pasted, .likelyPasted:
+            overlayController.showSuccessAndDismiss(title: "Pasted")
+        case .copied(let message, reason: let reason):
+            showNotPasted(text, message: message, unconfirmed: reason == .pasteNotConfirmed, overlayController: overlayController)
+        case .failed(let message, reason: _):
+            if case .clipboardBusy(let cause) = outcome.notPastedOffer {
+                showClipboardBusy(text, message: message, hint: cause.notPastedHint, overlayController: overlayController)
+            } else {
+                overlayController.showError(message)
+            }
+        }
+        return true
+    }
+
     /// Electron apps hide their text fields from Accessibility until asked,
     /// and Auto Enter needs a paste proven there. Asked at the start of the
     /// take only, so the tree is built before paste-back reads the focus.

@@ -170,7 +170,7 @@ extension DictationSessionController {
                             inputFormatReady: appState.sttRouter.inputFormatReady,
                             routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
                         ),
-                        actionTitle: "Try Again",
+                        actionTitle: "Try again",
                         action: retry
                     )
                 }

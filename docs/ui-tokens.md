@@ -11,7 +11,7 @@ One source for the look ("quiet paper, live green"): `Sources/UI/Shared/DesignTo
 | `hairline`, `hairlineStrong` | Dividers; the secondary-button border |
 | `fill`, `fillStrong` | The one neutral fill (hover, raised cards, chips); selected or pressed |
 | `live` (`NS.liveOnDark` on the island) | Capture green. Live or just-worked only: listening, recording, pasted, live progress, played audio |
-| `attention` | Failed or needs action |
+| `attention` (`NS.attentionOnDark` on the island) | Failed or needs action |
 | `danger` | Recording dot, the truly destructive confirm |
 | `dictationStream`, `meetingsStream`, `writingStream` | Small marks per stream, never fills |
 | `controlTint` | The window-root tint (below) |
@@ -47,7 +47,7 @@ Button("Not now") { … }.buttonStyle(.transcriptedQuiet)              // text o
 
 Height follows `.controlSize`: mini 20, small 24, regular 28, large 40 (onboarding and setup nav). One primary per view. Destructive actions stay secondary or quiet ink behind their existing confirm; only the confirm itself is red. No `.borderedProminent`, no `.tint(.orange)`, no green or blue fills.
 
-On the black island the same three are `NotchIslandButton.Style.accent` (white pill, the primary), `.plain` / `.subtle`, and `.link`; `.destructive` is red for losing something (Discard). Meeting prompt buttons pick their style from `NotchIslandMeetingContent.Prompt.primaryRole` / `secondaryRole`, never from the title. In the popover, filled rows (`MenuTokens.buttonBackgroundNS`) are the ink primary.
+On the black island the same three are `NotchIslandButton.Style.accent` (white pill, the primary), `.plain` / `.subtle`, and `.link`; `.destructive` is red only for the confirm step that loses something (the island's "Discard this recording?"). Every drop-down's buttons come from `NotchIslandDropButtons` with a role (`NotchIslandPromptButtonRole`), never from the title. In the popover, filled rows (`MenuTokens.buttonBackgroundNS`) are the ink primary.
 
 ## Root tint
 

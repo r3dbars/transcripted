@@ -57,18 +57,18 @@ func testDesignTokens() {
         assertEqual(note.primaryTitle, "Stop", "auto-record note primary is Stop")
         assertEqual(note.primaryRole, .primary, "Stop keeps the recording, so it is the safe primary, not red")
         assertEqual(note.secondaryTitle, "Discard", "auto-record note secondary is Discard")
-        assertEqual(note.secondaryRole, .destructive, "Discard throws the recording away, so it is the red one")
+        assertEqual(note.secondaryRole, .standard, "the first Discard only asks, so it stays grey; red is the confirm")
 
         let warning = NotchIslandMeetingContent.Prompt(
             title: "No sound",
             detail: "Nothing heard for 2 minutes.",
             countdown: "",
             primaryTitle: "Stop",
-            secondaryTitle: "Continue",
+            secondaryTitle: "Dismiss",
             tertiaryTitle: nil
         )
         assertEqual(warning.primaryRole, .primary, "a warning's Stop and transcribe defaults to the primary, not red")
-        assertEqual(warning.secondaryRole, .standard, "Continue stays the quiet pill")
+        assertEqual(warning.secondaryRole, .standard, "Dismiss stays the quiet pill")
     }
 }
 

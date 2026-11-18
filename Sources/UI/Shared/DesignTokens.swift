@@ -46,6 +46,8 @@ enum DesignTokens {
         static let liveOnDark = rgb(0x2EBD8C)
         /// Failed or needs-action states.
         static let attention = dynamic(dark: rgb(0xE0A33E), light: rgb(0xB07E1F))
+        /// Attention amber on an always-dark surface (the island).
+        static let attentionOnDark = rgb(0xE0A33E)
         /// Recording dot and the truly destructive confirm.
         static let danger = NSColor.systemRed
 
