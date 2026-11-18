@@ -236,6 +236,7 @@ final class MeetingSessionController: ObservableObject {
     var callEndTracking: MeetingCallEndTracking?
     var callEndArming = MeetingCallEndArming()
     var pendingCallEndCandidate: (identity: UUID, candidate: MeetingPromptDetector.Candidate)?
+    var refreshCalendarForSplitAcceptance: (() async -> Bool)?
     var onMeetingSplitDecision: ((MeetingPromptDetector.Candidate, MeetingSplitDecision) -> Void)?
     var latestCallActivity = MeetingCallActivitySnapshot.unknown
     /// Takes a fresh call-activity reading off main (the app wires it to the mic monitor's queue).
@@ -729,21 +730,6 @@ final class MeetingSessionController: ObservableObject {
     var isCaptureSessionActive: Bool {
         MeetingSessionStateMachine.isCaptureSessionActive(state)
     }
-
-    // enqueueTranscriptionJob, enqueueImportedAudioJob, enqueue,
-    // startQueuedTranscription, prepareAndStartQueuedTranscription,
-    // ensureModelsReadyForQueuedTranscription, runPreparedQueuedTranscription,
-    // and failQueuedTranscriptionJobAfterModelRecovery moved to
-    // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
-    // Call sites below now go through `transcriptionQueue.`.
-
-    // recordQueuedTranscriptionRuntimeDiagnosticsIfSafe,
-    // clearQueuedTranscriptionRuntimeDiagnosticsIfOwned,
-    // canStartQueuedTranscriptionImmediately(snapshot:),
-    // hasVisibleBackgroundTranscriptionWork(snapshot:),
-    // handleBackgroundTranscriptionWorkChanged, popNextQueuedTranscriptionJob,
-    // and finalizeBackgroundTranscriptionStateIfNeeded moved to
-    // TranscriptionQueueCoordinator.swift (audit 2026-07-08 wave 2, W2-B).
 
     // TranscriptionQueueCoordinator lives in a sibling file and needs
     // module-internal access.

@@ -83,7 +83,7 @@ final class MeetingPromptDetector {
     /// While prompts are held back (a meeting is recording), a different
     /// calendar meeting entering its prompt window is offered here as a split
     /// of the recording. True when the recording took it as an offer.
-    var onSplitRequest: ((Candidate) -> Bool)?
+    var onSplitRequest: (([Candidate]) -> Bool)?
     /// A detected ad-hoc call ended without a meeting recording and passed the
     /// `MissedCallNudgePolicy` gates (long enough, not declined, rate-limited).
     /// Wired in `TranscriptedApp` to the overlay's missed-call nudge.
@@ -439,13 +439,24 @@ final class MeetingPromptDetector {
         // that browser is the call, so present nothing until it lands (it
         // re-runs this). Otherwise a calendar or runtime prompt could win
         // this pass over the call that is actually happening.
-        if browserFirstTitleReadPending { return }
+
 
         let sortedCandidates = candidates.sorted(by: sortCandidates)
         let declinedProviders = detectedCallSession?.autoStartDeclinedProviders ?? []
         let visibleCandidates = declinedProviders.isEmpty
             ? sortedCandidates
             : sortedCandidates.filter { !declinedProviders.contains($0.candidate.provider) }
+        let promptsBlocked = shouldSkipPromptEvaluation?() == true
+        if promptsBlocked, let onSplitRequest {
+            let eligible = visibleCandidates.map(\.candidate).filter {
+                $0.source == .calendarEvent &&
+                    (snoozedUntil[$0.id] ?? .distantPast) <= now &&
+                    (pendingUntil[$0.id] ?? .distantPast) <= now
+            }
+            // Deliver even an empty refresh so ended or removed events clear.
+            if onSplitRequest(eligible) { return }
+        }
+        if browserFirstTitleReadPending { return }
         if visibleCandidates.isEmpty, let blocked = sortedCandidates.first,
            declinedProviders.contains(blocked.candidate.provider) {
             recordSuppression(
@@ -495,8 +506,7 @@ final class MeetingPromptDetector {
             }
         }
 
-        if shouldSkipPromptEvaluation?() == true {
-            if offerSplit(from: visibleCandidates, now: now) { return }
+        if promptsBlocked {
             recordSuppression(
                 candidate: match.candidate,
                 reason: .presentationBlocked,
@@ -544,22 +554,11 @@ final class MeetingPromptDetector {
         }
     }
 
-    // MARK: - Split on new meeting
-
-    /// Back-to-back calls otherwise record as one. Only calendar meetings
-    /// qualify: ad-hoc signals are already gated off while we hold the mic.
-    /// A recorded event is snoozed by `markAccepted`, one the user kept
-    /// recording through by `declineSplit`; the session leaves out an event
-    /// that started with the recording.
-    private func offerSplit(from candidates: [ScoredCandidate], now: Date) -> Bool {
-        guard let onSplitRequest else { return false }
-        return candidates.contains { scored in
-            let candidate = scored.candidate
-            guard candidate.source == .calendarEvent,
-                  (snoozedUntil[candidate.id] ?? .distantPast) <= now,
-                  (pendingUntil[candidate.id] ?? .distantPast) <= now else { return false }
-            return onSplitRequest(candidate)
-        }
+    /// A competing EventKit fetch will deliver its own evaluation. Until then
+    /// the old snapshot cannot authorize stopping a recording.
+    func refreshForSplitAcceptance() async -> Bool {
+        await evaluate(forceCalendarRefresh: true)
+        return !isFetchingCalendarSnapshots && !calendarSnapshotsNeedRefresh
     }
 
     private func preferredCandidate(from sortedCandidates: [ScoredCandidate]) -> ScoredCandidate? {

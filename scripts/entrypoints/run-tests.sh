@@ -585,6 +585,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingMicOnlyNotice.swift"
     "Sources/Meeting/MeetingCaptureSupport.swift"
     "Sources/Meeting/MeetingStopSequence.swift"
+    "Sources/Meeting/MeetingSplitOffer.swift"
     "Sources/Meeting/MeetingMicPCMRelay.swift"
     "Sources/Meeting/MeetingCaptureHealthTelemetry.swift"
     "Sources/Meeting/MeetingFailureCopy.swift"

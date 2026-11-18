@@ -58,6 +58,12 @@ enum MeetingStopSequence {
         return preserved
     }
 
+    @MainActor
+    static func split(stopAndEnqueue: () async -> Bool, startNext: () async -> Bool) async -> Bool {
+        guard await stopAndEnqueue() else { return false }
+        return await startNext()
+    }
+
     /// Which terminal ended an app-initiated stop.
     enum StopTerminal: Equatable {
         /// Stop timed out; the meeting went to the failed queue.

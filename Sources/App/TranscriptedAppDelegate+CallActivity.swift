@@ -47,8 +47,11 @@ extension TranscriptedAppDelegate {
     /// the user chose so the detector neither re-offers nor re-prompts.
     private func configureMeetingSplit() {
         let session = appState.meetingSession
-        meetingPromptDetector.onSplitRequest = { [weak session] candidate in
-            session?.offerMeetingSplit(candidate: candidate) ?? false
+        meetingPromptDetector.onSplitRequest = { [weak session] candidates in
+            session?.refreshCalendarSplit(candidates: candidates) ?? false
+        }
+        session.refreshCalendarForSplitAcceptance = { [weak self] in
+            await self?.meetingPromptDetector.refreshForSplitAcceptance() ?? false
         }
         session.onMeetingSplitDecision = { [weak self] candidate, decision in
             guard let detector = self?.meetingPromptDetector else { return }

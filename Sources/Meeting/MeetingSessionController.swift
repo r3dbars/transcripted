@@ -319,9 +319,10 @@ extension MeetingSessionController {
     /// Stop capture and queue the finished meeting for background transcription.
     /// Returns once the finished audio has either started transcribing or been
     /// placed behind the current background task.
-    func stopRecording(reason: StopReason = .unknown) async {
+    @discardableResult
+    func stopRecording(reason: StopReason = .unknown) async -> TranscriptionQueueCoordinator.QueueInsertionOutcome? {
         disableCallEndDetection(restoringSilenceWarning: false)
-        guard case .recording = state else { return }
+        guard case .recording = state else { return nil }
         transition(to: .stoppingRecording, reason: "stop_requested")
         Self.runtimeDiagnosticsRecorder?.recordSession(kind: "meeting", stage: "stop_requested")
         let recordingSnapshot = makeRecordingStopSnapshot()
@@ -584,7 +585,7 @@ extension MeetingSessionController {
                 stopTimedOut: stopResult.didTimeOut
             )
         })
-        guard terminal == .continueToTranscription else { return }
+        guard terminal == .continueToTranscription else { return nil }
 
         if files.micURL == nil {
             DiagnosticsTrail.record(
@@ -661,6 +662,7 @@ extension MeetingSessionController {
                 ]
             )
         )
+        return outcome
     }
 
     func handleUnexpectedCaptureStop(_ stopResult: CaptureStopResult) async {

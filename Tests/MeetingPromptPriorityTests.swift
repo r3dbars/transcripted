@@ -298,8 +298,22 @@ func testMeetingPromptPriority() {
             MeetingPromptPriority.resolve(inactivity: nil, systemAudio: nil, routeActive: true,
                                           micBoostVisible: true, current: .micBoost, isRecording: true,
                                           splitOffered: true),
+            .audioRoute,
+            "a route warning remains actionable while a split offer waits"
+        )
+        assertEqual(
+            MeetingPromptPriority.resolve(inactivity: nil, systemAudio: interruption, routeActive: false,
+                                          micBoostVisible: false, current: .meetingSplit, isRecording: true,
+                                          splitOffered: true),
+            .systemAudio,
+            "system audio degradation interrupts a pending split"
+        )
+        assertEqual(
+            MeetingPromptPriority.resolve(inactivity: nil, systemAudio: nil, routeActive: false,
+                                          micBoostVisible: false, current: .systemAudio, isRecording: true,
+                                          splitOffered: true),
             .meetingSplit,
-            "a split offer shows over the audio warnings while the next meeting starts"
+            "clearing the warning reveals the pending split"
         )
         assertNil(
             MeetingPromptPriority.resolve(inactivity: nil, systemAudio: nil, routeActive: false,

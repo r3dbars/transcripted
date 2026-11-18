@@ -107,8 +107,9 @@ extension MeetingOverlayController {
             // to whichever prompt was suppressed behind this one).
             meetingSession?.acceptMicBoostPrompt()
         case .meetingSplit:
+            guard let offer = meetingSplitOffer else { return }
             Task { @MainActor [weak self] in
-                await self?.meetingSession?.acceptMeetingSplit()
+                await self?.meetingSession?.acceptMeetingSplit(offer)
             }
         case .missedCall:
             onMissedCallNudgeResolved?(.acknowledged)
