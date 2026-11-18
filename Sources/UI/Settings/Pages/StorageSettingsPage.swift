@@ -290,8 +290,13 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         title: modelCacheCleanupInProgress ? "Removing…" : "Free up space",
                         tone: .destructive
                     ) {
+                        // Raise the confirm once the popover is gone: a
+                        // dialog presented while a popover is closing can be
+                        // dropped, leaving the button looking dead.
                         showsModelBreakdown = false
-                        showReclaimableCacheCleanupConfirmation = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                            showReclaimableCacheCleanupConfirmation = true
+                        }
                     }
                     .disabled(modelCacheCleanupInProgress || modelCacheLoading)
                 }

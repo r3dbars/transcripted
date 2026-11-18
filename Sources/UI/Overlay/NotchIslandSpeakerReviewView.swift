@@ -610,9 +610,10 @@ final class NotchIslandSpeakerReviewView: NSView {
         var updates = recognizedRows.compactMap { $0.buildUpdate(finish: finish) }
         var unanswered = 0
         for row in rows {
-            // The island's Later (or its ring) saves only what was answered;
-            // the mic's default You waits for a Done, here or on Speakers.
-            if finish == .later, !isPage, row.isMic, keepMicAsYou, !micAsYouChanged {
+            // Later (the island's button or ring, and Skip on Speakers) saves
+            // only what was answered; the mic's untouched default You waits
+            // for a Done, so nothing is written that the user never chose.
+            if finish == .later, row.isMic, keepMicAsYou, !micAsYouChanged {
                 unanswered += 1
                 continue
             }
