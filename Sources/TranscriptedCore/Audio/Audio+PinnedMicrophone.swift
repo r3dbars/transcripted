@@ -151,8 +151,9 @@ extension Audio {
                 throw AudioCaptureStaleSessionError()
             }
             try capture.start(
+                muteTimeline: writeContext.muteTimeline,
                 bufferCallback: { [weak self] buffer in
-                    self?.handleMicBuffer(buffer, writeContext: writeContext)
+                    self?.handleMicBuffer(buffer, timing: .redactedBeforeConversion, writeContext: writeContext)
                 },
                 eventHandler: { [weak self, weak capture] event in
                     guard let self, let capture else { return }

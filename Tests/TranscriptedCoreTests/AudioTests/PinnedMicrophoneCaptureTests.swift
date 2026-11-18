@@ -716,7 +716,7 @@ final class PinnedMicrophoneCaptureTests: XCTestCase {
         }
     }
 
-    private final class HAL: @unchecked Sendable {
+    final class HAL: @unchecked Sendable {
         var format = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 48000, channels: 1, interleaved: false)!
         var now: TimeInterval = 100
         var alive = true
