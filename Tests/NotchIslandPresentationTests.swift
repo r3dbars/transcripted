@@ -101,7 +101,7 @@ func testNotchIslandPresentation() {
     }
 
     runSuite("NotchIslandPresentation opens a dictation message by itself until it is closed") {
-        let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again")
+        let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try again")
         let content = NotchIslandDictationContent(phase: .message(message))
         let layout = notchLayout(dictation: content)
         assertEqual(layout.left, [.symbol(.warning, .warning), .text("Didn't start", .title)])
@@ -515,7 +515,7 @@ func testNotchIslandPresentation() {
         let message = NotchIslandDictationContent.Message(
             tone: .error,
             text: "Mic didn't start.",
-            actionTitle: "Try Again"
+            actionTitle: "Try again"
         )
         let covering: [NotchIslandDictationContent] = [
             NotchIslandDictationContent(phase: .starting),
@@ -618,7 +618,7 @@ func testNotchIslandPresentation() {
         )
         let others: [(String, NotchIslandDrop)] = [
             ("dictationLoading", .dictationLoading(title: "Warming up", detail: "Starts when ready.")),
-            ("dictationMessage", .dictationMessage(NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again"))),
+            ("dictationMessage", .dictationMessage(NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try again"))),
             ("dictationMessage notice", .dictationMessage(NotchIslandDictationContent.Message(tone: .notice, text: "Copied", actionTitle: nil))),
             ("justInserted", .justInserted(text: "Hello there", words: 2)),
             ("meetingPreparing", .meetingPreparing(title: "Starting", detail: "Getting the mic ready.")),

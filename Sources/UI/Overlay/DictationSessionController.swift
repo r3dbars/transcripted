@@ -206,12 +206,12 @@ class DictationSessionController: ObservableObject {
 
     /// Start dictation — show overlay and begin voice recording (no screenshot/vision)
     /// - Parameter isRetry: `true` when the caller is one of this controller's own
-    ///   error-alert actions ("Try Again", "Retry Dictation", the microphone
+    ///   error-alert actions ("Try again", "Retry Dictation", the microphone
     ///   permission recovery action) rather than a fresh request from a
     ///   hotkey, the menu bar, or onboarding. Those actions all pass the
     ///   failed attempt's `currentDictationTrigger` back in, so `trigger`
     ///   alone cannot tell a retry apart from the press that preceded it, and
-    ///   a user who taps Try Again four times would otherwise read as five
+    ///   a user who taps Try again four times would otherwise read as five
     ///   independent attempts in the denominator.
     func startDictation(
         sourceApp: NSRunningApplication?,

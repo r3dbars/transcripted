@@ -130,7 +130,7 @@ func testWritingSetupPresentation() {
             Copy.keyboardStep(.needsUserToAdd),
             Copy.KeyboardStep(
                 line: "Add Transcripted in Keyboard settings: Input Sources › Edit… › +, then English › Transcripted.",
-                buttonTitle: "Open Keyboard Settings",
+                buttonTitle: "Open keyboard settings",
                 isDone: false
             )
         )
@@ -138,7 +138,7 @@ func testWritingSetupPresentation() {
             Copy.keyboardStep(.needsRelogin),
             Copy.KeyboardStep(
                 line: "macOS lists new keyboards after you log out and back in. Log out, then add Transcripted in Keyboard settings.",
-                buttonTitle: "Open Keyboard Settings",
+                buttonTitle: "Open keyboard settings",
                 isDone: false
             )
         )

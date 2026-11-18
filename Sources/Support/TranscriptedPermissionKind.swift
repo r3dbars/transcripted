@@ -123,11 +123,11 @@ enum TranscriptedPermissionKind: String, CaseIterable, Identifiable {
         case .notDetermined:
             return "Allow microphone"
         case .denied, .restricted:
-            return "Open Microphone Settings"
+            return "Open microphone settings"
         case .authorized:
             return "Review"
         @unknown default:
-            return "Open Microphone Settings"
+            return "Open microphone settings"
         }
     }
 

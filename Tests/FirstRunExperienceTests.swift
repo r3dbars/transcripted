@@ -228,7 +228,7 @@ func testFirstRunExperience() {
             isLocallyInstalled: false
         )
         assertEqual(missing.status, "Not installed", "a missing script install should say so")
-        assertFalse(missing.detail.contains("Retry Download"), "a script-installed model has nothing to download")
+        assertFalse(missing.detail.contains("Retry download"), "a script-installed model has nothing to download")
 
         let brokenLoad = FirstRunExperience.modelCard(
             for: .failed(ParakeetLocalModelError.loadFailed.localizedDescription),
@@ -291,7 +291,7 @@ func testFirstRunExperience() {
             "failed model card should lead with a plain-language recovery cue"
         )
         assertTrue(
-            card.detail.contains("Retry Download"),
+            card.detail.contains("Retry download"),
             "failed model card should name the retry action"
         )
         assertFalse(
@@ -323,13 +323,13 @@ func testFirstRunExperience() {
             model: .appleSpeech
         )
         assertFalse(raw.detail.contains("NSURLErrorDomain"), "raw download errors stay out of the card")
-        assertTrue(raw.detail.contains("Try Again"), "the card names the retry button Apple Speech gets")
+        assertTrue(raw.detail.contains("Try again"), "the card names the retry button Apple Speech gets")
 
         let loading = FirstRunExperience.modelCard(for: .loading, model: .appleSpeech)
         assertFalse(loading.detail.contains("has the model files"), "Apple Speech may still need to download")
 
         let parakeet = FirstRunExperience.modelCard(for: .failed("anything"), model: .parakeetTDTv3)
-        assertTrue(parakeet.detail.contains("Retry Download"), "other models keep their copy")
+        assertTrue(parakeet.detail.contains("Retry download"), "other models keep their copy")
     }
 
     runSuite("FirstRunExperience.onboardingDoneModelPresentation — Done only says You're set once the model is on this Mac") {

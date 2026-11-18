@@ -167,13 +167,13 @@ enum WritingSetupPresentation {
         static let needsUserToAdd = "Add Transcripted in Keyboard settings: Input Sources › Edit… › +, then English › Transcripted."
         static let needsRelogin = "macOS lists new keyboards after you log out and back in. Log out, then add Transcripted in Keyboard settings."
         static let enabledNotSelected = "Choose Transcripted from the input menu in the menu bar."
-        static let openKeyboardSettings = "Open Keyboard Settings"
+        static let openKeyboardSettings = "Open keyboard settings"
     }
 
     /// The keyboard row on screen 2 and in the everyday view.
     struct KeyboardStep: Equatable {
         let line: String
-        /// "Open Keyboard Settings", or `nil` when that wouldn't help.
+        /// "Open keyboard settings", or `nil` when that wouldn't help.
         let buttonTitle: String?
         let isDone: Bool
     }

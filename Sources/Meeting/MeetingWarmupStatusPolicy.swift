@@ -108,7 +108,7 @@ enum MeetingWarmupStatusPolicy {
                 subtitle: "The local dictation model failed to load",
                 // Instruction first: the header clips at two lines, and the
                 // raw loader message is the least useful part.
-                detail: "Try dictation again, or press Retry Download in Settings → Transcription. \(message)",
+                detail: "Try dictation again, or press Retry download in Settings → Transcription. \(message)",
                 progress: 0,
                 dictationStatus: "Failed",
                 meetingsStatus: "Waiting"

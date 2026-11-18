@@ -37,7 +37,7 @@ extension ParakeetEngine {
     private static let stalledDownloadMessage =
         "The model download stopped making progress. Check your connection and retry the download."
     /// Slow downloads remain valid while bytes are moving. A silent task
-    /// fails into the existing Retry Download path instead of waiting forever.
+    /// fails into the existing Retry download path instead of waiting forever.
     private static let modelDownloadNoProgressTimeout: TimeInterval = 300
     /// Local benchmark override. Production keeps FluidAudio's power-efficient
     /// default unless the benchmark script explicitly selects another path.

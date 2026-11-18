@@ -627,7 +627,7 @@ func testTranscriptedPermissionAccess() async {
         )
         assertEqual(
             TranscriptedPermissionKind.microphoneActionTitle(for: .denied),
-            "Open Microphone Settings",
+            "Open microphone settings",
             "microphone action should point to System Settings after denial"
         )
         assertEqual(

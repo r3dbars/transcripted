@@ -155,7 +155,7 @@ Only the rows the screen 1 switches need are shown.
     Settings**.
   - Not enabled, and first installed during this login session: "macOS lists
     new keyboards after you log out and back in. Log out, then add
-    Transcripted in Keyboard settings." Button: **Open Keyboard Settings**.
+    Transcripted in Keyboard settings." Button: **Open keyboard settings**.
     Transcripted never logs out for the user.
   - Enabled but another input source is current: "Choose Transcripted from
     the input menu in the menu bar."
@@ -218,7 +218,7 @@ Shaped like the Dictations page:
 - macOS 26 ignores an app-initiated enable: `TISEnableInputSource` returns `noErr` and the keyboard stays off, even in a later process (seen on Justin's Mac, 2026-09-25). Transcripted still calls it, reads the source again, and logs the truth.
 - So the user adds the keyboard by hand: Keyboard settings › Input Sources › Edit… › +, then English › Transcripted.
 - A keyboard first copied into `~/Library/Input Methods` during this login session isn't listed there until the user logs out and back in (`killall TextInputMenuAgent` doesn't help). Transcripted remembers the login session it first installed the keyboard in (boot time plus audit session ID) and says so.
-- The Writing tab re-checks on app activation and on the Input Sources change notifications while it's on screen. The moment the keyboard is enabled, it selects it once. Only the **Open Keyboard Settings** button opens System Settings.
+- The Writing tab re-checks on app activation and on the Input Sources change notifications while it's on screen. The moment the keyboard is enabled, it selects it once. Only the **Open keyboard settings** button opens System Settings.
 
 **Screen Recording.** It's required for autocomplete, same as Tilde. Without it the keyboard stays silent, and the Writing tab says why with a one-click path to grant it.
 

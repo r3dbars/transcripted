@@ -51,7 +51,7 @@ enum FirstRunCompletionPath: String, Equatable {
 }
 
 enum FirstRunExperience {
-    private static let failedModelSetupDetail = "Local voice setup needs another try. Retry Download will try the same one-time local model setup again."
+    private static let failedModelSetupDetail = "Local voice setup needs another try. Retry download will try the same one-time local model setup again."
 
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
         if model.isAppleSpeech {
@@ -66,7 +66,7 @@ enum FirstRunExperience {
     private static func appleSpeechFailureDetail(message: String, model: TranscriptionModelChoice) -> String? {
         guard model.isAppleSpeech else { return nil }
         if message.hasPrefix("Apple Speech") { return message }
-        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try Again."
+        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try again."
     }
 
     private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
@@ -130,7 +130,7 @@ enum FirstRunExperience {
         model: TranscriptionModelChoice = .parakeetTDTv3,
         isLocallyInstalled: Bool = true
     ) -> FirstRunModelCardState {
-        // A script-installed model has nothing to download, so Retry Download
+        // A script-installed model has nothing to download, so Retry download
         // and download sizes don't apply. Say whether the install is missing
         // or present but failed to load, since only one needs a reinstall.
         if model.parakeetVariant?.isLocalInstallOnly == true {
@@ -182,7 +182,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try Again" : "Retry Download").",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try again" : "Retry download").",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working

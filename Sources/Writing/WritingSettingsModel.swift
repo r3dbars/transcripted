@@ -575,7 +575,7 @@ final class WritingSettingsModel: ObservableObject {
         refreshLive()
     }
 
-    /// "Open Keyboard Settings": tries the install, enable and select once
+    /// "Open keyboard settings": tries the install, enable and select once
     /// more, then opens Keyboard settings if the keyboard still isn't the
     /// input source. The only path that opens System Settings for it.
     func openKeyboardSettings() {

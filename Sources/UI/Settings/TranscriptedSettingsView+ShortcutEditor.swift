@@ -118,7 +118,7 @@ extension TranscriptedSettingsView {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Button("Open Keyboard Settings") {
+                Button("Open keyboard settings") {
                     trackSettingsAction("open_keyboard_settings", page: .general)
                     PhysicalDictationTriggerPreferences.openKeyboardSettings()
                 }

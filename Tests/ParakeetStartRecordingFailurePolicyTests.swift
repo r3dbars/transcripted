@@ -83,7 +83,7 @@ func testParakeetStartRecordingFailurePolicy() {
         )
 
         assertTrue(action.markFormatUnready, "timed-out engine starts should hold new starts until recovery refreshes readiness")
-        assertTrue(action.schedulePrewarmRetry, "a timed-out first start should still schedule readiness recovery for Try Again")
+        assertTrue(action.schedulePrewarmRetry, "a timed-out first start should still schedule readiness recovery for Try again")
         assertTrue(action.rebuildAudioEngine, "timed-out starts should keep using the graph recovery action")
     }
 

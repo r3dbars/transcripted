@@ -51,7 +51,7 @@ extension TranscriptedSettingsView {
             switch sttRouter.modelDownloadState {
             case .notLoaded, .failed:
                 guard isLocalModelInstalled(model) else { return "Check Again" }
-                if case .failed = sttRouter.modelDownloadState { return "Try Again" }
+                if case .failed = sttRouter.modelDownloadState { return "Try again" }
                 return "Load Now"
             case .cached:
                 return "Load Now"
@@ -67,7 +67,7 @@ extension TranscriptedSettingsView {
         case .failed:
             // Apple Speech failures are usually a language setting, not a
             // download to redo.
-            return effectiveTranscriptionModel.isAppleSpeech ? "Try Again" : "Retry Download"
+            return effectiveTranscriptionModel.isAppleSpeech ? "Try again" : "Retry download"
         case .downloading, .loading, .ready:
             return nil
         }

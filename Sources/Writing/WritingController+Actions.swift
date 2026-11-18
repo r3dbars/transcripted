@@ -160,7 +160,7 @@ extension WritingController {
     /// launch path tries the enable and select only on the first setup).
     /// macOS 26 ignores the enable, so until the user adds the keyboard in
     /// Keyboard settings this ends not selected. `openSettingsOnFailure` is
-    /// only for the tab's "Open Keyboard Settings" button: nothing else opens
+    /// only for the tab's "Open keyboard settings" button: nothing else opens
     /// System Settings. `true` once the keyboard is the selected input
     /// source.
     @discardableResult
