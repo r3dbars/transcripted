@@ -76,7 +76,7 @@ struct QuietHeaderSearchField: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField("Search", text: $query)
+            TextField("Search", text: $query, prompt: Text("Search").foregroundStyle(LibraryTokens.ink3))
                 .textFieldStyle(.plain)
                 .font(LibraryTokens.meta)
                 .focused($isFocused)
