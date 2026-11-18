@@ -111,7 +111,7 @@ final class NotchIslandDropView: NSView {
             let quote = body("\u{201C}\(message.preview ?? "")\u{201D}", maxLines: 2)
             let hint = NotchIslandPalette.label(
                 message.hint ?? "Click where it goes, then press ⌘V.",
-                font: .systemFont(ofSize: 12),
+                font: TextRole.meta.nsFont(weight: .regular),
                 color: NotchIslandPalette.secondaryText
             )
             readableText = [quote, hint]
@@ -241,13 +241,13 @@ final class NotchIslandDropView: NSView {
     }
 
     private func titleBlock(_ title: String, _ detail: String, wrapsDetail: Bool = false) -> NSView {
-        let titleLabel = NotchIslandPalette.label(title, font: .systemFont(ofSize: 15, weight: .bold), color: NotchIslandPalette.primaryText)
+        let titleLabel = NotchIslandPalette.label(title, font: TextRole.heading.nsFont(weight: .bold), color: NotchIslandPalette.primaryText)
         titleLabel.lineBreakMode = .byTruncatingTail
         var views: [NSView] = [titleLabel]
         if !detail.isEmpty {
             let detailLabel = NotchIslandPalette.label(
                 detail,
-                font: .systemFont(ofSize: 12),
+                font: TextRole.meta.nsFont(weight: .regular),
                 color: NotchIslandPalette.secondaryText,
                 wraps: wrapsDetail,
                 width: Self.contentWidth - 48
@@ -265,7 +265,7 @@ final class NotchIslandDropView: NSView {
     func body(_ text: String, maxLines: Int = 0) -> NSTextField {
         let label = NotchIslandPalette.label(
             text,
-            font: .systemFont(ofSize: 13),
+            font: TextRole.body.nsFont(weight: .regular),
             color: NotchIslandPalette.bodyText,
             wraps: true,
             width: Self.contentWidth
@@ -277,7 +277,7 @@ final class NotchIslandDropView: NSView {
     }
 
     private func lane(_ name: String, _ bars: NotchIslandBarsView) -> NSView {
-        let label = NotchIslandPalette.label(name, font: .systemFont(ofSize: 11, weight: .semibold), color: NotchIslandPalette.secondaryText)
+        let label = NotchIslandPalette.label(name, font: TextRole.small.nsFont(weight: .semibold), color: NotchIslandPalette.secondaryText)
         label.translatesAutoresizingMaskIntoConstraints = false
         label.widthAnchor.constraint(equalToConstant: 40).isActive = true
         return row([label, bars])
