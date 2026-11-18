@@ -17,8 +17,8 @@ extension PinnedMicrophoneCapture {
             return
         }
         switch item {
-        case let .audio(buffer):
-            callback?(buffer)
+        case let .audio(buffer, peak):
+            callback?(buffer, peak)
         case let .event(event):
             emit(event)
         case .silence:
@@ -26,9 +26,10 @@ extension PinnedMicrophoneCapture {
         }
     }
 
-    func deliver(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval) {
+    func deliver(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval) {
         let deliveryGeneration = generation
-        if hostSeconds > 0 {
+        let end = hostSeconds + Double(buffer.frameLength) / buffer.format.sampleRate
+        if hostSeconds > 0, end <= received, hostSeconds >= (expectedNextHostSeconds ?? 0) {
             if let expected = expectedNextHostSeconds {
                 let hole = hostSeconds - expected
                 if hole > Self.gapThresholdSeconds {
@@ -36,17 +37,18 @@ extension PinnedMicrophoneCapture {
                     guard generation == deliveryGeneration, callback != nil else { return }
                 }
             }
-            let rate = buffer.format.sampleRate
-            expectedNextHostSeconds = hostSeconds + (rate > 0 ? Double(buffer.frameLength) / rate : 0)
-        } else {
+            expectedNextHostSeconds = end
+        } else if hostSeconds <= 0 {
             // No timestamp: never measure the next hole from a stale one.
             expectedNextHostSeconds = nil
         }
         // pop() owns these native frames. Gate before conversion, paced
         // padding and finishing flushes so none can retain private samples.
         let digitalSilence = !silentInputReported && !tearingDown && Self.isDigitalSilence(buffer)
-        muteTimeline?.redact(buffer, hostSeconds: hostSeconds)
-        if let converted = convertToRecordingFormat(buffer) { deliverInOrder(.audio(converted)) }
+        let peak = roomLevelHandler == nil ? 0 : Audio.linearPeak(buffer: buffer)
+        roomLevelHandler?(Audio.normalizedRMSLevel(buffer: buffer))
+        muteTimeline?.redact(buffer, hostSeconds: hostSeconds, received: received, continuity: continuity)
+        if let converted = convertToRecordingFormat(buffer) { deliverInOrder(.audio(converted, rawPeak: peak)) }
         guard generation == deliveryGeneration else { return }
         trackSilentInput(buffer, digitalSilence: digitalSilence)
     }
@@ -79,9 +81,9 @@ extension PinnedMicrophoneCapture {
         var budget = padFrameBudget
         while let item = pendingOutput.first {
             switch item {
-            case let .audio(buffer):
+            case let .audio(buffer, peak):
                 pendingOutput.removeFirst()
-                callback?(buffer)
+                callback?(buffer, peak)
             case let .event(event):
                 pendingOutput.removeFirst()
                 emit(event)
@@ -119,7 +121,7 @@ extension PinnedMicrophoneCapture {
             for item in UnsafeMutableAudioBufferListPointer(silence.mutableAudioBufferList) {
                 if let data = item.mData { memset(data, 0, Int(item.mDataByteSize)) }
             }
-            callback?(silence)
+            callback?(silence, 0)
             delivered += chunk
             paddedSecondsTotal += Double(chunk) / format.sampleRate
             guard generation == silenceGeneration else { break }

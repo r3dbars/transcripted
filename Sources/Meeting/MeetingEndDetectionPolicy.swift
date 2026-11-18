@@ -111,6 +111,11 @@ struct MeetingCallEndTracking {
     /// after the remote side hung up. The user can still press Stop.
     var heardAudioDuringWarning = false
 
+    mutating func observeWarningLevels(micLevel: Float, systemLevel: Float) {
+        let threshold = MeetingAudioInactivityDetector.Configuration.default.activeLevelThreshold
+        if micLevel > threshold || systemLevel > threshold { heardAudioDuringWarning = true }
+    }
+
     func canStop(currentIdentity: UUID?, warningIdentity: UUID?, activity: MeetingEndDetectionPolicy.Activity,
                  at now: TimeInterval) -> Bool {
         recordingIdentity == currentIdentity && recordingIdentity == warningIdentity

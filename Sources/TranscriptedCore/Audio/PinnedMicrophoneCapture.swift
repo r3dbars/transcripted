@@ -53,7 +53,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     /// Why a queued item waits: silence padding is paced, and real buffers and
     /// in-order events queued behind it must not overtake it.
     enum PendingOutput {
-        case audio(AVAudioPCMBuffer)
+        case audio(AVAudioPCMBuffer, rawPeak: Float)
         case silence(frames: Int)
         case event(PinnedMicrophoneCaptureEvent)
     }
@@ -122,7 +122,9 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     var deviceFormat: AVAudioFormat?
     var converter: AVAudioConverter?
     var muteTimeline: MeetingMicMuteTimeline?
-    var callback: ((AVAudioPCMBuffer) -> Void)?
+    var continuity = MicCaptureContinuity()
+    var roomLevelHandler: ((Float) -> Void)?
+    var callback: ((AVAudioPCMBuffer, Float) -> Void)?
     var eventHandler: ((PinnedMicrophoneCaptureEvent) -> Void)?
     private var timer: DispatchSourceTimer?
     /// Hardware is running (IOProc started).
@@ -247,12 +249,13 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         bufferCallback: @escaping (AVAudioPCMBuffer) -> Void,
         eventHandler: @escaping (PinnedMicrophoneCaptureEvent) -> Void
     ) throws {
-        try start(muteTimeline: nil, bufferCallback: bufferCallback, eventHandler: eventHandler)
+        try start(muteTimeline: nil, roomLevelHandler: nil, bufferCallback: { buffer, _ in bufferCallback(buffer) }, eventHandler: eventHandler)
     }
 
     func start(
         muteTimeline: MeetingMicMuteTimeline?,
-        bufferCallback: @escaping (AVAudioPCMBuffer) -> Void,
+        roomLevelHandler: ((Float) -> Void)?,
+        bufferCallback: @escaping (AVAudioPCMBuffer, Float) -> Void,
         eventHandler: @escaping (PinnedMicrophoneCaptureEvent) -> Void
     ) throws {
         try serialized {
@@ -267,6 +270,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                 destroyHardware()
                 throw Self.error(-4, "Microphone start was cancelled.")
             }
+            self.roomLevelHandler = roomLevelHandler
             self.muteTimeline = muteTimeline
             callback = bufferCallback
             self.eventHandler = eventHandler
@@ -335,7 +339,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                 if let tail, let tailFormat {
                     for _ in 0..<tail.capacity {
                         guard generation == finishGeneration, let popped = tail.pop(format: tailFormat) else { break }
-                        deliver(popped.buffer, hostSeconds: popped.hostSeconds)
+                        deliver(popped.buffer, hostSeconds: popped.hostSeconds, received: popped.received)
                     }
                 }
                 if generation == finishGeneration, let recording = format {
@@ -404,6 +408,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         active = false
         waitingForDevice = false
         hasFailed = false
+        roomLevelHandler = nil
         muteTimeline = nil
         callback = nil
         eventHandler = nil
@@ -482,6 +487,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     }
 
     private func startHardware() throws {
+        continuity = MicCaptureContinuity(start: clock())
         let startGeneration = generation
         if let hardwareHooks { try hardwareHooks.start(hardwareDeviceID) }
         else {
@@ -577,7 +583,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                 lastBufferClock = now
                 consecutiveRestarts = 0
                 consecutiveFormatSettleRebuilds = 0
-                deliver(popped.buffer, hostSeconds: popped.hostSeconds)
+                deliver(popped.buffer, hostSeconds: popped.hostSeconds, received: popped.received)
                 guard running, generation == tickGeneration else { return }
             }
         }
@@ -732,8 +738,8 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
 
     // MARK: - Test seams
 
-    func receiveForTesting(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval) {
-        serialized { ring?.push(buffer.audioBufferList, hostSeconds: hostSeconds) }
+    func receiveForTesting(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval = PinnedMicrophoneBufferRing.hostSecondsNow()) {
+        serialized { ring?.push(buffer.audioBufferList, hostSeconds: hostSeconds, received: received) }
     }
     func drainForTesting() { serialized { drainAndCheck() } }
     /// Same as a HAL property listener firing.

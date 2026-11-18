@@ -474,7 +474,8 @@ extension Audio {
                             operation: "start_recording"
                         )
                     },
-                    installTap: { settledGraph, micWriteContext in
+                    installTap: { settledGraph, context in
+                        let micWriteContext = context.forNewTap()
                         // Install tap on microphone. The route can still move
                         // after the check; the guard makes that a failed
                         // start, not a crash.

@@ -94,11 +94,8 @@ extension MeetingSessionController {
     /// Room speech or other playback while "Call ended" is up. It doesn't
     /// clear the warning, but it vetoes the automatic stop.
     func noteAudioLevelsForCallEnd(micLevel: Float, systemLevel: Float) {
-        guard audioInactivityWarning?.kind == .callEnded,
-              callEndTracking?.heardAudioDuringWarning == false else { return }
-        let threshold = MeetingAudioInactivityDetector.Configuration.default.activeLevelThreshold
-        guard micLevel > threshold || systemLevel > threshold else { return }
-        callEndTracking?.heardAudioDuringWarning = true
+        guard audioInactivityWarning?.kind == .callEnded else { return }
+        callEndTracking?.observeWarningLevels(micLevel: micLevel, systemLevel: systemLevel)
     }
 
     /// The visible countdown reached zero. Read the call app's audio right now

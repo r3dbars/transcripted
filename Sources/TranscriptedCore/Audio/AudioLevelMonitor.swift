@@ -12,6 +12,10 @@ extension Audio {
     // MARK: - Mic Audio Level
 
     func calculateLevel(buffer: AVAudioPCMBuffer) {
+        publishMicLevel(normalizedRMSLevel(buffer: buffer))
+    }
+
+    func publishMicLevel(_ measurement: @autoclosure () -> Float) {
         // Mic buffers arrive ~12x/s; publishing each one fans two @Published
         // mutations out through the capture bridge into SwiftUI observers, so
         // gate publishes to `Audio.levelPublishInterval`. Buffers keep
@@ -28,7 +32,7 @@ extension Audio {
         }
         guard shouldPublish else { return }
 
-        let level = normalizedRMSLevel(buffer: buffer)
+        let level = measurement()
 
         DispatchQueue.main.async { [weak self] in
             guard let self = self else { return }
@@ -48,6 +52,10 @@ extension Audio {
     }
 
     func linearPeak(buffer: AVAudioPCMBuffer) -> Float {
+        Self.linearPeak(buffer: buffer)
+    }
+
+    static func linearPeak(buffer: AVAudioPCMBuffer) -> Float {
         let frameCount = vDSP_Length(buffer.frameLength)
         guard frameCount > 0,
               let channelData = buffer.floatChannelData else {
@@ -74,6 +82,10 @@ extension Audio {
     }
 
     func normalizedRMSLevel(buffer: AVAudioPCMBuffer) -> Float {
+        Self.normalizedRMSLevel(buffer: buffer)
+    }
+
+    static func normalizedRMSLevel(buffer: AVAudioPCMBuffer) -> Float {
         let frameCount = vDSP_Length(buffer.frameLength)
         guard frameCount > 0,
               let channelData = buffer.floatChannelData else {

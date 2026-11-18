@@ -11,16 +11,25 @@ import QuartzCore
 struct MicPCMWriteContext: @unchecked Sendable {
     let generation: UInt64
     let muteTimeline: MeetingMicMuteTimeline
+    var continuity = MicCaptureContinuity()
     let monoFormat: AVAudioFormat
     let inputChannelCount: AVAudioChannelCount
+
+    func forNewTap(start: Double = PinnedMicrophoneBufferRing.hostSecondsNow()) -> Self {
+        var context = self
+        context.continuity = MicCaptureContinuity(start: start)
+        return context
+    }
 }
 
 enum MicCaptureTiming {
-    case native(hostSeconds: Double)
-    case redactedBeforeConversion
+    case native(hostSeconds: Double, received: Double = PinnedMicrophoneBufferRing.hostSecondsNow())
+    case redactedBeforeConversion(rawPeak: Float)
 
-    func redact(_ buffer: AVAudioPCMBuffer, using timeline: MeetingMicMuteTimeline) {
-        if case let .native(seconds) = self { timeline.redact(buffer, hostSeconds: seconds) }
+    func redact(_ buffer: AVAudioPCMBuffer, using context: MicPCMWriteContext) {
+        if case let .native(seconds, received) = self {
+            context.muteTimeline.redact(buffer, hostSeconds: seconds, received: received, continuity: context.continuity)
+        }
     }
 
     init(_ time: AVAudioTime) {
@@ -67,15 +76,17 @@ extension Audio {
             }
         }
         lastBufferTime = CACurrentMediaTime()
-        let rawPeak = linearPeak(buffer: buffer)
+        let rawPeak: Float
+        switch timing {
+        case .native:
+            rawPeak = linearPeak(buffer: buffer)
+            calculateLevel(buffer: buffer)
+        case let .redactedBeforeConversion(peak):
+            rawPeak = peak
+        }
         if let window = micCaptureTelemetry.record(buffer, arrival: CACurrentMediaTime()) {
             AppLogger.audioMic.info("Mic capture window", window)
         }
-
-        // Meter + silence detection see the RAW signal so the user's
-        // visible level reflects their actual mic input, and the
-        // "Still recording?" prompt still triggers in a quiet room.
-        calculateLevel(buffer: buffer)
 
         // The tap-callback buffer is borrowed memory; modify a copy so the
         // CoreAudio-owned original stays untouched. The copy is what the
@@ -105,7 +116,7 @@ extension Audio {
         // including a borrowed dictation. Reuse the owned copy so mute adds
         // no buffer allocation. Dictation alone gates just the meeting track.
         let meetingBuffer: AVAudioPCMBuffer
-        timing.redact(bufferForAsyncUse, using: writeContext.muteTimeline)
+        timing.redact(bufferForAsyncUse, using: writeContext)
         if isMicGatedForBorrowedDictation {
             guard let silent = silentCopy(matching: bufferForAsyncUse) else {
                 AppLogger.audioMic.warning("Failed to build silent mic buffer while dictation is borrowing the mic")
@@ -179,7 +190,7 @@ extension Audio {
         // single-thread contract holds and the tail keeps the same loudness.
         realtimeAGC?.process(buffer: bufferForAsyncUse)
         // No host consumer sees the tail, so a gated tail is just silence.
-        timing.redact(bufferForAsyncUse, using: writeContext.muteTimeline)
+        timing.redact(bufferForAsyncUse, using: writeContext)
         if isMicGatedForBorrowedDictation {
             zeroSamples(of: bufferForAsyncUse)
         }

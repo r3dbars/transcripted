@@ -152,8 +152,12 @@ extension Audio {
             }
             try capture.start(
                 muteTimeline: writeContext.muteTimeline,
-                bufferCallback: { [weak self] buffer in
-                    self?.handleMicBuffer(buffer, timing: .redactedBeforeConversion, writeContext: writeContext)
+                roomLevelHandler: { [weak self] level in
+                    guard let self, self.recordingSessionGeneration == sessionGeneration else { return }
+                    self.publishMicLevel(level)
+                },
+                bufferCallback: { [weak self] buffer, peak in
+                    self?.handleMicBuffer(buffer, timing: .redactedBeforeConversion(rawPeak: peak), writeContext: writeContext)
                 },
                 eventHandler: { [weak self, weak capture] event in
                     guard let self, let capture else { return }

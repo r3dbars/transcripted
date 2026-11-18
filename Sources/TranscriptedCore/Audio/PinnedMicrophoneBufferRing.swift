@@ -79,6 +79,7 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
     private let storage: UnsafeMutableRawPointer
     private let lengths: UnsafeMutablePointer<Int>
     private let hostSeconds: UnsafeMutablePointer<Double>
+    private let receipts: UnsafeMutablePointer<Double>
     private let written = Atomic<Int>(0)
     private let read = Atomic<Int>(0)
     let received = Atomic<Int>(0)
@@ -103,6 +104,8 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
         // Write the PCM storage on the construction queue before the IOProc
         // first copies into it. This does not wire pages against later faults.
         memset(storage, 0, storageByteCount)
+        receipts = .allocate(capacity: capacity)
+        receipts.initialize(repeating: 0, count: capacity)
         lengths = .allocate(capacity: capacity)
         lengths.initialize(repeating: 0, count: capacity)
         hostSeconds = .allocate(capacity: capacity)
@@ -110,6 +113,8 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
     }
 
     deinit {
+        receipts.deinitialize(count: capacity)
+        receipts.deallocate()
         storage.deallocate()
         lengths.deinitialize(count: capacity)
         lengths.deallocate()
@@ -121,13 +126,13 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
     func push(_ input: UnsafePointer<AudioBufferList>, inputTime: UnsafePointer<AudioTimeStamp>) {
         let stamp = inputTime.pointee
         let valid = stamp.mFlags.contains(.hostTimeValid) && stamp.mHostTime != 0
-        push(input, hostSeconds: valid ? Double(stamp.mHostTime) * secondsPerHostTick : 0)
+        push(input, hostSeconds: valid ? Double(stamp.mHostTime) * secondsPerHostTick : 0, received: Double(mach_absolute_time()) * secondsPerHostTick)
     }
 
     /// `hostSeconds == 0` means the HAL gave no usable timestamp; the consumer
     /// then skips gap detection for that buffer.
-    func push(_ input: UnsafePointer<AudioBufferList>, hostSeconds stampSeconds: Double) {
-        received.wrappingAdd(1, ordering: .relaxed)
+    func push(_ input: UnsafePointer<AudioBufferList>, hostSeconds stampSeconds: Double, received: Double = hostSecondsNow()) {
+        self.received.wrappingAdd(1, ordering: .relaxed)
         guard !formatInvalidated.load(ordering: .acquiring) else {
             dropped.wrappingAdd(1, ordering: .relaxed)
             return
@@ -162,6 +167,7 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
         for index in 0..<bufferCount {
             memcpy(storage.advanced(by: (slot * bufferCount + index) * maximumFrames * bytesPerFrame), list[index].mData!, bytes)
         }
+        receipts[slot] = received
         lengths[slot] = bytes / bytesPerFrame
         hostSeconds[slot] = stampSeconds
         written.store(position + 1, ordering: .releasing)
@@ -180,12 +186,13 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
 
     /// Runs off the realtime thread and returns independently owned samples
     /// plus the capture host time in seconds (0 when unknown).
-    func pop(format: AVAudioFormat) -> (buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval)? {
+    func pop(format: AVAudioFormat) -> (buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval)? {
         let position = read.load(ordering: .relaxed)
         guard position < written.load(ordering: .acquiring) else { return nil }
         let slot = position % capacity
         let frames = lengths[slot]
         let stamp = hostSeconds[slot]
+        let received = receipts[slot]
         guard let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
             read.store(position + 1, ordering: .releasing)
             dropped.wrappingAdd(1, ordering: .relaxed)
@@ -197,6 +204,6 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
             memcpy(list[index].mData!, storage.advanced(by: (slot * bufferCount + index) * maximumFrames * bytesPerFrame), frames * bytesPerFrame)
         }
         read.store(position + 1, ordering: .releasing)
-        return (result, stamp)
+        return (result, stamp, received)
     }
 }

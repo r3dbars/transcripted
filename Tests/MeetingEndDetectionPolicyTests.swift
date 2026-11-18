@@ -637,7 +637,8 @@ func testMeetingEndDetectionPolicy() {
         for time in [100.0, 110, 120, 130, 140] { _ = tracking.policy.observe(.inactive, sampledAt: time, at: time) }
         assertTrue(tracking.canStop(currentIdentity: identity, warningIdentity: identity, activity: .inactive, at: 140),
                    "a silent room with the call app gone stops at the deadline")
-        tracking.heardAudioDuringWarning = true
+        tracking.observeWarningLevels(micLevel: 0.8, systemLevel: 0)
+        tracking.observeWarningLevels(micLevel: 0, systemLevel: 0)
         assertFalse(tracking.canStop(currentIdentity: identity, warningIdentity: identity, activity: .inactive, at: 140),
                     "people still talking after the remote side hung up keep the recording going")
     }

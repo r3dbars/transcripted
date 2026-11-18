@@ -444,7 +444,7 @@ extension Audio {
                     )
                 },
                 installTap: { graph, segment in
-                    let micWriteContext = segment.writeContext
+                    let micWriteContext = segment.writeContext.forNewTap()
                     try AudioTapInstallGuard.run(operation: "device_recovery") {
                         graph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: graph.recordingFormat) { [weak self] buffer, time in
                             self?.handleMicBuffer(buffer, timing: MicCaptureTiming(time), writeContext: micWriteContext)
