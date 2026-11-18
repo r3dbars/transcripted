@@ -3,7 +3,7 @@ import Foundation
 /// Promise: naming an unrecognized voice as someone already saved counts as a
 /// yes for that person, so their voice print shows their color with the rings
 /// they had plus the one this meeting earns, plays the match animation, and
-/// says what's left, exactly like ✓ on "Is this …?".
+/// says where they are, exactly like ✓ on "Is this …?".
 func testNotchIslandSavedPersonPrint() {
     typealias Policy = NotchIslandSpeakerReviewPolicy
     let picked = Policy.RowState.named(.savedPerson)
@@ -14,7 +14,7 @@ func testNotchIslandSavedPersonPrint() {
         for state in [Policy.RowState.confirmed, picked] {
             assertEqual(Policy.litRings(state, progress: repeated), 4)
             assertFalse(Policy.namedAutomatically(state, progress: repeated))
-            assertEqual(Policy.rowHint(state, progress: repeated)?.text, "1 more to go")
+            assertEqual(Policy.rowHint(state, progress: repeated)?.text, "4 of 5")
             assertEqual(Policy.litRings(state, progress: fresh), 5)
             assertTrue(Policy.namedAutomatically(state, progress: fresh))
         }
@@ -33,9 +33,9 @@ func testNotchIslandSavedPersonPrint() {
 
     runSuite("Picking a saved person says what's left, like a yes") {
         assertEqual(Policy.rowHint(picked, progress: Policy.Progress(confirmed: 2, required: 5)),
-                    SpeakerNamingTierPresentation.ReviewHint(text: "2 more to go", usesPersonColor: false))
+                    SpeakerNamingTierPresentation.ReviewHint(text: "3 of 5", usesPersonColor: false))
         assertEqual(Policy.rowHint(picked, progress: Policy.Progress(confirmed: 4, required: 5)),
-                    SpeakerNamingTierPresentation.ReviewHint(text: "Named automatically from now on", usesPersonColor: true))
+                    SpeakerNamingTierPresentation.ReviewHint(text: "Auto", usesPersonColor: true))
         assertTrue(Policy.namedAutomatically(picked, progress: Policy.Progress(confirmed: 4, required: 5)), "joins the footer")
         assertFalse(Policy.namedAutomatically(picked, progress: Policy.Progress(confirmed: 2, required: 5)))
         assertEqual(Policy.rowHint(picked, progress: Policy.Progress(confirmed: 7, required: 5, isTrusted: false)), nil,

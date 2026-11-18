@@ -4,12 +4,12 @@ import Foundation
 ///   - someone Transcripted names on its own sits under "Named automatically"
 ///     with a full print and no hint;
 ///   - everyone else who has a name is "Still learning", one lit ring per
-///     confirmed meeting, never a full print, with "One more yes" (in their
-///     color only when one yes really turns auto-naming on) or "N more";
+///     confirmed meeting, never a full print, with "4 of 5" (in their
+///     color only when one yes really turns auto-naming on);
 ///   - unnamed voices get an empty print in their own section;
 ///   - sections come in page order, keep the incoming order, and skip empties;
 ///   - the line under a name reads "14 meetings · today" / "· Tuesday";
-///   - "One more yes" in the person's color is readable text (4.5:1) on every
+///   - "4 of 5" in the person's color is readable text (4.5:1) on every
 ///     light and dark Settings surface, for all eight palette colors.
 func testSpeakerPrintDirectory() {
     func standing(_ tier: SpeakerNamingTier, confirmed: Int, required: Int = 5, trusted: Bool = true) -> SpeakerNamingStanding {
@@ -28,26 +28,26 @@ func testSpeakerPrintDirectory() {
         let marcus = Directory.row(standing: standing(.learning, confirmed: 4))
         assertEqual(marcus.section, .stillLearning)
         assertEqual(marcus.litRings, 4)
-        assertEqual(marcus.hint, Directory.Hint(text: "One more yes", usesPersonColor: true), "one left is the person-colored splash")
+        assertEqual(marcus.hint, Directory.Hint(text: "4 of 5", usesPersonColor: true), "one left is the person-colored splash")
 
         let dana = Directory.row(standing: standing(.new, confirmed: 1))
         assertEqual(dana.section, .stillLearning, "New people are still learning too")
         assertEqual(dana.litRings, 1)
-        assertEqual(dana.hint, Directory.Hint(text: "4 more", usesPersonColor: false))
+        assertEqual(dana.hint, Directory.Hint(text: "1 of 5", usesPersonColor: false))
 
         let fresh = Directory.row(standing: standing(.new, confirmed: 0))
         assertEqual(fresh.litRings, 0)
-        assertEqual(fresh.hint?.text, "5 more")
+        assertEqual(fresh.hint?.text, "0 of 5")
     }
 
     runSuite("After a correction, a well-confirmed person is still learning and the hint makes no color promise") {
         let paused = Directory.row(standing: standing(.learning, confirmed: 9, trusted: false))
         assertEqual(paused.section, .stillLearning)
         assertEqual(paused.litRings, 4, "probation past the bar never draws a full print")
-        assertEqual(paused.hint, Directory.Hint(text: "Keep confirming", usesPersonColor: false))
+        assertEqual(paused.hint, Directory.Hint(text: "Checking", usesPersonColor: false))
 
         let pausedOneShort = Directory.row(standing: standing(.learning, confirmed: 4, trusted: false))
-        assertEqual(pausedOneShort.hint?.text, "Keep confirming", "probation does not promise one yes")
+        assertEqual(pausedOneShort.hint?.text, "Checking", "probation does not promise one yes")
         assertEqual(pausedOneShort.hint?.usesPersonColor, false, "the health check may still hold auto-naming back")
     }
 
@@ -96,7 +96,7 @@ func testSpeakerPrintDirectory() {
         assertEqual(line(5, date(2026, 10, 9)), "5 meetings · today", "a clock ahead of us still reads today")
     }
 
-    runSuite("One more yes in the person's color is readable text in light and dark Settings") {
+    runSuite("4 of 5 in the person's color is readable text in light and dark Settings") {
         // The Settings window, white content, and a hovered row in each appearance.
         let light: [UInt32] = [0xFFFFFF, 0xECECEC, 0xE1E1E1]
         let dark: [UInt32] = [0x1E1E1E, 0x323232, 0x3B3B3B]
@@ -119,11 +119,8 @@ func testSpeakerPrintDirectory() {
 
     runSuite("Section titles and the page's header line read as designed") {
         assertEqual(Directory.title(.namedAutomatically, count: 2), "Named automatically · 2")
-        assertEqual(Directory.title(.stillLearning, count: 7), "Still learning")
-        assertEqual(Directory.title(.notNamedYet, count: 3), "Not named yet")
-        assertEqual(
-            Directory.headerLine,
-            "Confirm a voice in 5 meetings and its print fills in. Then Transcripted names that person on its own. Voices stay on this Mac."
-        )
+        assertEqual(Directory.title(.stillLearning, count: 7), "Still learning · 7")
+        assertEqual(Directory.title(.notNamedYet, count: 3), "Not named yet · 3")
+        assertEqual(Directory.headerLine, "Voices stay on this Mac.", "one line; the rings and the tip explain the rest")
     }
 }
