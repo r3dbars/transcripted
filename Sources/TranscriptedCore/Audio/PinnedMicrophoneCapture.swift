@@ -121,6 +121,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     /// rate or channels; `converter` then resamples back.
     var deviceFormat: AVAudioFormat?
     var converter: AVAudioConverter?
+    var muteTimeline: MeetingMicMuteTimeline?
     var callback: ((AVAudioPCMBuffer) -> Void)?
     var eventHandler: ((PinnedMicrophoneCaptureEvent) -> Void)?
     private var timer: DispatchSourceTimer?
@@ -246,6 +247,14 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         bufferCallback: @escaping (AVAudioPCMBuffer) -> Void,
         eventHandler: @escaping (PinnedMicrophoneCaptureEvent) -> Void
     ) throws {
+        try start(muteTimeline: nil, bufferCallback: bufferCallback, eventHandler: eventHandler)
+    }
+
+    func start(
+        muteTimeline: MeetingMicMuteTimeline?,
+        bufferCallback: @escaping (AVAudioPCMBuffer) -> Void,
+        eventHandler: @escaping (PinnedMicrophoneCaptureEvent) -> Void
+    ) throws {
         try serialized {
             guard !tearingDown else { throw Self.error(-4, "Microphone is stopping.") }
             guard !active else { return }
@@ -258,6 +267,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                 destroyHardware()
                 throw Self.error(-4, "Microphone start was cancelled.")
             }
+            self.muteTimeline = muteTimeline
             callback = bufferCallback
             self.eventHandler = eventHandler
             active = true
@@ -394,6 +404,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
         active = false
         waitingForDevice = false
         hasFailed = false
+        muteTimeline = nil
         callback = nil
         eventHandler = nil
         format = nil

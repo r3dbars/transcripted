@@ -10,8 +10,24 @@ import QuartzCore
 /// from reading successor state.
 struct MicPCMWriteContext: @unchecked Sendable {
     let generation: UInt64
+    let muteTimeline: MeetingMicMuteTimeline
     let monoFormat: AVAudioFormat
     let inputChannelCount: AVAudioChannelCount
+}
+
+enum MicCaptureTiming {
+    case native(hostSeconds: Double)
+    case redactedBeforeConversion
+
+    func redact(_ buffer: AVAudioPCMBuffer, using timeline: MeetingMicMuteTimeline) {
+        if case let .native(seconds) = self { timeline.redact(buffer, hostSeconds: seconds) }
+    }
+
+    init(_ time: AVAudioTime) {
+        let stamp = time.audioTimeStamp
+        self = .native(hostSeconds: stamp.mFlags.contains(.hostTimeValid)
+            ? Double(stamp.mHostTime) * PinnedMicrophoneBufferRing.secondsPerHostTick : 0)
+    }
 }
 
 extension Audio {
@@ -28,10 +44,10 @@ extension Audio {
     /// activity and the silence/inactivity detector still fires when the
     /// room is genuinely quiet. (AGC would otherwise amplify ambient noise
     /// up to "speech-looking" levels and defeat the inactivity prompt.)
-    func handleMicBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+    func handleMicBuffer(_ buffer: AVAudioPCMBuffer, timing: MicCaptureTiming, writeContext: MicPCMWriteContext) {
         let sessionGeneration = writeContext.generation
         guard sessionGeneration == recordingSessionGeneration else {
-            handleMicStopTailBuffer(buffer, writeContext: writeContext)
+            handleMicStopTailBuffer(buffer, timing: timing, writeContext: writeContext)
             return
         }
         // Empty callbacks do not prove the input route can deliver audio. Let
@@ -89,10 +105,8 @@ extension Audio {
         // including a borrowed dictation. Reuse the owned copy so mute adds
         // no buffer allocation. Dictation alone gates just the meeting track.
         let meetingBuffer: AVAudioPCMBuffer
-        if isMeetingMicMuted(generation: sessionGeneration) {
-            zeroSamples(of: bufferForAsyncUse)
-            meetingBuffer = bufferForAsyncUse
-        } else if isMicGatedForBorrowedDictation {
+        timing.redact(bufferForAsyncUse, using: writeContext.muteTimeline)
+        if isMicGatedForBorrowedDictation {
             guard let silent = silentCopy(matching: bufferForAsyncUse) else {
                 AppLogger.audioMic.warning("Failed to build silent mic buffer while dictation is borrowing the mic")
                 return
@@ -155,7 +169,7 @@ extension Audio {
     /// gone, so those buffers still reach this recording's file. The meter,
     /// watchdog, and live host consumer are skipped: the session they report
     /// on has already ended.
-    private func handleMicStopTailBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+    private func handleMicStopTailBuffer(_ buffer: AVAudioPCMBuffer, timing: MicCaptureTiming, writeContext: MicPCMWriteContext) {
         let sessionGeneration = writeContext.generation
         guard buffer.frameLength > 0,
               micAudioWriteBackpressure.isFinishing(generation: sessionGeneration),
@@ -165,7 +179,8 @@ extension Audio {
         // single-thread contract holds and the tail keeps the same loudness.
         realtimeAGC?.process(buffer: bufferForAsyncUse)
         // No host consumer sees the tail, so a gated tail is just silence.
-        if isMicGatedForBorrowedDictation || isMeetingMicMuted(generation: sessionGeneration) {
+        timing.redact(bufferForAsyncUse, using: writeContext.muteTimeline)
+        if isMicGatedForBorrowedDictation {
             zeroSamples(of: bufferForAsyncUse)
         }
 

@@ -479,8 +479,8 @@ extension Audio {
                         // after the check; the guard makes that a failed
                         // start, not a crash.
                         try AudioTapInstallGuard.run(operation: "start_recording") {
-                            settledGraph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: settledGraph.recordingFormat) { [weak self] buffer, _ in
-                                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
+                            settledGraph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: settledGraph.recordingFormat) { [weak self] buffer, time in
+                                self?.handleMicBuffer(buffer, timing: MicCaptureTiming(time), writeContext: micWriteContext)
                             }
                         }
                     },
@@ -615,6 +615,7 @@ extension Audio {
         self.monoOutputFormat = monoFormat
         let micWriteContext = MicPCMWriteContext(
             generation: sessionGeneration,
+            muteTimeline: meetingMicMuteSessions.timeline(for: sessionGeneration),
             monoFormat: monoFormat,
             inputChannelCount: recordingSnapshot.channelCount
         )
@@ -738,6 +739,7 @@ extension Audio {
         ])
         return MicPCMWriteContext(
             generation: sessionGeneration,
+            muteTimeline: meetingMicMuteSessions.timeline(for: sessionGeneration),
             monoFormat: monoFormat,
             inputChannelCount: recordingSnapshot.channelCount
         )

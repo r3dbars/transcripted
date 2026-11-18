@@ -42,9 +42,13 @@ extension PinnedMicrophoneCapture {
             // No timestamp: never measure the next hole from a stale one.
             expectedNextHostSeconds = nil
         }
+        // pop() owns these native frames. Gate before conversion, paced
+        // padding and finishing flushes so none can retain private samples.
+        let digitalSilence = !silentInputReported && !tearingDown && Self.isDigitalSilence(buffer)
+        muteTimeline?.redact(buffer, hostSeconds: hostSeconds)
         if let converted = convertToRecordingFormat(buffer) { deliverInOrder(.audio(converted)) }
         guard generation == deliveryGeneration else { return }
-        trackSilentInput(buffer)
+        trackSilentInput(buffer, digitalSilence: digitalSilence)
     }
 
     /// Reports the hole and queues its silence. The silence goes out paced by
@@ -139,11 +143,11 @@ extension PinnedMicrophoneCapture {
 
     /// Runs on the serial queue on each real buffer, in the device format,
     /// before conversion. Padding never counts. Stops looking once reported.
-    private func trackSilentInput(_ buffer: AVAudioPCMBuffer) {
+    private func trackSilentInput(_ buffer: AVAudioPCMBuffer, digitalSilence: Bool) {
         guard !silentInputReported, !tearingDown, buffer.frameLength > 0 else { return }
         let rate = buffer.format.sampleRate
         guard rate > 0 else { return }
-        guard Self.isDigitalSilence(buffer) else {
+        guard digitalSilence else {
             silentInputRunSeconds = 0
             return
         }

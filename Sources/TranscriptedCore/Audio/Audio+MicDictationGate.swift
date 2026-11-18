@@ -19,14 +19,8 @@ extension Audio {
     /// A recovered tap keeps the same generation. Stop advances it, but the
     /// finishing tap still checks its own generation while its writer drains.
     public var isMeetingMicMuted: Bool {
-        get { isMeetingMicMuted(generation: recordingSessionGeneration) }
-        set {
-            mutedMeetingGeneration.store(newValue ? recordingSessionGeneration : .max, ordering: .releasing)
-        }
-    }
-
-    func isMeetingMicMuted(generation: UInt64) -> Bool {
-        mutedMeetingGeneration.load(ordering: .acquiring) == generation
+        get { meetingMicMuteSessions.timeline(for: recordingSessionGeneration).isMuted }
+        set { meetingMicMuteSessions.timeline(for: recordingSessionGeneration).setMuted(newValue) }
     }
 
     /// On while a borrowed-mic dictation claim is live. Safe from any thread;

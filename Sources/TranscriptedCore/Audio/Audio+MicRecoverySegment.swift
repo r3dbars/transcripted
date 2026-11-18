@@ -97,6 +97,7 @@ extension Audio {
             self.monoOutputFormat = monoFormat
             micWriteContext = MicPCMWriteContext(
                 generation: sessionGeneration,
+                muteTimeline: meetingMicMuteSessions.timeline(for: sessionGeneration),
                 monoFormat: monoFormat,
                 inputChannelCount: recordingSnapshot.channelCount
             )

@@ -713,7 +713,7 @@ public class Audio: ObservableObject, @unchecked Sendable {
     // dictation gate is on, only this hook gets them: the saved mic WAV and
     // live preview get silence of the same length (Audio+MicDictationGate.swift).
     public var onMicPCMBuffer: ((AVAudioPCMBuffer) -> Void)?
-    let mutedMeetingGeneration = Atomic<UInt64>(.max)
+    let meetingMicMuteSessions = MeetingMicMuteSessions()
     let micDictationGate = Atomic<Bool>(false)
     let livePCMDelivery = LiveMeetingPCMDelivery() // live preview side channel; see Audio+LivePCM.swift
 

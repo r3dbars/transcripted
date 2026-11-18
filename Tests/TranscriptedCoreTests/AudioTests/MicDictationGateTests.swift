@@ -96,7 +96,7 @@ final class MicDictationGateTests: XCTestCase {
             audio: audio,
             url: url,
             writer: writer,
-            writeContext: MicPCMWriteContext(generation: generation, monoFormat: Self.format, inputChannelCount: 1)
+            writeContext: MicPCMWriteContext(generation: generation, muteTimeline: audio.meetingMicMuteSessions.timeline(for: generation), monoFormat: Self.format, inputChannelCount: 1)
         )
     }
 
@@ -154,18 +154,18 @@ final class MicDictationGateTests: XCTestCase {
         audio.setLivePCMDeliveryEnabled(true, previewEpoch: 1)
 
         let speech = makeSpeech(level: 0.5)
-        audio.handleMicBuffer(speech, writeContext: harness.writeContext)
-        audio.isMeetingMicMuted = true
+        audio.handleMicBuffer(speech, timing: .native(hostSeconds: 10), writeContext: harness.writeContext)
+        harness.writeContext.muteTimeline.setMuted(true, clock: { 20 })
         let replacementTap = MicPCMWriteContext(
-            generation: harness.writeContext.generation, monoFormat: Self.format, inputChannelCount: 1
+            generation: harness.writeContext.generation, muteTimeline: harness.writeContext.muteTimeline, monoFormat: Self.format, inputChannelCount: 1
         )
-        audio.handleMicBuffer(speech, writeContext: replacementTap)
+        audio.handleMicBuffer(speech, timing: .native(hostSeconds: 25), writeContext: replacementTap)
         audio.isMicGatedForBorrowedDictation = true
-        audio.handleMicBuffer(speech, writeContext: replacementTap)
+        audio.handleMicBuffer(speech, timing: .native(hostSeconds: 25), writeContext: replacementTap)
         audio.isMicGatedForBorrowedDictation = false
-        audio.handleMicBuffer(speech, writeContext: replacementTap)
-        audio.isMeetingMicMuted = false
-        audio.handleMicBuffer(speech, writeContext: replacementTap)
+        audio.handleMicBuffer(speech, timing: .native(hostSeconds: 25), writeContext: replacementTap)
+        harness.writeContext.muteTimeline.setMuted(false, clock: { 30 })
+        audio.handleMicBuffer(speech, timing: .native(hostSeconds: 35), writeContext: replacementTap)
 
         await withCheckedContinuation { continuation in
             audio.livePCMDelivery.flush { continuation.resume() }
@@ -178,13 +178,111 @@ final class MicDictationGateTests: XCTestCase {
         XCTAssertEqual(preview.value.map { $0.map(abs).max() }, [0.5, 0, 0, 0, 0.5])
     }
 
+    func testPinnedRingDrainedAfterUnmuteProtectsEverySink() async throws {
+        let harness = try startRecording(root: try makeRoot())
+        let audio = harness.audio
+        let hal = PinnedMicrophoneCaptureTests.HAL()
+        let capture = hal.makeCapture(deviceID: 41)
+        let format = try capture.prepare()
+        audio.pinnedMicrophoneCapture = capture
+        let prepared = PreparedPinnedMeetingMicrophone(
+            capture: capture, deviceID: 41, recordingFormat: format,
+            recordingSnapshot: try XCTUnwrap(AudioRecordingFormatPolicy.snapshot(format))
+        )
+        try audio.startPinnedMeetingMicrophone(prepared, writeContext: harness.writeContext,
+                                              sessionGeneration: harness.writeContext.generation)
+        defer { capture.stop() }
+        let host = LockedSamples(), preview = LockedSamples()
+        audio.onMicPCMBuffer = { host.append($0) }
+        audio.onLivePCMBuffer = { buffer, _, _, _ in preview.append(buffer) }
+        audio.setLivePCMDeliveryEnabled(true, previewEpoch: 1)
+        harness.writeContext.muteTimeline.setMuted(true, clock: { 10 })
+        capture.receiveForTesting(hal.buffer(frames: 1, value: 0.5),
+                                  hostSeconds: 11)
+        capture.receiveForTesting(hal.buffer(frames: 1, value: 0.75), hostSeconds: 0)
+        harness.writeContext.muteTimeline.setMuted(false, clock: { 12 })
+        capture.receiveForTesting(hal.buffer(frames: 1, value: 0.25),
+                                  hostSeconds: 13)
+        capture.drainForTesting()
+        await audio.flushMicHostPCMBufferFanout()
+        await withCheckedContinuation { continuation in
+            audio.livePCMDelivery.flush { continuation.resume() }
+        }
+        XCTAssertEqual(try savedSamples(harness), [0, 0, 0.25])
+        XCTAssertEqual(host.value.flatMap { $0 }, [0, 0, 0.25])
+        XCTAssertEqual(preview.value.flatMap { $0 }, [0, 0, 0.25])
+    }
+
+    func testEngineCaptureTimeRedactsOnlyFramesOverlappingMuteEdges() throws {
+        let harness = try startRecording(root: try makeRoot())
+        let timeline = harness.writeContext.muteTimeline
+        let ticks = AVAudioTime.hostTime(forSeconds: 100)
+        let start = Double(ticks) * PinnedMicrophoneBufferRing.secondsPerHostTick
+        let rate = Self.format.sampleRate
+        timeline.setMuted(true, clock: { start + 1.5 / rate })
+        timeline.setMuted(false, clock: { start + 3 / rate })
+        timeline.setMuted(true, clock: { start + 5 / rate })
+        timeline.setMuted(false, clock: { start + 6.5 / rate })
+        let speech = makeSpeech(level: 0.5)
+        harness.audio.handleMicBuffer(speech, timing: MicCaptureTiming(AVAudioTime(hostTime: ticks)),
+                                      writeContext: harness.writeContext)
+        let sampleOnly = AVAudioTime(sampleTime: 4800, atRate: rate)
+        harness.audio.handleMicBuffer(speech, timing: MicCaptureTiming(sampleOnly),
+                                      writeContext: harness.writeContext)
+        let saved = try savedSamples(harness)
+        var expected = Array(repeating: Float(0.5), count: Int(Self.frames))
+        for index in [1, 2, 5, 6] { expected[index] = 0 }
+        expected += Array(repeating: 0, count: Int(Self.frames))
+        XCTAssertEqual(saved.map(abs), expected)
+    }
+
+    func testMutedRouteChangeWithPacedPadAndConvertedFinishingTail() throws {
+        // Identical runs with injected private speech versus silence must
+        // match sample for sample, including resampler history after unmute.
+        func run(privateLevel: Float) throws -> [Float] {
+            let harness = try startRecording(root: try makeRoot())
+            let audio = harness.audio
+            let hal = PinnedMicrophoneCaptureTests.HAL()
+            let capture = hal.makeCapture(deviceID: 41)
+            let format = try capture.prepare()
+            audio.pinnedMicrophoneCapture = capture
+            try audio.startPinnedMeetingMicrophone(
+                PreparedPinnedMeetingMicrophone(capture: capture, deviceID: 41, recordingFormat: format,
+                                                recordingSnapshot: try XCTUnwrap(AudioRecordingFormatPolicy.snapshot(format))),
+                writeContext: harness.writeContext, sessionGeneration: harness.writeContext.generation
+            )
+            capture.receiveForTesting(hal.buffer(frames: 480, value: 0.25), hostSeconds: 100)
+            capture.drainForTesting()
+            hal.format = AVAudioFormat(standardFormatWithSampleRate: 24000, channels: 1)!
+            try capture.switchDevice(to: 42)
+            let timeline = harness.writeContext.muteTimeline
+            timeline.setMuted(true, clock: { 101 })
+            capture.receiveForTesting(hal.buffer(frames: 480, value: privateLevel), hostSeconds: 102)
+            timeline.setMuted(false, clock: { 102.02 })
+            capture.drainForTesting() // One second of the 1.99 s pad is delivered.
+            capture.receiveForTesting(hal.buffer(frames: 480, value: 0.75), hostSeconds: 102.02)
+            audio.micAudioWriteBackpressure.beginFinishing(generation: harness.writeContext.generation)
+            _ = audio.beginRecordingSessionGeneration()
+            audio.isMeetingMicMuted = true // The successor must not silence the old tail.
+            capture.finishAndDrain()
+            return try savedSamples(harness)
+        }
+        let reference = try run(privateLevel: 0)
+        XCTAssertEqual(try run(privateLevel: 0.5), reference)
+        XCTAssertEqual(reference.first, 0.25)
+        XCTAssertTrue(reference.count > 96_000)
+        XCTAssertTrue(reference[480..<96_000].allSatisfy { $0 == 0 })
+        XCTAssertGreaterThan(reference.last ?? 0, 0.5)
+    }
+
     func testStopTailStaysMutedAndNextRecordingStartsUnmuted() throws {
         let harness = try startRecording(root: try makeRoot())
         let audio = harness.audio
-        audio.isMeetingMicMuted = true
+        harness.writeContext.muteTimeline.setMuted(true, clock: { 10 })
+        XCTAssertTrue(audio.isMeetingMicMuted)
         audio.micAudioWriteBackpressure.beginFinishing(generation: harness.writeContext.generation)
         _ = audio.beginRecordingSessionGeneration()
-        audio.handleMicBuffer(makeSpeech(level: 0.5), writeContext: harness.writeContext)
+        audio.handleMicBuffer(makeSpeech(level: 0.5), timing: .native(hostSeconds: 11), writeContext: harness.writeContext)
         let saved = try savedSamples(harness)
         XCTAssertEqual(saved.count, Int(Self.frames))
         XCTAssertEqual(saved.map(abs).max(), 0)
@@ -208,5 +306,19 @@ final class MicDictationGateTests: XCTestCase {
         let peaks = audio.signalDiagnosticsSnapshot
         XCTAssertEqual(peaks.micRawPeak, 0.5, accuracy: 0.0001)
         XCTAssertEqual(peaks.micProcessedPeak, 0.5, accuracy: 0.0001, "Signal health reads the real mic, not the gated track")
+    }
+}
+
+// Older synthetic audio fixtures model a known, completed native buffer.
+extension Audio {
+    func handleMicBuffer(_ buffer: AVAudioPCMBuffer, writeContext: MicPCMWriteContext) {
+        handleMicBuffer(buffer, timing: .native(hostSeconds: 1), writeContext: writeContext)
+    }
+}
+
+extension MicPCMWriteContext {
+    init(generation: UInt64, monoFormat: AVAudioFormat, inputChannelCount: AVAudioChannelCount) {
+        self.init(generation: generation, muteTimeline: MeetingMicMuteTimeline(),
+                  monoFormat: monoFormat, inputChannelCount: inputChannelCount)
     }
 }
