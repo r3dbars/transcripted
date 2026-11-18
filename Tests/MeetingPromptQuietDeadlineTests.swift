@@ -41,11 +41,31 @@ func testMeetingPromptQuietDeadline() async {
                    "the inherited decline must expire for automatic recording too")
     }
 
+    runSuite("Another provider ending cannot extend the first provider's grace") {
+        detector.stop()
+        detector.nativeNotNowCallEnded(notNows, now: now)
+        let zoom = MeetingPromptDetector.NativeNotNow(provider: .zoom, kind: "zoom",
+            candidateReason: nil, providerReason: nil, declinedAt: now, quietUntil: decision.until)
+        detector.nativeNotNowCallEnded(["zoom": zoom], now: now.addingTimeInterval(50))
+        var session = MeetingPromptDetector.DetectedCallSession(
+            providers: [.teams], seenReasons: [.micInput], startedAt: now.addingTimeInterval(80),
+            sawMeetingRecording: false, userDeclined: false, promptShown: false)
+        detector.carryOverEndedNativeNotNows(into: &session, now: now.addingTimeInterval(80))
+        assertTrue(session.nativeNotNows.isEmpty, "Teams prompts again after its own grace expires")
+        session.providers = [.zoom]
+        detector.carryOverEndedNativeNotNows(into: &session, now: now.addingTimeInterval(80))
+        assertTrue(session.nativeNotNows["zoom"] != nil, "Zoom retains its own active grace")
+    }
+
     runSuite("A later quiet deadline keeps the earlier recheck scheduled") {
         detector.stop()
         detector.nativeNotNowCallEnded(notNows, now: now)
         let first = detector.recordedCallQuietEndTask
         detector.nativeNotNowCallEnded(notNows, now: now.addingTimeInterval(10))
+        let firstDeadline = now.addingTimeInterval(detector.recordedCallEndGrace)
         assertTrue(first?.isCancelled == false, "a later quiet window cannot cancel the earlier wake")
+        detector.armNextQuietRecheck(now: firstDeadline)
+        assertTrue(detector.recordedCallQuietEndAt == firstDeadline.addingTimeInterval(10),
+                   "the later deadline gets its own recheck after the earlier one expires")
     }
 }

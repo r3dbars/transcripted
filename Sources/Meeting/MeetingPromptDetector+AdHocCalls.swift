@@ -137,8 +137,8 @@ extension MeetingPromptDetector {
 
     /// Native Not nows from a call that just ended, kept until its grace ends.
     struct EndedNativeNotNowCall {
-        var notNows: [String: NativeNotNow]
-        var graceEndsAt: Date
+        let decline: NativeNotNow
+        let graceEndsAt: Date
     }
 
     // MARK: - Detected-call session (missed-call nudge)

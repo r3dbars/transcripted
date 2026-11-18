@@ -45,12 +45,9 @@ extension MeetingPromptDetector {
     func nativeNotNowCallEnded(_ notNows: [String: NativeNotNow], now: Date) {
         guard !notNows.isEmpty else { return }
         let until = now.addingTimeInterval(recordedCallEndGrace)
-        var ended = endedNativeNotNowCall.flatMap { $0.graceEndsAt > now ? $0 : nil }
-            ?? EndedNativeNotNowCall(notNows: [:], graceEndsAt: until)
-        ended.notNows.merge(notNows) { _, newer in newer }
-        ended.graceEndsAt = max(ended.graceEndsAt, until)
-        endedNativeNotNowCall = ended
+        endedNativeDeclines = endedNativeDeclines.filter { $0.value.graceEndsAt > now }
         for (id, notNow) in notNows {
+            endedNativeDeclines[id] = EndedNativeNotNowCall(decline: notNow, graceEndsAt: until)
             if notNow.candidateReason != nil, cooldownReasons[id] == notNow.candidateReason {
                 if let current = snoozedUntil[id], current > until { snoozedUntil[id] = until }
                 if let current = pendingUntil[id], current > until { pendingUntil[id] = until }
@@ -70,23 +67,17 @@ extension MeetingPromptDetector {
     /// call coming back after a signal gap (AirPods connecting restart the
     /// app's audio): it stays declined, and its end cuts the quiet again.
     func carryOverEndedNativeNotNows(into session: inout DetectedCallSession, now: Date) {
-        guard var ended = endedNativeNotNowCall else { return }
-        guard ended.graceEndsAt > now else {
-            endedNativeNotNowCall = nil
-            return
+        endedNativeDeclines = endedNativeDeclines.filter {
+            $0.value.graceEndsAt > now && $0.value.decline.quietUntil > now
         }
-        let carried = ended.notNows.filter {
-            session.providers.contains($0.value.provider) && $0.value.quietUntil > now
-        }
-        guard !carried.isEmpty else { return }
-        for (id, notNow) in carried {
+        for (id, ended) in endedNativeDeclines where session.providers.contains(ended.decline.provider) {
+            let notNow = ended.decline
             session.nativeNotNows[id] = notNow
             session.declinedKinds[notNow.kind] = notNow.declinedAt
             session.inheritedNativeDeclinesUntil[notNow.kind] = notNow.quietUntil
             scheduleQuietEndRecheck(at: notNow.quietUntil, now: now)
-            ended.notNows[id] = nil
+            endedNativeDeclines[id] = nil
         }
-        endedNativeNotNowCall = ended.notNows.isEmpty ? nil : ended
     }
 
     /// Feeds an explicit Not now on an ad-hoc prompt into the persisted
@@ -438,18 +429,28 @@ extension MeetingPromptDetector {
     /// Re-evaluates once a cut quiet window ends, so a call already going on
     /// then still prompts without waiting for the next signal change.
     private func scheduleQuietEndRecheck(at until: Date, now: Date) {
-        if let scheduled = recordedCallQuietEndAt, scheduled <= until { return }
+        guard until > now else { return }
+        quietRecheckDeadlines.insert(until)
+        armNextQuietRecheck(now: now)
+    }
+
+    func armNextQuietRecheck(now: Date) {
+        quietRecheckDeadlines = quietRecheckDeadlines.filter { $0 > now }
+        let next = quietRecheckDeadlines.min()
+        guard next != recordedCallQuietEndAt else { return }
         recordedCallQuietEndTask?.cancel()
         recordedCallQuietEndTask = nil
         recordedCallQuietEndAt = nil
-        let delay = until.timeIntervalSince(now)
-        guard delay > 0 else { return }
-        recordedCallQuietEndAt = until
+        guard let next else { return }
+        let delay = next.timeIntervalSince(now)
+        recordedCallQuietEndAt = next
         recordedCallQuietEndTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             self.recordedCallQuietEndTask = nil
             self.recordedCallQuietEndAt = nil
+            self.quietRecheckDeadlines.remove(next)
+            self.armNextQuietRecheck(now: Date())
             self.scheduleEvaluation()
         }
     }
