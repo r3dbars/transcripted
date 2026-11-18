@@ -109,24 +109,86 @@ enum MeetingOverlayActionSmoke {
         click(button("Unmute mic", in: view))
         expect(!session.isMeetingMicMuted, "Current Unmute worked after opt-out")
 
-        let recovered = MeetingSystemAudioDegradationWarning(cause: .failure, phase: .recovered, isPromptDismissed: false)
-        let degraded = MeetingSystemAudioDegradationWarning(cause: .failure, phase: .degraded, isPromptDismissed: false)
-        session.systemAudioDegradationWarning = degraded
+        // No mute button contributes identity to these two otherwise equal drops.
+        render()
+        let stripStop = button("Stop", in: view)
+        let stripDrop = drop(containing: stripStop)
+        click(stripStop)
+        session.activeRecordingIdentity = UUID()
+        await drain()
+        expect(session.isRecording, "Queued strip Stop preserved the next recording")
+        render()
+        expect(stripDrop !== drop(containing: button("Stop", in: view)), "Recording change replaced strip controls")
+        withExtendedLifetime(stripDrop) { click(stripStop) }
+        await drain()
+        expect(session.isRecording, "Retained strip Stop preserved the next recording")
+
+        func observe(_ status: MeetingSystemAudioStatusCopy.Case) -> MeetingSystemAudioDegradationWarning {
+            let next = MeetingSystemAudioDegradationPolicy.next(current: session.systemAudioDegradationWarning,
+                                                                 status: status, isRecording: true)!
+            session.systemAudioDegradationWarning = next
+            return next
+        }
+        let first = observe(.failed)
+        expect(observe(.failed) == first, "Refreshing a failure preserved its occurrence")
         await drain()
         render()
-        click(button("Stop", in: view))
-        session.systemAudioDegradationWarning = recovered
+        let firstStop = button("Stop", in: view)
+        let firstContinue = button("Continue", in: view)
+        let firstDrop = drop(containing: firstStop)
+        click(firstStop)
+        let recovered = observe(.healthy)
+        let degraded = observe(.failed)
         await drain()
-        expect(session.isRecording, "Dispatched Stop rechecked the warning")
+        expect(session.isRecording, "Queued warning Stop preserved the next equal-copy failure")
+        render()
+        expect(firstDrop !== drop(containing: button("Stop", in: view)), "A recurring failure replaced its controls")
+        withExtendedLifetime(firstDrop) {
+            click(firstStop)
+            click(firstContinue)
+        }
+        await drain()
+        expect(session.isRecording && session.systemAudioDegradationWarning == degraded,
+               "Retained warning controls preserved the recurring failure")
         let recoveredID = session.activeRecordingIdentity!
-        session.systemAudioDegradationWarning = degraded
+        let recoveredAgain = observe(.healthy)
+        expect(observe(.healthy) == recoveredAgain, "Refreshing a recovery preserved its occurrence")
         session.hideRecoveredSystemAudioWarning(recovered, recordingID: recoveredID)
-        expect(session.systemAudioDegradationWarning == degraded, "Old timer preserved replacement warning")
-        session.systemAudioDegradationWarning = recovered
+        expect(session.systemAudioDegradationWarning == recoveredAgain, "Old timer preserved equal-copy recovery")
+        await drain()
+        func suspendedTimer(for warning: MeetingSystemAudioDegradationWarning) async
+            -> (Task<Void, Never>?, AsyncStream<Void>.Continuation) {
+            overlay.cancelSystemAudioAutoHide()
+            let started = AsyncStream<Void>.makeStream()
+            let gate = AsyncStream<Void>.makeStream()
+            overlay.updateSystemAudioAutoHide(kind: .systemAudio, warning: warning) { _ in
+                started.continuation.finish()
+                for await _ in gate.stream { break }
+            }
+            let timer = overlay.systemAudioAutoHideTask
+            if timer != nil { for await _ in started.stream {} }
+            return (timer, gate.continuation)
+        }
+        render()
+        let oldOK = button("OK", in: view)
+        let recoveredDrop = drop(containing: oldOK)
+        let (oldTimer, resumeOldTimer) = await suspendedTimer(for: recoveredAgain)
+        _ = observe(.failed)
+        let latestRecovery = observe(.healthy)
+        resumeOldTimer.finish()
+        await oldTimer?.value
+        await drain()
+        render()
+        withExtendedLifetime(recoveredDrop) { click(oldOK) }
+        expect(oldTimer != nil && session.systemAudioDegradationWarning == latestRecovery,
+               "Suspended timer and retained OK preserved the recurring recovery")
+        let (currentTimer, resumeCurrentTimer) = await suspendedTimer(for: latestRecovery)
         session.activeRecordingIdentity = UUID()
-        session.hideRecoveredSystemAudioWarning(recovered, recordingID: recoveredID)
-        expect(session.systemAudioDegradationWarning == recovered, "Old timer preserved replacement recording")
-        session.hideRecoveredSystemAudioWarning(recovered, recordingID: session.activeRecordingIdentity!)
+        resumeCurrentTimer.finish()
+        await currentTimer?.value
+        expect(currentTimer != nil && session.systemAudioDegradationWarning == latestRecovery,
+               "Suspended recovery timer preserved the next recording")
+        session.hideRecoveredSystemAudioWarning(latestRecovery, recordingID: session.activeRecordingIdentity!)
         expect(session.systemAudioDegradationWarning?.isPromptDismissed == true, "Current timer dismissed recovered warning")
         session.systemAudioDegradationWarning = nil
         session.audioRouteWarning = .switchFailed

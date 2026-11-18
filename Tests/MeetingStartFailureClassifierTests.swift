@@ -221,6 +221,22 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("Recurring system-audio warnings have distinct occurrences across recovery") {
+        func next(_ current: MeetingSystemAudioDegradationWarning?, _ status: MeetingSystemAudioStatusCopy.Case)
+            -> MeetingSystemAudioDegradationWarning? {
+            MeetingSystemAudioDegradationPolicy.next(current: current, status: status, isRecording: true)
+        }
+        let first = next(nil, .failed)
+        let recovered = next(first, .healthy)
+        let second = next(recovered, .failed)
+        let recoveredAgain = next(second, .healthy)
+        assertTrue(first?.occurrenceID != second?.occurrenceID)
+        assertTrue(recovered?.occurrenceID != recoveredAgain?.occurrenceID)
+        assertEqual(next(second, .failed), second)
+        assertEqual(next(recoveredAgain, .healthy), recoveredAgain)
+        assertEqual(first?.dismissingPrompt().occurrenceID, first?.occurrenceID)
+    }
+
     runSuite("Meeting system-audio silence stays diagnostic-only in the recorder") {
         let silent = MeetingSystemAudioDegradationPolicy.next(
             current: nil,

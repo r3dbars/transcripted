@@ -139,7 +139,7 @@ final class NotchIslandDropView: NSView {
             buildJustInserted(text: text)
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
-        case .meetingControls(let note, let unverified, let showsTranscript, let micAction):
+        case .meetingControls(let note, let unverified, let showsTranscript, let recordingID, let micAction):
             let muted: Bool
             if case .meetingMicUnmute? = micAction { muted = true } else { muted = false }
             let subtitle: String
@@ -159,7 +159,9 @@ final class NotchIslandDropView: NSView {
                 trailing.append(button("\(verb) mic", .plain, micAction,
                                        accessibilityLabel: "\(verb) Transcripted meeting microphone"))
             }
-            trailing.append(button("Stop", .destructive, .meetingStop, symbol: "stop.fill"))
+            if let recordingID {
+                trailing.append(button("Stop", .destructive, .meetingStop(recordingID), symbol: "stop.fill"))
+            }
             if showsTranscript, let liveTranscriptView {
                 liveTranscriptView.removeFromSuperview()
                 stack.addArrangedSubview(liveTranscriptView) // not add(): it pins its own size

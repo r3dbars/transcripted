@@ -11,7 +11,10 @@ extension MeetingOverlayController {
     /// the same notice (another signal changed) keeps the running timer.
     func updateSystemAudioAutoHide(
         kind: PromptKind,
-        warning: MeetingSystemAudioDegradationWarning?
+        warning: MeetingSystemAudioDegradationWarning?,
+        wait: @escaping @MainActor (Double) async throws -> Void = { seconds in
+            try await Task.sleep(for: .seconds(seconds))
+        }
     ) {
         guard kind == .systemAudio,
               let warning, case .systemAudio(let id, _) = renderedPromptIdentity,
@@ -24,7 +27,7 @@ extension MeetingOverlayController {
         systemAudioAutoHideTask?.cancel()
         systemAudioAutoHideIdentity = identity
         systemAudioAutoHideTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+            do { try await wait(seconds) } catch { return }
             guard !Task.isCancelled, let self else { return }
             self.systemAudioAutoHideTask = nil
             self.systemAudioAutoHideIdentity = nil
