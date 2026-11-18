@@ -53,7 +53,7 @@ struct MeetingFailureCopy: Equatable {
             if message.contains("capture stopped early") {
                 return MeetingFailureCopy(
                     title: "Recording ended too soon",
-                    detail: "Check your mic and try again."
+                    detail: "Recording stopped early. Check your mic and try again."
                 )
             }
             return MeetingFailureCopy(
