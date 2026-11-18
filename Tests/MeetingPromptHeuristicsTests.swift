@@ -423,6 +423,7 @@ func testMeetingPromptHeuristics() {
             assertEqual(candidate?.suggestedTranscriptTitle, "Weekly Sync", "it keeps the invite title")
             assertTrue(candidate?.meetingURL == nil, "there is no link to carry")
         }
+        assertTrue(scored(event(location: "Microsoft Teams Training Room")) == nil, "physical training rooms must not prompt")
         assertTrue(scored(event(location: "Room 4.12")) == nil, "a room with no link is not a call")
         assertTrue(scored(event(location: nil)) == nil, "no link and no location is not a call")
     }

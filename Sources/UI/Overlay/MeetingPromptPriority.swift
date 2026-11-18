@@ -44,8 +44,7 @@ enum MeetingPromptPriority {
     ///   its countdown must stay visible over anything else. That includes
     ///   "Call ended" over a split offer: if the old call ends, its stop is
     ///   what lets the next meeting's own prompt show.
-    /// - `meetingSplit` is next because it only helps while the next
-    ///   meeting is starting; the audio warnings can wait behind it.
+    /// - A split offer yields to system-audio and route warnings.
     /// - `systemAudio` is gated by `MeetingSystemAudioPromptPolicy`, which
     ///   already folds in "never fight an active inactivity prompt" — this
     ///   branch is only reached once `inactivity` is nil, so that policy
@@ -75,9 +74,6 @@ enum MeetingPromptPriority {
         if inactivity != nil {
             return .audioInactivity
         }
-        if splitOffered {
-            return .meetingSplit
-        }
 
         if MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt(
             warning: systemAudio,
@@ -86,6 +82,9 @@ enum MeetingPromptPriority {
             return .systemAudio
         }
 
+        if splitOffered {
+            return routeActive ? .audioRoute : .meetingSplit
+        }
         if current == .audioRoute, routeActive {
             return .audioRoute
         }

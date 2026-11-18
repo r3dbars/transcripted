@@ -87,7 +87,7 @@ extension MeetingSessionController {
             // The call app let go of its audio for the whole warning interval
             // and came back: often the next back-to-back call, not the same
             // one. Shorter releases never warn, so they never offer.
-            if callAudioReturned { offerMeetingSplit(candidate: nil) }
+            if callAudioReturned { offerCallRejoinSplit() }
         }
     }
 

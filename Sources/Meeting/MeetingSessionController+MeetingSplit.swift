@@ -7,14 +7,6 @@
 
 import Foundation
 
-/// The split prompt the island shows while recording.
-struct MeetingSplitOffer: Equatable {
-    let recordingIdentity: UUID
-    /// The calendar meeting that is starting. Nil for a call re-join, which
-    /// has no title to offer.
-    let candidate: MeetingPromptDetector.Candidate?
-}
-
 /// What became of a calendar split offer, for the detector's bookkeeping.
 enum MeetingSplitDecision {
     case accepted
@@ -27,25 +19,23 @@ enum MeetingSplitDecision {
 extension MeetingSessionController {
     // MARK: - Split on new meeting
 
-    /// Raises the split prompt. An event that started with this recording is
-    /// its own meeting, not a new one. A calendar offer replaces a re-join
-    /// offer (it has a title); otherwise one offer at a time. Returns whether
-    /// this candidate is now offered.
-    @discardableResult
-    func offerMeetingSplit(candidate: MeetingPromptDetector.Candidate?) -> Bool {
+    func refreshCalendarSplit(candidates: [MeetingPromptDetector.Candidate]) -> Bool {
         guard case .recording = state, let identity = activeRecordingIdentity else { return false }
-        if let candidate {
-            if let startedAt = activeRecordingStartedAt,
-               MeetingInviteeSuggestionPolicy.startsTogether(eventStart: candidate.startDate, recordingStart: startedAt) {
-                return false
+        let refreshed = MeetingSplitOffer.refreshed(current: meetingSplitOffer, candidates: candidates,
+                                                   identity: identity, recordingStart: activeRecordingStartedAt)
+        if refreshed != meetingSplitOffer {
+            if let candidate = refreshed?.candidate, candidate.id != meetingSplitOffer?.candidate?.id {
+                trackMeetingSplit("shown", candidate: candidate)
             }
-            if let offered = meetingSplitOffer?.candidate { return offered.id == candidate.id }
-        } else if meetingSplitOffer != nil {
-            return false
+            meetingSplitOffer = refreshed
         }
-        meetingSplitOffer = MeetingSplitOffer(recordingIdentity: identity, candidate: candidate)
-        trackMeetingSplit("shown", candidate: candidate)
-        return true
+        return refreshed?.candidate != nil
+    }
+
+    func offerCallRejoinSplit() {
+        guard case .recording = state, let identity = activeRecordingIdentity, meetingSplitOffer == nil else { return }
+        meetingSplitOffer = MeetingSplitOffer(recordingIdentity: identity, candidate: nil)
+        trackMeetingSplit("shown", candidate: nil)
     }
 
     /// Split: stop this recording (it transcribes in the background, since
@@ -53,20 +43,26 @@ extension MeetingSessionController {
     /// calendar split starts like Record on that meeting's prompt, with its
     /// title and its own call-end arming. A re-join has no candidate, so the
     /// new recording is armed on this one's call app.
-    func acceptMeetingSplit() async {
-        guard let offer = meetingSplitOffer else { return }
+    func acceptMeetingSplit(_ offer: MeetingSplitOffer) async {
+        guard meetingSplitOffer == offer, audioInactivityWarning == nil else { return }
+        if offer.candidate != nil {
+            guard await refreshCalendarForSplitAcceptance?() == true,
+                  offer == meetingSplitOffer, audioInactivityWarning == nil else { return }
+        }
         meetingSplitOffer = nil
-        guard case .recording = state, offer.recordingIdentity == activeRecordingIdentity else { return }
+        guard offer.isCurrent(at: Date()), case .recording = state, offer.recordingIdentity == activeRecordingIdentity else { return }
         let rejoinFamilies = offer.candidate == nil ? callEndTracking?.families : nil
         trackMeetingSplit("split", candidate: offer.candidate)
         // Before the stop, like a prompt Record: the detector can evaluate
         // between the two recordings and must not prompt for this meeting.
         if let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .accepted) }
-        await stopRecording(reason: .newMeetingSplit)
-        let started = await startRecording(
-            trigger: .detectedPrompt,
-            suggestedTitle: offer.candidate?.suggestedTranscriptTitle,
-            detectedCallCandidate: offer.candidate
+        let started = await MeetingStopSequence.split(
+            stopAndEnqueue: { await stopRecording(reason: .newMeetingSplit) != nil },
+            startNext: {
+                await startRecording(trigger: .detectedPrompt,
+                                     suggestedTitle: offer.candidate?.suggestedTranscriptTitle,
+                                     detectedCallCandidate: offer.candidate)
+            }
         )
         if !started, let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .startFailed) }
         if started, let rejoinFamilies, callEndTracking == nil,

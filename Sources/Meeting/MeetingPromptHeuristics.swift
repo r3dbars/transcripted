@@ -88,7 +88,10 @@ enum MeetingPromptProvider: String, CaseIterable, Hashable {
     /// Microsoft Teams") as the location of Teams invites whose body carries
     /// no link, and those invites otherwise never prompt or offer a split.
     static func provider(forLocation location: String) -> MeetingPromptProvider? {
-        location.localizedCaseInsensitiveContains("microsoft teams") ? .teams : nil
+        switch location.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "microsoft teams meeting", "réunion microsoft teams": return .teams
+        default: return nil
+        }
     }
 
     private static func hostMatches(_ host: String, domain: String) -> Bool {

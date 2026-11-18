@@ -3,6 +3,32 @@ import Foundation
 
 @MainActor
 func testMeetingSessionUIPolicy() async {
+    await runSuite("Meeting split preserves timeout and missing-audio recovery and restarts after enqueue") {
+        let mic = URL(fileURLWithPath: "/synthetic/mic.wav")
+        for (result, expected) in [
+            (CaptureStopResult(micURL: mic, systemURL: nil, didTimeOut: true), ["timeout"]),
+            (CaptureStopResult(micURL: nil, systemURL: nil, didTimeOut: false), ["noAudio"]),
+            (CaptureStopResult(micURL: mic, systemURL: nil, didTimeOut: false), ["enqueue", "startNext"])
+        ] {
+            var actions: [String] = []
+            let started = await MeetingStopSequence.split(stopAndEnqueue: {
+                let terminal = MeetingStopSequence.stopTerminal(
+                    stopResult: result, files: (result.micURL, result.systemURL),
+                    onTimeout: { actions.append("timeout") },
+                    onNoAudio: { actions.append("noAudio") }, report: {}
+                )
+                guard terminal == .continueToTranscription else { return false }
+                actions.append("enqueue")
+                return true
+            }, startNext: {
+                actions.append("startNext")
+                return true
+            })
+            assertEqual(actions, expected, "a failed stop retains its recovery action without a new capture")
+            assertEqual(started, expected.last == "startNext")
+        }
+    }
+
     runSuite("Meeting route warning publisher sequence — a reset permits the same outcome in the next recording") {
         // This is the optional publisher sequence used by the controller:
         // removeDuplicates runs before compactMap so nil resets the latch.

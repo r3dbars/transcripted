@@ -913,8 +913,8 @@ func testMeetingPromptDetector() async {
         }
         var offered: [MeetingPromptDetector.Candidate] = []
         detector.onSplitRequest = { candidate in
-            offered.append(candidate)
-            return true
+            offered.append(contentsOf: candidate)
+            return !candidate.isEmpty
         }
 
         await detector.evaluate()
@@ -940,6 +940,34 @@ func testMeetingPromptDetector() async {
         recording = false
         await detector.evaluate()
         assertEqual(box.promptCount, 1, "nor does it prompt once the recording stops")
+    }
+
+    await runSuite("Calendar split refresh clears a removed event and offers its successor") {
+        let now = Date()
+        var events = [makeMeetingPromptCalendarSnapshot(id: "first", startsIn: 20, now: now)]
+        let detector = makeIsolatedDetector(calendarAccessGranted: { true }, fetchCalendarEventSnapshots: { _, _ in events })
+        detector.shouldSkipPromptEvaluation = { true }
+        let identity = UUID()
+        var offer: MeetingSplitOffer?
+        detector.onSplitRequest = { candidates in
+            offer = MeetingSplitOffer.refreshed(current: offer, candidates: candidates, identity: identity, recordingStart: nil)
+            return offer != nil
+        }
+        await detector.evaluate()
+        guard let first = offer else {
+            assertTrue(false, "initial evaluation must offer the first event")
+            return
+        }
+        assertEqual(first.candidate?.id, "calendar:first")
+        assertTrue(!first.isCurrent(at: now.addingTimeInterval(6 * 60)), "acceptance expires before even a long event ends")
+        events = [makeMeetingPromptCalendarSnapshot(id: "next", startsIn: 40, now: now)]
+        let refreshed = await detector.refreshForSplitAcceptance()
+        assertTrue(refreshed, "acceptance refresh completed")
+        assertEqual(offer?.candidate?.id, "calendar:next", "a removed event cannot block a later candidate")
+        assertTrue(first != offer, "the original tap cannot authorize the replacement")
+        events = []
+        await detector.evaluate(forceCalendarRefresh: true)
+        assertNil(offer, "even an evaluation with no candidates clears the offer")
     }
 
     await runSuite("MeetingPromptDetector.onSplitRequest — a refused offer is still a held-back prompt") {

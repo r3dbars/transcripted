@@ -764,7 +764,7 @@ that comes back during the countdown just clears the warning. While a
 recording runs, the island now offers **Split** / **Keep recording** when a
 different meeting looks like it is starting:
 
-- **Calendar.** A calendar meeting with a link enters its prompt window (a
+- **Calendar.** A calendar meeting with a join link or a recognized Teams location enters its prompt window (a
   minute before to five minutes after its start) and is not snoozed or
   pending. A recorded event is snoozed when its prompt is accepted; an event
   whose start lines up with the recording's start (the invitee-suggestion
@@ -777,11 +777,12 @@ different meeting looks like it is starting:
   from dropouts inside one call and are not offered. Title: "New call?".
 
 Split stops the recording (stop reason `new_meeting_split`; it transcribes in
-the background) and starts a new one as a detected-prompt recording. A
+the background) and starts a new one only after the first recording enters the transcription queue as a detected-prompt recording. A
 calendar split takes the meeting's title and arms call-end detection for it;
 a re-join split is armed on the previous recording's call app. Keep recording
 leaves the recording alone; a calendar meeting is then not offered or
 prompted again until it ends. There's no countdown and no automatic split.
+Calendar offers expire with the prompt window or when the event disappears. Split checks the current event again before stopping. System-audio and route warnings take priority over a split.
 "Call ended" keeps priority over the offer, so when the first call really
 ends its stop still happens and the next meeting gets its normal prompt.
 
