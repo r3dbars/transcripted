@@ -14,9 +14,10 @@ import TranscriptedCore
 #endif
 
 enum NotchIslandSpeakerReviewPolicy {
-    static let deleteTitle = "Delete recording…"
+    static let deleteTitle = "Delete"
+    static let deleteAccessibilityLabel = "Delete recording"
     static let deleteConfirmation = "Move this recording to Trash?"
-    static let deleteDetail = "The transcript and saved audio will move to Finder Trash. You can restore them there. Saved people stay in Speakers."
+    static let deleteDetail = "You can restore the transcript and saved audio from Finder Trash. Saved people stay in Speakers."
 
     /// The Later button's ring. Touching the review (play, Yes, No, typing)
     /// stops it, so the island never closes on someone mid-answer. It only
@@ -705,15 +706,10 @@ enum NotchIslandSpeakerReviewPolicy {
     /// lists who was on the call.
     static let headerTitle = "Who spoke?"
 
-    /// The meeting's name, small and grey on the header's right, or nil.
-    static func headerDetail(meetingTitle: String?) -> String? {
-        let trimmed = meetingTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return trimmed.isEmpty ? nil : trimmed
-    }
-
     /// The review's VoiceOver name: the question, then the meeting.
     static func accessibilityTitle(meetingTitle: String?) -> String {
-        headerDetail(meetingTitle: meetingTitle).map { "\(headerTitle) \($0)" } ?? headerTitle
+        let trimmed = meetingTitle?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return trimmed.isEmpty ? headerTitle : "\(headerTitle) \(trimmed)"
     }
 
     /// The quote a Speakers page card shows under a voice, in curly quotes,

@@ -149,6 +149,9 @@ extension NotchIslandSpeakerReviewView {
             }
         }
         footerDots = shown
+        // The island gives the summary its own row. Skip it when it's empty.
+        let summaryVisibilityChanged = !isPage && footerSummary.isHidden != shown.isEmpty
+        if summaryVisibilityChanged { footerSummary.isHidden = shown.isEmpty }
         // Only add, move or drop what changed, so a dot mid-pop keeps going.
         let views: [NSView] = shown.map(\.view) + [footerCount, footerSpacer]
         for (index, view) in views.enumerated() {
@@ -165,6 +168,7 @@ extension NotchIslandSpeakerReviewView {
             tickDelay: VoicePrintCascadePlan.FooterLanding.countDelay,
             reduceMotion: reduceMotion
         )
+        if landing != nil && summaryVisibilityChanged { onLayoutChange?() }
     }
 
     private func footerKey(_ row: NotchIslandVoiceRowView) -> String {
