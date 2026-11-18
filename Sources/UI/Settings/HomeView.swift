@@ -362,7 +362,9 @@ struct HomeFailedMeetingInlineRow: View {
                 Spacer(minLength: 8)
 
                 HomeRowMoreMenuButton(items: menuItems, automationIdentifier: "transcripted.home.failed-meeting.more")
-                    .frame(width: HomeHitTarget.minimum, height: 22)
+                    .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
+                    // The 40 pt hit shape overhangs the 22 pt bar.
+                    .padding(.vertical, -9)
                     .help("More options")
                     .opacity(isHovering ? 1 : 0)
                     .allowsHitTesting(isHovering)

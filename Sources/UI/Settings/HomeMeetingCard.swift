@@ -507,9 +507,10 @@ private struct HomeMeetingBarMeta: View {
 
 // MARK: - Transcript line
 
-/// One "Name text" line. Hovering shows the line's time in front; clicking
-/// it plays the kept audio from there. An opened card makes the name a
-/// button that fixes who it is.
+/// One "Name text" line. Hovering shows the line's time at its end; clicking
+/// it plays the kept audio from there. The time sits in a slot the line
+/// always leaves free, so hovering never rewraps the text or moves the card.
+/// An opened card makes the name a button that fixes who it is.
 private struct HomeMeetingCardLine: View {
     let line: HomeMeetingTranscriptLine
     let index: Int
@@ -521,6 +522,9 @@ private struct HomeMeetingCardLine: View {
 
     @State private var isHovering = false
 
+    /// Room for "1:02:03" at the small size.
+    static let timeSlotWidth: CGFloat = 46
+
     private var playableStart: TimeInterval? {
         guard audio != nil, !line.time.isEmpty else { return nil }
         return line.startSeconds
@@ -531,11 +535,10 @@ private struct HomeMeetingCardLine: View {
     }
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if isHovering, let clock, let start = playableStart {
-                HomeMeetingLineTime(clock: clock, index: index) { play(from: start) }
-                    .transition(.opacity)
-            }
+        // Top, not baseline: the opened card's name is a button, which
+        // doesn't report a text baseline. Name and text share one font size,
+        // so their first lines still sit on the same baseline.
+        HStack(alignment: .top, spacing: 6) {
             if !line.speaker.isEmpty {
                 speaker
             }
@@ -547,6 +550,15 @@ private struct HomeMeetingCardLine: View {
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .modifier(SelectableWhen(isOn: isOpened))
+            if let clock, let start = playableStart {
+                HomeMeetingLineTime(clock: clock, index: index) { play(from: start) }
+                    .frame(width: Self.timeSlotWidth, alignment: .trailing)
+                    // Small text, nudged down to the body's first baseline.
+                    .padding(.top, 2)
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
+                    .accessibilityHidden(true)
+            }
         }
         .contentShape(Rectangle())
         .onHover { hovering in
