@@ -34,6 +34,7 @@ swiftc \
   "$ROOT_DIR/Sources/UI/Shared/RecentMeetingsScanner.swift" \
   "$ROOT_DIR/Sources/UI/Shared/RecentMeetingMetadataCache.swift" \
   "$ROOT_DIR/Sources/UI/Settings/HomePresentation.swift" \
+  "$ROOT_DIR/Sources/UI/Shared/VoicePrintStyle.swift" \
   "$ROOT_DIR/Sources/UI/Settings/HomeSearchMatching.swift" \
   "$ROOT_DIR/Sources/UI/Settings/HomeMeetingSearchIndex.swift" \
   -framework AppKit \

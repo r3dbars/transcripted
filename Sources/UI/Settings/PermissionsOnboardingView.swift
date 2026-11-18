@@ -467,7 +467,7 @@ private struct WelcomeStage: View {
             VStack(spacing: 16) {
                 Image(systemName: "waveform")
                     .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(LibraryTokens.accent)
+                    .foregroundStyle(LibraryTokens.ink)
 
                 Text("Transcripted")
                     .font(LibraryTokens.title)
@@ -480,7 +480,7 @@ private struct WelcomeStage: View {
                     .frame(maxWidth: 380)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text("Audio and transcripts never leave this Mac. Anonymous usage stats and crash reports help us fix bugs; turn them off in Settings.")
+                Text("Audio and transcripts stay on this Mac unless you share them. Anonymous usage stats and crash reports help us fix bugs; turn them off in Settings.")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink3)
                     .multilineTextAlignment(.center)
@@ -598,7 +598,7 @@ private struct QuietPermissionRow: View {
         HStack(spacing: 14) {
             Image(systemName: granted ? "checkmark.circle.fill" : icon)
                 .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(granted ? LibraryTokens.accent : LibraryTokens.ink2)
+                .foregroundStyle(granted ? LibraryTokens.ink : LibraryTokens.ink2)
                 .frame(width: 22)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -648,7 +648,7 @@ struct QuietPermissionButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isSubtle ? LibraryTokens.ink3 : LibraryTokens.accent)
+            .foregroundStyle(isSubtle ? LibraryTokens.ink3 : LibraryTokens.ink)
             .padding(.horizontal, 14)
             .frame(minWidth: 88, minHeight: LibraryTokens.minimumHitTarget)
             .background(

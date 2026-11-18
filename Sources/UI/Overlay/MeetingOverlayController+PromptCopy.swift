@@ -55,7 +55,7 @@ extension MeetingOverlayController {
         }
 
         // Same shape as every recording warning: a short statement, one terse
-        // detail line, Continue / Stop (the island draws "Stop" red).
+        // detail line, Continue / Stop (Stop is the white primary).
         return PromptDisplay(
             title: warning.kind == .callEnded ? "Call ended" : "No sound",
             detail: warning.kind == .callEnded ? "Call audio stopped." : "Nothing heard for \(formatInactiveDuration(warning.inactiveDuration)).",

@@ -149,31 +149,39 @@ private struct HomePodcastPlayerButton: View {
         .accessibilityIdentifier(automationIdentifier)
     }
 
+    // The primary play button is ink, like every primary; green is for the
+    // played part of the audio, not the control.
     private var foreground: Color {
-        if isPrimary { return .white }
+        if isPrimary { return DesignTokens.paper }
         return .secondary
     }
 
     private var background: Color {
-        if isPrimary { return Color.accentColor }
+        if isPrimary { return DesignTokens.ink }
         return Color.primary.opacity(0.08)
     }
 }
 
+/// A speaker's color in a meeting transcript: the same voice-print palette
+/// (`VoicePrintStyle`) the Speakers page and the island use, so a saved person
+/// is one color everywhere. A saved person is keyed by their profile ID, like
+/// their print; an unsaved voice by its transcript key. Text takes the darker
+/// readable shade on light windows (`SpeakerPrintTextInk`).
 enum HomeMeetingSpeakerColor {
-    static func color(for speaker: String) -> Color {
-        let palette: [NSColor] = [
-            .systemBlue,
-            .systemGreen,
-            .systemPurple,
-            .systemOrange,
-            .systemPink,
-            .systemTeal,
-            .systemRed,
-            .systemIndigo,
-        ]
+    static func color(for identity: HomeMeetingSpeakerIdentity) -> Color {
+        Color(nsColor: nsColor(colorIndex: HomeMeetingSpeakerPalette.colorIndex(
+            persistentSpeakerID: identity.persistentSpeakerID,
+            stableID: identity.stableID
+        )))
+    }
 
-        let index = HomeMeetingSpeakerPalette.slotIndex(for: speaker, slotCount: palette.count)
-        return Color(nsColor: palette[index])
+    private static func nsColor(colorIndex: Int) -> NSColor {
+        func make(_ ink: VoicePrintRGBA) -> NSColor {
+            NSColor(srgbRed: ink.red, green: ink.green, blue: ink.blue, alpha: ink.alpha)
+        }
+        return DesignTokens.dynamic(
+            dark: make(SpeakerPrintTextInk.hint(colorIndex: colorIndex, dark: true)),
+            light: make(SpeakerPrintTextInk.hint(colorIndex: colorIndex, dark: false))
+        )
     }
 }

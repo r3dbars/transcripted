@@ -657,8 +657,8 @@ extension TranscriptedSettingsView {
                 .buttonStyle(SettingsHoverButtonStyle(
                     tone: .accent,
                     cornerRadius: 8,
-                    normalFill: Color.accentColor.opacity(0.08),
-                    normalStroke: Color.accentColor.opacity(0.16)
+                    normalFill: LibraryTokens.ink.opacity(0.08),
+                    normalStroke: LibraryTokens.ink.opacity(0.16)
                 ))
                 .frame(minHeight: 40)
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))

@@ -25,7 +25,6 @@ struct CallSpeakerNamesToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.regular)
-                .tint(.accentColor)
                 .accessibilityIdentifier("transcripted.settings.speakers.call-app-names")
         }
         .onChange(of: isOn) { _, enabled in

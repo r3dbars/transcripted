@@ -22,7 +22,7 @@ func testPasteLastDictationFeedback() {
         assertEqual(copied.title, "Copied instead", "copied title")
         assertEqual(copied.detail, "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", "copied detail")
         assertEqual(copied.tone, .caution, "copied tone")
-        assertEqual(failed.title, "Paste Last Dictation failed", "failed title uses the feature's name")
+        assertEqual(failed.title, "Couldn't paste again", "failed title names the island's Paste again button")
         assertEqual(failed.detail, "Couldn't prepare the clipboard for automatic paste.", "failed detail")
         assertEqual(failed.tone, .caution, "failed tone")
         assertTrue(

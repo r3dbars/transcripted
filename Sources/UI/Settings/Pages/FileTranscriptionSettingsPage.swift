@@ -23,7 +23,7 @@ struct FileTranscriptionSettingsPage<Activity: View>: View {
             }
 
             Button("Choose audio or video…", action: onImportAudioFile)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.transcriptedPrimary)
                 .help("Choose files to transcribe. You can also use ⌘O.")
                 .accessibilityIdentifier("transcripted.settings.files.choose")
 

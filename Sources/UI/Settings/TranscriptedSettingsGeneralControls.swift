@@ -32,9 +32,10 @@ struct SettingsCardLabel: View {
     let text: String
 
     var body: some View {
+        // The shared section label: mono, uppercase, tracked (`TextRole.label`).
         Text(text)
-            .font(.subheadline.weight(.semibold))
-            .foregroundStyle(.secondary)
+            .textRole(.label)
+            .foregroundStyle(LibraryTokens.ink3)
             .padding(.leading, 4)
     }
 }
@@ -221,7 +222,6 @@ struct GeneralToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.regular)
-                .tint(.accentColor)
                 .help(help)
                 .disabled(!isEnabled)
                 .accessibilityLabel(Text(title))

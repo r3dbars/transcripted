@@ -68,8 +68,8 @@ struct QuietMeetingSpeakerLabel: View {
     }
 
     private var speakerColor: Color {
-        if identity.displayName == "You" { return LibraryTokens.accent }
-        return HomeMeetingSpeakerColor.color(for: identity.stableID)
+        if identity.displayName == "You" { return LibraryTokens.ink }
+        return HomeMeetingSpeakerColor.color(for: identity)
     }
 }
 
@@ -371,8 +371,8 @@ struct HomeMeetingSpeakerNamingRow: View {
     }
 
     private var speakerColor: Color {
-        if draft.identity.displayName == "You" { return LibraryTokens.accent }
-        return HomeMeetingSpeakerColor.color(for: draft.identity.stableID)
+        if draft.identity.displayName == "You" { return LibraryTokens.ink }
+        return HomeMeetingSpeakerColor.color(for: draft.identity)
     }
 
     private var scopeLabel: String {

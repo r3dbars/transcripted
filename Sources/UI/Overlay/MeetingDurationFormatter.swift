@@ -5,15 +5,20 @@ import Foundation
 ///
 /// Extracted from `MeetingOverlayController` so the recording timer and the
 /// inactivity-warning copy can be unit-tested without the AppKit panel. The
-/// rendered strings are user-facing, so the formatting here must stay
-/// byte-for-byte identical to the original inline helpers.
+/// rendered strings are user-facing; the timer matches the island's.
 enum MeetingDurationFormatter {
-    /// Recording-timer label, clamped at zero and rendered as `mm:ss`.
+    /// Recording-timer label, clamped at zero. One timer format everywhere:
+    /// `5:07`, `1:02:03` past an hour, the same as the island
+    /// (`NotchIslandPresentation.timerText`).
     static func formatDuration(_ seconds: TimeInterval) -> String {
         let total = max(0, Int(seconds))
-        let m = total / 60
-        let s = total % 60
-        return String(format: "%02d:%02d", m, s)
+        let hours = total / 3600
+        let minutes = (total % 3600) / 60
+        let secs = total % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, secs)
+        }
+        return String(format: "%d:%02d", minutes, secs)
     }
 
     /// Inactivity-warning copy: rounds to whole minutes (minimum one) and

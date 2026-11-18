@@ -127,7 +127,8 @@ func testNotchIslandPresentation() {
             let message = NotchIslandDictationContent.Message(tone: tone, text: text, actionTitle: nil)
             assertEqual(NotchIslandPresentation.messageLabel(message), label, "\(text) should read \(label)")
             let layout = notchLayout(dictation: NotchIslandDictationContent(phase: .message(message)))
-            assertEqual(layout.left.first, .symbol(symbol, tone == .error || tone == .noSpeech ? .warning : .accent))
+            // Green means live; a notice or a save is done, so it is neutral.
+            assertEqual(layout.left.first, .symbol(symbol, tone == .error || tone == .noSpeech ? .warning : .neutral))
         }
     }
 
@@ -154,7 +155,7 @@ func testNotchIslandPresentation() {
         assertEqual(NotchIslandPresentation.messageLabel(message), "Not pasted")
         let content = NotchIslandDictationContent(phase: .message(message))
         let layout = notchLayout(dictation: content)
-        assertEqual(layout.left, [.symbol(.clipboard, .accent), .text("Not pasted", .title)])
+        assertEqual(layout.left, [.symbol(.clipboard, .neutral), .text("Not pasted", .title)])
         assertEqual(layout.drop, .dictationMessage(message), "the words and the Paste button open by themselves")
 
         var next = message
@@ -201,7 +202,7 @@ func testNotchIslandPresentation() {
     runSuite("NotchIslandPresentation shows the call prompt with one Record") {
         let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record this meeting?", secondsLeft: 30)
         let open = notchLayout(callPrompt: prompt)
-        assertEqual(open.left, [.symbol(.video, .accent), .text("Call", .title)])
+        assertEqual(open.left, [.symbol(.video, .neutral), .text("Call", .title)])
         assertEqual(open.drop, .callPrompt(title: "Zoom call", detail: "Record this meeting?"))
         assertTrue(open.dropIsSticky)
         assertEqual(open.right, [.live(.callSeconds, .secondary)], "the drop-down has the Record button, so the wing just counts")
@@ -377,7 +378,7 @@ func testNotchIslandPresentation() {
             )
         )
         let layout = notchLayout(meeting: meeting)
-        assertEqual(layout.left, [.symbol(.video, .accent), .text("Missed call", .title)])
+        assertEqual(layout.left, [.symbol(.video, .neutral), .text("Missed call", .title)])
         assertEqual(layout.drop, .meetingPrompt(meeting.prompt!))
     }
 
@@ -391,7 +392,7 @@ func testNotchIslandPresentation() {
         assertTrue(transcribing.showsEdgeProgress, "progress runs along the lower edge")
 
         let saved = notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: "Weekly sync")))
-        assertEqual(saved.left, [.symbol(.check, .accent), .text("Saved", .title)])
+        assertEqual(saved.left, [.symbol(.check, .neutral), .text("Saved", .title)], "saved is done, not live: no green")
         assertEqual(saved.right, [.chip("Open", .plain, .meetingOpen)])
         let savedOpen = notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: "Weekly sync")), expanded: true)
         assertEqual(savedOpen.drop, .meetingSaved(title: "Weekly sync"))

@@ -81,7 +81,7 @@ final class NextSentenceOptionChip: NextSentenceFlippedView {
 
     override func mouseEntered(with event: NSEvent) {
         label.textColor = .white
-        layer?.backgroundColor = NextSentenceCardStyle.accent.withAlphaComponent(0.85).cgColor
+        layer?.backgroundColor = NextSentenceCardStyle.selection.cgColor
     }
 
     override func mouseExited(with event: NSEvent) {

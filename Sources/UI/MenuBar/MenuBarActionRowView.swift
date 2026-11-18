@@ -176,6 +176,15 @@ final class MenuBarActionRowView: NSControl {
             titleColor = MenuTokens.textSecondaryNS
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textMutedNS
+        } else if isFilledButton {
+            // Filled buttons are the primary look: ink fill, paper text.
+            // Hover and press only soften the ink.
+            let fillAlpha: CGFloat = isPressing ? 0.78 : (isHovering ? 0.88 : 1)
+            backgroundColor = MenuTokens.buttonBackgroundNS.withAlphaComponent(fillAlpha)
+            iconTint = rowTone == .standard ? MenuTokens.buttonTextNS : toneColors().normal
+            titleColor = MenuTokens.buttonTextNS
+            detailColor = MenuTokens.buttonTextNS
+            trailingColor = MenuTokens.buttonTextNS
         } else if isPressing {
             backgroundColor = MenuTokens.flatRowPressedNS
             iconTint = toneColors().pressed
@@ -183,16 +192,13 @@ final class MenuBarActionRowView: NSControl {
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textSecondaryNS
         } else if isHovering {
-            // A button's resting fill is already hover-strength, so its hover
-            // steps up to the pressed fill.
-            backgroundColor = isFilledButton ? MenuTokens.flatRowPressedNS : MenuTokens.flatRowHoverNS
+            backgroundColor = MenuTokens.flatRowHoverNS
             iconTint = toneColors().pressed
             titleColor = MenuTokens.textPrimaryNS
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textSecondaryNS
         } else {
-            // Buttons keep a quiet fill at rest so they read as buttons.
-            backgroundColor = isFilledButton ? MenuTokens.buttonBackgroundNS : .clear
+            backgroundColor = .clear
             iconTint = toneColors().normal
             titleColor = MenuTokens.textPrimaryNS
             detailColor = MenuTokens.textSecondaryNS

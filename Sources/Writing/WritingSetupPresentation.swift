@@ -81,8 +81,8 @@ enum WritingSetupPresentation {
             ),
             Point(
                 symbolName: "lock",
-                title: "100% local.",
-                line: "No account. Your writing never leaves your Mac. It's saved as plain files you can point any AI agent at."
+                title: "Stays on your Mac.",
+                line: "No account. It's saved as plain files you can point any AI agent at. Only Write for Me sends text, and only when you press its key."
             ),
         ]
         static let next = "Next"

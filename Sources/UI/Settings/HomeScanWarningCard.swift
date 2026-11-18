@@ -11,9 +11,9 @@ struct HomeScanWarningCard: View {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(LibraryTokens.attention)
                     .frame(width: 34, height: 34)
-                    .background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .background(LibraryTokens.attention.opacity(0.12), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(model.title)
@@ -42,21 +42,16 @@ struct HomeScanWarningCard: View {
             HStack(spacing: 8) {
                 Button(action: onRetry) {
                     Text(model.retryTitle)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
+                .buttonStyle(.transcriptedPrimary)
+                .controlSize(.small)
                 .accessibilityIdentifier("transcripted.home.scan-warning.retry")
 
                 Button(action: onReveal) {
                     Text(model.revealTitle)
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(.transcriptedSecondary)
+                .controlSize(.small)
                 .accessibilityIdentifier("transcripted.home.scan-warning.reveal")
             }
         }
@@ -68,7 +63,7 @@ struct HomeScanWarningCard: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .stroke(Color.orange.opacity(0.28), lineWidth: 1)
+                .stroke(LibraryTokens.attention.opacity(0.28), lineWidth: 1)
         )
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.home.scan-warning")

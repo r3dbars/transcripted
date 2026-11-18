@@ -1,6 +1,6 @@
 // NotchIslandButton.swift
-// The island's pill buttons: plain, accent, warning and destructive, with an
-// optional countdown ring. Split out of NotchIslandView.swift.
+// The island's pill buttons: plain, accent (the white primary), warning and
+// destructive, with an optional countdown ring. Split out of NotchIslandView.swift.
 
 import AppKit
 
@@ -134,9 +134,10 @@ final class NotchIslandButton: NSButton {
         var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
         let traced: CGPath = isFlipped ? (path.copy(using: &flip) ?? path) : path
         // On the white pill the ring is drawn dark so it still shows.
-        let ink: CGFloat = style == .white ? 0 : 1
-        let trackAlpha: CGFloat = style == .white ? 0.14 : 0.10
-        let ringAlpha: CGFloat = style == .white ? 0.6 : 0.85
+        let whiteFill = style == .white || style == .accent
+        let ink: CGFloat = whiteFill ? 0 : 1
+        let trackAlpha: CGFloat = whiteFill ? 0.14 : 0.10
+        let ringAlpha: CGFloat = whiteFill ? 0.6 : 0.85
         for (shape, color) in [(ringTrack, NSColor(white: ink, alpha: trackAlpha)), (ring, NSColor(white: ink, alpha: ringAlpha))] {
             shape.path = traced
             shape.fillColor = nil
@@ -162,11 +163,13 @@ final class NotchIslandButton: NSButton {
 
     private var foreground: NSColor {
         switch style {
-        case .plain, .accent, .destructive: return .white
+        case .plain, .destructive: return .white
         case .subtle: return NSColor(white: 1, alpha: 0.82)
         case .warning: return NotchIslandPalette.warning
         case .link: return NSColor(white: 1, alpha: 0.55)
-        case .white: return .black
+        // The primary action is ink on the black island: a white pill.
+        // Green means live, so it is never a button.
+        case .accent, .white: return .black
         }
     }
 
@@ -174,7 +177,7 @@ final class NotchIslandButton: NSButton {
         switch style {
         case .plain: return NotchIslandPalette.buttonPlain
         case .subtle: return NotchIslandPalette.buttonSubtle
-        case .accent: return NotchIslandPalette.accent
+        case .accent: return .white
         case .destructive: return NotchIslandPalette.destructive
         case .warning: return NotchIslandPalette.warning.withAlphaComponent(0.22)
         case .link: return .clear

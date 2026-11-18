@@ -2,11 +2,10 @@ import AppKit
 import SwiftUI
 
 // Small pieces shared by the Writing tab's intro, setup and everyday views.
-// Colors, type and radii come from `LibraryTokens`; the buttons match the
-// first-run onboarding's (`PermissionsOnboardingView`).
+// Colors, type and radii come from `LibraryTokens`; the primary button is the
+// shared `TranscriptedButtonStyle`, like the first-run onboarding's.
 
-/// The accent-filled primary action: Next, Continue, Set up writing, Turn on
-/// writing.
+/// The ink primary action: Next, Continue, Set up writing, Turn on writing.
 struct WritingPrimaryButton: View {
     let title: String
     var isEnabled = true
@@ -16,17 +15,9 @@ struct WritingPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .padding(.horizontal, 22)
-                .frame(minHeight: LibraryTokens.minimumHitTarget)
-                .background(
-                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                        .fill(isEnabled ? LibraryTokens.accent : LibraryTokens.ink3)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.transcriptedPrimary)
+        .controlSize(.large)
         .disabled(!isEnabled)
         .accessibilityIdentifier(automationIdentifier)
     }
@@ -61,7 +52,7 @@ struct WritingPageDots: View {
         HStack(spacing: 6) {
             ForEach(1...max(1, count), id: \.self) { page in
                 Circle()
-                    .fill(page == current ? LibraryTokens.accent : LibraryTokens.ink3.opacity(0.6))
+                    .fill(page == current ? LibraryTokens.ink : LibraryTokens.ink3.opacity(0.6))
                     .frame(width: 6, height: 6)
             }
         }
@@ -93,16 +84,16 @@ struct WritingKeyCap: View {
     var body: some View {
         Text(key)
             .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(isPressed ? Color.white : Color.primary)
+            .foregroundStyle(isPressed ? DesignTokens.paper : LibraryTokens.ink)
             .padding(.horizontal, 7)
             .frame(minWidth: 26, minHeight: 20)
             .background(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(isPressed ? LibraryTokens.accent : LibraryTokens.raisedFill)
+                    .fill(isPressed ? LibraryTokens.ink : LibraryTokens.raisedFill)
             )
             .overlay(
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(isPressed ? LibraryTokens.accent : LibraryTokens.raisedStroke, lineWidth: 1)
+                    .stroke(isPressed ? LibraryTokens.ink : LibraryTokens.raisedStroke, lineWidth: 1)
             )
             .accessibilityLabel(Text(key == "~" ? "tilde key" : key))
     }
@@ -143,14 +134,14 @@ struct WritingAppChip: View {
                     .font(LibraryTokens.body)
                     .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? LibraryTokens.accent : Color.primary)
+            .foregroundStyle(LibraryTokens.ink)
             .padding(.horizontal, 10)
             .frame(minHeight: 28)
             .background(
-                Capsule().fill(isSelected ? LibraryTokens.accent.opacity(0.12) : LibraryTokens.raisedFill)
+                Capsule().fill(isSelected ? DesignTokens.fillStrong : LibraryTokens.raisedFill)
             )
             .overlay(
-                Capsule().stroke(isSelected ? LibraryTokens.accent.opacity(0.45) : LibraryTokens.raisedStroke, lineWidth: 1)
+                Capsule().stroke(isSelected ? DesignTokens.hairlineStrong : LibraryTokens.raisedStroke, lineWidth: 1)
             )
             .contentShape(Capsule())
         }
@@ -178,7 +169,7 @@ struct WritingChoiceRow: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(isSelected ? LibraryTokens.accent : LibraryTokens.ink3)
+                    .foregroundStyle(isSelected ? LibraryTokens.ink : LibraryTokens.ink3)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {

@@ -25,7 +25,9 @@ final class NotchIslandLiveTranscriptView: NSView {
 
     private static let font = NSFont.systemFont(ofSize: 12.5)
     private static let labelFont = NSFont.systemFont(ofSize: 12.5, weight: .semibold)
-    private static let youColor = NSColor(srgbRed: 0.52, green: 0.72, blue: 0.92, alpha: 1)
+    /// "You" is full white, the others a step dimmer: no hue, since green
+    /// means live and a second blue would be a third speaker palette.
+    private static let youColor = NotchIslandPalette.primaryText
     private static let themColor = NSColor(white: 1, alpha: 0.72)
     private static let committedColor = NSColor(white: 1, alpha: 0.9)
     private static let tentativeColor = NSColor(white: 1, alpha: 0.42)

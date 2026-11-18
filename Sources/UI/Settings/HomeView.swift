@@ -480,56 +480,22 @@ struct HomeFailedMeetingInlineRow: View {
     }
 }
 
+/// "Try again" on a failed meeting: the row's one primary action, so it's
+/// the shared ink primary, not red (red is for losing something).
 private struct HomeAttentionActionButton: View {
     let title: String
     let isDisabled: Bool
-    var tint: Color = .red
     var automationIdentifier: String? = nil
     let action: () -> Void
-
-    @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 12, weight: .semibold))
-                .lineLimit(1)
-            .foregroundStyle(foregroundColor)
-            .padding(.horizontal, 14)
-            .frame(height: 26)
-            .background(
-                Capsule(style: .continuous)
-                    .fill(backgroundColor)
-            )
-            .overlay(
-                Capsule(style: .continuous)
-                    .stroke(borderColor, lineWidth: 1)
-            )
-            .shadow(color: shadowColor, radius: isHovering && !isDisabled ? 5 : 2, y: 1)
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.transcriptedPrimary)
+        .controlSize(.small)
         .disabled(isDisabled)
-        .onHover { isHovering = $0 }
         .homeAutomationIdentifier(automationIdentifier)
-    }
-
-    private var foregroundColor: Color {
-        isDisabled ? tint.opacity(0.55) : Color.white
-    }
-
-    private var backgroundColor: Color {
-        if isDisabled {
-            return tint.opacity(0.12)
-        }
-        return tint.opacity(isHovering ? 0.9 : 0.78)
-    }
-
-    private var borderColor: Color {
-        isDisabled ? tint.opacity(0.16) : Color.white.opacity(0.14)
-    }
-
-    private var shadowColor: Color {
-        isDisabled ? Color.clear : tint.opacity(0.16)
     }
 }
 

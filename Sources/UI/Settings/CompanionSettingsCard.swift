@@ -12,9 +12,9 @@ struct CompanionSettingsCard: View {
             HStack(alignment: .center, spacing: 12) {
                 Image(systemName: "bubble.left.and.text.bubble.right")
                     .font(.system(size: 23, weight: .medium))
-                    .foregroundStyle(LibraryTokens.accent)
+                    .foregroundStyle(LibraryTokens.ink)
                     .frame(width: 44, height: 44)
-                    .background(LibraryTokens.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                    .background(LibraryTokens.raisedFill, in: RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text("ChatGPT companion")
@@ -94,7 +94,7 @@ struct CompanionSettingsCard: View {
                     .disabled(!companion.liveSharingActive && !companion.canShareCurrentMeeting)
                 }
                 .padding(14)
-                .background(LibraryTokens.accent.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                .background(LibraryTokens.raisedFill, in: RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised))
                 .accessibilityIdentifier("transcripted.settings.companion.current-meeting-sharing")
             }
 
@@ -138,6 +138,7 @@ struct CompanionSettingsCard: View {
 
     private var statusColor: Color {
         if !companion.isEnabled { return LibraryTokens.ink2 }
-        return companion.isListening ? LibraryTokens.accent : LibraryTokens.attention
+        // Ready is fine, not live: neutral. Live sharing keeps the green.
+        return companion.isListening ? LibraryTokens.ink2 : LibraryTokens.attention
     }
 }

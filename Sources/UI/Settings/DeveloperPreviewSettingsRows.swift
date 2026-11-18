@@ -59,7 +59,6 @@ private struct DeveloperPreviewRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.regular)
-                .tint(.accentColor)
                 .accessibilityLabel(Text("\(feature.title), Developer Preview"))
                 .accessibilityValue(Text(isOn ? "On" : "Off"))
                 .accessibilityIdentifier("transcripted.settings.developer-preview.\(feature.id)")

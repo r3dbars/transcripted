@@ -27,7 +27,11 @@ enum MeetingAutoRecordNoteCopy {
             countdown: "",
             primaryTitle: primaryTitle,
             secondaryTitle: secondaryTitle,
-            tertiaryTitle: nil
+            tertiaryTitle: nil,
+            // Stop keeps the recording, so it's the safe primary; Discard
+            // throws it away (after a confirmation), so it's the red one.
+            primaryRole: .primary,
+            secondaryRole: .destructive
         )
     }
 }

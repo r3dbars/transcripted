@@ -60,8 +60,9 @@ struct AgentConnectionSettingsPage: View {
                     .font(LibraryTokens.body)
                     .foregroundStyle(LibraryTokens.ink2)
             } else {
+                // Connected is fine, not live: neutral ink.
                 Circle()
-                    .fill(LibraryTokens.accent)
+                    .fill(LibraryTokens.ink2)
                     .frame(width: 6, height: 6)
 
                 Text(connectedStatusText)
@@ -242,7 +243,7 @@ struct AgentConnectionSettingsPage: View {
             HStack(spacing: 6) {
                 Text("Get Claude Desktop")
                     .font(LibraryTokens.body)
-                    .foregroundStyle(LibraryTokens.accent)
+                    .foregroundStyle(LibraryTokens.ink)
                 Spacer(minLength: 0)
             }
             .frame(minHeight: LibraryTokens.minimumHitTarget)

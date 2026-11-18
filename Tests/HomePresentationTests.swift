@@ -1,39 +1,70 @@
 import Foundation
 
 func testHomePresentation() {
-    runSuite("HomeMeetingSpeakerPalette.slotIndex — stable, in-range, spread") {
-        let slotCount = HomeMeetingSpeakerPalette.slotCount
-
-        // Fixed mapping vectors catch a changed assignment between launches.
-        for (name, expectedSlot) in [("Linus", 3), ("Alex", 2), ("You", 5)] {
-            assertEqual(
-                HomeMeetingSpeakerPalette.slotIndex(for: name),
-                expectedSlot,
-                "Existing speaker palette assignments should remain stable"
+    runSuite("HomeMeetingSpeakerPalette.colorIndex — one color per person everywhere") {
+        func colorIndex(_ identity: HomeMeetingSpeakerIdentity) -> Int {
+            HomeMeetingSpeakerPalette.colorIndex(
+                persistentSpeakerID: identity.persistentSpeakerID,
+                stableID: identity.stableID
             )
         }
-
-        // Normalization: case and surrounding whitespace do not change the slot.
+        let profileID = UUID(uuidString: "6F1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F")!
+        let saved = HomeMeetingSpeakerIdentity(
+            displayName: "Avery Stone",
+            rawLabel: "Avery Stone",
+            channel: .system,
+            diarizerSpeakerID: "2",
+            persistentSpeakerID: profileID
+        )
         assertEqual(
-            HomeMeetingSpeakerPalette.slotIndex(for: "Linus"),
-            HomeMeetingSpeakerPalette.slotIndex(for: "  linus  "),
-            "Slot selection should normalize case and whitespace"
+            colorIndex(saved),
+            VoicePrintStyle(id: profileID).preferredColorIndex,
+            "A saved person's transcript color is their voice-print color (Speakers page, island)"
         )
 
-        // Every slot stays inside the palette range.
-        let names = ["You", "Alex", "Linus", "Speaker 1", "Speaker 2", "Sam", "Jordan", "Riley", "Casey", "Morgan"]
-        for name in names {
-            let index = HomeMeetingSpeakerPalette.slotIndex(for: name)
-            assertTrue(index >= 0 && index < slotCount, "Slot for \(name) should be within 0..<\(slotCount)")
+        let renamed = HomeMeetingSpeakerIdentity(
+            displayName: "Avery S.",
+            rawLabel: "Avery S.",
+            channel: .mic,
+            diarizerSpeakerID: "7",
+            persistentSpeakerID: profileID
+        )
+        assertEqual(
+            colorIndex(renamed),
+            colorIndex(saved),
+            "Renaming or a new meeting doesn't change a saved person's color"
+        )
+
+        let unsaved = HomeMeetingSpeakerIdentity(
+            displayName: "Speaker 2",
+            rawLabel: "Speaker 2",
+            channel: .system,
+            diarizerSpeakerID: "2",
+            persistentSpeakerID: nil
+        )
+        assertEqual(
+            colorIndex(unsaved),
+            colorIndex(unsaved),
+            "An unsaved voice keeps one color"
+        )
+
+        let names = (1...12).map { index in
+            HomeMeetingSpeakerIdentity(
+                displayName: "Speaker \(index)",
+                rawLabel: "Speaker \(index)",
+                channel: .system,
+                diarizerSpeakerID: "\(index)",
+                persistentSpeakerID: nil
+            )
         }
-
-        // Distinct names spread across multiple slots (not all collapsed to one).
-        let distinctSlots = Set(names.map { HomeMeetingSpeakerPalette.slotIndex(for: $0) })
-        assertTrue(distinctSlots.count >= 4, "Distinct speaker names should spread across several palette slots")
-
-        // Custom slot count is honored (mirrors the app palette of 8).
-        let small = HomeMeetingSpeakerPalette.slotIndex(for: "Linus", slotCount: 3)
-        assertTrue(small >= 0 && small < 3, "Custom slot count should be respected")
+        for identity in names {
+            let index = colorIndex(identity)
+            assertTrue(index >= 0 && index < HomeMeetingSpeakerPalette.slotCount, "Index stays inside the voice-print palette")
+        }
+        assertTrue(
+            Set(names.map(colorIndex)).count >= 4,
+            "Different voices spread across the palette"
+        )
     }
 
     runSuite("HomeDaySectionLabel.label — Today / Yesterday / formatted date") {

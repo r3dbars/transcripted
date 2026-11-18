@@ -31,7 +31,7 @@ struct WritingIntroView: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text(Copy.IntroPage1.smallTitle)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(LibraryTokens.accent)
+                    .foregroundStyle(LibraryTokens.writingStream)
                 Text(Copy.IntroPage1.headline)
                     .font(LibraryTokens.title)
                     .fixedSize(horizontal: false, vertical: true)
@@ -57,7 +57,7 @@ struct WritingIntroView: View {
                     HStack(alignment: .top, spacing: 12) {
                         Image(systemName: point.symbolName)
                             .font(.system(size: 14, weight: .semibold))
-                            .foregroundStyle(LibraryTokens.accent)
+                            .foregroundStyle(LibraryTokens.ink2)
                             .frame(width: 20)
                             .padding(.top, 1)
                         VStack(alignment: .leading, spacing: 3) {
@@ -82,16 +82,16 @@ struct WritingIntroView: View {
             Image(systemName: item.isAdded ? "plus" : "checkmark")
                 .font(.system(size: 11, weight: .bold))
         }
-        .foregroundStyle(item.isAdded ? LibraryTokens.accent : LibraryTokens.ink2)
+        .foregroundStyle(item.isAdded ? LibraryTokens.ink : LibraryTokens.ink2)
         .padding(.horizontal, 12)
         .frame(minHeight: 32)
         .background(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 2, style: .continuous)
-                .fill(item.isAdded ? LibraryTokens.accent.opacity(0.12) : LibraryTokens.raisedFill)
+                .fill(item.isAdded ? DesignTokens.fillStrong : LibraryTokens.raisedFill)
         )
         .overlay(
             RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 2, style: .continuous)
-                .stroke(item.isAdded ? LibraryTokens.accent.opacity(0.5) : LibraryTokens.raisedStroke, lineWidth: 1)
+                .stroke(item.isAdded ? DesignTokens.hairlineStrong : LibraryTokens.raisedStroke, lineWidth: 1)
         )
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(item.isAdded ? "\(item.title), add" : "\(item.title), saved"))

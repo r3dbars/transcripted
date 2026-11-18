@@ -73,7 +73,7 @@ struct QuietHomeHeader: View {
                 Button(action: onToggleStarred) {
                     Image(systemName: isStarredOnly ? "star.fill" : "star")
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isStarredOnly ? LibraryTokens.accent : LibraryTokens.ink3)
+                        .foregroundStyle(isStarredOnly ? LibraryTokens.ink : LibraryTokens.ink3)
                         .frame(width: 26, height: 26)
                         .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
                 }
@@ -285,7 +285,7 @@ struct QuietWorkingRow: View {
                         if case .statusIcon(let isSuccess) = HomeActivityIndicator.make(isWorking: tone == .working, isSuccess: tone == .success) {
                             Image(systemName: symbolName)
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(isSuccess ? Color.green : Color.orange)
+                                .foregroundStyle(isSuccess ? LibraryTokens.ink2 : LibraryTokens.attention)
                         } else {
                             ProgressView()
                                 .controlSize(.mini)
@@ -600,7 +600,7 @@ struct QuietMeetingExpansion: View {
             quietAction(
                 title: isCopied ? "Copied" : "Copy",
                 symbol: isCopied ? "checkmark" : "square.on.square",
-                tint: isCopied ? LibraryTokens.accent : LibraryTokens.ink2,
+                tint: isCopied ? LibraryTokens.ink : LibraryTokens.ink2,
                 action: onCopy
             )
             .accessibilityIdentifier("transcripted.home.expansion.copy")
@@ -608,7 +608,7 @@ struct QuietMeetingExpansion: View {
             quietAction(
                 title: item.isStarred ? "Starred" : "Star",
                 symbol: item.isStarred ? "star.fill" : "star",
-                tint: item.isStarred ? LibraryTokens.accent : LibraryTokens.ink2,
+                tint: item.isStarred ? LibraryTokens.ink : LibraryTokens.ink2,
                 action: onToggleStar
             )
             .help(item.isStarred ? "Remove star" : "Star this meeting. Starred meetings keep their audio.")
@@ -681,7 +681,7 @@ private struct QuietTranscriptTimestamp: View {
         Button(action: action) {
             Text(time)
                 .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(isHovering ? LibraryTokens.accent : LibraryTokens.ink3)
+                .foregroundStyle(isHovering ? LibraryTokens.ink : LibraryTokens.ink3)
                 .underline(isHovering)
                 .frame(width: 52, alignment: .leading)
                 .contentShape(Rectangle())

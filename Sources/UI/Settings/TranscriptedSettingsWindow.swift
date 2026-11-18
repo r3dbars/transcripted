@@ -15,7 +15,7 @@ enum TranscriptedSettingsWindow {
             backing: .buffered,
             defer: false
         )
-        window.title = "Transcripted Settings"
+        window.title = "Transcripted"
         window.titleVisibility = .hidden
         // Two-tone split runs edge-to-edge; the traffic lights float over the
         // sidebar tone (Things-style) instead of sitting in a toolbar band.

@@ -285,7 +285,7 @@ func testNotchIslandSpeakerReviewPolicy() {
         )
         assertEqual(layout.drop, .speakerReview(review), "the review opens without a click")
         assertTrue(layout.dropIsSticky, "it stays open until answered")
-        assertEqual(layout.left, [.symbol(.check, .accent), .text("Design sync", .title)], "the wing names the meeting")
+        assertEqual(layout.left, [.symbol(.check, .neutral), .text("Design sync", .title)], "the wing names the meeting")
 
         let recording = NotchIslandPresentation.layout(
             dictation: nil,

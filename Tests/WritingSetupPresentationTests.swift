@@ -23,14 +23,14 @@ func testWritingSetupPresentation() {
         )
         assertEqual(
             Copy.IntroPage1.points.map(\.title),
-            ["Fuller context for your AI.", "You're in control.", "100% local."]
+            ["Fuller context for your AI.", "You're in control.", "Stays on your Mac."]
         )
         assertEqual(
             Copy.IntroPage1.points.map(\.line),
             [
                 "Your notes and replies sit next to your meetings, so your AI can pick up where you left off.",
                 "Pick the apps. Pause or delete anytime.",
-                "No account. Your writing never leaves your Mac. It's saved as plain files you can point any AI agent at.",
+                "No account. It's saved as plain files you can point any AI agent at. Only Write for Me sends text, and only when you press its key.",
             ]
         )
         assertEqual(Copy.IntroPage1.next, "Next")

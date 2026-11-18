@@ -567,7 +567,7 @@ private struct TodayWeekCell: View, Equatable {
             VStack(alignment: .leading, spacing: 2) {
                 Text(TodayCopy.weekdayShort(for: day.day))
                     .font(.system(size: 10.5))
-                    .foregroundStyle(day.isToday ? LibraryTokens.accent : LibraryTokens.ink3)
+                    .foregroundStyle(day.isToday ? LibraryTokens.ink : LibraryTokens.ink3)
                 Text(TodayCopy.dayNumber(for: day.day))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(day.isEmpty ? LibraryTokens.ink3 : Color.primary)

@@ -155,6 +155,8 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(LibraryTokens.contentBackground.ignoresSafeArea())
+        // Ink, not the Mac's accent: switches, checkboxes, progress, focus.
+        .transcriptedRootTint()
         .environment(recordingClock)
         // One Home alert modifier, not two. Stacking multiple legacy `.alert(item:)`
         // on the same view shadows all but the last — which silently killed the

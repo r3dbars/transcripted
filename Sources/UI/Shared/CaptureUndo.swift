@@ -247,7 +247,7 @@ struct UndoLineView: View {
             Text("\u{00B7}")
             Button("Undo", action: onUndo)
                 .buttonStyle(.plain)
-                .foregroundStyle(LibraryTokens.accent)
+                .foregroundStyle(LibraryTokens.ink)
                 .underline(isHoveringUndo)
                 .onHover { isHoveringUndo = $0 }
                 .accessibilityIdentifier("transcripted.undo-line.undo.\(offer.id)")

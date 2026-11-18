@@ -201,11 +201,10 @@ final class NotchIslandDropView: NSView {
             }
             var trailing: [NSView] = []
             if !prompt.secondaryTitle.isEmpty {
-                trailing.append(button(prompt.secondaryTitle, .plain, .meetingPrompt(.secondary, identity), accessibilityLabel: prompt.secondaryAccessibilityLabel))
+                trailing.append(button(prompt.secondaryTitle, Self.style(for: prompt.secondaryRole), .meetingPrompt(.secondary, identity), accessibilityLabel: prompt.secondaryAccessibilityLabel))
             }
             if !prompt.primaryTitle.isEmpty {
-                let style: NotchIslandButton.Style = prompt.primaryTitle == "Stop" ? .destructive : .accent
-                trailing.append(button(prompt.primaryTitle, style, .meetingPrompt(.primary, identity), accessibilityLabel: prompt.primaryAccessibilityLabel))
+                trailing.append(button(prompt.primaryTitle, Self.style(for: prompt.primaryRole), .meetingPrompt(.primary, identity), accessibilityLabel: prompt.primaryAccessibilityLabel))
             }
             add(buttonRow(leading: leading, trailing: trailing))
         case .meetingSaved(let title):
@@ -348,6 +347,15 @@ final class NotchIslandDropView: NSView {
         button.setContentHuggingPriority(.required, for: .horizontal)
         button.setContentCompressionResistancePriority(.required, for: .horizontal)
         return button
+    }
+
+    /// A prompt button's style comes from its role, not its title.
+    static func style(for role: NotchIslandPromptButtonRole) -> NotchIslandButton.Style {
+        switch role {
+        case .standard: return .plain
+        case .primary: return .accent
+        case .destructive: return .destructive
+        }
     }
 
     func button(_ title: String, _ style: NotchIslandButton.Style, _ action: NotchIslandAction, symbol: String? = nil, appIcon: NSImage? = nil, accessibilityLabel: String? = nil) -> NSView {

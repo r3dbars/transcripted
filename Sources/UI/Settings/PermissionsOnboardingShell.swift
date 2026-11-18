@@ -58,6 +58,7 @@ struct OnboardingWindowShell<Content: View>: View {
             )
         }
         .background(LibraryTokens.contentBackground)
+        .transcriptedRootTint()
     }
 }
 
@@ -107,17 +108,9 @@ private struct NavBar: View {
                 onNext()
             } label: {
                 Text(primaryTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .padding(.horizontal, 22)
-                    .frame(minHeight: LibraryTokens.minimumHitTarget)
-                    .background(
-                        RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                            .fill(primaryDisabled ? LibraryTokens.ink3 : LibraryTokens.accent)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
             }
-            .buttonStyle(.plain)
+            .buttonStyle(.transcriptedPrimary)
+            .controlSize(.large)
             .disabled(primaryDisabled)
             .accessibilityIdentifier("transcripted.onboarding.nav.primary")
         }
@@ -215,7 +208,8 @@ struct DoneStage: View {
             }
             .buttonStyle(.plain)
             .font(LibraryTokens.meta)
-            .foregroundStyle(LibraryTokens.accent)
+            .foregroundStyle(LibraryTokens.ink)
+            .underline()
             .accessibilityIdentifier("transcripted.onboarding.done.open-keyboard-settings")
         }
     }
@@ -302,7 +296,7 @@ private struct ShortcutRow: View {
             Spacer(minLength: 12)
             Text(shortcut)
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(LibraryTokens.accent)
+                .foregroundStyle(LibraryTokens.ink)
         }
         .padding(.vertical, 13)
         .frame(minHeight: LibraryTokens.minimumHitTarget)

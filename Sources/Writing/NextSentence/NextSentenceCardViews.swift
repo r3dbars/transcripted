@@ -2,7 +2,9 @@ import AppKit
 import QuartzCore
 
 /// Colors, type and corners from the notch island (`NotchIslandPalette`, `NotchIslandGeometry` in
-/// UIOverlay, which this module can't name). Keep the two in step.
+/// UIOverlay) and the shared tokens (`DesignTokens` in UIShared), which this module can't name.
+/// Keep them in step: `accent` is `DesignTokens.NS.liveOnDark` (capture green, live only) and
+/// the primary button is the island's white pill.
 enum NextSentenceCardStyle {
     static let background = NSColor.black
     static let title = NSColor(white: 1, alpha: 0.64)
@@ -10,7 +12,13 @@ enum NextSentenceCardStyle {
     static let faint = NSColor(white: 1, alpha: 0.36)
     static let buttonPlain = NSColor(white: 0.17, alpha: 1)
     static let buttonSubtle = NSColor(white: 0.11, alpha: 1)
-    static var accent: NSColor { NSColor(srgbRed: 0.04, green: 0.52, blue: 1, alpha: 1) }
+    /// Capture green on black: live only (streaming words, the busy dot, hold progress).
+    static var accent: NSColor { NSColor(srgbRed: 0x2E / 255.0, green: 0xBD / 255.0, blue: 0x8C / 255.0, alpha: 1) }
+    /// The primary button (Insert): ink on the black card, so a white pill with black text.
+    static let primaryFill = NSColor.white
+    static let primaryText = NSColor.black
+    /// Selection and the picked part of the text: neutral, not a hue.
+    static let selection = NSColor(white: 1, alpha: 0.26)
     static var send: NSColor { NSColor(srgbRed: 0.19, green: 0.82, blue: 0.35, alpha: 1) }
     static var listening: NSColor { NSColor(srgbRed: 1, green: 0.27, blue: 0.23, alpha: 1) }
     /// Mood pad, left to right: direct (cool blue), casual (neutral), warm (amber).
@@ -72,8 +80,12 @@ final class NextSentenceCapsuleButton: NSButton {
     private var holdStart: Date?
     private var holdTimer: Timer?
 
-    init(title: String, fill: NSColor, height: CGFloat = 28, wide: Bool = false) {
+    /// Title and symbol color when `set` isn't given one.
+    private let titleColor: NSColor
+
+    init(title: String, fill: NSColor, titleColor: NSColor = .white, height: CGFloat = 28, wide: Bool = false) {
         self.fill = fill
+        self.titleColor = titleColor
         self.height = height
         self.wide = wide
         super.init(frame: .zero)
@@ -84,7 +96,7 @@ final class NextSentenceCapsuleButton: NSButton {
         layer?.cornerRadius = height / 2
         imagePosition = .imageLeading
         imageScaling = .scaleProportionallyDown
-        contentTintColor = .white
+        contentTintColor = titleColor
         target = self
         action = #selector(pressed)
         set(title: title, icon: nil)
@@ -95,7 +107,8 @@ final class NextSentenceCapsuleButton: NSButton {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
-    func set(title: String, icon: NSImage?, color: NSColor = .white) {
+    func set(title: String, icon: NSImage?, color: NSColor? = nil) {
+        let color = color ?? titleColor
         attributedTitle = NSAttributedString(string: title, attributes: [
             .font: NSFont.systemFont(ofSize: height < 22 ? 10.5 : wide ? 13 : 12, weight: .semibold), .foregroundColor: color,
         ])

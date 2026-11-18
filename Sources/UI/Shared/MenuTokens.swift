@@ -12,80 +12,55 @@
 import AppKit
 
 enum MenuTokens {
-    private static func dynamic(dark: NSColor, light: NSColor) -> NSColor {
-        NSColor(name: nil) { appearance in
-            appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? dark : light
-        }
-    }
+    // Every value here comes from `DesignTokens` (Sources/UI/Shared/DesignTokens.swift),
+    // the one source shared with the main window and the island. These names
+    // stay so the popover's AppKit views keep reading one place.
 
     // Surface — NSPopover's native material provides the background; only the
     // section divider is drawn by the popover itself.
-    static let sectionDividerNS = dynamic(
-        dark: NSColor.white.withAlphaComponent(0.12),
-        light: NSColor.black.withAlphaComponent(0.12)
-    )
+    static let sectionDividerNS = DesignTokens.NS.hairline
 
-    // Text + status
-    static let statusGreenNS = NSColor.systemGreen
-    static let statusOrangeNS = NSColor.systemOrange
-    static let statusRedNS = NSColor.systemRed
-    static let textPrimaryNS = dynamic(
-        dark: NSColor.white,
-        light: NSColor(calibratedWhite: 0.10, alpha: 1.0)
-    )
-    static let textSecondaryNS = dynamic(
-        dark: NSColor(calibratedWhite: 0.74, alpha: 1.0),
-        light: NSColor(calibratedWhite: 0.35, alpha: 1.0)
-    )
-    static let textMutedNS = dynamic(
-        dark: NSColor(calibratedWhite: 0.58, alpha: 1.0),
-        light: NSColor(calibratedWhite: 0.50, alpha: 1.0)
-    )
+    // Text + status. Green means live (recording, transcribing), never "ready".
+    static let statusLiveNS = DesignTokens.NS.live
+    static let statusReadyNS = DesignTokens.NS.ink3
+    static let statusOrangeNS = DesignTokens.NS.attention
+    static let statusRedNS = DesignTokens.NS.danger
+    static let textPrimaryNS = DesignTokens.NS.ink
+    static let textSecondaryNS = DesignTokens.NS.ink2
+    static let textMutedNS = DesignTokens.NS.ink3
 
     // Rows
-    static let flatRowHoverNS = dynamic(
-        dark: NSColor.white.withAlphaComponent(0.075),
-        light: NSColor.black.withAlphaComponent(0.06)
-    )
-    static let flatRowPressedNS = dynamic(
-        dark: NSColor.white.withAlphaComponent(0.12),
-        light: NSColor.black.withAlphaComponent(0.10)
-    )
-    static let flatRowDisabledNS = dynamic(
-        dark: NSColor.white.withAlphaComponent(0.02),
-        light: NSColor.black.withAlphaComponent(0.02)
-    )
-    static let buttonBackgroundNS = dynamic(
-        dark: NSColor.white.withAlphaComponent(0.08),
-        light: NSColor.black.withAlphaComponent(0.06)
-    )
+    static let flatRowHoverNS = DesignTokens.NS.fill
+    static let flatRowPressedNS = DesignTokens.NS.fillStrong
+    static let flatRowDisabledNS = DesignTokens.NS.fill
+    /// Filled buttons (Record, Dictate, the update callout) are the primary
+    /// look: an ink fill with paper text.
+    static let buttonBackgroundNS = DesignTokens.NS.ink
+    static let buttonTextNS = DesignTokens.NS.paper
 
     // Layout
     static let panelWidth: CGFloat = 304
     static let panelHeight: CGFloat = 480
     static let innerPadding: CGFloat = 10
     static let sectionSpacing: CGFloat = 7
-    static let cardCornerRadius: CGFloat = 8
-    static let minimumHitTargetSize: CGFloat = 40
+    static let cardCornerRadius: CGFloat = DesignTokens.Radius.control
+    static let minimumHitTargetSize: CGFloat = DesignTokens.minimumHitTarget
     static let compactActionRowHeight: CGFloat = 42
     static let utilityActionRowHeight: CGFloat = 40
     static let statusDotSize: CGFloat = 6
 
-    // Type — the popover's SF Pro roles. See docs/DESIGN_TOKENS.md. The menubar
-    // is the app's compact density tier, so its sizes sit a half-point below the
-    // main-window scale; they live here as named roles so views never reach for
-    // a raw `NSFont.systemFont(ofSize:)` literal. Changing a menubar font means
-    // changing it once, here.
+    // Type — the shared text roles (`TextRole`). See docs/ui-tokens.md.
+    // Changing a menubar font means changing it once, here.
     @MainActor
     enum Font {
-        static let rowTitlePrimary = NSFont.systemFont(ofSize: 12.5, weight: .medium)
-        static let rowTitleUtility = NSFont.systemFont(ofSize: 12.5, weight: .regular)
-        static let rowDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
+        static let rowTitlePrimary = TextRole.body.nsFont(weight: .medium)
+        static let rowTitleUtility = TextRole.body.nsFont(weight: .regular)
+        static let rowDetail = TextRole.small.nsFont()
         // Monospaced digits so the live recording timer doesn't jitter.
-        static let rowTrailingPrimary = NSFont.monospacedDigitSystemFont(ofSize: 10.5, weight: .medium)
-        static let rowTrailingUtility = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .medium)
-        static let headerStatus = NSFont.systemFont(ofSize: 11.5, weight: .medium)
-        static let headerDetail = NSFont.systemFont(ofSize: 10, weight: .regular)
+        static let rowTrailingPrimary = NSFont.monospacedDigitSystemFont(ofSize: TextRole.small.size, weight: .medium)
+        static let rowTrailingUtility = NSFont.monospacedDigitSystemFont(ofSize: TextRole.small.size, weight: .regular)
+        static let headerStatus = TextRole.meta.nsFont(weight: .medium)
+        static let headerDetail = TextRole.small.nsFont()
     }
 }
 

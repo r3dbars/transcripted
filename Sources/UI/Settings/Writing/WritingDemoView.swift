@@ -43,7 +43,7 @@ struct WritingDemoView: View {
                 if let saved = frame.keystrokesSaved {
                     Label(WritingDemoScript.keystrokesSavedText(saved), systemImage: "checkmark.circle.fill")
                         .font(LibraryTokens.meta.weight(.semibold))
-                        .foregroundStyle(LibraryTokens.accent)
+                        .foregroundStyle(LibraryTokens.ink)
                         .transition(.opacity)
                 }
             }

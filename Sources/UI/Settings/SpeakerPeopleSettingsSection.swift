@@ -200,7 +200,7 @@ private struct SpeakersEmptyStateView: View {
                 Button(action: onStartMeeting) {
                     Text(SpeakerPeopleEmptyState.actionTitle)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.transcriptedPrimary)
                 .controlSize(.large)
                 .accessibilityIdentifier(SpeakerPeopleEmptyState.actionAutomationIdentifier)
                 .padding(.top, 2)

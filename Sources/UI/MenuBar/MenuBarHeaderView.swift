@@ -180,9 +180,10 @@ final class MenuBarHeaderView: NSView {
         case .recording:
             color = MenuTokens.statusRedNS
         case .ready:
-            color = MenuTokens.statusGreenNS
+            // Ready is neutral; green is only for something happening now.
+            color = MenuTokens.statusReadyNS
         case .working:
-            color = MenuTokens.statusOrangeNS
+            color = MenuTokens.statusLiveNS
         }
         statusDot.layer?.backgroundColor = menuResolvedCGColor(color)
     }

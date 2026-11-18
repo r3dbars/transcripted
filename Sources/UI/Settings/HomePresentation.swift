@@ -134,22 +134,23 @@ enum HomeDayGroupedRows {
 
 // MARK: - Meeting speaker palette selection
 
-/// Foundation-pure palette-slot selection for meeting speaker chips.
-///
-/// `HomeMeetingSpeakerColor.color(for:)` returns a SwiftUI `Color`, but the
-/// underlying decision — which stable palette slot a speaker name maps to — is
-/// deterministic and Foundation-only. That selection lives here so it can be
-/// fast-tested; `color(for:)` keeps the slot -> `Color` mapping in `HomeView`.
+/// Foundation-pure palette choice for transcript speaker names. It is the
+/// voice-print palette (`VoicePrintStyle`), so a saved person is the same
+/// color in a transcript, on the Speakers page and in the island review.
+/// `HomeMeetingSpeakerColor` (HomeMeetingAudioPlayer.swift) turns the index
+/// into a readable SwiftUI color.
 enum HomeMeetingSpeakerPalette {
-    /// Number of palette slots the speaker-color mapping spreads names across.
-    static let slotCount = 8
+    /// Number of palette slots: the voice-print palette.
+    static var slotCount: Int { VoicePrintStyle.palette.count }
 
-    /// Stable palette slot index in `0..<slotCount` for a speaker name.
-    static func slotIndex(for speaker: String, slotCount: Int = slotCount) -> Int {
-        let normalized = speaker.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
-            partial &+ scalar.value
+    /// A saved person keys by profile ID, exactly like their print; an
+    /// unsaved voice by its transcript key, so it stays put across launches.
+    /// Takes the identity's parts (`HomeMeetingSpeakerIdentity.persistentSpeakerID`
+    /// and `.stableID`) so this file stays free of the preview types.
+    static func colorIndex(persistentSpeakerID: UUID?, stableID: String) -> Int {
+        if let persistentSpeakerID {
+            return VoicePrintStyle(id: persistentSpeakerID).preferredColorIndex
         }
-        return Int(value % UInt32(slotCount))
+        return VoicePrintStyle(seedString: stableID).preferredColorIndex
     }
 }

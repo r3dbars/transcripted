@@ -93,7 +93,6 @@ struct WritingSetupFlowView: View {
             Toggle(title, isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .tint(.accentColor)
                 .accessibilityLabel(Text(title))
                 .accessibilityHint(Text(line))
                 .accessibilityIdentifier(automationIdentifier)
@@ -312,7 +311,7 @@ struct WritingSetupFlowView: View {
             Spacer(minLength: 0)
             if done {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(LibraryTokens.accent)
+                    .foregroundStyle(LibraryTokens.ink)
                     .accessibilityLabel(Text("Done"))
             }
         }

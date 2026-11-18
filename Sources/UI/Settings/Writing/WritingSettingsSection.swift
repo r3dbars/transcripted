@@ -98,7 +98,6 @@ struct WritingSettingsSection: View {
             Toggle(title, isOn: isOn)
                 .labelsHidden()
                 .toggleStyle(.switch)
-                .tint(.accentColor)
                 .disabled(!isEnabled)
                 .accessibilityLabel(Text(title))
                 .accessibilityHint(Text(line))
@@ -221,7 +220,7 @@ struct WritingSettingsSection: View {
 private struct WritingStorageMeter: View {
     let usage: WritingStorageUsage
 
-    private static let colors: [Color] = [LibraryTokens.accent, LibraryTokens.dictationStream, LibraryTokens.meetingsStream]
+    private static let colors: [Color] = [LibraryTokens.ink, LibraryTokens.ink2, LibraryTokens.ink3]
 
     var body: some View {
         GeometryReader { geometry in

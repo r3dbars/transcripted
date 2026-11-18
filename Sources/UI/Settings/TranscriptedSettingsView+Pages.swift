@@ -140,7 +140,9 @@ extension TranscriptedSettingsView {
             return "Checking…"
         case .noUpdateAvailable:
             return "You're up to date"
-        case .updateAvailable, .downloading:
+        case .updateAvailable:
+            return "Update available"
+        case .downloading:
             return "Downloading update…"
         case .unknown, .readyToCheck, .readyToInstall:
             return appVersionText
@@ -234,7 +236,9 @@ extension TranscriptedSettingsView {
             aboutPage
                 .padding(.top, 8)
 
-            Text("Transcripts and audio never leave this Mac.")
+            // Write for Me and the ChatGPT companion can send text off this Mac
+            // (DeveloperPreview.nextSentence, CompanionSettingsCard), so say when.
+            Text("Recordings and transcripts stay on this Mac. Write for Me and the ChatGPT companion send text only when you use them.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: 620)

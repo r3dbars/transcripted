@@ -21,6 +21,7 @@ Read the card for the folder you're editing first. Dependency edges live in `.ag
 - **Saved meetings change one way.** Rename, delete, Undo and dictionary fixes go through `Shared/` and the transcript-update serializer (Shared card).
 - **Source pins and window coverage.** Run `python3 scripts/dev/check-source-pins.py --changed-only` before editing; its resolved targets are the current pin inventory. `scripts/dev/check-window-inventory.py` scans `Sources/` for windows against `.agents/window-inventory.json`. `Tests/OverlayScreenSharePrivacyTests.swift` builds real windows and checks their sharing behavior.
 - **Finding a label.** Settings copy is inline. Grep the exact quoted text instead of reading the big files.
+- **One look.** Colors, radii, text roles and the three button styles come from `Shared/DesignTokens.swift` and `Shared/DesignButtonStyles.swift`; read `docs/ui-tokens.md` before styling anything. Primary buttons are ink, green means live only, and window roots use `.transcriptedRootTint()`.
 
 ## Cross-surface behavior
 

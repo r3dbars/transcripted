@@ -107,6 +107,11 @@ struct NotchIslandMeetingContent: Equatable {
         var primaryAccessibilityLabel: String? = nil
         var secondaryAccessibilityLabel: String? = nil
         var tertiaryAccessibilityLabel: String? = nil
+        /// How each button reads. The style follows what the button does,
+        /// never its title: a safe Stop is the white primary, and only an
+        /// action that throws the recording away is red.
+        var primaryRole: NotchIslandPromptButtonRole = .primary
+        var secondaryRole: NotchIslandPromptButtonRole = .standard
     }
 
     enum CallAudioNote: Equatable {
@@ -187,9 +192,22 @@ enum NotchIslandSymbol: String, Equatable {
     case saved = "tray.and.arrow.down.fill"
 }
 
+/// A meeting prompt button's meaning, which picks its island style.
+enum NotchIslandPromptButtonRole: Equatable {
+    /// A quiet grey pill (Continue, Skip, Keep recording).
+    case standard
+    /// The white primary pill (Stop and transcribe, Boost, Split, OK).
+    case primary
+    /// Red: the action loses the recording (Discard).
+    case destructive
+}
+
 enum NotchIslandTint: Equatable {
+    /// Live or just-worked (listening, pasted): capture green.
     case accent
     case warning
+    /// Done but not live (saved, copied, a call prompt): white.
+    case neutral
 }
 
 enum NotchIslandTextStyle: Equatable {
@@ -456,12 +474,12 @@ enum NotchIslandPresentation {
         } else if let dictation {
             (result.left, result.right) = dictationWings(dictation)
         } else if callPrompt != nil, !(meeting?.isBusy ?? false) {
-            result.left = [.symbol(.video, .accent), .text("Call", .title)]
+            result.left = [.symbol(.video, .neutral), .text("Call", .title)]
             result.right = dropIsOpen
                 ? [.live(.callSeconds, .secondary)]
                 : [.chip("Record", .destructive, .callRecord)]
         } else if let speakerReview, !(meeting?.isBusy ?? false) {
-            result.left = [.symbol(.check, .accent), .text(speakerReview.meetingTitle ?? "Saved", .title)]
+            result.left = [.symbol(.check, .neutral), .text(speakerReview.meetingTitle ?? "Saved", .title)]
             result.right = []
         } else if let meeting {
             (result.left, result.right) = meetingWings(meeting, dropIsOpen: dropIsOpen)
@@ -661,9 +679,9 @@ enum NotchIslandPresentation {
         case .error, .noSpeech:
             return .symbol(.warning, .warning)
         case .notice:
-            return .symbol(.clipboard, .accent)
+            return .symbol(.clipboard, .neutral)
         case .saved:
-            return .symbol(.saved, .accent)
+            return .symbol(.saved, .neutral)
         }
     }
 
@@ -675,7 +693,7 @@ enum NotchIslandPresentation {
     ) -> ([NotchIslandItem], [NotchIslandItem]) {
         switch meeting.phase {
         case .none:
-            return ([.symbol(.video, .accent), .text("Missed call", .title)], [])
+            return ([.symbol(.video, .neutral), .text("Missed call", .title)], [])
         case .preparing(let title, _):
             return ([.spinner, .text(title, .title)], [])
         case .recording:
@@ -700,7 +718,7 @@ enum NotchIslandPresentation {
             let right: [NotchIslandItem] = detail.isEmpty ? [] : [.text(detail, .secondary)]
             return ([progress == nil ? .spinner : .transcriptionRing, .text("Transcribing", .title)], right)
         case .saved:
-            return ([.symbol(.check, .accent), .text("Saved", .title)], [.chip("Open", .plain, .meetingOpen)])
+            return ([.symbol(.check, .neutral), .text("Saved", .title)], [.chip("Open", .plain, .meetingOpen)])
         case .error:
             return ([.symbol(.warning, .warning), .text("Meeting failed", .title)], [])
         }

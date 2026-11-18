@@ -47,8 +47,8 @@ struct SettingsPageIntro: View {
 
             if let summaryText {
                 Text(summaryText)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -78,7 +78,7 @@ enum SettingsInteractionPalette {
         case .neutral:
             return Color.primary.opacity(0.04)
         case .accent:
-            return Color.accentColor.opacity(0.13)
+            return LibraryTokens.ink.opacity(0.13)
         case .warning:
             return Color.orange.opacity(0.12)
         case .destructive:
@@ -91,7 +91,7 @@ enum SettingsInteractionPalette {
         case .neutral:
             return Color.primary.opacity(0.07)
         case .accent:
-            return Color.accentColor.opacity(0.18)
+            return LibraryTokens.ink.opacity(0.18)
         case .warning:
             return Color.orange.opacity(0.17)
         case .destructive:
@@ -104,7 +104,7 @@ enum SettingsInteractionPalette {
         case .neutral:
             return Color.primary.opacity(0.10)
         case .accent:
-            return Color.accentColor.opacity(0.30)
+            return LibraryTokens.ink.opacity(0.30)
         case .warning:
             return Color.orange.opacity(0.26)
         case .destructive:
@@ -250,7 +250,7 @@ struct SettingsInlineActionButton: View {
         case .neutral:
             return Color.primary.opacity(0.025)
         case .accent:
-            return Color.accentColor.opacity(0.08)
+            return LibraryTokens.ink.opacity(0.08)
         case .warning:
             return Color.orange.opacity(0.08)
         case .destructive:
@@ -263,7 +263,7 @@ struct SettingsInlineActionButton: View {
         case .neutral:
             return Color.primary.opacity(0.06)
         case .accent:
-            return Color.accentColor.opacity(0.16)
+            return LibraryTokens.ink.opacity(0.16)
         case .warning:
             return Color.orange.opacity(0.16)
         case .destructive:
@@ -415,7 +415,7 @@ struct PermissionStatusRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(granted ? Color.green : Color.orange)
+                .foregroundStyle(granted ? LibraryTokens.ink2 : LibraryTokens.attention)
                 .font(.system(size: 16, weight: .semibold))
                 .padding(.top, 2)
 

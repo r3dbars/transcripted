@@ -48,7 +48,7 @@ struct PasteLastDictationFeedback: Equatable {
             )
         case .failed(let message, reason: _):
             return PasteLastDictationFeedback(
-                title: "Paste Last Dictation failed",
+                title: "Couldn't paste again",
                 detail: message,
                 tone: .caution,
                 dismissDelayNanoseconds: 4_500_000_000
@@ -183,7 +183,7 @@ private final class PasteLastDictationFeedbackView: NSView {
     init(feedback: PasteLastDictationFeedback) {
         super.init(frame: NSRect(origin: .zero, size: Self.size))
         wantsLayer = true
-        layer?.cornerRadius = 16
+        layer?.cornerRadius = DesignTokens.Radius.surface
         layer?.backgroundColor = NSColor.windowBackgroundColor.withAlphaComponent(0.96).cgColor
         layer?.borderWidth = 1
         layer?.borderColor = NSColor.separatorColor.withAlphaComponent(0.32).cgColor
@@ -194,13 +194,13 @@ private final class PasteLastDictationFeedbackView: NSView {
         addSubview(indicator)
 
         titleLabel.stringValue = feedback.title
-        titleLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        titleLabel.font = TextRole.body.nsFont(weight: .semibold)
         titleLabel.textColor = .labelColor
         titleLabel.lineBreakMode = .byTruncatingTail
         addSubview(titleLabel)
 
         detailLabel.stringValue = feedback.detail
-        detailLabel.font = .systemFont(ofSize: 11, weight: .regular)
+        detailLabel.font = TextRole.small.nsFont()
         detailLabel.textColor = .secondaryLabelColor
         detailLabel.lineBreakMode = .byWordWrapping
         detailLabel.maximumNumberOfLines = 2
@@ -208,7 +208,7 @@ private final class PasteLastDictationFeedbackView: NSView {
 
         setAccessibilityElement(true)
         setAccessibilityRole(.group)
-        setAccessibilityLabel("Paste Last Dictation")
+        setAccessibilityLabel("Paste again")
         setAccessibilityValue(feedback.accessibilityValue)
     }
 
@@ -235,9 +235,10 @@ private final class PasteLastDictationFeedbackView: NSView {
     private func indicatorColor(for tone: PasteLastDictationFeedbackTone) -> NSColor {
         switch tone {
         case .success:
-            return NSColor.systemGreen.withAlphaComponent(0.88)
+            // Pasted is "just worked": the one other place green belongs.
+            return DesignTokens.NS.live
         case .caution:
-            return NSColor.systemOrange.withAlphaComponent(0.90)
+            return DesignTokens.NS.attention
         }
     }
 }

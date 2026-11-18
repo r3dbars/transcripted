@@ -154,8 +154,8 @@ struct FeedbackComposerView: View {
                 .contentShape(RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(SidebarQuietButtonStyle())
-            .background(dropTargeted ? Color.orange.opacity(0.10) : LibraryTokens.raisedFill, in: RoundedRectangle(cornerRadius: 8))
-            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(dropTargeted ? Color.orange : LibraryTokens.raisedStroke, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+            .background(dropTargeted ? DesignTokens.fillStrong : LibraryTokens.raisedFill, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(dropTargeted ? LibraryTokens.ink : LibraryTokens.raisedStroke, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
             .disabled(model.attachments.count >= 3 || model.isLoadingAttachments)
             .help("PNG, JPEG, HEIC, or TIFF. Up to 3 images.")
             .accessibilityLabel("Attach images")
@@ -229,7 +229,7 @@ struct FeedbackComposerView: View {
             Button(model.step == .review ? "Back" : "Cancel") {
                 if model.step == .review { model.edit() } else { onClose() }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(.transcriptedSecondary)
             .disabled(model.isSending)
             Spacer()
             Button(model.isSending ? "Sending…" : model.step == .review ? "Send report" : "Review report") {
@@ -239,8 +239,7 @@ struct FeedbackComposerView: View {
                     model.review()
                 }
             }
-            .buttonStyle(.borderedProminent)
-            .tint(.orange)
+            .buttonStyle(.transcriptedPrimary)
             .disabled(model.step == .compose ? !model.canReview : model.isSending)
             .accessibilityIdentifier("transcripted.feedback.primary")
         }
@@ -261,10 +260,10 @@ struct FeedbackComposerView: View {
             }
             HStack {
                 Button("Write another") { model.reset() }
+                    .buttonStyle(.transcriptedSecondary)
                 Spacer()
                 Button("Done", action: onClose)
-                    .buttonStyle(.borderedProminent)
-                    .tint(.orange)
+                    .buttonStyle(.transcriptedPrimary)
             }
         }
         .accessibilityIdentifier("transcripted.feedback.success")

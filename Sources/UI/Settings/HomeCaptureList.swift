@@ -38,7 +38,7 @@ private struct HomeEmptyStateView: View {
                 Button(action: state.action) {
                     Text(state.actionTitle)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.transcriptedPrimary)
                 .controlSize(.large)
                 .accessibilityIdentifier(state.automationIdentifier)
 
@@ -48,7 +48,7 @@ private struct HomeEmptyStateView: View {
                     Button(action: secondaryAction) {
                         Text(secondaryTitle)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.transcriptedSecondary)
                     .controlSize(.large)
                     .accessibilityIdentifier(secondaryAutomationIdentifier)
                 }

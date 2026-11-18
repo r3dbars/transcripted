@@ -57,8 +57,8 @@ final class NextSentenceTextView: NSTextView {
         isVerticallyResizable = true
         isHorizontallyResizable = false
         autoresizingMask = [.width]
-        insertionPointColor = NextSentenceCardStyle.accent
-        selectedTextAttributes = [.backgroundColor: NextSentenceCardStyle.accent.withAlphaComponent(0.42)]
+        insertionPointColor = .white
+        selectedTextAttributes = [.backgroundColor: NextSentenceCardStyle.selection]
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
         isAutomaticTextCompletionEnabled = false
