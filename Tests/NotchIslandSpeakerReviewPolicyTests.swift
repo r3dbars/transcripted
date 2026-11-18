@@ -268,9 +268,8 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 left to name in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 left to name in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle, "Who spoke?", "the header asks one short question")
-        assertEqual(NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: " Design sync "), "Design sync", "the meeting sits small on the right")
-        assertNil(NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: "  "), "no meeting name, nothing on the right")
-        assertEqual(NotchIslandSpeakerReviewPolicy.accessibilityTitle(meetingTitle: "Design sync"), "Who spoke? Design sync")
+        assertEqual(NotchIslandSpeakerReviewPolicy.accessibilityTitle(meetingTitle: " Design sync "), "Who spoke? Design sync")
+        assertEqual(NotchIslandSpeakerReviewPolicy.accessibilityTitle(meetingTitle: "  "), "Who spoke?")
     }
 
     runSuite("NotchIslandPresentation opens the speaker review by itself once the meeting is saved") {

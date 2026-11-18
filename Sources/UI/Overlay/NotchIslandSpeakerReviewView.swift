@@ -39,10 +39,11 @@ import TranscriptedCore
 @MainActor
 final class NotchIslandSpeakerReviewView: NSView {
     static let contentWidth = NotchIslandGeometry.dropWidth - 40
+    private static let footerButtonHeight: CGFloat = 34
 
     /// Where the review is drawn.
     enum Chrome: Equatable {
-        /// The island: the Later ring, Delete recording…, "Everyone's named".
+        /// The island: the Later ring, recording deletion, "Everyone's named".
         case island
         /// A card on the Speakers page, with the page's own words.
         case page(PageCard)
@@ -189,6 +190,9 @@ final class NotchIslandSpeakerReviewView: NSView {
             stack.trailingAnchor.constraint(equalTo: trailingAnchor),
             stack.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        if !isPage {
+            footerSummary.widthAnchor.constraint(lessThanOrEqualToConstant: width).isActive = true
+        }
         // Doubtful suggestions first: the first answer teaches the matcher most.
         let ranked = SpeakerReviewBridge.ranked(input.speakers.filter { $0.channel == .system })
             + SpeakerReviewBridge.ranked(input.speakers.filter { $0.channel == .mic })
@@ -260,7 +264,6 @@ final class NotchIslandSpeakerReviewView: NSView {
         meetingTitle = title
         guard !isFinished else { return }
         setAccessibilityLabel(accessibilityTitle)
-        rebuild()
     }
 
     /// The calendar invitees, and how many remote voices the whole meeting
@@ -357,7 +360,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         refreshInvitees()
 
         let buttons: NSStackView
-        let done = NotchIslandButton(title: pageCard?.doneTitle ?? "Done", style: .white, height: 34)
+        let done = NotchIslandButton(title: pageCard?.doneTitle ?? "Done", style: .white, height: Self.footerButtonHeight)
         done.onPress = { [weak self] in self?.finishDone() }
         if let pageCard {
             pageDoneButton = done
@@ -368,7 +371,7 @@ final class NotchIslandSpeakerReviewView: NSView {
             buttons = NSStackView(views: [done])
             startCountdownRing(on: done)
         } else {
-            let later = NotchIslandButton(title: "Later", style: .link, height: 30, fontSize: 13)
+            let later = NotchIslandButton(title: "Later", style: .subtle, height: Self.footerButtonHeight)
             later.onPress = { [weak self] in self?.finishLater() }
             later.setAccessibilityHelp("Save what you answered and name the rest later in Speakers.")
             startCountdownRing(on: later)
@@ -383,7 +386,10 @@ final class NotchIslandSpeakerReviewView: NSView {
         footerSummary.spacing = 8
         footerSummary.setHuggingPriority(.defaultLow, for: .horizontal)
         footerSummary.setClippingResistancePriority(.defaultLow, for: .horizontal)
-        let footer = NSStackView(views: [footerSummary, buttons])
+        // Leave the automatic-name summary the full width of the island.
+        let footer = NSStackView(views: isPage
+            ? [footerSummary, buttons]
+            : [deleteRecordingButton(), NSView(), buttons])
         footer.orientation = .horizontal
         footer.alignment = .centerY
         footer.distribution = .fill
@@ -391,11 +397,19 @@ final class NotchIslandSpeakerReviewView: NSView {
         footer.translatesAutoresizingMaskIntoConstraints = false
         footer.widthAnchor.constraint(equalToConstant: width).isActive = true
         stack.setCustomSpacing(18, after: lastRow)
+        if !isPage {
+            stack.addArrangedSubview(footerSummary)
+            stack.setCustomSpacing(10, after: footerSummary)
+        }
         stack.addArrangedSubview(footer)
         refreshFooterSummary(animated: false)
-        // A saved meeting is deleted from Meetings, not from its card.
-        guard !isPage else { return }
-        let delete = NotchIslandTextButton(title: NotchIslandSpeakerReviewPolicy.deleteTitle, restAlpha: 0.65)
+    }
+
+    private func deleteRecordingButton() -> NotchIslandButton {
+        let delete = NotchIslandButton(
+            title: NotchIslandSpeakerReviewPolicy.deleteTitle, style: .subtle, height: Self.footerButtonHeight, fontSize: 12
+        )
+        delete.setAccessibilityLabel(NotchIslandSpeakerReviewPolicy.deleteAccessibilityLabel)
         delete.setAccessibilityIdentifier("speaker-review-delete-recording")
         delete.setAccessibilityHelp("Delete this recording and its saved audio, with confirmation. Saved people are kept.")
         delete.onPress = { [weak self] in
@@ -407,16 +421,10 @@ final class NotchIslandSpeakerReviewView: NSView {
             self.rebuild()
             self.onLayoutChange?()
         }
-        stack.setCustomSpacing(10, after: footer)
-        stack.addArrangedSubview(delete)
+        return delete
     }
 
     private func buildDeleteConfirmation() {
-        if let meetingTitle {
-            let meeting = NotchIslandPalette.label(meetingTitle, font: .systemFont(ofSize: 12), color: NotchIslandPalette.secondaryText)
-            meeting.lineBreakMode = .byTruncatingTail
-            stack.addArrangedSubview(meeting)
-        }
         let title = NotchIslandPalette.label(NotchIslandSpeakerReviewPolicy.deleteConfirmation,
             font: .systemFont(ofSize: 16, weight: .semibold), color: NotchIslandPalette.primaryText)
         let detail = NSTextField(wrappingLabelWithString: deletionError ?? NotchIslandSpeakerReviewPolicy.deleteDetail)
@@ -440,6 +448,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         delete.setAccessibilityIdentifier("speaker-review-confirm-delete")
         delete.onPress = { [weak self] in self?.deleteConfirmed() }
         let buttons = NSStackView(views: [keep, delete])
+        stack.setCustomSpacing(12, after: detail)
         buttons.orientation = .horizontal
         buttons.spacing = 16
         stack.addArrangedSubview(buttons)
@@ -462,31 +471,15 @@ final class NotchIslandSpeakerReviewView: NSView {
         }
     }
 
-    /// "Who spoke?" with the meeting's name small and grey on the right.
     private func headerLine() -> NSView {
         let title = NotchIslandPalette.label(
             NotchIslandSpeakerReviewPolicy.headerTitle,
             font: .systemFont(ofSize: 19, weight: .semibold),
             color: NotchIslandPalette.primaryText
         )
-        title.setContentCompressionResistancePriority(.required, for: .horizontal)
-        title.setContentHuggingPriority(.required, for: .horizontal)
-        var views: [NSView] = [title, NSView()]
-        if let detail = NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: meetingTitle) {
-            let meeting = NotchIslandPalette.label(detail, font: .systemFont(ofSize: 12), color: NSColor(white: 1, alpha: 0.4))
-            meeting.lineBreakMode = .byTruncatingTail
-            meeting.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-            views.append(meeting)
-        }
-        let line = NSStackView(views: views)
-        line.orientation = .horizontal
-        line.alignment = .firstBaseline
-        line.spacing = 12
-        line.translatesAutoresizingMaskIntoConstraints = false
-        line.widthAnchor.constraint(equalToConstant: width).isActive = true
         // VoiceOver reads the review's own label instead.
-        line.setAccessibilityElement(false)
-        return line
+        title.setAccessibilityElement(false)
+        return title
     }
 
     private func startCountdownRing(on button: NotchIslandButton) {
