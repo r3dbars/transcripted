@@ -396,7 +396,9 @@ struct TranscriptedSettingsView: View {
     /// same row again, pressing Esc, or expanding another row collapses it.
     func toggleHomeMeetingExpansion(_ item: RecentMeetingItem) {
         if homeExpandedMeetingID == item.id {
-            collapseHomeMeetingExpansion()
+            // Show less only folds the card; audio started from its bar
+            // keeps playing. Leaving the page or Esc still stops it.
+            collapseHomeMeetingExpansion(stopsPlayback: false)
             return
         }
         trackSettingsAction("preview_recent_meeting", page: .home)
@@ -425,9 +427,11 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    func collapseHomeMeetingExpansion() {
+    func collapseHomeMeetingExpansion(stopsPlayback: Bool = true) {
         homeMeetingPreviewLoadTask?.cancel()
-        MeetingAudioPlayback.shared.stop()
+        if stopsPlayback {
+            MeetingAudioPlayback.shared.stop()
+        }
         withAnimation(.snappy(duration: 0.22)) {
             homeExpandedMeetingID = nil
         }
@@ -541,7 +545,14 @@ struct TranscriptedSettingsView: View {
                     promptRenameMeeting(item)
                 }
             case .starMeeting, .unstarMeeting:
-                return HomeRowMenuItem(title: title, symbolName: symbolName, automationIdentifier: "transcripted.home.meeting.star-toggle") {
+                // Keep audio: the same `starred` flag retention reads.
+                return HomeRowMenuItem(
+                    title: title,
+                    symbolName: symbolName,
+                    automationIdentifier: "transcripted.home.meeting.star-toggle",
+                    isChecked: menuEntry.isChecked,
+                    toolTip: menuEntry.toolTip
+                ) {
                     toggleMeetingStar(item)
                 }
             case .reportIssue:
@@ -578,7 +589,7 @@ struct TranscriptedSettingsView: View {
                     openHomeSpeakerReview(actionName: "review_meeting_speakers_row", transcriptURL: item.transcriptURL)
                 }
             case .boostMic:
-                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                return HomeRowMenuItem(title: title, symbolName: symbolName, placement: menuEntry.placement) {
                     // One meeting only, like the in-meeting Boost Mic prompt.
                     trackSettingsToggle("meeting_mic_boost_next_meeting", enabled: true, page: .home)
                     MicrophoneProcessingPreferences.requestBoostForNextMeeting()
@@ -597,7 +608,7 @@ struct TranscriptedSettingsView: View {
                     handleRetranscribeMeeting(item)
                 }
             case .showAudio:
-                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                return HomeRowMenuItem(title: title, symbolName: symbolName, placement: menuEntry.placement) {
                     trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
                     revealOwnFile(
                         candidateURLs: audioRevealURLs,

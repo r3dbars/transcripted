@@ -347,7 +347,13 @@ final class MeetingAudioPlayback: NSObject, ObservableObject, NSSoundDelegate {
         "\(attachment.id)#\(choice?.id ?? "default")"
     }
 
-    private static func formatTime(_ time: TimeInterval) -> String {
+    /// "0:19", "32:10", "1:02:03": the clock the Meetings card bar and its
+    /// transcript times show.
+    nonisolated static func clockText(_ time: TimeInterval) -> String {
+        formatTime(time)
+    }
+
+    private nonisolated static func formatTime(_ time: TimeInterval) -> String {
         let totalSeconds = max(0, Int(time.rounded(.down)))
         let hours = totalSeconds / 3600
         let minutes = (totalSeconds % 3600) / 60
@@ -412,6 +418,9 @@ enum MeetingAudioPlaybackLoadingPolicy {
     }
 }
 
+/// Which kept track plays: Mix, You (the mic) or Others (call audio). Only
+/// shown when the meeting kept more than one; sits at the end of the card
+/// bar's player.
 struct MeetingAudioSourceMenu: View {
     let attachment: MeetingAudioAttachment
     @Binding var selectedChoiceID: String?
@@ -433,66 +442,45 @@ struct MeetingAudioSourceMenu: View {
                         selectedChoiceID = choice.id
                         onSelect(choice)
                     } label: {
-                        Label(choice.title, systemImage: choice.id == selectedChoice.id ? "checkmark" : choice.symbolName)
+                        Label(Self.title(for: choice), systemImage: choice.id == selectedChoice.id ? "checkmark" : choice.symbolName)
                     }
                 }
             } label: {
-                HStack(spacing: 5) {
-                    Image(systemName: selectedChoice.symbolName)
-                        .font(.system(size: 10, weight: .semibold))
-                    Text(selectedChoice.title)
-                        .font(.caption.weight(.semibold))
+                HStack(spacing: 3) {
+                    Text(Self.title(for: selectedChoice))
                         .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 8, weight: .semibold))
                 }
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
-                        .fill(Color.secondary.opacity(0.08))
-                )
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
             .fixedSize()
-            .frame(minHeight: LibraryTokens.minimumHitTarget)
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-            .help("Choose retained meeting audio source")
+            .help("Play the mix, just you, or just the others")
+            .accessibilityLabel(Text("Audio track: \(Self.title(for: selectedChoice))"))
+            .accessibilityIdentifier("transcripted.home.meeting.audio-source")
         }
+    }
+
+    /// The mic track is you and call audio is everyone else, so the picker
+    /// says that instead of naming devices.
+    static func title(for choice: MeetingAudioPlaybackChoice) -> String {
+        MeetingAudioSourceTitle.title(
+            sourceStem: MeetingAudioPlaybackLoadingPolicy.sourceStem(ofChoiceID: choice.id),
+            fallback: choice.title
+        )
     }
 }
 
-struct MeetingAudioScrubber: View {
-    let attachment: MeetingAudioAttachment
-    var width: CGFloat?
-    var showsTime = true
-
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Slider(
-                value: Binding(
-                    get: { playback.progress(for: attachment) },
-                    set: { playback.seek(attachment, progress: $0) }
-                ),
-                in: 0...1
-            )
-            .controlSize(.small)
-            .disabled(!canScrub)
-
-            if showsTime {
-                Text(playback.timeLabel(for: attachment))
-                    .font(.caption2.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .frame(width: 78, alignment: .trailing)
-            }
+enum MeetingAudioSourceTitle {
+    static func title(sourceStem: String, fallback: String) -> String {
+        switch sourceStem {
+        case "microphone": return "You"
+        case "system_audio": return "Others"
+        default: return fallback
         }
-        .frame(width: width, alignment: .leading)
-        .help(canScrub ? "Drag to scrub meeting audio" : "Start playback before scrubbing")
-    }
-
-    private var canScrub: Bool {
-        playback.isActive(attachment) && playback.duration > 0
     }
 }

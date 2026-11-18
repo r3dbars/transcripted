@@ -216,7 +216,7 @@ func testFailedMeetingPresentation() {
             detail: "Model was not ready."
         )
 
-        assertEqual(presentation.statusText, "Retry ready", "retryable rows should show that recovery is available")
+        assertEqual(presentation.statusText, "Not transcribed", "retryable rows should show that recovery is available")
         assertEqual(
             presentation.inlineDetail,
             "Your audio is saved. Click Try again to transcribe it.",
@@ -233,7 +233,7 @@ func testFailedMeetingPresentation() {
             detail: "ignored",
             failureKind: .systemAudioPermission
         )
-        assertEqual(permission.statusText, "Retry ready")
+        assertEqual(permission.statusText, "Not transcribed")
         assertEqual(
             permission.inlineDetail,
             "Turn on System Audio Recording in System Settings first, then try again.",
@@ -320,7 +320,7 @@ func testFailedMeetingPresentation() {
             "stop-timeout failures should keep their recovery category"
         )
         assertTrue(hasAudioFiles, "retained timeout audio should make the Home row retry-ready")
-        assertEqual(presentation.statusText, "Retry ready", "Home should show that saved audio can be retried")
+        assertEqual(presentation.statusText, "Not transcribed", "Home should show that saved audio can be retried")
         assertEqual(
             presentation.inlineDetail,
             "Your audio is saved. Click Try again to transcribe it.",
@@ -384,7 +384,7 @@ func testFailedMeetingPresentation() {
             usableAudio: .unknown
         )
 
-        assertEqual(presentation.statusText, "Retry ready")
+        assertEqual(presentation.statusText, "Not transcribed")
         assertTrue(presentation.canShowRetryAction, "an unprobed row should still offer retry")
     }
 
@@ -556,7 +556,7 @@ func testFailedMeetingPresentation() {
         let noAudio = row(hasAudioFiles: false, audioURLs: [])
         assertFalse(noAudio.showsRevealAudio, "with no kept audio there is nothing to show")
 
-        assertEqual(complete.deleteTitle, "Delete failed meeting", "cleanup is labeled as a delete")
+        assertEqual(complete.deleteTitle, "Delete", "cleanup is labeled as a delete")
         assertTrue(complete.deleteIsDestructive, "cleanup is marked destructive")
         assertFalse(complete.deleteDisabled, "an idle failed meeting can be deleted")
         assertTrue(row(isRetrying: true).deleteDisabled, "delete waits while a retry is running")

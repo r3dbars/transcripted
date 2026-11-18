@@ -1,164 +1,158 @@
 import AppKit
 import SwiftUI
 
-// Meeting-audio player components shared by the Home inline expansion.
-// Extracted from HomeMeetingPreviewSheet.swift when the preview sheet was
-// retired (quiet-library redesign): the expansion replaced the sheet, but
-// the player and the speaker color palette remain shared UI.
+// Meeting-audio controls for the Meetings card bar, built like the
+// Dictations card (`DictationPlaybackBar.swift`): a small round play button,
+// and while that meeting's audio is open, current time · scrubber · total and
+// the source picker (Mix, You, Others) when the meeting kept split tracks.
+// There is no separate player block any more; playback still runs through
+// `MeetingAudioPlayback.shared`, and transcript times still play from there.
 
-struct HomeMeetingPodcastPlayer: View {
+/// The card bar's round play/pause: drawn at 22 pt, hit at 40 pt. Green
+/// while it plays (played audio is "live"), quiet fill at rest.
+struct HomeMeetingPlayButton: View {
     let audio: MeetingAudioAttachment
+    var automationIdentifier = "transcripted.home.meeting.play"
 
     @ObservedObject private var playback = MeetingAudioPlayback.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isHovering = false
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 11) {
-            ZStack {
-                HStack {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Meeting audio")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .textCase(.uppercase)
-                            .tracking(0.5)
-
-                        Text(playback.compactTimeLabel(for: audio))
-                            .font(.caption.monospacedDigit())
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-
-                    MeetingAudioSourceMenu(
-                        attachment: audio,
-                        selectedChoiceID: selectedPlaybackChoiceBinding
-                    ) { choice in
-                        if playback.isActive(audio) {
-                            playback.switchSource(audio, choice: choice)
-                        }
-                    }
-                }
-
-                HStack(spacing: 14) {
-                    HomePodcastPlayerButton(
-                        symbolName: "gobackward.15",
-                        size: 34,
-                        isPrimary: false,
-                        isDisabled: !canSeek,
-                        help: "Skip back 15 seconds",
-                        automationIdentifier: "transcripted.home.meeting-preview.audio.skip-back"
-                    ) {
-                        playback.skip(audio, by: -15)
-                    }
-
-                    HomePodcastPlayerButton(
-                        symbolName: playback.symbolName(for: audio, choice: selectedPlaybackChoice),
-                        size: 46,
-                        isPrimary: playback.isActive(audio, choice: selectedPlaybackChoice),
-                        isDisabled: false,
-                        help: "\(playback.buttonTitle(for: audio, choice: selectedPlaybackChoice)) meeting audio",
-                        automationIdentifier: "transcripted.home.meeting-preview.audio.toggle"
-                    ) {
-                        playback.toggle(audio, choice: selectedPlaybackChoice)
-                    }
-
-                    HomePodcastPlayerButton(
-                        symbolName: "goforward.15",
-                        size: 34,
-                        isPrimary: false,
-                        isDisabled: !canSeek,
-                        help: "Skip forward 15 seconds",
-                        automationIdentifier: "transcripted.home.meeting-preview.audio.skip-forward"
-                    ) {
-                        playback.skip(audio, by: 15)
-                    }
-                }
-            }
-
-            MeetingAudioScrubber(
-                attachment: audio,
-                width: nil,
-                showsTime: false
-            )
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.035))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(Color.primary.opacity(0.09), lineWidth: 1)
-        )
-    }
-
-    private var canSeek: Bool {
-        playback.isActive(audio) && playback.duration > 0
-    }
-
-    private var selectedPlaybackChoice: MeetingAudioPlaybackChoice? {
-        playback.activeChoice(for: audio) ?? playback.preferredChoice(for: audio)
-    }
-
-    private var selectedPlaybackChoiceBinding: Binding<String?> {
-        Binding(
-            get: { selectedPlaybackChoice?.id },
-            set: { playback.setPreferredChoiceID($0, for: audio) }
-        )
-    }
-}
-
-private struct HomePodcastPlayerButton: View {
-    let symbolName: String
-    let size: CGFloat
-    let isPrimary: Bool
-    let isDisabled: Bool
-    let help: String
-    let automationIdentifier: String
-    let action: () -> Void
+    private let size: CGFloat = 22
 
     private var hitTargetSize: CGFloat {
         HomeHitTarget.hitSize(forVisibleSize: size)
     }
 
+    private var selectedChoice: MeetingAudioPlaybackChoice? {
+        playback.activeChoice(for: audio) ?? playback.preferredChoice(for: audio)
+    }
+
+    private var isPlaying: Bool {
+        playback.isActive(audio) && playback.isPlaying
+    }
+
+    private var isUnavailable: Bool {
+        playback.isUnavailable(audio, choice: selectedChoice)
+    }
+
+    private var help: String {
+        if isUnavailable { return "This meeting's audio couldn't be played" }
+        return isPlaying ? "Pause" : "Play meeting"
+    }
+
     var body: some View {
-        Button(action: action) {
+        Button {
+            playback.toggle(audio, choice: selectedChoice)
+        } label: {
             ZStack {
                 Circle()
-                    .fill(background)
-                    .frame(width: size, height: size)
-                    .overlay(
-                        Circle()
-                            .stroke(Color.primary.opacity(isPrimary ? 0.0 : 0.08), lineWidth: 1)
-                    )
-
-                Image(systemName: symbolName)
-                    .font(.system(size: size >= 40 ? 15 : 12, weight: .bold))
-                    .foregroundStyle(foreground)
-                    .frame(width: size, height: size)
+                    .fill(isPlaying ? LibraryTokens.accent : (isHovering ? DesignTokens.hairlineStrong : DesignTokens.fillStrong))
+                Image(systemName: isUnavailable ? "exclamationmark" : (isPlaying ? "pause.fill" : "play.fill"))
+                    .font(.system(size: 8.5, weight: .bold))
+                    .offset(x: isPlaying || isUnavailable ? 0 : 0.5)
+                    .foregroundStyle(isPlaying ? DesignTokens.paper : (isUnavailable ? LibraryTokens.attention : LibraryTokens.ink))
             }
+            .frame(width: size, height: size)
             .frame(width: hitTargetSize, height: hitTargetSize)
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .disabled(isDisabled)
-        .opacity(isDisabled ? 0.42 : 1)
+        // The 40 pt hit shape overhangs the bar instead of growing it.
+        .padding(-(hitTargetSize - size) / 2)
+        .onHover { isHovering = $0 }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: isPlaying)
         .help(help)
         .accessibilityLabel(Text(help))
         .accessibilityIdentifier(automationIdentifier)
     }
+}
 
-    // The primary play button is ink, like every primary; green is for the
-    // played part of the audio, not the control.
-    private var foreground: Color {
-        if isPrimary { return DesignTokens.paper }
-        return .secondary
+/// Current time · scrubber · total · source, shown in the bar while this
+/// meeting's audio is open (playing or paused). Rows never follow the
+/// playhead; only this bar moves.
+struct HomeMeetingInlinePlayer: View {
+    let audio: MeetingAudioAttachment
+
+    static let trackWidth: CGFloat = 110
+
+    @ObservedObject private var playback = MeetingAudioPlayback.shared
+    @State private var dragFraction: Double?
+
+    var body: some View {
+        if playback.isActive(audio) {
+            let fraction = dragFraction ?? playback.progress(for: audio)
+            HStack(spacing: 7) {
+                Text(MeetingAudioPlayback.clockText(fraction * playback.duration))
+                    .foregroundStyle(LibraryTokens.accent)
+                    .frame(minWidth: 28, alignment: .trailing)
+                track(fraction: fraction)
+                Text(MeetingAudioPlayback.clockText(playback.duration))
+                MeetingAudioSourceMenu(
+                    attachment: audio,
+                    selectedChoiceID: selectedChoiceBinding
+                ) { choice in
+                    playback.switchSource(audio, choice: choice)
+                }
+            }
+            .font(LibraryTokens.meta)
+            .monospacedDigit()
+            .foregroundStyle(LibraryTokens.ink3)
+            .lineLimit(1)
+            .transition(.opacity)
+        }
     }
 
-    private var background: Color {
-        if isPrimary { return DesignTokens.ink }
-        return Color.primary.opacity(0.08)
+    private var selectedChoiceBinding: Binding<String?> {
+        Binding(
+            get: { (playback.activeChoice(for: audio) ?? playback.preferredChoice(for: audio))?.id },
+            set: { playback.setPreferredChoiceID($0, for: audio) }
+        )
+    }
+
+    private func track(fraction: Double) -> some View {
+        let width = Self.trackWidth
+        let x = width * CGFloat(min(max(fraction, 0), 1))
+        return ZStack(alignment: .leading) {
+            Capsule()
+                .fill(DesignTokens.fillStrong)
+                .frame(width: width, height: 3)
+            Capsule()
+                .fill(LibraryTokens.accent)
+                .frame(width: max(0, x), height: 3)
+            Circle()
+                .fill(DesignTokens.paper)
+                .overlay(Circle().stroke(DesignTokens.hairlineStrong, lineWidth: 1))
+                .frame(width: 10, height: 10)
+                .offset(x: x - 5)
+        }
+        .frame(width: width, height: 14)
+        .contentShape(Rectangle())
+        .gesture(
+            DragGesture(minimumDistance: 0)
+                .onChanged { value in
+                    dragFraction = Double(min(max(value.location.x / width, 0), 1))
+                }
+                .onEnded { value in
+                    playback.seek(audio, progress: Double(min(max(value.location.x / width, 0), 1)))
+                    dragFraction = nil
+                }
+        )
+        .padding(.horizontal, 2)
+        .help("Drag to move through the meeting")
+        .accessibilityElement()
+        .accessibilityLabel(Text("Playback position"))
+        .accessibilityValue(Text(
+            "\(MeetingAudioPlayback.clockText(fraction * playback.duration)) of \(MeetingAudioPlayback.clockText(playback.duration))"
+        ))
+        .accessibilityAdjustableAction { direction in
+            switch direction {
+            case .increment: playback.skip(audio, by: 15)
+            case .decrement: playback.skip(audio, by: -15)
+            @unknown default: break
+            }
+        }
+        .accessibilityIdentifier("transcripted.home.meeting.scrubber")
     }
 }
 
