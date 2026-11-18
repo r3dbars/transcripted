@@ -27,9 +27,13 @@ enum MeetingOverlayActionSmoke {
                 callPrompt: nil, recentInsert: nil, expanded: true)
             view.apply(layout, live: .init())
         }
-        func button(_ title: String, in parent: NSView) -> NSButton? {
-            if let button = parent as? NSButton, button.attributedTitle.string == title { return button }
-            return parent.subviews.lazy.compactMap { button(title, in: $0) }.first
+        func button(_ title: String, in parent: NSView, accessibilityLabel: String? = nil) -> NSButton? {
+            if let button = parent as? NSButton {
+                let matches = accessibilityLabel.map { button.accessibilityLabel() == $0 }
+                    ?? (button.attributedTitle.string == title)
+                if matches { return button }
+            }
+            return parent.subviews.lazy.compactMap { button(title, in: $0, accessibilityLabel: accessibilityLabel) }.first
         }
         func drop(containing button: NSButton?) -> NotchIslandDropView? {
             var ancestor: NSView? = button
@@ -39,8 +43,11 @@ enum MeetingOverlayActionSmoke {
             }
             return nil
         }
-        func click(_ button: NSButton?) {
-            guard let button, let action = button.action else { failures.append("Missing rendered control"); return }
+        func click(_ button: NSButton?, line: UInt = #line) {
+            guard let button, let action = button.action else {
+                failures.append("Missing rendered control in MeetingOverlayActionSmoke.swift at line \(line)")
+                return
+            }
             _ = button.sendAction(action, to: button.target)
         }
 
@@ -110,15 +117,17 @@ enum MeetingOverlayActionSmoke {
         expect(!session.isMeetingMicMuted, "Current Unmute worked after opt-out")
 
         // No mute button contributes identity to these two otherwise equal drops.
+        await drain()
         render()
-        let stripStop = button("Stop", in: view)
+        let stripStop = button("Stop", in: view, accessibilityLabel: "Stop")
         let stripDrop = drop(containing: stripStop)
         click(stripStop)
         session.activeRecordingIdentity = UUID()
         await drain()
         expect(session.isRecording, "Queued strip Stop preserved the next recording")
         render()
-        expect(stripDrop !== drop(containing: button("Stop", in: view)), "Recording change replaced strip controls")
+        let replacementStripDrop = drop(containing: button("Stop", in: view, accessibilityLabel: "Stop"))
+        expect(replacementStripDrop != nil && stripDrop !== replacementStripDrop, "Recording change replaced strip controls")
         withExtendedLifetime(stripDrop) { click(stripStop) }
         await drain()
         expect(session.isRecording, "Retained strip Stop preserved the next recording")
