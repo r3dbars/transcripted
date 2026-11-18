@@ -140,6 +140,10 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
             // to the action, overriding the per-item isEnabled set below.
             menu.autoenablesItems = false
             for item in items where item.placement != .issueLine {
+                // Delete sits under a separator, apart from the rest.
+                if item.isDestructive, !menu.items.isEmpty {
+                    menu.addItem(.separator())
+                }
                 let menuItem = ClosureMenuItem(menuItem: item)
                 // No key equivalents here; an empty mask lets an Option
                 // alternate pair with the line above it.
@@ -316,9 +320,10 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
 // MARK: - Failed meeting row
 
-/// A failed or unfinished meeting, drawn as the same card as a saved one:
-/// play (when audio was kept) · title · time, one amber line saying what
-/// happened, and an ink Try again. Show in Finder and Delete live in ⋯.
+/// A failed or unfinished meeting, drawn like a saved row: play (when audio
+/// was kept) · title · time, with the amber status in the summary slot and a
+/// quiet Try again beside it. Opening it shows the reason, the scrubber, Try
+/// again, and ⋯ with Show in Finder and Delete.
 struct HomeFailedMeetingInlineRow: View {
     let item: MeetingSessionController.FailedMeetingItem
     let canRetry: Bool
@@ -330,63 +335,165 @@ struct HomeFailedMeetingInlineRow: View {
     /// surface for it since the failed-meetings card was retired). `nil`
     /// hides the control.
     var audioAttachment: MeetingAudioAttachment? = nil
+    var isOpen: Bool = false
+    var onToggleOpen: () -> Void = {}
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
+
+    private typealias Layout = HomeMeetingRowLayout
+
+    private var timeText: String {
+        HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp)
+    }
 
     var body: some View {
         let presentation = inlinePresentation
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+        let slot = HomeMeetingCardPresentation.failedSlot(presentation, isRetrying: item.isRetrying)
+        VStack(alignment: .leading, spacing: 0) {
+            if isOpen {
+                openedHeader
+                openedBody(presentation: presentation)
+                    .transition(.opacity)
+            } else {
+                closedRow(slot: slot)
+            }
+        }
+        .homeMeetingRowSurface(isOpen: isOpen)
+        .onTapGesture {}
+        .background {
+            if isOpen {
+                Button(action: onToggleOpen) { EmptyView() }
+                    .buttonStyle(.plain)
+                    .keyboardShortcut(.cancelAction)
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isOpen)
+        .help(item.detail)
+        .accessibilityElement(children: .contain)
+        .modifier(HomeMeetingMenuAccessibilityActions(items: menuItems))
+        .accessibilityIdentifier("transcripted.home.failed-meeting.row")
+    }
+
+    private func closedRow(slot: HomeMeetingCardPresentation.Slot) -> some View {
+        Button(action: onToggleOpen) {
+            HStack(alignment: .center, spacing: Layout.columnGap) {
+                Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
+                HStack(alignment: .firstTextBaseline, spacing: Layout.columnGap) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .font(TextRole.body.font(weight: .semibold))
+                            .foregroundStyle(LibraryTokens.ink)
+                            .underline(isHovering, color: LibraryTokens.ink3)
+                            .lineLimit(1)
+                        // Try again is its own button inside the row.
+                        HomeMeetingSlotText(
+                            slot: slot,
+                            onAction: onRetry,
+                            actionIsDisabled: rowActions.retryDisabled,
+                            actionHelp: retryHelp,
+                            actionIdentifier: "transcripted.home.failed-meeting.retry"
+                        )
+                    }
+                    Spacer(minLength: 8)
+                    Text(timeText)
+                        .font(LibraryTokens.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.vertical, Layout.rowPadding)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .homeMeetingRowKeys(onToggleOpen)
+        .accessibilityLabel(Text("\(item.title), \(timeText)"))
+        .accessibilityValue(Text(slotSpokenText(slot)))
+        .accessibilityHint(Text("Opens the meeting"))
+        .overlay(alignment: .leading) {
+            if let audioAttachment {
+                HomeMeetingPlayButton(
+                    audio: audioAttachment,
+                    automationIdentifier: "transcripted.home.failed-meeting.play-audio"
+                )
+            }
+        }
+    }
+
+    private func slotSpokenText(_ slot: HomeMeetingCardPresentation.Slot) -> String {
+        switch slot {
+        case .summary(let text), .fallback(let text), .working(let text, _), .problem(let text, _): return text
+        case .empty: return ""
+        }
+    }
+
+    private var openedHeader: some View {
+        HStack(alignment: .top, spacing: Layout.columnGap) {
+            Button(action: onToggleOpen) {
+                HStack(alignment: .top, spacing: Layout.columnGap) {
+                    Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.title)
+                            .textRole(.heading)
+                            .foregroundStyle(LibraryTokens.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text(timeText)
+                            .font(LibraryTokens.meta)
+                            .monospacedDigit()
+                            .foregroundStyle(LibraryTokens.ink2)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+            .homeMeetingRowKeys(onToggleOpen)
+            .accessibilityLabel(Text("\(item.title), \(timeText)"))
+            .accessibilityHint(Text("Closes the meeting"))
+            .overlay(alignment: .topLeading) {
                 if let audioAttachment {
                     HomeMeetingPlayButton(
                         audio: audioAttachment,
+                        look: .filled,
                         automationIdentifier: "transcripted.home.failed-meeting.play-audio"
                     )
                 }
-
-                Text(item.title)
-                    .font(TextRole.body.font(weight: .semibold))
-                    .foregroundStyle(LibraryTokens.ink)
-                    .lineLimit(1)
-                    .layoutPriority(1)
-
-                Text(HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp))
-                    .font(LibraryTokens.meta)
-                    .monospacedDigit()
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                HomeRowMoreMenuButton(items: menuItems, automationIdentifier: "transcripted.home.failed-meeting.more")
-                    .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
-                    // The 40 pt hit shape overhangs the 22 pt bar.
-                    .padding(.vertical, -9)
-                    .help("More options")
-                    .opacity(isHovering ? 1 : 0)
-                    .allowsHitTesting(isHovering)
-
-                if presentation.canShowRetryAction {
-                    HomeAttentionActionButton(
-                        title: item.isRetrying ? "Retrying" : "Try again",
-                        isDisabled: rowActions.retryDisabled,
-                        automationIdentifier: "transcripted.home.failed-meeting.retry",
-                        action: onRetry
-                    )
-                    .help(retryHelp)
-                }
             }
-            .frame(minHeight: 22)
 
+            HomeRowMoreMenuButton(items: menuItems, automationIdentifier: "transcripted.home.failed-meeting.more")
+                .frame(width: 28, height: 24)
+                .padding(.top, -2)
+                .help("More options")
+        }
+        .padding(.top, 16)
+    }
+
+    private func openedBody(presentation: HomeFailedMeetingInlinePresentation) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let audioAttachment {
+                HomeMeetingScrubber(audio: audioAttachment, fallbackDuration: nil)
+                    .padding(.top, 12)
+                    .padding(.bottom, 16)
+            } else {
+                Spacer().frame(height: 14)
+            }
             issueLine(presentation: presentation)
+            if presentation.canShowRetryAction {
+                Button(item.isRetrying ? "Retrying" : "Try again", action: onRetry)
+                    .buttonStyle(.transcriptedSecondary)
+                    .controlSize(.small)
+                    .disabled(rowActions.retryDisabled)
+                    .help(retryHelp)
+                    .padding(.top, 10)
+            }
         }
-        .homeMeetingCardSurface(isHovering: isHovering)
-        .help(item.detail)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
-        }
-        .accessibilityElement(children: .contain)
-        .modifier(HomeMeetingMenuAccessibilityActions(items: menuItems))
+        .padding(.leading, Layout.bodyIndent)
+        .padding(.bottom, 16)
     }
 
     /// Show in Finder (the kept audio) and Delete.
@@ -422,30 +529,25 @@ struct HomeFailedMeetingInlineRow: View {
         )
     }
 
-    /// "Not transcribed · Your audio is saved…" in the attention color. The
-    /// status leads; the reason follows in secondary ink.
+    /// "Not transcribed", then why, under an opened failed meeting.
     private func issueLine(presentation: HomeFailedMeetingInlinePresentation) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            if item.isRetrying {
-                ProgressView()
-                    .controlSize(.mini)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                if item.isRetrying {
+                    ProgressView()
+                        .controlSize(.mini)
+                }
+                Text(presentation.statusText)
+                    .foregroundStyle(item.isRetrying ? LibraryTokens.ink2 : LibraryTokens.attention)
             }
-            Text(presentation.statusText)
-                .foregroundStyle(item.isRetrying ? LibraryTokens.ink2 : LibraryTokens.attention)
-                .accessibilityLabel(presentation.statusText)
             if let detail = presentation.inlineDetail {
-                Text("\u{00B7}")
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .accessibilityHidden(true)
                 Text(detail)
                     .foregroundStyle(LibraryTokens.ink2)
-                    .lineLimit(2)
-                    .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 520, alignment: .leading)
             }
         }
-        .font(LibraryTokens.meta)
-        .padding(.leading, audioAttachment == nil ? 0 : 32)
+        .font(LibraryTokens.body)
     }
 
     private var rowActions: HomeFailedMeetingRowActions {
@@ -461,25 +563,6 @@ struct HomeFailedMeetingInlineRow: View {
             hasAudioFiles: item.hasAudioFiles,
             usableAudio: item.usableAudio
         )
-    }
-}
-
-/// "Try again" on a failed meeting: the row's one primary action, so it's
-/// the shared ink primary, not red (red is for losing something).
-private struct HomeAttentionActionButton: View {
-    let title: String
-    let isDisabled: Bool
-    var automationIdentifier: String? = nil
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Text(title)
-        }
-        .buttonStyle(.transcriptedPrimary)
-        .controlSize(.small)
-        .disabled(isDisabled)
-        .homeAutomationIdentifier(automationIdentifier)
     }
 }
 
@@ -526,7 +609,7 @@ private struct HomeCompactIconButtonStyle: ButtonStyle {
     }
 }
 
-private extension View {
+extension View {
     @ViewBuilder
     func homeAutomationIdentifier(_ identifier: String?) -> some View {
         if let identifier {

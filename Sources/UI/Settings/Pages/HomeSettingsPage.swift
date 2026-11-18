@@ -2,11 +2,12 @@ import SwiftUI
 import TranscriptedCore
 
 /// The Settings > Home (Meetings) page. This owns pure view assembly only:
-/// the header, scan-warning/activity rows, search field, and the day-grouped
-/// meeting cards (including failed-meeting cards and the card opened with
-/// Show more). It is also where files get transcribed: the header's
-/// Transcribe a file… and a drop anywhere on the page both feed the same
-/// import queue as ⌘O. Everything with side effects — delete/rename/copy/
+/// the header (search, ⋯, Record), the titles opt-in line, scan-warning and
+/// activity rows, and the day-grouped meeting rows (saved and failed), one of
+/// which can be open in place. It also holds which row's transcript is
+/// revealed (`MeetingsPageOpenState`). It is where files get transcribed:
+/// the header ⋯'s Transcribe a file… and a drop anywhere on the page both
+/// feed the same import queue as ⌘O. Everything with side effects — delete/rename/copy/
 /// retranscribe, the shared root alert, undo staging, and analytics — stays
 /// in `TranscriptedSettingsView` (several pieces are pinned there by
 /// `Tests/UIAutomationSurfaceContractTests.swift`) and arrives here as
@@ -15,7 +16,13 @@ import TranscriptedCore
 struct HomeSettingsPage: View {
     @ObservedObject var homeViewModel: HomeViewModel
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isAudioDropTargeted = false
+    /// The open saved row's transcript reveal; follows `homeExpandedMeetingID`.
+    @State private var openState = MeetingsPageOpenState()
+    /// A failed meeting opened in place. Only one row is open at a time, so
+    /// opening it closes a saved one and the other way around.
+    @State private var openFailedMeetingID: UUID?
 
     let attentionTitle: String?
     let meetingDaySections: [HomeDaySection<HomeMeetingListItem>]
@@ -66,18 +73,23 @@ struct HomeSettingsPage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            QuietHomeHeader(
-                attentionTitle: attentionTitle,
-                onAttention: onAttention,
-                onToggleFind: onToggleFind,
-                onStartMeeting: onStartMeeting,
-                onImportAudioFile: onImportAudioFile,
-                // The Keep audio filter reads the same `starred` flag.
-                isKeptAudioOnly: homeStarredOnly,
-                onToggleKeptAudio: {
-                    withAnimation(.snappy(duration: 0.18)) { homeStarredOnly.toggle() }
-                }
-            )
+            VStack(alignment: .leading, spacing: 10) {
+                QuietHomeHeader(
+                    attentionTitle: attentionTitle,
+                    onAttention: onAttention,
+                    searchQuery: $homeMeetingSearchQuery,
+                    searchFocusToken: homeFindFieldFocusToken,
+                    onStartMeeting: onStartMeeting,
+                    onImportAudioFile: onImportAudioFile,
+                    // The Only kept audio filter reads the same `starred` flag.
+                    isKeptAudioOnly: homeStarredOnly,
+                    onToggleKeptAudio: {
+                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.18)) { homeStarredOnly.toggle() }
+                    }
+                )
+
+                MeetingTitlesOptInLineView(hasMeetings: !meetingDaySections.isEmpty || isSearchingMeetings)
+            }
 
             if let warning = homeViewModel.scanWarning {
                 HomeScanWarningCard(
@@ -108,18 +120,13 @@ struct HomeSettingsPage: View {
                 .transition(.opacity)
             }
 
-            if homeFindIsVisible || !homeMeetingSearchQuery.isEmpty {
-                HomeMeetingSearchField(
-                    query: $homeMeetingSearchQuery,
-                    focusRequestToken: homeFindFieldFocusToken
-                )
-                .padding(.top, 6)
-                .transition(.opacity)
-            }
-
             homeMeetingsListSection
         }
-        .animation(.snappy(duration: 0.22), value: transcriptionActivity)
+        .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: transcriptionActivity)
+        .onChange(of: homeExpandedMeetingID, initial: true) { _, openID in
+            openState.sync(openID: openID)
+            if openID != nil { openFailedMeetingID = nil }
+        }
         .contentShape(Rectangle())
         .dropDestination(for: URL.self) { urls, _ in
             let fileURLs = urls.filter(\.isFileURL)
@@ -196,8 +203,9 @@ struct HomeSettingsPage: View {
                 : homeViewModel.canLoadMoreMeetings,
             getID: { AnyHashable($0.id) },
             onLoadMore: onLoadMoreMeetings,
-            // Cards carry their own edges, like Dictations.
-            showsRowDividers: false
+            // Whitespace separates rows; the open one carries its own card.
+            showsRowDividers: false,
+            headerStyle: .label
         ) { item in
             homeMeetingListRow(item)
         }
@@ -224,12 +232,18 @@ struct HomeSettingsPage: View {
                         hintsHiddenThrough: micBoostHintsHiddenThrough
                     ),
                     voicesToName: meetingVoicesToName(meeting),
+                    isTranscriptShown: openState.isTranscriptShown(for: meeting.id),
+                    showsAllLines: openState.showsAllLines(for: meeting.id),
                     knownPeople: knownPeople,
                     savedSpeakerIDs: savedSpeakerIDs,
                     onToggleExpanded: { onOpenMeeting(meeting) },
                     onCollapse: onCollapseMeetingExpansion,
                     onCopy: { onCopyMeeting(meeting) },
                     onWhoSpoke: { onWhoSpoke(meeting) },
+                    onToggleTranscript: {
+                        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { openState.toggleTranscript() }
+                    },
+                    onShowAllLines: { openState.showAllLines() },
                     onAssignSpeakers: { assignments, completion in
                         onAssignMeetingSpeakers(meeting, assignments, completion)
                     }
@@ -243,8 +257,24 @@ struct HomeSettingsPage: View {
                 onRetry: { onRetryFailedMeeting(failedMeeting) },
                 onRevealAudio: { onRevealFailedMeetingAudio(failedMeeting) },
                 onClear: { onClearFailedMeeting(failedMeeting) },
-                audioAttachment: failedMeetingAudioAttachment(failedMeeting)
+                audioAttachment: failedMeetingAudioAttachment(failedMeeting),
+                isOpen: openFailedMeetingID == failedMeeting.id,
+                onToggleOpen: { toggleFailedMeeting(failedMeeting.id) }
             )
+        }
+    }
+}
+
+extension HomeSettingsPage {
+    /// Opens a failed meeting in place (closing any open saved one), or
+    /// closes it when it is the open one.
+    fileprivate func toggleFailedMeeting(_ id: UUID) {
+        let next = MeetingsPageOpenState.nextOpenID(current: openFailedMeetingID?.uuidString, tapped: id.uuidString)
+        if next != nil, homeExpandedMeetingID != nil {
+            onCollapseMeetingExpansion()
+        }
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.22)) {
+            openFailedMeetingID = next == nil ? nil : id
         }
     }
 }

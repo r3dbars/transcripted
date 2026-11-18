@@ -11,6 +11,9 @@ struct QuietMeetingSpeakerLabel: View {
     /// The fixed name column, or nil to size to the name (the Meetings card's
     /// inline "Name text" lines).
     var columnWidth: CGFloat? = 116
+    /// The faint chevron beside the name when the pointer is elsewhere. The
+    /// Meetings transcript hides it until hover, so lines read as "Name words".
+    var showsChevronAtRest = true
     let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
     @State private var showsPicker = false
@@ -35,7 +38,7 @@ struct QuietMeetingSpeakerLabel: View {
                     Image(systemName: "chevron.down")
                         .font(.system(size: 8, weight: .semibold))
                         .foregroundStyle(speakerColor.opacity(0.75))
-                        .opacity((isHovering || showsPicker) ? 1 : 0.34)
+                        .opacity((isHovering || showsPicker) ? 1 : (showsChevronAtRest ? 0.34 : 0))
                 }
             }
             .frame(maxWidth: columnWidth == nil ? nil : .infinity, alignment: .leading)

@@ -403,14 +403,16 @@ struct TranscriptedSettingsView: View {
     /// Expand a capture in place (quiet-library interaction). Clicking the
     /// same row again, pressing Esc, or expanding another row collapses it.
     func toggleHomeMeetingExpansion(_ item: RecentMeetingItem) {
-        if homeExpandedMeetingID == item.id {
-            // Show less only folds the card; audio started from its bar
-            // keeps playing. Leaving the page or Esc still stops it.
+        guard MeetingsPageOpenState.nextOpenID(current: homeExpandedMeetingID, tapped: item.id) != nil else {
+            // Closing only folds the card; audio started from its play
+            // button keeps playing. Leaving the page or Esc still stops it.
             collapseHomeMeetingExpansion(stopsPlayback: false)
             return
         }
         trackSettingsAction("preview_recent_meeting", page: .home)
-        withAnimation(.snappy(duration: 0.22)) {
+        // The opened card reads this one transcript off the main thread, so
+        // its line count and reveal are ready; closed rows never read one.
+        withAnimation(Self.homeRowAnimation) {
             homeExpandedMeetingID = item.id
         }
         homeExpandedMeetingPreview = nil
@@ -440,10 +442,15 @@ struct TranscriptedSettingsView: View {
         if stopsPlayback {
             MeetingAudioPlayback.shared.stop()
         }
-        withAnimation(.snappy(duration: 0.22)) {
+        withAnimation(Self.homeRowAnimation) {
             homeExpandedMeetingID = nil
         }
         homeExpandedMeetingPreview = nil
+    }
+
+    /// Opening and closing a Meetings row: gentle, and none with Reduce Motion.
+    static var homeRowAnimation: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .snappy(duration: 0.22)
     }
 
     static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
@@ -533,7 +540,9 @@ struct TranscriptedSettingsView: View {
     func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)
         let entries = HomeRowMenuPolicy.meetingEntries(
-            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item),
+            // The opened card always offers Who spoke? (it used to sit at the
+            // card's foot); closed rows keep it for voices still to name.
+            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item) || homeExpandedMeetingID == item.id,
             offersMicBoost: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                 audioHealth: item.audioHealth,
                 meetingDate: item.date,
@@ -594,7 +603,9 @@ struct TranscriptedSettingsView: View {
             case .reviewSpeakers:
                 let title = HomeRowMenuPolicy.whoSpokeTitle(voicesToName: speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL))
                 return HomeRowMenuItem(title: title, symbolName: symbolName) {
-                    openHomeSpeakerReview(actionName: "review_meeting_speakers_row", transcriptURL: item.transcriptURL)
+                    // Queued voices get the queue's card; otherwise the card
+                    // is built from the opened transcript.
+                    openWhoSpokeCard(for: item)
                 }
             case .boostMic:
                 return HomeRowMenuItem(title: title, symbolName: symbolName, placement: menuEntry.placement) {

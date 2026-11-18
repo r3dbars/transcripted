@@ -1,47 +1,71 @@
 import SwiftUI
 import TranscriptedCore
 
-// Meetings cards (2026-11): the Dictations card with a title.
+// The Meetings page row (2026-11-18, owner-approved "minimal" mockup).
 //
-// The bar on top carries play, the bold title, "9:00 AM · 32 min · You,
-// Priya", and Copy / ⋯ on hover. Under it, one amber line for anything that
-// needs a hand (no call audio, a muffled mic, voices to name), then the first
-// four transcript lines in italics as "Name text". Show more opens the whole
-// transcript in place, where speaker names can be fixed and "Who spoke?"
-// opens this meeting's card on Speakers to name every voice at once. Hovering a line shows its time; clicking
-// the time plays the kept audio from there. Rows never follow the playhead.
+// Closed, a row is only: a small round play button (when audio was kept),
+// the title, one summary under it, and the start time on the right. No card,
+// no borders, no actions; whitespace separates rows. Clicking anywhere but
+// play opens it in place as a quiet card: filled play, the title, "2:00 PM ·
+// 48 min · You, Priya", Copy and ⋯ on the right, a thin scrubber, the
+// meeting's short summary, the amber line when something needs a hand, and a
+// "Transcript" reveal that is closed every time the card opens. Closed rows
+// never read the transcript; the opened card's one background read happens in
+// `TranscriptedSettingsView.toggleHomeMeetingExpansion`. Rules and words:
+// `HomeMeetingCardPresentation`.
 
-// MARK: - Card surface
+// MARK: - Layout
 
-/// The raised card every Meetings row uses: saved, failed and in-progress.
-private struct HomeMeetingCardSurface: ViewModifier {
-    let isHovering: Bool
+enum HomeMeetingRowLayout {
+    /// The play column.
+    static let playColumn: CGFloat = HomeMeetingPlayButton.size
+    /// Between the play column, the text and the time.
+    static let columnGap: CGFloat = 14
+    /// Above and below a closed row's text.
+    static let rowPadding: CGFloat = 11
+    /// The opened card reaches this far past the list column on each side,
+    /// so its text stays where the closed row's was.
+    static let cardInset: CGFloat = 16
+    /// The opened card's body lines up under the title.
+    static var bodyIndent: CGFloat { playColumn + columnGap }
+}
+
+/// A row that can open into a quiet card in place: no surface while closed,
+/// the card fill at 12 pt radius while open, reaching `cardInset` past the
+/// list column so the text never moves.
+private struct HomeMeetingRowSurface: ViewModifier {
+    let isOpen: Bool
 
     func body(content: Content) -> some View {
         content
-            .padding(EdgeInsets(top: 10, leading: 14, bottom: 12, trailing: 14))
+            .padding(.horizontal, HomeMeetingRowLayout.cardInset)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
             .background(
                 RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                    .fill(LibraryTokens.raisedFill)
+                    .fill(isOpen ? LibraryTokens.raisedFill : Color.clear)
             )
-            .overlay(
-                RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                    .stroke(isHovering ? DesignTokens.hairlineStrong : LibraryTokens.raisedStroke, lineWidth: 1)
-            )
-            .padding(.vertical, 4)
+            .padding(.horizontal, -HomeMeetingRowLayout.cardInset)
+            .padding(.vertical, isOpen ? 6 : 0)
     }
 }
 
 extension View {
-    func homeMeetingCardSurface(isHovering: Bool = false) -> some View {
-        modifier(HomeMeetingCardSurface(isHovering: isHovering))
+    func homeMeetingRowSurface(isOpen: Bool) -> some View {
+        modifier(HomeMeetingRowSurface(isOpen: isOpen))
+    }
+
+    /// Return opens a focused row, like Space does for any button.
+    func homeMeetingRowKeys(_ action: @escaping () -> Void) -> some View {
+        onKeyPress(.return) {
+            action()
+            return .handled
+        }
     }
 }
 
-/// Each row action as a named VoiceOver action on the card, including the
-/// ones the pointer reaches by hover, Option, or the issue line.
+/// Each row action as a named VoiceOver action on the row, including the
+/// ones the pointer reaches only once the row is open, by Option, or from
+/// the amber line.
 struct HomeMeetingMenuAccessibilityActions: ViewModifier {
     let items: [HomeRowMenuItem]
 
@@ -52,50 +76,67 @@ struct HomeMeetingMenuAccessibilityActions: ViewModifier {
     }
 }
 
-// MARK: - Snippets
+/// The text under a row's title: a summary, the fallback line, or the amber
+/// or working wording with its quiet action.
+struct HomeMeetingSlotText: View {
+    let slot: HomeMeetingCardPresentation.Slot
+    var onAction: (() -> Void)? = nil
+    var actionIsDisabled = false
+    var actionHelp: String? = nil
+    var actionIdentifier: String? = nil
+    var showsSpinner = true
 
-/// First lines per saved meeting, read off the main thread once and kept
-/// while the file is unchanged. Nothing here leaves the Mac or gets logged.
-@MainActor
-enum HomeMeetingCardSnippetCache {
-    private struct Entry {
-        let stamp: Date?
-        let snippet: HomeMeetingCardSnippet
-    }
-
-    private static var entries: [String: Entry] = [:]
-    private static let capacity = 400
-
-    static func cached(id: String) -> HomeMeetingCardSnippet? {
-        entries[id]?.snippet
-    }
-
-    static func load(_ item: RecentMeetingItem) async -> HomeMeetingCardSnippet? {
-        let url = item.transcriptURL
-        let known = entries[item.id]
-        let knownStamp = known?.stamp
-        let hasKnown = known != nil
-        let result = await Task.detached(priority: .utility) { () -> (Date?, HomeMeetingCardSnippet?) in
-            // Follow transcripts renamed since scanning.
-            let resolved = OwnFileResolver.resolveExistingFile(candidateURLs: [url]) ?? url
-            let stamp = (try? resolved.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate
-            if hasKnown, let stamp, stamp == knownStamp { return (stamp, nil) }
-            guard let markdown = try? String(contentsOf: resolved, encoding: .utf8) else { return (stamp, nil) }
-            return (stamp, HomeMeetingCardPresentation.snippet(from: HomeMeetingPreviewContent.make(from: markdown)))
-        }.value
-        guard let snippet = result.1 else { return known?.snippet }
-        if entries.count >= capacity, entries[item.id] == nil {
-            entries.removeAll(keepingCapacity: true)
+    var body: some View {
+        switch slot {
+        case .summary(let text), .fallback(let text):
+            Text(text)
+                .font(LibraryTokens.body)
+                .foregroundStyle(LibraryTokens.ink2)
+                .lineLimit(HomeMeetingCardPresentation.summaryLineLimit)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case .working(let text, let percent):
+            HStack(spacing: 6) {
+                if showsSpinner {
+                    ProgressView().controlSize(.mini)
+                }
+                Text(text)
+                    .foregroundStyle(LibraryTokens.ink2)
+                if let percent {
+                    Text("\(percent)%")
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                }
+            }
+            .font(LibraryTokens.body)
+            .lineLimit(1)
+        case .problem(let text, let actionTitle):
+            HStack(spacing: 10) {
+                Text(text)
+                    .foregroundStyle(LibraryTokens.attention)
+                    .lineLimit(1)
+                if let actionTitle, let onAction {
+                    Button(actionTitle, action: onAction)
+                        .buttonStyle(.transcriptedQuiet)
+                        .controlSize(.small)
+                        .disabled(actionIsDisabled)
+                        .help(actionHelp ?? "")
+                        .homeAutomationIdentifier(actionIdentifier)
+                }
+            }
+            .font(LibraryTokens.body)
+        case .empty:
+            EmptyView()
         }
-        entries[item.id] = Entry(stamp: result.0, snippet: snippet)
-        return snippet
     }
 }
 
-// MARK: - Card
+// MARK: - Saved meeting row
 
 struct QuietMeetingCard: View {
     let item: RecentMeetingItem
+    /// The day header above it ("Today"), for its VoiceOver label.
+    var dayHeader: String = ""
     let isExpanded: Bool
     /// The full transcript, once an opened card has read it.
     let preview: HomeMeetingPreview?
@@ -105,59 +146,60 @@ struct QuietMeetingCard: View {
     /// Voices this meeting still has to name: the amber "2 to name", which
     /// opens its "Who spoke?" card on Speakers.
     var voicesToName: Int = 0
+    var isTranscriptShown: Bool = false
+    var showsAllLines: Bool = false
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onToggleExpanded: () -> Void
     let onCollapse: () -> Void
     let onCopy: () -> Void
     let onWhoSpoke: () -> Void
+    var onToggleTranscript: () -> Void = {}
+    var onShowAllLines: () -> Void = {}
     let onAssignSpeakers: ([HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var snippet: HomeMeetingCardSnippet?
     @State private var isHovering = false
-    @State private var showsAllLines = false
 
-    private var snippetTaskID: String {
-        // A rename, a speaker fix or a rescan changes one of these, so the
-        // card rereads its lines (the cache skips unchanged files).
-        [item.id, item.title, item.speakerNames.joined(separator: "|"), item.transcriptionEngine ?? ""]
-            .joined(separator: "\u{1F}")
+    private typealias P = HomeMeetingCardPresentation
+    private typealias Layout = HomeMeetingRowLayout
+
+    private var people: [String] {
+        P.people(speakerNames: item.speakerNames, isImported: item.importedAt != nil)
     }
 
-    private var openedContent: HomeMeetingPreviewContent? {
-        guard isExpanded, let preview, preview.readError == nil else { return nil }
-        return preview.content
+    private var timeText: String {
+        HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date)
     }
 
-    private var participants: [String] {
-        if let openedContent {
-            return HomeMeetingCardPresentation.snippet(from: openedContent).participants
-        }
-        return snippet?.participants ?? []
+    private var slot: P.Slot {
+        P.savedSlot(summaryLine: item.summaryLine, start: item.startDate, end: item.endDate, people: people)
+    }
+
+    private var accessibilityLabel: String {
+        P.accessibilityLabel(
+            title: item.displayTitle,
+            dayHeader: dayHeader.isEmpty ? P.dayHeader(for: item.listDate) : dayHeader,
+            time: timeText,
+            start: item.startDate,
+            end: item.endDate
+        )
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            bar
-
-            if hasIssues {
-                issueLine
-                    .padding(.top, 6)
+            if isExpanded {
+                openedHeader
+                openedBody
+                    .transition(.opacity)
+            } else {
+                closedRow
             }
-
-            transcript
-                .padding(.top, 8)
-
-            footer
         }
-        .homeMeetingCardSurface(isHovering: isHovering)
-        // Swallow taps inside the card so the page's click-away collapse
+        .homeMeetingRowSurface(isOpen: isExpanded)
+        // Swallow taps inside the row so the page's click-away collapse
         // doesn't fire for clicks on the card's own quiet areas.
         .onTapGesture {}
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
-        }
         .background {
             if isExpanded {
                 // Hidden control so Esc collapses the opened card.
@@ -168,78 +210,168 @@ struct QuietMeetingCard: View {
                     .accessibilityHidden(true)
             }
         }
-        .task(id: snippetTaskID) {
-            if snippet == nil {
-                snippet = HomeMeetingCardSnippetCache.cached(id: item.id)
-            }
-            if let loaded = await HomeMeetingCardSnippetCache.load(item) {
-                snippet = loaded
-            }
-        }
-        .onChange(of: isExpanded) { _, expanded in
-            if !expanded { showsAllLines = false }
-        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isExpanded)
         .accessibilityElement(children: .contain)
         .accessibilityAction(named: Text("Copy"), onCopy)
         .modifier(HomeMeetingMenuAccessibilityActions(items: menuItems))
         .accessibilityIdentifier(isExpanded ? "transcripted.home.expansion" : "transcripted.home.meeting.card")
     }
 
-    // MARK: Bar
+    // MARK: Closed
 
-    private var bar: some View {
-        HStack(spacing: 10) {
+    private var closedRow: some View {
+        Button(action: onToggleExpanded) {
+            HStack(alignment: .center, spacing: Layout.columnGap) {
+                Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
+                HStack(alignment: .firstTextBaseline, spacing: Layout.columnGap) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.displayTitle)
+                            .font(TextRole.body.font(weight: .semibold))
+                            .foregroundStyle(LibraryTokens.ink)
+                            .underline(isHovering, color: LibraryTokens.ink3)
+                            .lineLimit(1)
+                            .accessibilityIdentifier("transcripted.home.meeting.preview")
+                        HomeMeetingSlotText(slot: slot)
+                    }
+                    Spacer(minLength: 8)
+                    Text(timeText)
+                        .font(LibraryTokens.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .lineLimit(1)
+                }
+            }
+            .padding(.vertical, Layout.rowPadding)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { isHovering = $0 }
+        .homeMeetingRowKeys(onToggleExpanded)
+        .accessibilityLabel(Text(accessibilityLabel))
+        .accessibilityValue(Text(slotSpokenText))
+        .accessibilityHint(Text("Opens the meeting"))
+        .overlay(alignment: .leading) {
             if let audio = item.audio {
                 HomeMeetingPlayButton(audio: audio)
             }
-
-            Button(action: onToggleExpanded) {
-                Text(item.displayTitle)
-                    .font(TextRole.body.font(weight: .semibold))
-                    .foregroundStyle(LibraryTokens.ink)
-                    .lineLimit(1)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isExpanded ? "Show less" : "Show more")
-            .layoutPriority(2)
-            .accessibilityIdentifier(isExpanded ? "transcripted.home.expansion.title" : "transcripted.home.meeting.preview")
-
-            if item.isStarred {
-                Image(systemName: "pin.fill")
-                    .font(.system(size: 9, weight: .medium))
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .help("Keeps its audio")
-                    .accessibilityLabel("Keeps its audio")
-                    .accessibilityIdentifier("transcripted.home.meeting.starred")
-            }
-
-            HomeMeetingBarMeta(
-                audio: item.audio,
-                time: HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date),
-                duration: HomeMeetingCardPresentation.durationText(start: item.startDate, end: item.endDate),
-                people: HomeMeetingCardPresentation.participantsText(participants)
-            )
-
-            Spacer(minLength: 8)
-
-            HomeRowActionButtons(
-                isCopied: isCopied,
-                onCopy: onCopy,
-                menuItems: menuItems
-            )
-            .frame(height: 22)
-            // Hidden from the pointer until hover, never from VoiceOver.
-            .opacity(showsActions ? 1 : 0)
-            .allowsHitTesting(showsActions)
         }
-        .frame(minHeight: 22)
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: showsActions)
     }
 
-    private var showsActions: Bool { isHovering || isExpanded }
+    private var slotSpokenText: String {
+        switch slot {
+        case .summary(let text), .fallback(let text): return text
+        case .working(let text, _), .problem(let text, _): return text
+        case .empty: return ""
+        }
+    }
 
-    // MARK: Issue line
+    // MARK: Opened
+
+    private var openedHeader: some View {
+        HStack(alignment: .top, spacing: Layout.columnGap) {
+            Button(action: onToggleExpanded) {
+                HStack(alignment: .top, spacing: Layout.columnGap) {
+                    Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.displayTitle)
+                            .textRole(.heading)
+                            .foregroundStyle(LibraryTokens.ink)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("transcripted.home.expansion.title")
+                        Text(P.openedSubtitle(time: timeText, start: item.startDate, end: item.endDate, people: people))
+                            .font(LibraryTokens.meta)
+                            .monospacedDigit()
+                            .foregroundStyle(LibraryTokens.ink2)
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 8)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Close")
+            .homeMeetingRowKeys(onToggleExpanded)
+            .accessibilityLabel(Text(accessibilityLabel))
+            .accessibilityHint(Text("Closes the meeting"))
+            .overlay(alignment: .topLeading) {
+                if let audio = item.audio {
+                    HomeMeetingPlayButton(audio: audio, look: .filled)
+                }
+            }
+
+            HStack(spacing: 2) {
+                Button(isCopied ? "Copied" : "Copy", action: onCopy)
+                    .buttonStyle(.transcriptedQuiet)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("transcripted.home.row.copy")
+                HomeRowMoreMenuButton(items: menuItems)
+                    .frame(width: 28, height: 24)
+                    .help("More options")
+            }
+            .padding(.top, -2)
+        }
+        .padding(.top, 16)
+    }
+
+    private var openedBody: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if let audio = item.audio {
+                HomeMeetingScrubber(
+                    audio: audio,
+                    fallbackDuration: P.durationSeconds(start: item.startDate, end: item.endDate)
+                )
+                .padding(.top, 12)
+                .padding(.bottom, 16)
+            } else {
+                Spacer().frame(height: 14)
+            }
+
+            if let summary = item.summary {
+                Text(summary)
+                    .font(LibraryTokens.body)
+                    .foregroundStyle(LibraryTokens.ink)
+                    .lineSpacing(3)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: 520, alignment: .leading)
+                    .padding(.bottom, 12)
+            }
+
+            if hasIssues {
+                issueLine
+                    .padding(.bottom, 8)
+            }
+
+            if let preview, let readError = preview.readError {
+                Text(readError)
+                    .font(LibraryTokens.body)
+                    .foregroundStyle(LibraryTokens.attention)
+                    .padding(.bottom, 8)
+            }
+
+            HomeMeetingTranscriptReveal(
+                item: item,
+                content: openedContent,
+                isLoading: preview == nil,
+                isShown: isTranscriptShown,
+                showsAllLines: showsAllLines,
+                knownPeople: knownPeople,
+                savedSpeakerIDs: savedSpeakerIDs,
+                onToggle: onToggleTranscript,
+                onShowAll: onShowAllLines,
+                onAssignSpeakers: onAssignSpeakers
+            )
+        }
+        .padding(.leading, Layout.bodyIndent)
+        .padding(.top, 2)
+    }
+
+    private var openedContent: HomeMeetingPreviewContent? {
+        guard let preview, preview.readError == nil else { return nil }
+        return preview.content
+    }
+
+    // MARK: Amber line
 
     private var boostMicItem: HomeRowMenuItem? {
         menuItems.first { $0.placement == .issueLine }
@@ -295,350 +427,5 @@ struct QuietMeetingCard: View {
         Text("\u{00B7}")
             .foregroundStyle(LibraryTokens.ink3)
             .accessibilityHidden(true)
-    }
-
-    // MARK: Transcript
-
-    @ViewBuilder
-    private var transcript: some View {
-        if isExpanded, let preview, let readError = preview.readError {
-            Text(readError)
-                .font(LibraryTokens.body)
-                .foregroundStyle(LibraryTokens.attention)
-        } else if let openedContent {
-            openedTranscript(openedContent)
-        } else if let snippet {
-            closedTranscript(snippet)
-        } else {
-            // One quiet line while the file is read, so cards don't jump.
-            Text(" ")
-                .font(TextRole.body.font())
-                .accessibilityHidden(true)
-        }
-    }
-
-    @ViewBuilder
-    private func closedTranscript(_ snippet: HomeMeetingCardSnippet) -> some View {
-        if let fallback = snippet.fallbackText {
-            Text(fallback)
-                .font(TextRole.body.font().italic())
-                .foregroundStyle(LibraryTokens.ink2)
-                .lineSpacing(4)
-                .lineLimit(HomeMeetingCardPresentation.closedLineLimit)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(snippet.lines.enumerated()), id: \.offset) { index, line in
-                    HomeMeetingCardLine(
-                        line: line,
-                        index: index,
-                        audio: item.audio,
-                        isOpened: false,
-                        knownPeople: knownPeople,
-                        isSavedPerson: false,
-                        onAssign: { _, completion in completion(false) }
-                    )
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func openedTranscript(_ content: HomeMeetingPreviewContent) -> some View {
-        if content.transcriptLines.isEmpty {
-            Text(content.fallbackText)
-                .font(TextRole.body.font().italic())
-                .foregroundStyle(LibraryTokens.ink2)
-                .lineSpacing(4)
-                .textSelection(.enabled)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        } else {
-            let lines = content.transcriptLines
-            let shown = showsAllLines ? lines.count : min(lines.count, HomeMeetingCardPresentation.openedLineLimit)
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(0..<shown, id: \.self) { index in
-                    let line = lines[index]
-                    HomeMeetingCardLine(
-                        line: line,
-                        index: index,
-                        audio: item.audio,
-                        isOpened: true,
-                        knownPeople: knownPeople,
-                        isSavedPerson: line.identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false,
-                        onAssign: { assignment, completion in
-                            onAssignSpeakers([assignment], completion)
-                        }
-                    )
-                }
-            }
-        }
-    }
-
-    // MARK: Footer
-
-    private var canShowMore: Bool {
-        guard let snippet else { return false }
-        return HomeMeetingCardPresentation.hasMore(snippet)
-    }
-
-    @ViewBuilder
-    private var footer: some View {
-        let showAllTitle = openedContent.flatMap {
-            showsAllLines ? nil : HomeMeetingCardPresentation.showAllTitle(totalLineCount: $0.transcriptLines.count)
-        }
-        let offersWhoSpoke = !(openedContent?.transcriptLines.isEmpty ?? true)
-        if isExpanded || canShowMore {
-            HStack(spacing: 14) {
-                if isExpanded, preview == nil {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.mini)
-                        Text("Loading\u{2026}")
-                    }
-                    .foregroundStyle(LibraryTokens.ink3)
-                } else if let showAllTitle {
-                    footerButton(showAllTitle, identifier: "transcripted.home.expansion.show-all") {
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.2)) { showsAllLines = true }
-                    }
-                }
-                footerButton(
-                    isExpanded ? "Show less" : "Show more",
-                    chevron: isExpanded ? "chevron.up" : "chevron.down",
-                    identifier: "transcripted.home.meeting.show-more",
-                    action: onToggleExpanded
-                )
-                if offersWhoSpoke {
-                    footerButton("Who spoke?", identifier: "transcripted.home.expansion.name-speakers", action: onWhoSpoke)
-                    .help("Name every voice in this meeting")
-                }
-            }
-            .font(TextRole.small.font())
-            .padding(.top, 6)
-        }
-    }
-
-    private func footerButton(
-        _ title: String,
-        chevron: String? = nil,
-        identifier: String,
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Text(title)
-                if let chevron {
-                    Image(systemName: chevron)
-                        .font(.system(size: 8.5, weight: .semibold))
-                }
-            }
-            .foregroundStyle(LibraryTokens.ink3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityIdentifier(identifier)
-    }
-}
-
-// MARK: - Bar meta
-
-/// "9:00 AM · 32 min · You, Priya". While this meeting's audio is open the
-/// player slides in first and the length steps aside, like Dictations.
-private struct HomeMeetingBarMeta: View {
-    let audio: MeetingAudioAttachment?
-    let time: String
-    let duration: String?
-    let people: String?
-
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
-
-    private var isOpen: Bool {
-        audio.map { playback.isActive($0) } ?? false
-    }
-
-    private var items: [String] {
-        [time, isOpen ? nil : duration, people].compactMap { $0 }
-    }
-
-    var body: some View {
-        HStack(spacing: 7) {
-            if let audio, isOpen {
-                HomeMeetingInlinePlayer(audio: audio)
-                metaDot
-            }
-            ForEach(Array(items.enumerated()), id: \.offset) { index, text in
-                if index > 0 { metaDot }
-                Text(text)
-                    .foregroundStyle(text == duration ? LibraryTokens.ink2 : LibraryTokens.ink3)
-                    .truncationMode(.tail)
-                    .layoutPriority(text == people ? 0 : 1)
-            }
-        }
-        .font(LibraryTokens.meta)
-        .monospacedDigit()
-        .lineLimit(1)
-        .animation(.easeOut(duration: 0.15), value: isOpen)
-    }
-
-    private var metaDot: some View {
-        Circle()
-            .fill(LibraryTokens.ink3)
-            .frame(width: 2.5, height: 2.5)
-            .accessibilityHidden(true)
-    }
-}
-
-// MARK: - Transcript line
-
-/// One "Name text" line. Hovering shows the line's time at its end; clicking
-/// it plays the kept audio from there. The time sits in a slot the line
-/// always leaves free, so hovering never rewraps the text or moves the card.
-/// An opened card makes the name a button that fixes who it is.
-private struct HomeMeetingCardLine: View {
-    let line: HomeMeetingTranscriptLine
-    let index: Int
-    let audio: MeetingAudioAttachment?
-    let isOpened: Bool
-    let knownPeople: [SpeakerNameChoice]
-    let isSavedPerson: Bool
-    let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
-
-    @State private var isHovering = false
-
-    /// Room for "1:02:03" at the small size.
-    static let timeSlotWidth: CGFloat = 46
-
-    private var playableStart: TimeInterval? {
-        guard audio != nil, !line.time.isEmpty else { return nil }
-        return line.startSeconds
-    }
-
-    private var clock: String? {
-        playableStart.map(MeetingAudioPlayback.clockText)
-    }
-
-    var body: some View {
-        // Top, not baseline: the opened card's name is a button, which
-        // doesn't report a text baseline. Name and text share one font size,
-        // so their first lines still sit on the same baseline.
-        HStack(alignment: .top, spacing: 6) {
-            if !line.speaker.isEmpty {
-                speaker
-            }
-            Text(line.text)
-                .font(TextRole.body.font().italic())
-                .foregroundStyle(LibraryTokens.ink2)
-                .lineSpacing(3)
-                .lineLimit(isOpened ? nil : HomeMeetingCardPresentation.closedLineWrapLimit)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .modifier(SelectableWhen(isOn: isOpened))
-            if let clock, let start = playableStart {
-                HomeMeetingLineTime(clock: clock, index: index) { play(from: start) }
-                    .frame(width: Self.timeSlotWidth, alignment: .trailing)
-                    // Small text, nudged down to the body's first baseline.
-                    .padding(.top, 2)
-                    .opacity(isHovering ? 1 : 0)
-                    .allowsHitTesting(isHovering)
-                    .accessibilityHidden(true)
-            }
-        }
-        .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.1)) { isHovering = hovering }
-        }
-        .modifier(LinePlayAccessibilityAction(clock: clock) {
-            if let start = playableStart { play(from: start) }
-        })
-    }
-
-    @ViewBuilder
-    private var speaker: some View {
-        if isOpened {
-            QuietMeetingSpeakerLabel(
-                identity: line.identity,
-                knownPeople: knownPeople,
-                isSavedPerson: isSavedPerson,
-                columnWidth: nil,
-                onAssign: onAssign
-            )
-        } else {
-            Text(line.speaker)
-                .font(TextRole.body.font(weight: .semibold))
-                .foregroundStyle(speakerColor)
-                .lineLimit(1)
-                .fixedSize()
-        }
-    }
-
-    private var speakerColor: Color {
-        line.speaker == "You" ? LibraryTokens.ink : HomeMeetingSpeakerColor.color(for: line.identity)
-    }
-
-    private func play(from start: TimeInterval) {
-        guard let audio else { return }
-        MeetingAudioPlayback.shared.play(
-            audio,
-            from: start,
-            rowSourceStem: line.identity.channel.map(Self.retainedAudioStem(for:))
-        )
-    }
-
-    /// Retained-audio file stem that holds a channel's speech.
-    private static func retainedAudioStem(for channel: HomeMeetingSpeakerChannel) -> String {
-        switch channel {
-        case .mic: return "microphone"
-        case .system: return "system_audio"
-        }
-    }
-}
-
-/// A transcript line's time, shown on hover. Clicking it plays from there.
-private struct HomeMeetingLineTime: View {
-    let clock: String
-    let index: Int
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(clock)
-                .font(TextRole.small.font())
-                .monospacedDigit()
-                .foregroundStyle(isHovering ? LibraryTokens.ink : LibraryTokens.ink3)
-                .underline(isHovering)
-                .fixedSize()
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .help("Play from \(clock)")
-        .accessibilityLabel(Text("Play from \(clock)"))
-        .accessibilityIdentifier("transcripted.home.expansion.timestamp.\(index)")
-    }
-}
-
-/// VoiceOver can play from a line without hovering it.
-private struct LinePlayAccessibilityAction: ViewModifier {
-    let clock: String?
-    let action: () -> Void
-
-    func body(content: Content) -> some View {
-        if let clock {
-            content.accessibilityAction(named: Text("Play from \(clock)"), action)
-        } else {
-            content
-        }
-    }
-}
-
-private struct SelectableWhen: ViewModifier {
-    let isOn: Bool
-
-    func body(content: Content) -> some View {
-        if isOn {
-            content.textSelection(.enabled)
-        } else {
-            content
-        }
     }
 }

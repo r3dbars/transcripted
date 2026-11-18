@@ -73,6 +73,13 @@ private enum HomeDayGroupedListFormatting {
     }()
 }
 
+/// How a day header reads. Dictations keep the ruled header; Meetings use
+/// the quiet mono label with no rule ("TODAY", "MONDAY, NOV 16").
+enum HomeDayHeaderStyle {
+    case ruled
+    case label
+}
+
 struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
@@ -83,6 +90,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     /// Hairline dividers between rows. Off for lists of cards (Dictations),
     /// which carry their own edges.
     var showsRowDividers = true
+    var headerStyle: HomeDayHeaderStyle = .ruled
     @ViewBuilder let row: (Item) -> Row
 
     private static var headerFormatter: DateFormatter {
@@ -117,18 +125,29 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             VStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
-                        Text(Self.headerTitle(for: section))
-                            .font(.system(size: 11, weight: .semibold))
-                            .tracking(0.88)
-                            .textCase(.uppercase)
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.bottom, 6)
-                            .overlay(alignment: .bottom) {
-                                Rectangle()
-                                    .fill(LibraryTokens.hairline)
-                                    .frame(height: 1)
-                            }
+                        switch headerStyle {
+                        case .ruled:
+                            Text(Self.headerTitle(for: section))
+                                .font(.system(size: 11, weight: .semibold))
+                                .tracking(0.88)
+                                .textCase(.uppercase)
+                                .foregroundStyle(LibraryTokens.ink2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.bottom, 6)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle()
+                                        .fill(LibraryTokens.hairline)
+                                        .frame(height: 1)
+                                }
+                        case .label:
+                            // "Monday, Nov 16" (HomeDaySectionLabel), as the
+                            // section was grouped.
+                            Text(section.label)
+                                .textRole(.label)
+                                .foregroundStyle(LibraryTokens.ink3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityAddTraits(.isHeader)
+                        }
 
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(
@@ -224,6 +243,7 @@ struct HomeCaptureListSection<Item, Row: View>: View {
     let getID: (Item) -> AnyHashable
     let onLoadMore: () -> Void
     var showsRowDividers = true
+    var headerStyle: HomeDayHeaderStyle = .ruled
     @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
@@ -244,9 +264,10 @@ struct HomeCaptureListSection<Item, Row: View>: View {
                     emptyMessage: emptyMessage,
                     emptyState: emptyState,
                     getID: getID,
-                    sectionSpacing: 14,
+                    sectionSpacing: headerStyle == .label ? 22 : 14,
                     headerSpacing: 2,
                     showsRowDividers: showsRowDividers,
+                    headerStyle: headerStyle,
                     row: row
                 )
 
