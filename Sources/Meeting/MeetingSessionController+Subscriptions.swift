@@ -286,6 +286,10 @@ extension MeetingSessionController {
                     }
                 }
             }
+            // Opt-in on-device title and summary; a no-op while it's off.
+            MeetingTitlesController.shared.noteSavedMeeting(
+                at: transcriptURL, title: styled.title, titleWasGenerated: styled.titleWasGenerated
+            )
             guard let self, self.savedTranscriptRestyleTask == restyle else { return }
             self.mirrorSavedTranscript(url: styled.url, title: styled.title)
             DiagnosticsTrail.record(

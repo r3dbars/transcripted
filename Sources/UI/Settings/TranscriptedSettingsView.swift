@@ -447,7 +447,7 @@ struct TranscriptedSettingsView: View {
 
     private static func loadCopyMeetingText(for item: RecentMeetingItem) async -> HomeCopyMeetingReadResult {
         await Task.detached(priority: .userInitiated) {
-            HomeCopyMeetingReader.read(title: item.title, date: item.date, transcriptURL: item.transcriptURL)
+            HomeCopyMeetingReader.read(title: item.displayTitle, date: item.date, transcriptURL: item.transcriptURL)
         }.value
     }
 
@@ -638,7 +638,7 @@ struct TranscriptedSettingsView: View {
                 MeetingAudioPlayback.shared.stopIfActive(attachmentIDs: Set(payload.plan.audioAttachmentIDs))
                 captureUndo.stage(
                     id: item.id,
-                    message: CaptureUndoMessage.deleted(item.title),
+                    message: CaptureUndoMessage.deleted(item.displayTitle),
                     undoAction: {
                         Task { @MainActor in
                             await Task.detached(priority: .userInitiated) {

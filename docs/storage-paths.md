@@ -96,6 +96,13 @@ library moves:
 - models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
   excluded from backup. The Writing tab's **Delete model** empties this folder
   (never Delete all writing); it refuses the folder if it's a symlink
+
+The on-device meeting titles model (Settings › Meetings › Titles and
+summaries, off by default) is separate from Writing's model:
+`~/Library/Application Support/Transcripted/models/meeting-titles/gemma-4-e2b-it-q4km/model.gguf`
+(3.1 GB, owner-only, excluded from backup; `model.gguf.partial` while
+downloading). It stays when the capture library moves. Storage › Free up space
+removes the `meeting-titles` folder while the feature is off.
 - diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`,
   rolled to `writing-diagnostics.log.1` at 4 MB (one old generation kept)
 

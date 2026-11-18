@@ -148,6 +148,8 @@ struct GeneralSettingsPage<
 
                 NotchIslandLiveTranscriptRow()
 
+                MeetingTitlesSettingsRow()
+
                 micProcessingEditor()
             }
             .accessibilityElement(children: .contain)

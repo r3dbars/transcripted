@@ -1026,4 +1026,19 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertNil(blair.nameSource)
         XCTAssertEqual(blair.confidence, "high")
     }
+
+    func testDisplayTitleFollowsTheAppsPrecedence() {
+        let aiTitled = "---\ntitle: \"Meeting with Priya\"\ncapture_type: meeting\nai_title: \"Billing provider switch\"\nai_title_replaces: \"Meeting with Priya\"\n---\n\nbody\n"
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: aiTitled), "Billing provider switch")
+        XCTAssertEqual(CaptureMarkdown.extractTitle(from: aiTitled), "Meeting with Priya", "extractTitle stays the saved title")
+
+        let renamedLater = aiTitled.replacingOccurrences(of: "title: \"Meeting with Priya\"\n", with: "title: \"Board prep\"\n")
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: renamedLater), "Board prep")
+
+        let marked = aiTitled.replacingOccurrences(of: "capture_type: meeting\n", with: "capture_type: meeting\ntitle_set_by_user: true\n")
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: marked), "Meeting with Priya")
+
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: "---\ntitle: \"Weekly Sync\"\n---\n"), "Weekly Sync")
+        XCTAssertNil(CaptureMarkdown.displayTitle(from: "no frontmatter"))
+    }
 }

@@ -118,7 +118,9 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Pages/
 
-One file per page split out of the shell: `AboutSettingsPage.swift` (includes the Support section: email support, send diagnostics), `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift` (meeting audio retention, dictation audio keep window), `TodaySettingsPage.swift`, `WritingSettingsPage.swift`. The Beta and Support pages were dissolved; Nemotron is the diarization default with no toggle (`Sources/Support/DiarizationBackendPreferences.swift`), while Core itself defaults to pyannote (`Sources/TranscriptedCore/AGENTS.md`).
+`MeetingTitlesSettingsRow.swift` / `MeetingTitlesSettingsCopy.swift` — Settings › Meetings "Titles and summaries" (off by default): observes only `MeetingTitlesController.shared`, so download progress redraws this row and nothing else; the words live in the copy file (tested).
+
+One file per page split out of the shell: `AboutSettingsPage.swift` (includes the Support section: email support, send diagnostics), `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift` (meeting audio retention, dictation audio keep window; Free up space includes the meeting titles model only while that feature is off), `TodaySettingsPage.swift`, `WritingSettingsPage.swift`. The Beta and Support pages were dissolved; Nemotron is the diarization default with no toggle (`Sources/Support/DiarizationBackendPreferences.swift`), while Core itself defaults to pyannote (`Sources/TranscriptedCore/AGENTS.md`).
 
 ### Writing/
 
