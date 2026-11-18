@@ -7,38 +7,23 @@ import Foundation
 func testSpeakerMeetingReview() {
     typealias Policy = SpeakerMeetingReviewPolicy
 
-    runSuite("The headline counts voices in plain words and disappears when none are left") {
-        assertEqual(Policy.headline(voiceCount: 12), "12 voices from your meetings need a name")
-        assertEqual(Policy.headline(voiceCount: 1), "1 voice from your meetings needs a name")
-        assertNil(Policy.headline(voiceCount: 0), "nothing to name, no headline")
-    }
-
-    runSuite("Meeting N of M counts the meetings done this visit plus the ones left") {
+    runSuite("\"1 of 8\" counts the meetings done this visit plus the ones left") {
         let first = Policy.position(meetingsDone: 0, meetingsLeft: 8)
         assertEqual(first, .init(current: 1, total: 8))
-        assertEqual(first.map(Policy.positionLine), "Meeting 1 of 8")
+        assertEqual(first.flatMap(Policy.positionLine), "1 of 8")
 
         let third = Policy.position(meetingsDone: 2, meetingsLeft: 6)
-        assertEqual(third.map(Policy.positionLine), "Meeting 3 of 8", "finishing a meeting moves along without changing the total")
+        assertEqual(third.flatMap(Policy.positionLine), "3 of 8", "finishing a meeting moves along without changing the total")
         assertNil(Policy.position(meetingsDone: 3, meetingsLeft: 0), "with no card up there's no position")
-    }
-
-    runSuite("The bar lights the meetings done and the one on the card, and never grows past twelve segments") {
-        assertEqual(Policy.progress(.init(current: 1, total: 8)), .init(segments: 8, lit: 1))
-        assertEqual(Policy.progress(.init(current: 8, total: 8)), .init(segments: 8, lit: 8))
-        let long = Policy.progress(.init(current: 1, total: 40))
-        assertEqual(long.segments, 12, "forty meetings still draw twelve segments")
-        assertEqual(long.lit, 1, "the first meeting lights one")
-        assertEqual(Policy.progress(.init(current: 40, total: 40)).lit, 12, "the last meeting lights all of them")
+        assertNil(Policy.position(meetingsDone: 0, meetingsLeft: 1).flatMap(Policy.positionLine), "one meeting needs no count")
     }
 
     runSuite("The card says whose meeting it is and where Done goes") {
         assertEqual(Policy.cardTitle(meetingTitle: "Weekly sync"), "Who spoke? \u{00B7} Weekly sync")
         assertEqual(Policy.cardTitle(meetingTitle: "  "), "Who spoke?")
-        assertEqual(Policy.doneTitle(meetingsAfterThis: 3), "Done, next meeting")
-        assertEqual(Policy.doneTitle(meetingsAfterThis: 0), "Done", "the last meeting has no next one")
-        assertEqual(Policy.doneDetail(names: ["Marcus Reed", "Sam Ortiz"]), "Marcus Reed, Sam Ortiz. Saving in a moment.")
-        assertEqual(Policy.doneDetail(names: ["A", "B", "C", "D", "E"]), "A, B, C and 2 more. Saving in a moment.")
+        assertEqual(Policy.doneTitle, "Done", "the island's word; the next card says next")
+        assertEqual(Policy.doneDetail(names: ["Marcus Reed", "Sam Ortiz"]), "Marcus Reed, Sam Ortiz")
+        assertEqual(Policy.doneDetail(names: ["A", "B", "C", "D", "E"]), "A, B, C +2")
         assertEqual(Policy.rowPill(voicesToName: 2), "2 to name")
         assertNil(Policy.rowPill(voicesToName: 0))
         assertEqual(HomeRowMenuPolicy.whoSpokeTitle(voicesToName: 2), "Who spoke? \u{00B7} 2 to name")

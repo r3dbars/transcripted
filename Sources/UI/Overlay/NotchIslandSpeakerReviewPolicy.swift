@@ -4,7 +4,7 @@
 // under it, the buttons, how many rings are lit, when it celebrates), which
 // calendar invitees show as one-tap names, what the name field suggests as you
 // type, and what the island says once names are saved; plus the 1:1 calendar
-// name, "All me" (keep local mic as You), and "Not a person" (discard) carried
+// name, the mic line's You (keep local mic as You), and "Not a person" (discard) carried
 // over from the review window. NotchIslandSpeakerReviewView and
 // NotchIslandVoiceRowView draw them.
 
@@ -113,7 +113,7 @@ enum NotchIslandSpeakerReviewPolicy {
         case naming(NamingOrigin)
         /// A name was typed or picked in place.
         case named(NamedAs)
-        /// "All me" or "Not a person".
+        /// The mic line's You, or "Not a person".
         case locked(Lock)
     }
 
@@ -152,7 +152,7 @@ enum NotchIslandSpeakerReviewPolicy {
     }
 
     /// Rings lit in the row's print. ✓ shows the count this answer earns; a
-    /// voice the row no longer claims (a name field, All me, Not a person)
+    /// voice the row no longer claims (a name field, the mic line's You, Not a person)
     /// shows an empty print. A name picked from Speakers shows the same
     /// confirmation progress as ✓ (empty when their count isn't known).
     static func litRings(_ state: RowState, progress: Progress?) -> Int {
@@ -421,7 +421,7 @@ enum NotchIslandSpeakerReviewPolicy {
             + ranked.filter { !invited.contains(SpeakerNameSelectionPolicy.normalizedSearchText($0)) }
         return invitedFirst.prefix(limit).map { label in
             let calls = callsByLabel[label] ?? 0
-            let callText = calls == 1 ? "1 call" : "\(calls) calls"
+            let callText = calls == 1 ? "1 meeting" : "\(calls) meetings"
             let isInvited = invited.contains(SpeakerNameSelectionPolicy.normalizedSearchText(label))
             let detail: String
             switch (isInvited, calls > 0) {
@@ -558,7 +558,7 @@ enum NotchIslandSpeakerReviewPolicy {
 
     /// A voice set aside from naming: kept as you, or thrown away.
     enum Lock: Equatable {
-        /// "All me" is on: every local mic voice saves as You.
+        /// The mic line says You (the default): every local mic voice saves as You.
         case keptAsYou
         /// "Not a person": not saved to People. The transcript stays saved.
         case discarded
@@ -571,20 +571,25 @@ enum NotchIslandSpeakerReviewPolicy {
         return discarded ? .discarded : nil
     }
 
-    /// The local mic section's toggle, shown only when local mic voices are asked about.
+    /// The mic line's label. The mic is the owner, so its voices start as
+    /// You and the line says so: "On your mic · You".
+    static let micLineTitle = "On your mic"
+
+    /// The mic line's button: "Not just me?" names each mic voice (someone
+    /// else used the mic); "Just me" puts them back to You.
     static func keepAsYouTitle(keepMicAsYou: Bool) -> String {
-        keepMicAsYou ? "Undo" : "All me"
+        keepMicAsYou ? "Not just me?" : "Just me"
     }
 
     static func keepAsYouHelp(keepMicAsYou: Bool) -> String {
         keepMicAsYou
-            ? "Name each local mic voice again."
-            : "Use one \u{201C}You\u{201D} label for everyone picked up by the local microphone."
+            ? "Someone else used this mic? Name each voice it heard."
+            : "Save every voice on your mic as You."
     }
 
-    /// VoiceOver names for the two Undo buttons, which look the same.
+    /// VoiceOver names for the mic line's button.
     static func keepAsYouAccessibilityLabel(keepMicAsYou: Bool) -> String {
-        keepMicAsYou ? "Undo All me" : "All me"
+        keepMicAsYou ? "Not just me" : "Just me"
     }
 
     static let undoDiscardAccessibilityLabel = "Undo Not a person"
@@ -594,7 +599,7 @@ enum NotchIslandSpeakerReviewPolicy {
         discarded ? "Undo" : "Not a person"
     }
 
-    static let discardHelp = "Do not save this voice to People. The transcript stays saved."
+    static let discardHelp = "Don\u{2019}t save this voice. The transcript stays."
 
     /// What the small × says when the pointer rests on it.
     static let discardTooltip = "Don\u{2019}t save this voice"
@@ -603,7 +608,7 @@ enum NotchIslandSpeakerReviewPolicy {
     static func lockNote(_ lock: Lock) -> String {
         switch lock {
         case .keptAsYou: return "Saved as You"
-        case .discarded: return "Not saved to People"
+        case .discarded: return "Not saved"
         }
     }
 
@@ -696,9 +701,9 @@ enum NotchIslandSpeakerReviewPolicy {
     /// The title and line the island shows after Done.
     static func doneCopy(leftForLater: Int) -> (title: String, detail: String) {
         if leftForLater <= 0 {
-            return ("Everyone’s named", "After a few confirmed meetings, Transcripted names them on its own.")
+            return ("Everyone’s named", "Saved.")
         }
-        return ("Names saved", "\(leftForLater) left to name in Speakers.")
+        return ("Saved", "\(leftForLater) left in Speakers.")
     }
 
     /// The header: the same short question whether the review asks or only

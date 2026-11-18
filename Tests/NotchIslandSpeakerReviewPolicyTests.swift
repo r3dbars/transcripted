@@ -52,8 +52,8 @@ func testNotchIslandSpeakerReviewPolicy() {
 
         let pri = NotchIslandSpeakerReviewPolicy.suggestions(query: "Pri", people: people, invitees: ["Priya Shah"])
         assertEqual(pri.map(\.label), ["Priya Shah", "Priyanka Rao"], "the invitee leads, then saved people")
-        assertEqual(pri.first?.detail, "on the invite · 6 calls")
-        assertEqual(pri.last?.detail, "2 calls")
+        assertEqual(pri.first?.detail, "on the invite · 6 meetings")
+        assertEqual(pri.last?.detail, "2 meetings")
 
         let unsaved = NotchIslandSpeakerReviewPolicy.suggestions(query: "dan", people: people, invitees: ["Dana Kim"])
         assertEqual(unsaved.map(\.label), ["Dana Kim"], "an invitee nobody saved yet is still suggested")
@@ -100,7 +100,7 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertNil(Policy.rowTitle(.naming(.rejectedSuggestion), name: "Marcus Reed"), "after ✕ the title becomes the name field")
         assertEqual(Policy.rowTitle(.named(.newPerson), name: "Jo Park"), "Jo Park")
         assertEqual(Policy.rowTitle(.locked(.keptAsYou), name: nil), "Saved as You")
-        assertEqual(Policy.rowTitle(.locked(.discarded), name: "Speaker 2"), "Not saved to People")
+        assertEqual(Policy.rowTitle(.locked(.discarded), name: "Speaker 2"), "Not saved")
     }
 
     runSuite("Each review row offers the approved buttons") {
@@ -149,12 +149,12 @@ func testNotchIslandSpeakerReviewPolicy() {
     runSuite("The line under the name uses the shared copy, in the person's color for the payoff") {
         typealias Policy = NotchIslandSpeakerReviewPolicy
         let marcus = Policy.Progress(confirmed: 4, required: 5)
-        assertEqual(Policy.rowHint(.asking, progress: marcus), SpeakerNamingTierPresentation.ReviewHint(text: "One more yes to auto-name", usesPersonColor: true))
-        assertEqual(Policy.rowHint(.confirmed, progress: marcus), SpeakerNamingTierPresentation.ReviewHint(text: "Named automatically from now on", usesPersonColor: true))
+        assertEqual(Policy.rowHint(.asking, progress: marcus), SpeakerNamingTierPresentation.ReviewHint(text: "4 of 5", usesPersonColor: true))
+        assertEqual(Policy.rowHint(.confirmed, progress: marcus), SpeakerNamingTierPresentation.ReviewHint(text: "Auto", usesPersonColor: true))
         let dana = Policy.Progress(confirmed: 1, required: 5)
-        assertNil(Policy.rowHint(.asking, progress: dana), "nothing under a name with more than one yes to go")
-        assertEqual(Policy.rowHint(.confirmed, progress: dana), SpeakerNamingTierPresentation.ReviewHint(text: "3 more to go", usesPersonColor: false))
-        assertEqual(Policy.rowHint(.named(.newPerson), progress: nil), SpeakerNamingTierPresentation.ReviewHint(text: "Saved · 4 more to auto-name", usesPersonColor: false))
+        assertEqual(Policy.rowHint(.asking, progress: dana), SpeakerNamingTierPresentation.ReviewHint(text: "1 of 5", usesPersonColor: false))
+        assertEqual(Policy.rowHint(.confirmed, progress: dana), SpeakerNamingTierPresentation.ReviewHint(text: "2 of 5", usesPersonColor: false))
+        assertEqual(Policy.rowHint(.named(.newPerson), progress: nil), SpeakerNamingTierPresentation.ReviewHint(text: "1 of 5", usesPersonColor: false))
         assertNil(Policy.rowHint(.recognized, progress: Policy.Progress(confirmed: 7, required: 5)), "no words under a name given silently")
         assertNil(Policy.rowHint(.named(.savedPerson), progress: nil))
         assertNil(Policy.rowHint(.naming(.unknownVoice), progress: nil))
@@ -231,7 +231,7 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertFalse(Policy.namedAutomatically(.confirmed, progress: Policy.Progress(confirmed: 6, required: 5, isTrusted: false)), "probation doesn't count")
         assertFalse(Policy.namedAutomatically(.asking, progress: Policy.Progress(confirmed: 4, required: 5)))
         assertFalse(Policy.namedAutomatically(.naming(.correctingRecognized), progress: nil), "Not Priya? takes Priya's dot away")
-        assertEqual(SpeakerNamingTierPresentation.autoNamedFooter(count: 2), "2 people named automatically")
+        assertEqual(SpeakerNamingTierPresentation.autoNamedFooter(count: 2), "2 auto-named")
         assertNil(SpeakerNamingTierPresentation.autoNamedFooter(count: 0))
     }
 
@@ -247,8 +247,8 @@ func testNotchIslandSpeakerReviewPolicy() {
             "after ✓ the tip counts the yes"
         )
         assertEqual(Policy.printExplanation(.naming(.unknownVoice), name: nil, progress: nil), "Press play to listen.")
-        assertEqual(Policy.rowAccessibilityLabel(.asking, name: "Marcus Reed", hint: "One more yes to auto-name"), "Is this Marcus Reed? One more yes to auto-name", "no period after a question mark")
-        assertEqual(Policy.rowAccessibilityLabel(.confirmed, name: "Marcus Reed", hint: "Named automatically from now on"), "Marcus Reed, confirmed. Named automatically from now on")
+        assertEqual(Policy.rowAccessibilityLabel(.asking, name: "Marcus Reed", hint: "4 of 5"), "Is this Marcus Reed? 4 of 5", "no period after a question mark")
+        assertEqual(Policy.rowAccessibilityLabel(.confirmed, name: "Marcus Reed", hint: "Auto"), "Marcus Reed, confirmed. Auto")
         assertEqual(Policy.rowAccessibilityLabel(.named(.newPerson), name: "Jo Park", hint: nil), "Jo Park, named")
         assertEqual(Policy.rowAccessibilityLabel(.named(.savedPerson), name: "Dana Lee", hint: nil, corrected: true), "Dana Lee, corrected", "a fix to a name Transcripted gave says so")
         assertEqual(Policy.rowAccessibilityLabel(.recognized, name: "Priya Shah", hint: nil), "Priya Shah, named automatically")
@@ -264,9 +264,9 @@ func testNotchIslandSpeakerReviewPolicy() {
 
     runSuite("NotchIslandSpeakerReviewPolicy says what happened after Done") {
         assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).title, "Everyone’s named")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "After a few confirmed meetings, Transcripted names them on its own.")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 left to name in Speakers.")
-        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 left to name in Speakers.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 0).detail, "Saved.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 1).detail, "1 left in Speakers.")
+        assertEqual(NotchIslandSpeakerReviewPolicy.doneCopy(leftForLater: 2).detail, "2 left in Speakers.")
         assertEqual(NotchIslandSpeakerReviewPolicy.headerTitle, "Who spoke?", "the header asks one short question")
         assertEqual(NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: " Design sync "), "Design sync", "the meeting sits small on the right")
         assertNil(NotchIslandSpeakerReviewPolicy.headerDetail(meetingTitle: "  "), "no meeting name, nothing on the right")
@@ -520,8 +520,9 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertEqual(Policy.lock(isMic: false, keepMicAsYou: true, discarded: true), .discarded)
         assertEqual(Policy.lock(isMic: true, keepMicAsYou: false, discarded: true), .discarded)
         assertEqual(Policy.lock(isMic: true, keepMicAsYou: false, discarded: false), nil, "a voice left alone is asked as usual")
-        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: false), "All me")
-        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: true), "Undo", "pressing it again lifts it")
+        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: true), "Not just me?", "the mic is you; correcting it is the second action")
+        assertEqual(Policy.keepAsYouTitle(keepMicAsYou: false), "Just me", "and it can go back")
+        assertEqual(Policy.micLineTitle, "On your mic")
         assertEqual(Policy.lockNote(.keptAsYou), "Saved as You")
     }
 
@@ -533,7 +534,7 @@ func testNotchIslandSpeakerReviewPolicy() {
         assertFalse(Policy.offersDiscard(isRecognized: false, nameBoxOpen: true, keptAsYou: true), "not while kept as You")
         assertEqual(Policy.discardTitle(discarded: false), "Not a person")
         assertEqual(Policy.discardTitle(discarded: true), "Undo")
-        assertEqual(Policy.lockNote(.discarded), "Not saved to People")
+        assertEqual(Policy.lockNote(.discarded), "Not saved")
     }
 
     runSuite("Undo goes back to the question, or to the field a name came from") {

@@ -106,6 +106,15 @@ enum SpeakerVoiceRowMenuPolicy {
         didDelete ? nil : "Couldn't delete this voice. The speaker may still be saved — try again."
     }
 
+    /// The badge on a likely duplicate: "Same as Marcus?", which opens the
+    /// merge confirm. First name only; an unnamed match is "another voice".
+    static func sameAsTitle(for name: String?) -> String {
+        let first = name?.trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(whereSeparator: { $0.isWhitespace }).first.map(String.init)
+        guard let first, !first.isEmpty else { return "Same as another voice?" }
+        return "Same as \(first)?"
+    }
+
     static let deleteConfirmationTitle = "Delete this voice?"
     static let deleteConfirmationMessage =
         "This removes the saved voice profile and sample clip. Past transcripts stay unchanged."

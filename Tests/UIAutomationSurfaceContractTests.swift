@@ -120,7 +120,7 @@ func testUIAutomationSurfaceContract() async {
         )
         assertTrue(
             speakersSettingsSource().contains("struct SpeakerPeopleSettingsSection")
-                && speakersSettingsSource().contains("SpeakerQuietPlayButton("),
+                && speakersSettingsSource().contains("struct SpeakerPersonRow"),
             "the Speakers reader should load the section and its row views"
         )
 
@@ -389,7 +389,6 @@ func testUIAutomationSurfaceContract() async {
         // checked by scripts/dev/check-ui-automation-contract.py.
 
         assertEqual(SpeakerPeopleSettingsPolishContract.minimumHitTarget, 40, "speaker play and icon controls should keep a 40pt hit target")
-        assertEqual(SpeakerPeopleSettingsPolishContract.quietPlayGlyphPointSize, 14, "the quiet play control should stay a small glyph, not a filled circle")
         assertEqual(SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter, 28, "the compact icon should look smaller than its hit target")
         assertTrue(
             SpeakerPeopleSettingsPolishContract.compactIconVisibleDiameter < SpeakerPeopleSettingsPolishContract.minimumHitTarget,
@@ -397,19 +396,13 @@ func testUIAutomationSurfaceContract() async {
         )
         assertTrue(
             contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerCompactIconLabel")
-                && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains("struct SpeakerQuietPlayButton")
                 && contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift").contains(".contentShape(Rectangle())"),
-            "speaker settings should draw quiet play/icon chrome inside a full hit shape"
+            "speaker settings should draw quiet icon chrome inside a full hit shape"
         )
 
-        // The person card's player is a bare glyph (SpeakerQuietPlayButton);
-        // queue rows and person rows play from their voice print instead (its
-        // automation id is pinned by check-ui-automation-contract.py). The
-        // compact icon label backs the two overflow menus.
-        assertTrue(
-            speakersSettingsSource().components(separatedBy: "SpeakerQuietPlayButton(").count - 1 >= 1,
-            "the person card's play control should use the quiet 40pt hit-target play button"
-        )
+        // Person rows play from their voice print (its automation id is
+        // pinned by check-ui-automation-contract.py); there's no second play
+        // control. The compact icon label backs the two overflow menus.
         assertTrue(
             speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 2,
             "queue and person overflow menus should use the compact 40pt hit-target label"
@@ -488,9 +481,9 @@ func testUIAutomationSurfaceContract() async {
         let speakers = contractSource("Sources/UI/Settings/SpeakerPeopleSettingsSection.swift")
 
         assertEqual(SpeakerPeopleEmptyState.title, "No speakers yet", "the Speakers empty state should say plainly that there are no speakers yet")
-        assertTrue(
-            SpeakerPeopleEmptyState.message.hasPrefix("Transcripted learns each voice as you record."),
-            "the Speakers empty state should teach how the list fills, not show bare gray placeholder text"
+        assertEqual(
+            SpeakerPeopleEmptyState.message, "People from your meetings show up here.",
+            "the Speakers empty state should say how the list fills, in one line"
         )
         assertEqual(SpeakerPeopleEmptyState.actionTitle, "Record a meeting", "the Speakers empty state should offer the one action that fills it")
         assertEqual(

@@ -1,6 +1,13 @@
 import Foundation
 
 func testSpeakerVoiceRowPresentation() {
+    runSuite("A likely duplicate says who it is, by first name") {
+        assertEqual(SpeakerVoiceRowMenuPolicy.sameAsTitle(for: "Marcus Reed"), "Same as Marcus?")
+        assertEqual(SpeakerVoiceRowMenuPolicy.sameAsTitle(for: "  Priya  "), "Same as Priya?")
+        assertEqual(SpeakerVoiceRowMenuPolicy.sameAsTitle(for: nil), "Same as another voice?", "an unnamed match still says something")
+        assertEqual(SpeakerVoiceRowMenuPolicy.sameAsTitle(for: " "), "Same as another voice?")
+    }
+
     runSuite("An edit during an Everyone rename save stays available for a later save") {
         let submitted = "Alice"
         let laterDraft = "Alicia"

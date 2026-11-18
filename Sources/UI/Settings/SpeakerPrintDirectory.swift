@@ -1,7 +1,7 @@
 // SpeakerPrintDirectory.swift
 // How Settings › Speakers lays out saved people by their voice print: who is
 // "Named automatically" (a full, glowing print), who is "Still learning" (a
-// partial print plus "One more yes" or "N more"), and the voices nobody has
+// partial print plus "4 of 5"), and the voices nobody has
 // named yet that sit outside the open review card. One ring per confirmed
 // meeting, so the rings and the words always agree. Foundation-only so the
 // fast tests can compile it; the views are SpeakerPeoplePrintSections.swift
@@ -13,9 +13,9 @@ import TranscriptedCore
 #endif
 
 enum SpeakerPrintDirectory {
-    /// The line under the page title.
-    static let headerLine = "Confirm a voice in \(SpeakerNamingTierPresentation.segmentCount) meetings and its print fills in. "
-        + "Then Transcripted names that person on its own. Voices stay on this Mac."
+    /// The one line next to the page title. The rings and the hover tip
+    /// explain the rest.
+    static let headerLine = "Voices stay on this Mac."
 
     enum Section: Equatable, CaseIterable {
         case namedAutomatically
@@ -56,23 +56,24 @@ enum SpeakerPrintDirectory {
         return Row(section: .stillLearning, litRings: lit, hint: learningHint(standing))
     }
 
-    /// "One more yes" in the person's color when one confirmation is left;
-    /// "N more" otherwise. Probation can need several clean confirmations,
-    /// so it never promises a fixed number of yeses restores auto-naming.
+    /// "4 of 5", the review's own words, in the person's color when one
+    /// confirmation is left. Probation can need several clean confirmations,
+    /// so it says "Checking" rather than promise a number.
     private static func learningHint(_ standing: SpeakerNamingStanding) -> Hint {
-        guard standing.isTrusted else { return Hint(text: "Keep confirming", usesPersonColor: false) }
-        let left = max(0, max(1, standing.requiredMeetings) - max(0, standing.confirmedMeetings))
-        if left <= 1 {
-            return Hint(text: "One more yes", usesPersonColor: standing.isTrusted && left == 1)
-        }
-        return Hint(text: "\(left) more", usesPersonColor: false)
+        guard standing.isTrusted else { return Hint(text: "Checking", usesPersonColor: false) }
+        let required = max(1, standing.requiredMeetings)
+        let confirmed = min(max(0, standing.confirmedMeetings), required)
+        return Hint(
+            text: SpeakerNamingTierPresentation.progressText(confirmed: confirmed, required: required),
+            usesPersonColor: required - confirmed == 1
+        )
     }
 
     static func title(_ section: Section, count: Int) -> String {
         switch section {
         case .namedAutomatically: return "Named automatically · \(count)"
-        case .stillLearning: return "Still learning"
-        case .notNamedYet: return "Not named yet"
+        case .stillLearning: return "Still learning · \(count)"
+        case .notNamedYet: return "Not named yet · \(count)"
         }
     }
 
@@ -125,7 +126,7 @@ enum SpeakerPrintDirectory {
     }
 }
 
-/// "One more yes" is small text in the person's print color. The palette's
+/// "4 of 5" is small text in the person's print color. The palette's
 /// dark hexes already read at 4.5:1 on a dark window; its light hexes were
 /// tuned for thin strokes on white, which is too faint for 12-point text
 /// (Butter is about 3.2:1), so on a light window the text takes a darker
