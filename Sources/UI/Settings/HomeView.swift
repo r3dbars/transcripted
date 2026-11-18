@@ -14,6 +14,12 @@ struct HomeRowMenuItem: Identifiable {
     /// menu button itself only carries one identifier for the whole menu, so
     /// actions that automation needs to target by name (Rename) set this.
     let automationIdentifier: String?
+    /// A check mark beside the title (Keep audio on).
+    let isChecked: Bool
+    /// Menu line, Option-alternate of the line above, or not in the menu at
+    /// all (the card's issue line shows it). See `HomeRowMenuPlacement`.
+    let placement: HomeRowMenuPlacement
+    let toolTip: String?
     let action: () -> Void
 
     init(
@@ -22,6 +28,9 @@ struct HomeRowMenuItem: Identifiable {
         isEnabled: Bool = true,
         isDestructive: Bool = false,
         automationIdentifier: String? = nil,
+        isChecked: Bool = false,
+        placement: HomeRowMenuPlacement = .menu,
+        toolTip: String? = nil,
         action: @escaping () -> Void
     ) {
         self.title = title
@@ -29,6 +38,9 @@ struct HomeRowMenuItem: Identifiable {
         self.isEnabled = isEnabled
         self.isDestructive = isDestructive
         self.automationIdentifier = automationIdentifier
+        self.isChecked = isChecked
+        self.placement = placement
+        self.toolTip = toolTip
         self.action = action
     }
 }
@@ -127,8 +139,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
             // Without this, AppKit auto-enables every item whose target responds
             // to the action, overriding the per-item isEnabled set below.
             menu.autoenablesItems = false
-            for item in items {
+            for item in items where item.placement != .issueLine {
                 let menuItem = ClosureMenuItem(menuItem: item)
+                // No key equivalents here; an empty mask lets an Option
+                // alternate pair with the line above it.
+                menuItem.keyEquivalentModifierMask = []
+                if item.placement == .optionAlternate {
+                    menuItem.isAlternate = true
+                    menuItem.keyEquivalentModifierMask = [.option]
+                }
+                if item.isChecked {
+                    menuItem.state = .on
+                }
+                menuItem.toolTip = item.toolTip
                 if let image = NSImage(systemSymbolName: item.symbolName, accessibilityDescription: item.title) {
                     image.isTemplate = true
                     menuItem.image = image.withSymbolConfiguration(
@@ -296,33 +319,9 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
 
 // MARK: - Failed meeting row
 
-/// Play/pause for a failed row's kept audio. It alone observes the shared
-/// player, which publishes a few times a second while audio plays, so only
-/// this button re-renders on those ticks instead of every failed row.
-private struct HomeFailedMeetingPlayAudioButton: View {
-    let audioAttachment: MeetingAudioAttachment
-
-    @ObservedObject private var playback = MeetingAudioPlayback.shared
-
-    var body: some View {
-        // A paused attachment stays active, so "active" alone would keep
-        // showing Pause on a player that isn't playing.
-        let isPlayingThis = playback.isActive(audioAttachment) && playback.isPlaying
-        Button {
-            playback.toggle(audioAttachment)
-        } label: {
-            Label(
-                isPlayingThis ? "Pause audio" : "Play audio",
-                systemImage: isPlayingThis ? "pause.fill" : "play.fill"
-            )
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .help("Play this meeting's audio")
-        .accessibilityIdentifier("transcripted.home.failed-meeting.play-audio")
-    }
-}
-
+/// A failed or unfinished meeting, drawn as the same card as a saved one:
+/// play (when audio was kept) · title · time, one amber line saying what
+/// happened, and an ink Try again. Show in Finder and Delete live in ⋯.
 struct HomeFailedMeetingInlineRow: View {
     let item: MeetingSessionController.FailedMeetingItem
     let canRetry: Bool
@@ -339,87 +338,80 @@ struct HomeFailedMeetingInlineRow: View {
 
     var body: some View {
         let presentation = inlinePresentation
-        HStack(alignment: .top, spacing: 14) {
-            Text(HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp))
-                .font(.system(size: 10.5, weight: .medium, design: .monospaced))
-                .foregroundStyle(.secondary)
-                .frame(width: 64, alignment: .leading)
-                .padding(.top, 2)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 10) {
+                if let audioAttachment {
+                    HomeMeetingPlayButton(
+                        audio: audioAttachment,
+                        automationIdentifier: "transcripted.home.failed-meeting.play-audio"
+                    )
+                }
 
-            VStack(alignment: .leading, spacing: 4) {
                 Text(item.title)
-                    .font(.system(size: 12.5, weight: .medium))
-                    .foregroundStyle(Color.primary)
+                    .font(TextRole.body.font(weight: .semibold))
+                    .foregroundStyle(LibraryTokens.ink)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
+                Text(HomeActivityRowFormatting.timeFormatter.string(from: item.timestamp))
+                    .font(LibraryTokens.meta)
+                    .monospacedDigit()
+                    .foregroundStyle(LibraryTokens.ink3)
                     .lineLimit(1)
 
-                statusLine(presentation: presentation)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .help(item.detail)
+                Spacer(minLength: 8)
 
-            actions
-        }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
-        .background(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(isHovering ? Color.primary.opacity(0.035) : Color.clear)
-        )
-        .contentShape(Rectangle())
-        .onHover { isHovering = $0 }
-    }
+                HomeRowMoreMenuButton(items: menuItems, automationIdentifier: "transcripted.home.failed-meeting.more")
+                    .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
+                    // The 40 pt hit shape overhangs the 22 pt bar.
+                    .padding(.vertical, -9)
+                    .help("More options")
+                    .opacity(isHovering ? 1 : 0)
+                    .allowsHitTesting(isHovering)
 
-    /// Try again stays visible: it is the one thing this row is for. The
-    /// rest (play, show audio, delete) reveal on hover like other rows.
-    private var actions: some View {
-        HStack(spacing: 6) {
-            hoverActions
-                .opacity(isHovering ? 1 : 0)
-                .allowsHitTesting(isHovering)
-                .animation(.easeOut(duration: 0.12), value: isHovering)
-
-            if inlinePresentation.canShowRetryAction {
-                HomeAttentionActionButton(
-                    title: item.isRetrying ? "Retrying" : "Try again",
-                    isDisabled: rowActions.retryDisabled,
-                    automationIdentifier: "transcripted.home.failed-meeting.retry",
-                    action: onRetry
-                )
-                .help(retryHelp)
-            }
-        }
-    }
-
-    private var hoverActions: some View {
-        HStack(spacing: 6) {
-            if let audioAttachment {
-                HomeFailedMeetingPlayAudioButton(audioAttachment: audioAttachment)
-            }
-
-            if rowActions.showsRevealAudio {
-                Button {
-                    onRevealAudio()
-                } label: {
-                    Label("Show Audio", systemImage: "folder")
+                if presentation.canShowRetryAction {
+                    HomeAttentionActionButton(
+                        title: item.isRetrying ? "Retrying" : "Try again",
+                        isDisabled: rowActions.retryDisabled,
+                        automationIdentifier: "transcripted.home.failed-meeting.retry",
+                        action: onRetry
+                    )
+                    .help(retryHelp)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("Show saved audio in Finder")
-                .accessibilityIdentifier("transcripted.home.failed-meeting.show-audio")
             }
+            .frame(minHeight: 22)
 
-            HomeRowMoreMenuButton(items: [
-                HomeRowMenuItem(
-                    title: rowActions.deleteTitle,
-                    symbolName: "trash",
-                    isEnabled: !rowActions.deleteDisabled,
-                    isDestructive: rowActions.deleteIsDestructive,
-                    action: onClear
-                )
-            ], automationIdentifier: "transcripted.home.failed-meeting.more")
-            .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
-            .help("More options")
+            issueLine(presentation: presentation)
         }
+        .homeMeetingCardSurface(isHovering: isHovering)
+        .help(item.detail)
+        .onHover { hovering in
+            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
+        }
+        .accessibilityElement(children: .contain)
+        .modifier(HomeMeetingMenuAccessibilityActions(items: menuItems))
+    }
+
+    /// Show in Finder (the kept audio) and Delete.
+    private var menuItems: [HomeRowMenuItem] {
+        var items: [HomeRowMenuItem] = []
+        if rowActions.showsRevealAudio {
+            items.append(HomeRowMenuItem(
+                title: "Show in Finder",
+                symbolName: "folder",
+                automationIdentifier: "transcripted.home.failed-meeting.show-audio",
+                toolTip: "Show the saved audio in Finder",
+                action: onRevealAudio
+            ))
+        }
+        items.append(HomeRowMenuItem(
+            title: rowActions.deleteTitle,
+            symbolName: "trash",
+            isEnabled: !rowActions.deleteDisabled,
+            isDestructive: rowActions.deleteIsDestructive,
+            action: onClear
+        ))
+        return items
     }
 
     private var inlinePresentation: HomeFailedMeetingInlinePresentation {
@@ -433,35 +425,30 @@ struct HomeFailedMeetingInlineRow: View {
         )
     }
 
-    private func statusLine(presentation: HomeFailedMeetingInlinePresentation) -> some View {
-        // Red is for rows that can't be retried; a retry-ready row is
-        // recoverable, so its chip stays neutral.
-        let chipTint = presentation.canShowRetryAction ? Color.secondary : Color.red
-        return HStack(alignment: .firstTextBaseline, spacing: 8) {
+    /// "Not transcribed · Your audio is saved…" in the attention color. The
+    /// status leads; the reason follows in secondary ink.
+    private func issueLine(presentation: HomeFailedMeetingInlinePresentation) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            if item.isRetrying {
+                ProgressView()
+                    .controlSize(.mini)
+            }
             Text(presentation.statusText)
-                .font(.system(size: 10.5, weight: .semibold))
-                .foregroundStyle(chipTint)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 2)
-                .background(
-                    Capsule(style: .continuous)
-                        .fill(chipTint.opacity(0.12))
-                )
-                .overlay(
-                    Capsule(style: .continuous)
-                        .stroke(chipTint.opacity(0.18), lineWidth: 1)
-                )
+                .foregroundStyle(item.isRetrying ? LibraryTokens.ink2 : LibraryTokens.attention)
                 .accessibilityLabel(presentation.statusText)
-
             if let detail = presentation.inlineDetail {
+                Text("\u{00B7}")
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .accessibilityHidden(true)
                 Text(detail)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(LibraryTokens.ink2)
                     .lineLimit(2)
                     .truncationMode(.tail)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+        .font(LibraryTokens.meta)
+        .padding(.leading, audioAttachment == nil ? 0 : 32)
     }
 
     private var rowActions: HomeFailedMeetingRowActions {
@@ -568,7 +555,7 @@ struct HomeLoadMoreButton: View {
             Spacer(minLength: 0)
 
             Button(action: action) {
-                Text(isLoading ? "Loading..." : title)
+                Text(isLoading ? "Loading\u{2026}" : title)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(isLoading ? Color.secondary : Color.secondary.opacity(isHovering ? 1 : 0.82))
                     .padding(.horizontal, 10)

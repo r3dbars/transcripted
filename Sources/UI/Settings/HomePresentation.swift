@@ -17,7 +17,9 @@ enum HomeCaptureListCopy {
     static let emptyDictations = "No recent dictations."
     static let noMeetingMatches = "No meetings match your search."
     static let searchingMeetings = "Searching all meetings…"
-    static let noStarredMeetings = "No starred meetings yet. Star one from its \u{22EF} menu."
+    /// The Keep audio filter with nothing kept. (The filter reads the
+    /// transcript's `starred` flag, which is what Keep audio sets.)
+    static let noStarredMeetings = "No meetings keep their audio yet. Turn on Keep audio from a meeting's \u{22EF} menu."
 
     /// What an empty Meetings list says. A search (or the Starred filter)
     /// doesn't claim "none" before its pass over the library has looked.
@@ -40,6 +42,14 @@ enum HomeCaptureListCopy {
         static let value = "Choose"
         static let help = "Pick an audio or video file. The transcript lands with your meetings."
         static let automationIdentifier = "transcripted.settings.general.transcribe-audio-file"
+    }
+
+    /// The Meetings header's import button: the file picker, same as the
+    /// sidebar's Transcribe a file page, ⌘O, and dropping files on the page.
+    enum TranscribeFileAction {
+        static let title = "Transcribe a file\u{2026}"
+        static let help = "Choose audio or video to transcribe on this Mac. You can also drop files here or press \u{2318}O."
+        static let automationIdentifier = "transcripted.home.new.transcribe-file"
     }
 
     /// The empty Meetings list's second button, which opens the same picker.

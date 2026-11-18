@@ -247,8 +247,8 @@ enum RecentMeetingRetranscriptionMenuActionPolicy {
     /// A greyed-out menu item can't show a tooltip, so a disabled item says
     /// in its own title when it will work again.
     static func title(globalUnavailableReason: String?) -> String {
-        guard let globalUnavailableReason else { return "Re-transcribe" }
-        return "Re-transcribe (\(SavedMeetingRetranscriptionAvailabilityPolicy.menuHint(for: globalUnavailableReason)))"
+        guard let globalUnavailableReason else { return "Transcribe again" }
+        return "Transcribe again (\(SavedMeetingRetranscriptionAvailabilityPolicy.menuHint(for: globalUnavailableReason)))"
     }
 }
 

@@ -6,6 +6,9 @@ struct QuietMeetingSpeakerLabel: View {
     let identity: HomeMeetingSpeakerIdentity
     let knownPeople: [SpeakerNameChoice]
     let isSavedPerson: Bool
+    /// The fixed name column, or nil to size to the name (the Meetings card's
+    /// inline "Name text" lines).
+    var columnWidth: CGFloat? = 116
     let onAssign: (HomeMeetingSpeakerAssignment, @escaping (Bool) -> Void) -> Void
 
     @State private var showsPicker = false
@@ -22,7 +25,7 @@ struct QuietMeetingSpeakerLabel: View {
         } label: {
             HStack(spacing: 4) {
                 Text(identity.displayName)
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(TextRole.body.font(weight: .semibold))
                     .foregroundStyle(speakerColor)
                     .underline(isHovering || showsPicker, color: speakerColor.opacity(0.72))
                     .lineLimit(1)
@@ -33,8 +36,7 @@ struct QuietMeetingSpeakerLabel: View {
                         .opacity((isHovering || showsPicker) ? 1 : 0.34)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.vertical, 4)
+            .frame(maxWidth: columnWidth == nil ? nil : .infinity, alignment: .leading)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -42,7 +44,7 @@ struct QuietMeetingSpeakerLabel: View {
         .onHover { isHovering = $0 }
         .contextMenu {
             if canRename {
-                Button("Rename Speaker…") { showsPicker = true }
+                Button("Rename…") { showsPicker = true }
             }
         }
         .accessibilityLabel("Speaker: \(identity.displayName)")
@@ -50,7 +52,8 @@ struct QuietMeetingSpeakerLabel: View {
         .accessibilityAction(named: "Rename speaker") { showsPicker = true }
         .help(canRename ? "Assign or correct \(identity.displayName)" : "")
         .accessibilityIdentifier("transcripted.home.expansion.speaker.\(identity.stableID)")
-        .frame(width: 116, alignment: .leading)
+        .frame(width: columnWidth, alignment: .leading)
+        .fixedSize(horizontal: columnWidth == nil, vertical: false)
         .popover(isPresented: $showsPicker, arrowEdge: .bottom) {
             HomeMeetingSpeakerPicker(
                 identity: identity,

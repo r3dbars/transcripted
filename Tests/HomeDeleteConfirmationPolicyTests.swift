@@ -15,7 +15,7 @@ func testHomeDeleteConfirmationPolicy() {
         )
         assertEqual(
             presentation.confirmTitle,
-            "Delete Failed Meeting",
+            "Delete",
             "destructive button should be specific"
         )
     }

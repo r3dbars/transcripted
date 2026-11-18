@@ -3,8 +3,10 @@ import TranscriptedCore
 
 /// The Settings > Home (Meetings) page. This owns pure view assembly only:
 /// the header, scan-warning/activity rows, search field, and the day-grouped
-/// meeting list (including inline failed-meeting recovery rows and the
-/// expanded-row preview). Everything with side effects — delete/rename/copy/
+/// meeting cards (including failed-meeting cards and the card opened with
+/// Show more). It is also where files get transcribed: the header's
+/// Transcribe a file… and a drop anywhere on the page both feed the same
+/// import queue as ⌘O. Everything with side effects — delete/rename/copy/
 /// retranscribe, the shared root alert, undo staging, and analytics — stays
 /// in `TranscriptedSettingsView` (several pieces are pinned there by
 /// `Tests/UIAutomationSurfaceContractTests.swift`) and arrives here as
@@ -15,7 +17,6 @@ struct HomeSettingsPage: View {
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
     @State private var isAudioDropTargeted = false
 
-    let capturesToday: Int
     let attentionTitle: String?
     let meetingDaySections: [HomeDaySection<HomeMeetingListItem>]
     let homeCopiedRowID: String?
@@ -50,13 +51,11 @@ struct HomeSettingsPage: View {
     let onLoadMoreMeetings: () -> Void
     let onOpenMeeting: (RecentMeetingItem) -> Void
     let onCopyMeeting: (RecentMeetingItem) -> Void
-    let onRevealMeetingInFinder: (RecentMeetingItem) -> Void
     let onCollapseMeetingExpansion: () -> Void
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onAssignMeetingSpeakers: (RecentMeetingItem, [HomeMeetingSpeakerAssignment], @escaping (Bool) -> Void) -> Void
     let meetingRowMenuItems: (RecentMeetingItem) -> [HomeRowMenuItem]
-    let onToggleMeetingStar: (RecentMeetingItem) -> Void
     /// Voices a meeting still has to name, and opening its "Who spoke?" card.
     let meetingVoicesToName: (RecentMeetingItem) -> Int
     let onWhoSpoke: (RecentMeetingItem) -> Void
@@ -66,16 +65,16 @@ struct HomeSettingsPage: View {
     let failedMeetingAudioAttachment: (MeetingSessionController.FailedMeetingItem) -> MeetingAudioAttachment?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
+        VStack(alignment: .leading, spacing: 24) {
             QuietHomeHeader(
-                capturesToday: capturesToday,
                 attentionTitle: attentionTitle,
                 onAttention: onAttention,
                 onToggleFind: onToggleFind,
                 onStartMeeting: onStartMeeting,
                 onImportAudioFile: onImportAudioFile,
-                isStarredOnly: homeStarredOnly,
-                onToggleStarred: {
+                // The Keep audio filter reads the same `starred` flag.
+                isKeptAudioOnly: homeStarredOnly,
+                onToggleKeptAudio: {
                     withAnimation(.snappy(duration: 0.18)) { homeStarredOnly.toggle() }
                 }
             )
@@ -119,7 +118,6 @@ struct HomeSettingsPage: View {
             }
 
             homeMeetingsListSection
-                .padding(.top, 6)
         }
         .animation(.snappy(duration: 0.22), value: transcriptionActivity)
         .contentShape(Rectangle())
@@ -179,7 +177,7 @@ struct HomeSettingsPage: View {
             emptyState: isSearchingMeetings ? nil : HomeListEmptyState(
                 symbolName: "waveform",
                 title: "No meetings yet",
-                message: "Record a meeting or transcribe an existing audio file. Transcripted labels each speaker and saves the transcript here.",
+                message: "Record a call, or drop in a recording to transcribe it. Transcripts land here, with each speaker labeled.",
                 actionTitle: "Record a meeting",
                 automationIdentifier: "transcripted.home.meetings.empty.start",
                 action: onStartMeeting,
@@ -197,7 +195,9 @@ struct HomeSettingsPage: View {
                 ? homeViewModel.canLoadMoreMeetingSearchResults
                 : homeViewModel.canLoadMoreMeetings,
             getID: { AnyHashable($0.id) },
-            onLoadMore: onLoadMoreMeetings
+            onLoadMore: onLoadMoreMeetings,
+            // Cards carry their own edges, like Dictations.
+            showsRowDividers: false
         ) { item in
             homeMeetingListRow(item)
         }
@@ -209,28 +209,13 @@ struct HomeSettingsPage: View {
         case .saved(let meeting):
             if let offer = captureUndo.offer(for: meeting.id) {
                 UndoLineView(offer: offer, manager: captureUndo)
-            } else if homeExpandedMeetingID == meeting.id {
-                QuietMeetingExpansion(
-                    item: meeting,
-                    preview: homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
-                    isCopied: homeCopiedRowID == meeting.id,
-                    onCopy: { onCopyMeeting(meeting) },
-                    onRevealInFinder: { onRevealMeetingInFinder(meeting) },
-                    onCollapse: onCollapseMeetingExpansion,
-                    knownPeople: knownPeople,
-                    savedSpeakerIDs: savedSpeakerIDs,
-                    onAssignSpeakers: { assignments, completion in
-                        onAssignMeetingSpeakers(meeting, assignments, completion)
-                    },
-                    menuItems: meetingRowMenuItems(meeting),
-                    onToggleStar: { onToggleMeetingStar(meeting) }
-                )
             } else {
-                QuietMeetingRow(
+                let isExpanded = homeExpandedMeetingID == meeting.id
+                QuietMeetingCard(
                     item: meeting,
+                    isExpanded: isExpanded,
+                    preview: isExpanded && homeExpandedMeetingPreview?.id == meeting.id ? homeExpandedMeetingPreview : nil,
                     isCopied: homeCopiedRowID == meeting.id,
-                    onOpen: { onOpenMeeting(meeting) },
-                    onCopy: { onCopyMeeting(meeting) },
                     menuItems: meetingRowMenuItems(meeting),
                     showsMicBoostHint: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                         audioHealth: meeting.audioHealth,
@@ -239,7 +224,15 @@ struct HomeSettingsPage: View {
                         hintsHiddenThrough: micBoostHintsHiddenThrough
                     ),
                     voicesToName: meetingVoicesToName(meeting),
-                    onWhoSpoke: { onWhoSpoke(meeting) }
+                    knownPeople: knownPeople,
+                    savedSpeakerIDs: savedSpeakerIDs,
+                    onToggleExpanded: { onOpenMeeting(meeting) },
+                    onCollapse: onCollapseMeetingExpansion,
+                    onCopy: { onCopyMeeting(meeting) },
+                    onWhoSpoke: { onWhoSpoke(meeting) },
+                    onAssignSpeakers: { assignments, completion in
+                        onAssignMeetingSpeakers(meeting, assignments, completion)
+                    }
                 )
             }
         case .failed(let failedMeeting):
@@ -256,26 +249,23 @@ struct HomeSettingsPage: View {
     }
 }
 
-/// Shown over Home while files are dragged over it.
+/// Shown over Meetings while files are dragged over it.
 private struct HomeAudioDropTargetOverlay: View {
     var body: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(LibraryTokens.accent, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
+        RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+            .strokeBorder(DesignTokens.hairlineStrong, style: StrokeStyle(lineWidth: 1.5, dash: [6, 4]))
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(LibraryTokens.accent.opacity(0.08))
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
+                    .fill(DesignTokens.fill)
             )
             .overlay {
                 VStack(spacing: 6) {
                     Image(systemName: "square.and.arrow.down")
-                        .font(.system(size: 24, weight: .regular))
+                        .font(.system(size: 22, weight: .regular))
                     Text("Drop to transcribe")
-                        .font(.headline)
-                    Text("Audio files and video recordings")
-                        .font(.caption)
-                        .foregroundStyle(LibraryTokens.ink2)
+                        .font(TextRole.heading.font())
                 }
-                .foregroundStyle(LibraryTokens.accent)
+                .foregroundStyle(LibraryTokens.ink)
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)

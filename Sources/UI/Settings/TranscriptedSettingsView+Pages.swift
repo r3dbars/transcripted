@@ -328,7 +328,6 @@ extension TranscriptedSettingsView {
     private var homePage: some View {
         HomeSettingsPage(
             homeViewModel: homeViewModel,
-            capturesToday: homeViewModel.todayMeetingCount,
             attentionTitle: homeAttentionIssues.first?.title,
             meetingDaySections: homeMeetingDaySections,
             homeCopiedRowID: homeCopiedRowID,
@@ -410,14 +409,6 @@ extension TranscriptedSettingsView {
             onCopyMeeting: { meeting in
                 handleCopyMeeting(meeting)
             },
-            onRevealMeetingInFinder: { meeting in
-                trackSettingsAction("reveal_meeting_in_finder", page: .home)
-                _ = revealOwnFile(
-                    candidateURLs: [meeting.transcriptURL],
-                    failureTitle: "Could not show file",
-                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                )
-            },
             onCollapseMeetingExpansion: {
                 collapseHomeMeetingExpansion()
             },
@@ -432,7 +423,6 @@ extension TranscriptedSettingsView {
                 assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
-            onToggleMeetingStar: { item in toggleMeetingStar(item) },
             meetingVoicesToName: { item in
                 speakerPeopleModel.hasLoadedProfiles ? speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) : 0
             },

@@ -10,6 +10,6 @@ enum HomeDeleteConfirmationPolicy {
     static let failedMeeting = HomeDeleteConfirmationPresentation(
         title: "Delete this failed meeting?",
         message: "This deletes the saved audio for this meeting. This can't be undone.",
-        confirmTitle: "Delete Failed Meeting"
+        confirmTitle: "Delete"
     )
 }
