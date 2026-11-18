@@ -19,6 +19,14 @@ enum ShortcutRecordingTarget: CaseIterable {
         }
     }
 
+    /// The row's title in Settings. `name` stays the word clash hints use.
+    var rowTitle: String {
+        switch self {
+        case .dictation: return "Dictation key"
+        case .meeting: return "Meetings key"
+        }
+    }
+
     var binding: PhysicalDictationTriggerBinding {
         switch self {
         case .dictation: return PhysicalDictationTriggerPreferences.pushToTalkBinding()
@@ -238,7 +246,7 @@ struct ShortcutKeyRow<Footer: View>: View {
         let isRecording = recorder.recordingTarget == target
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
-                GeneralTitleLabel(title: target.name, info: info)
+                GeneralTitleLabel(title: target.rowTitle, info: info)
 
                 Spacer(minLength: 10)
 
@@ -262,18 +270,18 @@ struct ShortcutKeyRow<Footer: View>: View {
                         .frame(minWidth: 72)
                 }
                 .controlSize(.regular)
-                .tint(isRecording ? .orange : nil)
+                .tint(isRecording ? LibraryTokens.attention : nil)
                 .buttonStyle(.bordered)
                 .help(isRecording ? "Press the new shortcut, or Esc to cancel." : "Click, then press a new shortcut.")
-                .accessibilityLabel(Text(target.name))
+                .accessibilityLabel(Text(target.rowTitle))
                 .accessibilityValue(Text(recorder.displayText(for: target)))
                 .accessibilityIdentifier(automationIdentifier)
             }
 
             if let hint = recorder.hint(for: target) {
                 Text(hint)
-                    .font(.caption)
-                    .foregroundStyle(.orange)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
@@ -316,16 +324,11 @@ struct DictationKeyBehaviorRow: View {
     var body: some View {
         HStack(alignment: .center, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
-                GeneralTitleLabel(
-                    title: "Behavior",
-                    info: GeneralInfo(
-                        title: "Behavior",
-                        message: "Hold or tap: hold the key to talk and let go to paste, or tap it to keep listening and tap again to paste. Hold only: records only while you hold it. Tap to toggle: every tap starts or stops."
-                    )
-                )
+                // The summary line already says what the choice does, so no ⓘ.
+                GeneralTitleLabel(title: "Behavior", info: nil)
                 Text(behavior.summary)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
 

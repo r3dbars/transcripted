@@ -1,11 +1,12 @@
 import Foundation
 import SwiftUI
 
-/// The Storage portion of the combined settings page (2026-08 card restyle):
-/// five always-visible card rows — capture library, delete-audio window,
-/// keep-dictation-audio window, free-up-space, and a support-files reveal. Row explanations live in ⓘ
-/// popovers. Local confirmation state lives here; persisted state and
-/// filesystem work route through injected callbacks.
+/// Settings › Library: four rows — the capture folder, how long meeting
+/// audio and dictation audio are kept, and Free up space (what the voice
+/// models take, with a Review… breakdown and the cleanup). Row explanations
+/// live in ⓘ popovers. Local confirmation state lives here; persisted state
+/// and filesystem work route through injected callbacks. Support files moved
+/// to Advanced (`SupportFilesSettingsRow`).
 struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let captureLibraryURL: URL
     let unavailableCaptureLibraryPath: String?
@@ -24,8 +25,9 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let modelCacheCleanupStatus: String?
     let modelCacheCleanupStatusDetails: String?
     let effectiveTranscriptionModelIsWhisper: Bool
-
-    let supportFilesFolder: URL
+    /// Where Writing keeps its model, so the breakdown can list its size.
+    /// Read-only here; Writing's own page deletes it.
+    let writingModelRoot: URL?
 
     let onChooseCaptureLibrary: () -> Void
     let onResetCaptureLibrary: () -> Void
@@ -42,16 +44,17 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     /// Pending meeting and dictation audio windows, one slot each.
     @State private var retentionPrompts = StorageRetentionPrompts()
     @State private var showReclaimableCacheCleanupConfirmation = false
+    @State private var showsModelBreakdown = false
+    @State private var writingModelBytes: Int64?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            SettingsCardLabel(text: "Storage")
+            SettingsCardLabel(text: "Library")
             SettingsCard {
                 libraryRow
                 deleteAudioRow
                 keepDictationAudioRow
                 freeUpSpaceRow
-                supportFilesRow
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.storage")
@@ -69,7 +72,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         }
                     } else {
                         Text(status)
-                            .font(.caption)
+                            .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                             .fixedSize(horizontal: false, vertical: true)
                         failureDetailsButton(captureLibraryMigrationStatusDetails)
@@ -81,7 +84,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             if let status = modelCacheCleanupStatus {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(status)
-                        .font(.caption)
+                        .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                     failureDetailsButton(modelCacheCleanupStatusDetails)
@@ -91,6 +94,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.storage")
+        .id("transcripted.settings.section.storage")
         .onAppear {
             if modelCacheSnapshot == nil, !modelCacheLoading {
                 onLoadModelCacheSnapshot()
@@ -115,18 +119,18 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     private var libraryRow: some View {
         VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
-                title: "Capture library",
+                title: "Folder",
                 info: GeneralInfo(
-                    title: "Capture library",
-                    message: "Where meetings and dictations save as Markdown. Pick any folder you want agents to read — an Obsidian vault works great."
+                    title: "Folder",
+                    message: "Where meetings and dictations save as Markdown. Any folder works, including a notes vault your agents read."
                 ),
                 automationIdentifier: "transcripted.settings.storage.capture-library",
                 showsDivider: unavailableCaptureLibraryPath == nil
             ) {
                 HStack(spacing: 8) {
                     Text((captureLibraryURL.path as NSString).abbreviatingWithTildeInPath)
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .frame(maxWidth: 190, alignment: .trailing)
@@ -150,8 +154,8 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(LibraryTokens.attention)
                         .frame(width: 20)
-                    Text("Transcripted can't reach \(unavailableCaptureLibraryPath). It is using the default capture library until that folder is available again or you choose a new one.")
-                        .font(.caption)
+                    Text("Transcripted can't reach \(unavailableCaptureLibraryPath), so it's saving to the default folder until that one is back or you pick another.")
+                        .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -164,22 +168,28 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
     private var deleteAudioRow: some View {
         SettingsControlRow(
-            title: "Delete meeting audio after",
+            title: "Keep meeting audio",
             info: GeneralInfo(
-                title: "Delete meeting audio after",
-                message: "Transcripts are kept forever. This only deletes meeting audio. Choosing 7 or 30 days asks before the first cleanup. Audio is shrunk to a smaller file automatically after each transcript saves."
+                title: "Keep meeting audio",
+                message: "Transcripts are always kept; this is only the audio. A shorter window asks before it deletes anything."
             ),
             automationIdentifier: "transcripted.settings.storage.delete-audio"
         ) {
-            Picker("Delete meeting audio after", selection: audioRetentionWindowBinding) {
+            Picker("Keep meeting audio", selection: audioRetentionWindowBinding) {
                 ForEach(AudioRetentionWindow.allCases) { window in
-                    Text(window.title).tag(window)
+                    Text(Self.keepTitle(for: window)).tag(window)
                 }
             }
             .labelsHidden()
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .fixedSize()
         }
+    }
+
+    /// The stored meeting window says when audio is deleted ("Never"); the
+    /// row asks how long it's kept, so `.never` reads "Forever".
+    static func keepTitle(for window: AudioRetentionWindow) -> String {
+        window == .never ? "Forever" : window.title
     }
 
     private var keepDictationAudioRow: some View {
@@ -187,7 +197,7 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
             title: "Keep dictation audio",
             info: GeneralInfo(
                 title: "Keep dictation audio",
-                message: "Lets you play back and re-transcribe dictations. Text is always kept."
+                message: "Lets you play back and transcribe dictations again. Text is always kept."
             ),
             automationIdentifier: "transcripted.settings.storage.keep-dictation-audio"
         ) {
@@ -197,47 +207,44 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 }
             }
             .labelsHidden()
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
             .fixedSize()
         }
     }
 
+    /// Model-cache inspection and cleanup (a protected surface): the row says
+    /// what can go, Review… shows what each voice model store takes and holds
+    /// the cleanup.
     private var freeUpSpaceRow: some View {
         SettingsControlRow(
             title: "Free up space",
             info: GeneralInfo(
                 title: "Free up space",
-                message: "Removes old model files Transcripted no longer needs. The models you're using stay."
+                message: "Removes old voice model files Transcripted no longer needs. The ones you use stay."
             ),
-            automationIdentifier: "transcripted.settings.storage.free-up-space"
+            automationIdentifier: "transcripted.settings.storage.free-up-space",
+            showsDivider: false
         ) {
             HStack(spacing: 8) {
                 if modelCacheLoading, modelCacheSnapshot == nil {
                     ProgressView().controlSize(.small)
                 } else if let snapshot = modelCacheSnapshot {
-                    let includeWhisper = !effectiveTranscriptionModelIsWhisper
-                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisper)
+                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInCleanup)
                     Text(reclaimableBytes > 0
-                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisper)) reclaimable"
+                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisperInCleanup)) can go"
                         : "Nothing to clean up")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
 
-                    if reclaimableBytes > 0 {
-                        SettingsInlineActionButton(
-                            title: modelCacheCleanupInProgress ? "Removing…" : "Free Up Space",
-                            tone: .destructive
-                        ) {
-                            showReclaimableCacheCleanupConfirmation = true
-                        }
-                        .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                    SettingsInlineActionButton(
+                        title: "Review…",
+                        automationIdentifier: "transcripted.settings.storage.free-up-space.review"
+                    ) {
+                        showsModelBreakdown = true
                     }
-
-                    SettingsInlineActionButton(title: "Rescan", symbolName: "arrow.clockwise") {
-                        onRefreshModelCacheSnapshot()
+                    .popover(isPresented: $showsModelBreakdown, arrowEdge: .bottom) {
+                        modelBreakdown(snapshot)
                     }
-                    .disabled(modelCacheLoading)
-                    .help("Rescan model storage sizes.")
                 } else {
                     SettingsInlineActionButton(title: "Scan") {
                         onRefreshModelCacheSnapshot()
@@ -247,19 +254,83 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         }
     }
 
-    private var supportFilesRow: some View {
-        SettingsControlRow(
-            title: "Support files",
-            info: GeneralInfo(
-                title: "Support files",
-                message: "App state, cache, and logs — useful when debugging something with support. Not your transcripts."
-            ),
-            automationIdentifier: "transcripted.settings.storage.support-files",
-            showsDivider: false
-        ) {
-            SettingsInlineActionButton(title: "Show in Finder", symbolName: "folder") {
-                NSWorkspace.shared.activateFileViewerSelecting([supportFilesFolder])
+    private var includeWhisperInCleanup: Bool {
+        !effectiveTranscriptionModelIsWhisper
+    }
+
+    /// What each store takes, then the cleanup. Sizes only; nothing here
+    /// opens a file.
+    private func modelBreakdown(_ snapshot: ModelCacheSnapshot) -> some View {
+        let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisperInCleanup)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Voice models on this Mac")
+                .textRole(.heading)
+
+            VStack(alignment: .leading, spacing: 6) {
+                breakdownLine("Speech models", snapshot.formattedFluidAudioModelsSize)
+                breakdownLine("Old models", snapshot.staleFluidAudioModelBytes > 0
+                    ? "\(snapshot.formattedStaleFluidAudioModelSize), can go"
+                    : "None")
+                breakdownLine("Whisper", snapshot.whisperModelsBytes > 0
+                    ? (includeWhisperInCleanup
+                        ? "\(snapshot.formattedWhisperModelsSize), can go"
+                        : "\(snapshot.formattedWhisperModelsSize), in use")
+                    : "None")
+                breakdownLine("App cache", snapshot.formattedTranscriptedCacheSize)
+                if writingModelRoot != nil {
+                    breakdownLine("Writing model", writingModelBytes.map { bytes in
+                        bytes > 0 ? "\(ModelCacheInventory.formattedByteCount(bytes)), on the Writing page" : "None"
+                    } ?? "…")
+                }
             }
+
+            HStack(spacing: 8) {
+                if reclaimableBytes > 0 {
+                    SettingsInlineActionButton(
+                        title: modelCacheCleanupInProgress ? "Removing…" : "Free up space",
+                        tone: .destructive
+                    ) {
+                        showsModelBreakdown = false
+                        showReclaimableCacheCleanupConfirmation = true
+                    }
+                    .disabled(modelCacheCleanupInProgress || modelCacheLoading)
+                }
+
+                SettingsInlineActionButton(title: "Rescan", symbolName: "arrow.clockwise") {
+                    onRefreshModelCacheSnapshot()
+                    loadWritingModelBytes()
+                }
+                .disabled(modelCacheLoading)
+                .help("Rescan model storage sizes.")
+            }
+        }
+        .padding(16)
+        .frame(width: 300, alignment: .leading)
+        .task { loadWritingModelBytes() }
+    }
+
+    private func breakdownLine(_ title: String, _ value: String) -> some View {
+        HStack(spacing: 12) {
+            Text(title)
+                .font(LibraryTokens.body)
+                .foregroundStyle(LibraryTokens.ink)
+            Spacer(minLength: 12)
+            Text(value)
+                .font(LibraryTokens.meta)
+                .monospacedDigit()
+                .foregroundStyle(LibraryTokens.ink2)
+        }
+    }
+
+    /// Writing's model size, measured off the main thread. Only file sizes
+    /// are read, the same walk Writing's own storage meter does.
+    private func loadWritingModelBytes() {
+        guard let root = writingModelRoot else { return }
+        Task {
+            let bytes = await Task.detached(priority: .utility) {
+                WritingStorageUsage.fileBytes(under: root)
+            }.value
+            writingModelBytes = bytes
         }
     }
 
@@ -341,10 +412,10 @@ private extension StorageSettingsPage {
                     onMoveCapturesThenSwitchLibrary(choice)
                 }
                 .keyboardShortcut(.defaultAction)
-                Button("Copy Instead") {
+                Button("Copy instead") {
                     onCopyCapturesThenSwitchLibrary(choice)
                 }
-                Button("Just Switch") {
+                Button("Just switch") {
                     onSwitchLibraryWithoutCopying(choice)
                 }
             }
@@ -354,7 +425,7 @@ private extension StorageSettingsPage {
             // SwiftUI runs the action before or after dismissal clears it.
             let effect = retentionPrompts.confirmEffect(for: .meetingAudio)
             if effect != .none {
-                Button("Delete Old Audio", role: .destructive) {
+                Button("Delete old audio", role: .destructive) {
                     performRetention(effect)
                 }
             }
@@ -364,7 +435,7 @@ private extension StorageSettingsPage {
         case .dictationAudio:
             let effect = retentionPrompts.confirmEffect(for: .dictationAudio)
             if effect != .none {
-                Button("Delete Audio", role: .destructive) {
+                Button("Delete audio", role: .destructive) {
                     performRetention(effect)
                 }
             }
@@ -405,14 +476,14 @@ struct PendingCaptureLibraryChoice: Equatable {
     var moveButtonTitle: String {
         switch destinationKind {
         case .custom:
-            return "Move to New Folder"
+            return "Move to new folder"
         case .defaultLibrary:
-            return "Move to Default Folder"
+            return "Move to default folder"
         }
     }
 
     var promptMessage: String {
-        "Your current library has saved meetings or dictations. Move puts them in the \(destinationDescription) and sends the old copies to the Trash. Copy Instead keeps them in both places, which uses twice the space. Just Switch leaves everything in \(currentLibrary.path), and Transcripted and connected agents will only see the \(destinationDescription)."
+        "Your current library has saved meetings or dictations. Move puts them in the \(destinationDescription) and sends the old copies to the Trash. Copy instead keeps them in both places, which uses twice the space. Just switch leaves everything in \(currentLibrary.path), and Transcripted and connected agents will only see the \(destinationDescription)."
     }
 
     var destinationDescription: String {
