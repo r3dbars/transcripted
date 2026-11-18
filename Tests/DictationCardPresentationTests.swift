@@ -23,15 +23,15 @@ func testDictationCardPresentation() {
         assertEqual(DictationCardFormatting.clockText(seconds: .nan), "0:00", "a bad duration reads as zero")
     }
 
-    runSuite("Card metadata reads time, length, words, app, then any delivery problem") {
+    runSuite("Card metadata reads length, time, words, app, then any delivery problem") {
         let items = DictationCardFormatting.metadata(
             time: "5:30 AM", length: 16, wordCount: 46, appName: "Claude", delivery: .pasted
         )
-        assertEqual(items.map(\.text), ["5:30 AM", "16 sec", "46 words", "Claude"], "a pasted take has no problem note")
-        assertEqual(items.map(\.kind), [.time, .length, .words, .app], "kinds follow the same order")
+        assertEqual(items.map(\.text), ["16 sec", "5:30 AM", "46 words", "Claude"], "a pasted take has no problem note")
+        assertEqual(items.map(\.kind), [.length, .time, .words, .app], "kinds follow the same order")
         assertEqual(
             DictationCardFormatting.accessibilitySummary(items),
-            "5:30 AM, 16 sec, 46 words, Claude",
+            "16 sec, 5:30 AM, 46 words, Claude",
             "VoiceOver reads the whole bar"
         )
         assertEqual(
@@ -106,5 +106,37 @@ func testDictationCardPresentation() {
         let other = Policy.availability(entryID: "b", hasAudio: true, runningEntryID: "a", globalUnavailableReason: nil)
         assertFalse(Policy.isEnabled(other), "another entry waits")
         assertEqual(Policy.menuTitle(for: other), "Transcribe again (after the current one)", "and says why")
+    }
+
+    runSuite("Find dictations matches every word against the text, app, and date") {
+        func entry(_ text: String, app: String, daysAgo: Int = 0) -> SavedDictationEntry {
+            SavedDictationEntry(
+                url: URL(fileURLWithPath: "/nonexistent/Dictations_fixture.md"),
+                entryID: text,
+                title: "Dictation",
+                text: text,
+                createdAt: Date(timeIntervalSince1970: 1_800_000_000 - Double(daysAgo) * 86_400),
+                delivery: .pasted,
+                sourceAppName: app,
+                sourceAppBundleID: nil
+            )
+        }
+        let entries = [
+            entry("Ship the onboarding fix first", app: "Slack"),
+            entry("Thanks, I'll review it tomorrow", app: "Mail", daysAgo: 1),
+            entry("Notes for the design review", app: "Unknown", daysAgo: 2),
+        ]
+        assertEqual(DictationSearch.matches(entries, query: "review").map(\.text),
+                    ["Thanks, I'll review it tomorrow", "Notes for the design review"], "text matches, order kept")
+        assertEqual(DictationSearch.matches(entries, query: "slack ONBOARDING").map(\.text),
+                    ["Ship the onboarding fix first"], "every word must match, across text and app, any case")
+        assertEqual(DictationSearch.matches(entries, query: "unknown").count, 0, "a missing app name isn't searchable")
+        assertEqual(DictationSearch.matches(entries, query: "  ").count, 3, "a blank query matches everything")
+        assertFalse(DictationSearch.isActive(query: " \n"), "whitespace isn't a search")
+        assertTrue(DictationSearch.isActive(query: "mail"), "a word is")
+        assertEqual(DictationSearch.emptyMessage(isSearchPassRunning: true), "Searching all dictations\u{2026}",
+                    "doesn't claim none while looking")
+        assertEqual(DictationSearch.emptyMessage(isSearchPassRunning: false), "No dictations match your search.",
+                    "says none once it has looked")
     }
 }

@@ -71,7 +71,8 @@ struct QuietHomeHeader: View {
 }
 
 /// A 12 pt header glyph with a 40 pt hit shape and the row hover fill.
-private struct QuietHeaderIconButton: View {
+/// Dictations' header uses it too, so the two Find buttons match.
+struct QuietHeaderIconButton: View {
     let systemName: String
     let help: String
     var isOn: Bool? = nil

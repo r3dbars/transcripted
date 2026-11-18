@@ -158,12 +158,9 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
                         NSImage.SymbolConfiguration(pointSize: 12, weight: .medium)
                     )
                 }
-                if item.isDestructive {
-                    menuItem.attributedTitle = NSAttributedString(
-                        string: item.title,
-                        attributes: [.foregroundColor: NSColor.systemRed]
-                    )
-                }
+                // Destructive items (Delete) draw in ink like the rest of the
+                // menu; their own confirm or undo is the safety step, and red
+                // is kept for that confirm (docs/ui-tokens.md).
                 if let automationIdentifier = item.automationIdentifier {
                     menuItem.identifier = NSUserInterfaceItemIdentifier(automationIdentifier)
                     menuItem.setAccessibilityIdentifier(automationIdentifier)

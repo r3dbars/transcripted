@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// The Writing page (⌘4). Until setup is done it shows the two intro pages,
-/// then the three setup steps; after "Turn on writing" it shows the everyday
-/// view (docs/writing-plan.md, "Product design (approved)"). The views live
+/// The Writing page (⌘4). Until setup is done it shows the two setup
+/// screens (the pitch with both questions, then Allow and download; owner
+/// approved 2026-11-18); after "Turn on writing" it shows the everyday view
+/// (docs/writing-plan.md, "Product design (approved)"). The views live
 /// in `Sources/UI/Settings/Writing/`; state and every runtime action go
 /// through `WritingSettingsModel` and `WritingController`. "Turn on writing"
 /// sets `WritingSidebarNewBadge.dismissedDefaultsKey`, which drops the
@@ -22,14 +23,6 @@ struct WritingSettingsPage: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
             switch model.screen {
-            case let .intro(page):
-                WritingIntroView(
-                    page: page,
-                    onNext: { model.showIntroPage(page + 1) },
-                    onBack: { model.showIntroPage(page - 1) },
-                    onSetUp: { model.beginSetup() },
-                    onNotNow: { model.dismissNewBadge() }
-                )
             case let .setup(step):
                 WritingSetupFlowView(model: model, step: step)
             case .everyday:

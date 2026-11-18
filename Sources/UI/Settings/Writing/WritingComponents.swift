@@ -5,7 +5,7 @@ import SwiftUI
 // Colors, type and radii come from `LibraryTokens`; the primary button is the
 // shared `TranscriptedButtonStyle`, like the first-run onboarding's.
 
-/// The ink primary action: Next, Continue, Set up writing, Turn on writing.
+/// The ink primary action: Continue, Turn on writing.
 struct WritingPrimaryButton: View {
     let title: String
     var isEnabled = true
@@ -23,7 +23,7 @@ struct WritingPrimaryButton: View {
     }
 }
 
-/// The quiet text action: Back, Cancel.
+/// The quiet text action: Back, Cancel, Not now.
 struct WritingSecondaryButton: View {
     let title: String
     let automationIdentifier: String
@@ -43,7 +43,7 @@ struct WritingSecondaryButton: View {
     }
 }
 
-/// Page dots for the two intro pages.
+/// Page dots for the two setup screens.
 struct WritingPageDots: View {
     let count: Int
     let current: Int
@@ -67,7 +67,7 @@ struct WritingBadge: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold))
+            .font(LibraryTokens.small.weight(.medium))
             .foregroundStyle(LibraryTokens.ink2)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -83,35 +83,71 @@ struct WritingKeyCap: View {
 
     var body: some View {
         Text(key)
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
+            .font(LibraryTokens.small.weight(.semibold))
             .foregroundStyle(isPressed ? DesignTokens.paper : LibraryTokens.ink)
             .padding(.horizontal, 7)
             .frame(minWidth: 26, minHeight: 20)
             .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
                     .fill(isPressed ? LibraryTokens.ink : LibraryTokens.raisedFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
                     .stroke(isPressed ? LibraryTokens.ink : LibraryTokens.raisedStroke, lineWidth: 1)
             )
             .accessibilityLabel(Text(key == "~" ? "tilde key" : key))
     }
 }
 
-/// "Step 1 of 3" over the step's title.
-struct WritingStepHeader: View {
-    let step: Int
-    let title: String
+/// A setup question ("What should Writing do?", "Which apps?"): the
+/// heading role, so it sits between the page title and the rows.
+struct WritingQuestionTitle: View {
+    let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(WritingSetupPresentation.stepLabel(step))
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink2)
-            Text(title)
-                .font(.system(size: 22, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
+        Text(text)
+            .font(LibraryTokens.heading)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One switch row in a `SettingsCard`: the title in the body role (13
+/// medium) over its 12 pt line, never the other way round. Setup's two
+/// features and the everyday Settings card share it.
+struct WritingToggleRow: View {
+    let title: String
+    let line: String
+    @Binding var isOn: Bool
+    var isEnabled = true
+    let automationIdentifier: String
+    var showsDivider = true
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(LibraryTokens.rowTitle)
+                Text(line)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(!isEnabled)
+                .accessibilityLabel(Text(title))
+                .accessibilityHint(Text(line))
+                .accessibilityIdentifier(automationIdentifier)
+        }
+        .opacity(isEnabled ? 1 : 0.6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .overlay(alignment: .bottom) {
+            if showsDivider { Divider() }
         }
     }
 }

@@ -26,9 +26,9 @@ enum DictationCardFormatting {
         }
     }
 
-    /// The bar's metadata, in order: time, length, words, app, problem.
-    /// Length is left out until it's known; the app is left out when the
-    /// entry doesn't name one.
+    /// The bar's metadata, in order: length, time, words, app, problem
+    /// (length first, as approved for the card). Length is left out until
+    /// it's known; the app is left out when the entry doesn't name one.
     static func metadata(
         time: String,
         length: TimeInterval?,
@@ -36,10 +36,11 @@ enum DictationCardFormatting {
         appName: String,
         delivery: DictationDelivery
     ) -> [MetadataItem] {
-        var items = [MetadataItem(kind: .time, text: time)]
+        var items: [MetadataItem] = []
         if let length, length > 0 {
             items.append(MetadataItem(kind: .length, text: lengthText(seconds: length)))
         }
+        items.append(MetadataItem(kind: .time, text: time))
         items.append(MetadataItem(kind: .words, text: wordsText(wordCount)))
         let app = appName.trimmingCharacters(in: .whitespacesAndNewlines)
         if !app.isEmpty, app != "Unknown" {
@@ -170,4 +171,44 @@ enum DictationTranscribeAgainPolicy {
 enum DictationRowMenuIdentifier {
     static let reveal = "transcripted.dictations.row.reveal"
     static let transcribeAgain = "transcripted.dictations.row.transcribeAgain"
+}
+
+/// Find on the Dictations page: the Meetings matcher (`HomeMeetingListFilter`)
+/// over a dictation's text, app, and date words. Dictation bodies are short,
+/// so unlike meetings the text itself is searched.
+enum DictationSearch {
+    static let pageSize = 10
+    static let searchingMessage = "Searching all dictations\u{2026}"
+    static let noMatchesMessage = "No dictations match your search."
+
+    static func isActive(query: String) -> Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func searchFields(for entry: SavedDictationEntry) -> [String] {
+        var fields = [entry.text, HomeMeetingListFilter.dateSearchText(for: entry.createdAt)]
+        let app = entry.sourceAppName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !app.isEmpty, app != "Unknown" {
+            fields.append(app)
+        }
+        return fields
+    }
+
+    /// Every entry whose fields hold each query word, in the given order.
+    static func matches(_ entries: [SavedDictationEntry], query: String) -> [SavedDictationEntry] {
+        let tokens = HomeMeetingListFilter.tokens(in: query)
+        guard !tokens.isEmpty else { return entries }
+        return entries.filter { entry in
+            HomeMeetingListFilter.matches(
+                tokens: tokens,
+                haystack: HomeMeetingListFilter.haystack(for: searchFields(for: entry))
+            )
+        }
+    }
+
+    /// What an empty list says while searching. Doesn't claim "none" before
+    /// the pass over every dictation has looked.
+    static func emptyMessage(isSearchPassRunning: Bool) -> String {
+        isSearchPassRunning ? searchingMessage : noMatchesMessage
+    }
 }
