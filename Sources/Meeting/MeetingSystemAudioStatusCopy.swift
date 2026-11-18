@@ -276,6 +276,12 @@ enum MeetingSystemAudioPromptPolicy {
         warning?.shouldPresentPrompt == true && !hasAudioInactivityWarning
     }
 
+    static func allowsSplit(inactivity: MeetingAudioInactivityWarning?,
+                            systemAudio: MeetingSystemAudioDegradationWarning?, routeActive: Bool) -> Bool {
+        inactivity == nil && !routeActive
+            && !shouldPresentSystemAudioPrompt(warning: systemAudio, hasAudioInactivityWarning: false)
+    }
+
     /// Whether the prompt for this warning offers Keep Recording and
     /// End & Transcribe. A recovered warning only informs.
     static func offersActions(for warning: MeetingSystemAudioDegradationWarning) -> Bool {

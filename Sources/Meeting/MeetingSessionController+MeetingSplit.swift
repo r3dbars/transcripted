@@ -44,27 +44,40 @@ extension MeetingSessionController {
     /// title and its own call-end arming. A re-join has no candidate, so the
     /// new recording is armed on this one's call app.
     func acceptMeetingSplit(_ offer: MeetingSplitOffer) async {
-        guard meetingSplitOffer == offer, audioInactivityWarning == nil else { return }
+        guard splitIsEligible(offer) else { return }
         if offer.candidate != nil {
-            guard await refreshCalendarForSplitAcceptance?() == true,
-                  offer == meetingSplitOffer, audioInactivityWarning == nil else { return }
+            guard await refreshCalendarForSplitAcceptance?() == true else { return }
+        } else {
+            let snapshot = await freshCallActivitySnapshot()
+            guard isRecording, activeRecordingIdentity == offer.recordingIdentity,
+                  offer.matches(meetingSplitOffer) else { return }
+            // Use the same freshness, attribution and reliability checks as the
+            // observer. A timeout is unknown and withdraws this rejoin.
+            observeCallActivity(snapshot ?? .unknown)
         }
-        meetingSplitOffer = nil
-        guard offer.isCurrent(at: Date()), case .recording = state, offer.recordingIdentity == activeRecordingIdentity else { return }
         let rejoinFamilies = offer.candidate == nil ? callEndTracking?.families : nil
-        trackMeetingSplit("split", candidate: offer.candidate)
-        // Before the stop, like a prompt Record: the detector can evaluate
-        // between the two recordings and must not prompt for this meeting.
-        if let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .accepted) }
+        var accepted = false
         let started = await MeetingStopSequence.split(
-            stopAndEnqueue: { await stopRecording(reason: .newMeetingSplit) != nil },
+            stopAndEnqueue: {
+                guard splitIsEligible(offer) else { return false }
+                if offer.candidate == nil {
+                    guard let tracking = callEndTracking, tracking.recordingIdentity == offer.recordingIdentity,
+                          latestCallActivity.confirmsCallAudio(in: tracking, at: ProcessInfo.processInfo.systemUptime)
+                    else { return false }
+                }
+                accepted = true
+                meetingSplitOffer = nil
+                trackMeetingSplit("split", candidate: offer.candidate)
+                if let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .accepted) }
+                return await stopRecording(reason: .newMeetingSplit) != nil
+            },
             startNext: {
                 await startRecording(trigger: .detectedPrompt,
                                      suggestedTitle: offer.candidate?.suggestedTranscriptTitle,
                                      detectedCallCandidate: offer.candidate)
             }
         )
-        if !started, let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .startFailed) }
+        if accepted, !started, let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .startFailed) }
         if started, let rejoinFamilies, callEndTracking == nil,
            AutoCallDetectionPreferences.isEnabled(), let identity = activeRecordingIdentity {
             armCallEndTracking(identity: identity, families: rejoinFamilies, late: false)
@@ -73,11 +86,18 @@ extension MeetingSessionController {
 
     /// Keep recording. A calendar meeting is not offered again; a re-join
     /// is offered again only after another "Call ended" warning.
-    func declineMeetingSplit() {
-        guard let offer = meetingSplitOffer else { return }
+    func declineMeetingSplit(_ offer: MeetingSplitOffer) {
+        guard splitIsEligible(offer) else { return }
         meetingSplitOffer = nil
         trackMeetingSplit("kept", candidate: offer.candidate)
         if let candidate = offer.candidate { onMeetingSplitDecision?(candidate, .declined) }
+    }
+
+    private func splitIsEligible(_ offer: MeetingSplitOffer) -> Bool {
+        isRecording && activeRecordingIdentity == offer.recordingIdentity && offer.matches(meetingSplitOffer)
+            && offer.isCurrent(at: Date()) && MeetingSystemAudioPromptPolicy.allowsSplit(
+                inactivity: audioInactivityWarning, systemAudio: systemAudioDegradationWarning,
+                routeActive: audioRouteWarning != nil)
     }
 
     private func trackMeetingSplit(_ action: String, candidate: MeetingPromptDetector.Candidate?) {

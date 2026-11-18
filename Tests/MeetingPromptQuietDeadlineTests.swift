@@ -19,7 +19,7 @@ func testMeetingPromptQuietDeadline() async {
         for: .teams, reason: .micInput, evidence: .nativeApp, now: now
     ).candidate
     detector.detectedCallSession = MeetingPromptDetector.DetectedCallSession(
-        providers: [.teams], seenReasons: [.micInput], startedAt: now,
+        providers: [.teams], activeNativeProviders: [.teams], seenReasons: [.micInput], startedAt: now,
         sawMeetingRecording: false, userDeclined: false, promptShown: true
     )
     let decision = detector.dismiss(candidate: candidate)
@@ -28,7 +28,7 @@ func testMeetingPromptQuietDeadline() async {
     runSuite("A returning native call cannot extend the original dismissal deadline") {
         detector.nativeNotNowCallEnded(notNows, now: now)
         var returning = MeetingPromptDetector.DetectedCallSession(
-            providers: [.teams], seenReasons: [.micInput], startedAt: now.addingTimeInterval(10),
+            providers: [.teams], activeNativeProviders: [.teams], seenReasons: [.micInput], startedAt: now.addingTimeInterval(10),
             sawMeetingRecording: false, userDeclined: false, promptShown: false
         )
         detector.carryOverEndedNativeNotNows(into: &returning, now: now.addingTimeInterval(10))
@@ -48,13 +48,35 @@ func testMeetingPromptQuietDeadline() async {
             candidateReason: nil, providerReason: nil, declinedAt: now, quietUntil: decision.until)
         detector.nativeNotNowCallEnded(["zoom": zoom], now: now.addingTimeInterval(50))
         var session = MeetingPromptDetector.DetectedCallSession(
-            providers: [.teams], seenReasons: [.micInput], startedAt: now.addingTimeInterval(80),
+            providers: [.teams], activeNativeProviders: [.teams], seenReasons: [.micInput], startedAt: now.addingTimeInterval(80),
             sawMeetingRecording: false, userDeclined: false, promptShown: false)
         detector.carryOverEndedNativeNotNows(into: &session, now: now.addingTimeInterval(80))
         assertTrue(session.nativeNotNows.isEmpty, "Teams prompts again after its own grace expires")
-        session.providers = [.zoom]
+        session.activeNativeProviders = [.zoom]
         detector.carryOverEndedNativeNotNows(into: &session, now: now.addingTimeInterval(80))
         assertTrue(session.nativeNotNows["zoom"] != nil, "Zoom retains its own active grace")
+    }
+
+    runSuite("Teams owns its decline only while signaled or returning within its own grace") {
+        for withinGrace in [true, false] {
+            detector.stop()
+            @MainActor func observe(_ providers: [MeetingPromptProvider], after seconds: TimeInterval) {
+                detector.updateDetectedCallSession(signals: providers.map { ($0, .micInput) },
+                                                   now: now.addingTimeInterval(seconds))
+            }
+            observe([.teams], after: 0)
+            detector.dismiss(candidate: candidate)
+            observe([.teams, .zoom], after: 1)
+            observe([.zoom], after: 2)
+            assertTrue(detector.detectedCallSession?.nativeNotNows[candidate.id] == nil,
+                       "Zoom remaining live must release Teams' decline")
+            assertTrue(!detector.isAutoStartBlockedThisCall(now: now.addingTimeInterval(3)),
+                       "Teams declining cannot veto Zoom after Teams leaves")
+            let returnTime = 2 + detector.recordedCallEndGrace + (withinGrace ? -1 : 1)
+            observe([.teams, .zoom], after: returnTime)
+            assertEqual(detector.learnedSuppression(for: candidate, now: now.addingTimeInterval(returnTime)) != nil,
+                        withinGrace, "only a return inside Teams' own grace inherits its decline")
+        }
     }
 
     runSuite("A later quiet deadline keeps the earlier recheck scheduled") {

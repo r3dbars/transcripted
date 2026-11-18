@@ -77,6 +77,7 @@ extension MeetingPromptDetector {
     // unrecorded can raise the missed-call nudge.
     struct DetectedCallSession {
         var providers: Set<MeetingPromptProvider>
+        var activeNativeProviders: Set<MeetingPromptProvider> = []
         // Every ad-hoc reason seen during the call (mic/output/camera), for the
         // coarse signal_kinds funnel property.
         var seenReasons: Set<MeetingPromptReason>
@@ -118,7 +119,9 @@ extension MeetingPromptDetector {
         var inheritedNativeDeclinesUntil: [String: Date] = [:]
 
         func hasActiveUserDecline(at now: Date) -> Bool {
-            userDeclined || inheritedNativeDeclinesUntil.values.contains { $0 > now }
+            userDeclined || nativeNotNows.values.contains { decline in
+                inheritedNativeDeclinesUntil[decline.kind].map { $0 > now } ?? true
+            }
         }
     }
 
@@ -175,6 +178,9 @@ extension MeetingPromptDetector {
         now: Date
     ) {
         let providers = Set(signals.map(\.provider))
+        // Prompt selection prefers mic over playback. A native provider still
+        // playing call audio has not left just because another app took the mic.
+        let activeNative = providers.union(audioOutputProviders()).subtracting([.googleMeet])
         let reasons = Set(signals.map(\.reason))
         let isMeetingRecording = currentOwnCaptureActivity() == .meetingRecording
 
@@ -183,6 +189,7 @@ extension MeetingPromptDetector {
                 recordedCallSessionStarted(now: now)
                 var session = DetectedCallSession(
                     providers: providers,
+                    activeNativeProviders: activeNative,
                     seenReasons: reasons,
                     startedAt: now,
                     sawMeetingRecording: isMeetingRecording,
@@ -223,6 +230,15 @@ extension MeetingPromptDetector {
             nativeNotNowCallEnded(session.nativeNotNows, now: now)
             finishDetectedCallSession(session, endedAt: now)
         } else {
+            let ended = session.nativeNotNows.filter { !activeNative.contains($0.value.provider) }
+            for (id, decline) in ended {
+                session.nativeNotNows[id] = nil
+                session.declinedKinds[decline.kind] = nil
+                session.inheritedNativeDeclinesUntil[decline.kind] = nil
+            }
+            nativeNotNowCallEnded(ended, now: now)
+            session.activeNativeProviders = activeNative
+            carryOverEndedNativeNotNows(into: &session, now: now)
             session.providers.formUnion(providers)
             session.seenReasons.formUnion(reasons)
             detectedCallSession = session

@@ -10,7 +10,9 @@ extension MeetingPromptDetector {
     func dismiss(candidate: Candidate) -> MeetingPromptBackoffDecision {
         // An explicit dismissal during a live call means the user chose not to
         // record it — the missed-call nudge must respect that and stay quiet.
-        detectedCallSession?.userDeclined = true
+        if candidate.callEvidence != .nativeApp {
+            detectedCallSession?.userDeclined = true
+        }
         dismissStreaks[candidate.provider, default: 0] += 1
         let decision = dismiss(candidate: candidate, interval: nil)
         let result = applyLearnedDismissal(candidate: candidate, decision: decision)
@@ -27,11 +29,12 @@ extension MeetingPromptDetector {
                 declinedAt: now,
                 quietUntil: result.until
             )
-            if detectedCallSession?.providers.contains(candidate.provider) == true {
+            if detectedCallSession?.activeNativeProviders.contains(candidate.provider) == true {
                 detectedCallSession?.nativeNotNows[candidate.id] = notNow
             } else {
                 // The prompt outlived its call (the countdown keeps running
                 // after hang-up): the call is already over, so cut now.
+                detectedCallSession?.declinedKinds[kind] = nil
                 nativeNotNowCallEnded([candidate.id: notNow], now: now)
             }
         }
@@ -70,7 +73,7 @@ extension MeetingPromptDetector {
         endedNativeDeclines = endedNativeDeclines.filter {
             $0.value.graceEndsAt > now && $0.value.decline.quietUntil > now
         }
-        for (id, ended) in endedNativeDeclines where session.providers.contains(ended.decline.provider) {
+        for (id, ended) in endedNativeDeclines where session.activeNativeProviders.contains(ended.decline.provider) {
             let notNow = ended.decline
             session.nativeNotNows[id] = notNow
             session.declinedKinds[notNow.kind] = notNow.declinedAt

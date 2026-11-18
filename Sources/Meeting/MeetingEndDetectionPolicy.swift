@@ -63,6 +63,11 @@ struct MeetingCallActivitySnapshot: Equatable {
         return readings.contains(nil) ? nil : false
     }
 
+    func confirmsCallAudio(in tracking: MeetingCallEndTracking, at now: TimeInterval) -> Bool {
+        guard let sampledAt, sampledAt <= now, now - sampledAt <= tracking.policy.maximumSampleGap else { return false }
+        return activity(in: tracking.families, cameraInUse: false) == .active
+    }
+
     func activity(in families: Set<String>, cameraInUse: Bool?) -> MeetingEndDetectionPolicy.Activity {
         guard isReliable else { return .unknown }
         if cameraInUse == true

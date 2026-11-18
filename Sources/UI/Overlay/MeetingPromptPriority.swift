@@ -71,6 +71,11 @@ enum MeetingPromptPriority {
         // keep showing a stale warning prompt once recording stops.
         guard isRecording else { return nil }
 
+        if splitOffered, MeetingSystemAudioPromptPolicy.allowsSplit(
+            inactivity: inactivity, systemAudio: systemAudio, routeActive: routeActive
+        ) {
+            return .meetingSplit
+        }
         if inactivity != nil {
             return .audioInactivity
         }
@@ -82,8 +87,8 @@ enum MeetingPromptPriority {
             return .systemAudio
         }
 
-        if splitOffered {
-            return routeActive ? .audioRoute : .meetingSplit
+        if splitOffered && routeActive {
+            return .audioRoute
         }
         if current == .audioRoute, routeActive {
             return .audioRoute

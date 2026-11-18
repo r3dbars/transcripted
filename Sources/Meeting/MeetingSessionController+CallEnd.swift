@@ -37,14 +37,14 @@ extension MeetingSessionController {
         // like a released stream or hold up a countdown.
         let sampledAt = snapshot.sampledAt
         let activity: MeetingEndDetectionPolicy.Activity
-        var callAudioActive = false
+        let callAudioActive = snapshot.confirmsCallAudio(in: tracking, at: now)
         if let sampledAt, sampledAt <= now, now - sampledAt <= tracking.policy.maximumSampleGap {
             activity = snapshot.activity(in: tracking.families, cameraInUse: freshCallCameraActivity(at: now))
-            // The camera can't be attributed to an app, so only call-app
-            // audio counts as the call coming back.
-            callAudioActive = snapshot.activity(in: tracking.families, cameraInUse: false) == .active
         } else {
             activity = .unknown
+        }
+        if !callAudioActive, let offer = meetingSplitOffer, offer.candidate == nil {
+            meetingSplitOffer = nil
         }
         observeCallEnd(activity, sampledAt: sampledAt ?? now, at: now, callAudioReturned: callAudioActive)
     }
@@ -134,7 +134,7 @@ extension MeetingSessionController {
                                 extra: ["hold_reason": heardAudio ? "audio_heard" : "unconfirmed_read"])
     }
 
-    private func freshCallActivitySnapshot() async -> MeetingCallActivitySnapshot? {
+    func freshCallActivitySnapshot() async -> MeetingCallActivitySnapshot? {
         guard let sampler = callActivitySampler else { return nil }
         let once = CallActivitySampleOnce()
         return await withCheckedContinuation { continuation in

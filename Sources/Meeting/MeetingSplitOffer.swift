@@ -4,6 +4,25 @@ struct MeetingSplitOffer: Equatable {
     let recordingIdentity: UUID
     let candidate: MeetingPromptDetector.Candidate?
 
+    // A second offer for the same event or rejoin is a different user action.
+    var presentationID = UUID()
+
+    func matches(_ other: Self?) -> Bool {
+        guard let other, presentationID == other.presentationID,
+              recordingIdentity == other.recordingIdentity else { return false }
+        return hasSameEvent(as: other)
+    }
+
+    private func hasSameEvent(as other: Self) -> Bool {
+        guard let candidate, let refreshed = other.candidate else {
+            return candidate == nil && other.candidate == nil
+        }
+        return candidate.id == refreshed.id && candidate.provider == refreshed.provider
+            && candidate.startDate == refreshed.startDate && candidate.endDate == refreshed.endDate
+            && candidate.meetingURL == refreshed.meetingURL
+            && candidate.suggestedTranscriptTitle == refreshed.suggestedTranscriptTitle
+    }
+
     func isCurrent(at now: Date) -> Bool {
         guard let candidate else { return true }
         return MeetingPromptWindowPolicy.shouldOfferCalendarPrompt(
@@ -24,7 +43,11 @@ struct MeetingSplitOffer: Equatable {
         }
         let existing = current?.recordingIdentity == identity ? current : nil
         if let candidate = eligible.first(where: { $0.id == existing?.candidate?.id }) ?? eligible.first {
-            return Self(recordingIdentity: identity, candidate: candidate)
+            var refreshed = Self(recordingIdentity: identity, candidate: candidate)
+            if let existing, existing.hasSameEvent(as: refreshed) {
+                refreshed.presentationID = existing.presentationID
+            }
+            return refreshed
         }
         return existing?.candidate == nil ? existing : nil
     }

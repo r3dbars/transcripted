@@ -49,7 +49,8 @@ extension MeetingOverlayController {
             case .audioRoute:
                 meetingSession?.dismissAudioRouteWarning()
             case .meetingSplit:
-                meetingSession?.declineMeetingSplit()
+                guard let offer = meetingSplitOffer else { return }
+                meetingSession?.declineMeetingSplit(offer)
             case .missedCall:
                 // "Don't show again" — the wiring persists the opt-out.
                 onMissedCallNudgeResolved?(.disabled)
