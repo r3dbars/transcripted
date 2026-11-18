@@ -57,8 +57,7 @@ enum MeetingInviteeSuggestionPolicy {
         // double-booking check so a named event at the same time can't win.
         let matches = events.filter { event in
             guard !event.isAllDay, peopleCount(of: event) > 0 else { return false }
-            let startedAfterEvent = recordingStart.timeIntervalSince(event.startDate)
-            return (-startLeadTime ... startGrace).contains(startedAfterEvent)
+            return startsTogether(eventStart: event.startDate, recordingStart: recordingStart)
         }
         // Same names = the same meeting on two calendars, even when one copy
         // lists an extra email-only guest; keep the bigger count. With no
@@ -72,6 +71,13 @@ enum MeetingInviteeSuggestionPolicy {
         var merged = first
         merged.invitedPeopleCount = biggestCount
         return merged
+    }
+
+    /// The recording started in the event's record pop-up window, so it is
+    /// that event's recording. The split offer uses the same rule to leave a
+    /// recording's own event alone.
+    static func startsTogether(eventStart: Date, recordingStart: Date) -> Bool {
+        (-startLeadTime ... startGrace).contains(recordingStart.timeIntervalSince(eventStart))
     }
 
     private static func peopleCount(of event: MeetingInviteeEventSnapshot) -> Int {

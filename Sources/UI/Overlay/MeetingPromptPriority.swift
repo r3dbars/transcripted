@@ -22,6 +22,8 @@ enum MeetingWarningPromptKind: Equatable {
     case audioInactivity
     case micBoost
     case audioRoute
+    // A different meeting looks like it is starting: Split / Keep recording.
+    case meetingSplit
     // Post-call "that call wasn't recorded" awareness nudge. Not one of the
     // four warning-driven kinds below — MeetingOverlayController presents it
     // outside this resolver (it can only appear while not recording, so it
@@ -35,10 +37,15 @@ enum MeetingPromptPriority {
     /// meeting overlay should currently show, given the latest value of each
     /// signal.
     ///
-    /// Precedence: `audioInactivity` > `systemAudio` > `{audioRoute, micBoost}`.
+    /// Precedence: `audioInactivity` > `meetingSplit` > `systemAudio` >
+    /// `{audioRoute, micBoost}`.
     ///
     /// - `audioInactivity` always wins: it can auto-stop the recording, so
-    ///   its countdown must stay visible over anything else.
+    ///   its countdown must stay visible over anything else. That includes
+    ///   "Call ended" over a split offer: if the old call ends, its stop is
+    ///   what lets the next meeting's own prompt show.
+    /// - `meetingSplit` is next because it only helps while the next
+    ///   meeting is starting; the audio warnings can wait behind it.
     /// - `systemAudio` is gated by `MeetingSystemAudioPromptPolicy`, which
     ///   already folds in "never fight an active inactivity prompt" — this
     ///   branch is only reached once `inactivity` is nil, so that policy
@@ -57,7 +64,8 @@ enum MeetingPromptPriority {
         routeActive: Bool,
         micBoostVisible: Bool,
         current: MeetingWarningPromptKind?,
-        isRecording: Bool
+        isRecording: Bool,
+        splitOffered: Bool = false
     ) -> MeetingWarningPromptKind? {
         // All four warnings are recording-only: MeetingSessionController only
         // latches them while actively recording, and the overlay must never
@@ -66,6 +74,9 @@ enum MeetingPromptPriority {
 
         if inactivity != nil {
             return .audioInactivity
+        }
+        if splitOffered {
+            return .meetingSplit
         }
 
         if MeetingSystemAudioPromptPolicy.shouldPresentSystemAudioPrompt(

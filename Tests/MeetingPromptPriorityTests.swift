@@ -286,6 +286,27 @@ func testMeetingPromptPriority() {
             ),
             "no signal, no prompt"
         )
+        let callEnded = MeetingAudioInactivityWarning(inactiveDuration: 10, countdownSeconds: 30, kind: .callEnded)
+        assertEqual(
+            MeetingPromptPriority.resolve(inactivity: callEnded, systemAudio: nil, routeActive: false,
+                                          micBoostVisible: false, current: .meetingSplit, isRecording: true,
+                                          splitOffered: true),
+            .audioInactivity,
+            "Call ended keeps its countdown over a split offer"
+        )
+        assertEqual(
+            MeetingPromptPriority.resolve(inactivity: nil, systemAudio: nil, routeActive: true,
+                                          micBoostVisible: true, current: .micBoost, isRecording: true,
+                                          splitOffered: true),
+            .meetingSplit,
+            "a split offer shows over the audio warnings while the next meeting starts"
+        )
+        assertNil(
+            MeetingPromptPriority.resolve(inactivity: nil, systemAudio: nil, routeActive: false,
+                                          micBoostVisible: false, current: .meetingSplit, isRecording: false,
+                                          splitOffered: true),
+            "no split offer once the recording stops"
+        )
         assertNil(
             MeetingPromptPriority.resolve(
                 inactivity: nil,

@@ -94,6 +94,7 @@ final class MeetingSessionController: ObservableObject {
     @Published private(set) var savedMeetingReplacementCommitCount: Int = 0
     @Published var audioInactivityWarning: MeetingAudioInactivityWarning?
     @Published var isMicBoostPromptVisible = false
+    @Published var meetingSplitOffer: MeetingSplitOffer?
     @Published var audioRouteWarning: CaptureRouteStabilizationOutcome?
     @Published var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
     /// The start failed because macOS denied System Audio Recording (a typed
@@ -235,6 +236,7 @@ final class MeetingSessionController: ObservableObject {
     var callEndTracking: MeetingCallEndTracking?
     var callEndArming = MeetingCallEndArming()
     var pendingCallEndCandidate: (identity: UUID, candidate: MeetingPromptDetector.Candidate)?
+    var onMeetingSplitDecision: ((MeetingPromptDetector.Candidate, MeetingSplitDecision) -> Void)?
     var latestCallActivity = MeetingCallActivitySnapshot.unknown
     /// Takes a fresh call-activity reading off main (the app wires it to the mic monitor's queue).
     var callActivitySampler: (@MainActor (@escaping @MainActor @Sendable (MeetingCallActivitySnapshot) -> Void) -> Void)?

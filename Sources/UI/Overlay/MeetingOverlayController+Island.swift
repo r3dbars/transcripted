@@ -48,6 +48,8 @@ extension MeetingOverlayController {
                 meetingSession?.declineMicBoostPrompt()
             case .audioRoute:
                 meetingSession?.dismissAudioRouteWarning()
+            case .meetingSplit:
+                meetingSession?.declineMeetingSplit()
             case .missedCall:
                 // "Don't show again" — the wiring persists the opt-out.
                 onMissedCallNudgeResolved?(.disabled)
@@ -104,6 +106,10 @@ extension MeetingOverlayController {
             // subscription picks up and resolves back down to .recording (or
             // to whichever prompt was suppressed behind this one).
             meetingSession?.acceptMicBoostPrompt()
+        case .meetingSplit:
+            Task { @MainActor [weak self] in
+                await self?.meetingSession?.acceptMeetingSplit()
+            }
         case .missedCall:
             onMissedCallNudgeResolved?(.acknowledged)
             dismissPrompt()

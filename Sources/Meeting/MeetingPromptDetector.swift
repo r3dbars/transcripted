@@ -80,6 +80,10 @@ final class MeetingPromptDetector {
     var onPromptFallback: ((Candidate) -> RequestResult)?
     var onPromptSuppressed: ((MeetingPromptSuppression) -> Void)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
+    /// While prompts are held back (a meeting is recording), a different
+    /// calendar meeting entering its prompt window is offered here as a split
+    /// of the recording. True when the recording took it as an offer.
+    var onSplitRequest: ((Candidate) -> Bool)?
     /// A detected ad-hoc call ended without a meeting recording and passed the
     /// `MissedCallNudgePolicy` gates (long enough, not declined, rate-limited).
     /// Wired in `TranscriptedApp` to the overlay's missed-call nudge.
@@ -492,6 +496,7 @@ final class MeetingPromptDetector {
         }
 
         if shouldSkipPromptEvaluation?() == true {
+            if offerSplit(from: visibleCandidates, now: now) { return }
             recordSuppression(
                 candidate: match.candidate,
                 reason: .presentationBlocked,
@@ -536,6 +541,24 @@ final class MeetingPromptDetector {
                 reason: .presentationBlocked,
                 now: now
             )
+        }
+    }
+
+    // MARK: - Split on new meeting
+
+    /// Back-to-back calls otherwise record as one. Only calendar meetings
+    /// qualify: ad-hoc signals are already gated off while we hold the mic.
+    /// A recorded event is snoozed by `markAccepted`, one the user kept
+    /// recording through by `declineSplit`; the session leaves out an event
+    /// that started with the recording.
+    private func offerSplit(from candidates: [ScoredCandidate], now: Date) -> Bool {
+        guard let onSplitRequest else { return false }
+        return candidates.contains { scored in
+            let candidate = scored.candidate
+            guard candidate.source == .calendarEvent,
+                  (snoozedUntil[candidate.id] ?? .distantPast) <= now,
+                  (pendingUntil[candidate.id] ?? .distantPast) <= now else { return false }
+            return onSplitRequest(candidate)
         }
     }
 

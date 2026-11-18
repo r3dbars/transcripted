@@ -756,6 +756,43 @@ can resemble a hangup. Calls that retain streams between meetings can merge.
 Use Continue or stop manually in those cases. Calendar end times and
 foreground/window changes do not authorize an automatic stop.
 
+### Split on new meeting
+
+Back-to-back calls used to end up in one recording: Teams can move from one
+meeting to the next without releasing its audio for 10 seconds, and a call
+that comes back during the countdown just clears the warning. While a
+recording runs, the island now offers **Split** / **Keep recording** when a
+different meeting looks like it is starting:
+
+- **Calendar.** A calendar meeting with a link enters its prompt window (a
+  minute before to five minutes after its start) and is not snoozed or
+  pending. A recorded event is snoozed when its prompt is accepted; an event
+  whose start lines up with the recording's start (the invitee-suggestion
+  window) is the recording's own and is left alone. Title: "‹meeting› is
+  starting".
+- **Call re-join.** The "Call ended" warning was up (the bound call app let
+  go of its audio for 10 seconds) and clears because call-app audio is back,
+  the bound app or another conferencing app. Camera activity alone doesn't
+  count. Releases shorter than the warning interval are indistinguishable
+  from dropouts inside one call and are not offered. Title: "New call?".
+
+Split stops the recording (stop reason `new_meeting_split`; it transcribes in
+the background) and starts a new one as a detected-prompt recording. A
+calendar split takes the meeting's title and arms call-end detection for it;
+a re-join split is armed on the previous recording's call app. Keep recording
+leaves the recording alone; a calendar meeting is then not offered or
+prompted again until it ends. There's no countdown and no automatic split.
+"Call ended" keeps priority over the offer, so when the first call really
+ends its stop still happens and the next meeting gets its normal prompt.
+
+Limits: manual and other unarmed recordings only get the calendar trigger,
+since they have no bound call app. A manual start more than a minute before
+its own event's start doesn't line up with it, so that event is offered once.
+The few seconds between stopping one recording and the next one's capture
+starting are not recorded. Telemetry: `meeting_split_offer` with `action`
+(`shown`, `split`, `kept`), `trigger` (`calendar`, `call_rejoin`) and
+`provider` for calendar offers.
+
 ### Research behind the approach
 
 - Public docs from four desktop meeting recorders describe the same building
