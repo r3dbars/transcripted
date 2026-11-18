@@ -740,13 +740,16 @@ public class Audio: ObservableObject, @unchecked Sendable {
     init(
         paths: CoreStoragePaths = .default,
         systemAudioCaptureForTesting systemAudioCapture: (any SystemAudioCaptureEngine & Sendable)?,
+        initialJournalPersistenceForTesting: ((Data, URL) throws -> Void)? = nil,
         systemAudioCaptureFactoryForTesting systemAudioCaptureFactory:
             (() -> (any SystemAudioCaptureEngine & Sendable)?)? = nil,
         sleepWakeNotifications: AudioSleepWakeNotifications = .macOSWorkspace
     ) {
         self.paths = paths
         self.sleepWakeNotifications = sleepWakeNotifications
-        self.recordingJournal = MeetingRecordingJournalStore(directory: paths.audioCaptures)
+        self.recordingJournal = MeetingRecordingJournalStore(
+            directory: paths.audioCaptures, initialPersistenceForTesting: initialJournalPersistenceForTesting
+        )
         self._systemAudioCapture = systemAudioCapture
         self.systemAudioCaptureFactory =
             systemAudioCaptureFactory ?? { systemAudioCapture }

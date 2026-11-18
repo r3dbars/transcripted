@@ -7,7 +7,7 @@ import XCTest
 /// already took the empty slot would stay "recording" with nobody to close it,
 /// and launch recovery would bring back a meeting the user already stopped.
 final class MeetingJournalStartStopRaceTests: XCTestCase {
-    private func makeAudio() throws -> Audio {
+    private func makeAudio(persist: ((Data, URL) throws -> Void)? = nil) throws -> Audio {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("MeetingJournalStartStopRaceTests-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -20,65 +20,105 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
             speakerClips: root.appendingPathComponent("tmp/recordings/speaker_clips", isDirectory: true),
             audioCaptures: root.appendingPathComponent("tmp/recordings", isDirectory: true),
             logs: root.appendingPathComponent("logs", isDirectory: true)
-        ))
+        ), systemAudioCaptureForTesting: nil, initialJournalPersistenceForTesting: persist)
     }
 
-    private func makeSession() -> MeetingRecordingJournalSession {
-        MeetingRecordingJournalSession(
-            journalURL: URL(fileURLWithPath: "/nonexistent/meeting_test_mic.recording.json")
-        )
-    }
-
-    func testStopBeforeTheJournalOpensMeansNoJournalIsOpened() throws {
+    func testStoppedStartCannotOpenJournalInSuccessorGeneration() throws {
         let audio = try makeAudio()
+        let directory = audio.paths.audioCaptures
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         audio.prepareForNewRecordingStart()
-        let startGeneration = audio.recordingSessionGeneration
-        // Stop advances the generation and takes the (still empty) slot.
-        audio.beginRecordingSessionGeneration()
-        XCTAssertNil(audio.takeJournalSession())
-
-        var opened = false
-        let session = audio.openJournalSessionIfCurrent(sessionGeneration: startGeneration) {
-            opened = true
-            return makeSession()
-        }
-
-        XCTAssertNil(session)
-        XCTAssertFalse(opened, "A stopped start must not open a journal")
+        let generation = audio.recordingSessionGeneration
+        let stopped = expectation(description: "stop completed")
+        audio.onRecordingComplete = { _, _ in stopped.fulfill() }
+        audio.stop()
+        wait(for: [stopped], timeout: 5)
+        audio.prepareForNewRecordingStart()
+        XCTAssertThrowsError(try audio.openJournalSessionIfCurrent(
+            primaryMicURL: directory.appendingPathComponent("meeting_stale_mic.wav"),
+            sessionGeneration: generation
+        )) { XCTAssertTrue($0 is AudioCaptureStaleSessionError) }
+        XCTAssertTrue(MeetingRecordingJournalStore.journalURLs(in: directory).isEmpty)
         XCTAssertNil(audio.journalSession)
     }
 
-    func testStopLandingWhileTheJournalOpensTakesThatJournal() throws {
-        let audio = try makeAudio()
-        audio.prepareForNewRecordingStart()
-        let startGeneration = audio.recordingSessionGeneration
-        let expected = makeSession()
+    @MainActor
+    func testStopDuringPersistTransfersOldAudioToRecoveryAcrossSuccessorStart() throws {
+        try exerciseStopDuringPersist(failOldWrite: false)
+    }
 
-        let stopAdvanced = DispatchSemaphore(value: 0)
-        let stopTook = DispatchSemaphore(value: 0)
-        let takenByStop = TakenSession()
-        var stopFinishedDuringOpen = false
-        let opened = audio.openJournalSessionIfCurrent(sessionGeneration: startGeneration) {
-            // Stop arrives mid-open, the way stop() does it: advance the
-            // generation, then take the session.
-            Thread.detachNewThread {
-                audio.beginRecordingSessionGeneration()
-                stopAdvanced.signal()
-                takenByStop.value = audio.takeJournalSession()
-                stopTook.signal()
+    @MainActor
+    func testLateFailedPersistPreservesStoppedAudioAndSuccessorJournal() throws {
+        try exerciseStopDuringPersist(failOldWrite: true)
+    }
+
+    @MainActor
+    private func exerciseStopDuringPersist(failOldWrite: Bool) throws {
+        let persisting = expectation(description: "old start entered first disk write")
+        let release = DispatchSemaphore(value: 0)
+        let audio = try makeAudio { data, url in
+            if url.lastPathComponent != "meeting_new_mic.recording.json" {
+                persisting.fulfill()
+                // Deadlock escape only. Stop must return and release this gate.
+                guard release.wait(timeout: .now() + 10) == .success else {
+                    XCTFail("Stop waited for initial journal persistence")
+                    throw CocoaError(.fileWriteUnknown)
+                }
             }
-            stopAdvanced.wait()
-            // Give a Stop that is not held off every chance to take the
-            // empty slot before this open publishes. Only orders the race;
-            // nothing asserts on elapsed time.
-            stopFinishedDuringOpen = stopTook.wait(timeout: .now() + 0.3) == .success
-            return expected
+            try data.write(to: url, options: .atomic)
+            if failOldWrite, url.lastPathComponent != "meeting_new_mic.recording.json" {
+                throw CocoaError(.fileWriteUnknown)
+            }
         }
-        if !stopFinishedDuringOpen { stopTook.wait() }
+        let directory = audio.paths.audioCaptures
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        audio.prepareForNewRecordingStart()
+        let oldGeneration = audio.recordingSessionGeneration
+        let oldStartFinished = expectation(description: "old start observed Stop")
+        DispatchQueue.global().async {
+            do {
+                _ = try audio.createMeetingMicStartFile(
+                    recordingSnapshot: AudioRecordingFormatSnapshot(sampleRate: 16_000, channelCount: 1),
+                    sessionGeneration: oldGeneration
+                )
+                XCTFail("Stopped start returned as current")
+            } catch {
+                XCTAssertTrue(error is AudioCaptureStaleSessionError)
+            }
+            oldStartFinished.fulfill()
+        }
+        wait(for: [persisting], timeout: 5)
+        let completed = expectation(description: "old finalizer yielded to recovery")
+        audio.onRecordingCompleteWithGeneration = { _, mic, system, disposition in
+            XCTAssertNil(system)
+            XCTAssertNil(mic)
+            XCTAssertEqual(disposition, .journalRecoveryOwned)
+            completed.fulfill()
+        }
+        audio.stop()
+        let oldMic = try XCTUnwrap(audio.snapshotStartedMicFiles().primaryURL)
+        let oldJournal = oldMic.deletingPathExtension().appendingPathExtension("recording.json")
+        XCTAssertNil(audio.journalSession)
+        XCTAssertTrue(audio.abandonRecordingJournalFinalization(forStopGeneration: audio.recordingSessionGeneration))
+        audio.prepareForNewRecordingStart()
+        let successorGeneration = audio.recordingSessionGeneration
+        release.signal()
+        let successorMic = directory.appendingPathComponent("meeting_new_mic.wav")
+        let successor = try audio.openJournalSessionIfCurrent(primaryMicURL: successorMic, sessionGeneration: successorGeneration)
+        wait(for: [oldStartFinished, completed], timeout: 5)
+        audio.recordingJournal.flush()
 
-        XCTAssertEqual(opened, expected)
-        XCTAssertEqual(takenByStop.value, expected, "Stop must receive the journal the start opened")
-        XCTAssertNil(audio.journalSession, "Stop's take leaves nothing behind for a later writer")
+        XCTAssertEqual(audio.journalSession, successor)
+        if failOldWrite {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: oldJournal.path))
+        } else {
+            XCTAssertEqual(MeetingRecordingJournalStore.load(at: oldJournal)?.state, .stopping)
+        }
+        XCTAssertFalse(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: oldJournal))
+        XCTAssertFalse(try Data(contentsOf: oldMic).isEmpty)
+        let newJournal = directory.appendingPathComponent("meeting_new_mic.recording.json")
+        XCTAssertEqual(MeetingRecordingJournalStore.load(at: newJournal)?.state, .recording)
+        XCTAssertTrue(MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: newJournal))
     }
 
     /// Promise: the start's mic WAV always has an owner. Either Stop's
@@ -110,9 +150,4 @@ final class MeetingJournalStartStopRaceTests: XCTestCase {
         XCTAssertEqual(stopSnapshot.primaryURL, micURL)
         XCTAssertEqual(stopSnapshot.segments.map(\.url), [micURL])
     }
-}
-
-/// Written once on the Stop thread before `stopTook` signals, read after.
-private final class TakenSession: @unchecked Sendable {
-    var value: MeetingRecordingJournalSession?
 }

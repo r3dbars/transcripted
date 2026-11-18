@@ -7,26 +7,40 @@ import Foundation
 /// one, either Stop sees it and owns it, or the start sees it lost and backs
 /// out. Nothing a start makes is left without an owner.
 extension Audio {
-    /// Opens this recording's journal and publishes its session in one step
-    /// under the session lock. Stop advances the generation first and then
-    /// takes the session under this same lock, so it either gets the journal
-    /// this start opened or no journal is opened at all. Returns nil, without
-    /// calling `open`, when Stop already ended `sessionGeneration`.
-    ///
-    /// Reads the generation through its lock-free mirror on purpose: segment
-    /// registration holds the generation lock and then reads the session, so
-    /// taking the generation lock in here would invert that order. `open`
-    /// must not touch `journalSession`.
+    /// Reserve the token from inside the journal queue, before first persist.
+    /// Stop can take it immediately. Its stopping write then follows begin
+    /// on that queue, and Stop's cleanup group holds completion until begin exits.
     func openJournalSessionIfCurrent(
-        sessionGeneration: UInt64,
-        open: () throws -> MeetingRecordingJournalSession
-    ) rethrows -> MeetingRecordingJournalSession? {
-        journalSessionLock.lock()
-        defer { journalSessionLock.unlock() }
-        guard recordingSessionGeneration == sessionGeneration else { return nil }
-        let session = try open()
-        _journalSession = session
-        return session
+        primaryMicURL: URL, sessionGeneration: UInt64
+    ) throws -> MeetingRecordingJournalSession {
+        var reserved: MeetingRecordingJournalSession?
+        do {
+            let session = try recordingJournal.begin(
+                primaryMicURL: primaryMicURL,
+                languageSelection: languageSelectionForCurrentRecording,
+                micOnlyByChoice: !currentRecordingCapturesSystemAudio
+            ) { session in
+                try journalSessionLock.withLock {
+                    guard recordingSessionGeneration == sessionGeneration else {
+                        throw AudioCaptureStaleSessionError()
+                    }
+                    _journalSession = session
+                    reserved = session
+                }
+            }
+            guard recordingSessionGeneration == sessionGeneration else {
+                throw AudioCaptureStaleSessionError()
+            }
+            return session
+        } catch {
+            let stillCurrent = journalSessionLock.withLock {
+                guard recordingSessionGeneration == sessionGeneration else { return false }
+                if let reserved, _journalSession == reserved { _journalSession = nil }
+                return true
+            }
+            guard stillCurrent else { throw AudioCaptureStaleSessionError() }
+            throw error
+        }
     }
 
     /// Records the start's mic WAV as this recording's file, but only while

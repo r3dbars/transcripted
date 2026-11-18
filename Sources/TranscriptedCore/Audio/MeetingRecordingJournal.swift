@@ -52,6 +52,7 @@ enum MeetingRecordingJournalStartError: Error, Equatable {
 /// (multi-segment merges), so without the token a previous session's late
 /// writes would corrupt the journal of the recording that is now active.
 struct MeetingRecordingJournalSession: Equatable, Hashable, Sendable {
+    let initialPersistence = DispatchGroup()
     private let id: UUID
     private let liveOwnership: MeetingRecordingJournalLiveOwnership
 
@@ -113,7 +114,19 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     private let queue = DispatchQueue(label: "com.transcripted.recording-journal", qos: .utility)
     private var journalURL: URL?
     private var journal: MeetingRecordingJournal?
-    private var activeSession: MeetingRecordingJournalSession?
+    // Stop reads this snapshot without joining the disk writer queue.
+    private let systemURLLock = NSLock()
+    private var systemURL: URL?
+    private var sessionForSystemURL: MeetingRecordingJournalSession?
+    private var activeSession: MeetingRecordingJournalSession? {
+        get { systemURLLock.withLock { sessionForSystemURL } }
+        set {
+            systemURLLock.withLock {
+                sessionForSystemURL = newValue
+                systemURL = nil
+            }
+        }
+    }
 
     init(
         directory: URL,
@@ -128,7 +141,8 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         primaryMicURL: URL,
         startedAt: Date = Date(),
         languageSelection: TranscriptionLanguageSelection = .automatic,
-        micOnlyByChoice: Bool = false
+        micOnlyByChoice: Bool = false,
+        reserve: (MeetingRecordingJournalSession) throws -> Void = { _ in }
     ) throws -> MeetingRecordingJournalSession {
         let journalURL = directory.appendingPathComponent(
             primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
@@ -142,7 +156,13 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                 throw MeetingRecordingJournalStartError.alreadyExists
             }
             let session = MeetingRecordingJournalSession(journalURL: journalURL)
-            self.activeSession = session
+            session.initialPersistence.enter()
+            defer { session.initialPersistence.leave() }
+            try systemURLLock.withLock {
+                try reserve(session)
+                sessionForSystemURL = session
+                systemURL = nil
+            }
             self.journalURL = journalURL
             self.journal = MeetingRecordingJournal(
                 version: 1,
@@ -182,17 +202,20 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     /// that lands before this recording's `begin()` would otherwise resolve
     /// the previous meeting's system WAV.
     func currentSystemAudioURL(session: MeetingRecordingJournalSession?) -> URL? {
-        queue.sync {
-            guard let session, session == activeSession,
-                  let filename = journal?.systemAudioFilename, !filename.isEmpty else {
-                return nil
-            }
-            return directory.appendingPathComponent(filename)
+        systemURLLock.withLock {
+            guard let session, session == sessionForSystemURL else { return nil }
+            return systemURL
         }
     }
 
     func recordSystemAudio(_ url: URL, session: MeetingRecordingJournalSession?) {
-        mutate(session: session) { $0.systemAudioFilename = url.lastPathComponent }
+        let locatedURL = directory.appendingPathComponent(url.lastPathComponent, isDirectory: false)
+        systemURLLock.withLock {
+            if let session, session == sessionForSystemURL {
+                systemURL = locatedURL
+            }
+            mutate(session: session) { $0.systemAudioFilename = url.lastPathComponent }
+        }
     }
 
     func recordSegments(_ segments: [MicRecordingSegment], session: MeetingRecordingJournalSession?) {
@@ -361,8 +384,9 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
         of journalURL: URL,
         id: UUID
     ) {
+        let canonical = canonicalURL(journalURL)
         liveOwnershipLock.lock()
-        liveOwnership[id] = canonicalURL(journalURL)
+        liveOwnership[id] = canonical
         liveOwnershipLock.unlock()
     }
 
