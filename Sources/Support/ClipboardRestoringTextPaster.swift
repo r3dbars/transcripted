@@ -159,7 +159,8 @@ final class ClipboardRestoringTextPaster {
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait,
         endWaitOnLikelyPaste: Bool = false,
         onLateConfirmation: (@MainActor (ClipboardPasteConfirmationDiagnostic) -> Void)? = nil,
-        snapshotRead: ClipboardSnapshotReadContext = .production()
+        snapshotRead: ClipboardSnapshotReadContext = .production(),
+        ownWindowTextInput: @MainActor (String) -> Bool = OwnWindowTextDelivery.insertIntoFocusedField
     ) -> TextPasteOutcome {
         let operation = operationEpoch.begin()
         latestStartedOperation = operation
@@ -202,6 +203,18 @@ final class ClipboardRestoringTextPaster {
         // dictated text from the fallback stays in dictation history.
         restoreClipboardSavedBeforeFallback(on: pasteboard)
         guard isCurrentOperation() else { return cancelledOutcome }
+
+        // A take aimed at Transcripted itself goes straight into the focused
+        // field; the clipboard is never borrowed (`OwnWindowTextDelivery`).
+        // With no editable field focused here, fall through to the usual paste.
+        if OwnWindowTextDelivery.targetsThisProcess(target), ownWindowTextInput(text) {
+            guard isCurrentOperation() else { return cancelledOutcome }
+            lastConfirmationDiagnostic = ClipboardPasteConfirmationDiagnostic(
+                event: "dictation_paste_confirmed",
+                context: ["confirmation_mode": ClipboardPasteConfirmationDiagnostic.ownWindowInsertMode]
+            )
+            return .pasted
+        }
 
         if let target,
            !target.matchesCurrentFrontmostApp(),

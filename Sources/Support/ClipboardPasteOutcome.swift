@@ -194,6 +194,10 @@ struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let context: [String: String]
 
     static let lateConfirmedEvent = "dictation_paste_late_confirmed"
+    /// The words went straight into a focused field in Transcripted's own
+    /// window (`OwnWindowTextDelivery`). Analytics keep reporting the coarse
+    /// `target_confirmation_mode=none` for it.
+    static let ownWindowInsertMode = "own_window_insert"
 
     /// The target confirmed over Accessibility after a dictation paste had
     /// already ended its wait as a likely paste (`ClipboardLateConfirmationWatch`).
