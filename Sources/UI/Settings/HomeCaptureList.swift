@@ -165,6 +165,10 @@ struct HomeMeetingSearchField: View {
     /// the token is already non-zero, so a request made while the bar was
     /// hidden lands once it mounts.
     var focusRequestToken: Int = 0
+    /// Dictations reuses the field with its own words and ids.
+    var placeholder: String = "Find meetings"
+    var clearAccessibilityLabel: String = "Clear meeting filter"
+    var automationIdentifier: String = "transcripted.home.meeting-search.field"
 
     @FocusState private var isFocused: Bool
 
@@ -174,7 +178,7 @@ struct HomeMeetingSearchField: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            TextField("Find meetings", text: $query)
+            TextField(placeholder, text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($isFocused)
@@ -182,7 +186,7 @@ struct HomeMeetingSearchField: View {
                     guard focusRequestToken > 0 else { return }
                     isFocused = true
                 }
-                .accessibilityIdentifier("transcripted.home.meeting-search.field")
+                .accessibilityIdentifier(automationIdentifier)
 
             if !query.isEmpty {
                 Button {
@@ -194,7 +198,7 @@ struct HomeMeetingSearchField: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear filter")
-                .accessibilityLabel("Clear meeting filter")
+                .accessibilityLabel(Text(clearAccessibilityLabel))
             }
         }
         .padding(.horizontal, 10)

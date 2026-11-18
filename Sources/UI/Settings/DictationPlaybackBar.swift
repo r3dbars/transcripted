@@ -40,6 +40,8 @@ struct DictationCardBar: View {
                     .opacity(hasAudio ? 1 : 0)
                     .disabled(!hasAudio)
                     .accessibilityHidden(!hasAudio)
+                    // Its 40 pt hit square overhangs the metadata; keep it on top.
+                    .zIndex(1)
             }
 
             HStack(spacing: 0) {
@@ -144,11 +146,14 @@ struct DictationMetaDot: View {
     }
 }
 
-/// 22 pt round play/pause button. The icon morphs (rotate + scale
+/// 22 pt round play/pause button with a 40 pt hit area. The icon morphs (rotate + scale
 /// cross-fade), the fill turns green, and a soft ring pulses while playing.
 struct DictationPlayButton: View {
     let isPlaying: Bool
     let action: () -> Void
+
+    static let visibleSize: CGFloat = 22
+    static let hitSize = HomeHitTarget.hitSize(forVisibleSize: visibleSize)
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
@@ -174,10 +179,14 @@ struct DictationPlayButton: View {
                     .scaleEffect(isPlaying ? 1 : 0.4)
             }
             .foregroundStyle(isPlaying ? Color.white : Color.primary.opacity(0.85))
-            .frame(width: 22, height: 22)
-            .contentShape(Circle())
+            .frame(width: Self.visibleSize, height: Self.visibleSize)
+            // Drawn at 22 pt, clicked like every other control on the page:
+            // a 40 pt hit square that doesn't push the bar's layout.
+            .frame(width: Self.hitSize, height: Self.hitSize)
+            .contentShape(Rectangle())
         }
         .buttonStyle(DictationPressScaleButtonStyle())
+        .padding(-(Self.hitSize - Self.visibleSize) / 2)
         .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.55), value: isPlaying)
         .onHover { isHovering = $0 }
         .help(isPlaying ? "Pause" : "Play dictation")
