@@ -67,8 +67,8 @@ still hold.
 
 The header has no title. It only shows up when it has something to say:
 
-- a status line while a meeting records, a transcript is being made, or the
-  voice model is warming up (with progress)
+- a status line while a meeting starts, a transcript is being made, or the
+  voice model is warming up (with progress); saving shows on the button only
 - a one-line shortcut warning, clickable when it has a fix to open
 
 A ready, idle popover shows no header at all.
@@ -78,7 +78,7 @@ A ready, idle popover shows no header at all.
 Two small buttons sit side by side at the top:
 
 - `Record` (Record Meeting; becomes `Stop` with the elapsed time while recording)
-- `Dictate` (Start Dictation; becomes `Stop` while dictating)
+- `Dictate` (Start Dictation; becomes `Done` while dictating)
 
 Rules:
 
@@ -92,9 +92,19 @@ Rules:
 Under the buttons:
 
 - `Open Transcripted` (Settings lives inside it)
-- dynamic updates row: `Check for Updates`, `Checking for Updates…`, or an
-  update state; a prominent update callout replaces it when an update needs a click
 - `Quit`
+
+The idle popover is four controls. An update row appears only while an update
+downloads (`Downloading update`); a filled callout (`Update to X` / Install,
+`X is ready` / Restart) appears when it needs a click. The manual check is in
+About and the app menu. Words come from `Sources/UI/Shared/UpdateStatusWords.swift`.
+
+### Status item
+
+A template glyph in every state, never tinted: outline (idle), filled
+(dictating), filled with a dot (meeting), outline with a ring (making a
+transcript), outline with a solid dot (the key needs Accessibility, or an
+update needs a click). Left and right click open the same popover.
 
 ## Settings Window
 

@@ -777,6 +777,8 @@ APP_SOURCES=(
     "Sources/UI/Settings/TranscriptedSettingsFallbackView.swift"
     "Sources/UI/Settings/HomeMeetingActionTelemetry.swift"
     "Sources/UI/Settings/OnboardingNavigation.swift"
+    "Sources/UI/Settings/OnboardingPracticePresentation.swift"
+    "Sources/UI/Shared/UpdateStatusWords.swift"
     "Sources/UI/Settings/AgentSetupFailureCopy.swift"
     "Sources/Writing/WritingSidebarNewBadge.swift"
     "Sources/UI/Settings/SpeakerNameAutocompleteField.swift"

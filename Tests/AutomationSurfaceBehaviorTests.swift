@@ -74,22 +74,25 @@ func testAutomationSurfaceBehavior() async {
             isMeetingRecording: false
         )
         let utility = MenuBarUtilityActionsView(frame: .zero)
+        // Ready with nothing to update: the update row is hidden.
         utility.update(
-            updateSymbolName: "arrow.down.circle",
-            updateTitle: "Check for Updates",
+            updateSymbolName: "arrow.triangle.2.circlepath.circle",
+            updateTitle: UpdateStatusWords.checkForUpdates,
             updateDetail: "",
             updateVersion: nil,
             updateTone: .standard,
-            updateEnabled: true
+            updateEnabled: true,
+            showUpdateRow: false
         )
         let snapshots = primary.smokeSnapshot.merging(utility.smokeSnapshot) { first, _ in first }
+        assertEqual(snapshots["checkUpdates"]?.isVisible, false, "the ready popover has no permanent update row")
 
         let buildScript = (try? String(contentsOf: repoFixtureURL("scripts/entrypoints/build.sh"), encoding: .utf8)) ?? ""
         let expectations = launchSmokeRowExpectations(in: buildScript)
         assertEqual(
             Set(expectations.map(\.key)),
-            ["startDictation", "startMeeting", "checkUpdates", "openTranscripted", "quit"],
-            "build.sh's launch smoke should still check the five menu bar rows"
+            ["startDictation", "startMeeting", "openTranscripted", "quit"],
+            "build.sh's launch smoke should check the four always-on menu bar rows"
         )
         for expectation in expectations {
             guard let snapshot = snapshots[expectation.key] else {
@@ -217,36 +220,115 @@ func testAutomationSurfaceBehavior() async {
 
     // MARK: Onboarding
 
-    runSuite("Onboarding is one three-step path gated only on the microphone") {
-        assertEqual(OnboardingNavigation.steps, [.welcome, .permissions, .done], "setup should stay welcome, permissions, done")
-        assertEqual(OnboardingNavigation.step(at: 99), .done, "a stale saved step index should land on the last step")
-
-        func nav(_ step: OnboardingStepKind, granted: Bool = false, blocked: Bool = false, skipped: Bool = false) -> OnboardingNavigation {
-            OnboardingNavigation(step: step, microphoneGranted: granted, microphoneBlocked: blocked, skippedMicrophone: skipped)
-        }
-        assertFalse(nav(.welcome).primaryDisabled, "welcome always lets the person start")
-        assertTrue(nav(.permissions).primaryDisabled, "permissions waits for the microphone")
-        assertFalse(nav(.permissions, granted: true).primaryDisabled, "a granted microphone is enough to continue")
-        assertTrue(nav(.done).primaryDisabled, "done can't finish without the microphone or a skip")
-        assertFalse(nav(.done, granted: true).primaryDisabled, "done finishes with the microphone")
-        assertFalse(nav(.done, skipped: true).primaryDisabled, "done finishes after the person skipped a blocked microphone")
+    runSuite("Onboarding asks one thing per screen, then has the person dictate twice") {
         assertEqual(
-            OnboardingNavigation.steps.map { nav($0).primaryTitle },
-            ["Set Up", "Continue", "Done"],
-            "the primary button names each step's next move"
+            OnboardingNavigation.steps,
+            [.welcome, .microphone, .accessibility, .tryIt, .tryHandsFree, .systemAudio, .promise, .done],
+            "setup should ask for the mic, then paste access, then practice, then call audio, the promise and Done"
+        )
+        assertEqual(OnboardingNavigation.step(at: 99), .done, "a stale saved step index should land on the last step")
+        assertEqual(OnboardingNavigation.step(at: 1), .microphone, "a resumed setup reopens on the microphone ask")
+
+        let ready = OnboardingNavigation(step: .welcome, microphoneGranted: true, accessibilityGranted: true)
+        var walk: [OnboardingStepKind] = [.welcome]
+        var nav = ready
+        while let next = nav.nextStep {
+            walk.append(next)
+            nav = OnboardingNavigation(
+                step: next,
+                microphoneGranted: true,
+                accessibilityGranted: true,
+                tryItDone: true,
+                tryHandsFreeDone: true
+            )
+        }
+        assertEqual(
+            walk,
+            [.welcome, .microphone, .accessibility, .tryIt, .tryHandsFree, .systemAudio, .promise, .done],
+            "with everything granted and both takes done, setup visits every step once"
         )
     }
 
-    runSuite("Onboarding offers Skip for now only once the microphone is blocked") {
-        func nav(_ step: OnboardingStepKind, granted: Bool, blocked: Bool) -> OnboardingNavigation {
-            OnboardingNavigation(step: step, microphoneGranted: granted, microphoneBlocked: blocked, skippedMicrophone: false)
+    runSuite("Onboarding asks for each permission with one ink button") {
+        func nav(_ step: OnboardingStepKind, mic: Bool = false, blocked: Bool = false, ax: Bool = false) -> OnboardingNavigation {
+            OnboardingNavigation(step: step, microphoneGranted: mic, microphoneBlocked: blocked, accessibilityGranted: ax)
         }
-        assertNil(nav(.permissions, granted: false, blocked: false).secondaryTitle, "macOS can still ask, so no skip yet")
-        assertEqual(nav(.permissions, granted: false, blocked: true).secondaryTitle, "Skip for now", "after Don't Allow, setup offers a skip instead of a dead end")
-        assertNil(nav(.permissions, granted: true, blocked: true).secondaryTitle, "a granted microphone needs no skip")
-        assertNil(nav(.welcome, granted: false, blocked: true).secondaryTitle, "the skip belongs to the permissions step")
-        assertNil(nav(.done, granted: false, blocked: true).secondaryTitle, "the skip belongs to the permissions step")
-        assertFalse(nav(.permissions, granted: true, blocked: true).canSkipMicrophone, "a granted microphone can't be skipped")
+        assertEqual(nav(.welcome).primaryTitle, "Set up", "welcome starts setup")
+        assertEqual(nav(.microphone).primaryTitle, "Allow microphone", "the mic screen's button asks macOS")
+        assertEqual(nav(.microphone).primaryAction, .requestMicrophone, "the mic button starts the macOS prompt")
+        assertEqual(nav(.microphone, blocked: true).primaryTitle, "Open System Settings", "after Don't Allow the button opens Settings")
+        assertEqual(nav(.microphone, mic: true).primaryAction, .advance, "a granted mic moves on")
+        assertEqual(nav(.accessibility).primaryTitle, "Allow paste access", "Accessibility is named by what it gives")
+        assertEqual(nav(.accessibility).secondaryTitle, "Skip for now", "paste access can be skipped")
+        assertEqual(nav(.accessibility, ax: true).primaryTitle, "Continue", "granted paste access moves on")
+        assertNil(nav(.accessibility, ax: true).secondaryTitle, "nothing to skip once granted")
+
+        var audio = OnboardingNavigation(step: .systemAudio)
+        assertEqual(audio.primaryTitle, "Allow call audio", "call audio asks in plain words")
+        assertEqual(audio.secondaryTitle, "Skip for now", "call audio is optional")
+        assertEqual(audio.progressLabel, "Optional", "call audio says it's optional")
+        audio.systemAudioActionTitle = "Check"
+        assertEqual(audio.primaryTitle, "Check again", "an unverified check offers another check")
+        audio.systemAudioChecking = true
+        assertTrue(audio.primaryDisabled, "no second check while one runs")
+        audio.systemAudioVerified = true
+        audio.systemAudioChecking = false
+        assertEqual(audio.primaryTitle, "Continue", "verified call audio moves on")
+    }
+
+    runSuite("Onboarding practice needs a real take, with a way out") {
+        let waiting = OnboardingNavigation(step: .tryIt, microphoneGranted: true, accessibilityGranted: true)
+        assertTrue(waiting.primaryDisabled, "Continue waits for the first take to land")
+        assertEqual(waiting.secondaryTitle, "Skip", "nobody is stuck on practice")
+        assertEqual(waiting.secondaryAction, .skip, "Skip moves on")
+        assertEqual(waiting.nextStep, .systemAudio, "skipping the first take skips the hands-free one too")
+
+        let landed = OnboardingNavigation(step: .tryIt, microphoneGranted: true, accessibilityGranted: true, tryItDone: true)
+        assertFalse(landed.primaryDisabled, "a landed take unlocks Continue")
+        assertNil(landed.secondaryTitle, "no skip once it worked")
+        assertEqual(landed.nextStep, .tryHandsFree, "Hold or tap gets a second, hands-free take")
+
+        let holdOnly = OnboardingNavigation(
+            step: .tryIt, microphoneGranted: true, accessibilityGranted: true, keyBehavior: .holdOnly, tryItDone: true
+        )
+        assertEqual(holdOnly.nextStep, .systemAudio, "Hold only has no hands-free take")
+
+        let noPaste = OnboardingNavigation(step: .tryIt, microphoneGranted: true)
+        assertEqual(noPaste.primaryAction, .requestAccessibility, "without paste access the key can't work, so practice asks for it")
+        assertFalse(noPaste.primaryDisabled, "the paste access ask is always clickable")
+
+        let keyOff = OnboardingNavigation(step: .accessibility, microphoneGranted: true, accessibilityGranted: true, dictationKeyEnabled: false)
+        assertEqual(keyOff.nextStep, .systemAudio, "with the dictation key off there is nothing to practice")
+
+        assertEqual(
+            OnboardingNavigation(step: .microphone, microphoneGranted: true).progressLabel,
+            "Step 1 of 4",
+            "the asks and takes count up to four"
+        )
+        assertEqual(
+            OnboardingNavigation(step: .tryIt, microphoneGranted: true, keyBehavior: .tapToToggle).progressLabel,
+            "Step 3 of 3",
+            "tap to toggle has one take"
+        )
+    }
+
+    runSuite("Onboarding gates Done on the microphone and offers a skip once it's blocked") {
+        func nav(_ step: OnboardingStepKind, granted: Bool = false, blocked: Bool = false, skipped: Bool = false) -> OnboardingNavigation {
+            OnboardingNavigation(step: step, microphoneGranted: granted, microphoneBlocked: blocked, skippedMicrophone: skipped)
+        }
+        assertTrue(nav(.done).primaryDisabled, "done can't finish without the microphone or a skip")
+        assertFalse(nav(.done, granted: true).primaryDisabled, "done finishes with the microphone")
+        assertFalse(nav(.done, skipped: true).primaryDisabled, "done finishes after the person skipped a blocked microphone")
+        assertEqual(nav(.done, granted: true).primaryTitle, "Done", "the last button says Done")
+        assertEqual(nav(.done, granted: true).primaryAction, .finish, "Done finishes setup")
+        assertNil(nav(.microphone, granted: false, blocked: false).secondaryTitle, "macOS can still ask, so no skip yet")
+        assertEqual(nav(.microphone, granted: false, blocked: true).secondaryTitle, "Skip for now", "after Don't Allow, setup offers a skip instead of a dead end")
+        assertEqual(nav(.microphone, granted: false, blocked: true).secondaryAction, .skipMicrophone, "that skip goes without the mic")
+        assertNil(nav(.microphone, granted: true, blocked: true).secondaryTitle, "a granted microphone needs no skip")
+        assertFalse(nav(.microphone, granted: true, blocked: true).canSkipMicrophone, "a granted microphone can't be skipped")
+        assertEqual(nav(.done, skipped: true).previousStep, .promise, "after a mic skip, Back goes to the promise")
+        assertFalse(nav(.promise, skipped: true).isShown(.tryIt), "no practice without the microphone")
+        assertFalse(nav(.promise, skipped: true).isShown(.accessibility), "a mic skip leaves the other asks too")
     }
 
     // MARK: Failure copy

@@ -244,7 +244,6 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     }
     required_utility = {
         "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
-        "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
         "quit": ("Quit", "transcripted.menubar.utility.quit"),
     }
 

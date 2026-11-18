@@ -7,12 +7,19 @@ enum MenuBarHeaderLayoutPolicy {
     /// The warning row is as tall as its text: two lines (the Accessibility
     /// warning) up to four (`maximumNumberOfLines`, the Secure Keyboard Entry
     /// notice). A fixed four-line row left short warnings sitting on empty space.
-    static let minWarningTextHeight: CGFloat = 26
-    static let maxWarningTextHeight: CGFloat = 56
+    ///
+    /// Sized for the shared text roles: the status line is `meta` (12 pt,
+    /// about 15 pt tall) and the detail and warning text `small` (11 pt,
+    /// about 13.5 pt a line), so two lines need 28 pt, four need 56.
+    static let minWarningTextHeight: CGFloat = 28
+    static let maxWarningTextHeight: CGFloat = 58
     static let statusRowHeight: CGFloat = 20
-    static let progressTop: CGFloat = 20
-    static let detailTop: CGFloat = 32
-    static let nonReadyIntrinsicHeight: CGFloat = 56
+    static let statusLabelHeight: CGFloat = 17
+    static let progressTop: CGFloat = 21
+    static let detailTop: CGFloat = 33
+    /// The warmup detail's two lines.
+    static let detailHeight: CGFloat = 28
+    static let nonReadyIntrinsicHeight: CGFloat = detailTop + detailHeight
     static let recordingIntrinsicHeight: CGFloat = statusRowHeight
 
     /// Where the warning starts: at the top when it is the only thing in the

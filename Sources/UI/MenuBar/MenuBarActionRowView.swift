@@ -256,22 +256,29 @@ final class MenuBarActionRowView: NSControl {
             height: symbolSize
         )
 
+        // Line heights come from the fonts (title 13, detail and trailing 11),
+        // so the text never clips when a role's size changes. Two lines fit
+        // the 40/42 pt rows: about 16 + 1 + 14.
         let textX = symbolWellView.frame.maxX + Self.buttonIconGap
+        let titleHeight = Self.lineHeight(of: titleLabel)
+        let trailingHeight = Self.lineHeight(of: trailingLabel)
         if !hasDetail {
-            let centeredY = (bounds.height - 16) / 2
-            titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
+            let centeredY = floor((bounds.height - titleHeight) / 2)
+            titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: titleHeight)
             detailLabel.frame = .zero
         } else {
-            let textBlockHeight: CGFloat = 30
-            let titleY = floor((bounds.height - textBlockHeight) / 2)
-            titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
-            detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
+            let detailHeight = Self.lineHeight(of: detailLabel)
+            let textBlockHeight = titleHeight + 1 + detailHeight
+            let titleY = max(0, floor((bounds.height - textBlockHeight) / 2))
+            titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: titleHeight)
+            detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: detailHeight)
         }
 
         if trailingWidth > 0 {
             let trailingX = bounds.width - padX - trailingWidth
-            let trailingY = hasDetail ? titleLabel.frame.minY + 1 : (bounds.height - 14) / 2
-            trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: 14)
+            // Trailing text sits on the title's baseline row.
+            let trailingY = titleLabel.frame.minY + floor((titleHeight - trailingHeight) / 2) + 1
+            trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: trailingHeight)
         }
     }
 
@@ -303,18 +310,27 @@ final class MenuBarActionRowView: NSControl {
         let showsTrailing = !trailingLabel.stringValue.isEmpty
         trailingLabel.isHidden = !showsTrailing
 
-        let titleY = floor((bounds.height - 16) / 2)
-        titleLabel.frame = NSRect(x: textX, y: titleY, width: min(titleWidth, available), height: 16)
+        let titleHeight = Self.lineHeight(of: titleLabel)
+        let trailingHeight = Self.lineHeight(of: trailingLabel)
+        let titleY = floor((bounds.height - titleHeight) / 2)
+        titleLabel.frame = NSRect(x: textX, y: titleY, width: min(titleWidth, available), height: titleHeight)
         if showsTrailing {
             trailingLabel.frame = NSRect(
                 x: bounds.width - padX - trailingWidth,
-                y: floor((bounds.height - 14) / 2),
+                y: floor((bounds.height - trailingHeight) / 2),
                 width: trailingWidth,
-                height: 14
+                height: trailingHeight
             )
         } else {
             trailingLabel.frame = .zero
         }
+    }
+
+    /// One line of a label's font, rounded up, so frames never clip
+    /// descenders.
+    private static func lineHeight(of label: NSTextField) -> CGFloat {
+        guard let font = label.font else { return 16 }
+        return ceil(font.ascender - font.descender + font.leading)
     }
 
     /// The width a label's cell actually draws. On macOS 26 a label's

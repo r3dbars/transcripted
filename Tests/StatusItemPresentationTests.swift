@@ -58,10 +58,44 @@ func testStatusItemPresentation() {
         )
         assertEqual(
             updating.toolTip,
-            "Transcripted — dictating - update 1.2.3 available",
+            "Transcripted — dictating — update 1.2.3 available",
             "an available update should add to the tooltip without hiding the capture state"
         )
         assertEqual(updating.accessibilityLabel(), "Transcripted — dictating", "the update note should stay out of the label")
+
+        // Work and attention show on the idle outline, still template, never tinted.
+        let quietCases: [(transcribing: Bool, attention: StatusItemPresentation.Attention?, glyph: MenuBarGlyph, label: String)] = [
+            (true, nil, .working, "Transcripted — making a transcript"),
+            (false, .shortcutsNeedAccessibility, .attention, "Transcripted — your key needs Accessibility"),
+            (false, .updateNeedsClick, .attention, "Transcripted — update ready"),
+            (true, .shortcutsNeedAccessibility, .working, "Transcripted — making a transcript"),
+        ]
+        for state in quietCases {
+            let presentation = StatusItemPresentation.for(
+                meetingRecording: false,
+                dictating: false,
+                transcribing: state.transcribing,
+                attention: state.attention
+            )
+            assertEqual(presentation.glyph, state.glyph, "\(state.label) glyph")
+            assertEqual(presentation.label, state.label, "\(state.label) label")
+        }
+        assertEqual(
+            StatusItemPresentation.for(meetingRecording: false, dictating: true, attention: .shortcutsNeedAccessibility).glyph,
+            .dictating,
+            "a live take outranks the attention dot"
+        )
+
+        let updateDot = NSButton(frame: .zero)
+        StatusItemPresentation.apply(
+            to: updateDot,
+            meetingRecording: false,
+            dictating: false,
+            attention: .updateNeedsClick,
+            updateTooltip: "1.2.3 ready, restart to update"
+        )
+        assertEqual(updateDot.toolTip, "Transcripted — 1.2.3 ready, restart to update", "the update dot's tooltip names the update once")
+        assertNil(updateDot.contentTintColor, "the update dot is not orange any more")
 
         // MenuBarGlyph is compiled here: check the images it actually makes
         // instead of grepping its source for isTemplate and systemRed.
@@ -104,6 +138,14 @@ func testStatusItemPresentation() {
         // (design ~443, ~495 -> pixel 14, row 16).
         assertTrue(menuBarGlyphAlpha(idle, x: 14, y: 16) < 0.1, "idle should be an outline")
         assertTrue(menuBarGlyphAlpha(dictating, x: 14, y: 16) > 0.9, "dictating should be a filled bubble")
+
+        // The attention dot sits where the meeting dot does, on the outline; the working ring is hollow.
+        let attention = renderMenuBarGlyph(.attention)
+        let working = renderMenuBarGlyph(.working)
+        assertTrue(menuBarGlyphAlpha(attention, x: 29, y: 29) > 0.9, "attention should draw a solid dot")
+        assertTrue(menuBarGlyphAlpha(working, x: 29, y: 29) < 0.1, "the working ring should be hollow in the middle")
+        assertTrue(menuBarGlyphAlpha(attention, x: 14, y: 16) < 0.1, "attention keeps the idle outline")
+        assertTrue(menuBarGlyphAlpha(working, x: 17, y: 14) > 0.9, "working keeps the idle outline's stem")
 
         // The recording dot sits off the bubble's bottom-right corner (design 744, 757 -> pixel 29, row 29).
         assertTrue(menuBarGlyphAlpha(meeting, x: 29, y: 29) > 0.9, "meeting should draw the recording dot")

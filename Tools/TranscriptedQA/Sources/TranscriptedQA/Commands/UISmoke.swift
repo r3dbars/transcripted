@@ -262,7 +262,7 @@ final class UIAutomationSmokeRunner {
             "transcripted.menubar.primary.start-dictation",
             "transcripted.menubar.primary.start-meeting",
             "transcripted.menubar.utility.open-transcripted",
-            "transcripted.menubar.utility.check-updates",
+            // The update row shows only while an update needs attention.
             "transcripted.menubar.utility.quit",
         ]
         let menuMaxDepth = 12
@@ -583,30 +583,28 @@ final class UIAutomationSmokeRunner {
         }
         pauseForUITransition()
 
-        // Three-step quiet onboarding (welcome -> permissions -> done): one
-        // permissions screen exposes all four permission rows at once, no
-        // use-case branching. Microphone gates the primary CTA, so the smoke
-        // stops here rather than trying to advance past it in a sandboxed,
+        // One ask per screen (welcome -> microphone -> paste access -> two
+        // practice takes -> call audio -> promise -> done). The microphone
+        // screen comes first and its primary button asks macOS, so the smoke
+        // stops here rather than trigger a prompt in a sandboxed,
         // permission-less launch.
         let permissionIDs = [
             "transcripted.onboarding.permissions.microphone",
-            "transcripted.onboarding.permissions.accessibility",
-            "transcripted.onboarding.permissions.system-audio",
-            "transcripted.onboarding.permissions.calendar",
+            navPrimaryID,
         ]
         guard let permissionsObserved = waitForObservedElements(permissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth) else {
             builder.add(.fail(
                 "onboarding-permissions",
-                "Onboarding exposes microphone, paste-back, system audio, and calendar permission actions",
+                "Onboarding opens on the microphone ask after Set up",
                 target: "Transcripted onboarding",
-                detail: "The permissions step did not expose the expected automation identifiers.",
+                detail: "The microphone step did not expose the expected automation identifiers.",
                 observed: observedElements(for: permissionIDs, inspector: appInspector, maxDepth: onboardingMaxDepth)
             ))
             return false
         }
         builder.add(.pass(
             "onboarding-permissions",
-            "Onboarding exposes microphone, paste-back, system audio, and calendar permission actions",
+            "Onboarding opens on the microphone ask after Set up",
             target: "Transcripted onboarding",
             observed: permissionsObserved
         ))

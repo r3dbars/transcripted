@@ -174,6 +174,9 @@ func testUIAutomationSurfaceContract() async {
         let qaUISmokeIDs = qaUISmokeIdentifiers()
         for id in MenuBarAutomationID.allCases {
             assertEqual(id.rawValue, expected[id], "\(id) should keep the identifier external automation expects")
+            // The update row shows only while an update needs attention, so a
+            // fresh smoke launch can't require it.
+            guard id != .checkUpdates else { continue }
             assertTrue(qaUISmokeIDs.contains(id.rawValue), "\(id.rawValue) should stay in the QA AX smoke's expected list")
         }
 
@@ -433,7 +436,7 @@ func testUIAutomationSurfaceContract() async {
             "transcripted.settings.page.storage",
             "transcripted.settings.sidebar.settings-toggle",
             "transcripted.settings.sidebar.dictations",
-            "transcripted.onboarding.permissions.system-audio",
+            "transcripted.onboarding.permissions.microphone",
         ] {
             assertTrue(qaUISmokeIDs.contains(identifier), "the QA AX smoke should still check \(identifier)")
         }

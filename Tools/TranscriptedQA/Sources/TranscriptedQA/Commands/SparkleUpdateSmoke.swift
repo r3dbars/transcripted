@@ -319,12 +319,12 @@ enum SparkleUpdateSmokeEvaluator {
             checks.append(checkEqual(
                 id: "available-callout-title",
                 actual: launchReport.content.updateCallout.title,
-                expected: "Update available: \(version)"
+                expected: "Update to \(version)"
             ))
             checks.append(checkEqual(
                 id: "available-callout-detail",
                 actual: launchReport.content.updateCallout.detail,
-                expected: "A new version is ready to install"
+                expected: ""
             ))
             checks.append(checkEqual(
                 id: "available-callout-trailing",
@@ -345,12 +345,12 @@ enum SparkleUpdateSmokeEvaluator {
             checks.append(checkEqual(
                 id: "downloading-utility-title",
                 actual: launchReport.content.utilityActions.checkUpdates.title,
-                expected: "Preparing Update"
+                expected: "Downloading update"
             ))
             checks.append(checkEqual(
                 id: "downloading-utility-detail",
                 actual: launchReport.content.utilityActions.checkUpdates.detail,
-                expected: "Downloading \(version)"
+                expected: "Version \(version)"
             ))
             checks.append(checkTrue(
                 id: "downloading-utility-visible",

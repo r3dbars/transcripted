@@ -30,6 +30,7 @@ final class MenuBarHeaderView: NSView {
     private var currentWarmupStatus: MeetingSessionController.ModelWarmupStatus = .ready
     private var currentHotkeyError: String?
     private var currentStatusTone: MenuBarHeaderStatusPresentation.Tone = .ready
+    private var currentCapturePhase: MenuBarMeetingCapturePhase?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -106,15 +107,22 @@ final class MenuBarHeaderView: NSView {
         statusLabel.isHidden = !showsStatus
         if showsStatus {
             let dotSize = MenuTokens.statusDotSize
-            statusDot.frame = NSRect(x: 0, y: 7, width: dotSize, height: dotSize)
-            statusLabel.frame = NSRect(x: dotSize + 8, y: 3, width: bounds.width - dotSize - 8, height: 16)
+            let labelHeight = MenuBarHeaderLayoutPolicy.statusLabelHeight
+            let labelY: CGFloat = 2
+            statusDot.frame = NSRect(x: 0, y: labelY + floor((labelHeight - dotSize) / 2), width: dotSize, height: dotSize)
+            statusLabel.frame = NSRect(x: dotSize + 8, y: labelY, width: bounds.width - dotSize - 8, height: labelHeight)
         }
 
         progressBar.isHidden = isReady
         detailLabel.isHidden = isReady
         if !isReady {
             progressBar.frame = NSRect(x: 0, y: MenuBarHeaderLayoutPolicy.progressTop, width: bounds.width, height: 8)
-            detailLabel.frame = NSRect(x: 0, y: MenuBarHeaderLayoutPolicy.detailTop, width: bounds.width, height: 24)
+            detailLabel.frame = NSRect(
+                x: 0,
+                y: MenuBarHeaderLayoutPolicy.detailTop,
+                width: bounds.width,
+                height: MenuBarHeaderLayoutPolicy.detailHeight
+            )
         }
 
         warningIconView.isHidden = !hasWarning
@@ -126,6 +134,8 @@ final class MenuBarHeaderView: NSView {
             let warningY = MenuBarHeaderLayoutPolicy.warningTop(isReady: isReady, showsStatus: showsStatus)
             let warningHeight = warningTextHeight(forWidth: bounds.width)
             warningIconView.frame = NSRect(x: 0, y: warningY + 1, width: 12, height: 12)
+            // The label's first line is ~13.5 pt tall at the small role; the
+            // icon sits centred on it.
             warningLabel.frame = NSRect(
                 x: 18,
                 y: warningY - 1,
@@ -152,6 +162,7 @@ final class MenuBarHeaderView: NSView {
         currentWarmupStatus = warmupStatus
         currentHotkeyError = shortcutWarning?.text
         currentWarningAction = shortcutWarning?.action
+        currentCapturePhase = capturePhase
 
         let isReady = warmupStatus.isReadyForMenuHeader
         let status = MenuBarHeaderStatusPresentation.resolve(
@@ -223,9 +234,10 @@ final class MenuBarHeaderView: NSView {
     }
 
     /// A steady recording has no status line: the red Stop button with its
-    /// timer already says so.
+    /// timer already says so. Saving has none either: the button reads
+    /// "Saving…", and saying it twice was noise.
     private var showsStatusRow: Bool {
-        guard currentStatusTone != .recording else { return false }
+        guard currentStatusTone != .recording, currentCapturePhase != .saving else { return false }
         return !currentWarmupStatus.isReadyForMenuHeader || currentStatusTone != .ready
     }
 

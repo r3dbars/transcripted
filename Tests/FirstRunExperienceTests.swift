@@ -122,7 +122,7 @@ func testFirstRunExperience() {
             meetingsStatus: "On demand"
         )
 
-        assertEqual(failed.subtitle, "Try again to reload meeting tools", "failed meeting warmup should offer a retry path")
+        assertEqual(failed.subtitle, "Couldn't load the voice model. Try again.", "failed meeting warmup should offer a retry path")
         assertEqual(lazy.subtitle, "Sets up the first time you use it", "cold startup should explain lazy meeting setup")
     }
 
@@ -132,7 +132,7 @@ func testFirstRunExperience() {
         assertTrue(state.isEnabled, "dictation should stay reachable while the local model downloads")
         assertEqual(
             state.subtitle,
-            "Downloads once, then starts automatically",
+            "Downloading the voice model, one time",
             "dictation row should explain the one-time background wait"
         )
     }
@@ -141,7 +141,7 @@ func testFirstRunExperience() {
         let state = FirstRunExperience.dictationAction(for: .failed("load failed"))
 
         assertTrue(state.isEnabled, "dictation retry should stay available after local model setup fails")
-        assertEqual(state.subtitle, "Voice setup failed. Try again", "failed dictation row should explain retry behavior")
+        assertEqual(state.subtitle, "Couldn't load the voice model. Try again.", "failed dictation row should explain retry behavior")
     }
 
     runSuite("FirstRunExperience.dictationAction — offers Stop while dictating") {
@@ -167,7 +167,7 @@ func testFirstRunExperience() {
         assertTrue(state.isEnabled, "meeting row should stay reachable while background warmup continues")
         assertEqual(
             state.subtitle,
-            "Meeting tools are still loading in the background",
+            "Loading the voice model for meetings",
             "meeting row should explain why it is not fully ready yet"
         )
     }
@@ -357,7 +357,7 @@ func testFirstRunExperience() {
         let failed = FirstRunExperience.onboardingDoneModelPresentation(for: .failed("boom"))
         assertTrue(failed.isFailed, "a failed load should be marked as failed")
         assertEqual(failed.headline, "Almost set.", "a failed model should not read as done")
-        assertTrue(failed.detail?.contains("Transcription section in Settings") == true, "a failed load should say where to retry")
+        assertTrue(failed.detail?.contains("voice model in Settings") == true, "a failed load should say where to retry")
         assertFalse(failed.detail?.contains("boom") == true, "raw engine errors should not reach setup")
     }
 }

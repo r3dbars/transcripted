@@ -262,7 +262,7 @@ enum FirstRunExperience {
                 statusLine: card.title,
                 detail: model.parakeetVariant?.isLocalInstallOnly == true
                     ? card.detail
-                    : "Try again from the Transcription section in Settings. Dictation and meetings need it.",
+                    : "Try again from the voice model in Settings. Dictation and meetings need it.",
                 progress: nil,
                 isFailed: true
             )
@@ -277,7 +277,7 @@ enum FirstRunExperience {
             return OnboardingDoneModelPresentation(
                 headline: "Almost set.",
                 statusLine: statusLine,
-                detail: "It keeps going after you click Done. Your first dictation or meeting waits for it.",
+                detail: "It keeps going after you click Done. Your first dictation waits for it.",
                 progress: card.progress,
                 isFailed: false
             )
@@ -307,15 +307,15 @@ enum FirstRunExperience {
         case .ready:
             subtitle = ""
         case .failed:
-            subtitle = "Voice setup failed. Try again"
+            subtitle = "Couldn't load the voice model. Try again."
         case .notLoaded:
             subtitle = "Sets up the first time you use it"
         case .downloading:
-            subtitle = "Downloads once, then starts automatically"
+            subtitle = "Downloading the voice model, one time"
         case .cached:
-            subtitle = "Downloaded. Loads when you start"
+            subtitle = "Ready. Loads when you start."
         case .loading:
-            subtitle = "Finishing local voice setup"
+            subtitle = "Loading the voice model"
         }
 
         return MenuBarPrimaryActionState(
@@ -358,10 +358,10 @@ enum FirstRunExperience {
         case "Ready":
             subtitle = ""
         case "Failed":
-            subtitle = "Try again to reload meeting tools"
+            subtitle = "Couldn't load the voice model. Try again."
         default:
             subtitle = dictationReady
-                ? "Meeting tools are still loading in the background"
+                ? "Loading the voice model for meetings"
                 : "Sets up the first time you use it"
         }
 
