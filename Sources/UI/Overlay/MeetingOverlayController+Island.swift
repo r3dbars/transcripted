@@ -232,6 +232,7 @@ extension MeetingOverlayController {
             prompt: state == .prompt ? prompt : nil,
             duration: currentDuration,
             callAudioNote: callAudioNote,
+            micMuteControlEnabled: NotchIslandPreferences.meetingMicMuteControlEnabled(),
             micMuted: meetingSession?.isMeetingMicMuted == true,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             asksAboutCallAudio: islandCallAudioAskPending,
@@ -269,8 +270,8 @@ extension MeetingOverlayController {
             islandCallAudioAskPending = false
             meetingSession?.dismissCallAudioAsk()
             pushToView()
-        case .meetingMicMute:
-            meetingSession?.toggleMeetingMicMute()
+        case .meetingMicMute, .meetingMicUnmute:
+            meetingSession?.setMeetingMicMuted(action == .meetingMicMute)
             pushToView()
         case .meetingStop, .meetingDismissError:
             handleCloseTapped()

@@ -146,6 +146,8 @@ struct GeneralSettingsPage<
                     isEnabled: autoDetectCallsEnabled
                 )
 
+                MeetingMicMuteControlRow()
+
                 NotchIslandLiveTranscriptRow()
 
                 micProcessingEditor()

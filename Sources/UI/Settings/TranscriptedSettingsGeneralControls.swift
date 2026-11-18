@@ -164,6 +164,23 @@ struct NotchIslandScreenSharingRow: View {
     }
 }
 
+struct MeetingMicMuteControlRow: View {
+    @AppStorage(NotchIslandPreferences.meetingMicMuteControlKey) private var meetingMicMuteControlEnabled = false
+
+    var body: some View {
+        GeneralToggleRow(
+            title: "Show meeting mic mute control",
+            isOn: $meetingMicMuteControlEnabled,
+            help: "Mute your mic in Transcripted’s recording. Your call mic and system audio are unaffected.",
+            info: GeneralInfo(
+                title: "Meeting mic mute control",
+                message: "Hover over the island during a meeting to mute or unmute your microphone in Transcripted’s recording. Your call app’s microphone works independently, and Transcripted keeps recording system audio if enabled. If you hide this control while muted, Unmute stays available."
+            ),
+            automationIdentifier: "transcripted.settings.general.meeting-mic-mute-control"
+        )
+    }
+}
+
 /// Whether a recording meeting shows its live transcript in the island.
 struct NotchIslandLiveTranscriptRow: View {
     @AppStorage(NotchIslandPreferences.showsLiveTranscriptKey)

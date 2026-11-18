@@ -119,6 +119,7 @@ struct NotchIslandMeetingContent: Equatable {
     var prompt: Prompt?
     var duration: TimeInterval = 0
     var callAudioNote: CallAudioNote?
+    var micMuteControlEnabled = false
     var micMuted = false
     var systemAudioUnverified = false
     /// The island skipped the "can't hear the other side" question so the
@@ -218,6 +219,7 @@ enum NotchIslandAction: Equatable {
     case pasteLastDictation
     case meetingStop
     case meetingMicMute
+    case meetingMicUnmute
     case meetingPrimary
     case meetingSecondary
     case meetingTertiary
@@ -244,7 +246,7 @@ enum NotchIslandAction: Equatable {
             return .dictation
         case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
-        case .meetingMicMute, .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
+        case .meetingMicMute, .meetingMicUnmute, .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
             return .meeting
         case .callRecord, .callDismiss, .callRemind:
@@ -278,7 +280,7 @@ enum NotchIslandDrop: Equatable {
     case dictationMessage(NotchIslandDictationContent.Message)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, micMuted: Bool = false)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, micAction: NotchIslandAction? = nil)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -580,7 +582,7 @@ enum NotchIslandPresentation {
                 callAudioNote: meeting.callAudioNote,
                 systemAudioUnverified: meeting.systemAudioUnverified,
                 showsTranscript: meeting.showsLiveTranscript,
-                micMuted: meeting.micMuted
+                micAction: meeting.micMuted ? .meetingMicUnmute : (meeting.micMuteControlEnabled ? .meetingMicMute : nil)
             )
         case .preparing(let title, let detail):
             return .meetingPreparing(title: title, detail: detail)

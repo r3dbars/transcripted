@@ -15,6 +15,17 @@ enum NotchIslandPreferences {
         userDefaults.set(visible, forKey: visibleInScreenSharingKey)
     }
 
+    static let meetingMicMuteControlKey = "notchIslandMeetingMicMuteControl"
+
+    static func meetingMicMuteControlEnabled(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: meetingMicMuteControlKey)
+    }
+
+    /// Recheck at dispatch so a previously rendered Mute button cannot bypass Settings.
+    static func allowsMeetingMicChange(toMuted: Bool, userDefaults: UserDefaults = .standard) -> Bool {
+        !toMuted || meetingMicMuteControlEnabled(userDefaults: userDefaults)
+    }
+
     /// Whether a recording meeting transcribes live, on this Mac, so hovering
     /// the island shows the conversation so far. Off by default: it runs two
     /// streaming models for the whole call. The saved transcript is unaffected.

@@ -139,7 +139,7 @@ final class NotchIslandDropView: NSView {
             buildJustInserted(text: text)
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
-        case .meetingControls(let note, let unverified, let showsTranscript, let micMuted):
+        case .meetingControls(let note, let unverified, let showsTranscript, let micAction):
             let subtitle: String
             if unverified {
                 subtitle = "Can't confirm call audio yet"
@@ -147,14 +147,17 @@ final class NotchIslandDropView: NSView {
                 switch note {
                 case .off?: subtitle = "Call audio is off"
                 case .onForNextMeeting?: subtitle = "Call audio starts next meeting"
-                case nil: subtitle = micMuted ? "Meeting mic muted" : "You and the call"
+                case nil: subtitle = micAction == .meetingMicUnmute ? "Meeting mic muted" : "You and the call"
                 }
             }
             add(titleBlock("Recording", subtitle))
-            let micButton = button(
-                micMuted ? "Unmute mic" : "Mute mic", .plain, .meetingMicMute,
-                accessibilityLabel: micMuted ? "Unmute Transcripted meeting microphone" : "Mute Transcripted meeting microphone"
-            )
+            var trailing: [NSView] = []
+            if let micAction {
+                let verb = micAction == .meetingMicUnmute ? "Unmute" : "Mute"
+                trailing.append(button("\(verb) mic", .plain, micAction,
+                                       accessibilityLabel: "\(verb) Transcripted meeting microphone"))
+            }
+            trailing.append(button("Stop", .destructive, .meetingStop, symbol: "stop.fill"))
             if showsTranscript, let liveTranscriptView {
                 liveTranscriptView.removeFromSuperview()
                 stack.addArrangedSubview(liveTranscriptView) // not add(): it pins its own size
@@ -164,9 +167,7 @@ final class NotchIslandDropView: NSView {
                 if note == .off {
                     leading.append(button("Turn on", .warning, .meetingCallAudio, accessibilityLabel: "Turn on call audio"))
                 }
-                add(buttonRow(leading: leading, trailing: [
-                    micButton, button("Stop", .destructive, .meetingStop, symbol: "stop.fill"),
-                ]))
+                add(buttonRow(leading: leading, trailing: trailing))
                 break
             }
             let you = NotchIslandBarsView(count: 46, maxHeight: 20, color: NotchIslandPalette.accent)
@@ -179,9 +180,7 @@ final class NotchIslandDropView: NSView {
             if note == .off {
                 leading.append(button("Turn on", .warning, .meetingCallAudio, accessibilityLabel: "Turn on call audio"))
             }
-            add(buttonRow(leading: leading, trailing: [
-                micButton, button("Stop", .destructive, .meetingStop, symbol: "stop.fill"),
-            ]))
+            add(buttonRow(leading: leading, trailing: trailing))
         case .meetingPrompt(let prompt):
             add(titleBlock(prompt.title, prompt.detail, wrapsDetail: true))
             if !prompt.countdown.isEmpty {
