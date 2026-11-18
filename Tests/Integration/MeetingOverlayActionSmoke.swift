@@ -39,8 +39,8 @@ enum MeetingOverlayActionSmoke {
             }
             return nil
         }
-        func click(_ button: NSButton?) {
-            guard let button, let action = button.action else { failures.append("Missing rendered control"); return }
+        func click(_ button: NSButton?, line: Int = #line) {
+            guard let button, let action = button.action else { failures.append("Missing rendered control at smoke line \(line)"); return }
             _ = button.sendAction(action, to: button.target)
         }
 
@@ -49,6 +49,9 @@ enum MeetingOverlayActionSmoke {
         let firstID = UUID()
         session.activeRecordingIdentity = firstID
         session.transition(to: .recording, reason: "overlay_smoke")
+        // Let the recording-state subscription finish resetting the strip
+        // before delivering the first calendar offer, as in a live meeting.
+        await drain()
         let start = Date()
         let event = MeetingPromptDetector.Candidate(id: "fixture", title: "Meeting", detail: "",
             provider: .teams, reason: .calendarNearby, source: .calendarEvent, startDate: start,
