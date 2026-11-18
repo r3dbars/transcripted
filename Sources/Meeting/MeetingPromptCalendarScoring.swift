@@ -22,8 +22,7 @@ enum MeetingPromptCalendarScoring {
         runtimeSnapshot: MeetingPromptRuntimeSnapshot
     ) -> MeetingPromptScoredCandidate? {
         guard !event.isAllDay else { return nil }
-        guard let meetingURL = event.meetingURL,
-              let provider = event.provider else { return nil }
+        guard let provider = event.provider else { return nil }
 
         let startsIn = event.startDate.timeIntervalSince(now)
         let endsIn = event.endDate.timeIntervalSince(now)
@@ -51,7 +50,7 @@ enum MeetingPromptCalendarScoring {
                 source: .calendarEvent,
                 startDate: event.startDate,
                 endDate: event.endDate,
-                meetingURL: meetingURL,
+                meetingURL: event.meetingURL,
                 suggestedTranscriptTitle: transcriptTitle
             ),
             score: score

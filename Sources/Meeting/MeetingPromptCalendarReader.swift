@@ -20,7 +20,7 @@ private extension MeetingPromptCalendarEventSnapshot {
             location: event.location,
             notes: event.notes
         )
-        guard snapshot.meetingURL != nil else { return nil }
+        guard snapshot.provider != nil else { return nil }
         self = snapshot
     }
 }

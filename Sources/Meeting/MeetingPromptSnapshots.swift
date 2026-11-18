@@ -35,6 +35,7 @@ struct MeetingPromptCalendarEventSnapshot: Equatable {
         let meetingURL = Self.extractMeetingURL(url: url, location: location, notes: notes)
         self.meetingURL = meetingURL
         self.provider = meetingURL.flatMap(Self.provider(for:))
+            ?? location.flatMap(MeetingPromptProvider.provider(forLocation:))
     }
 
     private static let meetingURLDetector = try? NSDataDetector(

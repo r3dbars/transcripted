@@ -389,6 +389,44 @@ func testMeetingPromptHeuristics() {
         )
     }
 
+    runSuite("MeetingPromptCalendarScoring — a Teams invite with no join link is still a Teams meeting") {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        func event(location: String?) -> MeetingPromptCalendarEventSnapshot {
+            MeetingPromptCalendarEventSnapshot(
+                id: "weekly-sync",
+                title: "Weekly Sync",
+                startDate: now,
+                endDate: now.addingTimeInterval(60 * 60),
+                isAllDay: false,
+                url: nil,
+                location: location,
+                notes: "Agenda to follow\n"
+            )
+        }
+        func scored(_ event: MeetingPromptCalendarEventSnapshot) -> MeetingPromptScoredCandidate? {
+            MeetingPromptCalendarScoring.calendarCandidates(
+                from: [event],
+                now: now,
+                runtimeSnapshot: MeetingPromptRuntimeSnapshot(
+                    runningBundleIDs: [],
+                    frontmostBundleID: nil,
+                    recentNativeActivity: [:],
+                    runtimeSuppressedUntil: [:]
+                )
+            ).first
+        }
+
+        for location in ["Réunion Microsoft Teams", "Microsoft Teams Meeting"] {
+            let candidate = scored(event(location: location))?.candidate
+            assertEqual(candidate?.provider, .teams, "\(location) names Teams without a link")
+            assertEqual(candidate?.source, .calendarEvent, "it is a calendar candidate, so it can offer a split")
+            assertEqual(candidate?.suggestedTranscriptTitle, "Weekly Sync", "it keeps the invite title")
+            assertTrue(candidate?.meetingURL == nil, "there is no link to carry")
+        }
+        assertTrue(scored(event(location: "Room 4.12")) == nil, "a room with no link is not a call")
+        assertTrue(scored(event(location: nil)) == nil, "no link and no location is not a call")
+    }
+
     runSuite("MeetingPromptCalendarScoring — a frontmost Helium window is the meeting tab on a calendar prompt") {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let meet = MeetingPromptCalendarEventSnapshot(
