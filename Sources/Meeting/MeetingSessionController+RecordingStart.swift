@@ -12,9 +12,10 @@ import TranscriptedCore
 extension MeetingSessionController {
     var isMeetingMicMuted: Bool { capture.audio.isMeetingMicMuted }
 
-    func toggleMeetingMicMute() {
-        guard case .recording = state else { return }
-        capture.audio.isMeetingMicMuted.toggle()
+    func setMeetingMicMuted(_ muted: Bool) {
+        guard case .recording = state,
+              NotchIslandPreferences.allowsMeetingMicChange(toMuted: muted) else { return }
+        capture.audio.isMeetingMicMuted = muted
     }
 
     func installSharedDictationMicRelay() {

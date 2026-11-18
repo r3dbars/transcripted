@@ -18,6 +18,20 @@ func testNotchIslandPreferences() {
         )
     }
 
+    runSuite("NotchIslandPreferences requires opt-in for mute and always allows explicit unmute") {
+        let (defaults, suiteName) = makeNotchIslandPreferencesDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        assertFalse(NotchIslandPreferences.allowsMeetingMicChange(toMuted: true, userDefaults: defaults))
+        NotchIslandPreferences.setShowsLiveTranscript(true, userDefaults: defaults)
+        assertFalse(NotchIslandPreferences.meetingMicMuteControlEnabled(userDefaults: defaults))
+        defaults.set(true, forKey: NotchIslandPreferences.meetingMicMuteControlKey)
+        let reopened = UserDefaults(suiteName: suiteName)!
+        assertTrue(NotchIslandPreferences.allowsMeetingMicChange(toMuted: true, userDefaults: reopened))
+        defaults.set(false, forKey: NotchIslandPreferences.meetingMicMuteControlKey)
+        assertFalse(NotchIslandPreferences.allowsMeetingMicChange(toMuted: true, userDefaults: reopened))
+        assertTrue(NotchIslandPreferences.allowsMeetingMicChange(toMuted: false, userDefaults: reopened))
+    }
+
     runSuite("NotchIslandPreferences keeps the live transcript off until turned on") {
         let (defaults, suiteName) = makeNotchIslandPreferencesDefaults()
         defer { defaults.removePersistentDomain(forName: suiteName) }
