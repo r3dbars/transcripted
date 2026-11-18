@@ -24,8 +24,8 @@ enum AgentMCPAgent: String, CaseIterable, Identifiable {
     var detail: String {
         switch self {
         case .claudeDesktop: return "Desktop app"
-        case .claudeCode: return "CLI"
-        case .codex: return "App and CLI"
+        case .claudeCode: return "Terminal"
+        case .codex: return "App and terminal"
         case .cursor: return "Editor"
         }
     }
@@ -288,7 +288,7 @@ enum AgentMCPConnector {
     /// config. The backup must be named in UI — without it the rewrite
     /// silently drops every other MCP server the user had configured.
     static func replacedConfigNotice(for agent: AgentMCPAgent, backupURL: URL) -> String {
-        "Your previous \(agent.displayName) config wasn't readable, so it was backed up as \(backupURL.lastPathComponent) next to the config file and replaced. Re-add any other MCP servers from that backup."
+        "Your previous \(agent.displayName) config wasn't readable, so it was backed up as \(backupURL.lastPathComponent) next to the config file and replaced. Re-add any other tools you'd added there from that backup."
     }
 
     // MARK: - Claude Code

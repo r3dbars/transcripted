@@ -129,7 +129,7 @@ extension MeetingPromptDetector {
     ) -> Candidate {
         Candidate(
             id: "runtime:\(provider.rawValue)",
-            title: title ?? "\(provider.displayName) is active",
+            title: title ?? "\(provider.displayName) is open",
             detail: detail ?? MeetingPromptHeuristics.runtimeReminderDetail(meetingShortcut: meetingShortcutDisplay()),
             provider: provider,
             reason: MeetingPromptHeuristics.reason(for: .runtimeApp, hasRuntimeContext: false),

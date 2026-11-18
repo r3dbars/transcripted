@@ -49,7 +49,7 @@ func testFailedMeetingPresentation() {
             isRetryable: false
         )
 
-        assertEqual(copy.title, "Allow the mic", "microphone failures should name the missing permission")
+        assertEqual(copy.title, "Allow mic", "microphone failures should name the missing permission")
         assertEqual(
             copy.detail,
             "Turn on Microphone for Transcripted in System Settings, then try again.",

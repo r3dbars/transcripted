@@ -104,7 +104,7 @@ func testNotchIslandPresentation() {
         let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again")
         let content = NotchIslandDictationContent(phase: .message(message))
         let layout = notchLayout(dictation: content)
-        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Dictation", .title)])
+        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Didn't start", .title)])
         assertEqual(layout.drop, .dictationMessage(message))
         assertTrue(layout.dropIsSticky, "a message opens the drop-down by itself")
 

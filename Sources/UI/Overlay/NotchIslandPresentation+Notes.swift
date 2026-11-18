@@ -36,6 +36,31 @@ struct NotchIslandPassingNote: Equatable {
     }
 }
 
+/// The left wing's two words for a dictation error: the cause, the way
+/// "No speech" and "Not pasted" name theirs. Read from the message's own
+/// words, so a message nobody listed here still reads "Dictation".
+enum NotchIslandErrorWingLabel {
+    static let fallback = "Dictation"
+
+    static func make(_ text: String) -> String {
+        let text = text.lowercased()
+        func has(_ words: String...) -> Bool { words.contains { text.contains($0) } }
+        if has("quit paused") { return "Quit paused" }
+        if has("microphone access", "mic access", "allow microphone") { return "Mic off" }
+        if has("couldn't start", "didn't start") { return "Didn't start" }
+        if has("microphone", "mic unavailable") { return "Mic problem" }
+        if has("try again in a moment", "warming up") { return "Not ready" }
+        if has("didn't load") { return "Model failed" }
+        if has("couldn't save", "couldn't be saved", "only in memory", "couldn't be moved", "retry saving") {
+            return "Not saved"
+        }
+        if has("no longer available") { return "Audio gone" }
+        if has("couldn't copy", "clipboard") { return "Not copied" }
+        if has("paste") { return "Not pasted" }
+        return fallback
+    }
+}
+
 /// The one countdown look: a ring on the button that fires when time runs
 /// out (Dismiss, Skip, Stop, Keep). Nothing else on the island counts down.
 struct NotchIslandCountdownRing: Equatable {

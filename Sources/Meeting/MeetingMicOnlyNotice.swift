@@ -137,7 +137,7 @@ enum MeetingMicOnlyNoticeCopy {
 
     /// The detected-call prompt says it before the meeting starts, in place
     /// of its usual detail line.
-    static let detectedCallPromptDetail = "Call audio is off, so only your side will be recorded."
+    static let detectedCallPromptDetail = "Call audio is off — only your side records."
 
     /// Title and detail for the mid-meeting "not verified" / "unavailable"
     /// warning's Check Access button.

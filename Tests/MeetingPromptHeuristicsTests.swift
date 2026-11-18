@@ -14,7 +14,7 @@ func testMeetingPromptHeuristics() {
             meetingShortcut: "⌥M"
         )
 
-        assertEqual(prompt?.title, "Zoom is active", "frontmost reminder title should be direct")
+        assertEqual(prompt?.title, "Zoom is open", "frontmost reminder title should be direct")
         assertEqual(prompt?.score, 4, "frontmost apps should outrank stale native reminders")
     }
 
@@ -29,7 +29,7 @@ func testMeetingPromptHeuristics() {
         )
         assertEqual(
             runtime?.detail,
-            "If this is a meeting, start recording now or press ⌃⇧R anytime.",
+            "Or press ⌃⇧R anytime.",
             "a rebound shortcut should replace the default in the app reminder"
         )
         let mic = MeetingPromptHeuristics.micInputPresentation(title: "Zoom call detected", meetingShortcut: "⌃⇧R")
@@ -46,7 +46,7 @@ func testMeetingPromptHeuristics() {
             meetingShortcut: "⌥M"
         )
 
-        assertEqual(prompt?.title, "Teams just opened", "recent launches should get the softer reminder")
+        assertEqual(prompt?.title, "Teams is open", "recent launches get the same plain reminder")
         assertEqual(prompt?.score, 3, "recent launches should score below a frontmost active app")
     }
 
