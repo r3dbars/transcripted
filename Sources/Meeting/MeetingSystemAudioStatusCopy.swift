@@ -67,9 +67,11 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
         }
     }
 
+    /// Minted on a warning transition and carried through acknowledgement and UI refresh.
+    let occurrenceID = UUID()
     let cause: Cause
     let phase: Phase
-    let isPromptDismissed: Bool
+    private(set) var isPromptDismissed: Bool
     /// True once an interruption or failure has been observed at any point
     /// in this recording. `cause` is overwritten on every status transition,
     /// so an interruption followed by prolonged silence ends with
@@ -90,12 +92,9 @@ struct MeetingSystemAudioDegradationWarning: Equatable {
     }
 
     func dismissingPrompt() -> MeetingSystemAudioDegradationWarning {
-        MeetingSystemAudioDegradationWarning(
-            cause: cause,
-            phase: phase,
-            isPromptDismissed: true,
-            observedNonSilenceCause: observedNonSilenceCause
-        )
+        var dismissed = self
+        dismissed.isPromptDismissed = true
+        return dismissed
     }
 }
 
@@ -209,7 +208,7 @@ enum MeetingSystemAudioDegradationPolicy {
             guard let current else { return nil }
             // Buffers flowing proves neither signal nor that the tap hears
             // the playing call; only the signal checks clear these.
-            if current.cause == .unverified || current.cause == .unheardPlayback { return current }
+            if current.phase == .recovered || current.cause == .unverified || current.cause == .unheardPlayback { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: current.cause,
                 phase: .recovered,
@@ -217,49 +216,31 @@ enum MeetingSystemAudioDegradationPolicy {
                 observedNonSilenceCause: current.degradesSavedCapture
             )
         case .reconnecting:
+            if current?.cause == .interruption, current?.phase == .recovering { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: .interruption,
                 phase: .recovering,
-                isPromptDismissed: carriesPromptDismissal(
-                    from: current,
-                    for: .interruption
-                ),
+                isPromptDismissed: false,
                 observedNonSilenceCause: true
             )
         case .silent:
             if current?.cause == .unverified || current?.cause == .unheardPlayback { return current }
+            if current?.cause == .silence, current?.phase == .degraded { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: .silence,
                 phase: .degraded,
-                isPromptDismissed: carriesPromptDismissal(
-                    from: current,
-                    for: .silence
-                ),
+                isPromptDismissed: false,
                 observedNonSilenceCause: current?.degradesSavedCapture ?? false
             )
         case .failed:
+            if current?.cause == .failure, current?.phase == .degraded { return current }
             return MeetingSystemAudioDegradationWarning(
                 cause: .failure,
                 phase: .degraded,
-                isPromptDismissed: carriesPromptDismissal(
-                    from: current,
-                    for: .failure
-                ),
+                isPromptDismissed: false,
                 observedNonSilenceCause: true
             )
         }
-    }
-
-    private static func carriesPromptDismissal(
-        from current: MeetingSystemAudioDegradationWarning?,
-        for cause: MeetingSystemAudioDegradationWarning.Cause
-    ) -> Bool {
-        guard let current,
-              current.phase != .recovered,
-              current.cause == cause else {
-            return false
-        }
-        return current.isPromptDismissed
     }
 }
 
