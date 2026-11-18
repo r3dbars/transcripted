@@ -79,6 +79,9 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
     private let storage: UnsafeMutableRawPointer
     private let lengths: UnsafeMutablePointer<Int>
     private let hostSeconds: UnsafeMutablePointer<Double>
+    // Installed before AudioDeviceStart. The IOProc only reads this reference.
+    var muteTimeline: MeetingMicMuteTimeline?
+    private let admissions: UnsafeMutablePointer<MicPacketAdmission>
     private let receipts: UnsafeMutablePointer<Double>
     private let written = Atomic<Int>(0)
     private let read = Atomic<Int>(0)
@@ -104,6 +107,8 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
         // Write the PCM storage on the construction queue before the IOProc
         // first copies into it. This does not wire pages against later faults.
         memset(storage, 0, storageByteCount)
+        admissions = .allocate(capacity: capacity)
+        admissions.initialize(repeating: .retain, count: capacity)
         receipts = .allocate(capacity: capacity)
         receipts.initialize(repeating: 0, count: capacity)
         lengths = .allocate(capacity: capacity)
@@ -113,6 +118,8 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
     }
 
     deinit {
+        admissions.deinitialize(count: capacity)
+        admissions.deallocate()
         receipts.deinitialize(count: capacity)
         receipts.deallocate()
         storage.deallocate()
@@ -167,6 +174,7 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
         for index in 0..<bufferCount {
             memcpy(storage.advanced(by: (slot * bufferCount + index) * maximumFrames * bytesPerFrame), list[index].mData!, bytes)
         }
+        admissions[slot] = muteTimeline?.admission ?? .retain
         receipts[slot] = received
         lengths[slot] = bytes / bytesPerFrame
         hostSeconds[slot] = stampSeconds
@@ -186,13 +194,14 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
 
     /// Runs off the realtime thread and returns independently owned samples
     /// plus the capture host time in seconds (0 when unknown).
-    func pop(format: AVAudioFormat) -> (buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval)? {
+    func pop(format: AVAudioFormat) -> (buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval, admission: MicPacketAdmission)? {
         let position = read.load(ordering: .relaxed)
         guard position < written.load(ordering: .acquiring) else { return nil }
         let slot = position % capacity
         let frames = lengths[slot]
         let stamp = hostSeconds[slot]
         let received = receipts[slot]
+        let admission = admissions[slot]
         guard let result = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(frames)) else {
             read.store(position + 1, ordering: .releasing)
             dropped.wrappingAdd(1, ordering: .relaxed)
@@ -204,6 +213,6 @@ final class PinnedMicrophoneBufferRing: @unchecked Sendable {
             memcpy(list[index].mData!, storage.advanced(by: (slot * bufferCount + index) * maximumFrames * bytesPerFrame), frames * bytesPerFrame)
         }
         read.store(position + 1, ordering: .releasing)
-        return (result, stamp, received)
+        return (result, stamp, received, admission)
     }
 }

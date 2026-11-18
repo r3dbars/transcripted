@@ -107,7 +107,7 @@ enum MeetingOverlayActionSmoke {
         expect(session.isMeetingMicMuted, "Stale Unmute preserved mute")
         render()
         click(button("Unmute mic", in: view))
-        expect(!session.isMeetingMicMuted, "Current Unmute worked after opt-out")
+        expect(session.isMeetingMicMuted, "Unmute cannot reopen a capture with unknown packet provenance")
 
         let recovered = MeetingSystemAudioDegradationWarning(cause: .failure, phase: .recovered, isPromptDismissed: false)
         let degraded = MeetingSystemAudioDegradationWarning(cause: .failure, phase: .degraded, isPromptDismissed: false)

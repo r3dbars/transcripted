@@ -157,7 +157,7 @@ extension Audio {
                     self.publishMicLevel(level)
                 },
                 bufferCallback: { [weak self] buffer, peak in
-                    self?.handleMicBuffer(buffer, timing: .redactedBeforeConversion(rawPeak: peak), writeContext: writeContext)
+                    self?.handleMicBuffer(buffer, disposition: .redactedBeforeConversion(rawPeak: peak), writeContext: writeContext)
                 },
                 eventHandler: { [weak self, weak capture] event in
                     guard let self, let capture else { return }

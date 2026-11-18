@@ -26,7 +26,7 @@ extension PinnedMicrophoneCapture {
         }
     }
 
-    func deliver(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval) {
+    func deliver(_ buffer: AVAudioPCMBuffer, hostSeconds: TimeInterval, received: TimeInterval, admission: MicPacketAdmission) {
         let deliveryGeneration = generation
         let end = hostSeconds + Double(buffer.frameLength) / buffer.format.sampleRate
         if hostSeconds > 0, end <= received, hostSeconds >= (expectedNextHostSeconds ?? 0) {
@@ -47,7 +47,7 @@ extension PinnedMicrophoneCapture {
         let digitalSilence = !silentInputReported && !tearingDown && Self.isDigitalSilence(buffer)
         let peak = roomLevelHandler == nil ? 0 : Audio.linearPeak(buffer: buffer)
         roomLevelHandler?(Audio.normalizedRMSLevel(buffer: buffer))
-        muteTimeline?.redact(buffer, hostSeconds: hostSeconds, received: received, continuity: continuity)
+        admission.apply(to: buffer)
         if let converted = convertToRecordingFormat(buffer) { deliverInOrder(.audio(converted, rawPeak: peak)) }
         guard generation == deliveryGeneration else { return }
         trackSilentInput(buffer, digitalSilence: digitalSilence)

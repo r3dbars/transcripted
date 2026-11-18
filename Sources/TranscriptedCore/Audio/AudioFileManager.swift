@@ -474,14 +474,13 @@ extension Audio {
                             operation: "start_recording"
                         )
                     },
-                    installTap: { settledGraph, context in
-                        let micWriteContext = context.forNewTap()
+                    installTap: { settledGraph, micWriteContext in
                         // Install tap on microphone. The route can still move
                         // after the check; the guard makes that a failed
                         // start, not a crash.
                         try AudioTapInstallGuard.run(operation: "start_recording") {
-                            settledGraph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: settledGraph.recordingFormat) { [weak self] buffer, time in
-                                self?.handleMicBuffer(buffer, timing: MicCaptureTiming(time), writeContext: micWriteContext)
+                            settledGraph.inputNode.installTap(onBus: 0, bufferSize: 4096, format: settledGraph.recordingFormat) { [weak self] buffer, _ in
+                                self?.handleMicBuffer(buffer, writeContext: micWriteContext)
                             }
                         }
                     },

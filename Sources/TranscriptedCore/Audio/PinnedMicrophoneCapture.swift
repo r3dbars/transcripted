@@ -122,7 +122,6 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     var deviceFormat: AVAudioFormat?
     var converter: AVAudioConverter?
     var muteTimeline: MeetingMicMuteTimeline?
-    var continuity = MicCaptureContinuity()
     var roomLevelHandler: ((Float) -> Void)?
     var callback: ((AVAudioPCMBuffer, Float) -> Void)?
     var eventHandler: ((PinnedMicrophoneCaptureEvent) -> Void)?
@@ -339,7 +338,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                 if let tail, let tailFormat {
                     for _ in 0..<tail.capacity {
                         guard generation == finishGeneration, let popped = tail.pop(format: tailFormat) else { break }
-                        deliver(popped.buffer, hostSeconds: popped.hostSeconds, received: popped.received)
+                        deliver(popped.buffer, hostSeconds: popped.hostSeconds, received: popped.received, admission: popped.admission)
                     }
                 }
                 if generation == finishGeneration, let recording = format {
@@ -487,7 +486,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
     }
 
     private func startHardware() throws {
-        continuity = MicCaptureContinuity(start: clock())
+        ring?.muteTimeline = muteTimeline
         let startGeneration = generation
         if let hardwareHooks { try hardwareHooks.start(hardwareDeviceID) }
         else {
@@ -583,7 +582,7 @@ public final class PinnedMicrophoneCapture: @unchecked Sendable {
                 lastBufferClock = now
                 consecutiveRestarts = 0
                 consecutiveFormatSettleRebuilds = 0
-                deliver(popped.buffer, hostSeconds: popped.hostSeconds, received: popped.received)
+                deliver(popped.buffer, hostSeconds: popped.hostSeconds, received: popped.received, admission: popped.admission)
                 guard running, generation == tickGeneration else { return }
             }
         }

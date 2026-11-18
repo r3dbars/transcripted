@@ -18,6 +18,8 @@ import Synchronization
 extension Audio {
     /// A recovered tap keeps the same generation. Stop advances it, but the
     /// finishing tap still checks its own generation while its writer drains.
+    /// Once muted, this generation stays muted across attempted unmute and
+    /// route recovery. A new recording starts with a separate admission gate.
     public var isMeetingMicMuted: Bool {
         get { meetingMicMuteSessions.timeline(for: recordingSessionGeneration).isMuted }
         set { meetingMicMuteSessions.timeline(for: recordingSessionGeneration).setMuted(newValue) }
