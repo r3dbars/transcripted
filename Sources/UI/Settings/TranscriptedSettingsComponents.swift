@@ -80,7 +80,7 @@ enum SettingsInteractionPalette {
         case .accent:
             return LibraryTokens.ink.opacity(0.13)
         case .warning:
-            return Color.orange.opacity(0.12)
+            return LibraryTokens.attention.opacity(0.12)
         case .destructive:
             return Color.red.opacity(0.10)
         }
@@ -93,7 +93,7 @@ enum SettingsInteractionPalette {
         case .accent:
             return LibraryTokens.ink.opacity(0.18)
         case .warning:
-            return Color.orange.opacity(0.17)
+            return LibraryTokens.attention.opacity(0.17)
         case .destructive:
             return Color.red.opacity(0.15)
         }
@@ -106,7 +106,7 @@ enum SettingsInteractionPalette {
         case .accent:
             return LibraryTokens.ink.opacity(0.30)
         case .warning:
-            return Color.orange.opacity(0.26)
+            return LibraryTokens.attention.opacity(0.26)
         case .destructive:
             return Color.red.opacity(0.22)
         }
@@ -252,7 +252,7 @@ struct SettingsInlineActionButton: View {
         case .accent:
             return LibraryTokens.ink.opacity(0.08)
         case .warning:
-            return Color.orange.opacity(0.08)
+            return LibraryTokens.attention.opacity(0.08)
         case .destructive:
             return Color.red.opacity(0.06)
         }
@@ -265,7 +265,7 @@ struct SettingsInlineActionButton: View {
         case .accent:
             return LibraryTokens.ink.opacity(0.16)
         case .warning:
-            return Color.orange.opacity(0.16)
+            return LibraryTokens.attention.opacity(0.16)
         case .destructive:
             return Color.red.opacity(0.14)
         }
@@ -352,11 +352,11 @@ struct SettingsStatusCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.surface, style: .continuous)
+                .fill(DesignTokens.fill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.surface, style: .continuous)
                 .stroke(tintColor.opacity(0.16), lineWidth: 1)
         )
     }
@@ -364,11 +364,12 @@ struct SettingsStatusCard: View {
     private var tintColor: Color {
         switch tone {
         case .ready:
-            return .green
+            return LibraryTokens.ink2
         case .working:
-            return .blue
+            // Live progress is the one place green belongs here.
+            return LibraryTokens.accent
         case .caution:
-            return .orange
+            return LibraryTokens.attention
         }
     }
 

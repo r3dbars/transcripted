@@ -10,15 +10,9 @@ struct CompanionSettingsCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center, spacing: 12) {
-                Image(systemName: "bubble.left.and.text.bubble.right")
-                    .font(.system(size: 23, weight: .medium))
-                    .foregroundStyle(LibraryTokens.ink)
-                    .frame(width: 44, height: 44)
-                    .background(LibraryTokens.raisedFill, in: RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised))
-
                 VStack(alignment: .leading, spacing: 4) {
                     Text("ChatGPT companion")
-                        .font(.title3.weight(.semibold))
+                        .textRole(.heading)
                     HStack(spacing: 6) {
                         Circle()
                             .fill(statusColor)
@@ -31,15 +25,15 @@ struct CompanionSettingsCard: View {
                 Spacer(minLength: 12)
             }
 
-            Text("Bring a Zoom, Meet, Teams, or in-person meeting into your conversation. The Transcripted plugin connects to the app running on this Mac.")
+            Text("Let ChatGPT follow a meeting you choose to share.")
                 .font(LibraryTokens.body)
                 .foregroundStyle(LibraryTokens.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
             SettingsCard {
                 SettingsControlRow(title: "Allow a local companion", info: GeneralInfo(
-                    title: "Local connection",
-                    message: "Creates a private connection for meeting controls and live text. Turning it off stops new live sharing; recording continues in Transcripted. Saved-context access follows the installed plugin. Text already sent remains in ChatGPT."
+                    title: "Allow a local companion",
+                    message: "A private connection on this Mac for meeting controls and live text. Off stops new sharing; recording carries on."
                 ), automationIdentifier: "transcripted.settings.companion.enabled") {
                     Toggle("Allow a local companion", isOn: Binding(
                         get: { companion.isEnabled }, set: { companion.setEnabled($0) }
@@ -48,8 +42,8 @@ struct CompanionSettingsCard: View {
                     .toggleStyle(.switch)
                 }
                 SettingsControlRow(title: "Start and stop meetings", info: GeneralInfo(
-                    title: "Meeting controls",
-                    message: "Allows ChatGPT to start recording when you ask and stop the specific meeting you choose. Transcripted’s microphone and system audio permissions still apply."
+                    title: "Start and stop meetings",
+                    message: "ChatGPT can start recording when you ask, and stop the meeting you pick."
                 ), automationIdentifier: "transcripted.settings.companion.meeting-control") {
                     Toggle("Start and stop meetings", isOn: Binding(
                         get: { companion.allowsMeetingControl }, set: { companion.setAllowsMeetingControl($0) }
@@ -59,8 +53,8 @@ struct CompanionSettingsCard: View {
                     .disabled(!companion.isEnabled)
                 }
                 SettingsControlRow(title: "Allow live transcript sharing", info: GeneralInfo(
-                    title: "Live meeting context",
-                    message: "Speech is transcribed by the on-device model. When you explicitly share a meeting, the plugin can send its provisional text to ChatGPT. Each new meeting starts private. Live text may change; the saved transcript is prepared separately after recording."
+                    title: "Allow live transcript sharing",
+                    message: "Each meeting starts private. When you share one, its live text goes to ChatGPT and stays in that conversation even after you stop sharing."
                 ), automationIdentifier: "transcripted.settings.companion.live-sharing", showsDivider: false) {
                     Toggle("Allow live transcript sharing", isOn: Binding(
                         get: { companion.allowsLiveSharing }, set: { companion.setAllowsLiveSharing($0) }
@@ -109,10 +103,6 @@ struct CompanionSettingsCard: View {
             }
 
             HStack(alignment: .center, spacing: 12) {
-                Text("Shared text becomes context in ChatGPT. Text already shared stays in that conversation when you turn sharing off.")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
                 Spacer(minLength: 8)
                 SettingsInlineActionButton(title: promptCopied ? "Copied" : "Copy setup prompt") {
                     let pasteboard = NSPasteboard.general

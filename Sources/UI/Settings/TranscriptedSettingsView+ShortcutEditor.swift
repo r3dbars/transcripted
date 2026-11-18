@@ -1,33 +1,39 @@
 // TranscriptedSettingsView+ShortcutEditor.swift
-// General page: the keyboard shortcuts switch and the shortcut recorder
-// (dictation key, its behavior, meetings).
+// Settings: the dictation key and its behavior (Dictation), the Meetings key
+// (Meetings), and the keyboard shortcuts switch (Advanced while on).
 
 import SwiftUI
 
 extension TranscriptedSettingsView {
-    var generalShortcutSettingsEditor: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GeneralToggleRow(
+    /// The "Keyboard shortcuts" switch. Dictation shows it in place of the
+    /// key rows while shortcuts are off, so turning them back on is where
+    /// you'd look; while they're on it lives in Advanced.
+    private var keyboardShortcutsToggle: some View {
+        GeneralToggleRow(
+            title: "Keyboard shortcuts",
+            isOn: persistedSettingsBinding(
+                $dictationShortcutsEnabled,
+                persist: { HotkeyPreferences.setDictationShortcutsEnabled($0) },
+                track: { trackSettingsToggle("dictation_shortcuts", enabled: $0, page: .general) }
+            ),
+            help: dictationShortcutsEnabled ? "Shortcut keys can start dictation." : "Start dictation from the app only.",
+            info: GeneralInfo(
                 title: "Keyboard shortcuts",
-                isOn: persistedSettingsBinding(
-                    $dictationShortcutsEnabled,
-                    persist: { HotkeyPreferences.setDictationShortcutsEnabled($0) },
-                    track: { trackSettingsToggle("dictation_shortcuts", enabled: $0, page: .general) }
-                ),
-                help: dictationShortcutsEnabled ? "Shortcut keys can start dictation." : "Start dictation from the app only.",
-                info: GeneralInfo(
-                    title: "Keyboard shortcuts",
-                    message: "One dictation key: hold it to talk, or tap it to keep listening, depending on Behavior. Off still lets you start from the app, and meeting controls keep working."
-                ),
-                automationIdentifier: "transcripted.settings.general.keyboard-shortcuts"
-            )
+                message: "Off turns off the dictation key. The Meetings key keeps working."
+            ),
+            automationIdentifier: "transcripted.settings.general.keyboard-shortcuts"
+        )
+    }
 
+    /// Dictation key and Behavior, the first rows of Settings › Dictation.
+    var generalDictationKeyEditor: some View {
+        VStack(alignment: .leading, spacing: 0) {
             if dictationShortcutsEnabled {
                 ShortcutKeyRow(
                     target: .dictation,
                     info: GeneralInfo(
                         title: "Dictation key",
-                        message: "The one key for dictation. Click it, then press the key you want. Modifier keys like Fn or Right Option work on their own."
+                        message: "Click it, then press the key you want. Fn or Right Option work on their own."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-key",
                     recorder: shortcutRecorder
@@ -45,18 +51,9 @@ extension TranscriptedSettingsView {
                     persist: { HotkeyPreferences.setDictationKeyBehavior($0) },
                     track: { trackSettingsAction("change_dictation_key_behavior_\($0.rawValue)", page: .general) }
                 ))
+            } else {
+                keyboardShortcutsToggle
             }
-
-            ShortcutKeyRow(
-                target: .meeting,
-                info: GeneralInfo(
-                    title: "Meetings",
-                    message: "Starts or stops recording a meeting from anywhere."
-                ),
-                automationIdentifier: "transcripted.settings.general.meeting-shortcut",
-                showsDivider: false,
-                recorder: shortcutRecorder
-            )
         }
         .onDisappear { shortcutRecorder.stopRecording() }
         .onChange(of: dictationShortcutsEnabled) { _, enabled in
@@ -64,6 +61,27 @@ extension TranscriptedSettingsView {
             if !enabled, shortcutRecorder.recordingTarget == .dictation {
                 shortcutRecorder.stopRecording()
             }
+        }
+    }
+
+    /// The Meetings key, first row of Settings › Meetings.
+    var generalMeetingsKeyEditor: some View {
+        ShortcutKeyRow(
+            target: .meeting,
+            info: GeneralInfo(
+                title: "Meetings key",
+                message: "Starts or stops recording a meeting from anywhere."
+            ),
+            automationIdentifier: "transcripted.settings.general.meeting-shortcut",
+            recorder: shortcutRecorder
+        )
+    }
+
+    /// Advanced › Dictation keeps the switch while shortcuts are on.
+    @ViewBuilder
+    var generalKeyboardShortcutsAdvancedEditor: some View {
+        if dictationShortcutsEnabled {
+            keyboardShortcutsToggle
         }
     }
 
@@ -76,11 +94,12 @@ extension TranscriptedSettingsView {
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier(DictationShortcutUpgrade.movedToRightOptionNoticeIdentifier)
             Spacer(minLength: 0)
-            Button("OK") {
+            Button("Dismiss") {
                 DictationShortcutUpgrade.dismissMovedToRightOptionNotice()
                 showsDictationKeyMovedNotice = false
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(.transcriptedQuiet)
+            .controlSize(.small)
             .accessibilityIdentifier(DictationShortcutUpgrade.movedToRightOptionNoticeDismissIdentifier)
         }
         .font(.caption)
@@ -92,7 +111,7 @@ extension TranscriptedSettingsView {
     private func dictationKeyWarning(_ warning: String) -> some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+                .foregroundStyle(LibraryTokens.attention)
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(warning)
@@ -103,7 +122,8 @@ extension TranscriptedSettingsView {
                     trackSettingsAction("open_keyboard_settings", page: .general)
                     PhysicalDictationTriggerPreferences.openKeyboardSettings()
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.transcriptedQuiet)
+                .controlSize(.small)
                 .accessibilityIdentifier("transcripted.settings.general.keyboard-shortcuts.open-keyboard-settings")
             }
         }

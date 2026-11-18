@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// The Settings > About page. Extracted from `TranscriptedSettingsView`
@@ -6,9 +7,11 @@ import SwiftUI
 /// parent's sidebar footer also consumes, so it stays owned by the parent
 /// and is passed in as a closure.
 ///
-/// The Support tab dissolved into this page (settings redesign phase 1): its
-/// two rows (email support, send diagnostics) now live here under their own
-/// "Support" section.
+/// It renders inside Settings › Advanced: the version and update check,
+/// Automatic updates, and the one Feedback row. Send diagnostics sits in the
+/// visible Privacy group (`SendDiagnosticsSettingsRow`), and email support is
+/// offered there after diagnostics are sent, so the composer is the only
+/// standing feedback entry here.
 struct AboutSettingsPage: View {
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
     let onTrackSettingsToggle: (String, Bool, TranscriptedSettingsPage?) -> Void
@@ -17,17 +20,11 @@ struct AboutSettingsPage: View {
     let updateBlockedDetail: (SparkleUpdaterController.UpdateStatus) -> String?
     let onPerformUpdateAction: () -> Void
 
-    let diagnosticsActionStatus: String?
-    let crashReportingEnabled: Bool
     let onSubmitFeedback: () -> Void
-    let onEmailSupport: () -> Void
-    let onSendDiagnosticEvent: () -> Void
 
     var body: some View {
-        // Rendered as sections of the single combined settings page.
         VStack(alignment: .leading, spacing: 0) {
             versionGroup
-            supportGroup
         }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.about")
@@ -46,10 +43,10 @@ struct AboutSettingsPage: View {
                 ) {
                     HStack(spacing: 8) {
                         Text("\(TranscriptedAppVersion.description) · \(updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle)")
-                            .font(.caption)
+                            .font(LibraryTokens.meta)
                             .foregroundStyle(aboutUpdateStatusInkColor)
                             .lineLimit(1)
-                        SettingsInlineActionButton(title: aboutUpdateButtonTitle, tone: .accent) {
+                        SettingsInlineActionButton(title: aboutUpdateButtonTitle) {
                             guard aboutUpdateButtonEnabled else { return }
                             onPerformUpdateAction()
                         }
@@ -61,10 +58,9 @@ struct AboutSettingsPage: View {
                     title: "Automatic updates",
                     info: GeneralInfo(
                         title: "Automatic updates",
-                        message: "Check on launch: Transcripted checks when the app opens and when you press Check for Updates. Notify me: it also checks periodically and offers an install when a new version is found. Download automatically (the default): it downloads new versions in the background, but not during a meeting, dictation, or on a phone hotspot or Low Data Mode, and installs them the next time you quit or restart Transcripted."
+                        message: "Download automatically gets new versions in the background and installs them when you quit. Never during a recording."
                     ),
-                    automationIdentifier: "transcripted.settings.about.automatic-updates",
-                    showsDivider: false
+                    automationIdentifier: "transcripted.settings.about.automatic-updates"
                 ) {
                     // A menu, not a segmented control: three full-sentence
                     // choices in one segmented row squeezed the label down to
@@ -82,53 +78,24 @@ struct AboutSettingsPage: View {
                     .pickerStyle(.menu)
                     .fixedSize()
                 }
+
+                // The one feedback entry in Settings; the sidebar has the other.
+                SettingsControlRow(
+                    title: "Feedback",
+                    info: GeneralInfo(
+                        title: "Feedback",
+                        message: "Write to Transcripted support. You review the report before it goes to help@transcripted.app."
+                    ),
+                    automationIdentifier: "transcripted.settings.about.support",
+                    showsDivider: false
+                ) {
+                    SettingsInlineActionButton(title: "Send feedback…") {
+                        onSubmitFeedback()
+                    }
+                }
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.about")
-        }
-    }
-
-    // MARK: Support
-
-    private var supportGroup: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            SettingsCardLabel(text: "Support")
-                .padding(.top, 16)
-
-            SettingsCard {
-                SettingsControlRow(
-                    title: "A problem or an idea? Tell us.",
-                    info: GeneralInfo(
-                        title: "Support",
-                        message: "Feedback opens a report you can review before sending to help@transcripted.app. Add your own screenshots and optionally include app and macOS details. No transcripts or audio are attached automatically. Send Diagnostics is a separate privacy-safe app snapshot and needs Crash reports on."
-                    ),
-                    automationIdentifier: "transcripted.settings.about.support",
-                    showsDivider: diagnosticsActionStatus != nil || diagnosticsDisabledReason != nil
-                ) {
-                    HStack(spacing: 8) {
-                        SettingsInlineActionButton(title: "Send Diagnostics") {
-                            onSendDiagnosticEvent()
-                        }
-                        .disabled(!(CrashReporter.isAvailable && crashReportingEnabled))
-
-                        SettingsInlineActionButton(title: "Feedback…", tone: .accent) {
-                            onSubmitFeedback()
-                        }
-                        SettingsInlineActionButton(title: "Email Support…") {
-                            onEmailSupport()
-                        }
-                    }
-                }
-
-                if let footnote = diagnosticsActionStatus ?? diagnosticsDisabledReason {
-                    Text(footnote)
-                        .font(.caption)
-                        .foregroundStyle(LibraryTokens.ink3)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                }
-            }
         }
     }
 
@@ -173,17 +140,17 @@ struct AboutSettingsPage: View {
         switch sparkleUpdater.updateStatus.state {
         case .updateAvailable(let version):
             if sparkleUpdater.availableUpdateDownloadsAutomatically {
-                return "Preparing Update…"
+                return "Preparing update…"
             }
             return "Install \(version)"
         case .downloading:
             return "Downloading…"
         case .readyToInstall:
-            return "Restart to Update"
+            return "Restart to update"
         case .checking:
-            return "Checking for Updates…"
+            return "Checking for updates…"
         case .unknown, .readyToCheck, .noUpdateAvailable:
-            return "Check for Updates"
+            return "Check for updates"
         }
     }
 
@@ -276,14 +243,89 @@ struct AboutSettingsPage: View {
             }
         )
     }
+}
 
-    private var diagnosticsDisabledReason: String? {
+/// Privacy's last row: send an anonymous app snapshot to support. Needs Crash
+/// reports. After a send (or a failure) the status line offers email support,
+/// which carries the report ID so the two can be matched.
+struct SendDiagnosticsSettingsRow: View {
+    let status: String?
+    let crashReportingEnabled: Bool
+    let isSending: Bool
+    let onSend: () -> Void
+    let onEmailSupport: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            SettingsControlRow(
+                title: "Send diagnostics",
+                info: GeneralInfo(
+                    title: "Send diagnostics",
+                    message: "Sends support an anonymous snapshot of how the app is doing. No transcripts, audio or names."
+                ),
+                automationIdentifier: "transcripted.settings.about.send-diagnostics",
+                showsDivider: footnote != nil
+            ) {
+                SettingsInlineActionButton(title: isSending ? "Sending…" : "Send…") {
+                    onSend()
+                }
+                .disabled(!(CrashReporter.isAvailable && crashReportingEnabled) || isSending)
+            }
+
+            if let footnote {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(footnote)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if status != nil {
+                        Button("Email support") {
+                            onEmailSupport()
+                        }
+                        .buttonStyle(.transcriptedQuiet)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("transcripted.settings.about.email-support")
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    private var footnote: String? {
+        status ?? disabledReason
+    }
+
+    private var disabledReason: String? {
         if !CrashReporter.isAvailable {
-            return "Not available in this build: crash reporting is not configured."
+            return "Not available in this build."
         }
         if !crashReportingEnabled {
-            return "To enable this, turn on \"Crash reports\" in the Privacy section above."
+            return "Turn on Crash reports to send diagnostics."
         }
         return nil
+    }
+}
+
+/// Advanced › App: open the folder with logs and app state for support.
+struct SupportFilesSettingsRow: View {
+    let folder: URL
+
+    var body: some View {
+        SettingsControlRow(
+            title: "Support files",
+            info: GeneralInfo(
+                title: "Support files",
+                message: "Logs and app state for support. Not your transcripts."
+            ),
+            automationIdentifier: "transcripted.settings.storage.support-files",
+            showsDivider: false
+        ) {
+            SettingsInlineActionButton(title: "Show in Finder", symbolName: "folder") {
+                NSWorkspace.shared.activateFileViewerSelecting([folder])
+            }
+        }
     }
 }

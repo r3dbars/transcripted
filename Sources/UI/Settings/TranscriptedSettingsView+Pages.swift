@@ -225,16 +225,12 @@ extension TranscriptedSettingsView {
         }
     }
 
-    /// The whole settings surface as one scrolling page: what used to be the
-    /// General / Storage / About tab strip now renders stacked, so everything
-    /// is findable by scrolling instead of tab-hunting.
+    /// The whole settings surface as one scrolling page. `generalPage` lays
+    /// out the four groups and Advanced, and places Library (`storagePage`)
+    /// and About (`aboutPage`) inside them.
     private var settingsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             generalPage
-            storagePage
-                .padding(.top, 8)
-            aboutPage
-                .padding(.top, 8)
 
             // Write for Me and the ChatGPT companion can send text off this Mac
             // (DeveloperPreview.nextSentence, CompanionSettingsCard), so say when.
@@ -647,7 +643,7 @@ extension TranscriptedSettingsView {
         )
     }
 
-    private var storagePage: some View {
+    var storagePage: some View {
         StorageSettingsPage(
             captureLibraryURL: captureLibraryURL,
             unavailableCaptureLibraryPath: unavailableCaptureLibraryPath,
@@ -664,7 +660,7 @@ extension TranscriptedSettingsView {
             modelCacheCleanupStatus: modelCacheCleanupStatus,
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
-            supportFilesFolder: appStateFolder.deletingLastPathComponent(),
+            writingModelRoot: writingController.modelRoot,
             onChooseCaptureLibrary: {
                 trackSettingsAction("choose_capture_library", page: .general)
                 chooseCaptureLibrary()
@@ -719,7 +715,7 @@ extension TranscriptedSettingsView {
         )
     }
 
-    private var aboutPage: some View {
+    var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
             onTrackSettingsToggle: { settingID, enabled, page in
@@ -736,19 +732,10 @@ extension TranscriptedSettingsView {
                 trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
             },
-            diagnosticsActionStatus: diagnosticsActionStatus,
-            crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {
                 trackSettingsAction("submit_feedback", page: .general)
                 feedbackComposer.open(area: "general")
                 feedbackIsPresented = true
-            },
-            onEmailSupport: {
-                actions.sendFeedback()
-            },
-            onSendDiagnosticEvent: {
-                trackSettingsAction("send_diagnostic_event", page: .general)
-                sendDiagnosticEvent()
             }
         )
     }

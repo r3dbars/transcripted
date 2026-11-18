@@ -43,7 +43,7 @@ It uses a native macOS sidebar with these pages (`TranscriptedSettingsPage`):
 - `Agent` (raw value `connectAgent`, ⌘6)
 - `Settings` (the gear; one combined page, see "Card layout" below)
 
-There is no first-class `Advanced` page in this version.
+There is no separate `Advanced` page; the Settings page has one Advanced disclosure (below).
 
 The per-area sections below (Shortcuts, General, Models, People, Dictation,
 Storage, Agent, About) began as separate pages. Today Shortcuts, General,
@@ -222,19 +222,25 @@ This page should reuse the simple "prompt first, manual setup second" mental mod
 
 ### Card layout (2026-08 restyle)
 
-The combined settings page has no disclosures: every setting is an
-always-visible row inside a rounded card, grouped under plain gray section
-labels (Dictation, Microphone, Send after dictation, Meetings,
-Speakers, Transcription, App, Permissions, Privacy, Developer Preview, Storage, About, Support).
-Rows carry at most a few words; each row's explanation lives in its ⓘ info
-popover. The page ends with the privacy line "Transcripts and audio never
-leave this Mac." Corrections open in a sheet; permissions render as status
-rows with a request action; mic processing sits in the Meetings card.
-While the Mac mic recorder (`PinnedMicrophoneCapturePreferences`) is on, the
-Microphone card holds one picker for dictation and meetings (Automatic, a
-specific mic, or "Same as macOS Sound settings") and the Meetings card drops
-"Use Mac-selected microphone". With it off, the card keeps Faster Bluetooth
-dictation and its mic picker.
+The combined settings page shows four groups under mono section labels:
+Dictation (Dictation key, Behavior, Microphone, Clean up pasted text,
+Auto-send), Meetings (Meetings key, Auto-detect calls, Live transcript),
+Library (Folder, Keep meeting audio, Keep dictation audio, Free up space) and
+Privacy (Crash reports, Usage stats, Send diagnostics). One disclosure,
+Advanced, holds everything else, grouped: Dictation (Sounds, Muffle, island in
+screen sharing, Keyboard shortcuts), Meetings (auto-record, mic mute control,
+mic processing, People in the room), Transcription (voice model, meeting
+language, Corrections, Transcribe a file), App (Launch at login, Show in Dock,
+Support files), Permissions, About (version, Automatic updates, Feedback) and
+Developer Preview. It remembers whether it's open. Permissions and the voice
+model show above Dictation instead whenever they need attention. Auto-send's
+send key and per-app switches show under it while it's on. Rows carry at most
+a few words; each row's explanation lives in its ⓘ info popover. The page ends
+with a privacy line. Corrections open in a sheet. While the Mac mic recorder
+(`PinnedMicrophoneCapturePreferences`) is on, Microphone is one picker for
+dictation and meetings (Automatic, a specific mic, or "Same as macOS Sound
+settings") and Advanced drops "Use Mac-selected microphone". With it off,
+Dictation keeps Faster Bluetooth dictation and its mic picker.
 
 ### About
 
@@ -274,6 +280,6 @@ Optional supporting text can explain local-first behavior in one short paragraph
 ## Out Of Scope
 
 - no recents browser in the menubar popover
-- no dedicated `Advanced` page
+- no dedicated `Advanced` page (one Advanced disclosure on the Settings page)
 - no dedicated `Audio Files` sidebar page
 - no decorative theme treatment

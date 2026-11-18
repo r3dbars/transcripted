@@ -1,7 +1,5 @@
 import SwiftUI
 
-
-
 struct GeneralInfo {
     let title: String
     let message: String
@@ -18,12 +16,100 @@ struct SettingsCard<Content: View>: View {
             content
         }
         .background(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .fill(Color.primary.opacity(0.045))
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.surface, style: .continuous)
+                .fill(DesignTokens.fill)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: DesignTokens.Radius.surface, style: .continuous))
         .frame(maxWidth: 620, alignment: .leading)
     }
+}
+
+/// A labelled card: the section label, then its rows. The identifier goes on
+/// the card for automation and doubles as the scroll anchor.
+struct SettingsGroup<Content: View>: View {
+    let title: String
+    let identifier: String
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsCardLabel(text: title)
+            SettingsCard {
+                content
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier(identifier)
+            .id(identifier)
+        }
+    }
+}
+
+/// The settings page's one disclosure. Closed, it says in a line what's
+/// inside; open, it shows every row it holds. Whether it's open is remembered
+/// across launches. Nothing else on the page hides behind a disclosure.
+struct SettingsAdvancedDisclosure<Content: View>: View {
+    let summary: String
+    @ViewBuilder var content: () -> Content
+
+    @AppStorage(SettingsAdvancedDisclosureKey.expanded) private var isExpanded = false
+    @State private var isHovering = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.snappy(duration: 0.18)) {
+                    isExpanded.toggle()
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 6) {
+                            Text("Advanced")
+                                .textRole(.heading)
+                                .foregroundStyle(LibraryTokens.ink)
+                            Image(systemName: "chevron.right")
+                                .font(TextRole.small.font(weight: .semibold))
+                                .foregroundStyle(LibraryTokens.ink3)
+                                .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        }
+                        if !isExpanded {
+                            Text(summary)
+                                .font(LibraryTokens.meta)
+                                .foregroundStyle(LibraryTokens.ink3)
+                                .multilineTextAlignment(.leading)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 6)
+                .frame(maxWidth: 620, minHeight: LibraryTokens.minimumHitTarget, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .opacity(isHovering ? 0.8 : 1)
+            .accessibilityLabel(Text("Advanced"))
+            .accessibilityValue(Text(isExpanded ? "Expanded" : "Collapsed"))
+            .accessibilityHint(Text(isExpanded ? "Hide advanced settings" : "Show advanced settings"))
+            .accessibilityIdentifier("transcripted.settings.advanced.toggle")
+
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    content()
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("transcripted.settings.section.advanced")
+                .transition(.opacity)
+            }
+        }
+    }
+}
+
+/// The UserDefaults key behind the Advanced disclosure's open state.
+enum SettingsAdvancedDisclosureKey {
+    static let expanded = "SettingsAdvancedExpanded"
 }
 
 /// Small gray section label above a card, mirroring the mock's plain
@@ -131,8 +217,8 @@ struct GeneralTitleLabel: View {
     var body: some View {
         HStack(spacing: 5) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Color.primary)
+                .font(LibraryTokens.rowTitle)
+                .foregroundStyle(LibraryTokens.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.82)
 
@@ -158,7 +244,7 @@ struct NotchIslandScreenSharingRow: View {
                 : "The island is hidden from screen sharing, recordings, and screenshots.",
             info: GeneralInfo(
                 title: "Show island in screen sharing",
-                message: "Off keeps the island out of screen sharing, screen recordings, and screenshots, so people watching your screen never see what you dictate. Turn it on to demo it or capture it in a screenshot."
+                message: "Off hides the island from screen sharing, recordings and screenshots. Turn it on to demo it."
             ),
             automationIdentifier: "transcripted.settings.general.island-screen-sharing"
         )
@@ -174,8 +260,8 @@ struct MeetingMicMuteControlRow: View {
             isOn: $meetingMicMuteControlEnabled,
             help: "Mute your mic in Transcripted’s recording. Your call mic and system audio are unaffected.",
             info: GeneralInfo(
-                title: "Meeting mic mute control",
-                message: "Hover over the island during a meeting to mute or unmute your microphone in Transcripted’s recording. Your call app’s microphone works independently, and Transcripted keeps recording system audio if enabled. If you hide this control while muted, Unmute stays available."
+                title: "Show meeting mic mute control",
+                message: "Mute your side of Transcripted's recording from the island. Your call app isn't affected."
             ),
             automationIdentifier: "transcripted.settings.general.meeting-mic-mute-control"
         )
@@ -184,6 +270,8 @@ struct MeetingMicMuteControlRow: View {
 
 /// Whether a recording meeting shows its live transcript in the island.
 struct NotchIslandLiveTranscriptRow: View {
+    var showsDivider = true
+
     @AppStorage(NotchIslandPreferences.showsLiveTranscriptKey)
     private var showsLiveTranscript = false
 
@@ -196,9 +284,10 @@ struct NotchIslandLiveTranscriptRow: View {
                 : "Meetings are transcribed after they end.",
             info: GeneralInfo(
                 title: "Live transcript",
-                message: "Transcribes meetings as they happen, on this Mac, so hovering the island shows everything said so far, with Copy all. It's a quick draft: the saved meeting is transcribed again after Stop, with speaker names. The first meeting downloads a small speech model, and it uses some extra battery while you record."
+                message: "Hover the island during a meeting to read the transcript so far. The saved meeting is transcribed again, with names, after you stop."
             ),
-            automationIdentifier: "transcripted.settings.general.live-transcript"
+            automationIdentifier: "transcripted.settings.general.live-transcript",
+            showsDivider: showsDivider
         )
     }
 }
@@ -254,8 +343,8 @@ struct GeneralActionRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Color.primary)
+                    .font(LibraryTokens.rowTitle)
+                    .foregroundStyle(LibraryTokens.ink)
 
                 Spacer(minLength: 10)
 

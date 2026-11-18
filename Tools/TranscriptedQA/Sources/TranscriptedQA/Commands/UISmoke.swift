@@ -452,17 +452,22 @@ final class UIAutomationSmokeRunner {
             return builder.build()
         }
 
-        // The settings area is one combined scrolling page (the old
-        // General / Storage / About tab strip was removed): after the toggle,
-        // all three sections and the import row must be in a single snapshot.
+        // About and the import row live in Settings › Advanced: open it (a
+        // fresh home starts closed), then all must show in one snapshot.
         let settingsSectionIDs = [
             "transcripted.settings.page.general",
             "transcripted.settings.page.storage",
             "transcripted.settings.page.about", "transcripted.settings.general.transcribe-audio-file",
         ]
+        let advancedToggleID = "transcripted.settings.advanced.toggle"
+        if waitUntil(timeout: timeout, condition: {
+            appInspector.snapshot(maxDepth: 12).contains { $0.identifier == advancedToggleID }
+        }), !appInspector.snapshot(maxDepth: 16).contains(where: { $0.identifier == "transcripted.settings.section.advanced" }) {
+            _ = appInspector.performPressOrClick(identifier: advancedToggleID)
+        }
 
         guard waitUntil(timeout: timeout, condition: {
-            let ids = Set(appInspector.snapshot(maxDepth: 12).compactMap(\.identifier))
+            let ids = Set(appInspector.snapshot(maxDepth: 16).compactMap(\.identifier))
             return settingsSectionIDs.allSatisfy(ids.contains)
         }) else {
             builder.add(.fail(

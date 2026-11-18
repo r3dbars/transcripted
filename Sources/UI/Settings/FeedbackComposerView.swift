@@ -29,8 +29,8 @@ struct FeedbackComposerView: View {
                 if let error = model.errorMessage {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(error)
-                            .font(.callout)
-                            .foregroundStyle(.red)
+                            .font(LibraryTokens.body)
+                            .foregroundStyle(LibraryTokens.attention)
                             .accessibilityIdentifier("transcripted.feedback.error")
                         if model.step == .review {
                             Button(model.copiedReport ? "Report copied" : "Copy report") { model.copyReport() }
@@ -60,11 +60,11 @@ struct FeedbackComposerView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text(model.step == .review ? "Review your report" : "Feedback")
-                    .font(.system(size: 21, weight: .semibold))
+                    .textRole(.heading)
                 Spacer()
                 Button(action: onClose) {
                     Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .semibold))
+                        .font(TextRole.small.font(weight: .semibold))
                         .frame(width: 28, height: 28)
                 }
                 .buttonStyle(SidebarQuietButtonStyle())
@@ -73,8 +73,8 @@ struct FeedbackComposerView: View {
             }
             if model.step == .review {
                 Text("This will go to help@transcripted.app.")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.body)
+                    .foregroundStyle(LibraryTokens.ink2)
             }
         }
     }
@@ -83,14 +83,14 @@ struct FeedbackComposerView: View {
         VStack(alignment: .leading, spacing: 14) {
             ZStack(alignment: .topLeading) {
                 if model.message.isEmpty {
-                    Text("Tell me about it…")
-                        .foregroundStyle(.secondary)
+                    Text("What happened, or what's your idea?")
+                        .foregroundStyle(LibraryTokens.ink3)
                         .padding(.horizontal, 8)
                         .padding(.top, 9)
                         .allowsHitTesting(false)
                 }
                 TextEditor(text: $model.message)
-                    .font(.system(size: 14))
+                    .font(LibraryTokens.body)
                     .scrollContentBackground(.hidden)
                     .padding(3)
                     .focused($messageFocused)
@@ -99,13 +99,13 @@ struct FeedbackComposerView: View {
             }
             .frame(height: 124)
             .background(LibraryTokens.raisedFill)
-            .overlay(RoundedRectangle(cornerRadius: 8).stroke(LibraryTokens.raisedStroke))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl).stroke(LibraryTokens.raisedStroke))
+            .clipShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
 
             if model.message.utf16.count > 4_000 {
                 Text("Please keep your feedback under 4,000 characters.")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
             }
 
             TextField("Email for a reply (optional)", text: $model.replyEmail)
@@ -124,13 +124,10 @@ struct FeedbackComposerView: View {
                     .foregroundStyle(.secondary)
                     .padding(.top, 4)
                 Text(model.includeDiagnostics ? model.diagnosticPreview : "Diagnostics and logs are not included.")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.small.monospaced())
+                    .foregroundStyle(LibraryTokens.ink2)
                     .textSelection(.enabled)
                     .padding(.top, 4)
-                Text("Only the listed details are sent after review. No raw log files, transcripts, audio, file paths, or device names are attached.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
             .font(.callout)
         }
@@ -142,7 +139,7 @@ struct FeedbackComposerView: View {
                 HStack(spacing: 8) {
                     Image(systemName: dropTargeted ? "arrow.down.circle" : "paperclip")
                     Text(model.isLoadingAttachments ? "Preparing…" : dropTargeted ? "Drop images" : "Add or drop images")
-                        .font(.system(size: 12))
+                        .font(LibraryTokens.meta)
                     Spacer()
                     if model.isLoadingAttachments { ProgressView().controlSize(.small) }
                     Text("\(model.attachments.count)/3")
@@ -189,7 +186,7 @@ struct FeedbackComposerView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(model.message)
-                .font(.system(size: 14))
+                .font(LibraryTokens.body)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
             if !model.replyEmail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
@@ -198,8 +195,8 @@ struct FeedbackComposerView: View {
             }
             if model.includeDiagnostics {
                 Text(model.diagnosticPreview)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.small.monospaced())
+                    .foregroundStyle(LibraryTokens.ink2)
             } else {
                 Text("Diagnostics not included.")
                     .font(.caption)
@@ -218,9 +215,9 @@ struct FeedbackComposerView: View {
                     }
                 }
             }
-            Text("Your message and screenshots may contain private information. Only send what you want support to see.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            Text("Only what's shown here is sent. No transcripts, audio, file paths or device names.")
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
         }
     }
 

@@ -157,12 +157,12 @@ extension TranscriptedSettingsView {
 
     func sendDiagnosticEvent() {
         guard CrashReporter.isAvailable else {
-            diagnosticsActionStatus = "Diagnostics aren't available in this build. Click Email Support and tell us what happened instead."
+            diagnosticsActionStatus = "Diagnostics aren't available in this build. Use Email support below and tell us what happened instead."
             return
         }
 
         guard crashReportingEnabled else {
-            diagnosticsActionStatus = "Turn on \"Crash reports\" in the Privacy section above first, then try again."
+            diagnosticsActionStatus = "Turn on Crash reports first, then try again."
             return
         }
 
@@ -171,7 +171,7 @@ extension TranscriptedSettingsView {
         Task { @MainActor in
             defer { diagnosticEventSendInFlight = false }
             guard let eventID = await actions.sendDiagnosticEvent() else {
-                diagnosticsActionStatus = "Diagnostics didn't send. Click Email Support and tell us what happened instead."
+                diagnosticsActionStatus = "Diagnostics didn't send. Use Email support below and tell us what happened instead."
                 return
             }
 

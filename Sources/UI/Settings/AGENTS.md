@@ -34,13 +34,14 @@
 - `+Pages.swift` - sidebar, detail column, page routing, page hosts.
 - `+HomeMeetingActions.swift` - `RootAlert`, rename, failed meetings, `revealOwnFile`/`openOwnFile`, failure alerts.
 - `+HomeSpeakerVoiceprints.swift` - Home "Name speakers" persistence, including re-embed from retained audio for unlinked voices.
-- `+GeneralEditors.swift` - the combined page and its injected `general*Editor` properties (model, speaker matching, shortcuts, Bluetooth mic, microphone, auto-send, permissions, mic processing, reporting).
-- `+ShortcutEditor.swift` - shortcut recorder editor (dictation key, its behavior, meetings). The one-time "Dictation moved to Right Option" note lives under the dictation key row.
+- `+GeneralEditors.swift` - the combined page, its Advanced section, and the injected `general*Editor` properties (voice model, speaker matching, Bluetooth mic, microphone, Auto-send, permissions, mic processing, privacy with Send diagnostics). It places `storagePage` (Library) and `aboutPage` (in Advanced) from `+Pages.swift`.
+- `+AdvancedEditors.swift` - wires Settings › Advanced (`AdvancedSettingsSection` in `Pages/GeneralSettingsPage.swift`) and decides when the voice model moves up top (`generalModelNeedsAttention`).
+- `+ShortcutEditor.swift` - the dictation key and Behavior (Dictation), the Meetings key (Meetings), and the Keyboard shortcuts switch (in Advanced while on; in place of the key rows while off). The one-time "Dictation moved to Right Option" note lives under the dictation key row.
 - `+DictationMuffle.swift` - the "Muffle other audio" toggle; turning it on asks for System Audio Recording here, so dictation never prompts.
 - `+Refresh.swift` - state refresh, analytics, model cache, launch at login.
 - `+Preferences.swift` - corrections, capture library, Auto Enter, update actions.
 
-The combined settings page is card-based: every setting is an always-visible row inside a `SettingsCard`, no disclosures. The corrections editor opens as a sheet. All configuration is on that one scrolling page, reached from the sidebar gear; there is no tab strip, and the old `.storage`/`.about`/`.models`/`.shortcuts`/`.privacy`/`.beta`/`.support` page cases are deleted.
+The combined settings page is card-based: four visible groups (Dictation, Meetings, Library, Privacy; 15 rows) and exactly one disclosure, named Advanced, that holds every other setting (`SettingsAdvancedDisclosure`; whether it's open is remembered under `SettingsAdvancedExpanded`). No other setting hides behind a disclosure or a second page (ⓘ popovers and the System Audio "How to turn it on" help stay): rows that only matter while a switch is on (Auto-send's send key and apps) show under that switch, and Permissions and the voice model move above Dictation whenever they need attention, so the Home needs-attention links always land on a visible card. Keep the protected rows out of Advanced: Auto-send, Free up space (model-cache inspection and cleanup, with a Review… breakdown), Crash reports, Usage stats and Send diagnostics. Settings has one feedback row (Advanced › About › Feedback); the sidebar has the other, and Email support only appears under Send diagnostics after a send. The corrections editor opens as a sheet. All configuration is on that one scrolling page, reached from the sidebar gear; there is no tab strip, and the old `.storage`/`.about`/`.models`/`.shortcuts`/`.privacy`/`.beta`/`.support` page cases are deleted. The UI smokes open Advanced (`transcripted.settings.advanced.toggle`) before looking for the import row and About.
 
 ## Files
 
@@ -48,11 +49,11 @@ The combined settings page is card-based: every setting is an always-visible row
 
 - `TranscriptedSettingsPage.swift` - page enum. `.today` is first and the default (⌘1). Meetings keeps the `home` raw value (⌘2) so automation ids, analytics `page_id`, and source pins stay stable. Dictations ⌘3, Writing ⌘4, Speakers ⌘5, Agent ⌘6; `navigationShortcutKey` feeds both the sidebar tooltips and the Go menu (`TranscriptedMenuCommandCatalog.swift`).
 - `TranscriptedSettingsSidebar.swift` - sidebar sections and rows. The Writing row shows a quiet "New" badge until `WritingSidebarNewBadge.dismissedDefaultsKey` is set (key lives in `Sources/Writing/WritingSidebarNewBadge.swift`).
-- `FeedbackComposerView.swift` / `FeedbackComposerModel.swift` - the minimal sidebar Feedback popover and shared meeting-report flow. The model retains drafts, validates before review, and sends only after Send report. Chosen images normalize through UIShared's `FeedbackAttachment`. Diagnostics and logs are off by default; opting in snapshots OS/build plus up to three categorical UsageHealthStore failures (kind/stage/version only), shown exactly in What’s included and review. Never read captures or raw logs. Keep retry identity stable for an unchanged report; a prepared report is not a received report.
+- `FeedbackComposerView.swift` / `FeedbackComposerModel.swift` - the Feedback popover (sidebar row, Settings › Advanced › Feedback) and shared meeting-report flow. The model retains drafts, validates before review, and sends only after Send report. Chosen images normalize through UIShared's `FeedbackAttachment`. Diagnostics and logs are off by default; opting in snapshots OS/build plus up to three categorical UsageHealthStore failures (kind/stage/version only), shown exactly in What’s included and review. Never read captures or raw logs. Keep retry identity stable for an unchanged report; a prepared report is not a received report.
 - `FeedbackPopoverAnchor.swift` - the narrow AppKit presentation bridge keeps Feedback visible while Finder or Photos has focus for dragging. SwiftUI owns the draft and presentation binding; Close, Cancel, Escape, and closing the parent window dismiss it.
 - `TranscriptedSettingsNavigationModel.swift` - `@Observable` selected page, the ⌘F Home find-focus token, `isWindowOpen`, `requestHomeRevealMeeting`.
-- `TranscriptedSettingsGeneralControls.swift` - `SettingsCard`, label/control/toggle/action rows, the dictation overlay mode picker, `GeneralInfo` popovers.
-- `DeveloperPreviewSettingsRows.swift` - the Developer Preview card at the bottom of the settings page: one tagged row per `DeveloperPreview.all` feature, with what it sends in the ⓘ popover; turning one on asks first. No analytics for these toggles.
+- `TranscriptedSettingsGeneralControls.swift` - `SettingsCard`, `SettingsGroup` (label + card), `SettingsAdvancedDisclosure`, label/control/toggle/action rows, `GeneralInfo` popovers. There is no dictation window picker: the island is the only dictation window.
+- `DeveloperPreviewSettingsRows.swift` - the Developer Preview card at the bottom of Advanced: one tagged row per `DeveloperPreview.all` feature, with what it sends in the ⓘ popover; turning one on asks first. While Write for Me is on, its key and its sounds switch (`NextSentencePreferences.soundsKey`) show under it. No analytics for these toggles.
 - `TranscriptedSettingsComponents.swift` - `persistedSettingsBinding`, `SettingsPageIntro`, button styles, `SettingsStatusCard`, permission rows.
 - `TranscriptedSettingsRows.swift` - Auto Enter app candidates and the custom corrections editor row. The model picker is inline in `+GeneralEditors.swift`.
 - `ShortcutSettingsRows.swift` - key rows for the dictation key and meetings, and `ShortcutRecorderModel`, which records a shortcut in place (the dictation key is one key with hold/tap behavior; no Hands-Free or paste-last rows). A stored F8 vs Fn+F8 clash shows under the meeting row even while idle, so it isn't left silently dead.
@@ -96,7 +97,7 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Agent page
 
-- `AgentConnectionSettingsPage.swift` - one connect row per detected agent (via `AgentMCPConnector`), the universal copy-prompt row, the `CompanionSettingsCard()`, and the Advanced disclosure (the three capture folders and Copy Paths). The Codex inbox setup (`codexInboxDetails`) is implemented but off the view tree.
+- `AgentConnectionSettingsPage.swift` - connecting first: the status line, one row per detected agent (via `AgentMCPConnector`; connected agents stay listed with a check), Claude Desktop with Get when it isn't installed, and the universal copy-prompt row; then `CompanionSettingsCard()`, then the Folders disclosure (the three capture folders and Copy folder paths). No Disconnect: the connector can't remove its config entry safely yet. Row copy avoids jargon ("Terminal", not "CLI"; no "MCP servers"). The Codex inbox setup (`codexInboxDetails`) is implemented but off the view tree.
 - `CompanionSettingsCard.swift` - ChatGPT companion plugin card. Readiness describes the local bridge; it never implies ChatGPT has connected.
 - Onboarding has no agent step; connection lives only here.
 
@@ -121,7 +122,7 @@ The combined settings page is card-based: every setting is an always-visible row
 
 ### Pages/
 
-One file per page split out of the shell: `AboutSettingsPage.swift` (includes the Support section: email support, send diagnostics), `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift` (meeting audio retention, dictation audio keep window), `TodaySettingsPage.swift`, `WritingSettingsPage.swift`. The Beta and Support pages were dissolved; Nemotron is the diarization default with no toggle (`Sources/Support/DiarizationBackendPreferences.swift`), while Core itself defaults to pyannote (`Sources/TranscriptedCore/AGENTS.md`).
+One file per page split out of the shell: `AboutSettingsPage.swift` (version, Automatic updates and the Feedback row, in Advanced; also `SendDiagnosticsSettingsRow` for Privacy and `SupportFilesSettingsRow` for Advanced › App), `DictationsSettingsPage.swift`, `GeneralSettingsPage.swift`, `HomeSettingsPage.swift`, `PeopleSettingsPage.swift`, `StorageSettingsPage.swift` (Settings › Library: folder, meeting and dictation audio windows, Free up space with its breakdown, including Writing's model size read-only), `TodaySettingsPage.swift`, `WritingSettingsPage.swift`. The Beta and Support pages were dissolved; Nemotron is the diarization default with no toggle (`Sources/Support/DiarizationBackendPreferences.swift`), while Core itself defaults to pyannote (`Sources/TranscriptedCore/AGENTS.md`).
 
 ### Writing/
 
@@ -140,6 +141,6 @@ Then open Settings and check by hand:
 - failed meeting retry, reveal, delete, and retained-audio playback work
 - custom dictionary edits persist and preview
 - Auto Enter app add/remove works
-- Agent page connects detected agents, copies the universal prompt, and reveals and copies the capture folders from Advanced
+- Agent page connects detected agents, copies the universal prompt, and reveals and copies the capture folders from Folders
 
 Core engine types stay behind Meeting seams. The module boundary check has no grandfathered crossings.
