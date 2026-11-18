@@ -423,7 +423,7 @@ extension TranscriptedSettingsView {
                 speakerPeopleModel.hasLoadedProfiles ? speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) : 0
             },
             onWhoSpoke: { item in
-                openHomeSpeakerReview(actionName: "review_meeting_speakers_pill", transcriptURL: item.transcriptURL)
+                openWhoSpokeCard(for: item)
             },
             onRetryFailedMeeting: { failedMeeting in
                 trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)

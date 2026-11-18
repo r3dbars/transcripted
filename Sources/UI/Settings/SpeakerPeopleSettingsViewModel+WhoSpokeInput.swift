@@ -55,7 +55,7 @@ extension SpeakerPeopleSettingsViewModel {
     }
 
     /// Everyone with a name, for the card's name field and its suggestions.
-    private func meetingReviewKnownPeople() -> [SpeakerNameChoice] {
+    func meetingReviewKnownPeople() -> [SpeakerNameChoice] {
         profiles.compactMap { profile in
             guard let name = profile.displayName?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else {
                 return nil

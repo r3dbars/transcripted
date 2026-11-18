@@ -7,8 +7,8 @@ import TranscriptedCore
 // Priya", and Copy / ⋯ on hover. Under it, one amber line for anything that
 // needs a hand (no call audio, a muffled mic, voices to name), then the first
 // four transcript lines in italics as "Name text". Show more opens the whole
-// transcript in place, where speaker names can be fixed and the "Who spoke?"
-// sheet names every voice at once. Hovering a line shows its time; clicking
+// transcript in place, where speaker names can be fixed and "Who spoke?"
+// opens this meeting's card on Speakers to name every voice at once. Hovering a line shows its time; clicking
 // the time plays the kept audio from there. Rows never follow the playhead.
 
 // MARK: - Card surface
@@ -117,7 +117,6 @@ struct QuietMeetingCard: View {
     @State private var snippet: HomeMeetingCardSnippet?
     @State private var isHovering = false
     @State private var showsAllLines = false
-    @State private var showsSpeakerNamingSheet = false
 
     private var snippetTaskID: String {
         // A rename, a speaker fix or a rescan changes one of these, so the
@@ -184,22 +183,6 @@ struct QuietMeetingCard: View {
         .accessibilityAction(named: Text("Copy"), onCopy)
         .modifier(HomeMeetingMenuAccessibilityActions(items: menuItems))
         .accessibilityIdentifier(isExpanded ? "transcripted.home.expansion" : "transcripted.home.meeting.card")
-        .sheet(isPresented: $showsSpeakerNamingSheet) {
-            if let content = openedContent {
-                HomeMeetingSpeakerNamingSheet(
-                    content: content,
-                    knownPeople: knownPeople,
-                    savedSpeakerIDs: savedSpeakerIDs,
-                    onCancel: { showsSpeakerNamingSheet = false },
-                    onSave: { assignments, completion in
-                        onAssignSpeakers(assignments) { didSave in
-                            if didSave { showsSpeakerNamingSheet = false }
-                            completion(didSave)
-                        }
-                    }
-                )
-            }
-        }
     }
 
     // MARK: Bar
@@ -424,9 +407,7 @@ struct QuietMeetingCard: View {
                     action: onToggleExpanded
                 )
                 if offersWhoSpoke {
-                    footerButton("Who spoke?", identifier: "transcripted.home.expansion.name-speakers") {
-                        showsSpeakerNamingSheet = true
-                    }
+                    footerButton("Who spoke?", identifier: "transcripted.home.expansion.name-speakers", action: onWhoSpoke)
                     .help("Name every voice in this meeting")
                 }
             }

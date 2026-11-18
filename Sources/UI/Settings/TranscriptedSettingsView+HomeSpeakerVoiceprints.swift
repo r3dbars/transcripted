@@ -2,6 +2,34 @@ import Foundation
 import TranscriptedCore
 
 extension TranscriptedSettingsView {
+    /// A meeting's "Who spoke?" (its amber "2 to name", and the link at the
+    /// bottom of an opened card): its card on Speakers. Voices still in the
+    /// review queue get the queue's card; a meeting with nothing queued gets
+    /// the same card built from its transcript, so every name in it can be
+    /// fixed at once. Both save the way they always have.
+    func openWhoSpokeCard(for item: RecentMeetingItem) {
+        let queued = speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) > 0
+        if !queued, let preview = homeExpandedMeetingPreview, preview.id == item.id,
+           preview.readError == nil, !preview.content.transcriptLines.isEmpty {
+            SpeakerTranscriptWhoSpokeRequests.shared.open(SpeakerTranscriptCard(
+                meetingTitle: preview.title,
+                date: preview.date,
+                transcriptURL: preview.transcriptURL,
+                lines: preview.content.transcriptLines,
+                audio: preview.audio,
+                save: { assignments, completion in
+                    assignMeetingSpeakers(assignments, in: preview, completion: completion)
+                }
+            ))
+        } else {
+            SpeakerTranscriptWhoSpokeRequests.shared.close()
+        }
+        openHomeSpeakerReview(
+            actionName: queued ? "review_meeting_speakers_pill" : "review_meeting_speakers_row",
+            transcriptURL: item.transcriptURL
+        )
+    }
+
     func assignMeetingSpeakers(
         _ assignments: [HomeMeetingSpeakerAssignment],
         in preview: HomeMeetingPreview,
@@ -115,7 +143,7 @@ extension TranscriptedSettingsView {
 
         func finishPartialFailure() {
             // At least one canonical mutation committed, so the old drafts are
-            // no longer a safe retry surface. Close the sheet, reload persisted
+            // no longer a safe retry surface. Close the card, reload persisted
             // truth, and tell the user to review the remaining voices. New
             // people are only linked by the local rewrite, which didn't land.
             discardNewlyEnrolled()
@@ -124,7 +152,7 @@ extension TranscriptedSettingsView {
             completion(true)
             presentHomeActionFailure(
                 title: "Some speaker names were saved",
-                message: "Transcripted saved part of this batch but couldn't finish it. Reopen Name speakers to review what's left.",
+                message: "Transcripted saved part of this batch but couldn't finish it. Open Who spoke? again to see what's left.",
                 retryTitle: "Refresh meeting",
                 retry: { reloadExpandedMeetingPreview(preview) }
             )
