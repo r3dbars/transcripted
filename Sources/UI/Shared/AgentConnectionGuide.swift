@@ -23,6 +23,10 @@ enum AgentConnectionGuide {
         return formatter.string(from: date)
     }
 
+    /// The public docs for transcribing files from Terminal, linked from the
+    /// Agent page (it moved there with the retired Transcribe a file page).
+    static let cliDocumentationURL = URL(string: "https://github.com/r3dbars/transcripted/blob/main/Tools/TranscriptedCLI/README.md")!
+
     static var meetingsFolder: URL {
         MeetingStoragePaths.transcriptsFolder
     }

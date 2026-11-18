@@ -42,7 +42,9 @@ struct AboutSettingsPage: View {
                     automationIdentifier: "transcripted.settings.about.version"
                 ) {
                     HStack(spacing: 8) {
-                        Text("\(TranscriptedAppVersion.description) · \(updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle)")
+                        Text([TranscriptedAppVersion.description, updateBlockedDetail(sparkleUpdater.updateStatus) ?? aboutUpdateStatusTitle]
+                            .compactMap { $0 }
+                            .joined(separator: " · "))
                             .font(LibraryTokens.meta)
                             .foregroundStyle(aboutUpdateStatusInkColor)
                             .lineLimit(1)
@@ -99,24 +101,16 @@ struct AboutSettingsPage: View {
         }
     }
 
-    private var aboutUpdateStatusTitle: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .unknown, .readyToCheck:
-            return "Ready to check"
-        case .checking:
-            return "Checking for updates"
-        case .noUpdateAvailable:
-            return "Up to date"
-        case .updateAvailable(let version):
-            if sparkleUpdater.availableUpdateDownloadsAutomatically {
-                return "Preparing update (\(version))"
-            }
-            return "Update available (\(version))"
-        case .downloading(let version):
-            return "Downloading update (\(version))"
-        case .readyToInstall(let version):
-            return "Ready to restart (\(version))"
-        }
+    /// Words from `UpdateStatusWords`, the same set the sidebar and popover use.
+    private var aboutUpdateStatusTitle: String? {
+        let state = sparkleUpdater.updateStatus.state
+        let checkedUpToDate: Bool
+        if case .noUpdateAvailable = state { checkedUpToDate = true } else { checkedUpToDate = false }
+        return UpdateStatusWords.versionNote(
+            for: UpdateStatusWords.Phase(state),
+            checkedUpToDate: checkedUpToDate,
+            downloadsAutomatically: sparkleUpdater.availableUpdateDownloadsAutomatically
+        )
     }
 
     /// A healthy update state stays silent (plain ink); only live progress
@@ -137,21 +131,10 @@ struct AboutSettingsPage: View {
     }
 
     private var aboutUpdateButtonTitle: String {
-        switch sparkleUpdater.updateStatus.state {
-        case .updateAvailable(let version):
-            if sparkleUpdater.availableUpdateDownloadsAutomatically {
-                return "Preparing update…"
-            }
-            return "Install \(version)"
-        case .downloading:
-            return "Downloading…"
-        case .readyToInstall:
-            return "Restart to update"
-        case .checking:
-            return "Checking for updates…"
-        case .unknown, .readyToCheck, .noUpdateAvailable:
-            return "Check for updates"
-        }
+        UpdateStatusWords.buttonTitle(
+            for: UpdateStatusWords.Phase(sparkleUpdater.updateStatus.state),
+            downloadsAutomatically: sparkleUpdater.availableUpdateDownloadsAutomatically
+        )
     }
 
     private var aboutUpdateButtonEnabled: Bool {

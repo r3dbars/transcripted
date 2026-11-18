@@ -167,12 +167,9 @@ func testAutomationSurfaceBehavior() async {
             guard case let .openPage(page) = item.action else { return nil }
             return (page, item.key, item.title)
         }
-        // Transcribe a file is in the sidebar but has no ⌘ number: ⌘O in
-        // Capture already opens file import.
-        assertNil(TranscriptedSettingsPage.files.navigationShortcutKey, "Transcribe a file should leave ⌘O to Capture's file import")
-        let numberedSidebarOrder = FocusOrderContract.settingsSidebarOrder.filter {
-            $0 != TranscriptedSettingsPage.files.automationIdentifier
-        }
+        // The retired file page has no ⌘ number: ⌘O in Capture opens file import.
+        assertNil(TranscriptedSettingsPage.files.navigationShortcutKey, "file import should leave ⌘O to Capture's file import")
+        let numberedSidebarOrder = FocusOrderContract.settingsSidebarOrder
         assertEqual(
             pageItems.map { $0.0.automationIdentifier },
             numberedSidebarOrder,

@@ -98,7 +98,7 @@ struct TranscriptedSettingsView: View {
     @State var feedbackIsPresented = false
     @State var homeFindIsVisible = false
     /// True while a footer-initiated update check is in flight or its
-    /// "You're up to date" answer is lingering.
+    /// "Up to date" answer is lingering.
     @State var footerVersionCheckActive = false
     @State var homeFindConsumedFocusToken = 0
     @State var homeRevealConsumedToken = 0
@@ -118,6 +118,14 @@ struct TranscriptedSettingsView: View {
     @State var captureLibraryMigrationStatusDetails: String?
     @State var speakerInboxScrollRequest = 0
     @State var speakerInboxScrollAwaitingQueue = false
+    /// Today's setup checklist: dismissed or done means gone for good.
+    @AppStorage(TodaySetupChecklistPreferences.dismissedKey) var todaySetupRetired = false
+    @AppStorage(TodaySetupChecklistPreferences.triedFileImportKey) var todaySetupTriedFileImport = false
+    /// Nil until the off-main check of the agents' configs answers.
+    @State var todayAgentConnected: Bool?
+    @State var dictationRevealConsumedToken = 0
+    /// A dictation a Today click asked Dictations to scroll to.
+    @State var dictationPendingReveal: DictationPendingReveal?
 
     init(
         appState: TranscriptedAppState,
@@ -145,7 +153,7 @@ struct TranscriptedSettingsView: View {
     var body: some View {
         // Things-style two-tone split: solid darker sidebar, solid lighter
         // content, no toolbar chrome. The sidebar is permanent and narrow —
-        // seven destinations plus one quiet bottom line need no more.
+        // six places, Settings, Feedback and the version need no more.
         HStack(spacing: 0) {
             sidebarColumn
                 .frame(width: 184)

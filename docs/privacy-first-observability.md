@@ -572,7 +572,8 @@ counts and boundary timing; event receipt is not continuous observation.
 `product_navigation` records explicit sidebar/control selections and window
 presentations with canonical `destination`/`previous_destination` plus bounded
 `source` and `initiation=user|automatic|unknown`. Use `initiation=user` for
-intentional navigation. Legacy `home` is unchanged: menu `home` opens Today,
+intentional navigation. App launch and setup's Done (`onboarding_completed`,
+which opens Today) count as `automatic`. Legacy `home` is unchanged: menu `home` opens Today,
 page `home` means Meetings. Rendering callbacks still feed the legacy series,
 not the new deliberate-navigation series.
 

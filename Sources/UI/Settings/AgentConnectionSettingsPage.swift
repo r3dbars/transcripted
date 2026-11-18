@@ -315,6 +315,10 @@ struct AgentConnectionSettingsPage: View {
             AgentSetupDetailsDisclosure(isExpanded: $showAdvancedAgentSetup) {
                 folderDetails
             }
+            Link("Transcribe files from Terminal", destination: AgentConnectionGuide.cliDocumentationURL)
+                .font(LibraryTokens.meta)
+                .help("Import files from Terminal or automate a folder")
+                .accessibilityIdentifier("transcripted.settings.agent.cli-docs")
         }
     }
 

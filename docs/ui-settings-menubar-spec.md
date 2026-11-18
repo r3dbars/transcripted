@@ -36,12 +36,13 @@ It uses a native macOS sidebar with these pages (`TranscriptedSettingsPage`):
 
 - `Today` (the default page, ⌘1)
 - `Meetings` (raw value `home`, kept so automation ids and analytics stay stable, ⌘2)
-- `Transcribe a file` (raw value `files`, no ⌘ number shortcut)
 - `Dictations` (⌘3)
 - `Writing` (⌘4)
 - `Speakers` (raw value `people`, ⌘5)
 - `Agent` (raw value `connectAgent`, ⌘6)
-- `Settings` (the gear; one combined page, see "Card layout" below)
+- `Settings` (a labelled row under the six, with Feedback and the version; one combined page, see "Card layout" below)
+
+The old `Transcribe a file` page (raw value `files`) is retired: file import lives on Meetings, and `.files` redirects there so old deep links and analytics ids still land.
 
 There is no separate `Advanced` page; the Settings page has one Advanced disclosure (below).
 

@@ -96,6 +96,6 @@ enum FeedbackIssueBuilder {
 /// What Settings says after Send Diagnostics.
 enum SupportDiagnosticsStatusCopy {
     static func sent(eventID: String) -> String {
-        "Sent. Next, click Email Support and tell us what happened. Your report ID (\(eventID.prefix(8))) goes along with the email so we can find it."
+        "Sent. Next, click Email support and tell us what happened. Your report ID (\(eventID.prefix(8))) goes along with the email so we can find it."
     }
 }

@@ -67,6 +67,26 @@ enum UpdateStatusWords {
         }
     }
 
+    /// A short note after the version number (the sidebar footer, About), or
+    /// nil to show the version alone. `checkedUpToDate` is the updater's own
+    /// "no update" answer, which `Phase.idle` folds in with "never checked".
+    static func versionNote(for phase: Phase, checkedUpToDate: Bool, downloadsAutomatically: Bool) -> String? {
+        guard phase != .idle else { return checkedUpToDate ? upToDate : nil }
+        return title(for: phase, downloadsAutomatically: downloadsAutomatically)
+    }
+
+    /// The update button's word in About: what the update needs, or what
+    /// the updater is busy with, else the manual check.
+    static func buttonTitle(for phase: Phase, downloadsAutomatically: Bool) -> String {
+        if let action = action(for: phase, downloadsAutomatically: downloadsAutomatically) { return action }
+        switch phase {
+        case .idle: return checkForUpdates
+        case .checking, .available, .downloading, .readyToInstall:
+            return title(for: phase, downloadsAutomatically: downloadsAutomatically)
+        }
+    }
+
     static let checkForUpdates = "Check for updates"
     static let downloading = "Downloading update"
+    static let upToDate = "Up to date"
 }

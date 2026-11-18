@@ -1,22 +1,42 @@
-import AppKit
-import SwiftUI
+import Foundation
 
+// Promise: file import is an action on Meetings, not a sidebar place. The
+// old `.files` page id still works for deep links, the debug channel and
+// analytics, and lands on Meetings; the Terminal docs link lives on Agent.
 @MainActor
 func testFileTranscriptionPage() async {
-    runSuite("File transcription is a primary sidebar destination without changing existing shortcuts") {
-        assertTrue(SettingsSidebarSection.primarySection.pages.contains(.files))
-        assertFalse(SettingsSidebarSection.isSettingsPage(.files))
-        assertEqual(TranscriptedSettingsPage.files.title, "Transcribe a file")
-        assertEqual(TranscriptedSettingsPage.files.automationIdentifier, "transcripted.settings.sidebar.files")
-        assertEqual(TranscriptedSettingsPage.files.telemetryDestination, .files)
-        assertTrue(NSImage(systemSymbolName: TranscriptedSettingsPage.files.systemImage, accessibilityDescription: nil) != nil,
-                   "the sidebar icon must exist on this macOS")
-        assertEqual(TranscriptedSettingsPage.files.navigationShortcutKey, nil,
-                    "the existing ⌘O import command remains the keyboard entry")
-        assertEqual(SettingsRecentCaptureRefreshPolicy.mode(for: .files), .none,
-                    "file import does not start another library scan")
-        assertEqual(FileTranscriptionSettingsPage<EmptyView>.cliDocumentationURL,
+    runSuite("The retired file page redirects to Meetings and leaves the sidebar") {
+        assertFalse(SettingsSidebarSection.primarySection.pages.contains(.files), "the sidebar has six places, no file page")
+        assertEqual(TranscriptedSettingsPage.files.redirected, .home, "a request for the file page opens Meetings")
+        for page in TranscriptedSettingsPage.allCases where page != .files {
+            assertEqual(page.redirected, page, "only the retired page moves")
+        }
+        assertEqual(TranscriptedSettingsPage.files.automationIdentifier, "transcripted.settings.sidebar.files",
+                    "the old id stays stable for anything that still names it")
+        assertEqual(TranscriptedSettingsPage.files.navigationShortcutKey, nil, "⌘O stays the keyboard entry for import")
+    }
+
+    runSuite("Selecting or presenting the file page lands on Meetings") {
+        var navigations: [ProductUsageTelemetry.Destination] = []
+        var views: [TranscriptedSettingsPage] = []
+        let model = TranscriptedSettingsNavigationModel(
+            selectedPage: .today,
+            pageViewSink: { page, _ in views.append(page) },
+            navigationSink: { destination, _, _ in navigations.append(destination) }
+        )
+        model.select(.files, source: .settingsAction)
+        assertEqual(model.selectedPage, .home, "select lands on Meetings")
+        model.select(.today, source: .sidebar)
+        model.present(page: .files, source: "debug_control")
+        assertEqual(model.selectedPage, .home, "present lands on Meetings")
+        assertEqual(model.presentedPage, .home, "the presented page is Meetings too")
+        assertFalse(navigations.contains(.files), "navigation never reports the retired destination")
+        assertFalse(views.contains(.files), "page views never report the retired page")
+    }
+
+    runSuite("The Terminal docs link moved to the Agent page") {
+        assertEqual(AgentConnectionGuide.cliDocumentationURL,
                     URL(string: "https://github.com/r3dbars/transcripted/blob/main/Tools/TranscriptedCLI/README.md")!,
-                    "the page links to the existing CLI import instructions")
+                    "Agent links to the existing CLI import instructions")
     }
 }

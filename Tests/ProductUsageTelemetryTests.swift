@@ -4,7 +4,8 @@ func testProductUsageTelemetry() {
     runSuite("Product navigation separates explicit controls from automatic presentation") {
         for source in ProductUsageTelemetry.NavigationSource.allCases {
             let properties = ProductUsageTelemetry.navigationProperties(destination: .meetings, previous: .today, source: source)
-            let expected = source == .appLaunch ? "automatic" : (source == .unknown ? "unknown" : "user")
+            let automatic: Set<ProductUsageTelemetry.NavigationSource> = [.appLaunch, .onboardingCompleted]
+            let expected = automatic.contains(source) ? "automatic" : (source == .unknown ? "unknown" : "user")
             assertEqual(properties["initiation"], expected, "only known control sources count as deliberate")
             assertEqual(properties["destination"], "meetings", "canonical destination does not inherit the legacy home ambiguity")
             assertEqual(properties["previous_destination"], "today", "navigation path has a bounded origin")
@@ -14,6 +15,8 @@ func testProductUsageTelemetry() {
         assertEqual(TranscriptedSettingsPage.home.telemetryDestination, .meetings, "legacy home page is Meetings")
         assertEqual(TranscriptedSettingsPage.today.telemetryDestination, .today, "Open Transcripted lands on Today")
         assertNil(ProductUsageTelemetry.NavigationSource(rawValue: "private window title"), "unknown source cannot enter typed properties")
+        assertEqual(ProductUsageTelemetry.NavigationSource(rawValue: "onboarding_completed"), .onboardingCompleted,
+                    "setup's Done opens Today with a known source, not unknown")
     }
 
     runSuite("Saved result copy emits the clipboard outcome after the write") {
