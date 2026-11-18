@@ -114,6 +114,9 @@ extension TranscriptedAppDelegate {
                 launchToInteractiveMs: launchToInteractiveMs
             )
             report.meetingOverlayDurationUpdates = await meetingOverlayDurationSmokeUpdates()
+            #if TRANSCRIPTED_OVERLAY_SMOKE
+            report.meetingOverlayActionFailures = await MeetingOverlayActionSmoke.failures(router: appState.sttRouter)
+            #endif
             let reportURL = URL(fileURLWithPath: reportPath, isDirectory: false)
             do {
                 try FileManager.default.createDirectory(

@@ -349,3 +349,13 @@ enum MeetingSystemAudioDegradationCopy {
         "\(title(for: warning)). \(detail(for: warning))"
     }
 }
+
+/// Result of the one bounded input-route stabilization attempt, as the
+/// overlay sees it. Same four outcomes as Core's
+/// `CaptureRouteStabilizationOutcome`, owned here so UI modules don't name it.
+enum MeetingRouteWarning: Equatable {
+    case notNeeded
+    case switchedToBuiltIn
+    case builtInUnavailable
+    case switchFailed
+}

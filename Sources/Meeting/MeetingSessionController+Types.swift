@@ -151,15 +151,7 @@ enum MeetingTranscriptionStatus: Equatable {
     }
 }
 
-/// Result of the one bounded input-route stabilization attempt, as the
-/// overlay sees it. Same four outcomes as Core's
-/// `CaptureRouteStabilizationOutcome`, owned here so UI modules don't name it.
-enum MeetingRouteWarning: Equatable {
-    case notNeeded
-    case switchedToBuiltIn
-    case builtInUnavailable
-    case switchFailed
-
+extension MeetingRouteWarning {
     init(_ outcome: CaptureRouteStabilizationOutcome) {
         switch outcome {
         case .notNeeded: self = .notNeeded
@@ -188,6 +180,8 @@ extension MeetingSessionController {
 
     /// Route-stabilization warning changes for UI subscribers (emits the
     /// current value on subscribe, like `$audioRouteWarning`).
+    var currentRouteWarning: MeetingRouteWarning? { audioRouteWarning.map(MeetingRouteWarning.init) }
+
     var routeWarningPublisher: AnyPublisher<MeetingRouteWarning?, Never> {
         $audioRouteWarning
             .map { $0.map(MeetingRouteWarning.init) }

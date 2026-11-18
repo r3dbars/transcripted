@@ -293,7 +293,7 @@ import sys
 with open(sys.argv[1], "r", encoding="utf-8") as handle:
     report = json.load(handle)
 
-errors = []
+errors = report.get("meetingOverlayActionFailures", ["Missing overlay action smoke result"])
 if report.get("meetingOverlayDurationUpdates") != [0, 1, 2, 5]:
     errors.append("meeting overlay did not collapse recording-duration refreshes to whole seconds")
 if not report.get("appLaunched"):
@@ -622,6 +622,7 @@ swiftc \
     -num-threads "$SWIFTC_NUM_THREADS" \
     -o "$STAGED_APP_BINARY" \
     "${APP_SWIFTC_LINK_ARGS[@]}" \
+    -D TRANSCRIPTED_OVERLAY_SMOKE Tests/Integration/MeetingOverlayActionSmoke.swift \
     "${APP_SOURCE_FILES[@]}" \
     "${APP_SWIFTC_TAIL_ARGS[@]}" \
     2>&1

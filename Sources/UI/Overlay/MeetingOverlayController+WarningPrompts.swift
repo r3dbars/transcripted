@@ -14,29 +14,29 @@ extension MeetingOverlayController {
         warning: MeetingSystemAudioDegradationWarning?
     ) {
         guard kind == .systemAudio,
-              let warning,
+              let warning, case .systemAudio(let id, _) = renderedPromptIdentity,
               let seconds = MeetingSystemAudioPromptPolicy.autoHideSeconds(for: warning) else {
             cancelSystemAudioAutoHide()
             return
         }
-        if systemAudioAutoHideTask != nil, systemAudioAutoHideWarning == warning { return }
+        let identity = MeetingIslandPromptIdentity.systemAudio(id, warning)
+        if systemAudioAutoHideTask != nil, systemAudioAutoHideIdentity == identity { return }
         systemAudioAutoHideTask?.cancel()
-        systemAudioAutoHideWarning = warning
+        systemAudioAutoHideIdentity = identity
         systemAudioAutoHideTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
             guard !Task.isCancelled, let self else { return }
             self.systemAudioAutoHideTask = nil
-            self.systemAudioAutoHideWarning = nil
-            guard self.promptKind == .systemAudio,
-                  self.systemAudioDegradationWarning == warning else { return }
-            self.meetingSession?.acknowledgeSystemAudioDegradationWarning(automatic: true)
+            self.systemAudioAutoHideIdentity = nil
+            guard self.promptIsCurrent(identity) else { return }
+            self.meetingSession?.hideRecoveredSystemAudioWarning(warning, recordingID: id)
         }
     }
 
     func cancelSystemAudioAutoHide() {
         systemAudioAutoHideTask?.cancel()
         systemAudioAutoHideTask = nil
-        systemAudioAutoHideWarning = nil
+        systemAudioAutoHideIdentity = nil
     }
 
     /// Builds the display copy for the resolved warning-prompt kind, plus
@@ -87,6 +87,7 @@ extension MeetingOverlayController {
 
     func schedulePromptCountdown() {
         promptCountdownTask?.cancel()
+        guard let identity = renderedPromptIdentity else { return }
         promptCountdownTask = Task { @MainActor [weak self] in
             guard let self else { return }
             var run = MeetingInactivityCountdownRun(
@@ -100,7 +101,7 @@ extension MeetingOverlayController {
                 self.pushToView()
 
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled, self.promptIsCurrent(identity) else { return }
                 let warning = self.meetingSession?.audioInactivityWarning
                 _ = run.tick(
                     isVisible: self.meetingPromptIsCurrentlyVisible(),
@@ -110,7 +111,7 @@ extension MeetingOverlayController {
                 self.promptSecondsRemaining = run.remaining
             }
 
-            self.handlePromptCountdownExpired(coveredSeconds: run.coveredSeconds)
+            self.handlePromptCountdownExpired(identity: identity, coveredSeconds: run.coveredSeconds)
         }
     }
 
@@ -128,11 +129,7 @@ extension MeetingOverlayController {
                 currentPrompt = systemAudioWarningPromptDisplay(warning: warning)
             }
         case .audioInactivity:
-            let warning = meetingSession?.audioInactivityWarning
-                ?? MeetingAudioInactivityWarning(
-                    inactiveDuration: 5 * 60,
-                    countdownSeconds: max(1, promptSecondsRemaining)
-                )
+            guard case .inactivity(_, let warning) = renderedPromptIdentity else { return }
             currentPrompt = audioInactivityPromptDisplay(
                 warning: warning,
                 countdownSeconds: promptSecondsRemaining
@@ -156,7 +153,7 @@ extension MeetingOverlayController {
         }
     }
 
-    private func handlePromptCountdownExpired(coveredSeconds: Int = 0) {
+    private func handlePromptCountdownExpired(identity: MeetingIslandPromptIdentity, coveredSeconds: Int = 0) {
         switch promptKind {
         case .systemAudio:
             return
@@ -167,7 +164,7 @@ extension MeetingOverlayController {
         case .audioRoute, .meetingSplit:
             return
         case .audioInactivity:
-            guard let warning = meetingSession?.audioInactivityWarning else { return }
+            guard case .inactivity(_, let warning) = identity else { return }
             switch MeetingInactivityCountdownExpiry.resolve(
                 isCallEnded: warning.kind == .callEnded,
                 automaticStopAllowed: warning.automaticStopAllowed,
@@ -190,12 +187,12 @@ extension MeetingOverlayController {
                 // The session reads the call app's audio now and either stops
                 // at 0 or leaves Continue / Stop up without a countdown.
                 Task { @MainActor [weak self] in
-                    guard let session = self?.meetingSession else { return }
+                    guard self?.promptIsCurrent(identity) == true, let session = self?.meetingSession else { return }
                     await session.resolveCallEndCountdownExpiry(warning)
                 }
             case .stop:
                 Task { @MainActor [weak self] in
-                    guard let session = self?.meetingSession else { return }
+                    guard self?.promptIsCurrent(identity) == true, let session = self?.meetingSession else { return }
                     await session.endRecordingFromAudioInactivityPrompt(automatic: true, expectedWarning: warning)
                 }
             }

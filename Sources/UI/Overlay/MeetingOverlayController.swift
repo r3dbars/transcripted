@@ -65,18 +65,12 @@ final class MeetingOverlayController: NSObject {
     /// The session owns the ask and ties it to the start that raised it, so a
     /// start that fails before recording never leaves one for the next meeting.
     var islandCallAudioAskPending = false
+    var renderedPromptIdentity: MeetingIslandPromptIdentity?
     var promptKind: PromptKind?
     var audioRouteWarningOutcome: MeetingRouteWarning?
     var systemAudioDegradationWarning: MeetingSystemAudioDegradationWarning?
     var meetingSplitOffer: MeetingSplitOffer?
     var micOnlyNotice: MeetingMicOnlyNotice?
-    // Audio inactivity drives its own per-second countdown Task
-    // (schedulePromptCountdown). The combined warning subscription re-fires
-    // on *any* of the four signals changing, so this mirror lets it tell
-    // "the inactivity warning itself changed" apart from "some unrelated
-    // signal changed while inactivity was already the winning prompt" —
-    // only the former should restart the countdown.
-    private var lastAppliedAudioInactivityWarning: MeetingAudioInactivityWarning?
     var promptCountdownTask: Task<Void, Never>?
     var promptSecondsRemaining = 0
     // Transcription progress for the "Transcribing meeting…" pill. Nil when
@@ -112,7 +106,7 @@ final class MeetingOverlayController: NSObject {
     /// Hides a "call audio is back" notice after a few seconds. Kept apart
     /// from `autoHideTask`, which hides the whole panel after a save.
     var systemAudioAutoHideTask: Task<Void, Never>?
-    var systemAudioAutoHideWarning: MeetingSystemAudioDegradationWarning?
+    var systemAudioAutoHideIdentity: MeetingIslandPromptIdentity?
     var isShowingCancelConfirmation = false
 
     // The precedence lattice for these kinds lives in the pure
@@ -220,6 +214,7 @@ final class MeetingOverlayController: NSObject {
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
 
+        renderedPromptIdentity = .missedCall(UUID())
         missedCallPrompt = call
         promptKind = .missedCall
         promptSecondsRemaining = Self.missedCallNudgeTimeoutSeconds
@@ -335,15 +330,16 @@ final class MeetingOverlayController: NSObject {
             session.routeWarningPublisher
         )
         .combineLatest(session.$meetingSplitOffer)
+        .map { [weak session] warnings, offer in (warnings, offer, session?.activeRecordingIdentity) }
         .receive(on: DispatchQueue.main)
-        .sink { [weak self] warnings, splitOffer in
+        .sink { [weak self] warnings, splitOffer, recordingID in
             let (inactivity, systemAudio, micBoostVisible, route) = warnings
             self?.applyWarningPrompt(
                 inactivity: inactivity,
                 systemAudio: systemAudio,
                 micBoostVisible: micBoostVisible,
                 route: route,
-                splitOffer: splitOffer
+                recordingID: recordingID, splitOffer: splitOffer
             )
         }
         .store(in: &subscriptions)
@@ -408,7 +404,7 @@ final class MeetingOverlayController: NSObject {
         systemAudio: MeetingSystemAudioDegradationWarning?,
         micBoostVisible: Bool,
         route: MeetingRouteWarning?,
-        splitOffer: MeetingSplitOffer?
+        recordingID: UUID?, splitOffer: MeetingSplitOffer?
     ) {
         systemAudioDegradationWarning = systemAudio
         audioRouteWarningOutcome = route
@@ -425,7 +421,6 @@ final class MeetingOverlayController: NSObject {
         )
 
         guard let resolvedKind else {
-            lastAppliedAudioInactivityWarning = nil
             cancelSystemAudioAutoHide()
             if isWarningDrivenPromptKind(promptKind) {
                 clearWarningPrompt()
@@ -436,7 +431,7 @@ final class MeetingOverlayController: NSObject {
         }
 
         if resolvedKind == .audioInactivity, promptKind == .audioInactivity,
-           inactivity == lastAppliedAudioInactivityWarning {
+           let recordingID, let inactivity, renderedPromptIdentity == .inactivity(recordingID, inactivity) {
             // Already showing this exact inactivity warning and some
             // unrelated signal is what changed. Its per-second countdown
             // Task is still ticking down — don't restart it under a fresh
@@ -458,12 +453,18 @@ final class MeetingOverlayController: NSObject {
 
         autoHideTask?.cancel()
         promptCountdownTask?.cancel()
+        guard let recordingID else { clearWarningPrompt(); return }
+        switch resolvedKind {
+        case .systemAudio: renderedPromptIdentity = systemAudio.map { .systemAudio(recordingID, $0) }
+        case .audioRoute: renderedPromptIdentity = route.map { .route(recordingID, $0) }
+        case .audioInactivity: renderedPromptIdentity = inactivity.map { .inactivity(recordingID, $0) }
+        case .meetingSplit: renderedPromptIdentity = splitOffer.map { .split($0) }
+        case .micBoost: renderedPromptIdentity = .boost(recordingID)
+        case .missedCall: return
+        }
         promptKind = resolvedKind
         promptSecondsRemaining = display.countdownSeconds
         currentPrompt = display.prompt
-        if resolvedKind == .audioInactivity {
-            lastAppliedAudioInactivityWarning = inactivity
-        }
         state = presentationState(session: meetingSession?.state ?? .idle, prompt: promptKind)
         showPanel()
         pushToView()

@@ -229,20 +229,23 @@ func testNotchIslandPresentation() {
         )
 
         var enabled = recording()
+        let id = UUID()
+        enabled.recordingID = id
         enabled.micMuteControlEnabled = true
         assertEqual(
             notchLayout(meeting: enabled, expanded: true).drop,
-            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, micAction: .meetingMicMute)
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, micAction: .meetingMicMute(id))
         )
 
         var muted = recording()
+        muted.recordingID = id
         muted.micMuted = true
         assertTrue(notchLayout(meeting: muted).left.contains(.text("Mic muted", .warning)))
         assertEqual(
             notchLayout(meeting: muted, expanded: true).drop,
-            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, micAction: .meetingMicUnmute)
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, micAction: .meetingMicUnmute(id))
         )
-        assertEqual(NotchIslandAction.meetingMicMute.owner, .meeting)
+        assertEqual(NotchIslandAction.meetingMicMute(id).owner, .meeting)
 
         var transcribing = recording()
         transcribing.showsLiveTranscript = true

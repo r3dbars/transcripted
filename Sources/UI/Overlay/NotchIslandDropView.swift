@@ -140,6 +140,8 @@ final class NotchIslandDropView: NSView {
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
         case .meetingControls(let note, let unverified, let showsTranscript, let micAction):
+            let muted: Bool
+            if case .meetingMicUnmute? = micAction { muted = true } else { muted = false }
             let subtitle: String
             if unverified {
                 subtitle = "Can't confirm call audio yet"
@@ -147,13 +149,13 @@ final class NotchIslandDropView: NSView {
                 switch note {
                 case .off?: subtitle = "Call audio is off"
                 case .onForNextMeeting?: subtitle = "Call audio starts next meeting"
-                case nil: subtitle = micAction == .meetingMicUnmute ? "Meeting mic muted" : "You and the call"
+                case nil: subtitle = muted ? "Meeting mic muted" : "You and the call"
                 }
             }
             add(titleBlock("Recording", subtitle))
             var trailing: [NSView] = []
             if let micAction {
-                let verb = micAction == .meetingMicUnmute ? "Unmute" : "Mute"
+                let verb = muted ? "Unmute" : "Mute"
                 trailing.append(button("\(verb) mic", .plain, micAction,
                                        accessibilityLabel: "\(verb) Transcripted meeting microphone"))
             }
@@ -192,17 +194,18 @@ final class NotchIslandDropView: NSView {
                 promptCountdownLabel = countdown
                 add(countdown)
             }
+            guard let identity = prompt.identity else { break }
             var leading: [NSView] = []
             if let tertiary = prompt.tertiaryTitle, !tertiary.isEmpty {
-                leading.append(button(tertiary, .subtle, .meetingTertiary, accessibilityLabel: prompt.tertiaryAccessibilityLabel))
+                leading.append(button(tertiary, .subtle, .meetingPrompt(.tertiary, identity), accessibilityLabel: prompt.tertiaryAccessibilityLabel))
             }
             var trailing: [NSView] = []
             if !prompt.secondaryTitle.isEmpty {
-                trailing.append(button(prompt.secondaryTitle, .plain, .meetingSecondary, accessibilityLabel: prompt.secondaryAccessibilityLabel))
+                trailing.append(button(prompt.secondaryTitle, .plain, .meetingPrompt(.secondary, identity), accessibilityLabel: prompt.secondaryAccessibilityLabel))
             }
             if !prompt.primaryTitle.isEmpty {
                 let style: NotchIslandButton.Style = prompt.primaryTitle == "Stop" ? .destructive : .accent
-                trailing.append(button(prompt.primaryTitle, style, .meetingPrimary, accessibilityLabel: prompt.primaryAccessibilityLabel))
+                trailing.append(button(prompt.primaryTitle, style, .meetingPrompt(.primary, identity), accessibilityLabel: prompt.primaryAccessibilityLabel))
             }
             add(buttonRow(leading: leading, trailing: trailing))
         case .meetingSaved(let title):
@@ -214,7 +217,7 @@ final class NotchIslandDropView: NSView {
             if grantsSystemAudio {
                 // The meeting overlay's primary action opens the audio-only
                 // Settings pane while the start's denial is on screen.
-                trailing.append(button("Open Settings", .accent, .meetingPrimary))
+                trailing.append(button("Open Settings", .accent, .meetingOpen))
             } else if canOpen {
                 trailing.append(button("Open", .accent, .meetingOpen))
             }

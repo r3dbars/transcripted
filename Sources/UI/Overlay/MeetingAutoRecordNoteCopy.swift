@@ -44,13 +44,14 @@ enum MeetingAutoRecordIslandActionPolicy {
     static func route(
         action: NotchIslandAction,
         noteVisible: Bool,
-        overlayPromptActive: Bool
+        recordingID: UUID?
     ) -> Route {
-        guard noteVisible, !overlayPromptActive else { return .inherit }
-        switch action {
-        case .meetingPrimary, .meetingStop:
+        guard noteVisible, case .meetingPrompt(let button, .autoRecord(let id)) = action,
+              recordingID == id else { return .inherit }
+        switch button {
+        case .primary:
             return .stop
-        case .meetingSecondary:
+        case .secondary:
             return .discard
         default:
             return .inherit
