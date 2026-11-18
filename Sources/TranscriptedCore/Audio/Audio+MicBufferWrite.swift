@@ -85,10 +85,14 @@ extension Audio {
             agcMaxGain: agc?.maxGain
         )
 
-        // Borrowed dictation gets the real samples; the saved track and live
-        // preview get silence of the same length (Audio+MicDictationGate.swift).
+        // Explicit mic mute silences every consumer of this meeting input,
+        // including a borrowed dictation. Reuse the owned copy so mute adds
+        // no buffer allocation. Dictation alone gates just the meeting track.
         let meetingBuffer: AVAudioPCMBuffer
-        if isMicGatedForBorrowedDictation {
+        if isMeetingMicMuted(generation: sessionGeneration) {
+            zeroSamples(of: bufferForAsyncUse)
+            meetingBuffer = bufferForAsyncUse
+        } else if isMicGatedForBorrowedDictation {
             guard let silent = silentCopy(matching: bufferForAsyncUse) else {
                 AppLogger.audioMic.warning("Failed to build silent mic buffer while dictation is borrowing the mic")
                 return
@@ -161,7 +165,7 @@ extension Audio {
         // single-thread contract holds and the tail keeps the same loudness.
         realtimeAGC?.process(buffer: bufferForAsyncUse)
         // No host consumer sees the tail, so a gated tail is just silence.
-        if isMicGatedForBorrowedDictation {
+        if isMicGatedForBorrowedDictation || isMeetingMicMuted(generation: sessionGeneration) {
             zeroSamples(of: bufferForAsyncUse)
         }
 

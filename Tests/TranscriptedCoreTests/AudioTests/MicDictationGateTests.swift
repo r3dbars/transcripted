@@ -142,6 +142,56 @@ final class MicDictationGateTests: XCTestCase {
         XCTAssertEqual(delivered[2].map(abs).max() ?? 0, 0.5, accuracy: 0.0001)
     }
 
+    func testMeetingMutePreservesFramesInFileAndLivePreviewAcrossTapReplacement() async throws {
+        let harness = try startRecording(root: try makeRoot())
+        let audio = harness.audio
+        let host = LockedSamples()
+        audio.onMicPCMBuffer = { host.append($0) }
+        let preview = LockedSamples()
+        audio.onLivePCMBuffer = { buffer, source, _, _ in
+            if source == .microphone { preview.append(buffer) }
+        }
+        audio.setLivePCMDeliveryEnabled(true, previewEpoch: 1)
+
+        let speech = makeSpeech(level: 0.5)
+        audio.handleMicBuffer(speech, writeContext: harness.writeContext)
+        audio.isMeetingMicMuted = true
+        let replacementTap = MicPCMWriteContext(
+            generation: harness.writeContext.generation, monoFormat: Self.format, inputChannelCount: 1
+        )
+        audio.handleMicBuffer(speech, writeContext: replacementTap)
+        audio.isMicGatedForBorrowedDictation = true
+        audio.handleMicBuffer(speech, writeContext: replacementTap)
+        audio.isMicGatedForBorrowedDictation = false
+        audio.handleMicBuffer(speech, writeContext: replacementTap)
+        audio.isMeetingMicMuted = false
+        audio.handleMicBuffer(speech, writeContext: replacementTap)
+
+        await withCheckedContinuation { continuation in
+            audio.livePCMDelivery.flush { continuation.resume() }
+        }
+        await audio.flushMicHostPCMBufferFanout()
+        let saved = try savedSamples(harness)
+        XCTAssertEqual(host.value.flatMap { $0 }, saved)
+        XCTAssertEqual(saved.count, 5 * Int(Self.frames))
+        XCTAssertEqual(preview.value.flatMap { $0 }, saved)
+        XCTAssertEqual(preview.value.map { $0.map(abs).max() }, [0.5, 0, 0, 0, 0.5])
+    }
+
+    func testStopTailStaysMutedAndNextRecordingStartsUnmuted() throws {
+        let harness = try startRecording(root: try makeRoot())
+        let audio = harness.audio
+        audio.isMeetingMicMuted = true
+        audio.micAudioWriteBackpressure.beginFinishing(generation: harness.writeContext.generation)
+        _ = audio.beginRecordingSessionGeneration()
+        audio.handleMicBuffer(makeSpeech(level: 0.5), writeContext: harness.writeContext)
+        let saved = try savedSamples(harness)
+        XCTAssertEqual(saved.count, Int(Self.frames))
+        XCTAssertEqual(saved.map(abs).max(), 0)
+        audio.prepareForNewRecordingStart()
+        XCTAssertFalse(audio.isMeetingMicMuted)
+    }
+
     func testGateDoesNotLookLikeASilentMic() async throws {
         let harness = try startRecording(root: try makeRoot())
         let audio = harness.audio

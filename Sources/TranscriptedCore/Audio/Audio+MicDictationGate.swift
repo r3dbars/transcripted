@@ -16,6 +16,19 @@ import Synchronization
 /// peaks and watchdog keep reading the real mic, so being gated never looks
 /// like a dead or silent mic.
 extension Audio {
+    /// A recovered tap keeps the same generation. Stop advances it, but the
+    /// finishing tap still checks its own generation while its writer drains.
+    public var isMeetingMicMuted: Bool {
+        get { isMeetingMicMuted(generation: recordingSessionGeneration) }
+        set {
+            mutedMeetingGeneration.store(newValue ? recordingSessionGeneration : .max, ordering: .releasing)
+        }
+    }
+
+    func isMeetingMicMuted(generation: UInt64) -> Bool {
+        mutedMeetingGeneration.load(ordering: .acquiring) == generation
+    }
+
     /// On while a borrowed-mic dictation claim is live. Safe from any thread;
     /// the mic buffer handler reads it once per buffer.
     public var isMicGatedForBorrowedDictation: Bool {

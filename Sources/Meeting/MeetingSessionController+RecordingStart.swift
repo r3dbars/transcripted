@@ -10,6 +10,13 @@ import TranscriptedCore
 @available(macOS 14.0, *)
 @MainActor
 extension MeetingSessionController {
+    var isMeetingMicMuted: Bool { capture.audio.isMeetingMicMuted }
+
+    func toggleMeetingMicMute() {
+        guard case .recording = state else { return }
+        capture.audio.isMeetingMicMuted.toggle()
+    }
+
     func installSharedDictationMicRelay() {
         let dictationEngine = sttRouter.parakeetEngine
         capture.setSharedDictationMicHandler { [weak dictationEngine] buffer in
