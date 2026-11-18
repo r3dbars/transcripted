@@ -744,6 +744,6 @@ final class MeetingOverlayController: NSObject {
 
     private func pushAudioLevelsToView() {
         guard islandShown else { return }
-        island?.updateMeetingLevels(mic: currentMicLevel, system: currentSystemLevel)
+        island?.updateMeetingLevels(mic: meetingSession?.isMeetingMicMuted == true ? 0 : currentMicLevel, system: currentSystemLevel)
     }
 }

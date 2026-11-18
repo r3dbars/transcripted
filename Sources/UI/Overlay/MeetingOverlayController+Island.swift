@@ -231,6 +231,7 @@ extension MeetingOverlayController {
             prompt: state == .prompt ? prompt : nil,
             duration: currentDuration,
             callAudioNote: callAudioNote,
+            micMuted: meetingSession?.isMeetingMicMuted == true,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             asksAboutCallAudio: islandCallAudioAskPending,
             autoRecordNote: autoRecordNoteVisible
@@ -266,6 +267,9 @@ extension MeetingOverlayController {
         case .meetingCallAudioDismiss:
             islandCallAudioAskPending = false
             meetingSession?.dismissCallAudioAsk()
+            pushToView()
+        case .meetingMicMute:
+            meetingSession?.toggleMeetingMicMute()
             pushToView()
         case .meetingStop, .meetingDismissError:
             handleCloseTapped()

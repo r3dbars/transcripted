@@ -119,6 +119,7 @@ struct NotchIslandMeetingContent: Equatable {
     var prompt: Prompt?
     var duration: TimeInterval = 0
     var callAudioNote: CallAudioNote?
+    var micMuted = false
     var systemAudioUnverified = false
     /// The island skipped the "can't hear the other side" question so the
     /// meeting could start at once; ask it now, from the island, once.
@@ -216,6 +217,7 @@ enum NotchIslandAction: Equatable {
     case copyLastDictation
     case pasteLastDictation
     case meetingStop
+    case meetingMicMute
     case meetingPrimary
     case meetingSecondary
     case meetingTertiary
@@ -242,7 +244,7 @@ enum NotchIslandAction: Equatable {
             return .dictation
         case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
-        case .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
+        case .meetingMicMute, .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
             return .meeting
         case .callRecord, .callDismiss, .callRemind:
@@ -276,7 +278,7 @@ enum NotchIslandDrop: Equatable {
     case dictationMessage(NotchIslandDictationContent.Message)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, micMuted: Bool = false)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -455,6 +457,10 @@ enum NotchIslandPresentation {
             result.right = words > 0 ? [.text(words == 1 ? "1 word" : "\(words) words", .secondary)] : []
         }
 
+        if meeting?.isRecording == true, meeting?.micMuted == true {
+            result.left.append(.text("Mic muted", .warning))
+        }
+
         if dropIsOpen {
             // The drop-down carries the buttons; the wings only report status,
             // so nothing is offered twice.
@@ -573,7 +579,8 @@ enum NotchIslandPresentation {
             return .meetingControls(
                 callAudioNote: meeting.callAudioNote,
                 systemAudioUnverified: meeting.systemAudioUnverified,
-                showsTranscript: meeting.showsLiveTranscript
+                showsTranscript: meeting.showsLiveTranscript,
+                micMuted: meeting.micMuted
             )
         case .preparing(let title, let detail):
             return .meetingPreparing(title: title, detail: detail)
