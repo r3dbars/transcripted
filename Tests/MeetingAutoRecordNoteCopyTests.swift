@@ -10,34 +10,35 @@ func testMeetingAutoRecordNoteCopy() {
     }
 
     runSuite("auto-record island actions stop or discard only while the note is up") {
+        let id = UUID()
         assertEqual(
             MeetingAutoRecordIslandActionPolicy.route(
-                action: .meetingPrimary, noteVisible: true, overlayPromptActive: false
+                action: .meetingPrompt(.primary, .autoRecord(id)), noteVisible: true, recordingID: id
             ),
             .stop
         )
         assertEqual(
             MeetingAutoRecordIslandActionPolicy.route(
-                action: .meetingStop, noteVisible: true, overlayPromptActive: false
+                action: .meetingStop, noteVisible: true, recordingID: id
             ),
-            .stop
+            .inherit
         )
         assertEqual(
             MeetingAutoRecordIslandActionPolicy.route(
-                action: .meetingSecondary, noteVisible: true, overlayPromptActive: false
+                action: .meetingPrompt(.secondary, .autoRecord(id)), noteVisible: true, recordingID: id
             ),
             .discard
         )
         assertEqual(
             MeetingAutoRecordIslandActionPolicy.route(
-                action: .meetingPrimary, noteVisible: true, overlayPromptActive: true
+                action: .meetingPrompt(.primary, .autoRecord(id)), noteVisible: true, recordingID: UUID()
             ),
             .inherit,
-            "Call ended and other warnings keep their own buttons"
+            "A new recording never inherits an auto-record action"
         )
         assertEqual(
             MeetingAutoRecordIslandActionPolicy.route(
-                action: .meetingSecondary, noteVisible: false, overlayPromptActive: false
+                action: .meetingPrompt(.secondary, .autoRecord(id)), noteVisible: false, recordingID: id
             ),
             .inherit
         )

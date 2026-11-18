@@ -103,6 +103,7 @@ struct NotchIslandMeetingContent: Equatable {
         var secondaryTitle: String
         var tertiaryTitle: String?
         /// Explicit action descriptions from the meeting prompt; nil uses the visible title.
+        var identity: MeetingIslandPromptIdentity? = nil
         var primaryAccessibilityLabel: String? = nil
         var secondaryAccessibilityLabel: String? = nil
         var tertiaryAccessibilityLabel: String? = nil
@@ -119,6 +120,7 @@ struct NotchIslandMeetingContent: Equatable {
     var prompt: Prompt?
     var duration: TimeInterval = 0
     var callAudioNote: CallAudioNote?
+    var recordingID: UUID?
     var micMuteControlEnabled = false
     var micMuted = false
     var systemAudioUnverified = false
@@ -210,6 +212,18 @@ enum NotchIslandChipStyle: Equatable {
     case warning
 }
 
+enum MeetingIslandPromptIdentity: Equatable {
+    case split(MeetingSplitOffer)
+    case systemAudio(UUID, MeetingSystemAudioDegradationWarning)
+    case inactivity(UUID, MeetingAudioInactivityWarning)
+    case route(UUID, MeetingRouteWarning)
+    case boost(UUID)
+    case missedCall(UUID)
+    case autoRecord(UUID)
+}
+
+enum MeetingIslandPromptButton { case primary, secondary, tertiary }
+
 enum NotchIslandAction: Equatable {
     case dictationStop
     case dictationCancel
@@ -218,11 +232,9 @@ enum NotchIslandAction: Equatable {
     case copyLastDictation
     case pasteLastDictation
     case meetingStop
-    case meetingMicMute
-    case meetingMicUnmute
-    case meetingPrimary
-    case meetingSecondary
-    case meetingTertiary
+    case meetingMicMute(UUID)
+    case meetingMicUnmute(UUID)
+    case meetingPrompt(MeetingIslandPromptButton, MeetingIslandPromptIdentity)
     case meetingCallAudio
     case meetingCallAudioDismiss
     case meetingOpen
@@ -246,7 +258,7 @@ enum NotchIslandAction: Equatable {
             return .dictation
         case .copyLastDictation, .pasteLastDictation, .meetingCopyTranscript:
             return .island
-        case .meetingMicMute, .meetingMicUnmute, .meetingStop, .meetingPrimary, .meetingSecondary, .meetingTertiary,
+        case .meetingPrompt, .meetingMicMute, .meetingMicUnmute, .meetingStop,
              .meetingCallAudio, .meetingCallAudioDismiss, .meetingOpen, .meetingDismissError:
             return .meeting
         case .callRecord, .callDismiss, .callRemind:
@@ -543,7 +555,9 @@ enum NotchIslandPresentation {
             asksAboutCallAudio: meeting.asksAboutCallAudio,
             noteEnabled: meeting.autoRecordNote
            ) {
-            return .meetingPrompt(MeetingAutoRecordNoteCopy.prompt)
+            var prompt = MeetingAutoRecordNoteCopy.prompt
+            prompt.identity = meeting.recordingID.map(MeetingIslandPromptIdentity.autoRecord)
+            return .meetingPrompt(prompt)
         }
         return nil
     }
@@ -582,7 +596,9 @@ enum NotchIslandPresentation {
                 callAudioNote: meeting.callAudioNote,
                 systemAudioUnverified: meeting.systemAudioUnverified,
                 showsTranscript: meeting.showsLiveTranscript,
-                micAction: meeting.micMuted ? .meetingMicUnmute : (meeting.micMuteControlEnabled ? .meetingMicMute : nil)
+                micAction: meeting.recordingID.flatMap { id in
+                    meeting.micMuted ? .meetingMicUnmute(id) : (meeting.micMuteControlEnabled ? .meetingMicMute(id) : nil)
+                }
             )
         case .preparing(let title, let detail):
             return .meetingPreparing(title: title, detail: detail)

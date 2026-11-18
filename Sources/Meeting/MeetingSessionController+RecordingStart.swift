@@ -12,8 +12,8 @@ import TranscriptedCore
 extension MeetingSessionController {
     var isMeetingMicMuted: Bool { capture.audio.isMeetingMicMuted }
 
-    func setMeetingMicMuted(_ muted: Bool) {
-        guard case .recording = state,
+    func setMeetingMicMuted(_ muted: Bool, recordingID: UUID) {
+        guard case .recording = state, activeRecordingIdentity == recordingID,
               NotchIslandPreferences.allowsMeetingMicChange(toMuted: muted) else { return }
         capture.audio.isMeetingMicMuted = muted
     }

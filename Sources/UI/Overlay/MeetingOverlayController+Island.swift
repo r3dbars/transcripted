@@ -12,7 +12,7 @@ extension MeetingOverlayController {
     /// deliberate act and must never sit one mis-click from Stop.
     private func handleDiscardRequested() {
         guard !isShowingCancelConfirmation else { return }
-        guard let session = meetingSession else { return }
+        guard let session = meetingSession, let id = session.activeRecordingIdentity else { return }
         guard MeetingSessionStateMachine.mayDiscardRecording(sessionState: session.state) else { return }
 
         isShowingCancelConfirmation = true
@@ -32,37 +32,11 @@ extension MeetingOverlayController {
             return alert.runModal() == .alertSecondButtonReturn
         }, discard: {
             // A confirm can outlive Stop; the flow rechecks before canceling.
-            Task { [weak session] in await session?.cancelRecording(reason: .discardButton) }
-        })
-    }
-
-    private func handleSecondaryActionTapped() {
-        switch state {
-        case .prompt:
-            switch promptKind {
-            case .systemAudio:
-                meetingSession?.acknowledgeSystemAudioDegradationWarning()
-            case .audioInactivity:
-                meetingSession?.dismissAudioInactivityWarning()
-            case .micBoost:
-                meetingSession?.declineMicBoostPrompt()
-            case .audioRoute:
-                meetingSession?.dismissAudioRouteWarning()
-            case .meetingSplit:
-                guard let offer = meetingSplitOffer else { return }
-                meetingSession?.declineMeetingSplit(offer)
-            case .missedCall:
-                // "Don't show again" — the wiring persists the opt-out.
-                onMissedCallNudgeResolved?(.disabled)
-                dismissPrompt()
-            case .none:
-                dismissPrompt()
+            Task { [weak session] in
+                guard let session, session.activeRecordingIdentity == id else { return }
+                await session.cancelRecording(reason: .discardButton)
             }
-        case .recording:
-            handleCloseTapped()
-        default:
-            hidePanel()
-        }
+        })
     }
 
     private func handlePrimaryActionTapped() {
@@ -82,58 +56,60 @@ extension MeetingOverlayController {
         default:
             break
         }
-        guard case .prompt = state else { return }
-        promptCountdownTask?.cancel()
+    }
 
-        switch promptKind {
-        case .systemAudio:
-            Task { @MainActor [weak self] in
-                guard let session = self?.meetingSession else { return }
-                await session.stopRecording(reason: .systemAudioWarning)
-            }
-        case .audioInactivity:
-            let warning = meetingSession?.audioInactivityWarning
-            Task { @MainActor [weak self] in
-                guard let session = self?.meetingSession else { return }
-                await session.endRecordingFromAudioInactivityPrompt(automatic: false, expectedWarning: warning)
-            }
-        case .audioRoute:
-            Task { @MainActor [weak self] in
-                guard let session = self?.meetingSession else { return }
-                await session.stopRecording(reason: .audioRouteWarning)
-            }
-        case .micBoost:
-            // Session clears the published flag, which the combined warning
-            // subscription picks up and resolves back down to .recording (or
-            // to whichever prompt was suppressed behind this one).
-            meetingSession?.acceptMicBoostPrompt()
-        case .meetingSplit:
-            guard let offer = meetingSplitOffer else { return }
-            Task { @MainActor [weak self] in
-                await self?.meetingSession?.acceptMeetingSplit(offer)
-            }
-        case .missedCall:
-            onMissedCallNudgeResolved?(.acknowledged)
-            dismissPrompt()
-        case .none:
-            break
+    func promptIsCurrent(_ identity: MeetingIslandPromptIdentity) -> Bool {
+        guard let session = meetingSession else { return false }
+        guard state == .prompt, renderedPromptIdentity == identity else { return false }
+        if case .missedCall = identity { return promptKind == .missedCall && !session.isRecording }
+        guard session.isRecording, let currentID = session.activeRecordingIdentity,
+              MeetingPromptPriority.resolve(
+                inactivity: session.audioInactivityWarning, systemAudio: session.systemAudioDegradationWarning,
+                routeActive: session.currentRouteWarning != nil, micBoostVisible: session.isMicBoostPromptVisible,
+                current: promptKind, isRecording: true, splitOffered: session.meetingSplitOffer != nil
+              ) == promptKind else { return false }
+        switch identity {
+        case .autoRecord, .missedCall: return false
+        case .split(let offer):
+            return currentID == offer.recordingIdentity
+                && offer.matches(session.meetingSplitOffer)
+        case .systemAudio(let id, let warning):
+            return currentID == id && session.systemAudioDegradationWarning == warning
+        case .inactivity(let id, let warning):
+            return currentID == id && session.audioInactivityWarning == warning
+        case .route(let id, let warning):
+            return currentID == id && session.currentRouteWarning == warning
+        case .boost(let id):
+            return currentID == id && session.isMicBoostPromptVisible
         }
     }
 
-    /// The pill's "Mic only" note, or Check Access on the system audio
-    /// warning. Both send the user to turn call audio on.
-    private func handleCallAudioActionTapped() {
-        switch state {
-        case .prompt:
-            guard promptKind == .systemAudio else { return }
-            meetingSession?.checkSystemAudioAccessFromWarning()
-        case .recording:
-            guard micOnlyNotice == .callAudioOff else { return }
+    private func dispatchPromptButton(_ button: MeetingIslandPromptButton, identity: MeetingIslandPromptIdentity) {
+        guard promptIsCurrent(identity), let session = meetingSession else { return }
+        switch (button, identity) {
+        case (.primary, .systemAudio), (.primary, .route), (.primary, .inactivity), (.primary, .split):
             Task { @MainActor [weak self] in
-                await self?.meetingSession?.turnOnCallAudioFromMicOnlyNotice()
+                guard self?.promptIsCurrent(identity) == true else { return }
+                switch identity {
+                case .systemAudio: await session.stopRecording(reason: .systemAudioWarning)
+                case .route: await session.stopRecording(reason: .audioRouteWarning)
+                case .inactivity(_, let warning):
+                    await session.endRecordingFromAudioInactivityPrompt(automatic: false, expectedWarning: warning)
+                case .split(let offer): await session.acceptMeetingSplit(offer)
+                default: break
+                }
             }
-        default:
-            break
+        case (.secondary, .split(let offer)): session.declineMeetingSplit(offer)
+        case (.secondary, .systemAudio): session.acknowledgeSystemAudioDegradationWarning()
+        case (.tertiary, .systemAudio): session.checkSystemAudioAccessFromWarning()
+        case (.secondary, .route): session.dismissAudioRouteWarning()
+        case (.secondary, .inactivity): session.dismissAudioInactivityWarning()
+        case (.primary, .boost): session.acceptMicBoostPrompt()
+        case (.secondary, .boost): session.declineMicBoostPrompt()
+        case (.primary, .missedCall), (.secondary, .missedCall):
+            onMissedCallNudgeResolved?(button == .primary ? .acknowledged : .disabled)
+            dismissPrompt()
+        default: break
         }
     }
 
@@ -213,6 +189,7 @@ extension MeetingOverlayController {
                 primaryTitle: $0.primaryTitle,
                 secondaryTitle: $0.secondaryTitle,
                 tertiaryTitle: $0.tertiaryTitle,
+                identity: renderedPromptIdentity,
                 primaryAccessibilityLabel: $0.primaryAccessibilityLabel,
                 secondaryAccessibilityLabel: $0.secondaryAccessibilityLabel,
                 tertiaryAccessibilityLabel: $0.tertiaryAccessibilityLabel
@@ -232,6 +209,7 @@ extension MeetingOverlayController {
             prompt: state == .prompt ? prompt : nil,
             duration: currentDuration,
             callAudioNote: callAudioNote,
+            recordingID: meetingSession?.activeRecordingIdentity,
             micMuteControlEnabled: NotchIslandPreferences.meetingMicMuteControlEnabled(),
             micMuted: meetingSession?.isMeetingMicMuted == true,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
@@ -251,36 +229,36 @@ extension MeetingOverlayController {
     }
 
     func handleIslandAction(_ action: NotchIslandAction) {
-        switch MeetingAutoRecordIslandActionPolicy.route(
-            action: action,
-            noteVisible: autoRecordNoteVisible,
-            overlayPromptActive: state == .prompt || islandCallAudioAskPending
-        ) {
+        func autoRecordRoute() -> MeetingAutoRecordIslandActionPolicy.Route {
+            MeetingAutoRecordIslandActionPolicy.route(action: action, noteVisible: autoRecordNoteVisible,
+                recordingID: meetingSession?.activeRecordingIdentity)
+        }
+        switch autoRecordRoute() {
         case .stop:
-            handleCloseTapped()
+            Task { @MainActor in
+                guard autoRecordRoute() == .stop else { return }
+                await meetingSession?.stopRecording(reason: .overlayStopButton)
+            }
             return
         case .discard:
             handleDiscardRequested()
             return
-        case .inherit:
-            break
+        case .inherit: break
         }
         switch action {
         case .meetingCallAudioDismiss:
             islandCallAudioAskPending = false
             meetingSession?.dismissCallAudioAsk()
             pushToView()
-        case .meetingMicMute, .meetingMicUnmute:
-            meetingSession?.setMeetingMicMuted(action == .meetingMicMute)
+        case .meetingPrompt(let button, let identity):
+            dispatchPromptButton(button, identity: identity)
+        case .meetingMicMute(let id), .meetingMicUnmute(let id):
+            meetingSession?.setMeetingMicMuted(action == .meetingMicMute(id), recordingID: id)
             pushToView()
         case .meetingStop, .meetingDismissError:
             handleCloseTapped()
-        case .meetingPrimary, .meetingOpen:
+        case .meetingOpen:
             handlePrimaryActionTapped()
-        case .meetingSecondary:
-            handleSecondaryActionTapped()
-        case .meetingTertiary:
-            handleCallAudioActionTapped()
         case .meetingCallAudio:
             // The "Mic only" chip, which can show under a warning prompt too.
             islandCallAudioAskPending = false

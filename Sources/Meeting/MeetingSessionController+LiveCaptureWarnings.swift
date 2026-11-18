@@ -35,6 +35,12 @@ extension MeetingSessionController {
         )
     }
 
+    func hideRecoveredSystemAudioWarning(_ expected: MeetingSystemAudioDegradationWarning, recordingID: UUID) {
+        guard isRecording, activeRecordingIdentity == recordingID,
+              expected.phase == .recovered, systemAudioDegradationWarning == expected else { return }
+        acknowledgeSystemAudioDegradationWarning(automatic: true)
+    }
+
     /// `automatic` is a recovered notice hiding itself, not a user click.
     func acknowledgeSystemAudioDegradationWarning(automatic: Bool = false) {
         guard let warning = systemAudioDegradationWarning,
