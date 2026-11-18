@@ -12,36 +12,6 @@ extension Audio {
 
     // MARK: - Audio Capture Setup
 
-    /// The journal failed before input-tap installation. Retire only this
-    /// generation's writer and its new scratch WAV; if Stop already took the
-    /// writer, its finalizer (not this failed Start) owns the file.
-    @discardableResult
-    func discardUnjournaledMicStartFileIfOwned(
-        _ fileURL: URL,
-        sessionGeneration: UInt64
-    ) -> Bool {
-        let failedWriter = micAudioFileQueue.sync {
-            micAudioFileOwnership.takeWriterOwned(by: sessionGeneration)
-        }
-        guard let failedWriter else { return false }
-        failedWriter.close()
-        guard fileURL.deletingLastPathComponent().standardizedFileURL == paths.audioCaptures.standardizedFileURL,
-              fileURL.lastPathComponent.hasPrefix("meeting_"),
-              fileURL.lastPathComponent.hasSuffix("_mic.wav") else {
-            return false
-        }
-        do {
-            try FileManager.default.removeItem(at: fileURL)
-            return true
-        } catch {
-            AppLogger.audioMic.warning("Could not remove failed-start microphone scratch file", [
-                "file": fileURL.lastPathComponent,
-                "error": error.localizedDescription
-            ])
-            return false
-        }
-    }
-
     func startAudioCapture(sessionGeneration: UInt64) async throws {
         guard sessionGeneration == recordingSessionGeneration else {
             throw AudioCaptureStaleSessionError()
@@ -107,7 +77,16 @@ extension Audio {
             sessionGeneration: sessionGeneration
         )
         guard sessionIsCurrent() else { throw AudioCaptureStaleSessionError() }
-        if let capture = systemCapture {
+        let trackURLs: (mic: URL, system: URL?)
+        do {
+            trackURLs = try openMeetingStartTracks(
+                capturesSystemAudio: systemCapture != nil,
+                sessionGeneration: sessionGeneration
+            )
+        } catch {
+            throw await surfacedMicStartFileFailure(error, sessionGeneration: sessionGeneration)
+        }
+        if let capture = systemCapture, let fileURL = trackURLs.system {
             let recordsTimeline = recordsSystemAudioTimeline
             let captureAttempt = SystemAudioCaptureStartAttempt(capture: capture)
             guard wireSystemAudioStatusPublisher(
@@ -117,10 +96,6 @@ extension Audio {
                 throw AudioCaptureStaleSessionError()
             }
             AppLogger.audioSystem.info("System audio capture object exists, setting up")
-            let captureDir = self.paths.audioCaptures
-            try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
-            let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-            let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_system.wav")
             AppLogger.audioSystem.info("System audio file URL", ["file": fileURL.lastPathComponent])
 
             var displacedAttempt:
@@ -424,6 +399,7 @@ extension Audio {
             let micWriteContext: MicPCMWriteContext
             do {
                 micWriteContext = try createMeetingMicStartFile(
+                    fileURL: trackURLs.mic,
                     recordingSnapshot: recordingSnapshot,
                     sessionGeneration: sessionGeneration
                 )
@@ -462,6 +438,7 @@ extension Audio {
                     },
                     createSegment: { settledGraph in
                         try createMeetingMicStartFile(
+                            fileURL: trackURLs.mic,
                             recordingSnapshot: settledGraph.recordingSnapshot,
                             sessionGeneration: sessionGeneration
                         )
@@ -577,28 +554,12 @@ extension Audio {
     }
 
     /// Creates the session's mono mic WAV, sized for `recordingSnapshot`, and
-    /// opens its journal. The input tap is not installed yet.
-    func createMeetingMicStartFile(
+    /// uses the filename already owned by the journal. The tap is not installed yet.
+    private func createMeetingMicStartFile(
+        fileURL: URL,
         recordingSnapshot: AudioRecordingFormatSnapshot,
         sessionGeneration: UInt64
     ) throws -> MicPCMWriteContext {
-        // Create mic audio file - ALWAYS save as mono for Speech framework compatibility
-        let captureDir = self.paths.audioCaptures
-        try? FileManager.default.createDirectory(at: captureDir, withIntermediateDirectories: true)
-        let timestamp = DateFormattingHelper.formatFilenamePrecise(Date())
-        let fileURL = captureDir.appendingPathComponent("meeting_\(timestamp)_mic.wav")
-        let journalURL = captureDir.appendingPathComponent(
-            fileURL.deletingPathExtension().lastPathComponent
-                + MeetingRecordingJournalStore.filenameSuffix
-        )
-
-        // A timestamp collision must not let AVAudioFile truncate an
-        // earlier recording before begin() can reject its journal.
-        guard !FileManager.default.fileExists(atPath: fileURL.path),
-              !FileManager.default.fileExists(atPath: journalURL.path) else {
-            throw MeetingRecordingJournalStartError.alreadyExists
-        }
-
         // Published under the lock Stop snapshots with, so a Stop that wins
         // after this point is guaranteed to see the URL and own the file.
         guard publishMeetingMicStartFileIfCurrent(fileURL, sessionGeneration: sessionGeneration) else {
@@ -647,36 +608,6 @@ extension Audio {
         }
         writerInstall.displacedWriter?.close()
         FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
-        let openedJournalSession: MeetingRecordingJournalSession
-        do {
-            openedJournalSession = try openJournalSessionIfCurrent(
-                primaryMicURL: fileURL, sessionGeneration: sessionGeneration
-            )
-        } catch is AudioCaptureStaleSessionError {
-            // Stop owns the already-published WAV and its writer.
-            throw AudioCaptureStaleSessionError()
-        } catch {
-            // The input tap is not installed yet. Close only the writer
-            // this start still owns, then remove only its newly-created
-            // header-only WAV; a concurrent stop may already have taken
-            // ownership, in which case its finalizer owns the file.
-            discardUnjournaledMicStartFileIfOwned(
-                fileURL,
-                sessionGeneration: sessionGeneration
-            )
-            if sessionGeneration == recordingSessionGeneration {
-                originalMicAudioFileURL = nil
-                micSegments = []
-                DispatchQueue.main.async {
-                    guard sessionGeneration == self.recordingSessionGeneration else { return }
-                    self.micAudioFileURL = nil
-                }
-            }
-            throw error
-        }
-        if let systemURL = originalSystemAudioFileURL, recordingSessionGeneration == sessionGeneration {
-            recordingJournal.recordSystemAudio(systemURL, session: openedJournalSession)
-        }
         AppLogger.audioMic.info("Saving as mono", ["sampleRate": "\(recordingSnapshot.sampleRate)"])
         return micWriteContext
     }

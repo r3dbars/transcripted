@@ -7,16 +7,34 @@ import Foundation
 /// one, either Stop sees it and owns it, or the start sees it lost and backs
 /// out. Nothing a start makes is left without an owner.
 extension Audio {
-    /// Reserve the token from inside the journal queue, before first persist.
-    /// Stop can take it immediately. Its stopping write then follows begin
-    /// on that queue, and Stop's cleanup group holds completion until begin exits.
+    /// Commit both filenames before either backend can create a writer or admit PCM.
+    func openMeetingStartTracks(
+        capturesSystemAudio: Bool, sessionGeneration: UInt64
+    ) throws -> (mic: URL, system: URL?) {
+        let directory = paths.audioCaptures
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let stem = "meeting_\(DateFormattingHelper.formatFilenamePrecise(Date()))"
+        let mic = directory.appendingPathComponent(stem + "_mic.wav")
+        let system = capturesSystemAudio ? directory.appendingPathComponent(stem + "_system.wav") : nil
+        guard ![mic, system].compactMap({ $0 }).contains(where: {
+            FileManager.default.fileExists(atPath: $0.path)
+        }) else {
+            throw MeetingRecordingJournalStartError.alreadyExists
+        }
+        _ = try openJournalSessionIfCurrent(
+            primaryMicURL: mic, systemURL: system, sessionGeneration: sessionGeneration
+        )
+        return (mic, system)
+    }
+
     func openJournalSessionIfCurrent(
-        primaryMicURL: URL, sessionGeneration: UInt64
+        primaryMicURL: URL, systemURL: URL? = nil, sessionGeneration: UInt64
     ) throws -> MeetingRecordingJournalSession {
-        var reserved: MeetingRecordingJournalSession?
+        guard recordingSessionGeneration == sessionGeneration else { throw AudioCaptureStaleSessionError() }
         do {
-            let session = try recordingJournal.begin(
+            return try recordingJournal.begin(
                 primaryMicURL: primaryMicURL,
+                systemURL: systemURL,
                 languageSelection: languageSelectionForCurrentRecording,
                 micOnlyByChoice: !currentRecordingCapturesSystemAudio
             ) { session in
@@ -25,20 +43,10 @@ extension Audio {
                         throw AudioCaptureStaleSessionError()
                     }
                     _journalSession = session
-                    reserved = session
                 }
             }
-            guard recordingSessionGeneration == sessionGeneration else {
-                throw AudioCaptureStaleSessionError()
-            }
-            return session
         } catch {
-            let stillCurrent = journalSessionLock.withLock {
-                guard recordingSessionGeneration == sessionGeneration else { return false }
-                if let reserved, _journalSession == reserved { _journalSession = nil }
-                return true
-            }
-            guard stillCurrent else { throw AudioCaptureStaleSessionError() }
+            guard recordingSessionGeneration == sessionGeneration else { throw AudioCaptureStaleSessionError() }
             throw error
         }
     }
