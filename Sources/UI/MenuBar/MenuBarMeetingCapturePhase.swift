@@ -1,6 +1,6 @@
 // MenuBarMeetingCapturePhase.swift
 // Foundation-pure name for where a meeting capture is, so the menu bar says
-// "Starting…" and "Saving…" instead of a red "Recording" while the mic is
+// "Starting…" and "Saving…" instead of a live green "Recording" while the mic is
 // still engaging or the audio is being handed off.
 
 import Foundation
