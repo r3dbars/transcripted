@@ -27,7 +27,7 @@ struct HomeMeetingPlayButton: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var isHovering = false
 
-    static let size: CGFloat = 22
+    nonisolated static let size: CGFloat = 22
     private var size: CGFloat { Self.size }
 
     private var hitTargetSize: CGFloat {
