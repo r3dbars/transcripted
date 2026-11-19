@@ -548,7 +548,7 @@ struct TranscriptedSettingsView: View {
         // card to open); closed rows keep it for voices still to name.
         let whoSpoke = homeWhoSpokeAvailability(for: item)
         let entries = HomeRowMenuPolicy.meetingEntries(
-            hasPendingSpeakerReview: whoSpoke != .hidden,
+            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item) || whoSpoke != .hidden,
             offersMicBoost: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                 audioHealth: item.audioHealth,
                 meetingDate: item.date,
