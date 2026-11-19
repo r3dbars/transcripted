@@ -154,11 +154,16 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         }
     }
 
-    /// True when nothing holds `port` on 127.0.0.1 right now.
+    /// True when nothing holds `port` on 127.0.0.1 right now. Connections
+    /// a stopped helper left in TIME_WAIT don't count (the helper binds
+    /// with SO_REUSEADDR too); a live listener does. A port that only
+    /// looked free just fails the launch, and the next one is tried.
     static func portIsFree(_ port: Int) -> Bool {
         let descriptor = socket(AF_INET, SOCK_STREAM, 0)
         guard descriptor >= 0 else { return false }
         defer { close(descriptor) }
+        var reuse: Int32 = 1
+        setsockopt(descriptor, SOL_SOCKET, SO_REUSEADDR, &reuse, socklen_t(MemoryLayout<Int32>.size))
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
         address.sin_family = sa_family_t(AF_INET)
