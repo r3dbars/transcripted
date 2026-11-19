@@ -40,8 +40,10 @@ func handleListMeetings(params: CallTool.Parameters, index: TranscriptIndex, mee
 }
 
 /// Extract title from markdown YAML frontmatter
+/// The meeting title agents see: the person's or calendar's title, else the
+/// on-device title, else the app's (`CaptureMarkdown.displayTitle`).
 func extractTitle(from content: String) -> String? {
-    CaptureMarkdown.extractTitle(from: content)
+    CaptureMarkdown.displayTitle(from: content)
 }
 
 /// Returns non-empty transcript dialogue lines from the `## Full Transcript` section, filtering boilerplate.

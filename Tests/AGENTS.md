@@ -9,6 +9,7 @@ App tests, smokes, and fixtures. Full guide with every smoke's details: `Tests/R
 - `Tests/TranscriptedWritingTests/` — Swift Testing (not XCTest) for `Sources/TranscriptedWriting/` and `Sources/TranscriptedKeyboard/`.
 - `Tests/Integration/`, `Tests/E2E/` — smoke sources run by `run-integration-smoke.sh`, `run-e2e-smoke.sh`, `run-slow-pasteback-smoke.sh`.
 - `Tests/BuildDependencies/` — shell and Python tests for build, packaging, and Sparkle scripts.
+- `Tests/Labs/` — opt-in lab binaries that need real models, never run in CI (`MeetingTitlesLiveCheck.swift`, built by `scripts/dev/meeting-titles-live-check.sh`).
 - `Tests/Fixtures/` — golden meetings, corpora, release-health JSON. Treat as approved output: change one only when the behavior change is intended.
 - `Tests/quarantine.txt` — benched flaky suites.
 

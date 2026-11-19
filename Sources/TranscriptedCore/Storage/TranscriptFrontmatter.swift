@@ -50,6 +50,14 @@ public enum TranscriptFrontmatter {
         values[starredKey]?.lowercased() == "true"
     }
 
+    /// The flat key Rename writes when a person chose a meeting's `title:`
+    /// (`title_set_by_user: true`). A replacement save carries it over.
+    public static let titleSetByUserKey = "title_set_by_user"
+
+    public static func isTitleSetByUser(values: [String: String]) -> Bool {
+        values[titleSetByUserKey]?.lowercased() == "true"
+    }
+
     /// When an imported file was transcribed, or nil for live meetings and
     /// files saved before the key existed.
     public static func importedAt(values: [String: String]) -> Date? {

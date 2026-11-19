@@ -67,6 +67,16 @@ rules:
       - "python3 scripts/ops/test-native-smoke-isolation.py"
       - "python3 scripts/ops/test-launch-benchmark-isolation.py"
 
+  # Opt-in live check for on-device meeting titles; the real run needs the
+  # 3.1 GB model, so the mapped proof only compiles the lab binary.
+  - paths:
+      - "scripts/dev/meeting-titles-live-check.sh"
+      - "Tests/Labs/MeetingTitlesLiveCheck.swift"
+      - "Sources/Meeting/MeetingTitles*.swift"
+    checks:
+      - "bash -n scripts/dev/meeting-titles-live-check.sh"
+      - "bash scripts/dev/meeting-titles-live-check.sh --build-only"
+
   - paths:
       - "Sources/**/*.swift"
       - "Tests/**/*.swift"

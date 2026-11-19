@@ -149,7 +149,7 @@ struct QuietMeetingRow: View {
                     .accessibilityIdentifier("transcripted.home.meeting.starred")
             }
 
-            Text(item.title)
+            Text(item.displayTitle)
                 .font(LibraryTokens.rowTitle)
                 .lineLimit(1)
                 .accessibilityIdentifier("transcripted.home.meeting.preview")
@@ -368,7 +368,7 @@ struct QuietMeetingExpansion: View {
                     HomeMeetingExpansionLayout.performHeaderClick(onCollapse: onCollapse)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(item.title)
+                        Text(item.displayTitle)
                             .font(.system(size: 15, weight: .semibold))
                             .accessibilityIdentifier("transcripted.home.expansion.title")
                         Text(metaLine)

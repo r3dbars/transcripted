@@ -53,6 +53,37 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
         XCTAssertEqual(starLines(in: markdown), 0)
     }
 
+    // "Transcribe again" must keep a person's rename protected whatever else
+    // is on or off: the mark is carried inside the replacement write itself.
+    func testRenameMarkIsKeptByTheReplacement() throws {
+        let transcriptURL = directory.appendingPathComponent("2026-06-05 Renamed.md")
+        try existingMeetingMarkdown(starred: false, titleSetByUser: true)
+            .write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        XCTAssertEqual(replace(transcriptURL), transcriptURL)
+
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        XCTAssertTrue(markdown.contains("Fresh synthetic transcript."), "the replacement was written")
+        let values = try XCTUnwrap(TranscriptFrontmatter.values(in: markdown))
+        XCTAssertTrue(TranscriptFrontmatter.isTitleSetByUser(values: values), "the rename mark survives")
+        XCTAssertEqual(values["title"], "Quarterly Planning")
+        let lines = TranscriptFrontmatter.lines(in: markdown) ?? []
+        XCTAssertEqual(lines.filter { $0.hasPrefix("title_set_by_user:") }.count, 1)
+        XCTAssertFalse(TranscriptFrontmatter.isStarred(values: values), "the star is read separately")
+    }
+
+    func testReplacementWithoutRenameMarkWritesNone() throws {
+        let transcriptURL = directory.appendingPathComponent("2026-06-05 Plain.md")
+        try existingMeetingMarkdown(starred: true).write(to: transcriptURL, atomically: true, encoding: .utf8)
+
+        replace(transcriptURL)
+
+        let markdown = try String(contentsOf: transcriptURL, encoding: .utf8)
+        let values = try XCTUnwrap(TranscriptFrontmatter.values(in: markdown))
+        XCTAssertNil(values["title_set_by_user"])
+        XCTAssertTrue(TranscriptFrontmatter.isStarred(values: values))
+    }
+
     func testFreshSaveIsNeverStarred() throws {
         let savedURL = try XCTUnwrap(TranscriptSaver.saveTranscript(
             syntheticResult(),
@@ -266,14 +297,14 @@ final class TranscriptSaverReplacementStarTests: XCTestCase {
         )
     }
 
-    private func existingMeetingMarkdown(starred: Bool) -> String {
+    private func existingMeetingMarkdown(starred: Bool, titleSetByUser: Bool = false) -> String {
         """
         ---
         capture_id: "4F0C2B9E-6A55-4D7B-9E62-1B2C3D4E5F60"
         capture_type: meeting
         transcript_id: "4F0C2B9E-6A55-4D7B-9E62-1B2C3D4E5F60"
         title: "Quarterly Planning"
-        date: 2026-06-05
+        \(titleSetByUser ? "title_set_by_user: true\n" : "")date: 2026-06-05
         time: 09:00
         \(starred ? "starred: true\n" : "")---
 

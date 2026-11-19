@@ -87,7 +87,7 @@ struct HomeMeetingPreview: Identifiable {
         readError: String? = nil
     ) {
         id = item.id
-        title = item.title
+        title = item.displayTitle
         date = item.date
         transcriptURL = item.transcriptURL
         audio = item.audio

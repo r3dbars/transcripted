@@ -389,7 +389,9 @@ enum HomeMeetingRename {
             throw HomeMeetingRenameError.readFailed
         }
 
-        let rewritten = rewriteTitle(in: raw, to: normalizedTitle)
+        // The mark keeps an on-device meeting title from ever standing in
+        // for a name the person chose (see MeetingTitlesFields).
+        let rewritten = MeetingTitlesKeys.markingTitleSetByUser(rewriteTitle(in: raw, to: normalizedTitle))
         if rewritten != raw {
             do {
                 try TranscriptFileRewrite.write(rewritten, to: url)

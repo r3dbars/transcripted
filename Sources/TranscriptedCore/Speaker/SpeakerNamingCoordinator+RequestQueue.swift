@@ -115,6 +115,17 @@ extension TranscriptionTaskManager {
             || pendingSpeakerNamingRequests.contains { $0.asksAboutVoices }
     }
 
+    /// The same, for one saved meeting (by its capture id or its file).
+    /// Lets later work on that meeting wait until its speakers are named.
+    public func hasSpeakerReviewAwaitingAnswers(transcriptId: UUID?, transcriptURL: URL) -> Bool {
+        let standardizedURL = transcriptURL.standardizedFileURL
+        return ([speakerNamingRequest].compactMap { $0 } + pendingSpeakerNamingRequests).contains { request in
+            request.asksAboutVoices
+                && ((transcriptId != nil && request.transcriptId == transcriptId)
+                    || request.transcriptURL.standardizedFileURL == standardizedURL)
+        }
+    }
+
     private func hasPendingSpeakerNamingReview(transcriptId: UUID) -> Bool {
         speakerNamingRequest?.transcriptId == transcriptId
             || pendingSpeakerNamingRequests.contains { $0.transcriptId == transcriptId }

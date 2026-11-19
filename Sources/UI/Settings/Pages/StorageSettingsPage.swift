@@ -24,6 +24,8 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let modelCacheCleanupStatus: String?
     let modelCacheCleanupStatusDetails: String?
     let effectiveTranscriptionModelIsWhisper: Bool
+    /// Titles and summaries is off, so its downloaded model can go.
+    let meetingTitlesModelIsReclaimable: Bool
 
     let supportFilesFolder: URL
 
@@ -216,9 +218,12 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                     ProgressView().controlSize(.small)
                 } else if let snapshot = modelCacheSnapshot {
                     let includeWhisper = !effectiveTranscriptionModelIsWhisper
-                    let reclaimableBytes = snapshot.reclaimableBytes(includeWhisper: includeWhisper)
+                    let reclaimableBytes = snapshot.reclaimableBytes(
+                        includeWhisper: includeWhisper,
+                        includeMeetingTitles: meetingTitlesModelIsReclaimable
+                    )
                     Text(reclaimableBytes > 0
-                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisper)) reclaimable"
+                        ? "\(snapshot.formattedReclaimableSize(includeWhisper: includeWhisper, includeMeetingTitles: meetingTitlesModelIsReclaimable)) reclaimable"
                         : "Nothing to clean up")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -389,9 +394,11 @@ private extension StorageSettingsPage {
         case .dictationAudio:
             Text(retentionPrompts.pendingDictation.map(StorageConfirmationPolicy.dictationAudioMessage(for:)) ?? "")
         case .freeUpSpace:
-            Text(effectiveTranscriptionModelIsWhisper
-                ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
-                : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. The Parakeet model you use stays.")
+            Text(StorageConfirmationPolicy.freeUpSpaceMessage(
+                whisperIsSelected: effectiveTranscriptionModelIsWhisper,
+                removesMeetingTitlesModel: meetingTitlesModelIsReclaimable
+                    && (modelCacheSnapshot?.meetingTitlesModelBytes ?? 0) > 0
+            ))
         }
     }
 }

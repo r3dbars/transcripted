@@ -134,6 +134,45 @@ public enum CaptureMarkdown {
         }
     }
 
+    /// The title to show a person or an agent, by the app's rule: `title:`
+    /// when the person (or a calendar event) set it (`title_set_by_user:
+    /// true`, or `title:` no longer equals `ai_title_replaces`), else the
+    /// on-device `ai_title` when present, else `title:`. See
+    /// docs/capture-format.md.
+    public static func displayTitle(from content: String) -> String? {
+        let values = flatFrontmatterValues(from: content)
+        let saved = values["title"].flatMap { $0.isEmpty ? nil : $0 }
+        guard values["title_set_by_user"] != "true",
+              let aiTitle = values["ai_title"], !aiTitle.isEmpty,
+              let replaces = values["ai_title_replaces"],
+              let saved,
+              collapsedWhitespace(saved) == collapsedWhitespace(replaces) else { return saved }
+        return aiTitle
+    }
+
+    private static func collapsedWhitespace(_ text: String) -> String {
+        text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+    }
+
+    /// Unindented `key: value` lines of the frontmatter, values unquoted.
+    /// A repeated key keeps its last value, the way the app reads
+    /// frontmatter, so Home and agents show the same title.
+    private static func flatFrontmatterValues(from content: String) -> [String: String] {
+        guard content.count >= 8, content.hasPrefix("---"),
+              let endRange = content.range(
+                of: "\n---\n",
+                range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex
+              ) else { return [:] }
+        let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        var values: [String: String] = [:]
+        for line in yaml.components(separatedBy: "\n") {
+            guard line.first?.isWhitespace != true, let colon = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
+            values[key] = unquoteYAMLScalar(String(line[line.index(after: colon)...]))
+        }
+        return values
+    }
+
     /// Extract the `title:` value from YAML frontmatter, if present.
     public static func extractTitle(from content: String) -> String? {
         // Minimum valid frontmatter is "---\n...\n---\n" (8+ chars). The closing
@@ -147,15 +186,14 @@ public enum CaptureMarkdown {
                 range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex
               ) else { return nil }
         let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        // An unindented `title:`; a repeated one keeps the last, as the app does.
+        var title: String?
         for line in yaml.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed == "---" { break }
-            if trimmed.hasPrefix("title:") {
-                let title = unquoteYAMLScalar(String(trimmed.dropFirst(6)))
-                return title.isEmpty ? nil : title
-            }
+            if line.trimmingCharacters(in: .whitespaces) == "---" { break }
+            guard line.first?.isWhitespace != true, line.hasPrefix("title:") else { continue }
+            title = unquoteYAMLScalar(String(line.dropFirst(6)))
         }
-        return nil
+        return title?.isEmpty == false ? title : nil
     }
 
     /// Decode a YAML double-quoted scalar (`\"`, `\\`, `\n`, `\r`, `\t`).

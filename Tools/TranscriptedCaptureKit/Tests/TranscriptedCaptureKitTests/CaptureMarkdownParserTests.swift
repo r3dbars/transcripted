@@ -1026,4 +1026,40 @@ final class CaptureMarkdownParserTests: XCTestCase {
         XCTAssertNil(blair.nameSource)
         XCTAssertEqual(blair.confidence, "high")
     }
+
+    func testDisplayTitleFollowsTheAppsPrecedence() {
+        let aiTitled = "---\ntitle: \"Meeting with Priya\"\ncapture_type: meeting\nai_title: \"Billing provider switch\"\nai_title_replaces: \"Meeting with Priya\"\n---\n\nbody\n"
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: aiTitled), "Billing provider switch")
+        XCTAssertEqual(CaptureMarkdown.extractTitle(from: aiTitled), "Meeting with Priya", "extractTitle stays the saved title")
+
+        let renamedLater = aiTitled.replacingOccurrences(of: "title: \"Meeting with Priya\"\n", with: "title: \"Board prep\"\n")
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: renamedLater), "Board prep")
+
+        let marked = aiTitled.replacingOccurrences(of: "capture_type: meeting\n", with: "capture_type: meeting\ntitle_set_by_user: true\n")
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: marked), "Meeting with Priya")
+
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: "---\ntitle: \"Weekly Sync\"\n---\n"), "Weekly Sync")
+        XCTAssertNil(CaptureMarkdown.displayTitle(from: "no frontmatter"))
+    }
+
+    /// A file with a repeated key reads the way the app reads it: the last
+    /// value wins, so Home and agents never show different titles.
+    func testRepeatedFrontmatterKeysKeepTheLastValueLikeTheApp() {
+        let repeated = "---\ntitle: \"Meeting with Priya\"\ncapture_type: meeting\ntitle: \"Board prep\"\n---\n\nbody\n"
+        XCTAssertEqual(CaptureMarkdown.extractTitle(from: repeated), "Board prep")
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: repeated), "Board prep")
+
+        let aiRepeated = "---\ntitle: \"Meeting with Priya\"\ncapture_type: meeting\nai_title: \"Old\"\n"
+            + "ai_title: \"Billing provider switch\"\nai_title_replaces: \"Meeting with Priya\"\n---\n"
+        XCTAssertEqual(CaptureMarkdown.displayTitle(from: aiRepeated), "Billing provider switch")
+
+        let indented = "---\ntitle: \"Weekly Sync\"\nspeakers:\n  - title: \"Nested\"\n---\n"
+        XCTAssertEqual(CaptureMarkdown.extractTitle(from: indented), "Weekly Sync", "a nested title: is not the meeting's")
+    }
+
+    /// CRLF files aren't read as frontmatter here or in the app.
+    func testCRLFFrontmatterIsNotRead() {
+        let crlf = "---\r\ntitle: \"Weekly Sync\"\r\nai_title: \"Other\"\r\n---\r\n\r\nbody\r\n"
+        XCTAssertNil(CaptureMarkdown.displayTitle(from: crlf))
+    }
 }
