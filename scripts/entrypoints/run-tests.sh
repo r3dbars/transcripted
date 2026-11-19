@@ -665,6 +665,7 @@ APP_SOURCES=(
     "Sources/Meeting/MeetingTitlesFrontmatterWriter.swift"
     "Sources/Meeting/MeetingTitlesLabeler.swift"
     "Sources/Meeting/MeetingTitlesQueue.swift"
+    "Sources/Meeting/MeetingTitlesJob.swift"
     "Sources/Meeting/MeetingTitlesModelStore.swift"
     "Sources/Meeting/MeetingTitlesServer.swift"
     "Sources/Meeting/MeetingTitlesController.swift"

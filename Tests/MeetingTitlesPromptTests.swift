@@ -136,6 +136,67 @@ func testMeetingTitlesPrompt() async {
             assertTrue(last - first > 50, "kept middle turns span the meeting, got \(first)...\(last)")
         }
     }
+
+    await runSuite("One long voice over budget is split into whole sentences and thinned evenly") {
+        // One speaker for about an hour: 900 ten-word sentences, a single turn.
+        let sentences = (0..<900).map { "Sentence s\($0) talks about the plan for the next part today." }
+        let turns = [MeetingTitlesTurn(speaker: "You", text: sentences.joined(separator: " "), startSeconds: 0)]
+        let tokenizer = CountingTokenizer()
+        let budget = 2_000
+        guard let result = try? await MeetingTitlesFit.fit(turns, systemTokens: 100, budget: budget, countTokens: tokenizer.tokens) else {
+            assertTrue(false, "fit threw")
+            return
+        }
+        let available = budget - 100 - MeetingTitlesFit.templateOverheadTokens
+        assertTrue(result.tokenCount <= available, "fits the budget, got \(result.tokenCount)")
+        assertTrue(result.droppedTurns > 0, "pieces were dropped")
+        assertTrue(tokenizer.calls <= MeetingTitlesFit.maxTokenizeCalls, "tokenize calls are capped, got \(tokenizer.calls)")
+        assertEqual(result.tokenizeCalls, tokenizer.calls)
+        let lines = result.transcript.components(separatedBy: "\n")
+        for line in lines {
+            assertTrue(line.hasPrefix("You: ") && line.hasSuffix("today."), "only whole sentences: \(line.suffix(30))")
+        }
+        assertTrue(result.transcript.contains("s0 "), "the opening is kept")
+        assertTrue(result.transcript.contains("s899 "), "the ending is kept")
+        let kept = (1..<899).filter { result.transcript.contains("s\($0) ") }
+        if let first = kept.first, let last = kept.last {
+            assertTrue(last - first > 600, "kept sentences span the recording, got \(first)...\(last)")
+        } else {
+            assertTrue(false, "some middle sentences are kept")
+        }
+    }
+
+    runSuite("Long turns split at sentence ends with times spread across the turn") {
+        let text = (0..<30).map { "Point p\($0) is one short sentence here." }.joined(separator: " ")
+        let turns = [
+            MeetingTitlesTurn(speaker: "Priya", text: text, startSeconds: 60),
+            MeetingTitlesTurn(speaker: "You", text: "Thanks.", startSeconds: 160),
+        ]
+        let pieces = MeetingTitlesFit.splitLongTurns(turns, maxWords: 50)
+        assertTrue(pieces.count > 2, "the long turn was split")
+        assertEqual(pieces.last, turns.last, "a short turn is left alone")
+        let priya = pieces.dropLast()
+        assertTrue(priya.allSatisfy { $0.speaker == "Priya" && $0.text.hasSuffix("here.") })
+        assertEqual(priya.map(\.text).joined(separator: " "), text, "nothing is lost or reordered")
+        assertEqual(priya.first?.startSeconds, 60)
+        assertTrue(priya.map(\.startSeconds) == priya.map(\.startSeconds).sorted() && (priya.last?.startSeconds ?? 0) < 160)
+        let runOn = MeetingTitlesFit.splitLongTurns([MeetingTitlesTurn(
+            speaker: "You", text: Array(repeating: "word", count: 500).joined(separator: " "), startSeconds: 0
+        )], maxWords: 50)
+        assertTrue(runOn.count >= 10, "a run-on with no sentence ends is still split")
+    }
+}
+
+/// Counts words as tokens and how often it was asked.
+private final class CountingTokenizer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var calls: Int { lock.withLock { count } }
+
+    func tokens(_ text: String) async throws -> Int {
+        lock.withLock { count += 1 }
+        return text.split(whereSeparator: \.isWhitespace).count
+    }
 }
 
 private func wordCount(_ text: String) async throws -> Int {

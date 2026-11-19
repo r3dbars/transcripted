@@ -3,222 +3,36 @@ import Foundation
 import TranscriptedCore
 #endif
 
-/// One meeting waiting for an on-device title and summary.
-struct MeetingTitlesJob: Equatable, Sendable {
-    /// What the caller knows for certain about who made the saved `title:`.
-    enum TitleRule: Equatable, Sendable {
-        /// No outside evidence: decide from the file
-        /// (`MeetingTitlesTitleOwnership`). The rescan and later saves.
-        case fromFile
-        /// The app made this exact title: the restyle generated it in this
-        /// pass, an import named the file, or (before "Transcribe again")
-        /// the old file showed it was the app's. Only counts while `title:`
-        /// still equals it.
-        case appMade(String)
-        /// The file had `title_set_by_user: true` before "Transcribe again"
-        /// wrote a fresh one; carry the mark over.
-        case userSet
-        /// Nothing says who made it ("Transcribe again" of a title the old
-        /// file couldn't vouch for). Keep it, mark nothing.
-        case unknown
-    }
-
-    let transcriptURL: URL
-    let titleRule: TitleRule
-
-    var key: String { transcriptURL.standardizedFileURL.path }
-}
-
-/// Whether the model's title may stand in for a meeting's saved `title:`.
-/// Only on positive evidence that the app made it: a title the restyle just
-/// generated, the name an import gave the file, a title `ai_title` already
-/// stood in for, or a title with the shape of the app's rule titles
-/// ("Meeting with …", "Meeting at …", "Quick notes"). Anything else (a
-/// rename, a calendar event's title, a title nobody can vouch for) is kept,
-/// and only the line and summary are written. `title_set_by_user: true` is
-/// never inferred: only Rename writes it, and "Transcribe again" carries it
-/// over.
-enum MeetingTitlesTitleOwnership {
-    enum Decision: Equatable, Sendable {
-        /// `ai_title` may stand in for this saved title.
-        case replaceable(String)
-        /// Keep the saved title. `carryMark` writes `title_set_by_user: true`
-        /// back after "Transcribe again" dropped it.
-        case keep(carryMark: Bool)
-        /// No saved title to decide about.
-        case noTitle
-    }
-
-    static func decide(values: [String: String], rule: MeetingTitlesJob.TitleRule) -> Decision {
-        guard let saved = values["title"].map(MeetingTitlesKeys.normalizedTitle), !saved.isEmpty else { return .noTitle }
-        if values[MeetingTitlesKeys.titleSetByUser] == "true" { return .keep(carryMark: false) }
-        switch rule {
-        case .userSet:
-            return .keep(carryMark: true)
-        case .unknown:
-            return .keep(carryMark: false)
-        case .appMade(let title):
-            // The title changed since the evidence was taken: someone else's.
-            return MeetingTitlesKeys.normalizedTitle(title) == saved ? .replaceable(saved) : .keep(carryMark: false)
-        case .fromFile:
-            break
-        }
-        if values[MeetingTitlesKeys.titleReplaces].map(MeetingTitlesKeys.normalizedTitle) == saved { return .replaceable(saved) }
-        if MeetingTranscriptStyler.hasRuleTitleShape(saved) { return .replaceable(saved) }
-        return .keep(carryMark: false)
-    }
-}
-
-enum MeetingTitlesJobResult: Equatable, Sendable {
-    case written
-    case alreadyCurrent
-    /// Too short to label; recorded (`ai_summary_status: too_short`) so it
-    /// isn't read again until the version changes.
-    case tooShort
-    /// The model's reply had nothing usable; recorded the same way
-    /// (`ai_summary_status: no_usable_reply`).
-    case unusableReply
-    case unreadable
-    case writeSkipped
-    /// Transient: the request failed. Not recorded; the next rescan retries.
-    case requestFailed
-    /// Transient: the helper couldn't start. The job waits in the queue.
-    case engineUnavailable
-    /// Stopped part way (the app got busy or the feature was turned off).
-    /// Nothing was written.
-    case cancelled
-}
-
-/// Set when the job's task is cancelled; checked inside the serialized
-/// write, right before the file is replaced.
-final class MeetingTitlesCancelFlag: @unchecked Sendable {
-    private let lock = NSLock()
-    private var cancelled = false
-
-    var isCancelled: Bool { lock.withLock { cancelled } }
-    func cancel() { lock.withLock { cancelled = true } }
-}
-
-/// Reads, labels and writes one meeting. The engine is started only once a
-/// meeting actually needs the model. Cancelling the task stops the request,
-/// and nothing is written after a cancel.
-enum MeetingTitlesJobRunner {
-    static func run(
-        _ job: MeetingTitlesJob,
-        host: any MeetingTitlesEngineHost,
-        generatedAt: @escaping @Sendable () -> Date = { Date() }
-    ) async -> MeetingTitlesJobResult {
-        let flag = MeetingTitlesCancelFlag()
-        return await withTaskCancellationHandler {
-            await run(job, host: host, flag: flag, generatedAt: generatedAt)
-        } onCancel: {
-            flag.cancel()
-        }
-    }
-
-    private static func run(
-        _ job: MeetingTitlesJob,
-        host: any MeetingTitlesEngineHost,
-        flag: MeetingTitlesCancelFlag,
-        generatedAt: @escaping @Sendable () -> Date
-    ) async -> MeetingTitlesJobResult {
-        let url = job.transcriptURL
-        let prepared = await Task.detached(priority: .utility) { () -> Prepared in
-            prepare(job, flag: flag, generatedAt: generatedAt)
-        }.value
-        let turns: [MeetingTitlesTurn]
-        let replaceableTitle: String?
-        switch prepared {
-        case .skip(let result):
-            return flag.isCancelled ? .cancelled : result
-        case .ready(let readyTurns, let title):
-            turns = readyTurns
-            replaceableTitle = title
-        }
-        if flag.isCancelled { return .cancelled }
-
-        let engine: any MeetingTitlesEngine
-        do {
-            engine = try await host.start()
-        } catch {
-            return flag.isCancelled ? .cancelled : .engineUnavailable
-        }
-        let outcome: MeetingTitlesLabeler.Outcome
-        do {
-            outcome = try await MeetingTitlesLabeler.label(turns, engine: engine)
-        } catch {
-            return flag.isCancelled ? .cancelled : .requestFailed
-        }
-        if flag.isCancelled { return .cancelled }
-        let stamp = generatedAt()
-        guard case .labeled(let label, _) = outcome else {
-            _ = await Task.detached(priority: .utility) {
-                MeetingTitlesFrontmatterWriter.recordNoSummary(.noUsableReply, at: url, generatedAt: stamp, shouldWrite: { !flag.isCancelled })
-            }.value
-            return flag.isCancelled ? .cancelled : .unusableReply
-        }
-        let written = await Task.detached(priority: .utility) {
-            MeetingTitlesFrontmatterWriter.apply(
-                label, replaceableTitle: replaceableTitle, at: url, generatedAt: stamp,
-                shouldWrite: { !flag.isCancelled }
-            )
-        }.value
-        if flag.isCancelled { return .cancelled }
-        switch written {
-        case .written: return .written
-        case .skipped: return .writeSkipped
-        case .failed: return .unreadable
-        }
-    }
-
-    private enum Prepared {
-        case skip(MeetingTitlesJobResult)
-        case ready([MeetingTitlesTurn], replaceableTitle: String?)
-    }
-
-    /// Decides title ownership first and carries a rename mark over right
-    /// away, so it lands even when the model never runs.
-    private static func prepare(
-        _ job: MeetingTitlesJob,
-        flag: MeetingTitlesCancelFlag,
-        generatedAt: @Sendable () -> Date
-    ) -> Prepared {
-        let url = job.transcriptURL
-        guard var raw = try? String(contentsOf: url, encoding: .utf8),
-              let document = TranscriptFrontmatter.document(in: raw),
-              document.values["capture_type"] == "meeting" else { return .skip(.unreadable) }
-        let decision = MeetingTitlesTitleOwnership.decide(values: document.values, rule: job.titleRule)
-        if case .keep(carryMark: true) = decision {
-            MeetingTitlesFrontmatterWriter.markTitleSetByUser(at: url, shouldWrite: { !flag.isCancelled })
-            raw = (try? String(contentsOf: url, encoding: .utf8)) ?? raw
-        }
-        if MeetingTitlesFrontmatterWriter.isCurrent(values: document.values) { return .skip(.alreadyCurrent) }
-        guard let turns = MeetingTitlesLabeler.labelableTurns(fromMeetingMarkdown: raw) else {
-            MeetingTitlesFrontmatterWriter.recordNoSummary(.tooShort, at: url, generatedAt: generatedAt(), shouldWrite: { !flag.isCancelled })
-            return .skip(.tooShort)
-        }
-        if case .replaceable(let title) = decision {
-            return .ready(turns, replaceableTitle: title)
-        }
-        return .ready(turns, replaceableTitle: nil)
-    }
-}
-
-/// One meeting at a time, just-saved meetings ahead of the backfill. Never
-/// starts a job while `isBusy` (a meeting recording, a dictation, or a
-/// meeting being transcribed). A job already running when the app gets busy
-/// is cancelled, the helper stops, and the meeting goes back to the front of
-/// the queue; turning the feature off cancels it for good. The engine stops
-/// whenever the queue runs dry.
+/// One meeting at a time, just-saved meetings ahead of the backfill.
+///
+/// Never starts a job while `isBusy` (a meeting recording, a dictation, or a
+/// meeting being transcribed). The app calls `noteBusyStarted` the moment one
+/// of those starts, so a running job is cancelled then and there (a poll is
+/// only the backstop), the helper stops and the meeting goes back to the
+/// front. The helper (about 3.5 GB) starts again only after `quietPeriod`
+/// with nothing busy, so a burst of dictations doesn't load and kill it each
+/// time. A meeting whose speaker review still waits for answers is held and
+/// tried again later. Turning the feature off cancels everything for good.
+/// The engine stops whenever the queue runs dry.
 @MainActor
 final class MeetingTitlesQueue {
     struct Environment {
         var isEnabled: @MainActor () -> Bool
         var isBusy: @MainActor () -> Bool
+        /// True while this meeting (file, capture id) has a speaker review
+        /// waiting for answers.
+        var isAwaitingSpeakerReview: @MainActor (URL, UUID?) -> Bool = { _, _ in false }
         var sleep: @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+        /// Monotonic seconds. Tests pass a virtual clock that `sleep` moves.
+        var now: @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
         var busyPollInterval: Duration = .seconds(5)
-        /// How often a running job checks whether the app got busy.
+        /// How often a running job checks whether the app got busy, behind
+        /// the start signal.
         var runningPollInterval: Duration = .seconds(1)
+        /// How long nothing may be busy before the helper starts again.
+        var quietPeriod: Duration = .seconds(45)
+        /// How often meetings held for a speaker review are looked at again.
+        var reviewPollInterval: Duration = .seconds(30)
     }
 
     enum Activity: Equatable {
@@ -228,9 +42,14 @@ final class MeetingTitlesQueue {
         case engineUnavailable
     }
 
+    typealias JobRunner = @Sendable (MeetingTitlesJob, any MeetingTitlesEngineHost, MeetingTitlesJobRunner.Hooks) async
+        -> MeetingTitlesJobResult
+
     private let host: any MeetingTitlesEngineHost
     private let environment: Environment
     private(set) var pending: [MeetingTitlesJob] = []
+    /// Meetings whose speaker review still waits for answers.
+    private(set) var held: [MeetingTitlesJob] = []
     private(set) var activity: Activity = .idle {
         didSet { if activity != oldValue { onActivityChange?(activity) } }
     }
@@ -239,42 +58,63 @@ final class MeetingTitlesQueue {
     var onDrained: (() -> Void)?
     private var drainTask: Task<Void, Never>?
     private var runningJob: Task<MeetingTitlesJobResult, Never>?
-    private var jobRunner: @Sendable (MeetingTitlesJob, any MeetingTitlesEngineHost) async -> MeetingTitlesJobResult
+    /// The meeting `runningJob` is working on.
+    private var running: MeetingTitlesJob?
+    private let jobRunner: JobRunner
+    /// When something was last seen busy (`environment.now`).
+    private(set) var lastBusyAt: TimeInterval?
+    private var wasBusy = false
+    /// Set once a job passed the quiet period and may have started the
+    /// helper; cleared whenever the queue stops it.
+    private var engineMayBeRunning = false
 
-    init(
-        host: any MeetingTitlesEngineHost,
-        environment: Environment,
-        jobRunner: (@Sendable (MeetingTitlesJob, any MeetingTitlesEngineHost) async -> MeetingTitlesJobResult)? = nil
-    ) {
+    init(host: any MeetingTitlesEngineHost, environment: Environment, jobRunner: JobRunner? = nil) {
         self.host = host
         self.environment = environment
-        self.jobRunner = jobRunner ?? { job, host in await MeetingTitlesJobRunner.run(job, host: host) }
+        self.jobRunner = jobRunner ?? { job, host, hooks in await MeetingTitlesJobRunner.run(job, host: host, hooks: hooks) }
     }
 
     var isDraining: Bool { drainTask != nil }
 
     /// A just-saved meeting goes to the front, replacing any older job for
-    /// the same file.
+    /// the same file (held ones included). A later save with no evidence of
+    /// its own keeps what the waiting or running job knew about the title.
     func enqueue(_ job: MeetingTitlesJob) {
         guard environment.isEnabled() else { return }
+        let job = keepingKnownTitleRule(job)
         pending.removeAll { $0.key == job.key }
+        held.removeAll { $0.key == job.key }
         pending.insert(job, at: 0)
         wake()
     }
 
     /// Backfill jobs keep the caller's order (newest first) behind anything
-    /// already waiting; files already queued are left where they are.
+    /// already waiting; files already queued or held are left where they are.
+    /// A file whose job is running right now is queued again (it may have
+    /// changed under the job) with what that job knew about the title.
     func enqueueBackfill(_ jobs: [MeetingTitlesJob]) {
         guard environment.isEnabled() else { return }
-        var queued = Set(pending.map(\.key))
+        var queued = Set(pending.map(\.key) + held.map(\.key))
         for job in jobs where queued.insert(job.key).inserted {
-            pending.append(job)
+            pending.append(keepingKnownTitleRule(job))
         }
         wake()
     }
 
+    /// A job that has to decide from the file alone takes the title evidence
+    /// of a job for the same file that is waiting, held or running. That
+    /// evidence only exists in memory, so a later change to the file (the
+    /// audio being recompressed, a speaker fix) must not replace it.
+    private func keepingKnownTitleRule(_ job: MeetingTitlesJob) -> MeetingTitlesJob {
+        guard job.titleRule == .fromFile else { return job }
+        let known = (pending + held + [running].compactMap { $0 })
+            .first { $0.key == job.key && $0.titleRule != .fromFile }
+        guard let known else { return job }
+        return MeetingTitlesJob(transcriptURL: job.transcriptURL, titleRule: known.titleRule)
+    }
+
     func wake() {
-        guard drainTask == nil, !pending.isEmpty, environment.isEnabled() else { return }
+        guard drainTask == nil, !(pending.isEmpty && held.isEmpty), environment.isEnabled() else { return }
         drainTask = Task { [weak self] in
             await self?.drain()
         }
@@ -284,6 +124,7 @@ final class MeetingTitlesQueue {
     /// working on gets written. The engine stops after it.
     func cancelAll() {
         pending.removeAll()
+        held.removeAll()
         runningJob?.cancel()
     }
 
@@ -292,25 +133,96 @@ final class MeetingTitlesQueue {
         while let task = drainTask { await task.value }
     }
 
+    // MARK: - Busy
+
+    /// A dictation, recording or transcription just started (the app's own
+    /// published state said so). Stops a running job now, not on the next
+    /// poll, and restarts the quiet period.
+    func noteBusyStarted() {
+        wasBusy = true
+        lastBusyAt = environment.now()
+        runningJob?.cancel()
+    }
+
+    /// One of the busy sources changed; re-reads `isBusy`.
+    func noteBusyChanged() {
+        if observeBusy() { runningJob?.cancel() }
+    }
+
+    /// Reads `isBusy`, and remembers when it was last true (including the
+    /// moment it turned false).
+    @discardableResult
+    private func observeBusy() -> Bool {
+        let busy = environment.isBusy()
+        if busy || wasBusy { lastBusyAt = environment.now() }
+        wasBusy = busy
+        return busy
+    }
+
+    /// Seconds of quiet still needed before the helper may start.
+    private var remainingQuiet: TimeInterval {
+        guard let lastBusyAt else { return 0 }
+        return Self.seconds(environment.quietPeriod) - (environment.now() - lastBusyAt)
+    }
+
+    /// The job runner's gate before `host.start()`. A helper the queue
+    /// already has running needs no wait.
+    private func waitForQuietPeriod() async -> Bool {
+        while true {
+            if Task.isCancelled || !environment.isEnabled() { return false }
+            if engineMayBeRunning { return true }
+            let busy = observeBusy()
+            let remaining = remainingQuiet
+            if !busy, remaining <= 0 { break }
+            activity = .waitingForBusy
+            await environment.sleep(busy ? environment.busyPollInterval : min(.seconds(remaining), environment.busyPollInterval))
+        }
+        engineMayBeRunning = true
+        activity = .labeling
+        return true
+    }
+
+    private func isAwaitingSpeakerReview(_ url: URL, _ captureID: UUID?) -> Bool {
+        environment.isAwaitingSpeakerReview(url, captureID)
+    }
+
+    private func stopEngine() async {
+        engineMayBeRunning = false
+        await host.stop()
+    }
+
+    // MARK: - Drain
+
     private func drain() async {
         defer {
             drainTask = nil
             // A job saved while the engine was stopping starts a new drain.
-            if activity != .engineUnavailable, !pending.isEmpty {
+            if activity != .engineUnavailable, !(pending.isEmpty && held.isEmpty) {
                 wake()
             } else {
                 onDrained?()
             }
         }
-        while !pending.isEmpty {
+        while true {
             guard environment.isEnabled() else {
                 pending.removeAll()
+                held.removeAll()
                 break
             }
-            if environment.isBusy() {
+            if pending.isEmpty {
+                guard !held.isEmpty else { break }
+                // Only meetings waiting on a speaker review are left.
                 activity = .waitingForBusy
-                await host.stop()
-                while environment.isBusy(), environment.isEnabled() {
+                await stopEngine()
+                await environment.sleep(environment.reviewPollInterval)
+                pending.append(contentsOf: held.filter { job in !pending.contains { $0.key == job.key } })
+                held.removeAll()
+                continue
+            }
+            if observeBusy() {
+                activity = .waitingForBusy
+                await stopEngine()
+                while observeBusy(), environment.isEnabled() {
                     await environment.sleep(environment.busyPollInterval)
                 }
                 continue
@@ -324,35 +236,52 @@ final class MeetingTitlesQueue {
                 // Keep the job; the next save or a retry wakes the queue again.
                 pending.insert(job, at: 0)
                 activity = .engineUnavailable
-                await host.stop()
+                await stopEngine()
                 return
             case .cancelled:
-                await host.stop()
+                await stopEngine()
                 // Busy, not switched off: the meeting goes back to the front.
-                if environment.isEnabled(), !pending.contains(where: { $0.key == job.key }) {
-                    pending.insert(job, at: 0)
+                // A copy queued meanwhile stays where it is and takes this
+                // job's title evidence.
+                if environment.isEnabled() {
+                    if let index = pending.firstIndex(where: { $0.key == job.key }) {
+                        if pending[index].titleRule == .fromFile { pending[index] = job }
+                    } else {
+                        pending.insert(job, at: 0)
+                    }
                 }
+            case .awaitingSpeakerReview:
+                if !held.contains(where: { $0.key == job.key }) { held.append(job) }
             default:
                 break
             }
         }
         activity = .idle
-        await host.stop()
+        await stopEngine()
     }
 
-    /// Runs one job while checking, every `runningPollInterval`, that the app
-    /// hasn't got busy and the feature is still on. Either one cancels it.
+    /// Runs one job. The start signal cancels it at once; a poll every
+    /// `runningPollInterval` is the backstop for busy sources without one.
     private func runWatched(_ job: MeetingTitlesJob) async -> MeetingTitlesJobResult {
         let host = self.host
         let runner = jobRunner
-        let task = Task.detached(priority: .utility) { await runner(job, host) }
+        let hooks = MeetingTitlesJobRunner.Hooks(
+            isAwaitingSpeakerReview: { [weak self] url, captureID in
+                await self?.isAwaitingSpeakerReview(url, captureID) ?? false
+            },
+            mayStartEngine: { [weak self] in
+                await self?.waitForQuietPeriod() ?? false
+            }
+        )
+        let task = Task.detached(priority: .utility) { await runner(job, host, hooks) }
         runningJob = task
+        running = job
         let watcher = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.environment.sleep(self.environment.runningPollInterval)
                 if Task.isCancelled { return }
-                if self.environment.isBusy() || !self.environment.isEnabled() {
+                if self.observeBusy() || !self.environment.isEnabled() {
                     task.cancel()
                     return
                 }
@@ -361,6 +290,12 @@ final class MeetingTitlesQueue {
         let result = await task.value
         watcher.cancel()
         runningJob = nil
+        running = nil
         return result
+    }
+
+    nonisolated static func seconds(_ duration: Duration) -> TimeInterval {
+        let parts = duration.components
+        return TimeInterval(parts.seconds) + TimeInterval(parts.attoseconds) / 1e18
     }
 }

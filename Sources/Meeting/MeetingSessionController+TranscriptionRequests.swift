@@ -195,9 +195,6 @@ extension MeetingSessionController {
             return false
         }
 
-        // The name the import gave the file is the app's own title.
-        MeetingTitlesController.shared.noteImportQueued(title: preparedAudio.suggestedTitle)
-
         DiagnosticsTrail.record(
             engine: "meeting",
             event: outcome == .startedImmediately
@@ -347,7 +344,8 @@ extension MeetingSessionController {
         if admission == nil {
             meetingActionIdentity = ownedAdmission.actionID
             // The replacement drops the file's on-device title keys; note now
-            // whether the person had named this meeting.
+            // whether the app made this meeting's title. (A rename's mark is
+            // carried by the replacement write itself.)
             MeetingTitlesController.shared.noteRetranscriptionRequested(transcriptURL: transcriptURL)
         }
         if inputSnapshot == nil {

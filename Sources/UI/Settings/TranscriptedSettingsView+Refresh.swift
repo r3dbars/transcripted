@@ -286,13 +286,15 @@ extension TranscriptedSettingsView {
 
         Task.detached(priority: .utility) {
             do {
-                let result = try ModelCacheInventory.removeReclaimableCaches(
-                    includeWhisper: includeWhisper,
-                    includeMeetingTitles: includeMeetingTitles
-                )
+                let cachesResult = try ModelCacheInventory.removeReclaimableCaches(includeWhisper: includeWhisper)
+                // Serialized with the titles download: turning the feature
+                // back on meanwhile waits for this removal to finish.
+                let titlesResult = includeMeetingTitles
+                    ? try await MeetingTitlesController.shared.removeModelWhileOff()
+                    : .empty
+                let result = cachesResult.merging(titlesResult)
                 let snapshot = ModelCacheInventory.snapshot()
                 await MainActor.run {
-                    if includeMeetingTitles { MeetingTitlesController.shared.noteModelRemoved() }
                     modelCacheSnapshot = snapshot
                     modelCacheCleanupInProgress = false
                     if result.removedNames.isEmpty {

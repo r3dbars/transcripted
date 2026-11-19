@@ -107,6 +107,17 @@ enum MeetingSessionStateMachine {
         }
     }
 
+    /// Recording, starting or stopping one, loading models or transcribing:
+    /// on-device meeting titles wait (`MeetingTitlesController`).
+    static func keepsTitlesWaiting(_ state: MeetingSessionState) -> Bool {
+        switch state {
+        case .loadingModels, .startingRecording, .recording, .stoppingRecording, .transcribing:
+            return true
+        case .idle, .ready, .error:
+            return false
+        }
+    }
+
     /// Broad "is the audio capture pipeline live for this recording" question
     /// — covers the mic-engage and teardown windows in addition to steady
     /// -state recording. This is the answer every "don't quit / don't let

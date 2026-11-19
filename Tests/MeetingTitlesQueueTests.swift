@@ -39,7 +39,7 @@ func testMeetingTitlesQueue() async {
         let directory = MeetingTitlesFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let done = MeetingTitlesFixtures.writeMeeting(
-            MeetingTitlesFixtures.meetingMarkdown(extraFrontmatter: ["ai_summary_version: \"1\""]), named: "done.md", in: directory
+            MeetingTitlesFixtures.labeledMeetingMarkdown(), named: "done.md", in: directory
         )
         let short = MeetingTitlesFixtures.writeMeeting(
             MeetingTitlesFixtures.meetingMarkdown(turns: [("00:01", "Mic/You", "Testing one two.")]), named: "short.md", in: directory
@@ -65,29 +65,23 @@ func testMeetingTitlesQueue() async {
         assertFalse(MeetingTitlesController.backfillJobs(in: directory).contains { $0.transcriptURL.lastPathComponent == "short.md" })
     }
 
-    await runSuite("No job starts during a recording or dictation; it waits and resumes") {
+    await runSuite("No job starts during a recording or dictation; it waits, then waits out the quiet period") {
         let directory = MeetingTitlesFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let url = MeetingTitlesFixtures.writeMeeting(MeetingTitlesFixtures.meetingMarkdown(), named: "a.md", in: directory)
-        let host = FakeTitlesHost()
-        let state = BusyState()
+        let clock = TitlesTestClock()
+        let host = FakeTitlesHost(clock: clock)
+        let busyUntil = clock.now + 15
         let queue = MeetingTitlesQueue(host: host, environment: .init(
             isEnabled: { true },
-            isBusy: { state.isBusy },
-            sleep: { interval in
-                // Only the between-jobs busy wait counts; a running job's
-                // watcher sleeps on a shorter interval.
-                if interval == .seconds(5) {
-                    host.note("poll")
-                    state.poll()
-                } else {
-                    try? await Task.sleep(for: .milliseconds(2))
-                }
-            }
+            isBusy: { clock.now < busyUntil },
+            sleep: { await clock.sleep($0) },
+            now: { clock.now }
         ))
         queue.enqueue(MeetingTitlesJob(transcriptURL: url, titleRule: .appMade("Meeting with Priya")))
         await queue.waitUntilIdle()
-        assertEqual(host.events, ["stop", "poll", "poll", "poll", "start", "stop"])
+        assertEqual(host.events, ["stop", "start", "stop"], "the helper only starts once, after the wait")
+        assertTrue((host.startTimes.first ?? 0) >= busyUntil + 45, "45 quiet seconds after the last busy moment")
         assertEqual(TranscriptFrontmatter.values(in: (try? String(contentsOf: url, encoding: .utf8)) ?? "")?["ai_summary_version"], "1")
     }
 
@@ -98,7 +92,7 @@ func testMeetingTitlesQueue() async {
         let middle = MeetingTitlesFixtures.writeMeeting(MeetingTitlesFixtures.meetingMarkdown(date: "2026-02-02"), named: "middle.md", in: directory)
         let newest = MeetingTitlesFixtures.writeMeeting(MeetingTitlesFixtures.meetingMarkdown(date: "2026-03-02"), named: "newest.md", in: directory)
         MeetingTitlesFixtures.writeMeeting(
-            MeetingTitlesFixtures.meetingMarkdown(date: "2026-03-03", extraFrontmatter: ["ai_summary_version: \"1\""]),
+            MeetingTitlesFixtures.labeledMeetingMarkdown(date: "2026-03-03"),
             named: "done.md", in: directory
         )
         MeetingTitlesFixtures.writeMeeting("---\ncapture_type: dictation_day\n---\nhi\n", named: "dictation.md", in: directory)
@@ -173,34 +167,51 @@ func testMeetingTitlesQueue() async {
 
     runSuite("Only positive evidence makes a title replaceable; everything else is kept and never marked") {
         typealias Ownership = MeetingTitlesTitleOwnership
-        // The app's rule titles, matched by shape so time-zone, 12/24-hour and
-        // speaker-naming drift don't matter.
-        for title in ["Meeting at 3:05 PM", "Meeting at 15:05", "Meeting at 6:05\u{202F}PM", "Meeting at 3.05 p.m.",
-                      "Meeting with Priya", "Meeting with Speaker 1 and Dana", "Quick notes"] {
-            assertEqual(Ownership.decide(values: ["title": title], rule: .fromFile), .replaceable(MeetingTitlesKeys.normalizedTitle(title)), title)
+        // Time titles and "Quick notes" count by shape, so time-zone,
+        // 12/24-hour and later speaker naming don't matter.
+        for title in ["Meeting at 3:05 PM", "Meeting at 15:05", "Meeting at 6:05\u{202F}PM", "Meeting at 3.05 p.m.", "Quick notes"] {
+            assertEqual(
+                Ownership.decide(values: ["title": title], rule: .fromFile) { "Meeting with Priya" },
+                .replaceable(MeetingTitlesKeys.normalizedTitle(title)), title
+            )
         }
+        // "Meeting with <names>" only when the file's own speakers give exactly that.
+        assertEqual(Ownership.decide(values: ["title": "Meeting with Priya"], rule: .fromFile) { "Meeting with Priya" }, .replaceable("Meeting with Priya"))
+        assertEqual(Ownership.decide(values: ["title": "Meeting with Legal"], rule: .fromFile) { "Meeting with Priya" }, .keep, "typed, not the rule's")
+        assertEqual(Ownership.decide(values: ["title": "Meeting with Speaker 1"], rule: .fromFile) { "Meeting at 3:05 PM" }, .keep)
+        assertEqual(Ownership.decide(values: ["title": "Meeting with Priya"], rule: .fromFile) { nil }, .keep)
         // A pre-feature rename, a calendar title, a renamed import: kept, no mark.
-        assertEqual(Ownership.decide(values: ["title": "Board prep"], rule: .fromFile), .keep(carryMark: false))
-        assertEqual(Ownership.decide(values: ["title": "Q3 planning"], rule: .fromFile), .keep(carryMark: false), "calendar")
+        assertEqual(Ownership.decide(values: ["title": "Board prep"], rule: .fromFile), .keep)
+        assertEqual(Ownership.decide(values: ["title": "Q3 planning"], rule: .fromFile), .keep, "calendar")
         assertEqual(
             Ownership.decide(values: ["title": "Board prep", "imported_at": "2026-03-04T10:00:00Z"], rule: .fromFile),
-            .keep(carryMark: false), "an import renamed on an older build"
+            .keep, "an import renamed on an older build"
         )
         // Positive evidence.
-        assertEqual(Ownership.decide(values: ["title": "Voice memo 42"], rule: .appMade("Voice memo 42")), .replaceable("Voice memo 42"))
+        assertEqual(Ownership.decide(values: ["title": "Weekly thing"], rule: .appMade("Weekly thing")), .replaceable("Weekly thing"))
+        assertEqual(
+            Ownership.decide(values: ["title": "Voice memo 42", "imported_at": "2026-03-04T10:00:00Z"], rule: .importNamed("Voice memo 42")),
+            .replaceable("Voice memo 42")
+        )
+        assertEqual(Ownership.decide(values: ["title": "Voice memo 42"], rule: .importNamed("Voice memo 42")), .keep, "not an import file")
         assertEqual(
             Ownership.decide(values: ["title": "Pricing", "ai_title_replaces": "Pricing"], rule: .fromFile), .replaceable("Pricing")
         )
+        // A recording's own (calendar) title is kept even when it looks like the rule's.
+        assertEqual(Ownership.decide(values: ["title": "Meeting with Priya"], rule: .unknown) { "Meeting with Priya" }, .keep)
+        // An earlier label that kept the title keeps it on a relabel.
+        assertEqual(
+            Ownership.decide(values: ["title": "Meeting with Priya", "ai_summary_version": "1"], rule: .fromFile) { "Meeting with Priya" },
+            .keep
+        )
         // The title changed between enqueue and run.
-        assertEqual(Ownership.decide(values: ["title": "Board prep"], rule: .appMade("Meeting at 9:00 AM")), .keep(carryMark: false))
-        // Marks: only carried over, never inferred.
-        assertEqual(Ownership.decide(values: ["title": "Board prep"], rule: .userSet), .keep(carryMark: true))
-        assertEqual(Ownership.decide(values: ["title": "Meeting with Priya", "title_set_by_user": "true"], rule: .fromFile), .keep(carryMark: false))
-        assertEqual(Ownership.decide(values: ["title": "Meeting at 9:00 AM"], rule: .unknown), .keep(carryMark: false))
+        assertEqual(Ownership.decide(values: ["title": "Board prep"], rule: .appMade("Meeting at 9:00 AM")), .keep)
+        // The mark always wins and is never inferred.
+        assertEqual(Ownership.decide(values: ["title": "Meeting at 9:00 AM", "title_set_by_user": "true"], rule: .appMade("Meeting at 9:00 AM")), .keep)
         assertEqual(Ownership.decide(values: [:], rule: .fromFile), .noTitle)
     }
 
-    runSuite("Before Transcribe again, the old file's evidence is remembered: mark, app-made, or unknown") {
+    runSuite("Before Transcribe again, the old file's evidence is remembered: app-made or unknown") {
         let directory = MeetingTitlesFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let rule = MeetingTitlesFixtures.writeMeeting(
@@ -216,44 +227,27 @@ func testMeetingTitlesQueue() async {
             named: "ai.md", in: directory
         )
         assertEqual(MeetingTitlesController.retranscriptionRule(at: rule), .appMade("Meeting with Priya and Marcus"))
-        assertEqual(MeetingTitlesController.retranscriptionRule(at: marked), .userSet)
+        assertEqual(MeetingTitlesController.retranscriptionRule(at: marked), .unknown, "the replacement carries the mark itself")
         assertEqual(MeetingTitlesController.retranscriptionRule(at: other), .unknown)
         assertEqual(MeetingTitlesController.retranscriptionRule(at: aiBase), .appMade("Pricing"))
     }
 
-    await runSuite("After Transcribe again the rename mark comes back, and a later save never hides the name") {
+    await runSuite("A carried rename mark keeps the name, even one that looks like a rule title") {
         let directory = MeetingTitlesFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        let url = directory.appendingPathComponent("board.md")
-        MeetingTitlesFixtures.writeMeeting(
-            MeetingTitlesFixtures.meetingMarkdown(title: "Meeting with Legal", extraFrontmatter: ["title_set_by_user: true"]),
-            named: "board.md", in: directory
+        // What "Transcribe again" leaves: a fresh file with the mark carried over.
+        let url = MeetingTitlesFixtures.writeMeeting(
+            MeetingTitlesFixtures.meetingMarkdown(title: "Meeting with Priya", extraFrontmatter: ["title_set_by_user: true"]),
+            named: "renamed.md", in: directory
         )
-        let rule = MeetingTitlesController.retranscriptionRule(at: url)
-        // Transcribe again: a fresh file keeps the title but drops the mark.
-        // (The name even has a rule title's shape; only the mark protects it.)
-        MeetingTitlesFixtures.writeMeeting(MeetingTitlesFixtures.meetingMarkdown(title: "Meeting with Legal"), named: "board.md", in: directory)
-
-        // The first job after it fails (an unusable reply) yet still carries the mark over.
-        let failing = FakeTitlesHost(engine: FakeTitlesEngine(reply: "not json"))
-        let firstQueue = MeetingTitlesQueue(host: failing, environment: .init(isEnabled: { true }, isBusy: { false }))
-        firstQueue.enqueue(MeetingTitlesJob(transcriptURL: url, titleRule: rule))
-        await firstQueue.waitUntilIdle()
-        var values = TranscriptFrontmatter.values(in: (try? String(contentsOf: url, encoding: .utf8)) ?? "") ?? [:]
-        assertEqual(values["title_set_by_user"], "true", "the mark survives Transcribe again")
-
-        // A second save event (speaker naming finishing), after a newer
-        // version would run again, decides from the file.
-        let text = ((try? String(contentsOf: url, encoding: .utf8)) ?? "")
-            .replacingOccurrences(of: "ai_summary_version: \"1\"", with: "ai_summary_version: \"0\"")
-        try? text.write(to: url, atomically: true, encoding: .utf8)
         let host = FakeTitlesHost()
-        let secondQueue = MeetingTitlesQueue(host: host, environment: .init(isEnabled: { true }, isBusy: { false }))
-        secondQueue.enqueue(MeetingTitlesJob(transcriptURL: url, titleRule: .fromFile))
-        await secondQueue.waitUntilIdle()
-        values = TranscriptFrontmatter.values(in: (try? String(contentsOf: url, encoding: .utf8)) ?? "") ?? [:]
+        let queue = MeetingTitlesQueue(host: host, environment: .init(isEnabled: { true }, isBusy: { false }))
+        queue.enqueue(MeetingTitlesJob(transcriptURL: url, titleRule: .fromFile))
+        await queue.waitUntilIdle()
+        let values = TranscriptFrontmatter.values(in: (try? String(contentsOf: url, encoding: .utf8)) ?? "") ?? [:]
         assertNil(values["ai_title"], "ai_title never stands in for the name")
-        assertEqual(values["title"], "Meeting with Legal")
+        assertEqual(values["title"], "Meeting with Priya")
+        assertEqual(values["title_set_by_user"], "true")
         assertNotNil(values["ai_summary"], "the meeting still gets its summary")
     }
 
@@ -263,7 +257,9 @@ func testMeetingTitlesQueue() async {
         let titles = [
             ("tz.md", "Meeting at 6:05 PM", [String]()),             // saved in another time zone
             ("24h.md", "Meeting at 18:05", []),                       // saved with a 24-hour clock
-            ("renamed-speakers.md", "Meeting with Speaker 1", []),    // speakers named after the save
+            ("rule.md", "Meeting with Priya and Marcus", []),         // the rule's own names
+            ("quick.md", "Quick notes", []),
+            ("typed.md", "Meeting with Legal", []),                   // looks like a rule title, isn't
             ("old-rename.md", "Board prep", []),                      // renamed before Rename wrote marks
             ("calendar.md", "Q3 planning", []),                       // a calendar title
             ("renamed-import.md", "Partner brief", ["imported_at: 2026-03-04T10:00:00Z"]),
@@ -278,10 +274,10 @@ func testMeetingTitlesQueue() async {
         func values(_ name: String) -> [String: String] {
             TranscriptFrontmatter.values(in: (try? String(contentsOf: directory.appendingPathComponent(name), encoding: .utf8)) ?? "") ?? [:]
         }
-        for name in ["tz.md", "24h.md", "renamed-speakers.md"] {
+        for name in ["tz.md", "24h.md", "rule.md", "quick.md"] {
             assertEqual(values(name)["ai_title"], "Vendor contract renewal", "\(name): the app's title is replaceable")
         }
-        for name in ["old-rename.md", "calendar.md", "renamed-import.md"] {
+        for name in ["old-rename.md", "calendar.md", "renamed-import.md", "typed.md"] {
             assertNil(values(name)["ai_title"], "\(name): kept")
             assertNotNil(values(name)["ai_summary"], "\(name): still gets the summary")
         }
@@ -300,14 +296,16 @@ func testMeetingTitlesQueue() async {
         let engine = FakeTitlesEngine()
         engine.blockChat = true
         engine.onChatStarted = { controls.chatStarted(engine: engine) }
+        let clock = TitlesTestClock()
         let host = FakeTitlesHost(engine: engine)
         let queue = MeetingTitlesQueue(host: host, environment: .init(
             isEnabled: { true },
             isBusy: { controls.isBusy },
             sleep: { interval in
                 if interval == .seconds(5) { controls.busyPoll(engine: engine) }
-                try? await Task.sleep(for: .milliseconds(2))
-            }
+                await clock.sleep(interval)
+            },
+            now: { clock.now }
         ))
         var results: [MeetingTitlesJobResult] = []
         queue.onJobFinished = { _, result in results.append(result) }
@@ -402,8 +400,7 @@ func testMeetingTitlesQueue() async {
             )
         }
         let imported = titled("import.md", "Voice memo 42")
-        relaunched.noteImportQueued(title: "Voice memo 42")
-        relaunched.noteSavedMeeting(at: imported, title: "Voice memo 42")
+        relaunched.noteSavedMeeting(at: imported, title: "Voice memo 42", origin: .importedFile)
         await relaunched.waitUntilIdle()
         let importValues = TranscriptFrontmatter.values(in: (try? String(contentsOf: imported, encoding: .utf8)) ?? "") ?? [:]
         assertEqual(importValues["ai_title"], "Vendor contract renewal", "an untouched import is replaceable")

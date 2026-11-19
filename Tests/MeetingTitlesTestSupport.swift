@@ -59,25 +59,49 @@ final class FakeTitlesEngine: MeetingTitlesEngine, @unchecked Sendable {
     }
 }
 
+/// A virtual clock for the queue: `sleep` moves it, nothing reads the wall
+/// clock. The tiny real pause only lets other tasks run.
+final class TitlesTestClock: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seconds: TimeInterval = 1_000
+
+    var now: TimeInterval { lock.withLock { seconds } }
+
+    func advance(_ duration: Duration) {
+        lock.withLock { seconds += MeetingTitlesQueue.seconds(duration) }
+    }
+
+    func sleep(_ duration: Duration) async {
+        advance(duration)
+        try? await Task.sleep(for: .milliseconds(1))
+    }
+}
+
 /// Records starts and stops in order, with a shared event log so tests can
 /// check what happened relative to other fakes.
 final class FakeTitlesHost: MeetingTitlesEngineHost, @unchecked Sendable {
     let engine: FakeTitlesEngine
     private let lock = NSLock()
     private var log: [String] = []
+    private var starts: [TimeInterval] = []
     var startFails = false
+    /// When set, each start's virtual time is recorded in `startTimes`.
+    var clock: TitlesTestClock?
 
-    init(engine: FakeTitlesEngine = FakeTitlesEngine()) {
+    init(engine: FakeTitlesEngine = FakeTitlesEngine(), clock: TitlesTestClock? = nil) {
         self.engine = engine
+        self.clock = clock
     }
 
     var events: [String] { lock.withLock { log } }
     var startCount: Int { events.filter { $0 == "start" }.count }
+    var startTimes: [TimeInterval] { lock.withLock { starts } }
 
     func note(_ event: String) { lock.withLock { log.append(event) } }
 
     func start() async throws -> any MeetingTitlesEngine {
         note("start")
+        if let now = clock?.now { lock.withLock { starts.append(now) } }
         if lock.withLock({ startFails }) { throw MeetingTitlesEngineError.helperMissing }
         return engine
     }
@@ -118,6 +142,17 @@ enum MeetingTitlesFixtures {
         let body = turns.map { stamp, label, text in "**\(stamp)**  [\(label)]\n\(text)" }
             .joined(separator: "\n\n")
         return "---\n\(frontmatter.joined(separator: "\n"))\n---\n\n# \(title)\n\nRecorded today\n\n## Transcript\n\n\(body)\n"
+    }
+
+    /// A meeting already labeled at the current version from its own
+    /// speakers, as the writer leaves it.
+    static func labeledMeetingMarkdown(date: String = "2026-03-04") -> String {
+        let raw = meetingMarkdown(date: date)
+        let speakers = MeetingTitlesSpeakers.fingerprint(of: MeetingTitlesTranscript.turns(fromMeetingMarkdown: raw))
+        return MeetingTitlesFrontmatterWriter.markdown(
+            byApplying: MeetingTitlesLabel(title: nil, line: nil, summary: "Already labeled."),
+            replaceableTitle: nil, speakers: speakers, to: raw
+        ) ?? raw
     }
 
     static let defaultTurns: [(String, String, String)] = [

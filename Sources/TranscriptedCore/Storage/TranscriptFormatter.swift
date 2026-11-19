@@ -89,6 +89,9 @@ extension TranscriptSaver {
         // Add meeting title if available
         if let title = meetingTitle, !title.isEmpty {
             yaml += "\ntitle: \"\(Self.escapeYAML(title))\""
+            if formatOptions.titleSetByUser {
+                yaml += "\n\(TranscriptFrontmatter.titleSetByUserKey): true"
+            }
         }
 
         // Add recording health metadata (Phase 3: Post-hoc transparency)
