@@ -232,10 +232,6 @@ extension MeetingSessionController {
         refreshWarmupStatus()
     }
 
-    /// Restyling reads and rewrites the whole saved transcript and can rename
-    /// the markdown + retained-audio artifacts, so it must stay off the main
-    /// actor; multi-hour meetings produce multi-MB files. Restyles are chained
-    /// so two passes never touch the same artifacts concurrently.
     /// A speaker review for this saved meeting still waits for answers
     /// (on-device titles wait for it).
     func isSpeakerReviewPending(transcriptURL: URL, captureID: UUID?) -> Bool {
@@ -253,6 +249,10 @@ extension MeetingSessionController {
         return activeTranscriptionTrigger == .savedMeetingRetranscription ? .transcribedAgain : .other
     }
 
+    /// Restyling reads and rewrites the whole saved transcript and can rename
+    /// the markdown + retained-audio artifacts, so it must stay off the main
+    /// actor; multi-hour meetings produce multi-MB files. Restyles are chained
+    /// so two passes never touch the same artifacts concurrently.
     private func restyleSavedTranscriptInBackground(at url: URL, titlesOrigin: MeetingTitlesController.SaveOrigin) {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in

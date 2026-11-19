@@ -137,6 +137,26 @@ func testMeetingTitlesFrontmatter() {
         assertEqual(try? String(contentsOf: url, encoding: .utf8), raw)
     }
 
+    runSuite("A relabel that comes back with nothing usable keeps the earlier title and summary") {
+        let raw = MeetingTitlesFixtures.meetingMarkdown()
+        let labeled = MeetingTitlesFrontmatterWriter.markdown(
+            byApplying: label, replaceableTitle: "Meeting with Priya", speakers: "s1", to: raw, generatedAt: stamp
+        ) ?? ""
+        // The speaker names changed ("s2"), and the model's reply was junk.
+        let updated = MeetingTitlesFrontmatterWriter.markdown(recordingNoSummary: .noUsableReply, speakers: "s2", to: labeled) ?? ""
+        let values = TranscriptFrontmatter.values(in: updated) ?? [:]
+        assertEqual(values["ai_title"], "Vendor contract renewal")
+        assertEqual(values["ai_title_replaces"], "Meeting with Priya")
+        assertEqual(values["ai_summary_line"], "The renewal goes ahead for one year.")
+        assertEqual(values["ai_summary"], "Two bids were compared. The current vendor stays.")
+        assertNil(values["ai_summary_status"])
+        assertEqual(values["ai_summary_speakers"], "s2", "the names it was tried with, so it isn't tried again")
+        assertEqual(updated.components(separatedBy: "ai_summary_speakers:").count, 2, "written once")
+        assertEqual(TranscriptFrontmatter.body(in: updated), TranscriptFrontmatter.body(in: raw))
+        assertTrue(MeetingTitlesFrontmatterWriter.isCurrent(values: values, speakers: "s2"))
+        assertNil(MeetingTitlesFrontmatterWriter.markdown(recordingNoSummary: .noUsableReply, speakers: "s2", to: updated))
+    }
+
     runSuite("Nothing to write is recorded once per version without content") {
         let raw = MeetingTitlesFixtures.meetingMarkdown()
         let updated = MeetingTitlesFrontmatterWriter.markdown(recordingNoSummary: .noUsableReply, speakers: "s1", to: raw, generatedAt: stamp) ?? ""

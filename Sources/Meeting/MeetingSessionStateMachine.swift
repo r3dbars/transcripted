@@ -107,11 +107,6 @@ enum MeetingSessionStateMachine {
         }
     }
 
-    /// Broad "is the audio capture pipeline live for this recording" question
-    /// — covers the mic-engage and teardown windows in addition to steady
-    /// -state recording. This is the answer every "don't quit / don't let
-    /// dictation touch the mic / there's runtime work happening" gate should
-    /// use; see `MeetingSessionController.isCaptureSessionActive`.
     /// Recording, starting or stopping one, loading models or transcribing:
     /// on-device meeting titles wait (`MeetingTitlesController`).
     static func keepsTitlesWaiting(_ state: MeetingSessionState) -> Bool {
@@ -123,6 +118,11 @@ enum MeetingSessionStateMachine {
         }
     }
 
+    /// Broad "is the audio capture pipeline live for this recording" question
+    /// — covers the mic-engage and teardown windows in addition to steady
+    /// -state recording. This is the answer every "don't quit / don't let
+    /// dictation touch the mic / there's runtime work happening" gate should
+    /// use; see `MeetingSessionController.isCaptureSessionActive`.
     static func isCaptureSessionActive(_ state: MeetingSessionState) -> Bool {
         switch state {
         case .startingRecording, .recording, .stoppingRecording:

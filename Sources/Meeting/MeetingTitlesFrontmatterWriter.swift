@@ -36,6 +36,13 @@ enum MeetingTitlesFrontmatterWriter {
         return values[MeetingTitlesKeys.speakers] == speakers
     }
 
+    /// True when this version already wrote a line, a summary or a title.
+    static func hasLabel(values: [String: String]) -> Bool {
+        guard isCurrentVersion(values: values), values[MeetingTitlesKeys.status] == nil else { return false }
+        return [MeetingTitlesKeys.title, MeetingTitlesKeys.line, MeetingTitlesKeys.summary]
+            .contains { !(values[$0] ?? "").isEmpty }
+    }
+
     /// `replaceableTitle` is the app-made `title:` the model's title may
     /// stand in for. `ai_title` is written only when the file's `title:`
     /// still equals it, so a rename (before or after) always wins.
@@ -111,6 +118,16 @@ enum MeetingTitlesFrontmatterWriter {
         guard let document = TranscriptFrontmatter.document(in: raw),
               document.values["capture_type"] == "meeting",
               !isCurrent(values: document.values, speakers: speakers) else { return nil }
+        if status == .noUsableReply, hasLabel(values: document.values) {
+            // A relabel (the speaker names changed) came back with nothing
+            // usable. The earlier title and summary stay; only the names
+            // this was tried with are recorded, so it isn't tried again.
+            let speakersLine = yamlLine(MeetingTitlesKeys.speakers, speakers)
+            var lines = document.lines.filter { frontmatterKey(in: $0) != MeetingTitlesKeys.speakers }
+            let anchor = lines.lastIndex { frontmatterKey(in: $0) == MeetingTitlesKeys.version }
+            lines.insert(speakersLine, at: anchor.map { $0 + 1 } ?? lines.endIndex)
+            return "---\n\(lines.joined(separator: "\n"))\n---\n\(document.body)"
+        }
         let retained = document.lines.filter { line in
             guard let key = frontmatterKey(in: line) else { return true }
             return !MeetingTitlesKeys.all.contains(key)

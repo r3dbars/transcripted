@@ -46,6 +46,55 @@ func testMeetingTitlesScheduling() async {
         }
     }
 
+    await runSuite("A cancelled job keeps what it knew about the title when the file was queued again meanwhile") {
+        let directory = MeetingTitlesFixtures.temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        // The title reads like the app's rule title, but it came with the
+        // recording (a calendar event's), which only the first job knows.
+        let url = MeetingTitlesFixtures.writeMeeting(
+            MeetingTitlesFixtures.meetingMarkdown(title: "Meeting with Priya and Marcus"), named: "a.md", in: directory
+        )
+        let saved = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+        assertEqual(
+            MeetingTitlesTitleOwnership.decide(values: TranscriptFrontmatter.values(in: saved) ?? [:], rule: .fromFile) {
+                MeetingTranscriptStyler.ruleTitle(forMeetingMarkdown: saved, fallbackURL: url)
+            },
+            .replaceable("Meeting with Priya and Marcus"),
+            "from the file alone this title would be replaced"
+        )
+        let clock = TitlesTestClock()
+        let engine = FakeTitlesEngine()
+        engine.blockChat = true
+        let host = FakeTitlesHost(engine: engine, clock: clock)
+        let signals = SignalLog()
+        let queue = MeetingTitlesQueue(host: host, environment: .init(
+            isEnabled: { true },
+            isBusy: { false },
+            sleep: { await clock.sleep($0) },
+            now: { clock.now }
+        ))
+        engine.onChatStarted = { [weak queue] in
+            Task { @MainActor in
+                guard signals.firstChat() else { return }
+                // The library says the file changed (its audio was
+                // recompressed), then a dictation starts.
+                queue?.enqueueBackfill([MeetingTitlesJob(transcriptURL: url, titleRule: .fromFile)])
+                queue?.noteBusyStarted()
+                engine.blockChat = false
+            }
+        }
+        var results: [MeetingTitlesJobResult] = []
+        queue.onJobFinished = { _, result in results.append(result) }
+        queue.enqueue(MeetingTitlesJob(transcriptURL: url, titleRule: .unknown))
+        await queue.waitUntilIdle()
+
+        assertEqual(results.first, .cancelled)
+        assertTrue(results.contains(.written), "the meeting is labeled after the dictation")
+        let values = TranscriptFrontmatter.values(in: (try? String(contentsOf: url, encoding: .utf8)) ?? "") ?? [:]
+        assertNotNil(values["ai_summary_line"])
+        assertNil(values["ai_title"], "the recording's own title is kept")
+    }
+
     await runSuite("A burst of dictations doesn't load and kill the helper each time") {
         let directory = MeetingTitlesFixtures.temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }

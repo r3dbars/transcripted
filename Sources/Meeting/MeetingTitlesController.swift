@@ -444,8 +444,12 @@ final class MeetingTitlesController: ObservableObject {
     /// Meetings in `directory` that need a label, newest first: no keys at
     /// this version, or (for a file changed since it was labeled) keys
     /// written from speaker names it no longer has. Only those changed files
-    /// are read past the frontmatter.
-    nonisolated static func backfillJobs(in directory: URL, fileManager: FileManager = .default) -> [MeetingTitlesJob] {
+    /// are read past the frontmatter, and only while the change is recent.
+    nonisolated static func backfillJobs(
+        in directory: URL,
+        fileManager: FileManager = .default,
+        now: Date = Date()
+    ) -> [MeetingTitlesJob] {
         let keys: [URLResourceKey] = [.isRegularFileKey, .contentModificationDateKey]
         guard let urls = try? fileManager.contentsOfDirectory(
             at: directory, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]
@@ -461,7 +465,7 @@ final class MeetingTitlesController: ObservableObject {
             if MeetingTitlesFrontmatterWriter.isCurrentVersion(values: values) {
                 let tooShort = MeetingTitlesFrontmatterWriter.NoSummaryStatus.tooShort.rawValue
                 guard values[MeetingTitlesKeys.status] != tooShort,
-                      changedSinceLabeled(values: values, modifiedAt: resources.contentModificationDate),
+                      changedSinceLabeled(values: values, modifiedAt: resources.contentModificationDate, now: now),
                       let raw = try? String(contentsOf: url, encoding: .utf8) else { continue }
                 let speakers = MeetingTitlesSpeakers.fingerprint(of: MeetingTitlesTranscript.turns(fromMeetingMarkdown: raw))
                 guard !MeetingTitlesFrontmatterWriter.isCurrent(values: values, speakers: speakers) else { continue }
@@ -476,13 +480,27 @@ final class MeetingTitlesController: ObservableObject {
             .map { MeetingTitlesJob(transcriptURL: $0.0, titleRule: .fromFile) }
     }
 
+    /// How long after a file last changed the rescan still reads it in full
+    /// to compare speaker names.
+    nonisolated static let relabelCheckWindow: TimeInterval = 30 * 24 * 60 * 60
+
     /// The label's own write lands within moments of
     /// `ai_summary_generated_at`; anything later (a speaker rename, a merge,
-    /// a review's answers) may have changed the names.
-    nonisolated static func changedSinceLabeled(values: [String: String], modifiedAt: Date?) -> Bool {
+    /// a review's answers) may have changed the names. Other writes (a star,
+    /// a rename, the audio path) bump the modified time too, and a name
+    /// change made while the app runs is relabeled then and there, so this
+    /// is only the catch-up for one the app quit before handling. It stops
+    /// looking once the change is `relabelCheckWindow` old, so a library of
+    /// old starred meetings isn't read in full on every launch.
+    nonisolated static func changedSinceLabeled(
+        values: [String: String],
+        modifiedAt: Date?,
+        now: Date = Date()
+    ) -> Bool {
         guard let modifiedAt,
               let raw = values[MeetingTitlesKeys.generatedAt],
               let stamp = ISO8601DateFormatter().date(from: raw) else { return true }
-        return modifiedAt.timeIntervalSince(stamp) > 5
+        guard modifiedAt.timeIntervalSince(stamp) > 5 else { return false }
+        return now.timeIntervalSince(modifiedAt) <= relabelCheckWindow
     }
 }

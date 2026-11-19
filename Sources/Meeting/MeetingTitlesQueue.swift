@@ -58,6 +58,8 @@ final class MeetingTitlesQueue {
     var onDrained: (() -> Void)?
     private var drainTask: Task<Void, Never>?
     private var runningJob: Task<MeetingTitlesJobResult, Never>?
+    /// The meeting `runningJob` is working on.
+    private var running: MeetingTitlesJob?
     private let jobRunner: JobRunner
     /// When something was last seen busy (`environment.now`).
     private(set) var lastBusyAt: TimeInterval?
@@ -76,13 +78,10 @@ final class MeetingTitlesQueue {
 
     /// A just-saved meeting goes to the front, replacing any older job for
     /// the same file (held ones included). A later save with no evidence of
-    /// its own keeps what the waiting job knew about the title.
+    /// its own keeps what the waiting or running job knew about the title.
     func enqueue(_ job: MeetingTitlesJob) {
         guard environment.isEnabled() else { return }
-        var job = job
-        if job.titleRule == .fromFile, let waiting = (pending + held).first(where: { $0.key == job.key }) {
-            job = MeetingTitlesJob(transcriptURL: job.transcriptURL, titleRule: waiting.titleRule)
-        }
+        let job = keepingKnownTitleRule(job)
         pending.removeAll { $0.key == job.key }
         held.removeAll { $0.key == job.key }
         pending.insert(job, at: 0)
@@ -91,13 +90,27 @@ final class MeetingTitlesQueue {
 
     /// Backfill jobs keep the caller's order (newest first) behind anything
     /// already waiting; files already queued or held are left where they are.
+    /// A file whose job is running right now is queued again (it may have
+    /// changed under the job) with what that job knew about the title.
     func enqueueBackfill(_ jobs: [MeetingTitlesJob]) {
         guard environment.isEnabled() else { return }
         var queued = Set(pending.map(\.key) + held.map(\.key))
         for job in jobs where queued.insert(job.key).inserted {
-            pending.append(job)
+            pending.append(keepingKnownTitleRule(job))
         }
         wake()
+    }
+
+    /// A job that has to decide from the file alone takes the title evidence
+    /// of a job for the same file that is waiting, held or running. That
+    /// evidence only exists in memory, so a later change to the file (the
+    /// audio being recompressed, a speaker fix) must not replace it.
+    private func keepingKnownTitleRule(_ job: MeetingTitlesJob) -> MeetingTitlesJob {
+        guard job.titleRule == .fromFile else { return job }
+        let known = (pending + held + [running].compactMap { $0 })
+            .first { $0.key == job.key && $0.titleRule != .fromFile }
+        guard let known else { return job }
+        return MeetingTitlesJob(transcriptURL: job.transcriptURL, titleRule: known.titleRule)
     }
 
     func wake() {
@@ -228,8 +241,14 @@ final class MeetingTitlesQueue {
             case .cancelled:
                 await stopEngine()
                 // Busy, not switched off: the meeting goes back to the front.
-                if environment.isEnabled(), !pending.contains(where: { $0.key == job.key }) {
-                    pending.insert(job, at: 0)
+                // A copy queued meanwhile stays where it is and takes this
+                // job's title evidence.
+                if environment.isEnabled() {
+                    if let index = pending.firstIndex(where: { $0.key == job.key }) {
+                        if pending[index].titleRule == .fromFile { pending[index] = job }
+                    } else {
+                        pending.insert(job, at: 0)
+                    }
                 }
             case .awaitingSpeakerReview:
                 if !held.contains(where: { $0.key == job.key }) { held.append(job) }
@@ -256,6 +275,7 @@ final class MeetingTitlesQueue {
         )
         let task = Task.detached(priority: .utility) { await runner(job, host, hooks) }
         runningJob = task
+        running = job
         let watcher = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
@@ -270,6 +290,7 @@ final class MeetingTitlesQueue {
         let result = await task.value
         watcher.cancel()
         runningJob = nil
+        running = nil
         return result
     }
 

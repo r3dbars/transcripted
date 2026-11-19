@@ -96,6 +96,19 @@ func testMeetingTitlesRelabel() async {
         let names = MeetingTitlesController.backfillJobs(in: directory).map { $0.transcriptURL.lastPathComponent }
         assertEqual(names, ["stale.md"])
         assertTrue(MeetingTitlesController.changedSinceLabeled(values: [:], modifiedAt: Date()), "no stamp: check")
+
+        // Other writes bump the modified time too (a star, a rename), so the
+        // catch-up only looks at recent changes: an old one isn't read in
+        // full on every launch.
+        let window = MeetingTitlesController.relabelCheckWindow
+        let later = MeetingTitlesController.backfillJobs(in: directory, now: Date().addingTimeInterval(window + 3_600))
+        assertTrue(later.isEmpty, "a change older than the window is left alone")
+        let labeledAt = Date(timeIntervalSince1970: 1_800_000_000)
+        let stamped = [MeetingTitlesKeys.generatedAt: DateFormattingHelper.formatISO8601(labeledAt)]
+        let changedAt = labeledAt.addingTimeInterval(600)
+        assertFalse(MeetingTitlesController.changedSinceLabeled(values: stamped, modifiedAt: labeledAt.addingTimeInterval(2), now: changedAt))
+        assertTrue(MeetingTitlesController.changedSinceLabeled(values: stamped, modifiedAt: changedAt, now: changedAt.addingTimeInterval(window)))
+        assertFalse(MeetingTitlesController.changedSinceLabeled(values: stamped, modifiedAt: changedAt, now: changedAt.addingTimeInterval(window + 1)))
     }
 
     await runSuite("A CRLF file is not read as a meeting and is left byte for byte") {
