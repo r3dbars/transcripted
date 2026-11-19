@@ -1,16 +1,14 @@
 import AppKit
 import CoreText
 
-/// The two bundled typefaces (both SIL OFL 1.1, licenses in
-/// THIRD_PARTY_LICENSES.md): Instrument Serif for page titles and JetBrains
-/// Mono for section labels. The TTFs ship in `Contents/Resources/Fonts` and
-/// are registered for this process only, the first time a role needs them.
+/// The bundled typeface (SIL OFL 1.1, license in THIRD_PARTY_LICENSES.md):
+/// JetBrains Mono for section labels. The TTFs ship in
+/// `Contents/Resources/Fonts` and are registered for this process only, the
+/// first time a role needs them.
 /// Tests and smokes run without the bundle, so every caller has a system
 /// fallback (`TextRole.nsFont` uses it).
 enum BundledFonts {
     enum Face: String, CaseIterable, Sendable {
-        case instrumentSerifRegular = "InstrumentSerif-Regular"
-        case instrumentSerifItalic = "InstrumentSerif-Italic"
         case jetBrainsMonoRegular = "JetBrainsMono-Regular"
         case jetBrainsMonoMedium = "JetBrainsMono-Medium"
 
@@ -21,7 +19,7 @@ enum BundledFonts {
     static let resourceSubdirectory = "Fonts"
 
     /// Registers the app bundle's fonts once, on first use of a bundled
-    /// role (`TextRole.display` or `.label`), so no launch hook is needed.
+    /// role (`TextRole.label`), so no launch hook is needed.
     nonisolated static let registerOnce: Void = {
         _ = registerForProcess()
     }()
@@ -57,13 +55,5 @@ enum BundledFonts {
     /// The bundled face at `size`, or nil when it isn't registered.
     static func font(_ face: Face, size: CGFloat) -> NSFont? {
         NSFont(name: face.postScriptName, size: size)
-    }
-
-    /// The system serif (New York) used when Instrument Serif is missing.
-    static func systemSerif(size: CGFloat) -> NSFont {
-        let base = NSFont.systemFont(ofSize: size)
-        guard let descriptor = base.fontDescriptor.withDesign(.serif),
-              let serif = NSFont(descriptor: descriptor, size: size) else { return base }
-        return serif
     }
 }

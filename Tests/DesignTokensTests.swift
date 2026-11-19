@@ -12,20 +12,21 @@ func testDesignTokens() {
         )
     }
 
+    runSuite("DesignTokens — page titles are the system font, semibold") {
+        let display = TextRole.display.nsFont()
+        let system = NSFont.systemFont(ofSize: 28, weight: .semibold)
+        assertEqual(display.pointSize, 28)
+        assertEqual(display.fontName, system.fontName, "display is the system sans, not a serif")
+    }
+
     // Runs before anything registers the bundled fonts: tests and smokes have
-    // no app bundle, so the roles must fall back to system faces.
-    runSuite("DesignTokens — display and label fall back without the bundled fonts") {
+    // no app bundle, so the label role must fall back to a system face.
+    runSuite("DesignTokens — label falls back without the bundled font") {
         let registered = BundledFonts.registerForProcess()
         guard registered.isEmpty else {
             assertTrue(true, "fonts were already registered in this process; fallback not observable here")
             return
         }
-        let display = TextRole.display.nsFont()
-        assertEqual(display.pointSize, 28, "display keeps its size on the fallback")
-        assertTrue(
-            display.familyName != NSFont.systemFont(ofSize: 28).familyName,
-            "display falls back to the system serif, not the sans system font"
-        )
         let label = TextRole.label.nsFont()
         assertEqual(label.pointSize, 10.5, "label keeps its size on the fallback")
         assertTrue(label.isFixedPitch, "label falls back to the system monospaced face")
@@ -34,8 +35,7 @@ func testDesignTokens() {
     runSuite("DesignTokens — bundled fonts register for the process and drive the roles") {
         let fonts = repoRoot().appendingPathComponent("Resources/Fonts", isDirectory: true)
         let available = BundledFonts.register(directory: fonts)
-        assertEqual(Set(available), Set(BundledFonts.Face.allCases), "all four bundled faces register")
-        assertEqual(TextRole.display.nsFont().fontName, "InstrumentSerif-Regular", "display uses Instrument Serif")
+        assertEqual(Set(available), Set(BundledFonts.Face.allCases), "both bundled faces register")
         assertEqual(TextRole.label.nsFont().fontName, "JetBrainsMono-Medium", "label uses JetBrains Mono Medium")
         assertEqual(
             Set(BundledFonts.register(directory: fonts)),

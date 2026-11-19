@@ -9,7 +9,7 @@ import AppKit
 
 // MARK: - Shared layout
 
-/// Label, serif headline and one short line, then the screen's own content.
+/// Label, headline and one short line, then the screen's own content.
 struct OnboardingStageLayout<Content: View>: View {
     let label: String?
     let headline: String

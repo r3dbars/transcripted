@@ -54,7 +54,7 @@ enum LibraryTokens {
 
     // MARK: Type
 
-    /// Page titles (Meetings, Dictations, Speakers, …): the display serif.
+    /// Page titles (Meetings, Dictations, Speakers, …): the display role.
     static var title: Font { TextRole.display.font() }
     /// Card and sheet headings.
     static var heading: Font { TextRole.heading.font() }

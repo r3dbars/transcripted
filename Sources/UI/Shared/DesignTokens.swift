@@ -117,7 +117,7 @@ enum DesignTokens {
 /// The six text roles. Use `.textRole(.heading)` in SwiftUI (it applies
 /// size, weight, tracking and the label's uppercase) or `role.nsFont` in AppKit.
 enum TextRole: CaseIterable, Sendable {
-    /// Page titles. Instrument Serif 28; system serif when the font isn't bundled.
+    /// Page titles. 28 semibold, the system font.
     case display
     /// Card and sheet headings. 15 semibold.
     case heading
@@ -144,9 +144,9 @@ enum TextRole: CaseIterable, Sendable {
 
     var defaultWeight: NSFont.Weight {
         switch self {
-        case .heading: return .semibold
+        case .display, .heading: return .semibold
         case .label: return .medium
-        case .display, .body, .meta, .small: return .regular
+        case .body, .meta, .small: return .regular
         }
     }
 
@@ -155,18 +155,16 @@ enum TextRole: CaseIterable, Sendable {
 
     var isUppercased: Bool { self == .label }
 
-    /// The AppKit font. `weight` applies to the system roles; display and
-    /// label keep their face's own weight.
+    /// The AppKit font. `weight` applies to the system roles; label keeps
+    /// its face's own weight.
     func nsFont(weight: NSFont.Weight? = nil, size overrideSize: CGFloat? = nil) -> NSFont {
         let size = overrideSize ?? self.size
-        if self == .display || self == .label { _ = BundledFonts.registerOnce }
         switch self {
-        case .display:
-            return BundledFonts.font(.instrumentSerifRegular, size: size) ?? BundledFonts.systemSerif(size: size)
         case .label:
+            _ = BundledFonts.registerOnce
             return BundledFonts.font(.jetBrainsMonoMedium, size: size)
                 ?? NSFont.monospacedSystemFont(ofSize: size, weight: .medium)
-        case .heading, .body, .meta, .small:
+        case .display, .heading, .body, .meta, .small:
             return NSFont.systemFont(ofSize: size, weight: weight ?? defaultWeight)
         }
     }
@@ -174,9 +172,9 @@ enum TextRole: CaseIterable, Sendable {
     /// The SwiftUI font (no tracking or case; use `.textRole(_:)` for those).
     func font(weight: Font.Weight? = nil) -> Font {
         switch self {
-        case .display, .label:
+        case .label:
             return Font(nsFont() as CTFont)
-        case .heading, .body, .meta, .small:
+        case .display, .heading, .body, .meta, .small:
             return .system(size: size, weight: weight ?? Self.swiftUIWeight(defaultWeight))
         }
     }

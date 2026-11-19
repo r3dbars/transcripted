@@ -33,7 +33,7 @@ bytes included in a historical app build.
 - [MCP helper dependencies](#mcp-helper-dependencies)
 - [NVIDIA Parakeet TDT 0.6B v3](#nvidia-parakeet-tdt-06b-v3)
 - [FluidInference offline diarizer models](#fluidinference-offline-diarizer-models)
-- [Instrument Serif and JetBrains Mono (fonts)](#instrument-serif-and-jetbrains-mono-fonts)
+- [JetBrains Mono (font)](#jetbrains-mono-font)
 - [Shared CC-BY-4.0 model license text](#shared-cc-by-40-model-license-text)
 
 ---
@@ -4200,15 +4200,13 @@ This notice does not restrict or replace rights granted directly by upstream
 licensors.
 ```
 
-## Instrument Serif and JetBrains Mono (fonts)
+## JetBrains Mono (font)
 
-- **Component:** `InstrumentSerif-Regular.ttf`, `InstrumentSerif-Italic.ttf`, `JetBrainsMono-Regular.ttf` and `JetBrainsMono-Medium.ttf`, copied unmodified into `Contents/Resources/Fonts` and registered for the app process only.
-- **Instrument Serif source:** https://github.com/google/fonts/tree/main/ofl/instrumentserif (downloaded 2026-11-18). Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif).
+- **Component:** `JetBrainsMono-Regular.ttf` and `JetBrainsMono-Medium.ttf`, copied unmodified into `Contents/Resources/Fonts` and registered for the app process only.
 - **JetBrains Mono source:** https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304 (`fonts/ttf`). Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
-- **License:** SIL Open Font License 1.1 for both. The two projects ship the same license text; it is reproduced once below.
+- **License:** SIL Open Font License 1.1, reproduced below.
 
 ```text
-Copyright 2022 The Instrument Serif Project Authors (https://github.com/Instrument/instrument-serif)
 Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono)
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.

@@ -26,7 +26,7 @@ Green is never a button, "starred", "copied", "saved", "ready", "You" or today's
 
 | Role | Face | Use |
 |---|---|---|
-| `.display` | Instrument Serif 28 | Page titles (`LibraryTokens.title`, `SettingsPageIntro`) |
+| `.display` | SF 28 semibold | Page titles (`LibraryTokens.title`, `SettingsPageIntro`) |
 | `.heading` | SF 15 semibold | Card and sheet headings |
 | `.body` | SF 13 (`.medium` for row titles) | Reading text, rows |
 | `.meta` | SF 12 | Durations, counts, subtitles |
@@ -35,7 +35,7 @@ Green is never a button, "starred", "copied", "saved", "ready", "You" or today's
 
 SwiftUI: `Text("Today").textRole(.label)` applies font, tracking and case; `TextRole.heading.font()` gives just the font. AppKit: `TextRole.meta.nsFont(weight: .semibold)`. Timers use monospaced digits at a role's size, formatted `5:07` (`MeetingDurationFormatter.formatDuration`, `NotchIslandPresentation.timerText`).
 
-The fonts ship in `Resources/Fonts` (SIL OFL, see `THIRD_PARTY_LICENSES.md`) and `BundledFonts` registers them for the process the first time a display or label role is drawn. Without the bundle (tests, smokes) the roles fall back to the system serif and system monospaced, same sizes.
+The fonts ship in `Resources/Fonts` (SIL OFL, see `THIRD_PARTY_LICENSES.md`) and `BundledFonts` registers them for the process the first time a label role is drawn. Without the bundle (tests, smokes) the label falls back to system monospaced, same size. Page titles are the system font (the owner tried a serif and turned it down, 2026-11-19).
 
 ## Buttons (`Sources/UI/Shared/DesignButtonStyles.swift`)
 

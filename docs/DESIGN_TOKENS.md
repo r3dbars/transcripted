@@ -10,7 +10,7 @@ The surface names read from it:
 
 - `LibraryTokens` (main window, onboarding, Writing tab) keeps its names:
   `accent` is `DesignTokens.live`, `ink`/`ink2`/`ink3`, `hairline`,
-  `rowHover`/`raisedFill` (`fill`), `title` (display serif 28), `heading`,
+  `rowHover`/`raisedFill` (`fill`), `title` (display, SF 28 semibold), `heading`,
   `rowTitle` (13 medium), `body`, `meta`, `small`, `label` (mono 10.5 with
   `labelTracking`), `radiusControl` (6), `radiusRaised` (12),
   `minimumHitTarget` (40). `LibrarySectionLabel` draws the mono label.
