@@ -206,7 +206,7 @@ extension MeetingSessionController {
                     return
                 }
 
-                self.restyleSavedTranscriptInBackground(at: url)
+                self.restyleSavedTranscriptInBackground(at: url, titlesOrigin: self.savedTranscriptTitlesOrigin())
             }
             .store(in: &cancellables)
 
@@ -236,7 +236,18 @@ extension MeetingSessionController {
     /// the markdown + retained-audio artifacts, so it must stay off the main
     /// actor; multi-hour meetings produce multi-MB files. Restyles are chained
     /// so two passes never touch the same artifacts concurrently.
-    private func restyleSavedTranscriptInBackground(at url: URL) {
+    /// Read while the save publishes (`lastSavedTranscriptURL`), before the
+    /// queue moves on: a pipeline save of the active queued job is that
+    /// job's (a recording's or an import's); a saved-audio replacement is
+    /// "Transcribe again"; anything else (a review's save) says nothing.
+    private func savedTranscriptTitlesOrigin() -> MeetingTitlesController.SaveOrigin {
+        if let jobID = activeQueuedTranscriptionJobID, taskManager.lastSavedTranscriptTaskId == jobID {
+            return activeTranscriptionTrigger == .fileImport ? .importedFile : .recording
+        }
+        return activeTranscriptionTrigger == .savedMeetingRetranscription ? .transcribedAgain : .other
+    }
+
+    private func restyleSavedTranscriptInBackground(at url: URL, titlesOrigin: MeetingTitlesController.SaveOrigin) {
         let previousRestyle = savedTranscriptRestyleTask
         let restyle = Task.detached(priority: .userInitiated) { () -> StyledMeetingTranscript in
             _ = await previousRestyle?.value
@@ -288,7 +299,8 @@ extension MeetingSessionController {
             }
             // Opt-in on-device title and summary; a no-op while it's off.
             MeetingTitlesController.shared.noteSavedMeeting(
-                at: transcriptURL, title: styled.title, titleWasGenerated: styled.titleWasGenerated
+                at: transcriptURL, title: styled.title, titleWasGenerated: styled.titleWasGenerated,
+                origin: titlesOrigin
             )
             guard let self, self.savedTranscriptRestyleTask == restyle else { return }
             self.mirrorSavedTranscript(url: styled.url, title: styled.title)

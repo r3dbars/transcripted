@@ -120,6 +120,16 @@ class TranscriptedAppState: ObservableObject {
                 return self.sttRouter.isRecording || self.sttRouter.isTranscribing
                     || self.meetingSession.hasRuntimeDiagnosticsWork
             }
+            // A start cancels a running job at once instead of on the next poll.
+            meetingTitles.observeBusySignals([
+                sttRouter.$isRecording.eraseToAnyPublisher(),
+                sttRouter.$isTranscribing.eraseToAnyPublisher(),
+                meetingSession.$state.map(MeetingSessionStateMachine.keepsTitlesWaiting).eraseToAnyPublisher(),
+            ])
+            // A meeting's title and summary wait for its speaker review.
+            meetingTitles.speakerReviewProvider = { [weak self] url, captureID in
+                self?.meetingSession.isSpeakerReviewPending(transcriptURL: url, captureID: captureID) ?? false
+            }
             meetingTitles.launch()
         }
         AppSoundPlayer.shared.setWarningReporter { cue in

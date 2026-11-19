@@ -7,14 +7,17 @@ import Security
 /// 127.0.0.1 with the web UI off, and the model passed as an already-verified
 /// open file. Every request first rechecks that the listener on the port is
 /// this child. It is started when the titles queue has work and stopped when
-/// the queue empties.
+/// the queue empties. It takes the first free port of a small fixed range, so
+/// a second copy of the app (a dev build beside the release) gets its own.
 final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngine, @unchecked Sendable {
     /// Writing's helper uses 17891 (17875 for its preview build).
-    static let defaultPort = 17_893
+    static let defaultPorts = 17_893...17_899
+    static var defaultPort: Int { defaultPorts.lowerBound }
 
     struct Configuration: Sendable {
         var helperURL: URL
-        var port: Int = MeetingTitlesLlamaServer.defaultPort
+        /// Tried in order; the first one nothing listens on is used.
+        var ports: ClosedRange<Int> = MeetingTitlesLlamaServer.defaultPorts
         /// The app checks its own code signature (nested code included) before
         /// launching the helper, as Writing does. Off only for the lab check
         /// that runs a helper outside an app bundle.
@@ -25,6 +28,16 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         static var bundled: Configuration {
             Configuration(helperURL: Bundle.main.bundleURL
                 .appendingPathComponent("Contents/Helpers/llama-server", isDirectory: false))
+        }
+
+        init(helperURL: URL, ports: ClosedRange<Int> = MeetingTitlesLlamaServer.defaultPorts, requiresBundleSeal: Bool = true) {
+            self.helperURL = helperURL
+            self.ports = ports
+            self.requiresBundleSeal = requiresBundleSeal
+        }
+
+        init(helperURL: URL, port: Int, requiresBundleSeal: Bool = true) {
+            self.init(helperURL: helperURL, ports: port...port, requiresBundleSeal: requiresBundleSeal)
         }
     }
 
@@ -51,10 +64,13 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
     private let lock = NSLock()
     private var process: Process?
     private var apiKey: String?
+    /// The port the running child listens on.
+    private var port: Int?
     private let session: URLSession
 
     init(configuration: Configuration, openModel: @escaping @Sendable () throws -> FileHandle) {
-        precondition((1...65_535).contains(configuration.port))
+        precondition((1...65_535).contains(configuration.ports.lowerBound)
+            && (1...65_535).contains(configuration.ports.upperBound))
         self.configuration = configuration
         self.openModel = openModel
         let sessionConfiguration = URLSessionConfiguration.ephemeral
@@ -67,15 +83,18 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         session = URLSession(configuration: sessionConfiguration, delegate: NoRedirects(), delegateQueue: nil)
     }
 
-    private var baseURL: URL { URL(string: "http://127.0.0.1:\(configuration.port)")! }
+    private func baseURL(port: Int) -> URL { URL(string: "http://127.0.0.1:\(port)")! }
 
     var isRunning: Bool { lock.withLock { process?.isRunning == true } }
+
+    /// The port the running child listens on (nil when stopped).
+    var currentPort: Int? { lock.withLock { process?.isRunning == true ? port : nil } }
 
     // MARK: - Lifecycle
 
     func start() async throws -> any MeetingTitlesEngine {
-        if let child = lock.withLock({ process }), child.isRunning,
-           Self.holdsListeningSocket(pid: child.processIdentifier, port: configuration.port) {
+        if let (child, port) = lock.withLock({ process.flatMap { child in port.map { (child, $0) } } }), child.isRunning,
+           Self.holdsListeningSocket(pid: child.processIdentifier, port: port) {
             return self
         }
         await stop()
@@ -86,12 +105,26 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         if configuration.requiresBundleSeal, !Self.bundleSealIsValid() {
             throw MeetingTitlesEngineError.bundleSealInvalid
         }
+        let ports = configuration.ports
+        await Task.detached(priority: .utility) {
+            for port in ports { Self.reapOrphanedHelper(helperPath: helperPath, port: port) }
+        }.value
+        for port in ports where Self.portIsFree(port) {
+            do {
+                try await launch(helperPath: helperPath, port: port)
+                return self
+            } catch MeetingTitlesEngineError.launchFailed {
+                // Most likely another process took the port first; try the next.
+                try Task.checkCancellation()
+                continue
+            }
+        }
+        throw MeetingTitlesEngineError.launchFailed
+    }
+
+    private func launch(helperPath: String, port: Int) async throws {
         let model = try openModel()
         defer { try? model.close() }
-        let port = configuration.port
-        await Task.detached(priority: .utility) {
-            Self.reapOrphanedHelper(helperPath: helperPath, port: port)
-        }.value
         guard let key = Self.generateKey() else { throw MeetingTitlesEngineError.launchFailed }
 
         let child = Process()
@@ -111,19 +144,37 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         lock.withLock {
             process = child
             apiKey = key
+            self.port = port
         }
         do {
-            try await waitUntilHealthy(child)
+            try await waitUntilHealthy(child, port: port)
         } catch {
             await stop()
             throw error
         }
-        return self
+    }
+
+    /// True when nothing holds `port` on 127.0.0.1 right now.
+    static func portIsFree(_ port: Int) -> Bool {
+        let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+        guard descriptor >= 0 else { return false }
+        defer { close(descriptor) }
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(UInt16(port).bigEndian)
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+        let result = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return result == 0
     }
 
     func stop() async {
         let child: Process? = lock.withLock {
-            defer { process = nil; apiKey = nil }
+            defer { process = nil; apiKey = nil; port = nil }
             return process
         }
         guard let child else { return }
@@ -131,33 +182,33 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
     }
 
     /// At launch: the same strict rule as before each start (sole listener
-    /// on the titles port, this exact helper binary, adopted by launchd).
+    /// on a titles port, this exact helper binary, adopted by launchd).
     func reapOrphaned() async {
         let helperPath = configuration.helperURL.standardizedFileURL.path
         guard FileManager.default.isExecutableFile(atPath: helperPath), !isRunning else { return }
-        let port = configuration.port
+        let ports = configuration.ports
         await Task.detached(priority: .utility) {
-            Self.reapOrphanedHelper(helperPath: helperPath, port: port)
+            for port in ports { Self.reapOrphanedHelper(helperPath: helperPath, port: port) }
         }.value
     }
 
     /// Synchronous stop for app termination.
     func stopNow() {
         let child: Process? = lock.withLock {
-            defer { process = nil; apiKey = nil }
+            defer { process = nil; apiKey = nil; port = nil }
             return process
         }
         Self.shutDownNow(child)
     }
 
-    private func waitUntilHealthy(_ child: Process) async throws {
+    private func waitUntilHealthy(_ child: Process, port: Int) async throws {
         let clock = ContinuousClock()
         let deadline = clock.now + configuration.healthTimeout
         var delay = Duration.milliseconds(100)
         while clock.now < deadline {
             try Task.checkCancellation()
             guard child.isRunning else { throw MeetingTitlesEngineError.launchFailed }
-            if await probeHealth(), Self.holdsListeningSocket(pid: child.processIdentifier, port: configuration.port) {
+            if await probeHealth(port: port), Self.holdsListeningSocket(pid: child.processIdentifier, port: port) {
                 return
             }
             try await Task.sleep(for: delay)
@@ -166,8 +217,8 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         throw MeetingTitlesEngineError.healthTimeout
     }
 
-    private func probeHealth() async -> Bool {
-        var request = URLRequest(url: baseURL.appendingPathComponent("health"))
+    private func probeHealth(port: Int) async -> Bool {
+        var request = URLRequest(url: baseURL(port: port).appendingPathComponent("health"))
         request.timeoutInterval = 2
         authorize(&request)
         guard let (data, response) = try? await session.data(for: request),
@@ -196,11 +247,12 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
     }
 
     private func post(_ path: String, body: Data) async throws -> Data {
-        guard let child = lock.withLock({ process }), child.isRunning,
-              Self.holdsListeningSocket(pid: child.processIdentifier, port: configuration.port) else {
+        guard let (child, port) = lock.withLock({ process.flatMap { child in self.port.map { (child, $0) } } }),
+              child.isRunning,
+              Self.holdsListeningSocket(pid: child.processIdentifier, port: port) else {
             throw MeetingTitlesEngineError.notRunning
         }
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        var request = URLRequest(url: baseURL(port: port).appendingPathComponent(path))
         request.httpMethod = "POST"
         request.httpBody = body
         request.timeoutInterval = configuration.requestTimeout

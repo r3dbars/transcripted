@@ -16,7 +16,7 @@ struct MeetingTitlesSettingsRow: View {
                 title: Self.title,
                 info: GeneralInfo(
                     title: Self.title,
-                    message: "After a meeting is transcribed, a small model on this Mac names it and writes a one-line takeaway and a short summary into the meeting's Markdown, so you and your agents can find it later. Nothing leaves this Mac. A name you give a meeting, or its calendar event's title, always wins. Turning it on downloads a 3.1 GB model and then goes through your saved meetings too, newest first, one at a time, never while you record or dictate."
+                    message: "After a meeting is transcribed and its speakers are named, a small model on this Mac names it and writes a one-line takeaway and a short summary into the meeting's Markdown, so you and your agents can find it later. Nothing leaves this Mac. A name you give a meeting always wins, and so does a calendar event's title, unless it reads like a title the app makes itself, such as \"Meeting at 3:00 PM\". Turning it on downloads a 3.1 GB model and then goes through your saved meetings too, newest first, one at a time, never while you record or dictate."
                 )
             )
 

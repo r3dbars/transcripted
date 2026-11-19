@@ -232,21 +232,34 @@ enum MeetingTitlesPrompt {
 
 /// Fits a transcript into the model's prompt budget. The whole meeting goes in
 /// whenever it fits; clipping a long meeting's middle made titles drift to side
-/// topics. Only past the budget are turns dropped, evenly across the middle,
-/// keeping the first and last few minutes whole.
+/// topics. Only past the budget are pieces dropped, evenly across the middle,
+/// keeping the first and last few minutes whole. Long turns (a talk, or one
+/// voice for an hour) are first split into sentence-bounded pieces so there
+/// is something to drop; nothing is ever cut mid-sentence.
 enum MeetingTitlesFit {
     /// Prompt tokens for system + user. The server runs with a 40,960 context,
     /// which leaves room for this plus the 400-token reply.
     static let promptTokenBudget = 36_000
     /// Room for the chat template and the user wrapper around the transcript.
     static let templateOverheadTokens = 450
-    /// Minutes kept whole at each end when turns must be dropped.
+    /// Minutes kept whole at each end when pieces must be dropped.
     static let protectedEdgeSeconds = 180
+    /// Words per piece when a long turn is split.
+    static let pieceWords = 120
+    /// Most tokenize requests one fit may make (the whole transcript counts
+    /// as one). Each is a full pass over the text in the helper.
+    static let maxTokenizeCalls = 8
+    /// Speech runs about 150 words a minute; used to spread a split turn's
+    /// pieces over the time it took.
+    static let wordsPerSecond = 2.5
 
     struct Result: Equatable {
         let transcript: String
         let tokenCount: Int
+        /// Pieces left out (0 when the whole transcript fit).
         let droppedTurns: Int
+        /// Tokenize requests made.
+        let tokenizeCalls: Int
     }
 
     /// `countTokens` is the model's own tokenizer in production.
@@ -258,45 +271,116 @@ enum MeetingTitlesFit {
     ) async throws -> Result {
         let available = budget - systemTokens - templateOverheadTokens
         let full = MeetingTitlesTranscript.render(turns)
+        var calls = 1
         var count = try await countTokens(full)
         if count <= available {
-            return Result(transcript: full, tokenCount: count, droppedTurns: 0)
+            return Result(transcript: full, tokenCount: count, droppedTurns: 0, tokenizeCalls: calls)
         }
 
+        let pieces = splitLongTurns(turns)
+        // Tokens per word, from the full count; refined after each try.
+        var tokensPerWord = Double(count) / Double(max(MeetingTitlesTranscript.wordCount(pieces), 1))
         var edgeSeconds = protectedEdgeSeconds
-        var keptMiddle: Int? = nil
-        for _ in 0..<24 {
-            let split = splitEdges(turns, edgeSeconds: edgeSeconds)
-            let middleCount = split.middle.count
-            let fraction = 0.9 * Double(available) / Double(max(count, 1))
-            let target = max(0, Int(Double(keptMiddle ?? middleCount) * fraction))
-            let kept = evenlySpaced(split.middle, keeping: min(target, middleCount))
-            let chosen = split.head + kept + split.tail
-            let text = MeetingTitlesTranscript.render(chosen)
-            count = try await countTokens(text)
-            if count <= available {
-                return Result(transcript: text, tokenCount: count, droppedTurns: turns.count - chosen.count)
-            }
-            if target == 0 {
-                // The edges alone are too long: shrink them and try again.
+        var safety = 0.92
+        // The last request is kept for the fallback below.
+        while calls < maxTokenizeCalls - 1 {
+            let split = splitEdges(pieces, edgeSeconds: edgeSeconds)
+            let edgeWords = MeetingTitlesTranscript.wordCount(split.head + split.tail)
+            let allowedWords = Double(max(available, 0)) * safety / tokensPerWord
+            if Double(edgeWords) > allowedWords {
+                // The edges alone are too long: shrink them (no request).
                 guard edgeSeconds > 0 else { break }
                 edgeSeconds /= 2
-                keptMiddle = nil
-            } else {
-                keptMiddle = target
+                continue
             }
+            let middleWords = Double(MeetingTitlesTranscript.wordCount(split.middle))
+            let share = middleWords > 0 ? (allowedWords - Double(edgeWords)) / middleWords : 0
+            let keep = min(split.middle.count, max(0, Int(Double(split.middle.count) * share)))
+            let chosen = split.head + evenlySpaced(split.middle, keeping: keep) + split.tail
+            let text = MeetingTitlesTranscript.render(chosen)
+            calls += 1
+            count = try await countTokens(text)
+            if count <= available {
+                return Result(transcript: text, tokenCount: count, droppedTurns: pieces.count - chosen.count, tokenizeCalls: calls)
+            }
+            tokensPerWord = Double(count) / Double(max(MeetingTitlesTranscript.wordCount(chosen), 1))
+            safety *= 0.9
         }
 
-        // Last resort: first and last turn, cut to fit by length.
-        let ends = turns.count > 1 ? [turns[0], turns[turns.count - 1]] : Array(turns.prefix(1))
-        var text = MeetingTitlesTranscript.render(ends)
+        // Out of requests: the first and last pieces, each a few sentences,
+        // which always fit a budget this size. Still whole sentences.
+        let ends = pieces.count > 1 ? [pieces[0], pieces[pieces.count - 1]] : Array(pieces.prefix(1))
+        let text = MeetingTitlesTranscript.render(ends)
+        calls += 1
         count = try await countTokens(text)
-        if count > available, available > 0 {
-            let ratio = 0.9 * Double(available) / Double(count)
-            text = String(text.prefix(max(0, Int(Double(text.count) * ratio))))
-            count = try await countTokens(text)
+        return Result(transcript: text, tokenCount: count, droppedTurns: pieces.count - ends.count, tokenizeCalls: calls)
+    }
+
+    /// Splits every turn longer than `pieceWords` into pieces of whole
+    /// sentences. Only a run-on with no sentence ends for more than twice
+    /// that is broken between words. Each
+    /// piece keeps the speaker and gets a start time spread across the turn,
+    /// so the protected first and last minutes stay about right.
+    static func splitLongTurns(_ turns: [MeetingTitlesTurn], maxWords: Int = pieceWords) -> [MeetingTitlesTurn] {
+        var pieces: [MeetingTitlesTurn] = []
+        for (index, turn) in turns.enumerated() {
+            let words = turn.text.split(whereSeparator: \.isWhitespace).count
+            guard words > maxWords else {
+                pieces.append(turn)
+                continue
+            }
+            let sentences = sentences(in: turn.text).flatMap { sentence -> [String] in
+                let parts = sentence.split(whereSeparator: \.isWhitespace)
+                guard parts.count > maxWords * 2 else { return [sentence] }
+                return stride(from: 0, to: parts.count, by: maxWords).map {
+                    parts[$0..<min($0 + maxWords, parts.count)].joined(separator: " ")
+                }
+            }
+            let nextStart = index + 1 < turns.count ? turns[index + 1].startSeconds : nil
+            let spokenSeconds = Double(words) / wordsPerSecond
+            let span = nextStart.map { Double(max($0 - turn.startSeconds, 0)) } ?? spokenSeconds
+            var current: [String] = []
+            var currentWords = 0
+            var wordsBefore = 0
+            func flush() {
+                guard !current.isEmpty else { return }
+                let offset = Int(span * Double(wordsBefore) / Double(words))
+                pieces.append(MeetingTitlesTurn(
+                    speaker: turn.speaker, text: current.joined(separator: " "), startSeconds: turn.startSeconds + offset
+                ))
+                wordsBefore += currentWords
+                current = []
+                currentWords = 0
+            }
+            for sentence in sentences {
+                let count = sentence.split(whereSeparator: \.isWhitespace).count
+                if currentWords > 0, currentWords + count > maxWords { flush() }
+                current.append(sentence)
+                currentWords += count
+            }
+            flush()
         }
-        return Result(transcript: text, tokenCount: count, droppedTurns: turns.count - ends.count)
+        return pieces
+    }
+
+    /// Sentences ending in `.`, `?` or `!` (plus any closing quote), the rest
+    /// as a last sentence.
+    static func sentences(in text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        let characters = Array(text)
+        for (index, character) in characters.enumerated() {
+            current.append(character)
+            guard ".?!".contains(character) else { continue }
+            let next = index + 1 < characters.count ? characters[index + 1] : " "
+            guard next.isWhitespace else { continue }
+            let trimmed = current.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { result.append(trimmed) }
+            current = ""
+        }
+        let rest = current.trimmingCharacters(in: .whitespaces)
+        if !rest.isEmpty { result.append(rest) }
+        return result
     }
 
     static func splitEdges(

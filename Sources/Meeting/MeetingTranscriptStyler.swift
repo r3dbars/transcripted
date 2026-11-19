@@ -473,15 +473,19 @@ enum MeetingTranscriptStyler {
         return ruleTitle(for: document)
     }
 
-    /// True when `title` has the shape of one of `ruleTitle`'s templates:
-    /// "Quick notes", "Meeting with <names>", or "Meeting at <time>" in any
-    /// time format (12 or 24 hour, any AM/PM marker). Matching the shape, not
-    /// recomputing, means a time-zone or locale change and speaker names added
-    /// after the save don't hide that the app made the title.
-    static func hasRuleTitleShape(_ title: String) -> Bool {
+    /// True when `title` is the app's own rule title for a file whose rule
+    /// gives `ruleTitle` today. "Meeting with <names>" counts only when the
+    /// names are exactly the ones the rule takes from the file's speakers, so
+    /// a typed or calendar "Meeting with Legal" never matches. "Quick notes"
+    /// and "Meeting at <time>" (in any clock format: 12 or 24 hour, any AM/PM
+    /// marker) count by shape, so naming the speakers later or a time-zone or
+    /// locale change doesn't hide that the app made them.
+    static func matchesRuleTitle(_ title: String, ruleTitle: String?) -> Bool {
         let normalized = title.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        if let ruleTitle, normalized == ruleTitle.split(whereSeparator: \.isWhitespace).joined(separator: " ") {
+            return true
+        }
         if normalized == "Quick notes" { return true }
-        if normalized.hasPrefix("Meeting with "), normalized.count > "Meeting with ".count { return true }
         return normalized.range(of: ruleTimeTitlePattern, options: .regularExpression) != nil
     }
 

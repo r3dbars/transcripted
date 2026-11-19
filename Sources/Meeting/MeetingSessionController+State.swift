@@ -718,6 +718,11 @@ final class MeetingSessionController: ObservableObject {
         taskManager.hasSpeakerReviewAwaitingAnswers
     }
 
+    /// The same, for one saved meeting.
+    func isSpeakerReviewPending(transcriptURL: URL, captureID: UUID?) -> Bool {
+        taskManager.hasSpeakerReviewAwaitingAnswers(transcriptId: captureID, transcriptURL: transcriptURL)
+    }
+
     var hasVisibleBackgroundTranscriptionWork: Bool {
         transcriptionQueue.hasVisibleBackgroundTranscriptionWork(snapshot: transcriptionQueue.currentBackgroundTranscriptionWorkSnapshot)
     }

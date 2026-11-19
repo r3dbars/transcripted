@@ -112,6 +112,17 @@ enum MeetingSessionStateMachine {
     /// -state recording. This is the answer every "don't quit / don't let
     /// dictation touch the mic / there's runtime work happening" gate should
     /// use; see `MeetingSessionController.isCaptureSessionActive`.
+    /// Recording, starting or stopping one, loading models or transcribing:
+    /// on-device meeting titles wait (`MeetingTitlesController`).
+    static func keepsTitlesWaiting(_ state: MeetingSessionState) -> Bool {
+        switch state {
+        case .loadingModels, .startingRecording, .recording, .stoppingRecording, .transcribing:
+            return true
+        case .idle, .ready, .error:
+            return false
+        }
+    }
+
     static func isCaptureSessionActive(_ state: MeetingSessionState) -> Bool {
         switch state {
         case .startingRecording, .recording, .stoppingRecording:

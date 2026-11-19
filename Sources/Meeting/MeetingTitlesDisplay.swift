@@ -62,11 +62,15 @@ enum MeetingTitlesKeys {
     /// Set instead of a summary when there was nothing to write (`too_short`,
     /// `no_usable_reply`).
     static let status = "ai_summary_status"
+    /// A short hash of the speaker names the model read
+    /// (`MeetingTitlesSpeakers.fingerprint`). When the names change (a speaker
+    /// review answered, a rename or merge), the meeting is labeled again.
+    static let speakers = "ai_summary_speakers"
     /// Written by Rename. Not an `ai_*` key: the model never writes it.
     static let titleSetByUser = "title_set_by_user"
 
     /// Every key the titles writer owns and may replace.
-    static let all: Set<String> = [title, titleReplaces, line, summary, model, version, generatedAt, status]
+    static let all: Set<String> = [title, titleReplaces, line, summary, model, version, generatedAt, status, speakers]
 
     /// Adds `title_set_by_user: true` after the frontmatter's `title:` line
     /// (or at the end of the frontmatter) unless it is already there. Text
