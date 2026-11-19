@@ -4,11 +4,11 @@ import TranscriptedCore
 // The opened Meetings card's last row: "Transcript" with a chevron and
 // "214 lines" on the right. It is closed every time the card opens
 // (`MeetingsPageOpenState`), so the lines are only laid out once asked for.
-// Revealed, each line is the speaker's name in bold, then the words, upright.
-// Hovering a line shows "▶ 0:42" at its end and clicking it plays the kept
-// audio from there; rows never follow the playhead. The name is still the
-// one-voice fix (`QuietMeetingSpeakerLabel`). After 60 lines, "Show all N
-// lines".
+// Revealed, each line is the speaker's name in bold, then the words, upright
+// and always selectable. Hovering a line shows "▶ 0:42" at its end and
+// clicking that plays the kept audio from there; rows never follow the
+// playhead. The name is still the one-voice fix (`QuietMeetingSpeakerLabel`).
+// After 60 lines, "Show all N lines".
 
 struct HomeMeetingTranscriptReveal: View {
     let item: RecentMeetingItem
@@ -72,10 +72,20 @@ struct HomeMeetingTranscriptReveal: View {
                 .frame(height: 1)
         }
         .padding(.top, 10)
-        .accessibilityLabel(Text("Transcript"))
-        .accessibilityValue(Text(isShown ? "Expanded" : "Collapsed"))
-        .accessibilityHint(Text(isShown ? "Hides the transcript" : "Shows the transcript"))
+        // Looks like the mockup's reveal row; reads as a disclosure.
+        .accessibilityRepresentation {
+            DisclosureGroup(isExpanded: Binding(get: { isShown }, set: { if $0 != isShown { onToggle() } })) {
+                EmptyView()
+            } label: {
+                Text(revealAccessibilityLabel)
+            }
+        }
         .accessibilityIdentifier("transcripted.home.meeting.show-more")
+    }
+
+    /// "Transcript, 214 lines".
+    private var revealAccessibilityLabel: String {
+        ["Transcript", P.lineCountText(content?.transcriptLines.count)].compactMap { $0 }.joined(separator: ", ")
     }
 
     @ViewBuilder
@@ -130,10 +140,9 @@ struct HomeMeetingTranscriptReveal: View {
 
 // MARK: - Transcript line
 
-/// One "Name words" line. With kept audio the whole line plays from its time
-/// on click and shows "▶ 0:42" at its end on hover; the time sits in a slot
-/// the line always leaves free, so hovering never rewraps the text. Without
-/// audio the words are selectable instead.
+/// One "Name words" line. The words are always selectable. With kept audio,
+/// hovering shows "▶ 0:42" at the end, in a slot the line always leaves
+/// free so hovering never rewraps the text, and only that plays from there.
 private struct HomeMeetingTranscriptLineRow: View {
     let line: HomeMeetingTranscriptLine
     let index: Int
@@ -169,17 +178,32 @@ private struct HomeMeetingTranscriptLineRow: View {
                     onAssign: onAssign
                 )
             }
-            words
-            if let clock {
-                Text("\u{25B6}\u{FE0E} \(clock)")
-                    .font(TextRole.small.font())
-                    .monospacedDigit()
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .frame(width: Self.timeSlotWidth, alignment: .trailing)
-                    .padding(.top, 2)
-                    .opacity(isHovering ? 1 : 0)
-                    .accessibilityHidden(true)
-                    .accessibilityIdentifier("transcripted.home.expansion.timestamp.\(index)")
+            Text(line.text)
+                .font(LibraryTokens.body)
+                .foregroundStyle(LibraryTokens.ink)
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
+            if let clock, let start = playableStart {
+                Button {
+                    play(from: start)
+                } label: {
+                    Text("\u{25B6}\u{FE0E} \(clock)")
+                        .font(TextRole.small.font())
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink3)
+                        .frame(width: Self.timeSlotWidth, alignment: .trailing)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+                .opacity(isHovering ? 1 : 0)
+                .allowsHitTesting(isHovering)
+                .help("Play from \(clock)")
+                // The line's own action says the same for VoiceOver.
+                .accessibilityHidden(true)
+                .accessibilityIdentifier("transcripted.home.expansion.timestamp.\(index)")
             }
         }
         .padding(.vertical, 3)
@@ -193,28 +217,9 @@ private struct HomeMeetingTranscriptLineRow: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.1)) { isHovering = hovering }
         }
-        .onTapGesture {
-            if let start = playableStart { play(from: start) }
-        }
-        .help(clock.map { "Play from \($0)" } ?? "")
         .modifier(LinePlayAccessibilityAction(clock: clock) {
             if let start = playableStart { play(from: start) }
         })
-    }
-
-    @ViewBuilder
-    private var words: some View {
-        let text = Text(line.text)
-            .font(LibraryTokens.body)
-            .foregroundStyle(LibraryTokens.ink)
-            .lineSpacing(3)
-            .fixedSize(horizontal: false, vertical: true)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        if playableStart == nil {
-            text.textSelection(.enabled)
-        } else {
-            text
-        }
     }
 
     private func play(from start: TimeInterval) {

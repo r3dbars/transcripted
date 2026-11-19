@@ -272,6 +272,7 @@ extension TranscriptedSettingsView {
             homeMeetingSearchQuery: $homeMeetingSearchQuery,
             homeStarredOnly: $homeStarredOnly,
             homeFindFieldFocusToken: homeFindFieldFocusToken,
+            openState: $homeMeetingOpenState,
             onAttention: {
                 if let issue = homeAttentionIssues.first {
                     reviewHomeAttentionIssue(issue)
@@ -342,7 +343,8 @@ extension TranscriptedSettingsView {
             savedSpeakerIDs: homeSavedSpeakerIDs,
             onAssignMeetingSpeakers: { meeting, assignments, completion in
                 guard let preview = homeExpandedMeetingPreview,
-                      preview.id == meeting.id else {
+                      preview.id == homeExpandedMeetingID,
+                      homeMeetingOpenState.isOpen(meeting.id, expandedID: homeExpandedMeetingID) else {
                     completion(false)
                     return
                 }
@@ -354,6 +356,9 @@ extension TranscriptedSettingsView {
             },
             onWhoSpoke: { item in
                 openWhoSpokeCard(for: item)
+            },
+            onToggleFailedMeeting: { failedMeeting in
+                toggleHomeFailedMeetingExpansion(failedMeeting)
             },
             onRetryFailedMeeting: { failedMeeting in
                 trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
@@ -414,6 +419,24 @@ extension TranscriptedSettingsView {
         .onReceive(homeViewModel.$meetingDaySections) { sections in
             revealPendingHomeMeeting(in: sections)
         }
+        // The open card re-reads its transcript when its file changes under
+        // it (Transcribe again, a titles pass), so it never shows old lines.
+        .onReceive(NotificationCenter.default.publisher(for: .meetingCaptureArtifactsDidChange).receive(on: DispatchQueue.main)) { note in
+            let ids = note.userInfo?[CaptureLibraryChange.affectedTranscriptIDsKey] as? [String] ?? []
+            rereadOpenMeetingCard(affectedIDs: ids)
+        }
+        .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
+            rereadOpenMeetingCard(affectedIDs: [])
+        }
+    }
+
+    private func rereadOpenMeetingCard(affectedIDs: [String]) {
+        guard let preview = homeExpandedMeetingPreview,
+              HomeMeetingCardPresentation.shouldRereadOpenCard(
+                  openTranscriptURL: preview.transcriptURL,
+                  affectedIDs: affectedIDs
+              ) else { return }
+        reloadExpandedMeetingPreview(preview)
     }
 
     private static func homeRevealKey(for transcriptURL: URL) -> String {

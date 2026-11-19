@@ -22,6 +22,8 @@ struct QuietHomeHeader: View {
     @Binding var searchQuery: String
     /// Bump to move keyboard focus into search (⌘F, the Find menu command).
     var searchFocusToken: Int = 0
+    /// Search gained or lost keyboard focus (Esc goes to search while it has it).
+    var onSearchFocusChange: (Bool) -> Void = { _ in }
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
     var isKeptAudioOnly: Bool = false
@@ -35,7 +37,11 @@ struct QuietHomeHeader: View {
                 Text("Meetings")
                     .font(LibraryTokens.title)
                 Spacer()
-                QuietHeaderSearchField(query: $searchQuery, focusRequestToken: searchFocusToken)
+                QuietHeaderSearchField(
+                    query: $searchQuery,
+                    focusRequestToken: searchFocusToken,
+                    onFocusChange: onSearchFocusChange
+                )
                 QuietMeetingsMoreMenu(
                     isKeptAudioOnly: isKeptAudioOnly,
                     onImportAudioFile: onImportAudioFile,
@@ -67,7 +73,10 @@ struct QuietHomeHeader: View {
 /// named speakers (`HomeMeetingListFilter`), never transcript bodies.
 struct QuietHeaderSearchField: View {
     @Binding var query: String
+    /// Focus moves here when this changes while the page is showing (⌘F),
+    /// never just because the page appears again with an old request.
     var focusRequestToken: Int = 0
+    var onFocusChange: (Bool) -> Void = { _ in }
 
     @FocusState private var isFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -84,9 +93,11 @@ struct QuietHeaderSearchField: View {
                     query = ""
                     isFocused = false
                 }
-                .task(id: focusRequestToken) {
-                    guard focusRequestToken > 0 else { return }
+                .onChange(of: focusRequestToken) { _, _ in
                     isFocused = true
+                }
+                .onChange(of: isFocused) { _, focused in
+                    onFocusChange(focused)
                 }
                 .accessibilityLabel(Text("Search meetings"))
                 .accessibilityIdentifier("transcripted.home.meeting-search.field")

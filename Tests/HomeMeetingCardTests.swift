@@ -9,16 +9,107 @@ func testHomeMeetingCard() {
     let start = Date(timeIntervalSinceReferenceDate: 800_000_000)
     typealias P = HomeMeetingCardPresentation
 
-    runSuite("Meetings group by day: Today, Yesterday, then the weekday and date") {
+    // Days and times read through an injected clock (calendar, locale, time
+    // zone, now), never the wall clock.
+    let pacific = TimeZone(identifier: "America/Los_Angeles")!
+    let usEnglish = Locale(identifier: "en_US")
+    func clock(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 12, _ minute: Int = 0,
+               locale: Locale = usEnglish, timeZone: TimeZone = pacific) -> MeetingsPageClock {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = .current
-        let today = calendar.startOfDay(for: Date())
-        assertEqual(P.dayHeader(for: today, calendar: calendar), "Today")
-        assertEqual(P.dayHeader(for: calendar.date(byAdding: .day, value: -1, to: today)!, calendar: calendar), "Yesterday")
-        let older = calendar.date(from: DateComponents(year: 2026, month: 11, day: 16))!
-        let expected = HomeDaySectionLabel.formatter.string(from: older)
-        assertEqual(P.dayHeader(for: older, calendar: calendar), expected)
-        assertEqual(HomeDaySectionLabel.formatter.dateFormat, "EEEE, MMM d", "older days read like Monday, Nov 16")
+        calendar.timeZone = timeZone
+        let now = calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute))!
+        return MeetingsPageClock(now: now, locale: locale, timeZone: timeZone)
+    }
+    func at(_ year: Int, _ month: Int, _ day: Int, _ hour: Int, _ minute: Int = 0, _ second: Int = 0,
+            timeZone: TimeZone = pacific) -> Date {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        return calendar.date(from: DateComponents(year: year, month: month, day: day, hour: hour, minute: minute, second: second))!
+    }
+
+    runSuite("Meetings group by day: Today, Yesterday, then the weekday and date") {
+        let now = clock(2026, 11, 18, 15)
+        assertEqual(P.dayHeader(for: at(2026, 11, 18, 9), clock: now), "Today")
+        assertEqual(P.dayHeader(for: at(2026, 11, 17, 22), clock: now), "Yesterday")
+        assertEqual(P.dayHeader(for: at(2026, 11, 16, 13), clock: now), "Monday, Nov 16", "older days this year: weekday and date, no year")
+    }
+
+    runSuite("Day headers move at midnight: a minute either side of it") {
+        let justAfter = clock(2026, 11, 18, 0, 1)
+        assertEqual(P.dayHeader(for: at(2026, 11, 17, 23, 59), clock: justAfter), "Yesterday",
+                    "a meeting at 11:59 PM is yesterday once the clock passes midnight")
+        assertEqual(P.dayHeader(for: at(2026, 11, 18, 0, 0, 30), clock: justAfter), "Today")
+        let justBefore = clock(2026, 11, 17, 23, 59)
+        assertEqual(P.dayHeader(for: at(2026, 11, 17, 23, 30), clock: justBefore), "Today",
+                    "the same meeting was today a minute before midnight")
+        assertEqual(P.dayHeader(for: at(2026, 11, 16, 23, 59), clock: justBefore), "Yesterday")
+    }
+
+    runSuite("A day from another year says the year, so two Nov 16s never look the same") {
+        let newYear = clock(2027, 1, 2, 10)
+        assertEqual(P.dayHeader(for: at(2027, 1, 1, 20), clock: newYear), "Yesterday")
+        assertEqual(P.dayHeader(for: at(2026, 12, 31, 20), clock: newYear), "Thursday, Dec 31, 2026",
+                    "across the year boundary the year is spelled out")
+        let thisYear = clock(2026, 11, 18)
+        assertEqual(P.dayHeader(for: at(2025, 11, 16, 13), clock: thisYear), "Sunday, Nov 16, 2025")
+        assertEqual(P.dayHeader(for: at(2026, 11, 16, 13), clock: thisYear), "Monday, Nov 16")
+        assertFalse(
+            P.dayHeader(for: at(2025, 11, 16, 13), clock: thisYear) == P.dayHeader(for: at(2026, 11, 16, 13), clock: thisYear),
+            "the same date in two years reads differently"
+        )
+    }
+
+    runSuite("Times follow the Mac's 12- or 24-hour setting and its locale") {
+        let start = at(2026, 11, 18, 14)
+        let twelve = P.timeText(for: start, clock: clock(2026, 11, 18))
+        assertTrue(twelve.hasPrefix("2:00") && twelve.hasSuffix("PM"), "US English reads 2:00 PM (got \(twelve))")
+        assertEqual(P.timeText(for: start, clock: clock(2026, 11, 18, locale: Locale(identifier: "en_US@hours=h23"))), "14:00",
+                    "a 24-hour Mac reads 14:00")
+        assertEqual(P.timeText(for: start, clock: clock(2026, 11, 18, locale: Locale(identifier: "en_GB"))), "14:00")
+        assertEqual(P.dayHeader(for: at(2026, 11, 16, 13), clock: clock(2026, 11, 18, locale: Locale(identifier: "en_GB"))),
+                    "Monday 16 Nov", "the date takes the locale's own order")
+        let tokyo = TimeZone(identifier: "Asia/Tokyo")!
+        assertEqual(P.timeText(for: start, clock: clock(2026, 11, 18, locale: Locale(identifier: "en_US@hours=h23"), timeZone: tokyo)), "07:00",
+                    "the same moment reads in the Mac's time zone")
+    }
+
+    runSuite("Days and times stay right across a daylight-saving change") {
+        // Clocks go back at 2:00 AM on Sunday, Nov 1, 2026 in California:
+        // that day is 25 hours long.
+        let sunday = clock(2026, 11, 1, 23, 30)
+        let early = at(2026, 11, 1, 0, 30)
+        let late = at(2026, 11, 1, 23, 0)
+        assertEqual(P.dayHeader(for: early, clock: sunday), "Today")
+        assertEqual(P.dayHeader(for: late, clock: sunday), "Today")
+        assertEqual(P.dayHeader(for: at(2026, 10, 31, 23, 30), clock: sunday), "Yesterday")
+        assertEqual(P.timeText(for: late, clock: clock(2026, 11, 1, locale: Locale(identifier: "en_US@hours=h23"))), "23:00")
+        let sections = P.daySections([late, early, at(2026, 10, 31, 23, 30)], date: { $0 }, clock: sunday)
+        assertEqual(sections.map(\.label), ["Today", "Yesterday"], "the long day is one section")
+        assertEqual(sections.first?.items.count, 2)
+        // Clocks go forward on Sunday, Mar 8, 2026 (a 23-hour day).
+        let spring = clock(2026, 3, 9, 8)
+        assertEqual(P.dayHeader(for: at(2026, 3, 8, 23, 30), clock: spring), "Yesterday")
+        assertEqual(P.dayHeader(for: at(2026, 3, 7, 23, 30), clock: spring), "Saturday, Mar 7")
+    }
+
+    runSuite("Each row carries its section's header, so VoiceOver says the same day") {
+        let now = clock(2026, 11, 18, 0, 1)
+        let sections = P.daySections(
+            [at(2026, 11, 18, 0, 0, 30), at(2026, 11, 17, 23, 59), at(2025, 11, 16, 9)],
+            date: { $0 }, clock: now
+        )
+        assertEqual(sections.map(\.label), ["Today", "Yesterday", "Sunday, Nov 16, 2025"])
+        for section in sections {
+            for row in section.items {
+                assertEqual(row.dayHeader, section.label, "a row's day is its header's text")
+            }
+        }
+        let yesterdayRow = sections[1].items[0]
+        assertEqual(
+            P.accessibilityLabel(title: "Weekly sync", dayHeader: yesterdayRow.dayHeader,
+                                 time: P.timeText(for: yesterdayRow.item, clock: now), start: nil, end: nil),
+            "Weekly sync, yesterday \(P.timeText(for: yesterdayRow.item, clock: now))"
+        )
     }
 
     runSuite("A closed row shows the summary line when the meeting has one") {
@@ -51,6 +142,44 @@ func testHomeMeetingCard() {
             ["Dana"],
             "an imported file has no mic track, and unnamed or repeated voices are left out"
         )
+    }
+
+    runSuite("A named mic voice stands in for You instead of being listed twice") {
+        assertEqual(P.people(speakerNames: ["Dana", "Marcus"], micVoices: ["Dana"], isImported: false), ["Dana", "Marcus"],
+                    "the mic's only voice was named Dana: one person, not You and Dana")
+        assertEqual(P.people(speakerNames: ["Marcus"], micVoices: ["You"], isImported: false), ["You", "Marcus"])
+        assertEqual(P.people(speakerNames: ["Dana", "Marcus"], micVoices: ["You", "Dana"], isImported: false), ["You", "Dana", "Marcus"],
+                    "a second person on the mic (split local speakers) still leaves You")
+        assertEqual(P.people(speakerNames: ["Marcus"], micVoices: ["Speaker 2"], isImported: false), ["You", "Marcus"],
+                    "an unnamed mic voice is you")
+        assertEqual(P.people(speakerNames: ["Marcus"], micVoices: [], isImported: false), ["You", "Marcus"],
+                    "files that don't mark channels still lead with You")
+        assertEqual(
+            P.openedSubtitle(time: "2:00 PM", start: nil, end: nil,
+                             people: P.people(speakerNames: ["Dana"], micVoices: ["Dana"], isImported: false)),
+            "2:00 PM \u{00B7} Dana"
+        )
+        assertEqual(
+            RecentMeetingSpeakerStatus.micVoices(fromLabels: ["Mic/Dana", "System/Marcus", "mic/dana", "Mic/You", "Priya"]),
+            ["Dana", "You"],
+            "the mic track's voices, once each, as written"
+        )
+        var item = RecentMeetingItem(
+            title: "1:1 with Dana", date: start, startDate: nil, endDate: nil,
+            transcriptURL: URL(fileURLWithPath: "/tmp/fictional-one-on-one.md"), audio: nil, speakerStatus: .ready
+        )
+        item.micVoices = ["Dana"]
+        let cached = CachedRecentMeetingMetadata(item: item)
+        assertEqual(cached.makeItem(transcriptURL: item.transcriptURL, audio: nil).micVoices, ["Dana"], "the cache keeps the mic voices")
+        if let encoded = try? JSONEncoder().encode(cached),
+           var object = (try? JSONSerialization.jsonObject(with: encoded)) as? [String: Any] {
+            object.removeValue(forKey: "micVoices")
+            let legacy = (try? JSONSerialization.data(withJSONObject: object)) ?? Data()
+            assertNil(try? JSONDecoder().decode(CachedRecentMeetingMetadata.self, from: legacy),
+                      "a cached row from before mic voices misses once, so the meeting is reparsed")
+        } else {
+            assertTrue(false, "payload should encode")
+        }
         assertEqual(P.participantsText(["You", "Priya", "Leo", "Sam", "Ana"]), "You, Priya, Leo +2")
     }
 
@@ -139,6 +268,41 @@ func testHomeMeetingCard() {
         assertFalse(state.showsAllLines, "hiding the transcript forgets Show all")
     }
 
+    runSuite("Renaming the open meeting keeps it open with its transcript and Show all") {
+        var state = MeetingsPageOpenState()
+        assertTrue(state.sync(openID: "/m/Weekly sync.md"), "opening is a fresh open")
+        state.toggleTranscript()
+        state.showAllLines()
+        state.followRename(from: "/m/Weekly sync.md", to: "/m/Release plan.md")
+        assertFalse(state.sync(openID: "/m/Release plan.md"), "the shell following the rename is not a new open")
+        assertTrue(state.isTranscriptShown(for: "/m/Release plan.md"), "the reveal stays open")
+        assertTrue(state.showsAllLines(for: "/m/Release plan.md"), "Show all stays")
+        assertTrue(state.isOpen("/m/Weekly sync.md", expandedID: "/m/Release plan.md"),
+                   "the row still listed under its old path stays open until the list refreshes")
+        assertTrue(state.isTranscriptShown(for: "/m/Weekly sync.md"), "and keeps its transcript showing meanwhile")
+        assertTrue(state.isOpen("/m/Release plan.md", expandedID: "/m/Release plan.md"))
+        assertFalse(state.isOpen("/m/Other.md", expandedID: "/m/Release plan.md"))
+        state.sync(openID: "/m/Other.md")
+        assertFalse(state.isOpen("/m/Weekly sync.md", expandedID: "/m/Other.md"), "opening another row ends the carry-over")
+        assertFalse(state.isTranscriptShown(for: "/m/Other.md"))
+        var other = MeetingsPageOpenState()
+        other.sync(openID: "/m/A.md")
+        other.followRename(from: "/m/B.md", to: "/m/C.md")
+        assertEqual(other.openID, "/m/A.md", "renaming a meeting that isn't open changes nothing")
+    }
+
+    runSuite("Failed and saved rows share one open slot") {
+        let id = UUID(uuidString: "00000000-0000-0000-0000-000000000042")!
+        let key = MeetingsPageOpenState.failedMeetingKey(id)
+        assertFalse(key.hasPrefix("/"), "never mistaken for a saved meeting's path")
+        assertEqual(MeetingsPageOpenState.nextOpenID(current: "/m/Weekly sync.md", tapped: key), key,
+                    "opening a failed row closes the open saved one")
+        assertEqual(MeetingsPageOpenState.nextOpenID(current: key, tapped: key), nil)
+        var state = MeetingsPageOpenState()
+        state.sync(openID: key)
+        assertFalse(state.isTranscriptShown(for: key))
+    }
+
     runSuite("The transcript reveal says what it holds") {
         assertEqual(P.revealTitle(isShown: false), "Transcript")
         assertEqual(P.revealTitle(isShown: true), "Hide transcript")
@@ -168,37 +332,87 @@ func testHomeMeetingCard() {
         assertEqual(P.spokenDuration(start: start, end: start.addingTimeInterval(20)), "less than a minute")
     }
 
-    runSuite("The titles opt-in line shows only while it has something to offer") {
+    runSuite("The titles opt-in line follows the titles controller wherever it was turned on") {
         typealias Line = MeetingTitlesOptInLine
         func state(
             enabled: Bool = false,
             status: MeetingTitlesController.ModelStatus = .notDownloaded,
             dismissed: Bool = false,
             automated: Bool = false,
-            hasMeetings: Bool = true,
-            startedHere: Bool = false
+            hasMeetings: Bool = true
         ) -> Line.State {
             Line.state(isEnabled: enabled, status: status, dismissed: dismissed,
-                       isAutomatedLaunch: automated, hasMeetings: hasMeetings, startedHere: startedHere)
+                       isAutomatedLaunch: automated, hasMeetings: hasMeetings)
         }
         assertEqual(Line.offer, "Get titles and summaries \u{00B7} 3.1 GB download")
-        assertEqual(state(), .offer, "off: offer it")
+        assertEqual(state(), .offer("Get titles and summaries \u{00B7} 3.1 GB download"), "off: offer it with its size")
+        assertEqual(state(status: .ready), .offer("Get titles and summaries"),
+                    "off with the model already on disk: nothing to download, so no size")
         assertEqual(state(dismissed: true), .hidden, "dismissed for good")
         assertEqual(state(automated: true), .hidden, "never during automated launches")
         assertEqual(state(hasMeetings: false), .hidden, "an empty library has its own first-run words")
-        assertEqual(state(enabled: true, status: .downloading(received: 1, total: 4)), .hidden,
-                    "turned on in Settings: the Settings row shows the download, not this line")
-        if case .downloading(let fraction, let text) = state(
-            enabled: true, status: .downloading(received: 50, total: 200), startedHere: true
-        ) {
+        if case .downloading(let fraction, let text) = state(enabled: true, status: .downloading(received: 50, total: 200)) {
             assertEqual(fraction, 0.25)
             assertTrue(text.hasPrefix("Downloading "), "says it is downloading")
         } else {
-            assertTrue(false, "turned on here: the line shows the download")
+            assertTrue(false, "on and downloading: the line shows the download, wherever it was turned on")
         }
-        assertEqual(state(enabled: true, status: .failed(.offline), startedHere: true), .failed("Download stopped"))
-        assertEqual(state(enabled: true, status: .ready, startedHere: true), .hidden, "ready: it goes")
-        assertEqual(state(enabled: true, status: .ready, dismissed: true, automated: true, startedHere: true), .hidden)
+        assertEqual(state(enabled: true, status: .notDownloaded), .downloading(fraction: 0, text: "Starting download\u{2026}"))
+        assertEqual(state(enabled: true, status: .failed(.offline)), .failed("Download stopped"),
+                    "a failure shows here too, not only in Settings")
+        assertEqual(state(enabled: true, status: .ready), .hidden, "ready: it goes")
+        assertEqual(state(enabled: true, status: .downloading(received: 1, total: 4), dismissed: true), .hidden,
+                    "a dismissed line stays gone; Settings still shows the download")
+    }
+
+    runSuite("Who spoke? in the opened card's menu only opens when there is a card") {
+        typealias W = P.WhoSpokeAvailability
+        assertEqual(P.whoSpokeAvailability(isOpen: false, hasQueuedReview: false, transcript: .notLoaded), W.hidden,
+                    "a closed row with nothing waiting doesn't offer it")
+        assertEqual(P.whoSpokeAvailability(isOpen: false, hasQueuedReview: true, transcript: .notLoaded), W.enabled,
+                    "voices waiting in review: their card")
+        assertEqual(P.whoSpokeAvailability(isOpen: true, hasQueuedReview: false, transcript: .notLoaded), W.disabled,
+                    "greyed while the opened card's lines load")
+        assertEqual(P.whoSpokeAvailability(isOpen: true, hasQueuedReview: false, transcript: .failed), W.disabled)
+        assertEqual(P.whoSpokeAvailability(isOpen: true, hasQueuedReview: false, transcript: .loaded(speakerLineCount: 0)), W.disabled,
+                    "a transcript with no speaker lines has nobody to name")
+        assertEqual(P.whoSpokeAvailability(isOpen: true, hasQueuedReview: false, transcript: .loaded(speakerLineCount: 214)), W.enabled,
+                    "loaded lines: the card built from the transcript")
+        assertEqual(P.whoSpokeAvailability(isOpen: true, hasQueuedReview: true, transcript: .notLoaded), W.enabled)
+    }
+
+    runSuite("A failed row reads as one button with Try again as a named action") {
+        let slot = P.Slot.problem("Not transcribed", actionTitle: "Try again")
+        let ready = P.failedRowAccessibility(title: "Weekly sync", dayHeader: "Today", time: "10:00 AM", slot: slot, retryIsEnabled: true)
+        assertEqual(ready.label, "Weekly sync, today 10:00 AM")
+        assertEqual(ready.value, "Not transcribed")
+        assertEqual(ready.actionNames, ["Try again"], "VoiceOver reaches Try again from the row")
+        let blocked = P.failedRowAccessibility(title: "Weekly sync", dayHeader: "Monday, Nov 16", time: "10:00 AM", slot: slot, retryIsEnabled: false)
+        assertEqual(blocked.actionNames, [], "no action while a retry can't start")
+        assertEqual(blocked.label, "Weekly sync, Monday, Nov 16 10:00 AM")
+        let retrying = P.failedRowAccessibility(title: "Weekly sync", dayHeader: "Today", time: "10:00 AM",
+                                                slot: .working("Retrying", percent: nil), retryIsEnabled: true)
+        assertEqual(retrying.value, "Retrying")
+        assertEqual(retrying.actionNames, [])
+        let missing = P.failedRowAccessibility(title: "Weekly sync", dayHeader: "Today", time: "10:00 AM",
+                                               slot: .problem("Audio missing", actionTitle: nil), retryIsEnabled: true)
+        assertEqual(missing.actionNames, [], "nothing to retry without audio")
+    }
+
+    runSuite("The scrubber hides its times until the length is known") {
+        assertNil(P.scrubberClockTexts(fraction: 0, total: 0), "never 0:00 / 0:00")
+        let known = P.scrubberClockTexts(fraction: 0.5, total: 96)
+        assertEqual(known?.elapsed, "0:48")
+        assertEqual(known?.total, "1:36")
+        assertEqual(P.scrubberClockTexts(fraction: 2, total: 60)?.elapsed, "1:00", "a drag past the end stops at the end")
+    }
+
+    runSuite("The open card re-reads its transcript when that file changes") {
+        let open = URL(fileURLWithPath: "/tmp/fictional/Pricing page review.md")
+        assertTrue(P.shouldRereadOpenCard(openTranscriptURL: open, affectedIDs: [open.standardizedFileURL.path]))
+        assertTrue(P.shouldRereadOpenCard(openTranscriptURL: open, affectedIDs: []), "a library-wide change includes it")
+        assertFalse(P.shouldRereadOpenCard(openTranscriptURL: open, affectedIDs: ["/tmp/fictional/Weekly sync.md"]))
+        assertFalse(P.shouldRereadOpenCard(openTranscriptURL: nil, affectedIDs: []), "nothing open, nothing to read")
     }
 
     runSuite("Search finds a meeting by its line and summary, not just its title") {

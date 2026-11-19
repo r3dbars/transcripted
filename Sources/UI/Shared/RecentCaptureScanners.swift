@@ -17,6 +17,10 @@ struct RecentMeetingItem: Identifiable, Sendable {
     /// Named speakers from the transcript body, for the Home meetings search.
     /// Generic labels ("You", "Speaker 2") are left out.
     var speakerNames: [String] = []
+    /// The mic track's voices as written ("You", "Speaker 2", "Dana"), so the
+    /// Meetings row doesn't list "You" and a named mic voice as two people.
+    /// Empty when the transcript doesn't mark channels.
+    var micVoices: [String] = []
     /// Raw `transcription_engine` frontmatter id (e.g. `parakeet_local`), or
     /// nil for files saved without one.
     var transcriptionEngine: String? = nil
@@ -144,6 +148,25 @@ enum RecentMeetingSpeakerStatus: Equatable, Sendable {
     }
 
     private static let maxSpeakerNames = 24
+
+    /// Distinct voices on the mic track ("Mic/You", "Mic/Dana"), in
+    /// first-seen order, generic labels included: the Meetings row reads
+    /// them to know whether "You" was given a name.
+    static func micVoices(fromLabels speakerLabels: [String]) -> [String] {
+        var voices: [String] = []
+        var seen = Set<String>()
+        for rawLabel in speakerLabels {
+            let trimmed = rawLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let slash = trimmed.firstIndex(of: "/"),
+                  trimmed[..<slash].lowercased() == "mic" else { continue }
+            let name = String(trimmed[trimmed.index(after: slash)...])
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !name.isEmpty, seen.insert(name.lowercased()).inserted else { continue }
+            voices.append(name)
+            if voices.count >= maxSpeakerNames { break }
+        }
+        return voices
+    }
 
     private static func nameWithoutChannelPrefix(_ label: String) -> String {
         let trimmed = label.trimmingCharacters(in: .whitespacesAndNewlines)

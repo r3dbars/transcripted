@@ -135,8 +135,11 @@ struct HomeMeetingSlotText: View {
 
 struct QuietMeetingCard: View {
     let item: RecentMeetingItem
-    /// The day header above it ("Today"), for its VoiceOver label.
+    /// The day header above it ("Today"), for its VoiceOver label: the same
+    /// text the section shows.
     var dayHeader: String = ""
+    /// The page's calendar, locale, time zone and now.
+    var clock: MeetingsPageClock = .current()
     let isExpanded: Bool
     /// The full transcript, once an opened card has read it.
     let preview: HomeMeetingPreview?
@@ -148,6 +151,9 @@ struct QuietMeetingCard: View {
     var voicesToName: Int = 0
     var isTranscriptShown: Bool = false
     var showsAllLines: Bool = false
+    /// False while the search field has keyboard focus, so Esc clears the
+    /// search there instead of closing this card.
+    var escapeClosesCard: Bool = true
     let knownPeople: [SpeakerNameChoice]
     let savedSpeakerIDs: Set<UUID>
     let onToggleExpanded: () -> Void
@@ -164,12 +170,16 @@ struct QuietMeetingCard: View {
     private typealias P = HomeMeetingCardPresentation
     private typealias Layout = HomeMeetingRowLayout
 
+    /// The opened header's top inset, inside the row button so the whole
+    /// header stays one click target.
+    private static let openedTopInset: CGFloat = 16
+
     private var people: [String] {
-        P.people(speakerNames: item.speakerNames, isImported: item.importedAt != nil)
+        P.people(speakerNames: item.speakerNames, micVoices: item.micVoices, isImported: item.importedAt != nil)
     }
 
     private var timeText: String {
-        HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date)
+        P.timeText(for: item.startDate ?? item.date, clock: clock)
     }
 
     private var slot: P.Slot {
@@ -179,7 +189,7 @@ struct QuietMeetingCard: View {
     private var accessibilityLabel: String {
         P.accessibilityLabel(
             title: item.displayTitle,
-            dayHeader: dayHeader.isEmpty ? P.dayHeader(for: item.listDate) : dayHeader,
+            dayHeader: dayHeader.isEmpty ? P.dayHeader(for: item.listDate, clock: clock) : dayHeader,
             time: timeText,
             start: item.startDate,
             end: item.endDate
@@ -188,12 +198,10 @@ struct QuietMeetingCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
+            header
             if isExpanded {
-                openedHeader
                 openedBody
                     .transition(.opacity)
-            } else {
-                closedRow
             }
         }
         .homeMeetingRowSurface(isOpen: isExpanded)
@@ -202,10 +210,12 @@ struct QuietMeetingCard: View {
         .onTapGesture {}
         .background {
             if isExpanded {
-                // Hidden control so Esc collapses the opened card.
+                // Hidden control so Esc collapses the opened card. Off while
+                // search has focus, where Esc clears the search first.
                 Button(action: onCollapse) { EmptyView() }
                     .buttonStyle(.plain)
                     .keyboardShortcut(.cancelAction)
+                    .disabled(!escapeClosesCard)
                     .opacity(0)
                     .accessibilityHidden(true)
             }
@@ -217,10 +227,68 @@ struct QuietMeetingCard: View {
         .accessibilityIdentifier(isExpanded ? "transcripted.home.expansion" : "transcripted.home.meeting.card")
     }
 
-    // MARK: Closed
+    // MARK: Header (closed row and opened header)
 
-    private var closedRow: some View {
-        Button(action: onToggleExpanded) {
+    /// One button for the closed row and the opened header, so keyboard
+    /// focus stays on this meeting when it opens or closes and Tab carries
+    /// on from here. Copy and ⋯ sit beside it while open.
+    private var header: some View {
+        HStack(alignment: .top, spacing: Layout.columnGap) {
+            Button(action: onToggleExpanded) {
+                headerLabel
+                    .padding(.top, isExpanded ? Self.openedTopInset : Layout.rowPadding)
+                    .padding(.bottom, isExpanded ? 0 : Layout.rowPadding)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .onHover { isHovering = $0 }
+            .help(isExpanded ? "Close" : "")
+            .homeMeetingRowKeys(onToggleExpanded)
+            .accessibilityLabel(Text(accessibilityLabel))
+            .accessibilityValue(Text(isExpanded ? "" : P.spokenSlot(slot)))
+            .accessibilityHint(Text(isExpanded ? "Closes the meeting" : "Opens the meeting"))
+            .overlay(alignment: isExpanded ? .topLeading : .leading) {
+                if let audio = item.audio {
+                    HomeMeetingPlayButton(audio: audio, look: isExpanded ? .filled : .outline)
+                        .padding(.top, isExpanded ? Self.openedTopInset : 0)
+                }
+            }
+
+            if isExpanded {
+                HStack(spacing: 2) {
+                    Button(isCopied ? "Copied" : "Copy", action: onCopy)
+                        .buttonStyle(.transcriptedQuiet)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("transcripted.home.row.copy")
+                    HomeRowMoreMenuButton(items: menuItems)
+                        .frame(width: 28, height: 24)
+                        .help("More options")
+                }
+                .padding(.top, Self.openedTopInset - 2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var headerLabel: some View {
+        if isExpanded {
+            HStack(alignment: .top, spacing: Layout.columnGap) {
+                Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayTitle)
+                        .textRole(.heading)
+                        .foregroundStyle(LibraryTokens.ink)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("transcripted.home.expansion.title")
+                    Text(P.openedSubtitle(time: timeText, start: item.startDate, end: item.endDate, people: people))
+                        .font(LibraryTokens.meta)
+                        .monospacedDigit()
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+            }
+        } else {
             HStack(alignment: .center, spacing: Layout.columnGap) {
                 Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
                 HStack(alignment: .firstTextBaseline, spacing: Layout.columnGap) {
@@ -241,77 +309,10 @@ struct QuietMeetingCard: View {
                         .lineLimit(1)
                 }
             }
-            .padding(.vertical, Layout.rowPadding)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .homeMeetingRowKeys(onToggleExpanded)
-        .accessibilityLabel(Text(accessibilityLabel))
-        .accessibilityValue(Text(slotSpokenText))
-        .accessibilityHint(Text("Opens the meeting"))
-        .overlay(alignment: .leading) {
-            if let audio = item.audio {
-                HomeMeetingPlayButton(audio: audio)
-            }
-        }
-    }
-
-    private var slotSpokenText: String {
-        switch slot {
-        case .summary(let text), .fallback(let text): return text
-        case .working(let text, _), .problem(let text, _): return text
-        case .empty: return ""
         }
     }
 
     // MARK: Opened
-
-    private var openedHeader: some View {
-        HStack(alignment: .top, spacing: Layout.columnGap) {
-            Button(action: onToggleExpanded) {
-                HStack(alignment: .top, spacing: Layout.columnGap) {
-                    Color.clear.frame(width: Layout.playColumn, height: Layout.playColumn)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.displayTitle)
-                            .textRole(.heading)
-                            .foregroundStyle(LibraryTokens.ink)
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("transcripted.home.expansion.title")
-                        Text(P.openedSubtitle(time: timeText, start: item.startDate, end: item.endDate, people: people))
-                            .font(LibraryTokens.meta)
-                            .monospacedDigit()
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: 8)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Close")
-            .homeMeetingRowKeys(onToggleExpanded)
-            .accessibilityLabel(Text(accessibilityLabel))
-            .accessibilityHint(Text("Closes the meeting"))
-            .overlay(alignment: .topLeading) {
-                if let audio = item.audio {
-                    HomeMeetingPlayButton(audio: audio, look: .filled)
-                }
-            }
-
-            HStack(spacing: 2) {
-                Button(isCopied ? "Copied" : "Copy", action: onCopy)
-                    .buttonStyle(.transcriptedQuiet)
-                    .controlSize(.small)
-                    .accessibilityIdentifier("transcripted.home.row.copy")
-                HomeRowMoreMenuButton(items: menuItems)
-                    .frame(width: 28, height: 24)
-                    .help("More options")
-            }
-            .padding(.top, -2)
-        }
-        .padding(.top, 16)
-    }
 
     private var openedBody: some View {
         VStack(alignment: .leading, spacing: 0) {

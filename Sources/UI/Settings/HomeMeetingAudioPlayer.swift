@@ -94,7 +94,8 @@ struct HomeMeetingPlayButton: View {
 
 /// The opened card's scrubber: elapsed · thin bar · total, and the track
 /// picker when there is more than one. Before the audio has loaded, the total
-/// is the meeting's length and clicking the bar starts playing from there.
+/// is the meeting's length and clicking the bar starts playing from there;
+/// with no length to go on, the times stay hidden until it plays.
 struct HomeMeetingScrubber: View {
     let audio: MeetingAudioAttachment
     /// The meeting's length, used until the audio itself says.
@@ -112,11 +113,18 @@ struct HomeMeetingScrubber: View {
 
     var body: some View {
         let fraction = dragFraction ?? (isActive ? playback.progress(for: audio) : 0)
+        // No times until the length is known (a failed meeting before it
+        // plays), rather than "0:00 / 0:00".
+        let clocks = HomeMeetingCardPresentation.scrubberClockTexts(fraction: fraction, total: total)
         HStack(spacing: 8) {
-            Text(MeetingAudioPlayback.clockText(fraction * total))
-                .frame(minWidth: 28, alignment: .leading)
+            if let clocks {
+                Text(clocks.elapsed)
+                    .frame(minWidth: 28, alignment: .leading)
+            }
             bar(fraction: fraction)
-            Text(MeetingAudioPlayback.clockText(total))
+            if let clocks {
+                Text(clocks.total)
+            }
             MeetingAudioSourceMenu(
                 attachment: audio,
                 selectedChoiceID: selectedChoiceBinding

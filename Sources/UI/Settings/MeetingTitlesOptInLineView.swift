@@ -1,17 +1,18 @@
 import SwiftUI
 
 /// One quiet line under the Meetings header while on-device titles are off:
-/// "Get titles and summaries · 3.1 GB download", Turn on, Dismiss. Turn on
-/// flips the feature's own switch (the Settings › Meetings row); the line
-/// then shows the download and goes once the model is ready. Dismiss hides it
-/// for good. Never shown during automated launches. Rules:
-/// `MeetingTitlesOptInLine`.
+/// "Get titles and summaries · 3.1 GB download" (no size when the model is
+/// already on disk), Turn on, Dismiss. Turn on flips the feature's own switch
+/// (the Settings › Meetings row). The line reads only the controller's
+/// published state, so the download, a failure and its Try again show here
+/// however and wherever it was turned on, and it goes once the model is
+/// ready. Dismiss hides it for good. Never shown during automated launches.
+/// Rules: `MeetingTitlesOptInLine`.
 struct MeetingTitlesOptInLineView: View {
     let hasMeetings: Bool
 
     @ObservedObject private var controller = MeetingTitlesController.shared
     @AppStorage(MeetingTitlesOptInLine.dismissedKey) private var dismissed = false
-    @State private var startedHere = false
 
     private var state: MeetingTitlesOptInLine.State {
         MeetingTitlesOptInLine.state(
@@ -19,8 +20,7 @@ struct MeetingTitlesOptInLineView: View {
             status: controller.modelStatus,
             dismissed: dismissed,
             isAutomatedLaunch: AutomatedLaunchEnvironment.isActive(),
-            hasMeetings: hasMeetings,
-            startedHere: startedHere
+            hasMeetings: hasMeetings
         )
     }
 
@@ -28,12 +28,11 @@ struct MeetingTitlesOptInLineView: View {
         switch state {
         case .hidden:
             EmptyView()
-        case .offer:
+        case .offer(let offer):
             HStack(spacing: 10) {
-                Text(MeetingTitlesOptInLine.offer)
+                Text(offer)
                     .foregroundStyle(LibraryTokens.ink2)
                 Button(MeetingTitlesOptInLine.turnOnTitle) {
-                    startedHere = true
                     controller.setEnabled(true)
                 }
                 .buttonStyle(.transcriptedQuiet)

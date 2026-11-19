@@ -15,23 +15,83 @@ enum HomeMeetingCardPresentation {
     /// Names in a subtitle before "+N".
     static let participantLimit = 3
 
-    // MARK: Day headers
+    // MARK: Days and times
 
-    /// "Today", "Yesterday", then "Monday, Nov 16" (`HomeDaySectionLabel`).
-    static func dayHeader(for day: Date, calendar: Calendar = .current) -> String {
-        HomeDaySectionLabel.label(for: day, calendar: calendar)
+    /// "Today", "Yesterday", then "Monday, Nov 16" in the reader's own order
+    /// and words, with the year when it isn't this year ("Monday, Nov 16,
+    /// 2025"), so two Nov 16s in search results never look the same.
+    static func dayHeader(for date: Date, clock: MeetingsPageClock) -> String {
+        let calendar = clock.calendar
+        let today = calendar.startOfDay(for: clock.now)
+        let day = calendar.startOfDay(for: date)
+        if day == today { return "Today" }
+        if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), day == yesterday {
+            return "Yesterday"
+        }
+        var style = Date.FormatStyle(locale: clock.locale, calendar: calendar, timeZone: clock.timeZone)
+            .weekday(.wide).month(.abbreviated).day()
+        if calendar.component(.year, from: day) != calendar.component(.year, from: today) {
+            style = style.year()
+        }
+        return date.formatted(style)
+    }
+
+    /// A row's start time, "2:00 PM" or "14:00" as the reader's Mac is set.
+    static func timeText(for date: Date, clock: MeetingsPageClock) -> String {
+        date.formatted(Date.FormatStyle(
+            date: .omitted, time: .shortened,
+            locale: clock.locale, calendar: clock.calendar, timeZone: clock.timeZone
+        ))
+    }
+
+    /// The rows grouped by day, newest first as given, each row carrying the
+    /// exact header text its section shows (VoiceOver reads the same words).
+    static func daySections<Item>(
+        _ items: [Item],
+        date: (Item) -> Date,
+        clock: MeetingsPageClock
+    ) -> [HomeDaySection<MeetingsPageDayRow<Item>>] {
+        var buckets: [(day: Date, items: [Item])] = []
+        for item in items {
+            let day = clock.calendar.startOfDay(for: date(item))
+            if let index = buckets.firstIndex(where: { $0.day == day }) {
+                buckets[index].items.append(item)
+            } else {
+                buckets.append((day, [item]))
+            }
+        }
+        return buckets.map { bucket in
+            let header = dayHeader(for: bucket.day, clock: clock)
+            return HomeDaySection(
+                day: bucket.day,
+                label: header,
+                items: bucket.items.map { MeetingsPageDayRow(item: $0, dayHeader: header) }
+            )
+        }
     }
 
     // MARK: People and length
 
     /// Who was there, from the scanned metadata only (closed rows never read
-    /// the transcript). The mic track is always you, so a recorded meeting
-    /// leads with "You"; an imported file has no mic track and lists only
-    /// the names found in it.
-    static func people(speakerNames: [String], isImported: Bool) -> [String] {
+    /// the transcript). The mic track is you: a recorded meeting leads with
+    /// "You", unless every voice on the mic was given a name, which then
+    /// stands in for "You" instead of being listed a second time
+    /// (`micVoices`, the mic-track voices as written; empty for files that
+    /// don't say). An imported file has no mic track and lists only the
+    /// names found in it.
+    static func people(speakerNames: [String], micVoices: [String] = [], isImported: Bool) -> [String] {
+        var lead: [String] = []
+        if !isImported {
+            let mic = micVoices
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let named = mic.filter { !isUnnamedVoice($0) && $0.lowercased() != "you" }
+            let micHasYou = mic.isEmpty || named.count < mic.count
+            lead = (micHasYou ? ["You"] : []) + named
+        }
         var seen = Set<String>()
         var people: [String] = []
-        for name in (isImported ? [] : ["You"]) + speakerNames {
+        for name in lead + speakerNames {
             let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty, !isUnnamedVoice(trimmed), seen.insert(trimmed.lowercased()).inserted else { continue }
             people.append(trimmed)
@@ -156,6 +216,55 @@ enum HomeMeetingCardPresentation {
         HomeRowMenuPolicy.visibleMenuEntries(entries)
     }
 
+    /// The scrubber's "0:42" and "48:00", or nil while the length is still
+    /// unknown (a failed meeting before its audio has played), so it never
+    /// reads "0:00 / 0:00".
+    static func scrubberClockTexts(fraction: Double, total: TimeInterval) -> (elapsed: String, total: String)? {
+        guard total > 0 else { return nil }
+        let clamped = min(max(fraction, 0), 1)
+        return (MeetingAudioPlayback.clockText(clamped * total), MeetingAudioPlayback.clockText(total))
+    }
+
+    // MARK: Who spoke?
+
+    /// What the opened card knows about its transcript for "Who spoke?".
+    enum TranscriptRead: Equatable {
+        case notLoaded
+        case failed
+        case loaded(speakerLineCount: Int)
+    }
+
+    enum WhoSpokeAvailability: Equatable {
+        /// Not in the menu (a closed row with nothing waiting).
+        case hidden
+        /// In the opened card's menu but greyed: the lines are still loading,
+        /// or the transcript has no speaker lines to name.
+        case disabled
+        case enabled
+    }
+
+    /// "Who spoke?" in ⋯ always has a card to open: the review queue's card
+    /// when this meeting has voices waiting, else one built from the opened
+    /// transcript's speaker lines. The opened card always lists it; it is
+    /// greyed until there is a card, so it never drops the reader on
+    /// Speakers with nothing to answer.
+    static func whoSpokeAvailability(isOpen: Bool, hasQueuedReview: Bool, transcript: TranscriptRead) -> WhoSpokeAvailability {
+        if hasQueuedReview { return .enabled }
+        guard isOpen else { return .hidden }
+        if case .loaded(let count) = transcript, count > 0 { return .enabled }
+        return .disabled
+    }
+
+    // MARK: The open card after its file changes
+
+    /// Whether a change to saved meetings (`affectedIDs` from
+    /// `CaptureLibraryChange`, empty for a library-wide change) touched the
+    /// open card's transcript, so the card re-reads it.
+    static func shouldRereadOpenCard(openTranscriptURL: URL?, affectedIDs: [String]) -> Bool {
+        guard let openTranscriptURL else { return false }
+        return affectedIDs.isEmpty || affectedIDs.contains(openTranscriptURL.standardizedFileURL.path)
+    }
+
     // MARK: VoiceOver
 
     /// "Pricing page review, today 2:00 PM, 48 minutes".
@@ -164,6 +273,39 @@ enum HomeMeetingCardPresentation {
         var parts = [title, "\(day) \(time)"]
         if let length = spokenDuration(start: start, end: end) { parts.append(length) }
         return parts.joined(separator: ", ")
+    }
+
+    /// What a slot says to VoiceOver as the row's value.
+    static func spokenSlot(_ slot: Slot) -> String {
+        switch slot {
+        case .summary(let text), .fallback(let text), .working(let text, _), .problem(let text, _): return text
+        case .empty: return ""
+        }
+    }
+
+    /// A failed meeting's row for VoiceOver: label, value, and the named
+    /// actions on the row itself. "Try again" is also its own button beside
+    /// the status; the row's action reaches it without hunting for it.
+    struct FailedRowAccessibility: Equatable {
+        let label: String
+        let value: String
+        let actionNames: [String]
+    }
+
+    static func failedRowAccessibility(
+        title: String,
+        dayHeader: String,
+        time: String,
+        slot: Slot,
+        retryIsEnabled: Bool
+    ) -> FailedRowAccessibility {
+        var actions: [String] = []
+        if case .problem(_, let actionTitle?) = slot, retryIsEnabled { actions.append(actionTitle) }
+        return FailedRowAccessibility(
+            label: accessibilityLabel(title: title, dayHeader: dayHeader, time: time, start: nil, end: nil),
+            value: spokenSlot(slot),
+            actionNames: actions
+        )
     }
 
     /// "48 minutes", "1 hour 5 minutes", "less than a minute".
@@ -177,27 +319,96 @@ enum HomeMeetingCardPresentation {
     }
 }
 
+// MARK: - Clock
+
+/// The calendar, locale, time zone and "now" the page's days and times are
+/// read with. The page takes a fresh one when it appears and when the day,
+/// the time zone or the locale changes, so "Today" turns into "Yesterday" at
+/// midnight without a restart; tests pass a fixed one.
+struct MeetingsPageClock: Equatable {
+    let calendar: Calendar
+    let locale: Locale
+    let timeZone: TimeZone
+    let now: Date
+
+    init(now: Date, locale: Locale, timeZone: TimeZone, calendar: Calendar = Calendar(identifier: .gregorian)) {
+        var calendar = calendar
+        calendar.locale = locale
+        calendar.timeZone = timeZone
+        self.calendar = calendar
+        self.locale = locale
+        self.timeZone = timeZone
+        self.now = now
+    }
+
+    /// The Mac's own settings (12/24-hour included) as of `now`.
+    static func current(now: Date = Date()) -> MeetingsPageClock {
+        MeetingsPageClock(
+            now: now,
+            locale: .autoupdatingCurrent,
+            timeZone: .autoupdatingCurrent,
+            calendar: .autoupdatingCurrent
+        )
+    }
+}
+
+/// One row in a day section, with the header its section shows.
+struct MeetingsPageDayRow<Item> {
+    let item: Item
+    let dayHeader: String
+}
+
 // MARK: - Open state
 
 /// Which row is open and whether its transcript is showing. Only one row is
 /// open at a time, and opening a row (even the same one again) always starts
-/// with the transcript closed.
+/// with the transcript closed. A rename changes a meeting's id (its path);
+/// `followRename` carries the open card, its reveal and Show all across it,
+/// and keeps the old id open until the list shows the renamed row.
 struct MeetingsPageOpenState: Equatable {
     private(set) var openID: String?
     private(set) var isTranscriptShown = false
     private(set) var showsAllLines = false
+    /// The open meeting's id before its last rename.
+    private(set) var renamedFromID: String?
 
     /// Clicking a row: opens it, or closes it when it is the open one.
     static func nextOpenID(current: String?, tapped: String) -> String? {
         current == tapped ? nil : tapped
     }
 
+    /// The open-row key for a failed meeting. Saved and failed rows share one
+    /// open slot, so opening either closes the other; a path never starts
+    /// with this.
+    static func failedMeetingKey(_ id: UUID) -> String {
+        "failed-meeting:\(id.uuidString)"
+    }
+
     /// Follow the open row. A different row (or none) resets the transcript.
-    mutating func sync(openID newID: String?) {
-        guard newID != openID else { return }
+    /// True when that was a fresh open (the page scrolls the card into view).
+    @discardableResult
+    mutating func sync(openID newID: String?) -> Bool {
+        guard newID != openID else { return false }
         openID = newID
         isTranscriptShown = false
         showsAllLines = false
+        renamedFromID = nil
+        return newID != nil
+    }
+
+    /// The open meeting was renamed from `oldID` to `newID`: same card.
+    mutating func followRename(from oldID: String, to newID: String) {
+        guard openID == oldID, oldID != newID else { return }
+        openID = newID
+        renamedFromID = oldID
+    }
+
+    /// Whether the row with `rowID` is the open one, given the shell's open
+    /// id. The row still listed under its old path during a rename counts.
+    func isOpen(_ rowID: String, expandedID: String?) -> Bool {
+        guard let expandedID else { return false }
+        if rowID == expandedID { return true }
+        return openID == expandedID && renamedFromID == rowID
     }
 
     mutating func toggleTranscript() {
@@ -212,11 +423,15 @@ struct MeetingsPageOpenState: Equatable {
     }
 
     func isTranscriptShown(for id: String) -> Bool {
-        openID == id && isTranscriptShown
+        matches(id) && isTranscriptShown
     }
 
     func showsAllLines(for id: String) -> Bool {
-        openID == id && showsAllLines
+        matches(id) && showsAllLines
+    }
+
+    private func matches(_ id: String) -> Bool {
+        openID != nil && (openID == id || renamedFromID == id)
     }
 }
 
@@ -227,36 +442,38 @@ struct MeetingsPageOpenState: Equatable {
 /// (`MeetingTitlesController.setEnabled`), the same one Settings shows.
 enum MeetingTitlesOptInLine {
     static let dismissedKey = "meetingTitlesOptInLineDismissed"
-    static let offer = "Get titles and summaries \u{00B7} \(MeetingTitlesController.downloadSizeLabel)"
+    static let offerTitle = "Get titles and summaries"
+    /// The offer when the model still has to come down.
+    static let offer = "\(offerTitle) \u{00B7} \(MeetingTitlesController.downloadSizeLabel)"
     static let turnOnTitle = "Turn on"
     static let dismissTitle = "Dismiss"
 
     enum State: Equatable {
         case hidden
-        /// Off: the offer, Turn on and Dismiss.
-        case offer
-        /// Turned on from this line: "1.2 GB of 3.1 GB" and a fraction.
+        /// Off: the offer, Turn on and Dismiss. Says the download size only
+        /// when the model isn't on disk already.
+        case offer(String)
+        /// On, model coming down: "Downloading 1.2 GB of 3.1 GB" and a fraction.
         case downloading(fraction: Double, text: String)
-        /// The download from this line stopped: amber reason and Try again.
+        /// On, and the download or the model stopped: amber reason and Try again.
         case failed(String)
     }
 
-    /// `startedHere` is true once this line's Turn on was pressed this
-    /// session: only then does it stay to show the download. Once the model
-    /// is ready it goes. Never during automated launches, never once
-    /// dismissed, and not on an empty library (the first-run state says
-    /// enough).
+    /// Read straight from the titles controller's own published state
+    /// (`isEnabled`, `modelStatus`), so the line agrees with the Settings row
+    /// wherever it was turned on and whichever page was showing meanwhile.
+    /// Once the model is ready it goes. Never during automated launches,
+    /// never once dismissed, and not on an empty library (the first-run
+    /// state says enough).
     static func state(
         isEnabled: Bool,
         status: MeetingTitlesController.ModelStatus,
         dismissed: Bool,
         isAutomatedLaunch: Bool,
-        hasMeetings: Bool,
-        startedHere: Bool
+        hasMeetings: Bool
     ) -> State {
-        guard !isAutomatedLaunch, hasMeetings else { return .hidden }
-        guard isEnabled else { return dismissed ? .hidden : .offer }
-        guard startedHere else { return .hidden }
+        guard !isAutomatedLaunch, hasMeetings, !dismissed else { return .hidden }
+        guard isEnabled else { return .offer(status == .ready ? offerTitle : offer) }
         switch status {
         case .ready:
             return .hidden

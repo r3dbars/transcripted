@@ -108,6 +108,8 @@ struct TranscriptedSettingsView: View {
     @State var homeFindFieldFocusToken = 0
     @State var homeExpandedMeetingID: String?
     @State var homeExpandedMeetingPreview: HomeMeetingPreview?
+    /// The open Meetings card's transcript reveal; Rename carries it over.
+    @State var homeMeetingOpenState = MeetingsPageOpenState()
     @ObservedObject var captureUndo = CaptureUndoManager.shared
     @State var homeDeletionIDs: Set<String> = []  // meeting ids and dictation undo ids being deleted
     @State var homeMeetingSearchQuery = ""
@@ -403,7 +405,10 @@ struct TranscriptedSettingsView: View {
     /// Expand a capture in place (quiet-library interaction). Clicking the
     /// same row again, pressing Esc, or expanding another row collapses it.
     func toggleHomeMeetingExpansion(_ item: RecentMeetingItem) {
-        guard MeetingsPageOpenState.nextOpenID(current: homeExpandedMeetingID, tapped: item.id) != nil else {
+        // The row still listed under its old path while a rename settles is
+        // the open one.
+        let current = homeMeetingOpenState.isOpen(item.id, expandedID: homeExpandedMeetingID) ? item.id : homeExpandedMeetingID
+        guard MeetingsPageOpenState.nextOpenID(current: current, tapped: item.id) != nil else {
             // Closing only folds the card; audio started from its play
             // button keeps playing. Leaving the page or Esc still stops it.
             collapseHomeMeetingExpansion(stopsPlayback: false)
@@ -539,10 +544,11 @@ struct TranscriptedSettingsView: View {
 
     func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)
+        // The opened card always lists Who spoke? (greyed until it has a
+        // card to open); closed rows keep it for voices still to name.
+        let whoSpoke = homeWhoSpokeAvailability(for: item)
         let entries = HomeRowMenuPolicy.meetingEntries(
-            // The opened card always offers Who spoke? (it used to sit at the
-            // card's foot); closed rows keep it for voices still to name.
-            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item) || homeExpandedMeetingID == item.id,
+            hasPendingSpeakerReview: whoSpoke != .hidden,
             offersMicBoost: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                 audioHealth: item.audioHealth,
                 meetingDate: item.date,
@@ -602,7 +608,12 @@ struct TranscriptedSettingsView: View {
                 }
             case .reviewSpeakers:
                 let title = HomeRowMenuPolicy.whoSpokeTitle(voicesToName: speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL))
-                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                return HomeRowMenuItem(
+                    title: title,
+                    symbolName: symbolName,
+                    isEnabled: whoSpoke == .enabled,
+                    toolTip: whoSpoke == .enabled ? nil : "No speakers to name yet"
+                ) {
                     // Queued voices get the queue's card; otherwise the card
                     // is built from the opened transcript.
                     openWhoSpokeCard(for: item)
@@ -655,7 +666,7 @@ struct TranscriptedSettingsView: View {
     private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
         guard !captureUndo.isPending(item.id),
               homeDeletionIDs.insert(item.id).inserted else { return }
-        if homeExpandedMeetingID == item.id {
+        if homeMeetingOpenState.isOpen(item.id, expandedID: homeExpandedMeetingID) {
             collapseHomeMeetingExpansion()
         }
         if let audio = item.audio {
