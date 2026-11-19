@@ -236,6 +236,12 @@ extension MeetingSessionController {
     /// the markdown + retained-audio artifacts, so it must stay off the main
     /// actor; multi-hour meetings produce multi-MB files. Restyles are chained
     /// so two passes never touch the same artifacts concurrently.
+    /// A speaker review for this saved meeting still waits for answers
+    /// (on-device titles wait for it).
+    func isSpeakerReviewPending(transcriptURL: URL, captureID: UUID?) -> Bool {
+        taskManager.hasSpeakerReviewAwaitingAnswers(transcriptId: captureID, transcriptURL: transcriptURL)
+    }
+
     /// Read while the save publishes (`lastSavedTranscriptURL`), before the
     /// queue moves on: a pipeline save of the active queued job is that
     /// job's (a recording's or an import's); a saved-audio replacement is
