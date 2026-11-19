@@ -385,9 +385,10 @@ public class TranscriptSaver {
             fileURL = candidateURL
         }
 
-        func render(starred: Bool) -> String {
+        func render(_ carried: ReplacedTranscriptMarks) -> String {
             var options = formatOptions
-            options.starred = starred
+            options.starred = carried.starred
+            options.titleSetByUser = carried.titleSetByUser
             return formatTranscriptMarkdown(
                 result: result,
                 transcriptId: transcriptId,
@@ -404,8 +405,10 @@ public class TranscriptSaver {
 
         // A replacement reads authoritative metadata inside the write transaction.
         // Unknown metadata must abort before replacing any bytes or publishing success.
-        let expectedStar = formatOptions.starred
-        var markdown = render(starred: expectedStar)
+        let expectedMarks = ReplacedTranscriptMarks(
+            starred: formatOptions.starred, titleSetByUser: formatOptions.titleSetByUser
+        )
+        var markdown = render(expectedMarks)
 
         // Serialize file writes to prevent concurrent corruption with retroactive speaker updates.
         // Uses the reentrancy-safe wrapper (not a raw `.sync`) so this cannot deadlock if it is
@@ -422,8 +425,8 @@ public class TranscriptSaver {
                             throw CocoaError(.fileReadCorruptFile)
                         }
                     }
-                    if let currentStar = try replacedTranscriptStar(explicitFileURL, requiredCaptureID: reservedID),
-                       currentStar != expectedStar { markdown = render(starred: currentStar) }
+                    if let currentMarks = try replacedTranscriptMarks(explicitFileURL, requiredCaptureID: reservedID),
+                       currentMarks != expectedMarks { markdown = render(currentMarks) }
                 }
                 try markdown.write(to: fileURL, atomically: true, encoding: .utf8)
                 FileManager.default.restrictToOwnerOnly(atPath: fileURL.path)
@@ -459,10 +462,18 @@ public class TranscriptSaver {
         return savedURL
     }
 
+    /// What a replacement keeps from the file it replaces, read inside the
+    /// write transaction: the star, and the mark that a person chose
+    /// `title:` (written by Rename). Neither depends on any optional feature.
+    struct ReplacedTranscriptMarks: Equatable {
+        var starred: Bool
+        var titleSetByUser: Bool
+    }
+
     /// A leased replacement must retain its captured identity and protection.
     /// The public explicit-target API also permits a new destination or a plain
     /// readable file; neither claims to replace a reserved meeting capture.
-    private static func replacedTranscriptStar(_ url: URL, requiredCaptureID: UUID?) throws -> Bool? {
+    private static func replacedTranscriptMarks(_ url: URL, requiredCaptureID: UUID?) throws -> ReplacedTranscriptMarks? {
         guard FileManager.default.fileExists(atPath: url.path) else {
             if requiredCaptureID != nil { throw CocoaError(.fileReadNoSuchFile) }
             return nil
@@ -490,7 +501,10 @@ public class TranscriptSaver {
             }
             return nil
         }
-        return TranscriptFrontmatter.isStarred(values: values)
+        return ReplacedTranscriptMarks(
+            starred: TranscriptFrontmatter.isStarred(values: values),
+            titleSetByUser: TranscriptFrontmatter.isTitleSetByUser(values: values)
+        )
     }
 
     /// Keeps only the creation date: the new text must get a fresh mtime so mtime-keyed indexes pick it up.

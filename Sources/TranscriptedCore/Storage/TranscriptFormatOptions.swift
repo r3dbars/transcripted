@@ -16,17 +16,23 @@ public struct TranscriptFormatOptions: Sendable, Equatable {
     /// replaces (`TranscriptSaver.saveTranscript(targetURL:)`), so
     /// re-transcribing never drops a star.
     public var starred: Bool
+    /// Written as `title_set_by_user: true` after `title:`. Like `starred`, a
+    /// replacement save sets it from the file it replaces, so "Transcribe
+    /// again" never loses the mark that a person chose the title.
+    public var titleSetByUser: Bool
 
     public init(
         audioSources: [TranscriptAudioSource] = [.microphone, .systemAudio],
         includeObsidianMetadata: Bool = false,
         importedAt: Date? = nil,
-        starred: Bool = false
+        starred: Bool = false,
+        titleSetByUser: Bool = false
     ) {
         self.audioSources = Self.normalizedAudioSources(audioSources)
         self.includeObsidianMetadata = includeObsidianMetadata
         self.importedAt = importedAt
         self.starred = starred
+        self.titleSetByUser = titleSetByUser
     }
 
     public static let `default` = TranscriptFormatOptions()
@@ -36,7 +42,8 @@ public struct TranscriptFormatOptions: Sendable, Equatable {
             audioSources: sources,
             includeObsidianMetadata: includeObsidianMetadata,
             importedAt: importedAt,
-            starred: starred
+            starred: starred,
+            titleSetByUser: titleSetByUser
         )
     }
 
