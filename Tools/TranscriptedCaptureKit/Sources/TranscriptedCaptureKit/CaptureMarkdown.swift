@@ -155,7 +155,8 @@ public enum CaptureMarkdown {
     }
 
     /// Unindented `key: value` lines of the frontmatter, values unquoted.
-    /// The first `title:` wins, matching `extractTitle(from:)`.
+    /// A repeated key keeps its last value, the way the app reads
+    /// frontmatter, so Home and agents show the same title.
     private static func flatFrontmatterValues(from content: String) -> [String: String] {
         guard content.count >= 8, content.hasPrefix("---"),
               let endRange = content.range(
@@ -167,7 +168,6 @@ public enum CaptureMarkdown {
         for line in yaml.components(separatedBy: "\n") {
             guard line.first?.isWhitespace != true, let colon = line.firstIndex(of: ":") else { continue }
             let key = String(line[..<colon]).trimmingCharacters(in: .whitespaces)
-            guard values[key] == nil else { continue }
             values[key] = unquoteYAMLScalar(String(line[line.index(after: colon)...]))
         }
         return values
@@ -186,15 +186,14 @@ public enum CaptureMarkdown {
                 range: content.index(content.startIndex, offsetBy: 4)..<content.endIndex
               ) else { return nil }
         let yaml = String(content[content.index(content.startIndex, offsetBy: 4)..<endRange.lowerBound])
+        // An unindented `title:`; a repeated one keeps the last, as the app does.
+        var title: String?
         for line in yaml.components(separatedBy: "\n") {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed == "---" { break }
-            if trimmed.hasPrefix("title:") {
-                let title = unquoteYAMLScalar(String(trimmed.dropFirst(6)))
-                return title.isEmpty ? nil : title
-            }
+            if line.trimmingCharacters(in: .whitespaces) == "---" { break }
+            guard line.first?.isWhitespace != true, line.hasPrefix("title:") else { continue }
+            title = unquoteYAMLScalar(String(line.dropFirst(6)))
         }
-        return nil
+        return title?.isEmpty == false ? title : nil
     }
 
     /// Decode a YAML double-quoted scalar (`\"`, `\\`, `\n`, `\r`, `\t`).
