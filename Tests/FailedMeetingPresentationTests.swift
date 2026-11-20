@@ -216,7 +216,7 @@ func testFailedMeetingPresentation() {
             detail: "Model was not ready."
         )
 
-        assertEqual(presentation.statusText, "Not transcribed", "retryable rows should show that recovery is available")
+        assertEqual(presentation.statusText, "Not transcribed", "a retryable row says plainly that it wasn't transcribed")
         assertEqual(
             presentation.inlineDetail,
             "Your audio is saved. Click Try again to transcribe it.",

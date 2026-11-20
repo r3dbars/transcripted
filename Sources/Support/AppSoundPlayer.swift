@@ -51,7 +51,7 @@ final class AppSoundPlayer: @unchecked Sendable {
         /// follows the Mac's own interface-sounds switch.
         case menuHover
         /// A softer, lower tick for the rows under the buttons (Open
-        /// Transcripted, Check for Updates, Quit).
+        /// Transcripted, Quit, and the update row while one is under way).
         case menuRowHover
         /// A short, soft click when a menu bar button or row is pressed.
         case menuPress

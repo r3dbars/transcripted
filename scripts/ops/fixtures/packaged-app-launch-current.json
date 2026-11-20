@@ -40,6 +40,16 @@
       "trailingText": ""
     },
     "utilityActions": {
+      "checkUpdates": {
+        "automationIdentifier": "transcripted.menubar.utility.check-updates",
+        "detail": "",
+        "displayTitle": "Check for updates",
+        "isEnabled": true,
+        "isVisible": false,
+        "title": "Check for updates",
+        "toolTip": "",
+        "trailingText": ""
+      },
       "openTranscripted": {
         "automationIdentifier": "transcripted.menubar.utility.open-transcripted",
         "detail": "",

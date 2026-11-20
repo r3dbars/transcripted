@@ -97,8 +97,10 @@ Under the buttons:
 
 The idle popover is four controls. An update row appears only while an update
 downloads (`Downloading update`); a filled callout (`Update to X` / Install,
-`X is ready` / Restart) appears when it needs a click. The manual check is in
-About and the app menu. Words come from `Sources/UI/Shared/UpdateStatusWords.swift`.
+`X is ready` / Restart) appears when it needs a click. The manual check is
+Settings › Advanced › About (`Check for updates`) and a click on the sidebar's
+version line; there is no app-menu item. Words come from
+`Sources/UI/Shared/UpdateStatusWords.swift`.
 
 ### Status item
 
@@ -250,10 +252,15 @@ Cover app identity, updates, and support links.
 
 Contents:
 
-- current app version
-- current update status
-- `Check for Updates` or `Update Available`
-- `Submit Feedback`
+It sits inside Settings › Advanced.
+
+- current app version and update status on one line
+- one update button whose word follows the status (`Check for updates`,
+  `Install`, `Restart`, ...; see `UpdateStatusWords.buttonTitle`)
+- `Automatic updates` (`Check on launch` / `Notify me` / `Download automatically`)
+- `Feedback` (`Send feedback…`)
+
+Send diagnostics is not here; it sits in the Privacy group next to Crash reports.
 
 Optional supporting text can explain local-first behavior in one short paragraph.
 
@@ -268,7 +275,8 @@ Optional supporting text can explain local-first behavior in one short paragraph
 
 ### Transcribe Audio File
 
-- appears on `Settings` (Transcription card)
+- appears in Settings › Advanced › Transcription (`Transcribe a file`)
+- appears in the Meetings page header's ⋯ menu, and on ⌘O and a file drop
 - appears as the second action on the Meetings page's empty state
 - does not appear in the menubar popover in this version
 

@@ -4202,7 +4202,7 @@ licensors.
 
 ## JetBrains Mono (font)
 
-- **Component:** `JetBrainsMono-Regular.ttf` and `JetBrainsMono-Medium.ttf`, copied unmodified into `Contents/Resources/Fonts` and registered for the app process only.
+- **Component:** `JetBrainsMono-Medium.ttf`, copied unmodified into `Contents/Resources/Fonts` and registered for the app process only.
 - **JetBrains Mono source:** https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304 (`fonts/ttf`). Copyright 2020 The JetBrains Mono Project Authors (https://github.com/JetBrains/JetBrainsMono).
 - **License:** SIL Open Font License 1.1, reproduced below.
 

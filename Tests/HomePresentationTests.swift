@@ -42,10 +42,11 @@ func testHomePresentation() {
             diarizerSpeakerID: "2",
             persistentSpeakerID: nil
         )
+        assertEqual(unsaved.stableID, "voice:system:2", "an unsaved voice keys by its channel and diarizer id")
         assertEqual(
             colorIndex(unsaved),
-            colorIndex(unsaved),
-            "An unsaved voice keeps one color"
+            VoicePrintStyle(seedString: "voice:system:2").preferredColorIndex,
+            "An unsaved voice keeps one color: the one its transcript key seeds, so it stays put across launches"
         )
 
         let names = (1...12).map { index in

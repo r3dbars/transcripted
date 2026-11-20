@@ -44,8 +44,9 @@ enum HomeCaptureListCopy {
         static let automationIdentifier = "transcripted.settings.general.transcribe-audio-file"
     }
 
-    /// The Meetings header's import button: the file picker, same as the
-    /// sidebar's Transcribe a file page, ⌘O, and dropping files on the page.
+    /// The Meetings header ⋯ menu's import item: the file picker, same as
+    /// the Settings row (Advanced › Transcription), ⌘O, and dropping files
+    /// on the page.
     enum TranscribeFileAction {
         static let title = "Transcribe a file\u{2026}"
         static let help = "Choose audio or video to transcribe on this Mac. You can also drop files here or press \u{2318}O."

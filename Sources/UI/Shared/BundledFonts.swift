@@ -2,14 +2,13 @@ import AppKit
 import CoreText
 
 /// The bundled typeface (SIL OFL 1.1, license in THIRD_PARTY_LICENSES.md):
-/// JetBrains Mono for section labels. The TTFs ship in
-/// `Contents/Resources/Fonts` and are registered for this process only, the
-/// first time a role needs them.
+/// JetBrains Mono Medium for section labels. The TTF ships in
+/// `Contents/Resources/Fonts` and is registered for this process only, the
+/// first time a role needs it.
 /// Tests and smokes run without the bundle, so every caller has a system
 /// fallback (`TextRole.nsFont` uses it).
 enum BundledFonts {
     enum Face: String, CaseIterable, Sendable {
-        case jetBrainsMonoRegular = "JetBrainsMono-Regular"
         case jetBrainsMonoMedium = "JetBrainsMono-Medium"
 
         /// PostScript name and file name are the same.
