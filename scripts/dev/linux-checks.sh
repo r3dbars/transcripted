@@ -411,6 +411,11 @@ check "dependency freshness contracts" "bash Tests/BuildDependencies/DepsStalene
 check "dependency toolchain contracts" "bash Tests/BuildDependencies/DepsToolchainTests.sh"
 check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.sh" slow
 check "Sparkle signing and frozen-feed contracts" "bash Tests/BuildDependencies/SparkleAppcastSigningTests.sh" slow
+if command -v node >/dev/null 2>&1; then
+    check "Sparkle appcast signature verification" "node --test Tests/BuildDependencies/SparkleAppcastVerificationTests.mjs"
+else
+    skip "Sparkle appcast signature verification" "node not installed"
+fi
 
 # ---------------------------------------------------------------- deterministic fixture lanes (from .agents/test-matrix.yml)
 check "posthog dashboard summary (fixture)" "python3 scripts/ops/posthog-product-dashboard-summary.py --fixture Tests/Fixtures/posthog-product-dashboard-summary.json --json-only >/dev/null" slow

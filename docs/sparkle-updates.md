@@ -201,7 +201,11 @@ an EdDSA signature as a trailing `<!-- sparkle-signatures: ... -->` comment (and
 a warning comment), then reads it back with the same key. Any edit after that,
 including `mark-appcast-critical.py`, invalidates it, so signing is the last
 step. The signature is made with the same key whose public half is
-`SUPublicEDKey`.
+`SUPublicEDKey`. The Release Candidate job verifies the previous release's
+feed with that public key before inheriting any items. A missing or invalid
+feed stops the run. The frozen legacy feed stays separate. The job also
+verifies the new signature after signing, and candidate verification reads
+the public key from the packaged app.
 
 With `SURequireSignedFeed`, pinned Sparkle 2.9.1 verifies the feed against
 `SUPublicEDKey` before using it. It also verifies release notes fetched through
@@ -373,12 +377,20 @@ REPO_APPCAST_PATH=/path/to/feed-copy/appcast.xml INFO_PLIST_PATH=<shipped Info.p
    command working in bash and zsh when there are no deltas). Any publish helper
    script must upload the deltas and the feed too; a DMG-only upload leaves
    every delta URL a 404 and the feed on the previous release.
-8. Verify the published update path (it fetches the live feed through the
-   redirect; `VERIFY_APPCAST_FILE=build/appcast.xml` checks the artifact copy
-   before publishing):
+8. Verify the published update path. It follows the feed redirect, checks its
+   signature with `SUPublicEDKey`, and checks that the release assets are live.
 
 ```bash
 bash scripts/release/verify-sparkle-release.sh <version>
+```
+
+   Before publishing, use the artifact feed and the packaged app's plist for
+   an offline signature and entry check.
+
+```bash
+VERIFY_APPCAST_FILE=build/appcast.xml \
+VERIFY_INFO_PLIST=build/Transcripted.app/Contents/Info.plist \
+  bash scripts/release/verify-sparkle-release.sh <version>
 ```
 
 9. After the release is published and any expected Homebrew/Sentry release

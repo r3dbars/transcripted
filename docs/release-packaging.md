@@ -255,14 +255,16 @@ jobs so the code that compiles never holds a secret:
 2. `sign-and-notarize` (the main-only `release` environment, the owner approves)
    checks out main, not the prep branch, and runs only
    `scripts/release/sign-release.sh`, notarytool, `fetch-sparkle-tools.sh`,
-   `generate-sparkle-appcast.sh`, `sign-appcast.sh` and the cask edit. It never
+   `generate-sparkle-appcast.sh`, `sign-appcast.sh`, the public-key appcast
+   verifier and the cask edit. It never
    runs `build.sh`, `build-beta.sh`, `build-deps.sh` or `swift`. It signs the
    app, builds and signs the DMG, notarizes and staples it, builds the appcast
-   item and delta updates, merges them into the feed published with the previous
-   release, and signs the feed with the Sparkle EdDSA key.
+   item and delta updates. It verifies the previous release's feed before
+   merging its history and verifies the new signature with the shipped public key.
 3. `verify-candidate` (no environment, no secrets) opens the signed DMG and runs
-   the packaged-app smoke, the privacy sweep and the post-DMG audit against the
-   generated `appcast.xml`. Only if it passes does the
+   the packaged-app smoke, the privacy sweep and the post-DMG audit. It also
+   verifies the candidate appcast offline using the public key in the signed app.
+   Only if it passes does the
    `Transcripted-<version>-release-candidate` artifact exist.
 
 `build-beta.sh` and `sign-release.sh` share `scripts/entrypoints/lib/release-package.sh`

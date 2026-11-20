@@ -239,10 +239,38 @@ func testCIWorkflowContract() {
         for required in ["sign-release.sh", "notarytool", "generate-sparkle-appcast.sh", "sign-appcast.sh", "fetch-sparkle-tools.sh"] {
             assertTrue(signCommands.contains(required), "the signing job should run \(required)")
         }
-        assertTrue(
-            signCommands.contains("config/release/legacy-appcast-freeze.json"),
-            "once the legacy feed is frozen, a latest release without appcast.xml must fail the run instead of restarting from docs/appcast.xml"
-        )
+        assertFalse(signCommands.contains("docs/appcast.xml"), "the signing job must never seed release history from the frozen legacy feed")
+        let steps = sign?.child("steps")?.children ?? []
+        let fetchIndex = steps.firstIndex { $0.child("name")?.scalar == "Fetch the current feed" }
+        let generateIndex = steps.firstIndex { $0.child("name")?.scalar == "Generate Sparkle metadata" }
+        assertNotNil(fetchIndex, "the signing job must fetch the previous release feed")
+        assertNotNil(generateIndex, "the signing job must generate the new feed")
+        if let fetchIndex, let generateIndex {
+            let command = steps[fetchIndex].child("run")?.commandLines.joined(separator: "\n") ?? ""
+            assertTrue(fetchIndex < generateIndex, "authenticate feed history before metadata generation")
+            assertTrue(command.contains("exit 1"), "missing previous feed must stop the signing job")
+            assertTrue(command.contains("verify-sparkle-appcast.mjs"), "verify the previous feed with the shipped public key")
+        }
+        let signIndex = steps.firstIndex { $0.child("name")?.scalar == "Mark critical and sign the feed" }
+        let verifyIndex = steps.firstIndex { $0.child("name")?.scalar == "Verify the new feed signature" }
+        assertNotNil(signIndex, "the workflow must sign the new feed")
+        assertNotNil(verifyIndex, "the workflow must verify the new feed")
+        if let signIndex, let verifyIndex {
+            let verification = steps[verifyIndex]
+            assertTrue(signIndex < verifyIndex, "verification must check the final signed bytes")
+            assertFalse(workflowMentionsSecret(verification), "verify the signed feed without private signing material")
+            assertTrue(
+                (verification.child("run")?.commandLines ?? []).contains {
+                    $0.contains("verify-sparkle-appcast.mjs build/appcast.xml")
+                },
+                "check the published artifact with the shipped public key"
+            )
+        }
+        let verify = release.job("verify-candidate")
+        let candidateCommands = (verify?.commands ?? []).joined(separator: "\n")
+        assertTrue(candidateCommands.contains("VERIFY_APPCAST_FILE=build/appcast.xml"), "verify the candidate feed offline")
+        assertTrue(candidateCommands.contains("VERIFY_INFO_PLIST=build/Transcripted.app/Contents/Info.plist"), "read the verifying key from the packaged app")
+        assertTrue(candidateCommands.contains("verify-sparkle-release.sh"), "verify the candidate feed before upload")
 
         let build = release.job("build-unsigned")
         let buildCommands = (build?.commands ?? []).joined(separator: "\n")

@@ -10,29 +10,25 @@ fi
 
 VERSION="$1"
 TAG="v${VERSION}"
-# The feed installed apps read: the appcast.xml asset of the latest release.
-# The host answers that URL with a 302 to the asset store; curl -L follows it
-# the way Sparkle's URLSession does. VERIFY_APPCAST_FILE checks a local copy
-# instead (for example the workflow artifact, before the release is published).
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)"
+# Without a file, follow the same release-asset redirect installed apps use.
+# With a file, verify an unpublished candidate without contacting GitHub.
 FEED_URL="https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml"
 APPCAST_PATH="${VERIFY_APPCAST_FILE:-}"
+INFO_PLIST="${VERIFY_INFO_PLIST:-$REPO_ROOT/Info.plist}"
 FETCHED_FEED=""
+DELTA_URLS_FILE=""
+trap 'rm -f "$DELTA_URLS_FILE" "$FETCHED_FEED"' EXIT
 DMG_NAME="Transcripted-${VERSION}.dmg"
 EXPECTED_URL="https://github.com/r3dbars/transcripted/releases/download/${TAG}/${DMG_NAME}"
-EXPECTED_MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" Info.plist)"
+EXPECTED_MINIMUM_SYSTEM_VERSION="$(/usr/libexec/PlistBuddy -c "Print :LSMinimumSystemVersion" "$INFO_PLIST")"
 EXPECTED_HARDWARE_REQUIREMENTS="arm64"
 
-if ! command -v gh >/dev/null 2>&1; then
-    echo "Missing gh CLI."
-    exit 1
-fi
-
-if ! command -v python3 >/dev/null 2>&1; then
-    echo "Missing python3."
-    exit 1
-fi
-
 if [ -z "$APPCAST_PATH" ]; then
+    if ! command -v gh >/dev/null 2>&1; then
+        echo "Missing gh CLI."
+        exit 1
+    fi
     FETCHED_FEED="$(mktemp "${TMPDIR:-/tmp}/transcripted-appcast.XXXXXX")"
     APPCAST_PATH="$FETCHED_FEED"
     echo "Fetching the live feed..."
@@ -42,28 +38,18 @@ elif [ ! -f "$APPCAST_PATH" ]; then
     exit 1
 fi
 
-echo "Checking GitHub release ${TAG}..."
-gh release view "$TAG" --repo r3dbars/transcripted >/dev/null
-
-echo "Checking release asset URL..."
-curl -fsSIL --retry 3 "$EXPECTED_URL" >/dev/null
-
 echo "Checking Info.plist Sparkle settings..."
-/usr/libexec/PlistBuddy -c "Print :SUFeedURL" Info.plist | grep -Fx "$FEED_URL" >/dev/null
-/usr/libexec/PlistBuddy -c "Print :SUVerifyUpdateBeforeExtraction" Info.plist | grep -F "true" >/dev/null
-/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" Info.plist | grep -E ".{20,}" >/dev/null
-/usr/libexec/PlistBuddy -c "Print :SUEnableAutomaticChecks" Info.plist | grep -F "true" >/dev/null
-/usr/libexec/PlistBuddy -c "Print :SUAllowsAutomaticUpdates" Info.plist | grep -F "true" >/dev/null
+/usr/libexec/PlistBuddy -c "Print :SUFeedURL" "$INFO_PLIST" | grep -Fx "$FEED_URL" >/dev/null
+/usr/libexec/PlistBuddy -c "Print :SUVerifyUpdateBeforeExtraction" "$INFO_PLIST" | grep -Fx "true" >/dev/null
+/usr/libexec/PlistBuddy -c "Print :SUEnableAutomaticChecks" "$INFO_PLIST" | grep -Fx "true" >/dev/null
+/usr/libexec/PlistBuddy -c "Print :SUAllowsAutomaticUpdates" "$INFO_PLIST" | grep -Fx "true" >/dev/null
 
 echo "Checking feed signature..."
-if ! grep -q '<!-- sparkle-signatures:' "$APPCAST_PATH"; then
-    echo "The feed has no embedded EdDSA signature."
-    exit 1
-fi
+PUBLIC_KEY="$(/usr/libexec/PlistBuddy -c "Print :SUPublicEDKey" "$INFO_PLIST")"
+node "$REPO_ROOT/scripts/release/verify-sparkle-appcast.mjs" "$APPCAST_PATH" "$PUBLIC_KEY"
 
 echo "Checking appcast entry..."
 DELTA_URLS_FILE="$(mktemp "${TMPDIR:-/tmp}/transcripted-delta-urls.XXXXXX")"
-trap 'rm -f "$DELTA_URLS_FILE" "$FETCHED_FEED"' EXIT
 python3 - "$APPCAST_PATH" "$VERSION" "$EXPECTED_URL" "$EXPECTED_MINIMUM_SYSTEM_VERSION" "$EXPECTED_HARDWARE_REQUIREMENTS" > "$DELTA_URLS_FILE" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
@@ -135,6 +121,17 @@ for delta in item.findall("sparkle:deltas/enclosure", namespaces):
         raise SystemExit(f"delta from {from_version} has invalid length")
     print(delta_url)
 PY
+
+if [ -z "$FETCHED_FEED" ]; then
+    echo "Sparkle candidate appcast verified offline for ${TAG}."
+    exit 0
+fi
+
+echo "Checking GitHub release ${TAG}..."
+gh release view "$TAG" --repo r3dbars/transcripted >/dev/null
+
+echo "Checking release asset URL..."
+curl -fsSIL --retry 3 "$EXPECTED_URL" >/dev/null
 
 if [ -s "$DELTA_URLS_FILE" ]; then
     echo "Checking delta update assets..."
