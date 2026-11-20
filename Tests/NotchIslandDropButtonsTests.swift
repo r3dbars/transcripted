@@ -18,11 +18,17 @@ func testNotchIslandDropButtons() {
     runSuite("Stop on a recording is the white primary, not red") {
         let id = UUID()
         let buttons = NotchIslandDropButtons.buttons(for: .meetingControls(
-            callAudioNote: .off, systemAudioUnverified: false, showsTranscript: true, micAction: .meetingMicMute(id)
+            callAudioNote: .off, systemAudioUnverified: false, showsTranscript: true, recordingID: id,
+            micAction: .meetingMicMute(id)
         ))
         assertEqual(buttons.map(\.title), ["Copy all", "Turn on", "Mute mic", "Stop"])
         assertEqual(buttons.map(\.role), [.standard, .standard, .standard, .primary], "Stop saves the meeting, so it's safe")
         assertEqual(buttons.map(\.placement), [.leading, .leading, .trailing, .trailing])
+        assertEqual(buttons.last?.action, .meetingStop(id), "Stop names the recording it was drawn for")
+        let unowned = NotchIslandDropButtons.buttons(for: .meetingControls(
+            callAudioNote: nil, systemAudioUnverified: false, showsTranscript: false
+        ))
+        assertEqual(unowned.map(\.title), [], "no recording to name, no Stop to press")
     }
 
     runSuite("The recent take offers Paste again as the primary, on the right like every row") {
@@ -107,7 +113,8 @@ func testNotchIslandDropButtons() {
             .dictationMessage(.init(tone: .notice, text: "Not pasted", actionTitle: "Paste", preview: "hi", dismissSeconds: 15)),
             .dictationMessage(.init(tone: .error, text: "Mic didn't start.", actionTitle: "Try again")),
             .justInserted(text: "Hi", words: 1),
-            .meetingControls(callAudioNote: .off, systemAudioUnverified: false, showsTranscript: false, micAction: .meetingMicMute(id)),
+            .meetingControls(callAudioNote: .off, systemAudioUnverified: false, showsTranscript: false, recordingID: id,
+                             micAction: .meetingMicMute(id)),
             .meetingPrompt(note),
             .meetingPrompt(warning),
             .meetingPrompt(MeetingDiscardConfirmCopy.prompt(recordingID: id, secondsLeft: 10)),

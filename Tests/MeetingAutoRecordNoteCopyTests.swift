@@ -19,7 +19,7 @@ func testMeetingAutoRecordNoteCopy() {
         )
         assertEqual(
             MeetingAutoRecordIslandActionPolicy.route(
-                action: .meetingStop, noteVisible: true, recordingID: id
+                action: .meetingStop(id), noteVisible: true, recordingID: id
             ),
             .inherit
         )

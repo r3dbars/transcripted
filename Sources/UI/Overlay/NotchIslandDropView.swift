@@ -126,7 +126,7 @@ final class NotchIslandDropView: NSView {
             return
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
-        case .meetingControls(let note, let unverified, let showsTranscript, let micAction):
+        case .meetingControls(let note, let unverified, let showsTranscript, let recordingID, let micAction):
             let muted: Bool
             if case .meetingMicUnmute? = micAction { muted = true } else { muted = false }
             let subtitle: String

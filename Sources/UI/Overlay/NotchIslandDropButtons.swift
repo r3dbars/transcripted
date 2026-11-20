@@ -61,7 +61,7 @@ enum NotchIslandDropButtons {
                 .init(title: "Copy", role: .standard, action: .copyLastDictation),
                 .init(title: "Paste again", role: .primary, action: .pasteLastDictation),
             ]
-        case .meetingControls(let note, _, let showsTranscript, let micAction):
+        case .meetingControls(let note, _, let showsTranscript, let recordingID, let micAction):
             var buttons: [NotchIslandDropButton] = []
             if showsTranscript {
                 buttons.append(.init(title: "Copy all", role: .standard, action: .meetingCopyTranscript,
@@ -77,8 +77,11 @@ enum NotchIslandDropButtons {
                 buttons.append(.init(title: "\(verb) mic", role: .standard, action: micAction,
                                      accessibilityLabel: "\(verb) Transcripted meeting microphone"))
             }
-            // Stop saves and transcribes: the safe primary, not red.
-            buttons.append(.init(title: "Stop", role: .primary, action: .meetingStop, symbol: "stop.fill"))
+            // Stop saves and transcribes: the safe primary, not red. It names
+            // the recording it was drawn for, so a late click can't stop another.
+            if let recordingID {
+                buttons.append(.init(title: "Stop", role: .primary, action: .meetingStop(recordingID), symbol: "stop.fill"))
+            }
             return buttons
         case .meetingPrompt(let prompt):
             guard let identity = prompt.identity else { return [] }

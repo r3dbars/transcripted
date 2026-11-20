@@ -52,7 +52,6 @@ enum MeetingRecordingJournalStartError: Error, Equatable {
 /// (multi-segment merges), so without the token a previous session's late
 /// writes would corrupt the journal of the recording that is now active.
 struct MeetingRecordingJournalSession: Equatable, Hashable, Sendable {
-    let initialPersistence = DispatchGroup()
     private let id: UUID
     private let liveOwnership: MeetingRecordingJournalLiveOwnership
 
@@ -139,10 +138,11 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     @discardableResult
     func begin(
         primaryMicURL: URL,
+        systemURL: URL? = nil,
         startedAt: Date = Date(),
         languageSelection: TranscriptionLanguageSelection = .automatic,
         micOnlyByChoice: Bool = false,
-        reserve: (MeetingRecordingJournalSession) throws -> Void = { _ in }
+        publish: (MeetingRecordingJournalSession) throws -> Void = { _ in }
     ) throws -> MeetingRecordingJournalSession {
         let journalURL = directory.appendingPathComponent(
             primaryMicURL.deletingPathExtension().lastPathComponent + Self.filenameSuffix
@@ -156,15 +156,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                 throw MeetingRecordingJournalStartError.alreadyExists
             }
             let session = MeetingRecordingJournalSession(journalURL: journalURL)
-            session.initialPersistence.enter()
-            defer { session.initialPersistence.leave() }
-            try systemURLLock.withLock {
-                try reserve(session)
-                sessionForSystemURL = session
-                systemURL = nil
-            }
-            self.journalURL = journalURL
-            self.journal = MeetingRecordingJournal(
+            let record = MeetingRecordingJournal(
                 version: 1,
                 state: .recording,
                 startedAt: startedAt,
@@ -174,23 +166,28 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
                     filename: primaryMicURL.lastPathComponent,
                     gapBefore: 0
                 )],
-                systemAudioFilename: nil,
+                systemAudioFilename: systemURL?.lastPathComponent,
                 finalMicFilename: nil,
                 languageSelection: languageSelection,
                 micOnlyByChoice: micOnlyByChoice ? true : nil
             )
-            guard self.persistLocked(initial: true) else {
-                // Only this begin() could have created the journal: the
-                // pre-existing-file guard above failed closed before writing.
-                // An injected or real fsync failure can leave a new file
-                // behind; retire that incomplete start without touching WAVs.
+            do {
+                guard persistLocked(record, at: journalURL, initial: true) else {
+                    throw MeetingRecordingJournalStartError.persistenceFailed
+                }
+                try systemURLLock.withLock {
+                    try publish(session)
+                    sessionForSystemURL = session
+                    self.systemURL = nil // Stop can claim the track once its writer is installed.
+                }
+            } catch {
+                // No writer has been admitted. Retire only this unpublished record.
                 try? Self.unlinkFileOnly(at: journalURL)
-                self.journal = nil
-                self.journalURL = nil
-                self.activeSession = nil
                 session.releaseLiveOwnership()
-                throw MeetingRecordingJournalStartError.persistenceFailed
+                throw error
             }
+            self.journal = record
+            self.journalURL = journalURL
             return session
         }
     }
@@ -326,7 +323,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
             change(&journal)
             journal.updatedAt = Date()
             self.journal = journal
-            self.persistLocked()
+            self.persistLocked(journal, at: journalURL)
             if endingSession, self.activeSession == session {
                 self.activeSession = nil
             }
@@ -334,8 +331,7 @@ final class MeetingRecordingJournalStore: @unchecked Sendable {
     }
 
     @discardableResult
-    private func persistLocked(initial: Bool = false) -> Bool {
-        guard let journal, let journalURL else { return false }
+    private func persistLocked(_ journal: MeetingRecordingJournal, at journalURL: URL, initial: Bool = false) -> Bool {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         do {

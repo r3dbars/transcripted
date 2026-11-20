@@ -272,7 +272,7 @@ enum NotchIslandAction: Equatable {
     case dictationDismissMessage
     case copyLastDictation
     case pasteLastDictation
-    case meetingStop
+    case meetingStop(UUID)
     case meetingMicMute(UUID)
     case meetingMicUnmute(UUID)
     case meetingPrompt(MeetingIslandPromptButton, MeetingIslandPromptIdentity)
@@ -336,7 +336,7 @@ enum NotchIslandDrop: Equatable {
     case dictationNote(String)
     case justInserted(text: String, words: Int)
     case meetingPreparing(title: String, detail: String)
-    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, micAction: NotchIslandAction? = nil)
+    case meetingControls(callAudioNote: NotchIslandMeetingContent.CallAudioNote?, systemAudioUnverified: Bool, showsTranscript: Bool = false, recordingID: UUID? = nil, micAction: NotchIslandAction? = nil)
     case meetingPrompt(NotchIslandMeetingContent.Prompt)
     case meetingSaved(title: String?)
     case meetingError(title: String, message: String, canOpen: Bool, grantsSystemAudio: Bool = false)
@@ -655,6 +655,7 @@ enum NotchIslandPresentation {
                 callAudioNote: meeting.callAudioNote,
                 systemAudioUnverified: meeting.systemAudioUnverified,
                 showsTranscript: meeting.showsLiveTranscript,
+                recordingID: meeting.recordingID,
                 micAction: meeting.recordingID.flatMap { id in
                     meeting.micMuted ? .meetingMicUnmute(id) : (meeting.micMuteControlEnabled ? .meetingMicMute(id) : nil)
                 }

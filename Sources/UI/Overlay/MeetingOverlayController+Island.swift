@@ -282,8 +282,14 @@ extension MeetingOverlayController {
         case .meetingMicMute(let id), .meetingMicUnmute(let id):
             meetingSession?.setMeetingMicMuted(action == .meetingMicMute(id), recordingID: id)
             pushToView()
-        case .meetingStop, .meetingDismissError:
-            handleCloseTapped()
+        case .meetingStop(let recordingID):
+            Task { @MainActor [weak self] in
+                guard let session = self?.meetingSession, session.isRecording,
+                      session.activeRecordingIdentity == recordingID else { return }
+                await session.stopRecording(reason: .overlayStopButton)
+            }
+        case .meetingDismissError:
+            dismissError()
         case .meetingOpen:
             handlePrimaryActionTapped()
         case .meetingCallAudio:

@@ -640,20 +640,11 @@ final class MeetingOverlayController: NSObject {
         }
     }
 
-    func handleCloseTapped() {
-        if case .error = state {
-            state = .idle
-            hidePanel()
-            pushToView()
-            return
-        }
-        guard let session = meetingSession else { hidePanel(); return }
-        Task { [weak session] in
-            guard let session else { return }
-            if case .recording = session.state {
-                await session.stopRecording(reason: .overlayStopButton)
-            }
-        }
+    func dismissError() {
+        guard case .error = state else { return }
+        state = .idle
+        hidePanel()
+        pushToView()
     }
 
     func openMeetingsFromPill(transcriptURL: URL?) {

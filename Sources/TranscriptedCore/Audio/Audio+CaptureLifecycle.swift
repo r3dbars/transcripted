@@ -385,15 +385,6 @@ extension Audio {
             recordingJournal.recordSystemAudio(finalSystemURL, session: journalSession)
         }
         recordingJournal.markStopping(session: journalSession)
-        // A completion may hand off or remove the journal. Keep that work
-        // behind its first persist without holding up the caller or device teardown.
-        if let journalSession {
-            cleanupGroup.enter()
-            journalSession.initialPersistence.notify(queue: .global(qos: .utility)) {
-                cleanupGroup.leave()
-            }
-        }
-
         // Update UI state immediately so the meeting widget unfreezes
         // before any of the slow CoreAudio teardown begins. Without this
         // dispatch, the user-visible "still spinning" state could last
