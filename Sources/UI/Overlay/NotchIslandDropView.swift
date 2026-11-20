@@ -126,7 +126,7 @@ final class NotchIslandDropView: NSView {
             return
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
-        case .meetingControls(let note, let unverified, let showsTranscript, let recordingID, let micAction):
+        case .meetingControls(let note, let unverified, let showsTranscript, _, let micAction):
             let muted: Bool
             if case .meetingMicUnmute? = micAction { muted = true } else { muted = false }
             let subtitle: String
@@ -194,7 +194,10 @@ final class NotchIslandDropView: NSView {
                               accessibilityLabel: spec.accessibilityLabel)
             }
             if let ring = spec.countdown {
-                view.startCountdown(seconds: ring.secondsLeft, fromFraction: ring.fraction)
+                let action = spec.action
+                view.startCountdown(seconds: ring.secondsLeft, fromFraction: ring.fraction) { secondsLeft in
+                    NotchIslandDropButtons.countdownAccessibilityValue(for: action, secondsLeft: secondsLeft)
+                }
                 // Only a ring whose timer holds on hover is paused by it.
                 if ring.holdsWhileHovered { countdownButton = view }
             }

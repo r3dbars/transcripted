@@ -99,6 +99,40 @@ func testNotchIslandDropButtons() {
         assertEqual(buttons[1].countdown?.holdsWhileHovered, false, "that timer doesn't hold on hover, so neither does its ring")
     }
 
+    runSuite("A button with a ring tells VoiceOver what happens at zero, and when") {
+        let id = UUID()
+        func words(_ drop: NotchIslandDrop, _ seconds: Int, callSecondsLeft: Int = 0) -> String? {
+            guard let ringed = NotchIslandDropButtons.buttons(for: drop, callSecondsLeft: callSecondsLeft)
+                .first(where: { $0.countdown != nil }) else { return nil }
+            return NotchIslandDropButtons.countdownAccessibilityValue(for: ringed.action, secondsLeft: seconds)
+        }
+        var noSound = NotchIslandMeetingContent.Prompt(
+            title: "No sound", detail: "", countdown: "", primaryTitle: "Stop", secondaryTitle: "Dismiss",
+            tertiaryTitle: nil, identity: .inactivity(id, .init(inactiveDuration: 180, countdownSeconds: 30))
+        )
+        noSound.countdownRing = .init(button: .primary, secondsLeft: 12, totalSeconds: 30, holdsWhileHovered: false)
+        assertEqual(words(.meetingPrompt(noSound), 12), "Stops in 12 seconds")
+        assertEqual(words(.meetingPrompt(MeetingDiscardConfirmCopy.prompt(recordingID: id, secondsLeft: 4)), 4),
+                    "Keeps recording in 4 seconds", "the discard question keeps the recording at zero")
+        assertEqual(words(.callPrompt(title: "Call", detail: ""), 1, callSecondsLeft: 1), "Skips in 1 second")
+        let notice = NotchIslandDrop.dictationMessage(.init(tone: .notice, text: "Not pasted", actionTitle: "Paste",
+                                                            preview: "Some words", dismissSeconds: 15))
+        assertEqual(words(notice, 15), "Closes in 15 seconds")
+        assertEqual(NotchIslandDropButtons.countdownAccessibilityValue(for: .callDismiss, secondsLeft: -2),
+                    "Skips in 0 seconds", "never a negative count")
+    }
+
+    runSuite("The 15-minute cap's saved words stay: no countdown, no ring, Paste still there") {
+        let capSaved = NotchIslandDictationContent.Message.make(
+            tone: .saved, text: "Not pasted", errorActionTitle: nil,
+            notPasted: .init(text: "fifteen minutes of words", actionTitle: "Paste", hint: nil, dismissSeconds: nil)
+        )
+        assertNil(capSaved.dismissSeconds, "a notice without a countdown never closes by itself")
+        let buttons = NotchIslandDropButtons.buttons(for: .dictationMessage(capSaved))
+        assertEqual(buttons.map(\.title), ["Dismiss", "Paste"])
+        assertTrue(buttons.allSatisfy { $0.countdown == nil }, "so Dismiss carries no ring")
+    }
+
     runSuite("No drop-down has more than one primary or a red that isn't a confirm") {
         let id = UUID()
         var note = MeetingAutoRecordNoteCopy.prompt

@@ -135,6 +135,25 @@ enum NotchIslandDropButtons {
         }
     }
 
+    /// What VoiceOver hears on a button with a countdown ring: what happens
+    /// by itself when the ring runs out, and when.
+    static func countdownAccessibilityValue(for action: NotchIslandAction, secondsLeft: Int) -> String {
+        let seconds = max(0, secondsLeft)
+        let when = "in \(seconds) \(seconds == 1 ? "second" : "seconds")"
+        switch action {
+        case .meetingPrompt(_, .inactivity(_, _)):
+            return "Stops \(when)"
+        case .meetingPrompt(_, .discardConfirm(_)):
+            return "Keeps recording \(when)"
+        case .callDismiss:
+            return "Skips \(when)"
+        case .dictationDismissMessage, .meetingPrompt(_, .missedCall(_)):
+            return "Closes \(when)"
+        default:
+            return "Goes ahead by itself \(when)"
+        }
+    }
+
     static func insertTitle(appName: String?) -> String {
         guard let appName, !appName.isEmpty else { return "Insert now" }
         return "Insert into \(appName)"

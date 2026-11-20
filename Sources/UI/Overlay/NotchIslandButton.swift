@@ -87,15 +87,35 @@ final class NotchIslandButton: NSButton {
     /// Traces a ring around the button that runs down over `seconds`,
     /// starting from `fromFraction` of a full ring (a countdown already
     /// under way when the drop-down was built).
-    func startCountdown(seconds: Double, fromFraction: Double = 1) {
+    /// `words` says what happens at zero for VoiceOver ("Stops in 12
+    /// seconds"); the button's accessibility value reads it from the ring's
+    /// current position, so it stays right as the ring runs and while it's held.
+    func startCountdown(seconds: Double, fromFraction: Double = 1, words: ((Int) -> String)? = nil) {
         countdownSeconds = seconds
         countdownFromFraction = min(1, max(0, fromFraction))
+        countdownWords = words
         needsLayout = true
+    }
+
+    private var countdownWords: ((Int) -> String)?
+
+    override func accessibilityValue() -> Any? {
+        guard let seconds = countdownSeconds, let countdownWords else { return super.accessibilityValue() }
+        // Before the first layout the ring hasn't started: the full count is left.
+        let left: Double
+        if countdownStarted, countdownFromFraction > 0 {
+            let fractionLeft = Double(ring.presentation()?.strokeEnd ?? ring.strokeEnd)
+            left = fractionLeft * seconds / countdownFromFraction
+        } else {
+            left = seconds
+        }
+        return countdownWords(Int(left.rounded(.up)))
     }
 
     /// Takes the ring away for good (the person started answering).
     func stopCountdown() {
         countdownSeconds = nil
+        countdownWords = nil
         ring.removeAllAnimations()
         ring.removeFromSuperlayer()
         ringTrack.removeFromSuperlayer()

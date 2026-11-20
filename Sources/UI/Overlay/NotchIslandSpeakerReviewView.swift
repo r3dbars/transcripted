@@ -205,7 +205,7 @@ final class NotchIslandSpeakerReviewView: NSView {
         rows = ranked.map { makeRow(for: $0, recognized: false) }
         // The mic is the owner: its voices start as You, asked about only
         // when someone says it wasn't just them.
-        micDefaultsToYou = rows.contains { $0.isMic }
+        micDefaultsToYou = NotchIslandSpeakerReviewPolicy.micStartsAsYou(micVoiceCount: rows.filter(\.isMic).count)
         keepMicAsYou = micDefaultsToYou
         for row in rows where row.isMic { row.setKeptAsYou(true) }
         recognizedRows = input.recognizedSpeakers.map { makeRow(for: $0, recognized: true) }
@@ -606,7 +606,9 @@ final class NotchIslandSpeakerReviewView: NSView {
             // Later (the island's button or ring, and Skip on Speakers) saves
             // only what was answered; the mic's untouched default You waits
             // for a Done, so nothing is written that the user never chose.
-            if finish == .later, row.isMic, keepMicAsYou, !micAsYouChanged {
+            if row.isMic, NotchIslandSpeakerReviewPolicy.micVoiceOnFinish(
+                finish, keepMicAsYou: keepMicAsYou, startedAsYou: micDefaultsToYou
+            ) == .waits {
                 unanswered += 1
                 continue
             }

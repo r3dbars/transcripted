@@ -572,6 +572,29 @@ enum NotchIslandSpeakerReviewPolicy {
         return discarded ? .discarded : nil
     }
 
+    /// The mic is the owner: when the review has mic voices they start kept
+    /// as You, and are asked about only when someone says it wasn't just them.
+    static func micStartsAsYou(micVoiceCount: Int) -> Bool {
+        micVoiceCount > 0
+    }
+
+    /// What closing the review saves for one mic voice.
+    enum MicVoiceOnFinish: Equatable {
+        /// Nothing yet: Later with the untouched default You. Nothing is
+        /// written that the person never chose; it waits for a Done.
+        case waits
+        /// Saved as You (Done with the default, or You chosen again).
+        case savesYou
+        /// Its own answer, like any other voice (the person said "Not just me").
+        case savesOwnAnswer
+    }
+
+    static func micVoiceOnFinish(_ finish: Finish, keepMicAsYou: Bool, startedAsYou: Bool) -> MicVoiceOnFinish {
+        guard keepMicAsYou else { return .savesOwnAnswer }
+        let untouched = keepMicAsYou == startedAsYou
+        return finish == .later && untouched ? .waits : .savesYou
+    }
+
     /// The mic line's label. The mic is the owner, so its voices start as
     /// You and the line says so: "On your mic · You".
     static let micLineTitle = "On your mic"

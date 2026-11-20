@@ -1,6 +1,22 @@
 import Foundation
 
 func testNotchIslandSpeakerReviewPolicy() {
+    runSuite("Mic voices start as You, Later saves nothing for that default, Done saves You") {
+        typealias P = NotchIslandSpeakerReviewPolicy
+        assertTrue(P.micStartsAsYou(micVoiceCount: 2), "the mic is the owner, so its voices start as You")
+        assertFalse(P.micStartsAsYou(micVoiceCount: 0), "no mic voices, nothing kept")
+        assertEqual(P.micVoiceOnFinish(.later, keepMicAsYou: true, startedAsYou: true), .waits,
+                    "Later with the untouched default writes nothing")
+        assertEqual(P.micVoiceOnFinish(.done, keepMicAsYou: true, startedAsYou: true), .savesYou,
+                    "Done with the untouched default saves You")
+        for finish in [P.Finish.later, .done] {
+            assertEqual(P.micVoiceOnFinish(finish, keepMicAsYou: false, startedAsYou: true), .savesOwnAnswer,
+                        "after Not just me, each mic voice saves its own answer (\(finish))")
+        }
+        assertEqual(P.micVoiceOnFinish(.later, keepMicAsYou: true, startedAsYou: false), .savesYou,
+                    "You picked by hand is a change, so Later saves it too")
+    }
+
     runSuite("NotchIslandSpeakerReviewPolicy asks yes/no only when there is a suggestion") {
         assertEqual(
             NotchIslandSpeakerReviewPolicy.question(currentName: "Maya Chen", needsConfirmation: true),

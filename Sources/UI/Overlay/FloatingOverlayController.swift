@@ -89,8 +89,9 @@ class FloatingOverlayController {
     private var notPastedPasteHandler: (() -> Void)?
     private var notPastedActionTitle = "Paste"
     private var notPastedHint: String?
+    /// The shown notice's countdown, or nil when it stays (`NotPastedNotice`).
+    private var notPastedDismissAfter: Double?
     private var notPastedKeyMonitor: Any?
-    static let notPastedDismissSeconds: Double = 15
     var loadingElapsedSeconds: Int = 0 {
         didSet { pushStateToIsland() }
     }
@@ -227,7 +228,7 @@ class FloatingOverlayController {
                         text: $0,
                         actionTitle: notPastedActionTitle,
                         hint: notPastedHint,
-                        dismissSeconds: Self.notPastedDismissSeconds
+                        dismissSeconds: notPastedDismissAfter
                     )
                 }
             ))
@@ -434,19 +435,12 @@ class FloatingOverlayController {
         ))
     }
 
-    private struct NotPastedNotice {
-        let text: String
-        let actionTitle: String
-        let hint: String?
-        let watchesForManualPaste: Bool
-        let action: () -> Void
-    }
-
     private func clearNotPasted() {
         notPastedText = nil
         notPastedPasteHandler = nil
         notPastedActionTitle = "Paste"
         notPastedHint = nil
+        notPastedDismissAfter = nil
         if let notPastedKeyMonitor {
             NSEvent.removeMonitor(notPastedKeyMonitor)
             self.notPastedKeyMonitor = nil
@@ -473,7 +467,8 @@ class FloatingOverlayController {
     func showSavedNotPastedNotice(_ text: String, hint: String, fallbackMessage: String, paste: @escaping () -> Void) {
         guard isIslandMode else { return showSavedNotice(fallbackMessage, actionTitle: "Paste", action: paste) }
         showMessage("Not pasted", tone: .saved, kind: .other, notPasted: NotPastedNotice(
-            text: text, actionTitle: "Paste", hint: hint, watchesForManualPaste: false, action: paste
+            text: text, actionTitle: "Paste", hint: hint, watchesForManualPaste: false,
+            dismissSeconds: NotPastedNotice.capSavedDismissSeconds, action: paste
         ))
     }
 
@@ -501,6 +496,7 @@ class FloatingOverlayController {
             notPastedPasteHandler = notPasted.action
             notPastedActionTitle = notPasted.actionTitle
             notPastedHint = notPasted.hint
+            notPastedDismissAfter = notPasted.dismissSeconds
             if notPasted.watchesForManualPaste {
                 watchForManualPaste(of: notPasted.text)
             }
@@ -518,10 +514,12 @@ class FloatingOverlayController {
             showPanel(near: nil)
         }
         pushStateToIsland()  // Force update for error message
-        if notPasted != nil {
-            // Runs down with the island's ring, and holds while hovered.
+        if let notPasted {
+            // Runs down with the island's ring, and holds while hovered. A
+            // notice without a countdown stays until it's used or dismissed.
+            guard let seconds = notPasted.dismissSeconds else { return }
             errorDismissTask = Task { @MainActor [weak self] in
-                var remaining = Self.notPastedDismissSeconds
+                var remaining = seconds
                 while remaining > 0 {
                     do { try await Task.sleep(nanoseconds: 100_000_000) } catch { return }
                     guard let self else { return }

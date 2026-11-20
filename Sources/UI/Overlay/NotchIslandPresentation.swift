@@ -51,7 +51,9 @@ struct NotchIslandDictationContent: Equatable {
             var text: String
             var actionTitle: String
             var hint: String?
-            var dismissSeconds: Double
+            /// Nil: the notice stays until it's used or dismissed (the
+            /// 15-minute cap's saved words).
+            var dismissSeconds: Double?
         }
 
         /// Builds the message for a finished dictation. With a not-pasted

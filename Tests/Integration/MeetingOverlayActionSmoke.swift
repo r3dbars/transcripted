@@ -155,7 +155,7 @@ enum MeetingOverlayActionSmoke {
         expect(observe(.failed) == first, "Refreshing a failure preserved its occurrence")
         await renderPrompt(.systemAudio(session.activeRecordingIdentity!, first))
         let firstStop = button("Stop", in: view)
-        let firstContinue = button("Continue", in: view)
+        let firstDismiss = button("Dismiss", in: view)
         let firstDrop = drop(containing: firstStop)
         click(firstStop)
         let recovered = observe(.healthy)
@@ -166,7 +166,7 @@ enum MeetingOverlayActionSmoke {
         expect(firstDrop !== drop(containing: button("Stop", in: view)), "A recurring failure replaced its controls")
         withExtendedLifetime(firstDrop) {
             click(firstStop)
-            click(firstContinue)
+            click(firstDismiss)
         }
         await drain()
         expect(session.isRecording && session.systemAudioDegradationWarning == degraded,
@@ -191,17 +191,17 @@ enum MeetingOverlayActionSmoke {
             return (timer, gate.continuation)
         }
         await renderPrompt(.systemAudio(recoveredID, recoveredAgain))
-        let oldOK = button("OK", in: view)
-        let recoveredDrop = drop(containing: oldOK)
+        let oldDismiss = button("Dismiss", in: view)
+        let recoveredDrop = drop(containing: oldDismiss)
         let (oldTimer, resumeOldTimer) = await suspendedTimer(for: recoveredAgain)
         _ = observe(.failed)
         let latestRecovery = observe(.healthy)
         resumeOldTimer.finish()
         await oldTimer?.value
         await renderPrompt(.systemAudio(recoveredID, latestRecovery))
-        withExtendedLifetime(recoveredDrop) { click(oldOK) }
+        withExtendedLifetime(recoveredDrop) { click(oldDismiss) }
         expect(oldTimer != nil && session.systemAudioDegradationWarning == latestRecovery,
-               "Suspended timer and retained OK preserved the recurring recovery")
+               "Suspended timer and retained Dismiss preserved the recurring recovery")
         let (currentTimer, resumeCurrentTimer) = await suspendedTimer(for: latestRecovery)
         session.activeRecordingIdentity = UUID()
         resumeCurrentTimer.finish()
