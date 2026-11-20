@@ -90,11 +90,10 @@ final class AppSoundPlayer: @unchecked Sendable {
             case .menuRowHover:
                 // Quieter still (about 5%), so the rows sit a tier below the buttons.
                 return 0.07
-            case .menuPress:
-                // A touch firmer than the hover ticks (about 10%), still well
-                // under the dictation clicks.
+            case .menuPress, .meetingTranscriptComplete:
+                // Quiet confirmation cues (about 10%).
                 return 0.15
-            case .dictationCancelled, .meetingTranscriptComplete, .meetingRecordingStart, .meetingRecordingStop:
+            case .dictationCancelled, .meetingRecordingStart, .meetingRecordingStop:
                 return 1.0
             }
         }
