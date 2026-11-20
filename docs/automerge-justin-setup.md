@@ -1,10 +1,10 @@
 # Auto-merge: steps only Justin does
 
 Agents never run these. Until A is done, risk-gate only labels and logs; nothing auto-merges.
-Order matters: **C1–C3 before relying on release approvals.** #2199 adds `environment: release` to release-candidate.yml. Until C1 exists, GitHub creates that environment unprotected on the first run and repo-level secrets still apply, so RCs keep working with no approval step. **Set `AUTOMERGE_APP_ID` (A4) before `AI_REVIEW_API_KEY`**: the review job makes no AI calls until the App ID is set. Then A (the App must have posted `risk-gate` once), then B: the bot gets write access only after the ruleset requires `risk-gate` (N1).
+Order matters. **Verify C1–C3 before relying on release approvals.** The signing job already declares `environment: release`. If the environment has never been configured, GitHub can create it without protection. **Set `AUTOMERGE_APP_ID` (A4) before `AI_REVIEW_API_KEY`** so the review job can make AI calls. Then finish A and confirm the App has posted `risk-gate` once. In B, grant the bot write access after the ruleset requires `risk-gate` (N1).
 
 ## C. Release environment for the 6 Apple/Sparkle secrets (about 20 min)
-Secrets, all repo-wide today: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVELOPER_ID_CERT, DEVELOPER_ID_PASSWORD, SPARKLE_PRIVATE_KEY.
+The signing job uses `APPLE_APP_PASSWORD`, `APPLE_ID`, `APPLE_TEAM_ID`, `DEVELOPER_ID_CERT`, `DEVELOPER_ID_PASSWORD`, and `SPARKLE_PRIVATE_KEY`.
 1. Create `release`, deployable from `main` only, with you as **mandatory** reviewer (S5, S9):
    ```
    ME=$(gh api user -q .id)
@@ -16,10 +16,10 @@ Secrets, all repo-wide today: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVEL
    ```
    The reviewer gate only means something after B (today every agent can approve as you).
 2. For each secret: `gh secret set NAME -R r3dbars/transcripted --env release` with the original value (repo secrets can't be read back; use your source copies).
-3. Merge #2199 (high risk, by hand).
+3. Verify that `release` is main-only, requires your approval, and has all six environment secrets before relying on its approval gate.
 4. Dispatch RCs from main (the env policy checks the workflow ref, S6):
    `gh workflow run release-candidate.yml -R r3dbars/transcripted --ref main -f source_ref=<prep branch> -f version=<x.y.z>`, approve the deployment.
-5. Once an RC is green: `gh secret delete NAME -R r3dbars/transcripted` for each of the 6 repo-level copies.
+5. Once an approved RC is green using the environment secrets, remove any remaining repo-level copies with `gh secret delete NAME -R r3dbars/transcripted`.
 
 ## A. Create the gate App (about 30 min)
 1. github.com/settings/apps/new: name `transcripted-gate`, homepage the repo URL, webhook off.
@@ -33,7 +33,7 @@ Secrets, all repo-wide today: APPLE_APP_PASSWORD, APPLE_ID, APPLE_TEAM_ID, DEVEL
 5. Delete the downloaded .pem. **Never** put it on an agent box or Mac (S7).
 6. Labels: `for l in risk:low risk:medium risk:high automerge:off; do gh label create "$l" -R r3dbars/transcripted; done`
 7. Watch a few PRs in `signal-only` until the App has posted `risk-gate` at least once (GitHub only offers it as a pinned source after that, S3). B4 then requires it.
-8. **Only after #2201 lands** (Sparkle feed off main, keychain/build-sign split, MCP publish gated), and only when you choose: `gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=true` and `gh variable set AUTOMERGE_ENABLED -R r3dbars/transcripted --env automerge-app -b true`.
+8. Enable auto-merge only by your decision after #2201 is complete, including the [staged signed-feed upgrade proof](sparkle-updates.md#signed-feed). The commands are `gh api -X PATCH repos/r3dbars/transcripted -F allow_auto_merge=true` and `gh variable set AUTOMERGE_ENABLED -R r3dbars/transcripted --env automerge-app -b true`.
 
 ## B. No agent merges as you (after A7)
 Agents use your `gh` login, so today "only r3dbars can merge" means every agent can.
@@ -63,5 +63,11 @@ Agents use your `gh` login, so today "only r3dbars can merge" means every agent 
 6. Why 0 approvals is safe (S2): low/medium trust comes from the App-pinned `risk-gate` plus the identity split; high never auto-merges. Bot self-approval can't happen (GitHub never lets an author approve its own PR, and Actions may not approve: `can_approve_pull_request_reviews=false`, already set). The bot has no bypass.
 7. Tags (S7, N4): add a tag ruleset protecting `v*` (no create/update/delete except Repository admin). `publish-mcp-registry.yml` runs on `release` events, not tag pushes. It used to accept `workflow_dispatch` too, which the tag ruleset didn't gate; that trigger is gone (#2201), so it runs only when a release is published. `environment: release` wasn't used because its main-only branch policy would block release runs, whose ref is the tag.
 
-## Follow-ups (not in #2199)
-Done from #2201: keychain import trusts only `/usr/bin/codesign` (`-T`, no `-A`) with a 3 h lock timeout, and `publish-mcp-registry.yml` is release-event only. Still tracked in #2201: signed/off-main Sparkle feed and splitting build from sign.
+## Release hardening status
+
+Releases ship the signed Sparkle feed as a GitHub release asset. The RC
+workflow builds without signing secrets and signs in the `release` environment.
+Its temporary keychain trusts only `/usr/bin/codesign`, locks after three
+hours, and is deleted on job exit. MCP publication runs on release publication,
+and the risk gate binds its verdict to the open PR. #2201 still needs real
+staged proof of client-side signed-feed enforcement before A8.

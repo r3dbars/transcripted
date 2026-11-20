@@ -20,6 +20,8 @@ Future agents should treat this as a release requirement:
   (see "Feed hosting" below)
 - `SUVerifyUpdateBeforeExtraction` is on, so Sparkle checks an update archive's
   EdDSA signature before it unpacks anything
+- `SURequireSignedFeed` is on for future builds from this source. Published
+  1.1.75 and 1.1.76 builds use the same feed URL and verify downloads
 - `SUEnableAutomaticChecks` is enabled by default
 - `SUScheduledCheckInterval` is set to 4 hours so automatic checks happen
   more often than Sparkle's default daily cadence
@@ -201,36 +203,56 @@ including `mark-appcast-critical.py`, invalidates it, so signing is the last
 step. The signature is made with the same key whose public half is
 `SUPublicEDKey`.
 
-Sparkle 2.9.1 is the pinned version (`build-deps.sh`). What it does and does not
-give us:
+With `SURequireSignedFeed`, pinned Sparkle 2.9.1 verifies the feed against
+`SUPublicEDKey` before using it. It also verifies release notes fetched through
+`sparkle:releaseNotesLink`. New items embed a short notice in `description`
+covered by the feed signature. The notice links to the full GitHub notes in
+the user's browser. `sparkle:fullReleaseNotesLink` also makes that page
+available from Sparkle's Version History action. Sparkle displays the
+embedded notice without fetching GitHub's HTML as release notes.
+[Feed verification source][sparkle-feed-source] ·
+[Release notes verification source][sparkle-notes-source] ·
+[Sparkle publishing docs][sparkle-publishing]
 
-- the framework has both `SUVerifyUpdateBeforeExtraction` (Sparkle 2.7.3+) and
-  `SURequireSignedFeed` (Sparkle 2.9+), plus `SUSignedFeedFailureExpirationInterval`
-  (found in the vendored binary's strings; its headers are not shipped in
-  `deps-frameworks/`, and Sparkle's customization docs describe all three)
-- `SUVerifyUpdateBeforeExtraction` is on. `SURequireSignedFeed` is **not** on
-  yet, on purpose. Sparkle's docs say that with it on, external release notes
-  must be signed too, and every item's `sparkle:releaseNotesLink` points at a
-  GitHub release page (`releases/tag/v<version>`), which is HTML GitHub renders
-  and nobody can sign. How Sparkle 2.9.1 treats an unsigned release-notes link
-  under that key is not documented, so turning it on today could break the
-  update window on the first build that has it. To turn it on: switch new items
-  to embedded release notes (`<description>`) or a static, signed notes file,
-  add the key to `Info.plist`, and prove it with the staged upgrade test
-  (`docs/staged-sparkle-update-test.md`) before the release ships. The key only
-  affects builds that carry it, so it can land in any later release.
-- with `SURequireSignedFeed` off, nothing here proves Sparkle checks the
-  embedded feed signature, or refuses an unsigned or stripped feed. Don't claim
-  either. The signature still pays off: `sign-appcast.sh` and
-  `verify-sparkle-release.sh` check it, and it is in place for the day the key
-  is on. Sparkle's docs also say that once the key is on, a feed that keeps
-  failing validation shows updates again after 20 days
-  (`SUSignedFeedFailureExpirationInterval`), as a failsafe for a lost key
-- archives and deltas are already EdDSA-signed in the feed; with
-  `SUVerifyUpdateBeforeExtraction` on, that check happens before the archive is
-  unpacked
-- builds before the one that introduces this `Info.plist` keep the old behavior,
-  and they read the legacy feed, which is why it is frozen and not deleted
+The feed URL, public key, and signed DMG and delta checks carry forward.
+Historical entries on the release-asset feed retain their metadata, including
+their original notes links. Sparkle checks those links only if it downloads
+the notes for a selected update. Builds with enforcement start above those
+historical versions, so Sparkle never offers those entries to them as updates.
+1.1.75 and 1.1.76 already read the release-asset feed. Earlier builds use
+the frozen legacy feed to reach 1.1.75.
+
+Sparkle's default 20-day key-rotation recovery remains available if feed
+verification keeps failing. Recovery omits untrusted release notes and allows
+the same-team Developer ID fallback for a full DMG during key rotation. Under
+normal conditions, a missing or invalid feed signature fails the update check.
+[Sparkle security settings][sparkle-configuration] ·
+[Feed verification source][sparkle-feed-source]
+
+### Staged proof before the first enforcing release
+
+- On a disposable hosted Mac or isolated macOS account, use the published
+  1.1.76 DMG and the approved, unchanged signed candidate to verify the full
+  upgrade and any offered delta independently. Confirm the installed app
+  relaunches at the candidate version and carries both verification flags.
+- Start a separate pass with the enforcing candidate as the installed app.
+  Use a temporary `SUFeedURL` preference in the isolated account to point the
+  unchanged app at the staged feed. Offer a newer staged build via a valid
+  signed feed and exercise the manual update window. Confirm the embedded
+  notice renders and its link opens the full notes in the browser. Verify
+  that fresh checks with the signature absent or invalid reject the feed
+  before requesting an archive.
+- Serve signed feed bytes unchanged in the positive case. If staging needs
+  different asset URLs, set them in a separate feed before signing it through
+  the approved release signing path. The
+  [1.1.75 → 1.1.76 harness](staged-sparkle-update-test.md) rewrites its feed
+  for loopback and uses a client without enforcement. Its receipts cannot
+  establish signed-feed enforcement.
+
+[sparkle-feed-source]: https://github.com/sparkle-project/Sparkle/blob/066e75a8b3e99962685d6a90cdd5293ebffd9261/Sparkle/SUAppcastDriver.m
+[sparkle-notes-source]: https://github.com/sparkle-project/Sparkle/blob/066e75a8b3e99962685d6a90cdd5293ebffd9261/Sparkle/SPUUIBasedUpdateDriver.m
+[sparkle-publishing]: https://sparkle-project.org/documentation/publishing/#embedded-release-notes
+[sparkle-configuration]: https://sparkle-project.org/documentation/customization/#security-settings
 
 ## Legacy feed
 
@@ -335,6 +357,7 @@ REPO_APPCAST_PATH=/path/to/feed-copy/appcast.xml INFO_PLIST_PATH=<shipped Info.p
    then writes the merged result back to the scratch copy. It has no default
    feed path and refuses `docs/appcast.xml` once that is frozen. It lists the
    delta files to upload in `<updates-folder>/sparkle-deltas.txt`.
+   - The newest item embeds the release-notes notice before the feed is signed.
    - If the owner said yes to reaching old versions (see "Reaching people on old
      versions" below), dispatch with `mark_critical_for_old_builds=true`; the
      workflow runs `python3 scripts/release/mark-appcast-critical.py --appcast <feed>`.
