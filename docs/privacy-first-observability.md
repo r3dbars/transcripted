@@ -75,7 +75,7 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 8. Verify Settings also shows separate toggles for:
    - crash and error reports
    - anonymous usage statistics
-9. Use Settings › Privacy > `Send diagnostics` (next to Crash reports) to verify Sentry wiring (the dedicated
+9. Use Settings › Privacy > `Send diagnostics` (under Crash reports and Usage stats) to verify Sentry wiring (the dedicated
    `Send Test Sentry Event` settings row was removed in the settings
    simplification).
 10. Leave anonymous usage statistics on and verify only allowlisted events arrive

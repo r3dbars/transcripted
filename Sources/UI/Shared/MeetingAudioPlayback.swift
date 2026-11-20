@@ -444,14 +444,15 @@ struct MeetingAudioSourceMenu: View {
                 }
                 .font(LibraryTokens.meta)
                 .foregroundStyle(LibraryTokens.ink2)
-                // Quiet text, but a full-size target: no pill, just room.
                 .padding(.horizontal, 6)
-                .frame(minHeight: LibraryTokens.minimumHitTarget)
-                .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            // Quiet text, but a full-size target: no pill, just room. On the
+            // menu itself, since a borderless menu can drop its label's frame.
+            .frame(minHeight: LibraryTokens.minimumHitTarget)
+            .contentShape(Rectangle())
             .help("Play the mix, just you, or just the others")
             .accessibilityLabel(Text("Audio track: \(Self.title(for: selectedChoice))"))
             .accessibilityIdentifier("transcripted.home.meeting.audio-source")
