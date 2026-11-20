@@ -190,7 +190,8 @@ struct OnboardingNavigation: Equatable {
         case .tryHandsFree:
             return tryHandsFreeDone ? nil : .skip
         case .systemAudio:
-            return systemAudioVerified || systemAudioChecking ? nil : .skip
+            // Skip stays while a check runs: a slow check never holds setup.
+            return systemAudioVerified ? nil : .skip
         case .welcome, .promise, .done:
             return nil
         }

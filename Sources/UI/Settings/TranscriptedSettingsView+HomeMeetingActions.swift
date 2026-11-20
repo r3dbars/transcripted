@@ -276,6 +276,10 @@ extension TranscriptedSettingsView {
                 }
             )
         } else {
+            // The deleted meeting was the open one: nothing is open now.
+            if homeExpandedMeetingID == MeetingsPageOpenState.failedMeetingKey(item.id) {
+                collapseHomeMeetingExpansion(stopsPlayback: false)
+            }
             ActivationTelemetry.trackWorkflowAbandoned(
                 workflowKind: HomeFailedMeetingCleanupTelemetry.workflowKind,
                 stage: HomeFailedMeetingCleanupTelemetry.stage,

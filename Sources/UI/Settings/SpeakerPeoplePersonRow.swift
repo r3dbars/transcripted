@@ -35,8 +35,9 @@ struct SpeakerPersonRow: View {
 
     private var isExpandedRow: Bool { expandedPersonID == profile.id }
 
-    /// ••• stays hidden until hover; the print is always there.
-    private var showsRowActions: Bool { isHovering }
+    /// ••• shows on hover and while the person is open, so a keyboard or
+    /// VoiceOver user who opens a row can reach Merge into and Delete.
+    private var showsRowActions: Bool { isHovering || isExpandedRow }
 
     /// Print size in Settings, from the approved mockup.
     static let printDiameter: CGFloat = 36

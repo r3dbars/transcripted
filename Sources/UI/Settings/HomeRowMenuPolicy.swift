@@ -143,8 +143,44 @@ enum HomeRowMenuPolicy {
         return entries
     }
 
+    /// The lines the ⋯ menu draws, in order: every `.menu` item, each
+    /// `.optionAlternate` right where it stands (it replaces the line above
+    /// while Option is held), nothing that rides the issue line, and a
+    /// separator before a destructive line. `HomeView` builds the real menu
+    /// from this, so the tests check what the menu shows.
+    static func menuLines<Item>(
+        _ items: [Item],
+        placement: (Item) -> HomeRowMenuPlacement,
+        isDestructive: (Item) -> Bool
+    ) -> [HomeRowMenuLine<Item>] {
+        var lines: [HomeRowMenuLine<Item>] = []
+        for item in items {
+            let itemPlacement = placement(item)
+            guard itemPlacement != .issueLine else { continue }
+            lines.append(HomeRowMenuLine(
+                item: item,
+                isOptionAlternate: itemPlacement == .optionAlternate,
+                separatorBefore: isDestructive(item) && !lines.isEmpty
+            ))
+        }
+        return lines
+    }
+
+    static func menuLines(_ entries: [HomeRowMenuEntry]) -> [HomeRowMenuLine<HomeRowMenuEntry>] {
+        menuLines(entries, placement: \.placement, isDestructive: \.isDestructive)
+    }
+
     /// The lines a person sees in the ⋯ menu, before holding Option.
     static func visibleMenuEntries(_ entries: [HomeRowMenuEntry]) -> [HomeRowMenuEntry] {
-        entries.filter { $0.placement == .menu }
+        menuLines(entries).filter { !$0.isOptionAlternate }.map(\.item)
     }
+}
+
+/// One line of a Home row's ⋯ menu (`HomeRowMenuPolicy.menuLines`).
+struct HomeRowMenuLine<Item> {
+    var item: Item
+    /// Shown instead of the line above while Option is held.
+    var isOptionAlternate: Bool
+    /// Delete sits under a separator, apart from the rest.
+    var separatorBefore: Bool
 }

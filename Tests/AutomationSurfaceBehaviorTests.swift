@@ -268,6 +268,7 @@ func testAutomationSurfaceBehavior() async {
         assertEqual(audio.primaryTitle, "Check again", "an unverified check offers another check")
         audio.systemAudioChecking = true
         assertTrue(audio.primaryDisabled, "no second check while one runs")
+        assertEqual(audio.secondaryAction, .skip, "Skip stays while a check runs, so a slow check never holds setup")
         audio.systemAudioVerified = true
         audio.systemAudioChecking = false
         assertEqual(audio.primaryTitle, "Continue", "verified call audio moves on")

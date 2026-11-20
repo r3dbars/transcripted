@@ -139,16 +139,19 @@ struct HomeRowMoreMenuButton: NSViewRepresentable {
             // Without this, AppKit auto-enables every item whose target responds
             // to the action, overriding the per-item isEnabled set below.
             menu.autoenablesItems = false
-            for item in items where item.placement != .issueLine {
-                // Delete sits under a separator, apart from the rest.
-                if item.isDestructive, !menu.items.isEmpty {
+            // Which lines, in what order, with which separator: the same
+            // function the menu tests check.
+            let lines = HomeRowMenuPolicy.menuLines(items, placement: \.placement, isDestructive: \.isDestructive)
+            for line in lines {
+                let item = line.item
+                if line.separatorBefore {
                     menu.addItem(.separator())
                 }
                 let menuItem = ClosureMenuItem(menuItem: item)
                 // No key equivalents here; an empty mask lets an Option
                 // alternate pair with the line above it.
                 menuItem.keyEquivalentModifierMask = []
-                if item.placement == .optionAlternate {
+                if line.isOptionAlternate {
                     menuItem.isAlternate = true
                     menuItem.keyEquivalentModifierMask = [.option]
                 }

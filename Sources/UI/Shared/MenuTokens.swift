@@ -12,9 +12,13 @@
 import AppKit
 
 enum MenuTokens {
-    // Every value here comes from `DesignTokens` (Sources/UI/Shared/DesignTokens.swift),
+    // Almost every value here comes from `DesignTokens` (Sources/UI/Shared/DesignTokens.swift),
     // the one source shared with the main window and the island. These names
-    // stay so the popover's AppKit views keep reading one place.
+    // stay so the popover's AppKit views keep reading one place. The two
+    // exceptions are the secondary and muted text greys below: the popover sits
+    // on a translucent system material, where the main window's see-through
+    // inks drop too far (about 3.7:1 and 2.1:1 in light mode), so it keeps
+    // solid greys.
 
     // Surface — NSPopover's native material provides the background; only the
     // section divider is drawn by the popover itself.
@@ -27,8 +31,14 @@ enum MenuTokens {
     /// The recording mark. Recording is live, so it is the same green.
     static let statusRecordingNS = DesignTokens.NS.live
     static let textPrimaryNS = DesignTokens.NS.ink
-    static let textSecondaryNS = DesignTokens.NS.ink2
-    static let textMutedNS = DesignTokens.NS.ink3
+    static let textSecondaryNS = DesignTokens.dynamic(
+        dark: NSColor(calibratedWhite: 0.74, alpha: 1.0),
+        light: NSColor(calibratedWhite: 0.35, alpha: 1.0)
+    )
+    static let textMutedNS = DesignTokens.dynamic(
+        dark: NSColor(calibratedWhite: 0.58, alpha: 1.0),
+        light: NSColor(calibratedWhite: 0.50, alpha: 1.0)
+    )
 
     // Rows
     static let flatRowHoverNS = DesignTokens.NS.fill

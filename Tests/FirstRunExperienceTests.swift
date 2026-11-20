@@ -1,6 +1,21 @@
 import Foundation
 
 func testFirstRunExperience() {
+    runSuite("The voice model moves up top only when it failed or is downloading") {
+        func needs(_ state: ParakeetModelState, installed: Bool = true,
+                   model: TranscriptionModelChoice = .parakeetTDTv3) -> Bool {
+            FirstRunExperience.modelNeedsAttention(
+                state, card: FirstRunExperience.modelCard(for: state, model: model, isLocallyInstalled: installed)
+            )
+        }
+        assertTrue(needs(.failed("Model load failed")), "a failed model needs the person")
+        assertTrue(needs(.downloading(progress: 0.4)), "a download in progress shows up top")
+        assertFalse(needs(.notLoaded), "idle (On demand) is normal and stays in Advanced")
+        assertFalse(needs(.cached), "downloaded and waiting is normal")
+        assertFalse(needs(.loading), "loading is normal, so the card doesn't jump")
+        assertFalse(needs(.ready))
+    }
+
     runSuite("Parakeet v2 persistence copy uses the approximate required CoreML download size") {
         let detail = FirstRunExperience.modelPersistenceDetail(for: .parakeetTDTv2)
         assertTrue(detail.hasPrefix("One-time ~460 MB download."))

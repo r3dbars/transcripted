@@ -444,6 +444,9 @@ struct MeetingAudioSourceMenu: View {
                 }
                 .font(LibraryTokens.meta)
                 .foregroundStyle(LibraryTokens.ink2)
+                // Quiet text, but a full-size target: no pill, just room.
+                .padding(.horizontal, 6)
+                .frame(minHeight: LibraryTokens.minimumHitTarget)
                 .contentShape(Rectangle())
             }
             .menuStyle(.borderlessButton)

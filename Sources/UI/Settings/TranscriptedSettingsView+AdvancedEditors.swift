@@ -93,11 +93,12 @@ extension TranscriptedSettingsView {
     /// Model files missing, failed or downloading: the voice model moves to
     /// the top of the page instead of waiting inside Advanced.
     var generalModelNeedsAttention: Bool {
+        let state = sttRouter.modelDownloadState
         let modelCard = FirstRunExperience.modelCard(
-            for: sttRouter.modelDownloadState,
+            for: state,
             model: effectiveTranscriptionModel,
             isLocallyInstalled: isLocalModelInstalled(effectiveTranscriptionModel)
         )
-        return modelCard.tone != .ready || modelCard.progress != nil
+        return FirstRunExperience.modelNeedsAttention(state, card: modelCard)
     }
 }

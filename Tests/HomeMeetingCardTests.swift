@@ -291,6 +291,25 @@ func testHomeMeetingCard() {
         assertEqual(other.openID, "/m/A.md", "renaming a meeting that isn't open changes nothing")
     }
 
+    runSuite("After a rename the open card's preview matches the new open id") {
+        let oldURL = URL(fileURLWithPath: "/m/Weekly sync.md")
+        let newURL = URL(fileURLWithPath: "/m/2026-06-05 Release plan.md")
+        let item = RecentMeetingItem(title: "Weekly sync", date: start, startDate: nil, endDate: nil,
+                                     transcriptURL: oldURL, audio: nil, speakerStatus: .ready)
+        let loaded = HomeMeetingPreview(item: item, markdown: "# Weekly sync\n\nSome words.")
+        var state = MeetingsPageOpenState()
+        state.sync(openID: item.id)
+        let renamed = loaded.updatingAfterRename(transcriptURL: newURL, title: "Release plan", audio: nil)
+        state.followRename(from: item.id, to: newURL.path)
+        let openID = newURL.path
+        assertEqual(renamed.id, openID, "the renamed preview carries the new open id, so the card isn't stuck loading")
+        assertEqual(state.openID, openID)
+        assertTrue(state.isOpen(item.id, expandedID: openID) && renamed.id == openID,
+                   "the row still listed under its old path shows the renamed preview")
+        assertEqual(renamed.markdown, loaded.markdown, "the transcript already read stays")
+        assertEqual(renamed.title, "Release plan")
+    }
+
     runSuite("Failed and saved rows share one open slot") {
         let id = UUID(uuidString: "00000000-0000-0000-0000-000000000042")!
         let key = MeetingsPageOpenState.failedMeetingKey(id)

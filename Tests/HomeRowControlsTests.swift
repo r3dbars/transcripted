@@ -69,6 +69,23 @@ func testHomeRowControls() {
         assertFalse(entries.contains(.reportIssue), "Report issue lives in the sidebar's Feedback now")
     }
 
+    runSuite("The ⋯ menu draws Show audio as Option on Show in Finder, Boost mic nowhere, and Delete under a separator") {
+        let lines = HomeRowMenuPolicy.menuLines(HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: true,
+            offersMicBoost: true,
+            hasAudioRevealTarget: true,
+            hasRetranscriptionInput: true
+        ))
+        assertEqual(lines.map(\.item),
+                    [.renameMeeting, .reviewSpeakers, .retranscribe, .starMeeting, .showTranscript, .showAudio, .deleteMeeting],
+                    "every line the menu draws, in order; Boost mic rides the amber line instead")
+        assertEqual(lines.filter(\.isOptionAlternate).map(\.item), [.showAudio],
+                    "Show audio in Finder replaces Show in Finder while Option is held")
+        assertEqual(lines.filter(\.separatorBefore).map(\.item), [.deleteMeeting], "only Delete sits under a separator")
+        assertEqual(HomeRowMenuPolicy.menuLines([HomeRowMenuEntry.deleteMeeting]).map(\.separatorBefore), [false],
+                    "no separator above a lone first line")
+    }
+
     runSuite("Keep audio sets the same starred flag that keeps a meeting's audio") {
         let off = HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: false,

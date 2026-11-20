@@ -125,6 +125,15 @@ enum FirstRunExperience {
         return calendarGranted ? "granted" : "not_granted"
     }
 
+    /// Whether the voice model needs the person now, so Settings shows it
+    /// at the top instead of inside Advanced: it failed (or its install is
+    /// missing), or it is downloading. Idle ("On demand"), cached and loading
+    /// are normal and stay put, so the card doesn't sit up top and then jump.
+    static func modelNeedsAttention(_ state: ParakeetModelState, card: FirstRunModelCardState) -> Bool {
+        if case .downloading = state { return true }
+        return card.tone == .failed
+    }
+
     static func modelCard(
         for modelState: ParakeetModelState,
         model: TranscriptionModelChoice = .parakeetTDTv3,
