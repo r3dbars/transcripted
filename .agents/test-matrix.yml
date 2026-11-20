@@ -188,6 +188,7 @@ rules:
       - "scripts/release/verify-sparkle-release.sh"
       - "scripts/release/verify-sparkle-appcast.mjs"
       - "Tests/BuildDependencies/SparkleAppcastVerificationTests.mjs"
+      - "Tests/BuildDependencies/SparkleAppcastVerificationTests.sh"
       - "scripts/release/provision-release-models.sh"
       - "scripts/release/sign-appcast.sh"
       - "scripts/release/sign-release.sh"
@@ -205,7 +206,7 @@ rules:
       - "bash -n scripts/entrypoints/build-beta.sh"
       - "bash Tests/BuildDependencies/SparkleAppcastDeltaTests.sh"
       - "bash Tests/BuildDependencies/SparkleAppcastSigningTests.sh"
-      - "node --test Tests/BuildDependencies/SparkleAppcastVerificationTests.mjs"
+      - "bash Tests/BuildDependencies/SparkleAppcastVerificationTests.sh"
 
   - paths:
       - "scripts/entrypoints/lib/bundle-cli.sh"

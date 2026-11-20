@@ -412,7 +412,7 @@ check "dependency toolchain contracts" "bash Tests/BuildDependencies/DepsToolcha
 check "CLI packaging contracts" "bash Tests/BuildDependencies/CLIPackagingTests.sh" slow
 check "Sparkle signing and frozen-feed contracts" "bash Tests/BuildDependencies/SparkleAppcastSigningTests.sh" slow
 if command -v node >/dev/null 2>&1; then
-    check "Sparkle appcast signature verification" "node --test Tests/BuildDependencies/SparkleAppcastVerificationTests.mjs"
+    check "Sparkle appcast signature verification" "bash Tests/BuildDependencies/SparkleAppcastVerificationTests.sh"
 else
     skip "Sparkle appcast signature verification" "node not installed"
 fi
