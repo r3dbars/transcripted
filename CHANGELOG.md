@@ -16,6 +16,9 @@ force-installed by Sparkle so existing users recover from a regression.
 ## [Unreleased]
 
 ### Fixed
+- Dragging the main window onto another display no longer jumps it away from
+  the pointer. AppKit was snapping the window mid-drag to the last frame it
+  remembered for that display.
 - Settings > Storage: "Delete meeting audio after" and "Keep dictation audio"
   now run through one tested model that keeps their pending choices apart, so
   a meeting choice can never change dictation audio or the other way around.
