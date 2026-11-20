@@ -72,6 +72,9 @@ struct TodaySetupChecklistState: Equatable {
     var agentConnected: Bool?
     var triedFileImport: Bool
     var dismissed: Bool
+    /// Setup finished on a build that has the checklist. Someone who set up
+    /// on an older build never sees it (`PermissionsOnboardingPreferences`).
+    var offered: Bool
 
     var remaining: [TodaySetupStep] {
         TodaySetupStep.allCases.filter { step in
@@ -89,7 +92,7 @@ struct TodaySetupChecklistState: Equatable {
         calendarConnected && agentConnected == true && triedFileImport
     }
 
-    var isShown: Bool { !dismissed && !isComplete && !remaining.isEmpty }
+    var isShown: Bool { offered && !dismissed && !isComplete && !remaining.isEmpty }
 }
 
 /// Plain app preferences for the checklist, next to the other window prefs
@@ -114,6 +117,18 @@ enum TodaySetupChecklistPreferences {
 
     static func markTriedFileImport(userDefaults: UserDefaults = .standard) {
         userDefaults.set(true, forKey: triedFileImportKey)
+    }
+
+    /// Any import counts as the file step done: ⌘O, a drop, the Meetings
+    /// menu or the checklist's own button. Nothing importable, nothing done.
+    static func noteFilesImported(count: Int, userDefaults: UserDefaults = .standard) {
+        guard count > 0 else { return }
+        markTriedFileImport(userDefaults: userDefaults)
+    }
+
+    /// Whether setup finished on a build with the checklist.
+    static func isOffered(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: PermissionsOnboardingPreferences.finishedWithTodayChecklistKey)
     }
 }
 

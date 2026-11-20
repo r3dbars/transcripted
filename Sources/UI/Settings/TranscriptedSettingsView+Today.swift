@@ -57,7 +57,7 @@ extension TranscriptedSettingsView {
         .task {
             // Reads the agents' own config files, so off main, and only
             // while the checklist could still show.
-            guard !todaySetupRetired else { return }
+            guard todaySetupOffered, !todaySetupRetired else { return }
             todayAgentConnected = await Self.anyAgentConnected()
         }
         .onChange(of: todaySetupChecklistState.isComplete, initial: true) { _, isComplete in
@@ -94,7 +94,8 @@ extension TranscriptedSettingsView {
             calendarBlocked: TranscriptedPermissionAccess.calendarAccessBlocked(),
             agentConnected: todayAgentConnected,
             triedFileImport: todaySetupTriedFileImport,
-            dismissed: todaySetupRetired
+            dismissed: todaySetupRetired,
+            offered: todaySetupOffered
         )
     }
 

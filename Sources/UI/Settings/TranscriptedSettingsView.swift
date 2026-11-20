@@ -123,6 +123,8 @@ struct TranscriptedSettingsView: View {
     /// Today's setup checklist: dismissed or done means gone for good.
     @AppStorage(TodaySetupChecklistPreferences.dismissedKey) var todaySetupRetired = false
     @AppStorage(TodaySetupChecklistPreferences.triedFileImportKey) var todaySetupTriedFileImport = false
+    /// Setup finished on a build with the checklist; older setups never get it.
+    @AppStorage(PermissionsOnboardingPreferences.finishedWithTodayChecklistKey) var todaySetupOffered = false
     /// Nil until the off-main check of the agents' configs answers.
     @State var todayAgentConnected: Bool?
     @State var dictationRevealConsumedToken = 0

@@ -70,6 +70,8 @@ extension TranscriptedAppDelegate {
             return
         }
 
+        // Today's checklist counts an import any way it starts.
+        TodaySetupChecklistPreferences.noteFilesImported(count: importable.count)
         pendingAudioImports.add(importable)
 
         if appState.meetingSession.isCaptureSessionActive {

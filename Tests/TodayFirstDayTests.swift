@@ -20,7 +20,7 @@ func testTodayFirstDay() {
     runSuite("The setup checklist shows what's left and hides once done or dismissed") {
         var state = TodaySetupChecklistState(
             calendarConnected: false, calendarBlocked: false, agentConnected: nil,
-            triedFileImport: false, dismissed: false
+            triedFileImport: false, dismissed: false, offered: true
         )
         assertEqual(state.remaining, [.calendar, .transcribeFile], "the agent row waits for its check")
         assertTrue(state.isShown, "a fresh install sees it")
@@ -52,6 +52,46 @@ func testTodayFirstDay() {
         TodaySetupChecklistPreferences.retire(userDefaults: defaults)
         assertTrue(TodaySetupChecklistPreferences.hasTriedFileImport(userDefaults: defaults), "a tried import is remembered")
         assertTrue(TodaySetupChecklistPreferences.isDismissed(userDefaults: defaults), "retiring is remembered")
+    }
+
+    runSuite("Only people who finish setup on a build with the checklist see it") {
+        let suiteName = "TodayFirstDayTests.offered.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "test defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        // Someone who set up on an older build: completion saved, no new flag.
+        defaults.set(true, forKey: PermissionsOnboardingPreferences.completionKey)
+        assertFalse(TodaySetupChecklistPreferences.isOffered(userDefaults: defaults),
+                    "an update doesn't offer the checklist to someone already set up")
+        let existing = TodaySetupChecklistState(
+            calendarConnected: false, calendarBlocked: false, agentConnected: false,
+            triedFileImport: false, dismissed: false,
+            offered: TodaySetupChecklistPreferences.isOffered(userDefaults: defaults)
+        )
+        assertFalse(existing.isShown, "steps left, but never offered, so it stays hidden")
+        PermissionsOnboardingPreferences.markCompleted(userDefaults: defaults)
+        assertTrue(TodaySetupChecklistPreferences.isOffered(userDefaults: defaults),
+                   "finishing setup on this build offers it")
+        var fresh = existing
+        fresh.offered = true
+        assertTrue(fresh.isShown)
+    }
+
+    runSuite("A file imported any way counts as the file step") {
+        let suiteName = "TodayFirstDayTests.import.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "test defaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        TodaySetupChecklistPreferences.noteFilesImported(count: 0, userDefaults: defaults)
+        assertFalse(TodaySetupChecklistPreferences.hasTriedFileImport(userDefaults: defaults),
+                    "nothing importable, nothing done")
+        TodaySetupChecklistPreferences.noteFilesImported(count: 2, userDefaults: defaults)
+        assertTrue(TodaySetupChecklistPreferences.hasTriedFileImport(userDefaults: defaults),
+                   "a drop or ⌘O import checks the step off")
     }
 
     runSuite("A live meeting spans its start to now on today's lane") {
