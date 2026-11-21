@@ -18,7 +18,8 @@ Packaging helpers for shipping a build: version bump, Sparkle appcast, Homebrew 
 - `sign-release.sh --app <app> --version <x.y.z>`: signs an unsigned app, builds and signs the DMG. Needs a Developer ID identity; never ad-hoc. Shares `scripts/entrypoints/lib/release-package.sh` with `build-beta.sh`.
 - `freeze-legacy-appcast.py`: run once, for the first release on the release-asset feed; writes the final legacy entry and `config/release/legacy-appcast-freeze.*`. `--dry-run` first.
 - `mark-appcast-critical.py`: marks the newest appcast item critical for old builds (1.1.22 to 1.1.62) whose reminder window can't install. Sparkle only reads the newest item, so it always marks that one. Don't remove the marker without checking those builds.
-- `verify-sparkle-release.sh <version>`: checks the live feed (`releases/latest/download/appcast.xml`, or `VERIFY_APPCAST_FILE`) against the published GitHub release (URL, minimum macOS from `Info.plist`, arm64, feed signature present). Needs `gh`.
+- `verify-sparkle-appcast.mjs <appcast.xml> <SUPublicEDKey>`: checks the Sparkle trailer and verifies its Ed25519 signature over the exact feed bytes using Node.js. Runs before inherited items are merged and after the new feed is signed.
+- `verify-sparkle-release.sh <version>`: checks the signature and entry metadata using `Info.plist` (or `VERIFY_INFO_PLIST`). Live mode fetches the feed and checks GitHub release assets. `VERIFY_APPCAST_FILE` checks a candidate feed offline.
 - `post-dmg-release-audit.py`: read-only audit across the release surfaces after the DMG exists.
 - `test-staged-sparkle-update.py`: real Sparkle upgrade proof; hosted CI only (`docs/staged-sparkle-update-test.md`).
 - `update-cask.sh <version>`: downloads the published `Transcripted-<version>.dmg`, hashes it, rewrites `version` and `sha256` in `Casks/transcripted.rb`. Run it only after the release is public; then commit the cask.

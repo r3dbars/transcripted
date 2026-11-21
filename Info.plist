@@ -42,6 +42,8 @@
 	<string>https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
+	<key>SURequireSignedFeed</key>
+	<true/>
 	<key>SUPublicEDKey</key>
 	<string>Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=</string>
 	<key>SUScheduledCheckInterval</key>
