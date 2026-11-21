@@ -7,53 +7,31 @@ import Foundation
 func testWritingSetupPresentation() {
     typealias Copy = WritingSetupPresentation
 
-    runSuite("Writing intro page 1 uses the approved copy") {
-        assertEqual(Copy.IntroPage1.smallTitle, "Writing")
-        assertEqual(Copy.IntroPage1.headline, "Your AI knows what you said. Not what you wrote.")
+    runSuite("Writing setup screen 1 pitch uses the approved copy") {
+        assertEqual(Copy.Intro.smallTitle, "Writing")
+        assertEqual(Copy.Intro.headline, "Your AI knows what you said. Not what you wrote.")
         assertEqual(
-            Copy.IntroPage1.body,
-            "Transcripted already saves your meetings and dictations. But a lot of your work happens in writing: Slack replies, emails, notes. Writing in Transcripted adds that context, and helps you write faster."
+            Copy.Intro.body,
+            "A lot of your work happens in writing: Slack replies, emails, notes. Writing saves it next to your meetings and dictations, and helps you finish your sentences."
         )
-        assertEqual(Copy.IntroPage1.contextLabel, "Your context")
-        assertEqual(Copy.IntroPage1.contextItems.map(\.title), ["Meetings", "Dictations", "Writing"])
+        assertEqual(Copy.Intro.keyHints.map(\.key), ["Tab", "~", "Esc"])
         assertEqual(
-            Copy.IntroPage1.contextItems.map(\.isAdded),
-            [false, false, true],
-            "Meetings and Dictations are checked; only Writing is the highlighted add"
-        )
-        assertEqual(
-            Copy.IntroPage1.points.map(\.title),
-            ["Fuller context for your AI.", "You're in control.", "100% local."]
-        )
-        assertEqual(
-            Copy.IntroPage1.points.map(\.line),
-            [
-                "Your notes and replies sit next to your meetings, so your AI can pick up where you left off.",
-                "Pick the apps. Pause or delete anytime.",
-                "No account. Your writing never leaves your Mac. It's saved as plain files you can point any AI agent at.",
-            ]
-        )
-        assertEqual(Copy.IntroPage1.next, "Next")
-        assertEqual(Copy.introPageCount, 2)
-    }
-
-    runSuite("Writing intro page 2 uses the approved copy and key hints") {
-        assertEqual(Copy.IntroPage2.headline, "Autocomplete finishes your sentences.")
-        assertEqual(
-            Copy.IntroPage2.body,
-            "As you type, Transcripted suggests the next few words right where you're typing. Take them or leave them."
-        )
-        assertEqual(Copy.IntroPage2.keyHints.map(\.key), ["Tab", "~", nil, "Esc"])
-        assertEqual(
-            Copy.IntroPage2.keyHints.map(\.text),
-            ["adds the next word", "takes the whole suggestion", "Keep typing to ignore it", "hides it"]
+            Copy.Intro.keyHints.map(\.text),
+            ["adds the next word", "takes the whole suggestion", "hides it"]
         )
         assertFalse(
-            Copy.IntroPage2.keyHints.contains { $0.text.contains("above Tab") },
+            Copy.Intro.keyHints.contains { $0.text.contains("above Tab") },
             "the ~ key is not 'the key above Tab' on ISO keyboards"
         )
-        assertEqual(Copy.IntroPage2.back, "Back")
-        assertEqual(Copy.IntroPage2.setUp, "Set up writing")
+        assertEqual(Copy.Intro.privacy.title, "Stays on your Mac.")
+        assertEqual(
+            Copy.Intro.privacy.line,
+            "No account. It's saved as plain files you can point any AI agent at. Only Write for Me sends text, and only when you press its key."
+        )
+        assertFalse(
+            Copy.Intro.privacy.line.contains("never leaves"),
+            "Write for Me sends a window when asked, so the privacy line can't promise nothing leaves"
+        )
     }
 
     runSuite("Delete model warns that it turns Autocomplete off and the model downloads again") {
@@ -82,54 +60,67 @@ func testWritingSetupPresentation() {
 
     runSuite("Writing copy says what you wrote, never what you typed") {
         let allCopy = [
-            Copy.IntroPage1.headline, Copy.IntroPage1.body,
+            Copy.Intro.headline, Copy.Intro.body, Copy.Intro.privacy.line,
             Copy.Step1.saveLine, Copy.nothingSavedYet, Copy.deleteConfirmMessage,
-        ] + Copy.IntroPage1.points.map(\.line)
+        ]
         for line in allCopy {
             assertFalse(line.contains("what you typed"), "keylogger wording: \(line)")
         }
     }
 
-    runSuite("Writing setup steps use the approved copy") {
-        assertEqual(Copy.stepLabel(1), "Step 1 of 3")
-        assertEqual(Copy.Step1.title, "What should writing do?")
+    runSuite("Writing setup is two screens with the approved copy") {
+        assertEqual(Copy.setupStepCount, 2, "owner-approved two-screen setup")
+        assertEqual(Copy.Step1.title, "What should Writing do?")
         assertEqual(Copy.Step1.saveTitle, "Save my writing")
         assertEqual(Copy.Step1.saveLine, "Your AI can read what you wrote. Files stay on this Mac, only in apps you choose.")
         assertEqual(Copy.Step1.autocompleteTitle, "Autocomplete")
-        assertEqual(Copy.Step1.autocompleteLine, "Suggests the next words. Hit Tab to accept.")
+        assertEqual(Copy.Step1.autocompleteLine, "Suggests the next words. Tab to accept.")
         assertEqual(Copy.Step1.continueTitle, "Continue")
         assertEqual(Copy.Step1.needsOne, "Turn on at least one to continue.")
+        assertEqual(Copy.Step1.appsTitle, "Which apps?")
+        assertEqual(Copy.Step1.allApps, "All apps")
+        assertEqual(Copy.Step1.allAppsLine, "Password managers are always skipped.")
+        assertEqual(Copy.Step1.pickedApps, "Only apps I pick")
+        assertEqual(Copy.Step1.sameApps, "Both use the same apps.")
+        assertEqual(Copy.Step1.needsOneApp, "Pick at least one app.")
+        assertEqual(Copy.Step1.editTitle, "Edit setup")
 
-        assertEqual(Copy.Step2.title, "Which apps?")
-        assertEqual(Copy.Step2.allApps, "All apps")
-        assertEqual(Copy.Step2.allAppsLine, "Password managers are always skipped.")
-        assertEqual(Copy.Step2.pickedApps, "Only apps I pick")
-        assertEqual(Copy.Step2.sameApps, "Autocomplete uses the same apps.")
-        assertEqual(Copy.Step2.needsOne, "Pick at least one app.")
-
-        assertEqual(Copy.Step3.title, "Allow and download")
-        assertEqual(Copy.Step3.keyboardTitle, "Transcripted keyboard")
-        assertEqual(Copy.Step3.keyboardLine, "You add it in Keyboard settings. No privacy prompt.")
-        assertEqual(Copy.Step3.screenRecordingTitle, "Screen Recording")
-        assertEqual(Copy.Step3.screenRecordingLine, "Reads the window you're replying in, on this Mac.")
-        assertEqual(Copy.Step3.modelTitle, "Model")
-        assertEqual(Copy.Step3.autocompleteBadge, "Autocomplete")
-        assertEqual(Copy.Step3.qwenIneligible, "Your Mac needs 16 GB of memory for this model.")
-        assertEqual(Copy.Step3.footnote, "Suggestion counts only, never text. Follows your analytics setting.")
-        assertEqual(Copy.Step3.turnOn, "Turn on writing")
+        assertEqual(Copy.Step2.title, "Allow and download")
+        assertEqual(Copy.Step2.keyboardTitle, "Transcripted keyboard")
+        assertEqual(Copy.Step2.keyboardLine, "You add it in Keyboard settings. No privacy prompt.")
+        assertEqual(Copy.Step2.screenRecordingTitle, "Screen Recording")
+        assertEqual(Copy.Step2.screenRecordingLine, "Reads the window you're replying in, on this Mac.")
+        assertEqual(Copy.Step2.modelTitle, "Model")
+        assertEqual(Copy.Step2.autocompleteBadge, "Autocomplete")
+        assertEqual(Copy.Step2.qwenIneligible, "Your Mac needs 16 GB of memory for this model.")
+        assertEqual(Copy.Step2.footnote, "Suggestion counts only, never text. Follows your analytics setting.")
+        assertEqual(Copy.Step2.turnOn, "Turn on writing")
         assertEqual(Copy.back, "Back")
+        assertEqual(Copy.notNow, "Not now")
         assertEqual(Copy.finishRecordingFirst, "Finish recording and transcribing first")
     }
 
-    runSuite("Writing step 3 shows only the rows the step 1 toggles need") {
-        assertEqual(Copy.step3Rows(saveMyWriting: true, autocomplete: true), [.keyboard, .screenRecording, .model])
+    runSuite("Writing setup screen 2 names the model it picked and where to change it") {
         assertEqual(
-            Copy.step3Rows(saveMyWriting: true, autocomplete: false),
+            Copy.modelLine(for: .gemma4E2B),
+            "Gemma 4 E2B (3.4 GB) downloads after you turn on writing. You can switch models later on this page."
+        )
+        assertEqual(
+            Copy.modelLine(for: .qwen35B9B),
+            "Qwen 3.5 9B (5.6 GB) downloads after you turn on writing. You can switch models later on this page.",
+            "an earlier pick from the Settings card carries into setup"
+        )
+    }
+
+    runSuite("Writing setup screen 2 shows only the rows the screen 1 toggles need") {
+        assertEqual(Copy.step2Rows(saveMyWriting: true, autocomplete: true), [.keyboard, .screenRecording, .model])
+        assertEqual(
+            Copy.step2Rows(saveMyWriting: true, autocomplete: false),
             [.keyboard],
             "Save my writing needs no Screen Recording and no model download"
         )
-        assertEqual(Copy.step3Rows(saveMyWriting: false, autocomplete: true), [.keyboard, .screenRecording, .model])
-        assertEqual(Copy.step3Rows(saveMyWriting: false, autocomplete: false), [])
+        assertEqual(Copy.step2Rows(saveMyWriting: false, autocomplete: true), [.keyboard, .screenRecording, .model])
+        assertEqual(Copy.step2Rows(saveMyWriting: false, autocomplete: false), [])
     }
 
     // macOS 26 ignores an app's TISEnableInputSource, so the keyboard row
@@ -139,7 +130,7 @@ func testWritingSetupPresentation() {
             Copy.keyboardStep(.needsUserToAdd),
             Copy.KeyboardStep(
                 line: "Add Transcripted in Keyboard settings: Input Sources › Edit… › +, then English › Transcripted.",
-                buttonTitle: "Open Keyboard Settings",
+                buttonTitle: "Open keyboard settings",
                 isDone: false
             )
         )
@@ -147,7 +138,7 @@ func testWritingSetupPresentation() {
             Copy.keyboardStep(.needsRelogin),
             Copy.KeyboardStep(
                 line: "macOS lists new keyboards after you log out and back in. Log out, then add Transcripted in Keyboard settings.",
-                buttonTitle: "Open Keyboard Settings",
+                buttonTitle: "Open keyboard settings",
                 isDone: false
             )
         )
@@ -167,7 +158,7 @@ func testWritingSetupPresentation() {
         assertEqual(
             Copy.keyboardStep(nil),
             Copy.KeyboardStep(line: "You add it in Keyboard settings. No privacy prompt.", buttonTitle: nil, isDone: false),
-            "before the keyboard is installed, step 3 shows the plain line"
+            "before the keyboard is installed, screen 2 shows the plain line"
         )
         assertEqual(
             Copy.everydayKeyboardStep(nil),
@@ -209,6 +200,9 @@ func testWritingSetupPresentation() {
         draft.saveMyWriting = false
         draft.autocomplete = false
         assertTrue(draft.canFinishStep1(isEditing: true), "Edit setup's button stays enabled with both off")
+        draft.scope = .picked
+        assertTrue(draft.canFinishStep1(isEditing: true), "turning writing off doesn't need an app picked")
+        draft.scope = .all
         assertEqual(Copy.Step1.turnOffTitle, "Turn off writing")
 
         // First setup still needs one feature on: there's nothing to turn off.
@@ -234,28 +228,33 @@ func testWritingSetupPresentation() {
         assertNil(Copy.step1Message(saveMyWriting: true, autocomplete: false))
         assertNil(Copy.step1Message(saveMyWriting: false, autocomplete: true))
         assertEqual(Copy.step1Message(saveMyWriting: false, autocomplete: false), "Turn on at least one to continue.")
-        assertNil(Copy.step2Message(scope: .all, pickedCount: 0), "all apps needs no picks")
-        assertEqual(Copy.step2Message(scope: .picked, pickedCount: 0), "Pick at least one app.")
-        assertNil(Copy.step2Message(scope: .picked, pickedCount: 1))
+        assertNil(Copy.appsMessage(scope: .all, pickedCount: 0), "all apps needs no picks")
+        assertEqual(Copy.appsMessage(scope: .picked, pickedCount: 0), "Pick at least one app.")
+        assertNil(Copy.appsMessage(scope: .picked, pickedCount: 1))
 
         var draft = Copy.Draft()
         assertTrue(draft.saveMyWriting && draft.autocomplete, "both toggles start on")
         assertEqual(draft.scope, .all, "setup starts on all apps")
         assertEqual(draft.model, .gemma4E2B, "Gemma is the default model")
-        assertTrue(draft.canContinueStep1 && draft.canContinueStep2)
+        assertTrue(draft.canContinueStep1 && draft.canContinueApps)
+        assertTrue(draft.canFinishStep1(isEditing: false), "the defaults go straight to screen 2")
         draft.saveMyWriting = false
         draft.autocomplete = false
         assertFalse(draft.canContinueStep1)
         draft.autocomplete = true
         draft.scope = .picked
-        assertFalse(draft.canContinueStep2)
+        assertFalse(draft.canContinueApps)
+        assertFalse(draft.canFinishStep1(isEditing: false), "screen 1 asks for an app when picking")
+        assertFalse(draft.canFinishStep1(isEditing: true), "editing too, unless it's turning writing off")
         draft.pickedBundleIdentifiers = ["com.apple.Notes"]
-        assertTrue(draft.canContinueStep2)
+        assertTrue(draft.canContinueApps)
+        assertTrue(draft.canFinishStep1(isEditing: false))
     }
 
     runSuite("Writing model options match the approved sizes and eligibility line") {
         assertEqual(Copy.modelOptions.map(\.choice), [.gemma4E2B, .qwen35B9B])
         assertEqual(Copy.modelOptions.map(\.name), ["Gemma 4 E2B", "Qwen 3.5 9B"])
+        assertEqual(Copy.modelOptions.map(\.size), ["3.4 GB", "5.6 GB"])
         assertEqual(Copy.modelOptions.map(\.detail), ["3.4 GB, faster", "5.6 GB, better"])
         assertEqual(Copy.modelOptions.map(\.isDefault), [true, false])
         assertEqual(Copy.defaultTag, "(default)")
@@ -298,11 +297,10 @@ func testWritingSetupPresentation() {
     }
 
     runSuite("Writing everyday summary") {
-        assertEqual(Copy.summary(saveMyWriting: true, autocomplete: true, wordsToday: 42), "42 words today")
-        assertEqual(Copy.summary(saveMyWriting: true, autocomplete: false, wordsToday: 1), "1 word today")
-        assertEqual(Copy.summary(saveMyWriting: true, autocomplete: true, wordsToday: 0), "0 words today")
-        assertEqual(Copy.summary(saveMyWriting: false, autocomplete: true, wordsToday: 12), "Autocomplete only")
-        assertEqual(Copy.summary(saveMyWriting: false, autocomplete: false, wordsToday: 0), "Writing is off")
+        assertNil(Copy.summary(saveMyWriting: true, autocomplete: true), "Today owns the word count")
+        assertNil(Copy.summary(saveMyWriting: true, autocomplete: false))
+        assertNil(Copy.summary(saveMyWriting: false, autocomplete: true))
+        assertEqual(Copy.summary(saveMyWriting: false, autocomplete: false), "Writing is off")
         assertEqual(Copy.suggestionsAcceptedLine(3), "3 suggestions accepted today")
         assertEqual(Copy.suggestionsAcceptedLine(1), "1 suggestion accepted today")
         assertEqual(

@@ -31,11 +31,32 @@ func testHomeRowControls() {
         )
     }
 
-    runSuite("Every meeting row can be renamed, starred, reported, revealed and deleted") {
+    func visibleTitles(
+        review: Bool = false,
+        boost: Bool = false,
+        audio: Bool = false,
+        retranscribable: Bool = false,
+        starred: Bool = false
+    ) -> [String?] {
+        HomeRowMenuPolicy.visibleMenuEntries(HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: review,
+            offersMicBoost: boost,
+            hasAudioRevealTarget: audio,
+            hasRetranscriptionInput: retranscribable,
+            isStarred: starred
+        )).map(\.fixedTitle)
+    }
+
+    runSuite("A meeting's menu is the short list: Rename, Who spoke?, Transcribe again, Keep audio, Show in Finder, Delete") {
         assertEqual(
-            meetingTitles(),
-            [HomeMeetingRenameAffordance.title, "Star meeting", "Report issue", "Show transcript in Finder", "Delete meeting"],
-            "a plain meeting row should offer rename, Star meeting, Report issue, the transcript in Finder, and Delete meeting last"
+            visibleTitles(review: true, boost: true, audio: true, retranscribable: true),
+            [HomeMeetingRenameAffordance.title, "Who spoke?", nil, "Keep audio", "Show in Finder", "Delete"],
+            "everything a meeting can do fits in six lines (Transcribe again's title is built by the shell)"
+        )
+        assertEqual(
+            visibleTitles(),
+            [HomeMeetingRenameAffordance.title, "Show in Finder", "Delete"],
+            "a meeting with no audio and nothing to review offers rename, Finder and delete"
         )
         let entries = HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: true,
@@ -43,24 +64,61 @@ func testHomeRowControls() {
             hasAudioRevealTarget: true,
             hasRetranscriptionInput: true
         )
-        assertEqual(entries.last, .deleteMeeting, "Delete meeting should stay the last item, whatever else the row offers")
-        assertEqual(entries.filter(\.isDestructive), [.deleteMeeting], "only Delete meeting should be destructive")
+        assertEqual(entries.last, .deleteMeeting, "Delete should stay the last item, whatever else the row offers")
+        assertEqual(entries.filter(\.isDestructive), [.deleteMeeting], "only Delete should be destructive")
+        assertFalse(entries.contains(.reportIssue), "Report issue lives in the sidebar's Feedback now")
     }
 
-    runSuite("A starred meeting's row menu offers Remove star instead of Star meeting") {
-        let titles = meetingTitles(review: true, boost: true, audio: true, retranscribable: true, starred: true)
-        assertTrue(titles.contains("Remove star"), "a starred meeting can be unstarred from its menu")
-        assertFalse(titles.contains("Star meeting"), "a starred meeting doesn't offer Star meeting again")
-        assertFalse(meetingTitles().contains("Remove star"), "an unstarred meeting doesn't offer Remove star")
-        let entries = HomeRowMenuPolicy.meetingEntries(
+    runSuite("The ⋯ menu draws Show audio as Option on Show in Finder, Boost mic nowhere, and Delete under a separator") {
+        let lines = HomeRowMenuPolicy.menuLines(HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: true,
             offersMicBoost: true,
             hasAudioRevealTarget: true,
-            hasRetranscriptionInput: true,
+            hasRetranscriptionInput: true
+        ))
+        assertEqual(lines.map(\.item),
+                    [.renameMeeting, .reviewSpeakers, .retranscribe, .starMeeting, .showTranscript, .showAudio, .deleteMeeting],
+                    "every line the menu draws, in order; Boost mic rides the amber line instead")
+        assertEqual(lines.filter(\.isOptionAlternate).map(\.item), [.showAudio],
+                    "Show audio in Finder replaces Show in Finder while Option is held")
+        assertEqual(lines.filter(\.separatorBefore).map(\.item), [.deleteMeeting], "only Delete sits under a separator")
+        assertEqual(HomeRowMenuPolicy.menuLines([HomeRowMenuEntry.deleteMeeting]).map(\.separatorBefore), [false],
+                    "no separator above a lone first line")
+    }
+
+    runSuite("Keep audio sets the same starred flag that keeps a meeting's audio") {
+        let off = HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: false,
+            offersMicBoost: false,
+            hasAudioRevealTarget: true,
+            hasRetranscriptionInput: false,
+            isStarred: false
+        )
+        assertTrue(off.contains(.starMeeting), "a meeting with audio offers Keep audio, which stars it")
+        assertFalse(HomeRowMenuEntry.starMeeting.isChecked, "Keep audio is unchecked on an unstarred meeting")
+
+        let on = HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: false,
+            offersMicBoost: false,
+            hasAudioRevealTarget: true,
+            hasRetranscriptionInput: false,
             isStarred: true
         )
-        assertEqual(entries.last, .deleteMeeting, "Delete meeting stays last on a starred meeting")
-        assertEqual(entries.filter(\.isDestructive), [.deleteMeeting], "starring adds nothing destructive")
+        assertTrue(on.contains(.unstarMeeting), "a starred meeting shows Keep audio, checked, which unstars it")
+        assertFalse(on.contains(.starMeeting), "a starred meeting doesn't offer to star it again")
+        assertTrue(HomeRowMenuEntry.unstarMeeting.isChecked, "Keep audio is checked on a starred meeting")
+        assertEqual(HomeRowMenuEntry.starMeeting.fixedTitle, "Keep audio")
+        assertEqual(HomeRowMenuEntry.unstarMeeting.fixedTitle, "Keep audio")
+
+        let starredWithoutAudio = HomeRowMenuPolicy.meetingEntries(
+            hasPendingSpeakerReview: false,
+            offersMicBoost: false,
+            hasAudioRevealTarget: false,
+            hasRetranscriptionInput: false,
+            isStarred: true
+        )
+        assertTrue(starredWithoutAudio.contains(.unstarMeeting), "a starred meeting can always turn Keep audio off")
+        assertFalse(meetingTitles().contains("Keep audio"), "no audio and not starred: nothing to keep")
     }
 
     runSuite("A meeting with voices to name offers Who spoke? from its row menu") {
@@ -68,15 +126,21 @@ func testHomeRowControls() {
         assertFalse(meetingTitles(review: false).contains("Who spoke?"), "a meeting with nothing to review should not offer it")
     }
 
-    runSuite("Re-transcribe and Show audio need retained audio with a Finder target") {
+    runSuite("Transcribe again and Show audio need retained audio with a Finder target") {
         let withAudio = HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: false,
             offersMicBoost: false,
             hasAudioRevealTarget: true,
             hasRetranscriptionInput: true
         )
-        assertTrue(withAudio.contains(.retranscribe), "retained audio that can be fed back should offer re-transcribe")
-        assertTrue(meetingTitles(audio: true).contains("Show audio in Finder"), "retained audio with a Finder target should offer Show audio in Finder")
+        assertTrue(withAudio.contains(.retranscribe), "retained audio that can be fed back should offer Transcribe again")
+        assertTrue(meetingTitles(audio: true).contains("Show audio in Finder"), "retained audio with a Finder target can still be shown in Finder")
+        assertEqual(HomeRowMenuEntry.showAudio.placement, .optionAlternate, "Show audio in Finder is Show in Finder with Option held")
+        if let finder = withAudio.firstIndex(of: .showTranscript) {
+            assertEqual(withAudio[finder + 1], .showAudio, "an Option alternate must sit right after the line it replaces")
+        } else {
+            assertTrue(false, "Show in Finder should always be offered")
+        }
 
         let notRetranscribable = HomeRowMenuPolicy.meetingEntries(
             hasPendingSpeakerReview: false,
@@ -84,7 +148,7 @@ func testHomeRowControls() {
             hasAudioRevealTarget: true,
             hasRetranscriptionInput: false
         )
-        assertFalse(notRetranscribable.contains(.retranscribe), "audio with no re-transcription input should not offer re-transcribe")
+        assertFalse(notRetranscribable.contains(.retranscribe), "audio with no re-transcription input should not offer Transcribe again")
         assertTrue(notRetranscribable.contains(.showAudio), "it should still offer Show audio in Finder")
 
         let noFinderTarget = HomeRowMenuPolicy.meetingEntries(
@@ -99,9 +163,11 @@ func testHomeRowControls() {
         )
     }
 
-    runSuite("Boost mic shows only when the mic-boost hint offers it") {
-        assertTrue(meetingTitles(boost: true).contains("Boost mic next meeting"), "an offered hint should add Boost mic next meeting")
-        assertFalse(meetingTitles(boost: false).contains("Boost mic next meeting"), "no hint, no Boost mic item")
+    runSuite("Boost mic rides on the card's Mic was muffled line, only when the hint offers it") {
+        assertTrue(meetingTitles(boost: true).contains("Boost mic next meeting"), "an offered hint keeps Boost mic next meeting reachable")
+        assertFalse(meetingTitles(boost: false).contains("Boost mic next meeting"), "no hint, no Boost mic")
+        assertEqual(HomeRowMenuEntry.boostMic.placement, .issueLine, "Boost mic is on the amber line, not a menu line")
+        assertFalse(visibleTitles(boost: true).contains("Boost mic next meeting"), "it doesn't add a menu line")
     }
 
     runSuite("Home controls never get a hit shape under 40pt, or smaller than what's drawn") {

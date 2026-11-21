@@ -176,7 +176,7 @@ final class NextSentenceStatusLine: NextSentenceFlippedView {
     }
 }
 
-/// Ink bleed for streamed words: each new stretch of text lands in bright accent blue with a glow
+/// Ink bleed for streamed words: each new stretch of text lands in capture green with a glow
 /// and cools to its final color over about a second, so you can see the leading edge of the thought.
 struct NextSentenceInk {
     static let duration: TimeInterval = 1.15

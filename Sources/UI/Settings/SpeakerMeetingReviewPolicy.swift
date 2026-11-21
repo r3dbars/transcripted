@@ -3,9 +3,8 @@
 // island's own review drawn as a card (NotchIslandSpeakerReviewView,
 // `Chrome.page`). This file is what the page says around it and what its
 // answers save as:
-//   - the headline ("12 voices from your meetings need a name"), "Meeting 1
-//     of 8" and the segmented bar;
-//   - the card's title, Skip and "Done, next meeting";
+//   - the card's title ("Who spoke? · Weekly sync"), where the visit is
+//     ("1 of 8", on the card itself; nothing stacks above it), Skip and Done;
 //   - a likely name for a voice ("Marcus Reed?") from the saved voice
 //     matches, so the card can ask ✓ / ✕ the way the island does;
 //   - how the island's `SpeakerReviewUpdate`s turn into the page's saves;
@@ -24,20 +23,8 @@ enum SpeakerMeetingReviewPolicy {
     static let undoSeconds: Double = 6
     /// The longest Quit waits for answers already given to save.
     static let terminationWaitSeconds: Double = 5
-    /// The bar never gets busier than this; with more meetings each segment
-    /// stands for several.
-    static let maxSegments = 12
 
-    // MARK: Around the card
-
-    /// "12 voices from your meetings need a name", or nil when none do.
-    static func headline(voiceCount: Int) -> String? {
-        switch voiceCount {
-        case ..<1: return nil
-        case 1: return "1 voice from your meetings needs a name"
-        default: return "\(voiceCount) voices from your meetings need a name"
-        }
-    }
+    // MARK: Where the visit is
 
     struct Position: Equatable {
         /// 1-based: the meeting on the card now.
@@ -52,23 +39,11 @@ enum SpeakerMeetingReviewPolicy {
         return Position(current: done + 1, total: done + meetingsLeft)
     }
 
-    /// "Meeting 1 of 8"
-    static func positionLine(_ position: Position) -> String {
-        "Meeting \(position.current) of \(position.total)"
-    }
-
-    struct Progress: Equatable {
-        let segments: Int
-        /// Segments lit, counting the meeting on the card.
-        let lit: Int
-    }
-
-    static func progress(_ position: Position) -> Progress {
-        let total = max(1, position.total)
-        let segments = min(total, maxSegments)
-        let current = min(max(1, position.current), total)
-        let lit = Int((Double(current) / Double(total) * Double(segments)).rounded(.up))
-        return Progress(segments: segments, lit: min(max(1, lit), segments))
+    /// "1 of 8", the same "N of M" the voice prints use, on the card's
+    /// header. Nil with only one meeting to name: the card's date says enough.
+    static func positionLine(_ position: Position) -> String? {
+        guard position.total > 1 else { return nil }
+        return SpeakerNamingTierPresentation.progressText(confirmed: position.current, required: position.total)
     }
 
     // MARK: The card
@@ -79,21 +54,29 @@ enum SpeakerMeetingReviewPolicy {
         return title.isEmpty ? "Who spoke?" : "Who spoke? \u{00B7} \(title)"
     }
 
-    /// The main button: on to the next meeting, or just Done on the last one.
-    static func doneTitle(meetingsAfterThis: Int) -> String {
-        meetingsAfterThis > 0 ? "Done, next meeting" : "Done"
-    }
+    /// The main button, the island's word. The next card sliding up says
+    /// "next" on its own.
+    static let doneTitle = "Done"
+    static let doneHelp = "Save these names."
 
     static let skipTitle = "Skip"
-    static let skipHelp = "Save what you answered and stop asking about this meeting. Its other voices stay under Not named yet."
+    /// Skip is for good, so its help says so.
+    static let skipHelp = "Keeps your answers and stops asking about this meeting. Its other voices wait under Not named yet."
 
-    /// The finished card's second line.
+    /// The transcript card's second button (SpeakerTranscriptWhoSpoke): it
+    /// isn't a queue, so it only closes, like the island's Later.
+    static let laterTitle = "Later"
+    static let laterHelp = "Close without saving."
+
+    /// The finished card's second line: who was named.
     static func doneDetail(names: [String]) -> String {
         let shown = names.prefix(3).joined(separator: ", ")
         let rest = names.count - min(names.count, 3)
-        let list = rest > 0 ? "\(shown) and \(rest) more" : shown
-        return list.isEmpty ? "Saving in a moment." : "\(list). Saving in a moment."
+        return rest > 0 ? "\(shown) +\(rest)" : shown
     }
+
+    /// Undo's help on the finished card.
+    static let undoHelp = "Not saved yet. Brings this meeting back."
 
     /// Some answers didn't save. The voices are still unnamed, so their
     /// meeting's card comes back.
@@ -104,8 +87,8 @@ enum SpeakerMeetingReviewPolicy {
         return "Couldn't save \(names)\(from). Its card is back so you can try again."
     }
 
-    /// The list under the cards: "People Transcripted knows".
-    static let directoryTitle = "People Transcripted knows"
+    /// The list under the cards.
+    static let directoryTitle = "People"
 
     // MARK: A likely name
 
@@ -140,7 +123,7 @@ enum SpeakerMeetingReviewPolicy {
         case name(voiceID: UUID, name: String)
         /// ✓ on a guess, or a saved person picked from the list.
         case join(voiceID: UUID, personID: UUID, name: String)
-        /// "All me", or picking Me.
+        /// The mic line's You, or picking Me.
         case markAsMe(voiceID: UUID)
         /// "Not a person": the voice is deleted from People.
         case notAPerson(voiceID: UUID)

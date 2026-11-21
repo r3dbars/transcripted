@@ -70,7 +70,7 @@ func testDictationSessionCap() {
             DictationSessionCapSavePolicy.presentation(saveFailureMessage: nil),
             .savedNotice(
                 message: "Saved to Markdown. Paste it now, or find it later in Dictations.",
-                actionTitle: "Paste It"
+                actionTitle: "Paste"
             ),
             "a saved cap take is a notice that says where the words are, not a warning"
         )
@@ -156,12 +156,12 @@ func testDictationSessionCap() {
     runSuite("An interruption with kept audio offers to transcribe it without pasting") {
         let kept = DictationInterruptionPlan.make(hasRecoverableRecording: true)
         assertFalse(kept.cancelRecording, "the kept audio must survive until the action can transcribe it")
-        assertEqual(kept.actionTitle, "Transcribe Captured Audio", "wake or device interruption offers a transcribe action")
+        assertEqual(kept.actionTitle, "Transcribe captured audio", "wake or device interruption offers a transcribe action")
         assertEqual(kept.action, .transcribeCapturedAudio(autoPaste: false), "it saves without pasting into a possibly changed app")
 
         let lost = DictationInterruptionPlan.make(hasRecoverableRecording: false)
         assertTrue(lost.cancelRecording, "with nothing kept, the recording is torn down")
         assertEqual(lost.action, .retryDictation, "with nothing kept, it offers a fresh dictation")
-        assertEqual(lost.actionTitle, "Retry Dictation")
+        assertEqual(lost.actionTitle, "Retry dictation")
     }
 }

@@ -15,7 +15,7 @@ struct CallSpeakerNamesToggleRow: View {
                 Text("Use call app names as hints")
                     .font(LibraryTokens.rowTitle)
                     .foregroundStyle(.primary)
-                Text("Notes who Zoom, Meet, Teams or Slack shows talking while a meeting records, and offers it when you name a voice. It never renames anyone on its own. Names stay on this Mac.")
+                Text("Offers the name Zoom, Meet, Teams or Slack showed when you name a voice. Never applied on its own.")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -25,7 +25,6 @@ struct CallSpeakerNamesToggleRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.regular)
-                .tint(.accentColor)
                 .accessibilityIdentifier("transcripted.settings.speakers.call-app-names")
         }
         .onChange(of: isOn) { _, enabled in

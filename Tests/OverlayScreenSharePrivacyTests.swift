@@ -100,7 +100,7 @@ func testOverlayScreenSharePrivacy() async {
         assertFalse(window.isKeyWindow, "constructing onboarding does not take keyboard focus")
         assertEqual(window.contentRect(forFrameRect: window.frame).size, preferredSize, "preserve onboarding content size")
         assertEqual(window.minSize, preferredSize, "preserve onboarding minimum size")
-        assertEqual(window.styleMask, [.titled, .closable, .resizable, .fullSizeContentView], "preserve onboarding controls")
+        assertEqual(window.styleMask, [.titled, .closable, .fullSizeContentView], "onboarding is a fixed-size window: its content is laid out for one frame")
         assertFalse(window.isReleasedWhenClosed, "the controller retains its reusable window")
     }
 

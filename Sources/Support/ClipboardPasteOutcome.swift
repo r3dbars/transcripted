@@ -41,13 +41,13 @@ enum ClipboardSnapshotCause: String, Equatable {
     var notPastedHint: String {
         switch self {
         case .tooLarge:
-            return "Your clipboard holds something too big to set aside."
+            return "Your clipboard is too big to set aside."
         case .timeout:
             return "Your clipboard took too long to read."
         case .unreadable:
-            return "Something on your clipboard couldn't be read."
+            return "Your clipboard couldn't be read."
         case .changed:
-            return "Your clipboard changed before it could be set aside."
+            return "Your clipboard changed mid-paste."
         }
     }
 
@@ -194,6 +194,10 @@ struct ClipboardPasteConfirmationDiagnostic: Equatable {
     let context: [String: String]
 
     static let lateConfirmedEvent = "dictation_paste_late_confirmed"
+    /// The words went straight into a focused field in Transcripted's own
+    /// window (`OwnWindowTextDelivery`). Analytics keep reporting the coarse
+    /// `target_confirmation_mode=none` for it.
+    static let ownWindowInsertMode = "own_window_insert"
 
     /// The target confirmed over Accessibility after a dictation paste had
     /// already ended its wait as a likely paste (`ClipboardLateConfirmationWatch`).

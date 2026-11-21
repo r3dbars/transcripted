@@ -8,13 +8,13 @@ final class SparkleUpdateSmokeTests: XCTestCase {
             version: "9.9.9",
             launchReport: launchReport(
                 updateCallout: row(
-                    title: "Update available: 9.9.9",
-                    detail: "A new version is ready to install",
+                    title: "Update to 9.9.9",
+                    detail: "",
                     trailingText: "Install",
                     isVisible: true,
                     isEnabled: true
                 ),
-                checkUpdates: row(title: "Check for Updates", isVisible: false)
+                checkUpdates: row(title: "Check for updates", isVisible: false)
             ),
             reportPath: nil,
             appLogPath: nil
@@ -31,8 +31,8 @@ final class SparkleUpdateSmokeTests: XCTestCase {
             launchReport: launchReport(
                 updateCallout: row(isVisible: false),
                 checkUpdates: row(
-                    title: "Preparing Update",
-                    detail: "Downloading 9.9.9",
+                    title: "Downloading update",
+                    detail: "Version 9.9.9",
                     isVisible: true,
                     isEnabled: false
                 )
@@ -52,7 +52,7 @@ final class SparkleUpdateSmokeTests: XCTestCase {
             launchReport: launchReport(
                 updateCallout: row(
                     title: "Update ready",
-                    detail: "A new version is ready to install",
+                    detail: "",
                     trailingText: "Install",
                     isVisible: true
                 ),
@@ -161,13 +161,13 @@ final class SparkleUpdateSmokeTests: XCTestCase {
     private func passingAvailableReport() -> SparkleLaunchSmokeReport {
         launchReport(
             updateCallout: row(
-                title: "Update available: 9.9.9",
-                detail: "A new version is ready to install",
+                title: "Update to 9.9.9",
+                detail: "",
                 trailingText: "Install",
                 isVisible: true,
                 isEnabled: true
             ),
-            checkUpdates: row(title: "Check for Updates", isVisible: false)
+            checkUpdates: row(title: "Check for updates", isVisible: false)
         )
     }
 

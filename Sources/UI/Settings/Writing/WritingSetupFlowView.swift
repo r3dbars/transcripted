@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// Setup, steps 1 to 3 (docs/writing-plan.md, "Setup, step 1 of 3" to
-/// "step 3 of 3"). Editing both features off applies at step 1 through
-/// `finishSetupStep1()`; enabled choices fill the draft until "Turn on writing".
+/// Setup in two screens (owner-approved 2026-11-18, docs/writing-plan.md,
+/// "Setup, screen 1 of 2" and "screen 2 of 2"). Screen 1 is the pitch plus
+/// the two questions: what Writing does and which apps. Screen 2 is the
+/// keyboard, Screen Recording and the model picked for you. Editing both
+/// features off applies on screen 1 through `finishSetupStep1()`; enabled
+/// choices fill the draft until "Turn on writing".
 struct WritingSetupFlowView: View {
     typealias Copy = WritingSetupPresentation
 
@@ -13,42 +16,53 @@ struct WritingSetupFlowView: View {
         VStack(alignment: .leading, spacing: 22) {
             switch step {
             case 1: stepOne
-            case 2: stepTwo
-            default: stepThree
+            default: stepTwo
             }
         }
         .frame(maxWidth: 620, alignment: .leading)
     }
 
-    // MARK: Step 1: What should writing do?
+    // MARK: Screen 1: Turn on Writing
 
     private var stepOne: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            WritingStepHeader(step: 1, title: Copy.Step1.title)
-
-            SettingsCard {
-                featureToggle(
-                    title: Copy.Step1.saveTitle,
-                    line: Copy.Step1.saveLine,
-                    isOn: $model.draft.saveMyWriting,
-                    automationIdentifier: "transcripted.settings.writing.setup.save-my-writing"
-                )
-                featureToggle(
-                    title: Copy.Step1.autocompleteTitle,
-                    line: Copy.Step1.autocompleteLine,
-                    isOn: $model.draft.autocomplete,
-                    automationIdentifier: "transcripted.settings.writing.setup.autocomplete",
-                    showsDivider: false
-                )
+        VStack(alignment: .leading, spacing: 24) {
+            if model.isEditingSetup {
+                SettingsPageIntro(title: Copy.Step1.editTitle)
+            } else {
+                WritingIntroView()
             }
 
-            validationMessage(Copy.step1Message(
-                saveMyWriting: model.draft.saveMyWriting,
-                autocomplete: model.draft.autocomplete,
-                isEditing: model.isEditingSetup
-            ), isBlocking: !model.draft.canFinishStep1(isEditing: model.isEditingSetup))
+            VStack(alignment: .leading, spacing: 10) {
+                WritingQuestionTitle(text: Copy.Step1.title)
+                SettingsCard {
+                    WritingToggleRow(
+                        title: Copy.Step1.saveTitle,
+                        line: Copy.Step1.saveLine,
+                        isOn: $model.draft.saveMyWriting,
+                        automationIdentifier: "transcripted.settings.writing.setup.save-my-writing"
+                    )
+                    WritingToggleRow(
+                        title: Copy.Step1.autocompleteTitle,
+                        line: Copy.Step1.autocompleteLine,
+                        isOn: $model.draft.autocomplete,
+                        automationIdentifier: "transcripted.settings.writing.setup.autocomplete",
+                        showsDivider: false
+                    )
+                }
+                validationMessage(Copy.step1Message(
+                    saveMyWriting: model.draft.saveMyWriting,
+                    autocomplete: model.draft.autocomplete,
+                    isEditing: model.isEditingSetup
+                ), isBlocking: !model.draft.canContinueStep1 && !model.isEditingSetup)
+            }
+
+            appsQuestion
+
+            WritingPrivacyPoint(point: Copy.Intro.privacy)
 
             HStack(spacing: 12) {
+                WritingPageDots(count: Copy.setupStepCount, current: 1)
+                Spacer()
                 if model.isEditingSetup {
                     WritingSecondaryButton(
                         title: Copy.cancel,
@@ -56,8 +70,14 @@ struct WritingSetupFlowView: View {
                     ) {
                         model.cancelSetup()
                     }
+                } else {
+                    WritingSecondaryButton(
+                        title: Copy.notNow,
+                        automationIdentifier: "transcripted.settings.writing.intro.not-now"
+                    ) {
+                        model.dismissNewBadge()
+                    }
                 }
-                Spacer()
                 WritingPrimaryButton(
                     title: Copy.step1Primary(
                         saveMyWriting: model.draft.saveMyWriting,
@@ -70,59 +90,28 @@ struct WritingSetupFlowView: View {
                     model.finishSetupStep1()
                 }
             }
+            .padding(.top, 4)
+        }
+        .task {
+            model.loadInstalledAppsIfNeeded()
         }
     }
 
-    private func featureToggle(
-        title: String,
-        line: String,
-        isOn: Binding<Bool>,
-        automationIdentifier: String,
-        showsDivider: Bool = true
-    ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(line)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(.accentColor)
-                .accessibilityLabel(Text(title))
-                .accessibilityHint(Text(line))
-                .accessibilityIdentifier(automationIdentifier)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(minHeight: 56)
-        .overlay(alignment: .bottom) {
-            if showsDivider { Divider() }
-        }
-    }
-
-    // MARK: Step 2: Which apps?
-
-    private var stepTwo: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            WritingStepHeader(step: 2, title: Copy.Step2.title)
-
-            VStack(alignment: .leading, spacing: 4) {
+    private var appsQuestion: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            WritingQuestionTitle(text: Copy.Step1.appsTitle)
+            VStack(alignment: .leading, spacing: 0) {
                 WritingChoiceRow(
-                    title: Copy.Step2.allApps,
-                    detail: Copy.Step2.allAppsLine,
+                    title: Copy.Step1.allApps,
+                    detail: Copy.Step1.allAppsLine,
                     isSelected: model.draft.scope == .all,
                     automationIdentifier: "transcripted.settings.writing.setup.scope.all"
                 ) {
                     model.draft.scope = .all
                 }
                 WritingChoiceRow(
-                    title: Copy.Step2.pickedApps,
+                    title: Copy.Step1.pickedApps,
+                    detail: Copy.Step1.sameApps,
                     isSelected: model.draft.scope == .picked,
                     automationIdentifier: "transcripted.settings.writing.setup.scope.picked"
                 ) {
@@ -134,32 +123,10 @@ struct WritingSetupFlowView: View {
                         .padding(.top, 4)
                 }
             }
-
-            Text(Copy.Step2.sameApps)
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink2)
-
-            validationMessage(Copy.step2Message(
+            validationMessage(Copy.appsMessage(
                 scope: model.draft.scope,
                 pickedCount: model.draft.pickedBundleIdentifiers.count
             ))
-
-            HStack(spacing: 12) {
-                WritingSecondaryButton(
-                    title: Copy.back,
-                    automationIdentifier: "transcripted.settings.writing.setup.back"
-                ) {
-                    model.showStep(1)
-                }
-                Spacer()
-                WritingPrimaryButton(
-                    title: Copy.Step1.continueTitle,
-                    isEnabled: model.draft.canContinueStep2,
-                    automationIdentifier: "transcripted.settings.writing.setup.continue"
-                ) {
-                    model.showStep(3)
-                }
-            }
         }
     }
 
@@ -183,12 +150,11 @@ struct WritingSetupFlowView: View {
                 }
             }
             if ordered.count > Copy.collapsedAppCount {
-                Button(model.showsAllApps ? Copy.Step2.fewerApps : Copy.Step2.moreApps) {
+                Button(model.showsAllApps ? Copy.Step1.fewerApps : Copy.Step1.moreApps) {
                     model.showsAllApps.toggle()
                 }
-                .buttonStyle(.link)
-                .font(LibraryTokens.meta)
-                .frame(minHeight: 28)
+                .buttonStyle(.transcriptedQuiet)
+                .controlSize(.small)
                 .accessibilityIdentifier("transcripted.settings.writing.setup.more-apps")
             }
         }
@@ -196,56 +162,58 @@ struct WritingSetupFlowView: View {
         .accessibilityIdentifier("transcripted.settings.writing.setup.apps")
     }
 
-    // MARK: Step 3: Allow and download
+    // MARK: Screen 2: Allow and download
 
-    private var stepThree: some View {
-        let rows = Copy.step3Rows(
+    private var stepTwo: some View {
+        let rows = Copy.step2Rows(
             saveMyWriting: model.draft.saveMyWriting,
             autocomplete: model.draft.autocomplete
         )
         return VStack(alignment: .leading, spacing: 18) {
-            WritingStepHeader(step: 3, title: Copy.Step3.title)
+            SettingsPageIntro(title: Copy.Step2.title)
 
             SettingsCard {
                 ForEach(Array(rows.enumerated()), id: \.element) { index, row in
-                    step3Row(row, showsDivider: index < rows.count - 1)
+                    step2Row(row, showsDivider: index < rows.count - 1)
                 }
             }
 
-            Text(Copy.Step3.footnote)
+            Text(Copy.Step2.footnote)
                 .font(LibraryTokens.meta)
                 .foregroundStyle(LibraryTokens.ink2)
                 .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 12) {
+                WritingPageDots(count: Copy.setupStepCount, current: 2)
+                Spacer()
                 WritingSecondaryButton(
                     title: Copy.back,
                     automationIdentifier: "transcripted.settings.writing.setup.back"
                 ) {
-                    model.showStep(2)
+                    model.showStep(1)
                 }
-                Spacer()
                 WritingPrimaryButton(
-                    title: Copy.Step3.turnOn,
-                    isEnabled: model.draft.canContinueStep1 && model.draft.canContinueStep2,
+                    title: Copy.Step2.turnOn,
+                    isEnabled: model.draft.canContinueStep1 && model.draft.canContinueApps,
                     automationIdentifier: "transcripted.settings.writing.setup.turn-on"
                 ) {
                     model.turnOnWriting()
                 }
             }
+            .padding(.top, 4)
         }
     }
 
     @ViewBuilder
-    private func step3Row(_ row: Copy.Step3Row, showsDivider: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+    private func step2Row(_ row: Copy.Step2Row, showsDivider: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
             switch row {
             case .keyboard:
                 // Once the keyboard is installed, the steps for where it
                 // stands; "Turn on writing" never waits on them.
                 let keyboardStep = Copy.keyboardStep(model.keyboardSetup)
                 rowHeader(
-                    title: Copy.Step3.keyboardTitle,
+                    title: Copy.Step2.keyboardTitle,
                     badge: Copy.keyboardBadge(
                         saveMyWriting: model.draft.saveMyWriting,
                         autocomplete: model.draft.autocomplete
@@ -254,21 +222,21 @@ struct WritingSetupFlowView: View {
                 )
                 rowLine(keyboardStep.line)
                 if let buttonTitle = keyboardStep.buttonTitle {
-                    SettingsInlineActionButton(
-                        title: buttonTitle,
-                        tone: .warning,
-                        automationIdentifier: "transcripted.settings.writing.setup.keyboard.open-settings"
-                    ) {
+                    Button(buttonTitle) {
                         model.openKeyboardSettings()
                     }
+                    .buttonStyle(.transcriptedSecondary)
+                    .controlSize(.small)
+                    .padding(.top, 4)
+                    .accessibilityIdentifier("transcripted.settings.writing.setup.keyboard.open-settings")
                 }
             case .screenRecording:
                 rowHeader(
-                    title: Copy.Step3.screenRecordingTitle,
-                    badge: Copy.Step3.autocompleteBadge,
+                    title: Copy.Step2.screenRecordingTitle,
+                    badge: Copy.Step2.autocompleteBadge,
                     done: model.screenRecordingGranted
                 )
-                rowLine(Copy.Step3.screenRecordingLine)
+                rowLine(Copy.Step2.screenRecordingLine)
                 if !model.screenRecordingGranted, model.captureBusy {
                     Text(Copy.finishRecordingFirst)
                         .font(LibraryTokens.meta.weight(.semibold))
@@ -276,23 +244,12 @@ struct WritingSetupFlowView: View {
                         .accessibilityIdentifier("transcripted.settings.writing.setup.screen-recording.hold")
                 }
             case .model:
-                rowHeader(title: Copy.Step3.modelTitle, badge: Copy.Step3.autocompleteBadge, done: false)
-                VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Copy.modelOptions, id: \.name) { option in
-                        let eligible = option.choice == .gemma4E2B || model.isQwenEligible
-                        WritingChoiceRow(
-                            title: option.name,
-                            detail: option.detail,
-                            tag: option.isDefault ? Copy.defaultTag : nil,
-                            disabledLine: Copy.ineligibleLine(for: option.choice, isEligible: eligible),
-                            isSelected: model.draft.model == option.choice,
-                            isEnabled: eligible,
-                            automationIdentifier: "transcripted.settings.writing.setup.model.\(option.choice == .gemma4E2B ? "gemma" : "qwen")"
-                        ) {
-                            model.draft.model = option.choice
-                        }
-                    }
-                }
+                // No question here: the draft's model (the smaller one
+                // unless changed) downloads, and the Settings card on the
+                // Writing page switches it.
+                rowHeader(title: Copy.Step2.modelTitle, badge: Copy.Step2.autocompleteBadge, done: false)
+                rowLine(Copy.modelLine(for: model.draft.model))
+                    .accessibilityIdentifier("transcripted.settings.writing.setup.model")
             }
         }
         .padding(.horizontal, 14)
@@ -307,12 +264,12 @@ struct WritingSetupFlowView: View {
     private func rowHeader(title: String, badge: String, done: Bool) -> some View {
         HStack(spacing: 8) {
             Text(title)
-                .font(.subheadline.weight(.semibold))
+                .font(LibraryTokens.rowTitle)
             WritingBadge(text: badge)
             Spacer(minLength: 0)
             if done {
                 Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(LibraryTokens.accent)
+                    .foregroundStyle(LibraryTokens.ink)
                     .accessibilityLabel(Text("Done"))
             }
         }

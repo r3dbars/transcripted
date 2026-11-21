@@ -111,7 +111,7 @@ func testSettingsPageViewLifecycle() {
         let fixture = SettingsPageViewFixture(page: .today)
         fixture.model.present(page: .files, source: "menu_command")
         assertEqual(fixture.recorder.events, [
-            .navigation(.files, .today, .menuCommand), .viewed(.files, "menu_command")
+            .navigation(.meetings, .today, .menuCommand), .viewed(.home, "menu_command")
         ])
     }
 }

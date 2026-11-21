@@ -48,8 +48,21 @@ final class TranscriptedSettingsNavigationModel {
         homeRevealMeetingToken += 1
     }
 
+    /// Bumped by Today's dictation clicks. The shell waits for the entry
+    /// with this id to load on Dictations, then scrolls to it (mount-safe
+    /// `.task(id:)`, like the meeting reveal).
+    var dictationRevealToken = 0
+    private(set) var dictationRevealEntryID: String?
+
+    func requestDictationReveal(entryID: String) {
+        dictationRevealEntryID = entryID
+        dictationRevealToken += 1
+    }
+
     /// Call from a control or window presentation with its known source, never from render callbacks.
-    func select(_ page: TranscriptedSettingsPage, source: ProductUsageTelemetry.NavigationSource) {
+    /// A retired page (`.files`) lands on the page that replaced it.
+    func select(_ requested: TranscriptedSettingsPage, source: ProductUsageTelemetry.NavigationSource) {
+        let page = requested.redirected
         let previous = selectedPage
         updateSelection(page, source: source)
         if previous != page {
@@ -58,7 +71,8 @@ final class TranscriptedSettingsNavigationModel {
     }
 
     /// One explicit window presentation owns one page view, regardless of render callbacks.
-    func present(page: TranscriptedSettingsPage, source: String, beforePageView: () -> Void = {}) {
+    func present(page requested: TranscriptedSettingsPage, source: String, beforePageView: () -> Void = {}) {
+        let page = requested.redirected
         presentedPage = page
         updateSelection(page, source: ProductUsageTelemetry.NavigationSource(rawValue: source) ?? .unknown)
         presentationSource = source

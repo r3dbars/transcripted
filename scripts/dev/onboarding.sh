@@ -40,6 +40,10 @@ case "${1:-status}" in
         defaults delete "$BUNDLE_ID" "$COMPLETION_KEY" >/dev/null 2>&1 || true
         defaults delete "$BUNDLE_ID" "$FORCE_KEY" >/dev/null 2>&1 || true
         defaults delete "$BUNDLE_ID" "$RESUME_KEY" >/dev/null 2>&1 || true
+        # Today's "Get set up" list comes back with a fresh setup too.
+        for key in permissionsOnboardingFinishedWithTodayChecklist TodaySetupChecklistDismissed TodaySetupChecklistTriedFileImport; do
+            defaults delete "$BUNDLE_ID" "$key" >/dev/null 2>&1 || true
+        done
         echo "Set onboarding back to normal first-run behavior for $BUNDLE_ID"
         ;;
     *)

@@ -148,7 +148,7 @@ final class MenuBarPanelController: NSViewController {
             updateVersion: updateTrailing,
             updateTone: updatePresentation.tone,
             updateEnabled: updateActionEnabled,
-            showUpdateRow: !updatePresentation.isProminent
+            showUpdateRow: updatePresentation.isVisible && !updatePresentation.isProminent
         )
 
         if allowUpdateRefresh, case .unknown = appState.sparkleUpdater.updateStatus.state {
@@ -401,6 +401,10 @@ final class MenuBarPanelController: NSViewController {
         return app
     }
 
+    /// The popover's update row. Nothing shows while there's nothing to do:
+    /// the manual check lives in About (and the app menu). A download in
+    /// progress is a quiet row; an update that needs a click is the filled
+    /// callout. Words come from `UpdateStatusWords`.
     private func menuUpdatePresentation(
         for status: SparkleUpdaterController.UpdateStatus,
         availableUpdateDownloadsAutomatically: Bool
@@ -410,74 +414,24 @@ final class MenuBarPanelController: NSViewController {
         detail: String,
         trailingText: String?,
         tone: MenuBarActionRowView.Tone,
-        isProminent: Bool
+        isProminent: Bool,
+        isVisible: Bool
     ) {
-        switch status.state {
-        case .unknown, .readyToCheck:
-            return (
-                "arrow.triangle.2.circlepath.circle",
-                "Check for Updates",
-                "",
-                nil,
-                .standard,
-                false
-            )
-        case .checking:
-            return (
-                "arrow.triangle.2.circlepath.circle",
-                "Checking for Updates…",
-                "",
-                nil,
-                .standard,
-                false
-            )
-        case .noUpdateAvailable:
-            return (
-                "arrow.triangle.2.circlepath.circle",
-                "Check for Updates",
-                "",
-                nil,
-                .standard,
-                false
-            )
-        case .updateAvailable(let version):
-            if availableUpdateDownloadsAutomatically {
-                return (
-                    "arrow.down.circle",
-                    "Preparing Update",
-                    "Downloading \(version)",
-                    nil,
-                    .standard,
-                    false
-                )
+        let phase = UpdateStatusWords.Phase(status.state)
+        let auto = availableUpdateDownloadsAutomatically
+        let title = UpdateStatusWords.title(for: phase, downloadsAutomatically: auto)
+        let detail = UpdateStatusWords.detail(for: phase, downloadsAutomatically: auto) ?? ""
+        let action = UpdateStatusWords.action(for: phase, downloadsAutomatically: auto)
+        switch phase {
+        case .idle, .checking:
+            return ("arrow.triangle.2.circlepath.circle", title, detail, nil, .standard, false, false)
+        case .available, .downloading:
+            if action != nil {
+                return ("arrow.down.circle.fill", title, detail, action, .standard, true, true)
             }
-
-            return (
-                "arrow.down.circle.fill",
-                "Update available: \(version)",
-                "A new version is ready to install",
-                "Install",
-                .standard,
-                true
-            )
-        case .downloading(let version):
-            return (
-                "arrow.down.circle",
-                "Preparing Update",
-                "Downloading \(version)",
-                nil,
-                .standard,
-                false
-            )
-        case .readyToInstall(let version):
-            return (
-                "arrow.clockwise.circle.fill",
-                "Restart to Update",
-                "Version \(version) downloaded",
-                "Restart",
-                .standard,
-                true
-            )
+            return ("arrow.down.circle", title, detail, nil, .standard, false, true)
+        case .readyToInstall:
+            return ("arrow.clockwise.circle.fill", title, detail, action, .standard, true, true)
         }
     }
 

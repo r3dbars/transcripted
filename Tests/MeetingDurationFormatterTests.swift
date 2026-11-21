@@ -1,18 +1,18 @@
 import Foundation
 
 func testMeetingDurationFormatter() {
-    runSuite("MeetingDurationFormatter — formatDuration renders mm:ss") {
-        assertEqual(MeetingDurationFormatter.formatDuration(0), "00:00", "zero clamps to 00:00")
-        assertEqual(MeetingDurationFormatter.formatDuration(65), "01:05", "65s is 1:05")
-        assertEqual(MeetingDurationFormatter.formatDuration(3661), "61:01", "minutes are not wrapped past 60")
+    runSuite("MeetingDurationFormatter — formatDuration renders m:ss like the island") {
+        assertEqual(MeetingDurationFormatter.formatDuration(0), "0:00", "zero clamps to 0:00")
+        assertEqual(MeetingDurationFormatter.formatDuration(65), "1:05", "65s is 1:05")
+        assertEqual(MeetingDurationFormatter.formatDuration(3661), "1:01:01", "past an hour shows hours, like the island")
     }
 
     runSuite("MeetingDurationFormatter — formatDuration clamps and truncates") {
-        assertEqual(MeetingDurationFormatter.formatDuration(-10), "00:00", "negative durations clamp to zero")
-        assertEqual(MeetingDurationFormatter.formatDuration(59), "00:59")
-        assertEqual(MeetingDurationFormatter.formatDuration(60), "01:00")
+        assertEqual(MeetingDurationFormatter.formatDuration(-10), "0:00", "negative durations clamp to zero")
+        assertEqual(MeetingDurationFormatter.formatDuration(59), "0:59")
+        assertEqual(MeetingDurationFormatter.formatDuration(60), "1:00")
         assertEqual(
-            MeetingDurationFormatter.formatDuration(65.9), "01:05",
+            MeetingDurationFormatter.formatDuration(65.9), "1:05",
             "fractional seconds truncate toward zero, they do not round up"
         )
     }

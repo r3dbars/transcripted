@@ -328,11 +328,11 @@ func testHomeMeetingSearchIndex() async {
         assertFalse(HomeMeetingSearchPaging.isActive(query: "  ", starredOnly: false), "spaces with Starred off are not a search")
     }
 
-    runSuite("An empty Starred list says how to star a meeting") {
+    runSuite("An empty Keep audio filter says how to keep a meeting's audio") {
         assertEqual(
             HomeCaptureListCopy.meetingsEmptyMessage(isSearching: true, starredOnly: true, query: "", isSearchPassRunning: false),
-            "No starred meetings yet. Star one from its \u{22EF} menu.",
-            "Starred with no query explains how to add one"
+            "No meetings keep their audio yet. Turn on Keep audio from a meeting's \u{22EF} menu.",
+            "the filter with no query explains how to add one"
         )
         assertEqual(
             HomeCaptureListCopy.meetingsEmptyMessage(isSearching: true, starredOnly: true, query: "design", isSearchPassRunning: false),

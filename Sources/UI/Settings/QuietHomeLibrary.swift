@@ -2,258 +2,229 @@ import AppKit
 import SwiftUI
 import TranscriptedCore
 
-// Quiet-library Home components (2026-08 redesign).
+// Quiet-library Home components (2026-08 redesign, minimal rows 2026-11-18).
 //
-// The Meetings page is a shelf, not a dashboard: one title, one sentence,
-// then day-grouped captures. Rows lead with the title; duration is the only
-// always-on metadata; time-of-day and actions reveal on hover. Opening a
-// capture expands it in place — no sheet, no "Done" button.
+// The Meetings page is for finding a meeting: one title, then day-grouped
+// rows (`HomeMeetingCard.swift`): play, title, one summary, start time.
+// Each row opens in place; there is no sheet and no separate meeting page.
+// The header carries a quiet search, one ⋯ menu (Transcribe a file… and the
+// Only kept audio filter; a drop anywhere on the page also transcribes), and
+// one ink Record button. Today owns the day's counts, so the header doesn't
+// repeat them.
 
 // MARK: - Header
 
-/// Page title plus the single status sentence. The sentence carries the
-/// capture count and at most one attention clause, rendered as a link to
-/// the place where the work lives.
+/// Page title, quiet search, ⋯, Record, and at most one attention clause
+/// rendered as a link to the place where the work lives.
 struct QuietHomeHeader: View {
-    @State private var isNewHovered = false
-    let capturesToday: Int
     let attentionTitle: String?
     let onAttention: () -> Void
-    let onToggleFind: () -> Void
+    @Binding var searchQuery: String
+    /// Bump to move keyboard focus into search (⌘F, the Find menu command).
+    var searchFocusToken: Int = 0
+    /// Search gained or lost keyboard focus (Esc goes to search while it has it).
+    var onSearchFocusChange: (Bool) -> Void = { _ in }
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
-    var isStarredOnly: Bool = false
-    var onToggleStarred: () -> Void = {}
+    var isKeptAudioOnly: Bool = false
+    var onToggleKeptAudio: () -> Void = {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(alignment: .firstTextBaseline) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 10) {
                 // Same title treatment as SettingsPageIntro so Meetings,
                 // Dictations, and Speakers read as siblings.
                 Text("Meetings")
                     .font(LibraryTokens.title)
                 Spacer()
-                Menu {
-                    Button(action: onStartMeeting) {
-                        Label("Record a meeting", systemImage: "mic")
-                    }
+                QuietHeaderSearchField(
+                    query: $searchQuery,
+                    focusRequestToken: searchFocusToken,
+                    onFocusChange: onSearchFocusChange
+                )
+                QuietMeetingsMoreMenu(
+                    isKeptAudioOnly: isKeptAudioOnly,
+                    onImportAudioFile: onImportAudioFile,
+                    onToggleKeptAudio: onToggleKeptAudio
+                )
+                Button("Record", action: onStartMeeting)
+                    .buttonStyle(.transcriptedPrimary)
+                    .controlSize(.small)
+                    .help("Record a meeting")
+                    .accessibilityLabel(Text("Record a meeting"))
                     .accessibilityIdentifier("transcripted.home.new.record-meeting")
-                    Button(action: onImportAudioFile) {
-                        Label("Transcribe a file…", systemImage: "doc.badge.plus")
-                    }
-                    .accessibilityIdentifier("transcripted.home.new.transcribe-file")
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isNewHovered ? Color.primary : LibraryTokens.ink3)
-                        .frame(width: 26, height: 26)
-                        .background {
-                            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl)
-                                .fill(isNewHovered ? LibraryTokens.rowHover : Color.clear)
-                        }
-                        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
-                }
-                .menuStyle(.borderlessButton)
-                .menuIndicator(.hidden)
-                .fixedSize()
-                .onHover { isNewHovered = $0 }
-                .help("New recording or transcription")
-                .accessibilityLabel("New recording or transcription")
-                .accessibilityIdentifier("transcripted.home.new.menu")
-                Button(action: onToggleFind) {
-                    Image(systemName: "magnifyingglass")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(LibraryTokens.ink3)
-                        .frame(width: 26, height: 26)
-                        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
-                }
-                .buttonStyle(.plain)
-                .help("Find meetings")
-                .accessibilityIdentifier("transcripted.home.find.toggle")
-                Button(action: onToggleStarred) {
-                    Image(systemName: isStarredOnly ? "star.fill" : "star")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(isStarredOnly ? LibraryTokens.accent : LibraryTokens.ink3)
-                        .frame(width: 26, height: 26)
-                        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl))
-                }
-                .buttonStyle(.plain)
-                .help(isStarredOnly ? "Show all meetings" : "Show starred meetings")
-                .accessibilityLabel(isStarredOnly ? "Show all meetings" : "Show starred meetings")
-                .accessibilityValue(isStarredOnly ? "On" : "Off")
-                .accessibilityIdentifier("transcripted.home.starred.toggle")
             }
 
-            HStack(spacing: 0) {
-                Text(capturesSummary)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                if let attentionTitle {
-                    Text("  ·  ")
+            if let attentionTitle {
+                Button(action: onAttention) {
+                    Text(attentionTitle)
                         .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.ink3)
-                    Button(action: onAttention) {
-                        Text(attentionTitle)
-                            .font(LibraryTokens.meta)
-                            .foregroundStyle(LibraryTokens.attention)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityIdentifier("transcripted.home.attention.link")
+                        .foregroundStyle(LibraryTokens.attention)
                 }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("transcripted.home.attention.link")
             }
-        }
-    }
-
-    private var capturesSummary: String {
-        switch capturesToday {
-        case 0: return "Nothing saved yet today"
-        case 1: return "1 saved today"
-        default: return "\(capturesToday) saved today"
         }
     }
 }
 
-// MARK: - Rows
+/// "Search", quiet: no border at rest, wider with a hairline once focused or
+/// filled. It matches title, the on-device line and summary, date words and
+/// named speakers (`HomeMeetingListFilter`), never transcript bodies.
+struct QuietHeaderSearchField: View {
+    @Binding var query: String
+    /// Focus moves here when this changes while the page is showing (⌘F),
+    /// never just because the page appears again with an old request.
+    var focusRequestToken: Int = 0
+    var onFocusChange: (Bool) -> Void = { _ in }
 
-/// Title-first meeting row. Duration always visible; start time and actions
-/// fade in on hover.
-struct QuietMeetingRow: View {
-    let item: RecentMeetingItem
-    let isCopied: Bool
-    let onOpen: () -> Void
-    let onCopy: () -> Void
-    let menuItems: [HomeRowMenuItem]
-    var showsMicBoostHint: Bool = false
-    /// Voices this meeting still has to name: the "2 to name" pill, which
-    /// opens its "Who spoke?" card on Speakers.
-    var voicesToName: Int = 0
-    var onWhoSpoke: (() -> Void)? = nil
+    @FocusState private var isFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var isOpen: Bool { isFocused || !query.isEmpty }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            TextField("Search", text: $query, prompt: Text("Search").foregroundStyle(LibraryTokens.ink3))
+                .textFieldStyle(.plain)
+                .font(LibraryTokens.meta)
+                .focused($isFocused)
+                .onExitCommand {
+                    query = ""
+                    isFocused = false
+                }
+                .onChange(of: focusRequestToken) { _, _ in
+                    isFocused = true
+                }
+                .onChange(of: isFocused) { _, focused in
+                    onFocusChange(focused)
+                }
+                .accessibilityLabel(Text("Search meetings"))
+                .accessibilityIdentifier("transcripted.home.meeting-search.field")
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(LibraryTokens.ink3)
+                }
+                .buttonStyle(.plain)
+                .help("Clear search")
+                .accessibilityLabel(Text("Clear meeting filter"))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .frame(width: isOpen ? 170 : 70)
+        .background(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                .strokeBorder(isOpen ? LibraryTokens.hairline : Color.clear, lineWidth: 1)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { isFocused = true }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isOpen)
+        // The find affordance the QA smoke looks for (it was the magnifier).
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("transcripted.home.find.toggle")
+    }
+}
+
+/// The header's one ⋯: Transcribe a file… and Only kept audio (checked while
+/// on). Both used to be header buttons; they stay one click away.
+struct QuietMeetingsMoreMenu: View {
+    let isKeptAudioOnly: Bool
+    let onImportAudioFile: () -> Void
+    let onToggleKeptAudio: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            if showsMicBoostHint {
-                Circle()
-                    .fill(LibraryTokens.attention)
-                    .frame(width: 6, height: 6)
-                    .help("Your mic was muffled by another call app")
-            }
-
-            if item.isStarred {
-                Image(systemName: "star.fill")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .help("Starred")
-                    .accessibilityLabel("Starred")
-                    .accessibilityIdentifier("transcripted.home.meeting.starred")
-            }
-
-            Text(item.displayTitle)
-                .font(LibraryTokens.rowTitle)
-                .lineLimit(1)
-                .accessibilityIdentifier("transcripted.home.meeting.preview")
-
-            if let warning = item.systemAudioVerificationWarning {
-                Label(warning, systemImage: "exclamationmark.triangle")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.attention)
-                    .help("Didn't hear anyone else on the call. They may have been quiet, or call audio wasn't recorded.")
-                    .accessibilityIdentifier("transcripted.home.meeting.system-audio-unverified")
-            }
-
-            Spacer(minLength: 12)
-
-            // Always present so the row keeps one constant height; hover only
-            // fades the actions in and tints the background — no size change.
-            HStack(spacing: 10) {
-                Text(startTimeString)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                HomeRowActionButtons(
-                    isCopied: isCopied,
-                    onCopy: onCopy,
-                    menuItems: menuItems
-                )
-            }
-            .opacity(isHovering ? 1 : 0)
-            .allowsHitTesting(isHovering)
-            .accessibilityHidden(!isHovering)
-
-            if let pill = SpeakerMeetingReviewPolicy.rowPill(voicesToName: voicesToName), let onWhoSpoke {
-                HomeWhoSpokePill(title: pill, action: onWhoSpoke)
-            }
-
-            if let durationString {
-                Text(durationString)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-            }
+        Menu {
+            Button(HomeCaptureListCopy.TranscribeFileAction.title, action: onImportAudioFile)
+                .help(HomeCaptureListCopy.TranscribeFileAction.help)
+                .accessibilityIdentifier(HomeCaptureListCopy.TranscribeFileAction.automationIdentifier)
+            Toggle("Only kept audio", isOn: Binding(
+                get: { isKeptAudioOnly },
+                set: { _ in onToggleKeptAudio() }
+            ))
+            .accessibilityIdentifier("transcripted.home.starred.toggle")
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isKeptAudioOnly || isHovering ? LibraryTokens.ink : LibraryTokens.ink3)
+                .frame(width: HomeHitTarget.compactVisibleSize, height: HomeHitTarget.compactVisibleSize)
+                .background {
+                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                        .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
+                }
+                .contentShape(Rectangle())
         }
-        .padding(.vertical, 2)
-        .padding(.horizontal, 10)
-        .contentShape(Rectangle())
-        .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 1, style: .continuous)
-                .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
-        )
-        .padding(.horizontal, -10)
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.12)) { isHovering = hovering }
-        }
-        .onTapGesture(perform: onOpen)
-        .help("Open capture")
-    }
-
-    private var startTimeString: String {
-        HomeActivityRowFormatting.timeFormatter.string(from: item.startDate ?? item.date)
-    }
-
-    private var durationString: String? {
-        guard let start = item.startDate, let end = item.endDate, end > start else { return nil }
-        let minutes = Int((end.timeIntervalSince(start) / 60).rounded())
-        if minutes < 1 { return "<1 min" }
-        if minutes < 60 { return "\(minutes) min" }
-        let hours = minutes / 60
-        let rest = minutes % 60
-        return rest == 0 ? "\(hours) hr" : "\(hours) hr \(rest) min"
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .onHover { isHovering = $0 }
+        .help(isKeptAudioOnly ? "More (showing only meetings that keep their audio)" : "More")
+        .accessibilityLabel(Text("More"))
+        .accessibilityValue(Text(isKeptAudioOnly ? "Only kept audio" : ""))
+        .accessibilityIdentifier("transcripted.home.more")
     }
 }
 
-/// "2 to name" on a meeting row: a dot in the attention color and the count.
-private struct HomeWhoSpokePill: View {
-    let title: String
+/// A 12 pt header glyph with a 40 pt hit shape and the row hover fill.
+/// Dictations' header uses it too, so the two Find buttons match.
+struct QuietHeaderIconButton: View {
+    let systemName: String
+    let help: String
+    var isOn: Bool? = nil
+    let automationIdentifier: String
     let action: () -> Void
 
     @State private var isHovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 5) {
-                Circle()
-                    .fill(LibraryTokens.attention)
-                    .frame(width: 6, height: 6)
-                Text(title)
-                    .font(LibraryTokens.meta)
-                    .monospacedDigit()
-            }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Capsule().fill(isHovering ? LibraryTokens.rowHover : Color.clear))
-            .overlay(Capsule().stroke(LibraryTokens.hairline.opacity(2), lineWidth: 1))
-            .contentShape(Capsule())
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(isOn == true || isHovering ? LibraryTokens.ink : LibraryTokens.ink3)
+                .frame(width: HomeHitTarget.compactVisibleSize, height: HomeHitTarget.compactVisibleSize)
+                .background {
+                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                        .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
+                }
+                .frame(width: HomeHitTarget.minimum, height: HomeHitTarget.minimum)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(LibraryTokens.ink2)
+        .padding(-(HomeHitTarget.minimum - HomeHitTarget.compactVisibleSize) / 2)
         .onHover { isHovering = $0 }
-        .help("Name who spoke in this meeting")
-        .accessibilityLabel("Who spoke? \(title)")
-        .accessibilityIdentifier("transcripted.home.meeting.who-spoke")
+        .help(help)
+        .accessibilityLabel(Text(help))
+        .modifier(OptionalToggleValue(isOn: isOn))
+        .accessibilityIdentifier(automationIdentifier)
     }
 }
 
-/// In-flight transcription rendered as a row-shaped status line instead of a
-/// dashboard card. Appears above the day list while work is running.
+private struct OptionalToggleValue: ViewModifier {
+    let isOn: Bool?
+
+    func body(content: Content) -> some View {
+        if let isOn {
+            content.accessibilityValue(isOn ? "On" : "Off")
+        } else {
+            content
+        }
+    }
+}
+
+// MARK: - Working row
+
+/// In-flight transcription, drawn like a closed meeting row above the day
+/// list: a spinner (or the status mark) in the play column, the title, and
+/// the status in the summary slot with its percent. A failure shows its amber
+/// wording and why. Quiet Open and Cancel on the right. While recording it is
+/// the live dot and timer instead; Stop stays in the menu bar and the
+/// recording overlay.
 struct QuietWorkingRow: View {
     let title: String
     let status: String
@@ -261,17 +232,20 @@ struct QuietWorkingRow: View {
     let symbolName: String
     let tone: HomeTranscriptionActivityPresentation.Tone
     let onCancel: (() -> Void)?
-    /// When non-nil, the session is actively recording: render a red dot and
-    /// the live timer instead of a spinner. Stop stays in the menu bar and
-    /// the recording overlay — Home only reflects the state.
+    /// When non-nil, the session is actively recording: render the live dot
+    /// and timer instead of a spinner.
     var recordingElapsed: String? = nil
     /// Plain-language reason under a failed row.
     var detail: String? = nil
-    /// Shows Open on a saved row: expands that meeting in the list.
+    /// Shows Open on a saved row: opens that meeting in the list.
     var onOpen: (() -> Void)? = nil
 
+    private typealias Layout = HomeMeetingRowLayout
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .center, spacing: Layout.columnGap) {
+            leadingMark
+                .frame(width: Layout.playColumn, height: Layout.playColumn)
             if let recordingElapsed {
                 // The live time comes from the shell's clock, so the
                 // once-a-second tick redraws only this label.
@@ -279,29 +253,13 @@ struct QuietWorkingRow: View {
             } else {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(title)
-                        .font(LibraryTokens.rowTitle)
+                        .font(TextRole.body.font(weight: .semibold))
+                        .foregroundStyle(LibraryTokens.ink)
                         .lineLimit(1)
-                    HStack(spacing: 6) {
-                        if case .statusIcon(let isSuccess) = HomeActivityIndicator.make(isWorking: tone == .working, isSuccess: tone == .success) {
-                            Image(systemName: symbolName)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(isSuccess ? Color.green : Color.orange)
-                        } else {
-                            ProgressView()
-                                .controlSize(.mini)
-                        }
-                        Text(status)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(LibraryTokens.ink2)
-                        if let percent = HomeActivityPercent.displayed(progress) {
-                            Text("\(percent)%")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(LibraryTokens.ink3)
-                        }
-                    }
+                    statusLine
                     if let detail, !detail.isEmpty {
                         Text(detail)
-                            .font(.system(size: 11.5))
+                            .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -309,395 +267,55 @@ struct QuietWorkingRow: View {
                     }
                 }
             }
-            Spacer()
+            Spacer(minLength: 8)
             if recordingElapsed == nil, let onOpen {
                 Button("Open", action: onOpen)
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.transcriptedQuiet)
                     .controlSize(.small)
-                    .help("Show this meeting's transcript")
+                    .help("Show this meeting")
                     .accessibilityIdentifier("transcripted.home.activity.open")
             }
             if recordingElapsed == nil, let onCancel {
                 Button("Cancel", action: onCancel)
-                    .buttonStyle(.plain)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
+                    .buttonStyle(.transcriptedQuiet)
+                    .controlSize(.small)
                     .accessibilityIdentifier("transcripted.home.activity.cancel")
             }
         }
-        .padding(.vertical, 8)
+        .padding(.vertical, Layout.rowPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.home.activity.row")
+    }
+
+    @ViewBuilder
+    private var leadingMark: some View {
+        if recordingElapsed != nil {
+            EmptyView()
+        } else if case .statusIcon(let isSuccess) = HomeActivityIndicator.make(isWorking: tone == .working, isSuccess: tone == .success) {
+            Image(systemName: symbolName)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(isSuccess ? LibraryTokens.ink2 : LibraryTokens.attention)
+        } else {
+            ProgressView()
+                .controlSize(.small)
+        }
+    }
+
+    private var statusLine: some View {
+        // The play column already spins; the slot keeps just the words.
+        HomeMeetingSlotText(
+            slot: HomeMeetingCardPresentation.workingSlot(
+                status: status,
+                percent: HomeActivityPercent.displayed(progress),
+                isCaution: tone == .caution
+            ),
+            showsSpinner: false
+        )
     }
 
     static func formatElapsed(_ seconds: TimeInterval) -> String {
         HomeRecordingElapsed.text(seconds)
-    }
-}
-
-// MARK: - Inline expansion
-
-/// The opened capture: player, transcript, quiet text actions — revealed in
-/// place within the list. Esc or the row click collapses it.
-struct QuietMeetingExpansion: View {
-    let item: RecentMeetingItem
-    let preview: HomeMeetingPreview?
-    let isCopied: Bool
-    let onCopy: () -> Void
-    let onRevealInFinder: () -> Void
-    let onCollapse: () -> Void
-    let knownPeople: [SpeakerNameChoice]
-    let savedSpeakerIDs: Set<UUID>
-    let onAssignSpeakers: (
-        [HomeMeetingSpeakerAssignment],
-        @escaping (Bool) -> Void
-    ) -> Void
-    let menuItems: [HomeRowMenuItem]
-    var onToggleStar: () -> Void = {}
-
-    @State private var showsFullTranscript = false
-    @State private var showsSpeakerNamingSheet = false
-
-    private static let visibleLineLimit = 8
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 12) {
-                // Only the title/meta area closes the card. Actions sit beside
-                // this button, so Copy, Finder and the menu never collapse it.
-                Button {
-                    HomeMeetingExpansionLayout.performHeaderClick(onCollapse: onCollapse)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(item.displayTitle)
-                            .font(.system(size: 15, weight: .semibold))
-                            .accessibilityIdentifier("transcripted.home.expansion.title")
-                        Text(metaLine)
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(LibraryTokens.ink3)
-                        if let warning = item.systemAudioVerificationWarning {
-                            Label(warning, systemImage: "exclamationmark.triangle")
-                                .font(LibraryTokens.meta)
-                                .foregroundStyle(LibraryTokens.attention)
-                            Text("Didn't hear anyone else on the call. They may have been quiet, or call audio wasn't recorded.")
-                                .font(LibraryTokens.meta)
-                                .foregroundStyle(LibraryTokens.ink2)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help("Close capture")
-                .accessibilityIdentifier("transcripted.home.expansion.header")
-
-                HStack(spacing: 16) {
-                    ForEach(HomeMeetingExpansionLayout.headerActions, id: \.self) { action in
-                        expansionAction(for: action)
-                    }
-                }
-
-                // Hidden control so Esc collapses the expansion.
-                Button(action: onCollapse) { EmptyView() }
-                    .buttonStyle(.plain)
-                    .keyboardShortcut(.cancelAction)
-                    .frame(width: 0, height: 0)
-                    .opacity(0)
-                    .accessibilityHidden(true)
-            }
-
-            if let audio = item.audio {
-                HomeMeetingPodcastPlayer(audio: audio)
-                    .padding(.top, 12)
-            }
-
-            content
-                .padding(.top, 12)
-
-            if !HomeMeetingExpansionLayout.footerActions.isEmpty {
-                HStack(spacing: 16) {
-                    ForEach(HomeMeetingExpansionLayout.footerActions, id: \.self) { action in
-                        expansionAction(for: action)
-                    }
-                    Spacer()
-                }
-                .padding(.top, 12)
-                .overlay(alignment: .top) {
-                    Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
-                        .padding(.top, 6)
-                }
-            }
-        }
-        .padding(18)
-        .contentShape(Rectangle())
-        // Swallow taps inside the card so the page-level background tap
-        // catcher (click-away collapse) doesn't fire for clicks on the
-        // expansion's own non-interactive areas.
-        .onTapGesture {}
-        .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .fill(LibraryTokens.raisedFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
-        )
-        .padding(.vertical, 6)
-        .accessibilityIdentifier("transcripted.home.expansion")
-        .sheet(isPresented: $showsSpeakerNamingSheet) {
-            if let content = preview?.content {
-                HomeMeetingSpeakerNamingSheet(
-                    content: content,
-                    knownPeople: knownPeople,
-                    savedSpeakerIDs: savedSpeakerIDs,
-                    onCancel: { showsSpeakerNamingSheet = false },
-                    onSave: { assignments, completion in
-                        onAssignSpeakers(assignments) { didSave in
-                            if didSave { showsSpeakerNamingSheet = false }
-                            completion(didSave)
-                        }
-                    }
-                )
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let preview {
-            if let readError = preview.readError {
-                Text(readError)
-                    .font(LibraryTokens.body)
-                    .foregroundStyle(LibraryTokens.attention)
-            } else {
-                transcript(for: preview.content)
-            }
-        } else {
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.mini)
-                Text("Loading…")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-            }
-            .padding(.vertical, 8)
-        }
-    }
-
-    @ViewBuilder
-    private func transcript(for content: HomeMeetingPreviewContent) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("TRANSCRIPT")
-                    .font(LibraryTokens.label)
-                    .tracking(LibraryTokens.labelTracking)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .help("Transcribed on this Mac")
-                Spacer()
-                if !content.transcriptLines.isEmpty {
-                    Button {
-                        showsSpeakerNamingSheet = true
-                    } label: {
-                        HStack(spacing: 5) {
-                            Image(systemName: "person.2")
-                                .font(.system(size: 10.5, weight: .medium))
-                            Text("Name speakers")
-                                .font(LibraryTokens.meta)
-                        }
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Assign or correct every speaker in this meeting")
-                    .accessibilityIdentifier("transcripted.home.expansion.name-speakers")
-                }
-            }
-
-            if content.transcriptLines.isEmpty {
-                Text(content.fallbackText)
-                    .font(LibraryTokens.body)
-                    .foregroundStyle(.primary)
-                    .lineLimit(showsFullTranscript ? nil : 12)
-                    .textSelection(.enabled)
-            } else {
-                let visibleIndices = showsFullTranscript
-                    ? Array(content.transcriptLines.indices)
-                    : Array(content.transcriptLines.indices.prefix(Self.visibleLineLimit))
-                ForEach(visibleIndices, id: \.self) { index in
-                    transcriptLine(content.transcriptLines[index], index: index)
-                }
-                if content.transcriptLines.count > Self.visibleLineLimit {
-                    Button(showsFullTranscript
-                        ? "Show less"
-                        : "Show all \(content.transcriptLines.count) lines"
-                    ) {
-                        withAnimation(.snappy(duration: 0.2)) { showsFullTranscript.toggle() }
-                    }
-                    .buttonStyle(.plain)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .overlay(alignment: .top) {
-            Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
-                .padding(.top, -6)
-        }
-    }
-
-    private func transcriptLine(_ line: HomeMeetingTranscriptLine, index: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 12) {
-            if !line.time.isEmpty {
-                if let audio = item.audio, let startSeconds = line.startSeconds {
-                    QuietTranscriptTimestamp(time: line.time, index: index) {
-                        MeetingAudioPlayback.shared.play(
-                            audio,
-                            from: startSeconds,
-                            rowSourceStem: line.identity.channel.map(Self.retainedAudioStem(for:))
-                        )
-                    }
-                } else {
-                    Text(line.time)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(LibraryTokens.ink3)
-                        .frame(width: 52, alignment: .leading)
-                }
-            }
-            if !line.speaker.isEmpty {
-                QuietMeetingSpeakerLabel(
-                    identity: line.identity,
-                    knownPeople: knownPeople,
-                    isSavedPerson: identityIsSaved(line.identity),
-                    onAssign: { assignment, completion in
-                        onAssignSpeakers([assignment], completion)
-                    }
-                )
-            }
-            Text(line.text)
-                .font(.system(size: 12.5))
-                .foregroundStyle(.primary.opacity(0.9))
-                .textSelection(.enabled)
-        }
-        .padding(.horizontal, 7)
-        .padding(.vertical, 5)
-    }
-
-    /// Retained-audio file stem that holds a channel's speech.
-    private static func retainedAudioStem(for channel: HomeMeetingSpeakerChannel) -> String {
-        switch channel {
-        case .mic: return "microphone"
-        case .system: return "system_audio"
-        }
-    }
-
-    private func identityIsSaved(_ identity: HomeMeetingSpeakerIdentity) -> Bool {
-        identity.persistentSpeakerID.map(savedSpeakerIDs.contains) ?? false
-    }
-
-    @ViewBuilder
-    private func expansionAction(for action: HomeMeetingExpansionAction) -> some View {
-        switch action {
-        case .copy:
-            quietAction(
-                title: isCopied ? "Copied" : "Copy",
-                symbol: isCopied ? "checkmark" : "square.on.square",
-                tint: isCopied ? LibraryTokens.accent : LibraryTokens.ink2,
-                action: onCopy
-            )
-            .accessibilityIdentifier("transcripted.home.expansion.copy")
-        case .star:
-            quietAction(
-                title: item.isStarred ? "Starred" : "Star",
-                symbol: item.isStarred ? "star.fill" : "star",
-                tint: item.isStarred ? LibraryTokens.accent : LibraryTokens.ink2,
-                action: onToggleStar
-            )
-            .help(item.isStarred ? "Remove star" : "Star this meeting. Starred meetings keep their audio.")
-            .accessibilityValue(item.isStarred ? "Starred" : "Not starred")
-            .accessibilityIdentifier("transcripted.home.expansion.star")
-        case .revealInFinder:
-            quietAction(
-                title: "Show in Finder",
-                symbol: "folder",
-                tint: LibraryTokens.ink2,
-                action: onRevealInFinder
-            )
-            .accessibilityIdentifier("transcripted.home.expansion.reveal")
-        case .more:
-            if !menuItems.isEmpty {
-                HomeRowMoreMenuButton(
-                    items: menuItems,
-                    automationIdentifier: "transcripted.home.expansion.more"
-                )
-                .frame(width: 24, height: 24)
-            }
-        }
-    }
-
-    private func quietAction(title: String, symbol: String, tint: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            HStack(spacing: 5) {
-                Image(systemName: symbol)
-                    .font(.system(size: 11, weight: .medium))
-                Text(title)
-                    .font(LibraryTokens.meta)
-            }
-            .foregroundStyle(tint)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private var metaLine: String {
-        var parts: [String] = []
-        parts.append(Self.timeFormatter.string(from: item.startDate ?? item.date))
-        if let start = item.startDate, let end = item.endDate, end > start {
-            let minutes = max(1, Int((end.timeIntervalSince(start) / 60).rounded()))
-            parts.append("\(minutes) min")
-        }
-        if let modelName = item.transcriptionModelName {
-            parts.append(modelName)
-        }
-        return parts.joined(separator: "  ·  ")
-    }
-
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter
-    }()
-}
-
-/// A transcript row's clock time, shown only when the meeting kept its audio.
-/// Clicking it plays the meeting from that moment.
-private struct QuietTranscriptTimestamp: View {
-    let time: String
-    let index: Int
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            Text(time)
-                .font(.system(size: 11, design: .monospaced))
-                .foregroundStyle(isHovering ? LibraryTokens.accent : LibraryTokens.ink3)
-                .underline(isHovering)
-                .frame(width: 52, alignment: .leading)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .onHover { isHovering = $0 }
-        .help("Play from \(time)")
-        .accessibilityLabel(Text("Play from \(time)"))
-        .accessibilityIdentifier("transcripted.home.expansion.timestamp.\(index)")
-    }
-}
-
-
-extension RecentMeetingItem {
-    /// The speech model that made this transcript, e.g. "Parakeet V3".
-    var transcriptionModelName: String? {
-        transcriptionEngine.flatMap(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier:))
     }
 }

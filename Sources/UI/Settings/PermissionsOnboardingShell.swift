@@ -58,6 +58,7 @@ struct OnboardingWindowShell<Content: View>: View {
             )
         }
         .background(LibraryTokens.contentBackground)
+        .transcriptedRootTint()
     }
 }
 
@@ -71,55 +72,29 @@ private struct NavBar: View {
     let onSecondary: () -> Void
 
     var body: some View {
-        HStack {
-            Button {
-                onBack()
-            } label: {
-                Text("Back")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .frame(minWidth: LibraryTokens.minimumHitTarget, minHeight: LibraryTokens.minimumHitTarget)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .opacity(canGoBack ? 1 : 0)
-            .disabled(!canGoBack)
-            .accessibilityIdentifier("transcripted.onboarding.nav.back")
+        HStack(spacing: 8) {
+            Button("Back", action: onBack)
+                .buttonStyle(.transcriptedQuiet)
+                .controlSize(.large)
+                .opacity(canGoBack ? 1 : 0)
+                .disabled(!canGoBack)
+                .accessibilityHidden(!canGoBack)
+                .accessibilityIdentifier("transcripted.onboarding.nav.back")
 
             Spacer()
 
             if let secondaryTitle {
-                Button {
-                    onSecondary()
-                } label: {
-                    Text(secondaryTitle)
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .padding(.horizontal, 12)
-                        .frame(minHeight: LibraryTokens.minimumHitTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("transcripted.onboarding.nav.secondary")
+                Button(secondaryTitle, action: onSecondary)
+                    .buttonStyle(.transcriptedQuiet)
+                    .controlSize(.large)
+                    .accessibilityIdentifier("transcripted.onboarding.nav.secondary")
             }
 
-            Button {
-                onNext()
-            } label: {
-                Text(primaryTitle)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Color.white)
-                    .padding(.horizontal, 22)
-                    .frame(minHeight: LibraryTokens.minimumHitTarget)
-                    .background(
-                        RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                            .fill(primaryDisabled ? LibraryTokens.ink3 : LibraryTokens.accent)
-                    )
-                    .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
-            }
-            .buttonStyle(.plain)
-            .disabled(primaryDisabled)
-            .accessibilityIdentifier("transcripted.onboarding.nav.primary")
+            Button(primaryTitle, action: onNext)
+                .buttonStyle(.transcriptedPrimary)
+                .controlSize(.large)
+                .disabled(primaryDisabled)
+                .accessibilityIdentifier("transcripted.onboarding.nav.primary")
         }
         .padding(.horizontal, 32)
         .frame(height: 76)
@@ -134,6 +109,8 @@ struct DoneStage: View {
     /// Setup was skipped after a Don't Allow on the microphone.
     let microphoneMissing: Bool
     let onOpenMicrophoneSettings: () -> Void
+    /// Asks for paste access again (the same request as its setup screen).
+    let onAllowPasteAccess: () -> Void
     let functionKeyWarning: String?
     let dictationShortcutDisplay: String?
     let meetingShortcutDisplay: String
@@ -145,22 +122,16 @@ struct DoneStage: View {
     let willOpenAtLogin: Bool
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            VStack(spacing: 20) {
-                Text(microphoneMissing ? "Almost set." : modelPresentation.headline)
-                    .font(LibraryTokens.title)
-                    .foregroundStyle(.primary)
+        VStack(alignment: .leading, spacing: 0) {
+            Text(microphoneMissing ? "Almost set." : modelPresentation.headline)
+                .textRole(.display)
+                .foregroundStyle(LibraryTokens.ink)
 
+            VStack(alignment: .leading, spacing: 18) {
                 if microphoneMissing {
                     microphoneMissingNotice
                 } else if shortcutsNeedAccessibility {
-                    Text("Shortcuts start working once Accessibility is on. Until then, start dictation and meetings from the menu bar.")
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 380)
-                        .fixedSize(horizontal: false, vertical: true)
+                    pasteAccessNotice
                 } else {
                     shortcutList
                     if let functionKeyWarning {
@@ -174,54 +145,63 @@ struct DoneStage: View {
 
                 if willOpenAtLogin {
                     Text("Opens at login so it can catch your meetings. Change it in Settings.")
-                        .font(LibraryTokens.meta)
+                        .textRole(.meta)
                         .foregroundStyle(LibraryTokens.ink3)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: 380)
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+            .padding(.top, 20)
+
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 48)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 56)
+        .padding(.top, 52)
     }
 
     private var microphoneMissingNotice: some View {
-        VStack(spacing: 8) {
-            Text("Dictation and meetings need the microphone. Until it's on, you can still transcribe audio and video files with + on the Meetings page.")
-                .font(LibraryTokens.meta)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Dictation and meetings need the microphone. Until it's on, you can still transcribe files from Transcribe a file.")
+                .textRole(.body)
                 .foregroundStyle(LibraryTokens.ink2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Open Microphone Settings", action: onOpenMicrophoneSettings)
-                .buttonStyle(QuietPermissionButtonStyle())
+            Button("Open Settings", action: onOpenMicrophoneSettings)
+                .buttonStyle(.transcriptedSecondary)
                 .accessibilityIdentifier("transcripted.onboarding.done.open-microphone-settings")
         }
     }
 
-    private func functionKeyNotice(_ warning: String) -> some View {
-        VStack(spacing: 6) {
-            Text(warning)
-                .font(LibraryTokens.meta)
+    private var pasteAccessNotice: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Your key works once paste access is on. Until then, start from the menu bar and your words go to the clipboard.")
+                .textRole(.body)
                 .foregroundStyle(LibraryTokens.ink2)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
                 .fixedSize(horizontal: false, vertical: true)
 
-            Button("Open Keyboard Settings") {
+            Button("Allow paste access", action: onAllowPasteAccess)
+                .buttonStyle(.transcriptedSecondary)
+                .accessibilityIdentifier("transcripted.onboarding.done.allow-paste-access")
+        }
+    }
+
+    private func functionKeyNotice(_ warning: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(warning)
+                .textRole(.meta)
+                .foregroundStyle(LibraryTokens.ink2)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button("Open Settings") {
                 PhysicalDictationTriggerPreferences.openKeyboardSettings()
             }
-            .buttonStyle(.plain)
-            .font(LibraryTokens.meta)
-            .foregroundStyle(LibraryTokens.accent)
+            .buttonStyle(.transcriptedQuiet)
             .accessibilityIdentifier("transcripted.onboarding.done.open-keyboard-settings")
         }
     }
 
     private var modelStatus: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             if let statusLine = modelPresentation.statusLine {
                 HStack(spacing: 6) {
                     if modelPresentation.isFailed {
@@ -229,8 +209,8 @@ struct DoneStage: View {
                             .foregroundStyle(LibraryTokens.attention)
                     }
                     Text(statusLine)
-                        .font(LibraryTokens.rowTitle)
-                        .foregroundStyle(.primary)
+                        .textRole(.body, weight: .medium)
+                        .foregroundStyle(LibraryTokens.ink)
                 }
             }
 
@@ -244,26 +224,16 @@ struct DoneStage: View {
 
             if let detail = modelPresentation.detail {
                 Text(detail)
-                    .font(LibraryTokens.meta)
+                    .textRole(.meta)
                     .foregroundStyle(LibraryTokens.ink3)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .frame(maxWidth: 400)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("transcripted.onboarding.done.model-status")
     }
 
-    @ViewBuilder
     private var shortcutList: some View {
-        Text(dictationShortcutDisplay == nil
-            ? "One shortcut to remember."
-            : "Two shortcuts to remember.")
-            .font(LibraryTokens.meta)
-            .foregroundStyle(LibraryTokens.ink2)
-
         VStack(spacing: 0) {
             if let dictationShortcutDisplay {
                 ShortcutRow(
@@ -279,8 +249,7 @@ struct DoneStage: View {
                 detail: "Start or stop from anywhere."
             )
         }
-        .frame(maxWidth: 400)
-        .padding(.top, 6)
+        .frame(maxWidth: 440)
     }
 }
 
@@ -293,18 +262,20 @@ private struct ShortcutRow: View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(LibraryTokens.rowTitle)
-                    .foregroundStyle(.primary)
+                    .textRole(.body, weight: .medium)
+                    .foregroundStyle(LibraryTokens.ink)
                 Text(detail)
-                    .font(LibraryTokens.meta)
+                    .textRole(.meta)
                     .foregroundStyle(LibraryTokens.ink3)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 12)
             Text(shortcut)
-                .font(.system(size: 12, weight: .semibold, design: .monospaced))
-                .foregroundStyle(LibraryTokens.accent)
+                .font(TextRole.label.font())
+                .foregroundStyle(LibraryTokens.ink)
         }
-        .padding(.vertical, 13)
+        .padding(.vertical, 12)
         .frame(minHeight: LibraryTokens.minimumHitTarget)
+        .accessibilityElement(children: .combine)
     }
 }

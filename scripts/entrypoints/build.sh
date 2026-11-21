@@ -329,8 +329,14 @@ for key, expected_display in {"startMeeting": "Record", "startDictation": "Dicta
         errors.append(f"{key} shows {row.get('displayTitle')!r}, expected {expected_display!r}")
 
 utility_actions = report.get("content", {}).get("utilityActions", {})
+# The update row shows only while an update is downloading; the manual check
+# lives in About. A launch with nothing to update keeps it hidden.
+update_row = utility_actions.get("checkUpdates") or {}
+if update_row.get("automationIdentifier") != "transcripted.menubar.utility.check-updates":
+    errors.append(f"checkUpdates automation identifier was {update_row.get('automationIdentifier')!r}")
+if update_row.get("isVisible"):
+    errors.append("checkUpdates row was visible with no update to show")
 for key, expected in {
-    "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
     "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
     "quit": ("Quit", "transcripted.menubar.utility.quit"),
 }.items():

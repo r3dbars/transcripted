@@ -6,7 +6,7 @@ enum TranscriptedOnboardingWindow {
     static func make(preferredSize: NSSize) -> NSWindow {
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: preferredSize),
-            styleMask: [.titled, .closable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -15,6 +15,8 @@ enum TranscriptedOnboardingWindow {
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
+        // Fixed size: the content is laid out for one frame, so resizing only
+        // added empty margin.
         window.minSize = preferredSize
         // First-run setup should be capturable for support and QA walkthroughs.
         window.sharingType = .readOnly

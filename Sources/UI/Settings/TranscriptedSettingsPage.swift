@@ -5,6 +5,9 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     /// value so automation identifiers and analytics `page_id` stay stable.
     case today
     case home
+    /// Retired: file import lives on Meetings now (its header, a drop
+    /// anywhere on the page, ⌘O). Kept so old deep links, the debug channel
+    /// and analytics ids still land somewhere; `redirected` sends it to Meetings.
     case files
     case dictations
     case writing
@@ -13,6 +16,11 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case connectAgent
 
     var id: String { rawValue }
+
+    /// The page a request for this one actually shows. Only `.files` moves.
+    var redirected: TranscriptedSettingsPage {
+        self == .files ? .home : self
+    }
 
     var automationIdentifier: String {
         switch self {
@@ -36,7 +44,7 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         switch self {
         case .today: return .today
         case .home: return .meetings
-        case .files: return .files
+        case .files: return .meetings
         case .dictations: return .dictations
         case .writing: return .writing
         case .general: return .settings
@@ -60,8 +68,8 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
 
     /// Conventional ⌘ shortcut for the primary sidebar sections, surfaced in
-    /// the "Go" menu and as the sidebar row tooltip. `nil` for gear-gated
-    /// settings pages and file import (which already has ⌘O).
+    /// the "Go" menu and as the sidebar row tooltip. `nil` for the Settings
+    /// page (⌘, instead) and the retired file page.
     var navigationShortcutKey: String? {
         switch self {
         case .today: return "1"

@@ -19,22 +19,32 @@ struct NotchIslandLiveValues: Equatable {
 
 // MARK: - Palette
 
+/// The island is always black, so it takes the dark side of the shared
+/// tokens (`DesignTokens`): the same capture green for live (recording
+/// included), the same attention amber, and danger red only for a
+/// destructive confirm. Geometry and motion stay in `NotchIslandGeometry`.
 enum NotchIslandPalette {
     static let background = NSColor.black
     static let primaryText = NSColor.white
     static let secondaryText = NSColor(white: 1, alpha: 0.64)
     static let bodyText = NSColor(white: 1, alpha: 0.9)
-    static let warning = NSColor.systemOrange
-    static let recording = NSColor.systemRed
+    /// Needs attention: no speech, a warning, Mic only. The shared amber.
+    static let warning = DesignTokens.NS.attentionOnDark
+    /// The live meeting dot: recording is live, so capture green.
+    static let recording = DesignTokens.NS.liveOnDark
     static let buttonPlain = NSColor(white: 0.17, alpha: 1)
     static let buttonSubtle = NSColor(white: 0.11, alpha: 1)
-    static let destructive = NSColor(srgbRed: 0.851, green: 0.176, blue: 0.125, alpha: 1)
-    static var accent: NSColor { NSColor.controlAccentColor }
+    static let destructive = DesignTokens.NS.danger
+    /// Live: listening bars, the live dot and edge, progress rings, "You".
+    /// Capture green, never the Mac's accent color, so a live take looks the
+    /// same here and in the main window.
+    static var accent: NSColor { DesignTokens.NS.liveOnDark }
 
     static func color(for tint: NotchIslandTint) -> NSColor {
         switch tint {
         case .accent: return accent
         case .warning: return warning
+        case .neutral: return primaryText
         }
     }
 
@@ -48,12 +58,12 @@ enum NotchIslandPalette {
 
     static func font(for style: NotchIslandTextStyle) -> NSFont {
         switch style {
-        case .title, .warning: return .systemFont(ofSize: 12, weight: .semibold)
-        case .secondary: return .systemFont(ofSize: 12, weight: .medium)
+        case .title, .warning: return TextRole.meta.nsFont(weight: .semibold)
+        case .secondary: return TextRole.meta.nsFont(weight: .medium)
         }
     }
 
-    nonisolated(unsafe) static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold) // immutable, never mutated
+    nonisolated(unsafe) static let liveFont = NSFont.monospacedDigitSystemFont(ofSize: TextRole.meta.size, weight: .semibold) // immutable, never mutated
 
     static var reduceMotion: Bool {
         AccessibilityDisplayPolicy.reduceMotion

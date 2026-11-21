@@ -2,7 +2,8 @@ import AppKit
 import SwiftUI
 
 /// The Writing tab after setup, shaped like the Dictations page
-/// (docs/writing-plan.md, "Everyday view"): the summary, a status line,
+/// (docs/writing-plan.md, "Everyday view"): the title (no day count; Today
+/// owns it), a status line with Writing's small amber mark while it runs,
 /// today's saved writing newest first, the autocomplete numbers, and the
 /// settings section.
 struct WritingEverydayView: View {
@@ -41,22 +42,32 @@ struct WritingEverydayView: View {
                 title: Copy.everydayTitle,
                 summary: Copy.summary(
                     saveMyWriting: model.saveMyWriting,
-                    autocomplete: model.autocomplete,
-                    wordsToday: model.today.wordCount
+                    autocomplete: model.autocomplete
                 )
             )
 
             if model.saveMyWriting || model.autocomplete {
-                Text(Copy.statusLine(
-                    keyboardOn: model.keyboardOn,
-                    autocomplete: model.autocomplete,
-                    model: model.selectedModel,
-                    modelStatus: model.modelStatus,
-                    scope: model.scope,
-                    pickedCount: model.pickedCount
-                ))
-                .font(LibraryTokens.meta)
-                .foregroundStyle(Copy.isProblem(model.modelStatus) && model.autocomplete ? LibraryTokens.attention : LibraryTokens.ink2)
+                HStack(spacing: 7) {
+                    // Writing's stream mark, like its lane on Today. Hidden
+                    // while paused; amber is a mark, never a fill.
+                    if model.pausedUntil == nil {
+                        Circle()
+                            .fill(LibraryTokens.writingStream)
+                            .frame(width: 6, height: 6)
+                            .accessibilityHidden(true)
+                    }
+                    Text(Copy.statusLine(
+                        keyboardOn: model.keyboardOn,
+                        autocomplete: model.autocomplete,
+                        model: model.selectedModel,
+                        modelStatus: model.modelStatus,
+                        scope: model.scope,
+                        pickedCount: model.pickedCount
+                    ))
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(Copy.isProblem(model.modelStatus) && model.autocomplete ? LibraryTokens.attention : LibraryTokens.ink2)
+                }
+                .accessibilityElement(children: .combine)
                 .accessibilityIdentifier("transcripted.settings.writing.status")
 
                 if model.autocomplete, case let .downloading(fraction) = model.modelStatus, let fraction {
@@ -85,34 +96,32 @@ struct WritingEverydayView: View {
             }
 
             HStack(spacing: 8) {
-                SettingsInlineActionButton(
-                    title: Copy.editSetup,
-                    symbolName: "slider.horizontal.3",
-                    automationIdentifier: "transcripted.settings.writing.edit-setup"
-                ) {
+                Button {
                     model.editSetup()
+                } label: {
+                    Label(Copy.editSetup, systemImage: "slider.horizontal.3")
                 }
+                .accessibilityIdentifier("transcripted.settings.writing.edit-setup")
                 if model.saveMyWriting || model.autocomplete {
                     if model.pausedUntil == nil {
-                        SettingsInlineActionButton(
-                            title: Copy.pauseForHour,
-                            symbolName: "pause.circle",
-                            automationIdentifier: "transcripted.settings.writing.pause"
-                        ) {
+                        Button {
                             model.pauseForAnHour()
+                        } label: {
+                            Label(Copy.pauseForHour, systemImage: "pause.circle")
                         }
+                        .accessibilityIdentifier("transcripted.settings.writing.pause")
                     } else {
-                        SettingsInlineActionButton(
-                            title: Copy.resume,
-                            symbolName: "play.circle",
-                            tone: .accent,
-                            automationIdentifier: "transcripted.settings.writing.resume"
-                        ) {
+                        Button {
                             model.resume()
+                        } label: {
+                            Label(Copy.resume, systemImage: "play.circle")
                         }
+                        .accessibilityIdentifier("transcripted.settings.writing.resume")
                     }
                 }
             }
+            .buttonStyle(.transcriptedSecondary)
+            .controlSize(.small)
         }
     }
 
@@ -130,7 +139,7 @@ struct WritingEverydayView: View {
                     // the input menu.
                     let keyboardStep = Copy.everydayKeyboardStep(model.keyboardSetup)
                     attentionRow(
-                        title: Copy.Step3.keyboardTitle,
+                        title: Copy.Step2.keyboardTitle,
                         line: keyboardStep.line,
                         note: nil,
                         buttonTitle: keyboardStep.buttonTitle,
@@ -143,8 +152,8 @@ struct WritingEverydayView: View {
                 }
                 if needsScreenRecording {
                     attentionRow(
-                        title: Copy.Step3.screenRecordingTitle,
-                        line: Copy.Step3.screenRecordingLine,
+                        title: Copy.Step2.screenRecordingTitle,
+                        line: Copy.Step2.screenRecordingLine,
                         note: model.captureBusy ? Copy.finishRecordingFirst : Copy.screenRecordingReopenLine,
                         buttonTitle: model.screenRecordingRequested
                             ? Copy.openScreenRecordingSettings
@@ -175,7 +184,7 @@ struct WritingEverydayView: View {
                 .foregroundStyle(LibraryTokens.attention)
             VStack(alignment: .leading, spacing: 3) {
                 Text(title)
-                    .font(.subheadline.weight(.semibold))
+                    .font(LibraryTokens.rowTitle)
                 Text(line)
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink2)
@@ -189,13 +198,11 @@ struct WritingEverydayView: View {
             }
             Spacer(minLength: 12)
             if let buttonTitle {
-                SettingsInlineActionButton(
-                    title: buttonTitle,
-                    tone: .warning,
-                    automationIdentifier: automationIdentifier,
-                    action: action
-                )
-                .disabled(!buttonEnabled)
+                Button(buttonTitle, action: action)
+                    .buttonStyle(.transcriptedSecondary)
+                    .controlSize(.small)
+                    .disabled(!buttonEnabled)
+                    .accessibilityIdentifier(automationIdentifier)
             }
         }
         .padding(.horizontal, 14)
@@ -313,7 +320,6 @@ struct WritingEverydayView: View {
 // MARK: - Rows
 
 /// One saved entry: its first line, the app, and the time; Copy on hover.
-/// Same shape as `QuietDictationRow`.
 private struct WritingEntryRow: View {
     let entry: WritingDayFileReader.Entry
     let time: String

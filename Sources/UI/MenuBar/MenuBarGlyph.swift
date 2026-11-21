@@ -3,8 +3,10 @@
 // drawn in code as a one-color template image so macOS tints it for light and
 // dark menu bars (and for the highlighted state when the popover is open).
 //
-// Filled means capturing; the dot means a meeting. There is no color on
-// purpose, so the always-visible icon stays quiet during screen sharing.
+// Filled means capturing; filled with a dot means a meeting. On the outline,
+// a ring means a transcript is being made and a solid dot means something
+// needs a click. There is no color on purpose, so the always-visible icon
+// stays quiet during screen sharing.
 //
 // MenuBarGlyphGeometry is the app icon's own, in its 1024-unit design space
 // (docs/assets/app-icon-options/round8/H-mono-light.svg). It mirrors
@@ -18,6 +20,12 @@ enum MenuBarGlyph: CaseIterable {
     case idle
     case dictating
     case meetingRecording
+    /// The idle outline with a ring where the meeting dot goes: a meeting
+    /// transcript is being made.
+    case working
+    /// The idle outline with a solid dot: something needs a click (the key
+    /// needs Accessibility, or an update is waiting).
+    case attention
 
     static let pointSize: CGFloat = 18
 
@@ -65,11 +73,22 @@ enum MenuBarGlyph: CaseIterable {
 
         switch self {
         case .idle:
-            context.addPath(MenuBarGlyphGeometry.outlinePath())
-            context.addPath(MenuBarGlyphGeometry.crossbarPath())
-            context.addPath(MenuBarGlyphGeometry.stemPath(from: MenuBarGlyphGeometry.top))
-            context.addPath(MenuBarGlyphGeometry.sideBarsPath())
-            context.strokePath()
+            Self.strokeOutline(in: context)
+        case .working, .attention:
+            // Same dot place and clear ring as the meeting dot, on the outline.
+            context.beginTransparencyLayer(auxiliaryInfo: nil)
+            Self.strokeOutline(in: context)
+            context.setBlendMode(.clear)
+            context.fillEllipse(in: MenuBarGlyphGeometry.dotRect(radius: MenuBarGlyphGeometry.dotRadius + MenuBarGlyphGeometry.dotRing))
+            context.setBlendMode(.normal)
+            if self == .attention {
+                context.fillEllipse(in: MenuBarGlyphGeometry.dotRect(radius: MenuBarGlyphGeometry.dotRadius))
+            } else {
+                let ringWidth = MenuBarGlyphGeometry.dotRing
+                context.setLineWidth(ringWidth)
+                context.strokeEllipse(in: MenuBarGlyphGeometry.dotRect(radius: MenuBarGlyphGeometry.dotRadius - ringWidth / 2))
+            }
+            context.endTransparencyLayer()
         case .dictating, .meetingRecording:
             context.beginTransparencyLayer(auxiliaryInfo: nil)
             context.addPath(MenuBarGlyphGeometry.bodyPath())
@@ -87,6 +106,14 @@ enum MenuBarGlyph: CaseIterable {
             }
             context.endTransparencyLayer()
         }
+    }
+
+    private static func strokeOutline(in context: CGContext) {
+        context.addPath(MenuBarGlyphGeometry.outlinePath())
+        context.addPath(MenuBarGlyphGeometry.crossbarPath())
+        context.addPath(MenuBarGlyphGeometry.stemPath(from: MenuBarGlyphGeometry.top))
+        context.addPath(MenuBarGlyphGeometry.sideBarsPath())
+        context.strokePath()
     }
 }
 

@@ -16,7 +16,7 @@ extension MeetingOverlayController {
                 title: MeetingSystemAudioDegradationCopy.title(for: warning),
                 detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
                 countdownText: "",
-                secondaryTitle: "OK",
+                secondaryTitle: NotchIslandDropButtons.dismissTitle,
                 secondaryAccessibilityLabel: "Dismiss this notice and keep recording",
                 primaryTitle: "",
                 primaryAccessibilityLabel: ""
@@ -30,7 +30,7 @@ extension MeetingOverlayController {
             title: MeetingSystemAudioDegradationCopy.title(for: warning),
             detail: MeetingSystemAudioDegradationCopy.detail(for: warning),
             countdownText: "",
-            secondaryTitle: "Continue",
+            secondaryTitle: NotchIslandDropButtons.dismissTitle,
             secondaryAccessibilityLabel: "Acknowledge system audio warning and keep recording",
             primaryTitle: "Stop",
             primaryAccessibilityLabel: "Stop and transcribe the meeting",
@@ -47,7 +47,7 @@ extension MeetingOverlayController {
                 title: "Audio changed",
                 detail: "Mic or call audio sounds muted. Still recording.",
                 countdownText: "",
-                secondaryTitle: "Continue",
+                secondaryTitle: NotchIslandDropButtons.dismissTitle,
                 secondaryAccessibilityLabel: "Keep recording",
                 primaryTitle: "Stop",
                 primaryAccessibilityLabel: "Stop and transcribe the meeting"
@@ -55,13 +55,14 @@ extension MeetingOverlayController {
         }
 
         // Same shape as every recording warning: a short statement, one terse
-        // detail line, Continue / Stop (the island draws "Stop" red).
+        // detail line, Dismiss / Stop (Stop is the white primary).
         return PromptDisplay(
             title: warning.kind == .callEnded ? "Call ended" : "No sound",
-            detail: warning.kind == .callEnded ? "Call audio stopped." : "Nothing heard for \(formatInactiveDuration(warning.inactiveDuration)).",
+            // "Call ended" says it all; the countdown is the ring on Stop.
+            detail: warning.kind == .callEnded ? "" : "Nothing heard for \(formatInactiveDuration(warning.inactiveDuration)).",
             // A warning that won't stop on its own shows no countdown.
             countdownText: warning.automaticStopAllowed ? "Stops in \(max(0, countdownSeconds))s" : "",
-            secondaryTitle: "Continue",
+            secondaryTitle: NotchIslandDropButtons.dismissTitle,
             secondaryAccessibilityLabel: "Keep recording",
             primaryTitle: "Stop",
             primaryAccessibilityLabel: "Stop and transcribe the meeting"
@@ -85,7 +86,7 @@ extension MeetingOverlayController {
             title: "Bluetooth mic is dropping out",
             detail: detail,
             countdownText: "",
-            secondaryTitle: "Continue",
+            secondaryTitle: NotchIslandDropButtons.dismissTitle,
             secondaryAccessibilityLabel: "Keep recording with the current audio input",
             primaryTitle: "Stop",
             primaryAccessibilityLabel: "Stop and transcribe the meeting"
@@ -101,7 +102,7 @@ extension MeetingOverlayController {
             title: "Another call app made your mic quiet",
             detail: "Just this meeting. Other sounds may get quieter.",
             countdownText: "",
-            secondaryTitle: "Skip",
+            secondaryTitle: NotchIslandDropButtons.dismissTitle,
             secondaryAccessibilityLabel: "Keep software mic boost",
             primaryTitle: "Boost",
             primaryAccessibilityLabel: "Boost microphone with Apple voice processing"
@@ -121,7 +122,7 @@ extension MeetingOverlayController {
             title: title,
             detail: "Split saves this recording and starts a new one.",
             countdownText: "",
-            secondaryTitle: "Keep recording",
+            secondaryTitle: NotchIslandDropButtons.dismissTitle,
             secondaryAccessibilityLabel: "Keep recording into this meeting",
             primaryTitle: "Split",
             primaryAccessibilityLabel: "Stop and save this meeting, then record the new one"
@@ -145,7 +146,7 @@ extension MeetingOverlayController {
             countdownText: "",
             secondaryTitle: "Don't show again",
             secondaryAccessibilityLabel: "Disable missed-call reminders",
-            primaryTitle: "OK",
+            primaryTitle: NotchIslandDropButtons.dismissTitle,
             primaryAccessibilityLabel: "Dismiss missed-call reminder"
         )
     }

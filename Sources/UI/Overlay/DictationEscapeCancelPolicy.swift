@@ -13,7 +13,10 @@ enum DictationEscapeCancelPolicy {
     static let instantCancelLimitSeconds: Double = 5
     /// A second Esc inside this window confirms the discard.
     static let confirmWindowSeconds: Double = 3
+    /// What VoiceOver announces.
     static let confirmNotice = "Press Esc again to discard"
+    /// The same ask in the island's right wing, where the timer was.
+    static let confirmWingNotice = "Esc again to discard"
 
     /// `capturedSeconds` is nil before the mic has started recording.
     /// `secondsSinceFirstPress` is nil when no earlier Esc is waiting on a confirm.

@@ -286,7 +286,7 @@ extension DictationSessionController {
             await finishFailedDictationStart(appState: appState, cleanupPlan: cleanupPlan)
             overlayController.showError(
                 info.message,
-                actionTitle: "Try Again",
+                actionTitle: "Try again",
                 action: { [weak self] in
                     guard let self else { return }
                     self.retryDictation(sourceApp: sourceApp)
@@ -407,7 +407,7 @@ extension DictationSessionController {
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_failed")
                 overlayController.showError(
                     "Dictation couldn't start: \(message)",
-                    actionTitle: "Try Again",
+                    actionTitle: "Try again",
                     action: { [weak self] in
                         self?.retryDictation(sourceApp: sourceApp)
                     }
@@ -424,7 +424,7 @@ extension DictationSessionController {
                 appState.runtimeDiagnostics.clearSession(kind: "dictation", outcome: "model_load_timeout")
                 overlayController.showError(
                     "The voice model is still warming up. Try again in a moment.",
-                    actionTitle: "Try Again",
+                    actionTitle: "Try again",
                     action: { [weak self] in
                         self?.retryDictation(sourceApp: sourceApp)
                     }
@@ -498,8 +498,8 @@ extension DictationSessionController {
 
     func microphonePermissionPresentation() -> FloatingOverlayController.LoadingPresentation {
         .init(
-            title: "Allow microphone",
-            detail: "Transcripted needs microphone access before dictation can listen.",
+            title: "Allow mic",
+            detail: "Needed before dictation can listen.",
             progress: 0.16,
             status: "Waiting for macOS permission"
         )

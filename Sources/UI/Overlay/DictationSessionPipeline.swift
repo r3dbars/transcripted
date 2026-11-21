@@ -1,6 +1,6 @@
 // DictationSessionPipeline.swift
 // The start and stop wiring of DictationSessionController that tests run
-// against a fake controller: start admission, Try Again restarts, the start
+// against a fake controller: start admission, Try again restarts, the start
 // click, focus recovery after a failed mic start, the stop task up to
 // transcription, an empty take, Paste Anyway, a stop before capture started,
 // and Quit.
@@ -149,7 +149,7 @@ extension DictationSessionPipelineHost {
         return false
     }
 
-    /// A Try Again / Retry Dictation button restarting the failed take. It's
+    /// A Try again / Retry Dictation button restarting the failed take. It's
     /// marked as a retry, so four taps don't read as five separate attempts.
     func retryDictation(sourceApp: NSRunningApplication?) {
         startDictation(
@@ -401,7 +401,7 @@ extension DictationSessionPipelineHost {
 
     /// A stop that arrived before the mic ever started recording: cancel the
     /// start and the speech engine (which drops any preserved recovery
-    /// audio), end the session, and offer Try Again.
+    /// audio), end the session, and offer Try again.
     func endStopBeforeCaptureStarted(
         inputFormatReady: Bool,
         cancelSpeechEngine: @MainActor () -> Void,

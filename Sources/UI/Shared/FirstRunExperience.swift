@@ -51,7 +51,7 @@ enum FirstRunCompletionPath: String, Equatable {
 }
 
 enum FirstRunExperience {
-    private static let failedModelSetupDetail = "Local voice setup needs another try. Retry Download will try the same one-time local model setup again."
+    private static let failedModelSetupDetail = "Local voice setup needs another try. Retry download will try the same one-time local model setup again."
 
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
         if model.isAppleSpeech {
@@ -66,7 +66,7 @@ enum FirstRunExperience {
     private static func appleSpeechFailureDetail(message: String, model: TranscriptionModelChoice) -> String? {
         guard model.isAppleSpeech else { return nil }
         if message.hasPrefix("Apple Speech") { return message }
-        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try Again."
+        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try again."
     }
 
     private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
@@ -125,12 +125,21 @@ enum FirstRunExperience {
         return calendarGranted ? "granted" : "not_granted"
     }
 
+    /// Whether the voice model needs the person now, so Settings shows it
+    /// at the top instead of inside Advanced: it failed (or its install is
+    /// missing), or it is downloading. Idle ("On demand"), cached and loading
+    /// are normal and stay put, so the card doesn't sit up top and then jump.
+    static func modelNeedsAttention(_ state: ParakeetModelState, card: FirstRunModelCardState) -> Bool {
+        if case .downloading = state { return true }
+        return card.tone == .failed
+    }
+
     static func modelCard(
         for modelState: ParakeetModelState,
         model: TranscriptionModelChoice = .parakeetTDTv3,
         isLocallyInstalled: Bool = true
     ) -> FirstRunModelCardState {
-        // A script-installed model has nothing to download, so Retry Download
+        // A script-installed model has nothing to download, so Retry download
         // and download sizes don't apply. Say whether the install is missing
         // or present but failed to load, since only one needs a reinstall.
         if model.parakeetVariant?.isLocalInstallOnly == true {
@@ -182,7 +191,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try Again" : "Retry Download").",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try again" : "Retry download").",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
@@ -262,7 +271,7 @@ enum FirstRunExperience {
                 statusLine: card.title,
                 detail: model.parakeetVariant?.isLocalInstallOnly == true
                     ? card.detail
-                    : "Try again from the Transcription section in Settings. Dictation and meetings need it.",
+                    : "Try again from the voice model in Settings. Dictation and meetings need it.",
                 progress: nil,
                 isFailed: true
             )
@@ -277,7 +286,7 @@ enum FirstRunExperience {
             return OnboardingDoneModelPresentation(
                 headline: "Almost set.",
                 statusLine: statusLine,
-                detail: "It keeps going after you click Done. Your first dictation or meeting waits for it.",
+                detail: "It keeps going after you click Done. Your first dictation waits for it.",
                 progress: card.progress,
                 isFailed: false
             )
@@ -307,15 +316,15 @@ enum FirstRunExperience {
         case .ready:
             subtitle = ""
         case .failed:
-            subtitle = "Voice setup failed. Try again"
+            subtitle = "Couldn't load the voice model. Try again."
         case .notLoaded:
             subtitle = "Sets up the first time you use it"
         case .downloading:
-            subtitle = "Downloads once, then starts automatically"
+            subtitle = "Downloading the voice model, one time"
         case .cached:
-            subtitle = "Downloaded. Loads when you start"
+            subtitle = "Ready. Loads when you start."
         case .loading:
-            subtitle = "Finishing local voice setup"
+            subtitle = "Loading the voice model"
         }
 
         return MenuBarPrimaryActionState(
@@ -358,10 +367,10 @@ enum FirstRunExperience {
         case "Ready":
             subtitle = ""
         case "Failed":
-            subtitle = "Try again to reload meeting tools"
+            subtitle = "Couldn't load the voice model. Try again."
         default:
             subtitle = dictationReady
-                ? "Meeting tools are still loading in the background"
+                ? "Loading the voice model for meetings"
                 : "Sets up the first time you use it"
         }
 

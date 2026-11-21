@@ -329,7 +329,7 @@ enum DictationStopRequestRouting {
     }
 }
 
-/// "Transcribe Captured Audio" after an interrupted recording readmits the
+/// "Transcribe captured audio" after an interrupted recording readmits the
 /// same retained recording into the stop path. The interrupted stop may
 /// still be writing or cleaning up its WAV checkpoint, so the readmission
 /// waits for that first, then checks the session still owns the recording,

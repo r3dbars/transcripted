@@ -73,7 +73,7 @@ func testMenuBarShortcutWarningPresentation() {
 
     runSuite("A hotkey warning wins over a Secure Keyboard Entry notice") {
         let hotkey = MenuBarShortcutWarningPresentation(
-            text: "Shortcuts need Accessibility access. Click to turn it on.",
+            text: "Your keys need Accessibility to work. Click to turn it on.",
             action: .openAccessibilitySettings
         )
         let shown = MenuBarShortcutWarningPresentation.resolve(

@@ -1,8 +1,10 @@
 import SwiftUI
 
 /// The everyday view's settings: the two features, personalized
-/// suggestions, the model switch, the storage meter with Delete model, and
-/// Delete all writing.
+/// suggestions, the model switch (setup picks the smaller model without
+/// asking; this is where the other one is), Write for Me's sounds while
+/// Write for Me is on, the storage meter with Delete model, and Delete all
+/// writing. Deletes are ink buttons; their confirm is the red step.
 /// Replaces Tilde's settings window (`TildeSettingsWindowController`).
 struct WritingSettingsSection: View {
     typealias Copy = WritingSetupPresentation
@@ -10,25 +12,30 @@ struct WritingSettingsSection: View {
     @ObservedObject var model: WritingSettingsModel
     @State private var confirmsDelete = false
     @State private var confirmsDeleteModel = false
+    /// Write for Me is a Developer Preview; its switch lives in Settings ›
+    /// Developer Preview. The sounds row shows here only while it's on.
+    @AppStorage(NextSentencePreferences.enabledKey) private var writeForMeEnabled = false
+    /// Same preference as Settings › Advanced. On unless set off.
+    @AppStorage(NextSentencePreferences.soundsKey) private var writeForMeSounds = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             SettingsCardLabel(text: Copy.settingsLabel)
             SettingsCard {
-                toggleRow(
+                WritingToggleRow(
                     title: Copy.Step1.saveTitle,
                     line: Copy.Step1.saveLine,
                     isOn: Binding(get: { model.saveMyWriting }, set: { model.setSaveMyWriting($0) }),
                     automationIdentifier: "transcripted.settings.writing.settings.save-my-writing"
                 )
-                toggleRow(
+                WritingToggleRow(
                     title: Copy.Step1.autocompleteTitle,
                     line: Copy.Step1.autocompleteLine,
                     isOn: Binding(get: { model.autocomplete }, set: { model.setAutocomplete($0) }),
                     isEnabled: !model.isDeleting,
                     automationIdentifier: "transcripted.settings.writing.settings.autocomplete"
                 )
-                toggleRow(
+                WritingToggleRow(
                     title: Copy.personalizedTitle,
                     line: model.saveMyWriting ? Copy.personalizedLine : Copy.personalizedNeedsSave,
                     isOn: Binding(
@@ -40,6 +47,14 @@ struct WritingSettingsSection: View {
                 )
                 if model.autocomplete {
                     modelRow
+                }
+                if writeForMeEnabled {
+                    WritingToggleRow(
+                        title: Copy.WriteForMeSounds.title,
+                        line: writeForMeSounds ? Copy.WriteForMeSounds.onLine : Copy.WriteForMeSounds.offLine,
+                        isOn: $writeForMeSounds,
+                        automationIdentifier: "transcripted.settings.writing.settings.write-for-me-sounds"
+                    )
                 }
                 storageRow
                 deleteRow
@@ -78,43 +93,10 @@ struct WritingSettingsSection: View {
         .accessibilityIdentifier("transcripted.settings.writing.settings")
     }
 
-    private func toggleRow(
-        title: String,
-        line: String,
-        isOn: Binding<Bool>,
-        isEnabled: Bool = true,
-        automationIdentifier: String
-    ) -> some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.subheadline.weight(.semibold))
-                Text(line)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer(minLength: 12)
-            Toggle(title, isOn: isOn)
-                .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(.accentColor)
-                .disabled(!isEnabled)
-                .accessibilityLabel(Text(title))
-                .accessibilityHint(Text(line))
-                .accessibilityIdentifier(automationIdentifier)
-        }
-        .opacity(isEnabled ? 1 : 0.6)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-        .frame(minHeight: 56)
-        .overlay(alignment: .bottom) { Divider() }
-    }
-
     private var modelRow: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(Copy.Step3.modelTitle)
-                .font(.subheadline.weight(.semibold))
+            Text(Copy.Step2.modelTitle)
+                .font(LibraryTokens.rowTitle)
             ForEach(Copy.modelOptions, id: \.name) { option in
                 let eligible = option.choice == .gemma4E2B || model.isQwenEligible
                 WritingChoiceRow(
@@ -142,7 +124,7 @@ struct WritingSettingsSection: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(Copy.storageTitle)
-                    .font(.subheadline.weight(.semibold))
+                    .font(LibraryTokens.rowTitle)
                 Spacer()
                 Text(model.storage?.summary ?? "")
                     .font(LibraryTokens.meta)
@@ -179,15 +161,15 @@ struct WritingSettingsSection: View {
             if model.isDeletingModel {
                 ProgressView().controlSize(.small)
             }
-            SettingsInlineActionButton(
-                title: Copy.deleteModel,
-                symbolName: "trash",
-                tone: .destructive,
-                automationIdentifier: "transcripted.settings.writing.delete-model"
-            ) {
+            Button {
                 confirmsDeleteModel = true
+            } label: {
+                Label(Copy.deleteModel, systemImage: "trash")
             }
+            .buttonStyle(.transcriptedSecondary)
+            .controlSize(.small)
             .disabled(model.isDeleting)
+            .accessibilityIdentifier("transcripted.settings.writing.delete-model")
         }
     }
 
@@ -202,15 +184,15 @@ struct WritingSettingsSection: View {
             if model.isDeleting, !model.isDeletingModel {
                 ProgressView().controlSize(.small)
             }
-            SettingsInlineActionButton(
-                title: Copy.deleteAll,
-                symbolName: "trash",
-                tone: .destructive,
-                automationIdentifier: "transcripted.settings.writing.delete-all"
-            ) {
+            Button {
                 confirmsDelete = true
+            } label: {
+                Label(Copy.deleteAll, systemImage: "trash")
             }
+            .buttonStyle(.transcriptedSecondary)
+            .controlSize(.small)
             .disabled(model.isDeleting)
+            .accessibilityIdentifier("transcripted.settings.writing.delete-all")
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -221,7 +203,7 @@ struct WritingSettingsSection: View {
 private struct WritingStorageMeter: View {
     let usage: WritingStorageUsage
 
-    private static let colors: [Color] = [LibraryTokens.accent, LibraryTokens.dictationStream, LibraryTokens.meetingsStream]
+    private static let colors: [Color] = [LibraryTokens.ink, LibraryTokens.ink2, LibraryTokens.ink3]
 
     var body: some View {
         GeometryReader { geometry in

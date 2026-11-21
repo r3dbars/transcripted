@@ -2,7 +2,7 @@ func testPasteLastDictationFeedback() {
     runSuite("PasteLastDictationFeedback maps pasted outcome to short success copy") {
         let feedback = PasteLastDictationFeedback.presentation(for: .pasted)
 
-        assertEqual(feedback.title, "Last dictation pasted", "pasted title")
+        assertEqual(feedback.title, "Pasted", "pasted title, the same word as the island")
         assertEqual(feedback.detail, "Text went to the focused app.", "pasted detail")
         assertEqual(feedback.tone, .success, "pasted tone")
         assertTrue(
@@ -22,7 +22,7 @@ func testPasteLastDictationFeedback() {
         assertEqual(copied.title, "Copied instead", "copied title")
         assertEqual(copied.detail, "Couldn't paste automatically. Your text is on the clipboard — press ⌘V.", "copied detail")
         assertEqual(copied.tone, .caution, "copied tone")
-        assertEqual(failed.title, "Paste Last Dictation failed", "failed title uses the feature's name")
+        assertEqual(failed.title, "Couldn't paste again", "failed title names the island's Paste again button")
         assertEqual(failed.detail, "Couldn't prepare the clipboard for automatic paste.", "failed detail")
         assertEqual(failed.tone, .caution, "failed tone")
         assertTrue(
@@ -49,19 +49,6 @@ func testPasteLastDictationFeedback() {
         assertTrue(
             feedback.dismissDelayNanoseconds >= 3_500_000_000,
             "recovery feedback should stay visible long enough to scan"
-        )
-    }
-
-    runSuite("PasteLastDictationFeedback no-saved state replaces silent beep") {
-        let feedback = PasteLastDictationFeedback.noSavedDictation
-
-        assertEqual(feedback.title, "No saved dictation yet", "no saved title")
-        assertEqual(feedback.detail, "Dictate once, then copy it from Dictations.", "no saved detail points to the current saved-text surface")
-        assertEqual(feedback.tone, .caution, "no saved tone")
-        assertEqual(
-            feedback.accessibilityValue,
-            "No saved dictation yet. Dictate once, then copy it from Dictations.",
-            "notice should expose complete VoiceOver copy"
         )
     }
 }

@@ -188,7 +188,7 @@ extension MeetingOverlayController {
                 return
             case .confirmCallEndedThenStop:
                 // The session reads the call app's audio now and either stops
-                // at 0 or leaves Continue / Stop up without a countdown.
+                // at 0 or leaves Dismiss / Stop up without a countdown.
                 Task { @MainActor [weak self] in
                     guard self?.promptIsCurrent(identity) == true, let session = self?.meetingSession else { return }
                     await session.resolveCallEndCountdownExpiry(warning)

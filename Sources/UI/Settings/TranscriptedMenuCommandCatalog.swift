@@ -47,7 +47,7 @@ enum TranscriptedMenuCommandCatalog {
     static let capture: [Item] = [
         Item(title: "Start Dictation", key: "d", action: .startDictation),
         Item(title: "Start / Stop Meeting Recording", key: "r", action: .toggleMeetingRecording),
-        Item(title: "Transcribe Audio File…", key: "o", action: .importAudio, startsGroup: true),
+        Item(title: "Transcribe a file…", key: "o", action: .importAudio, startsGroup: true),
     ]
 
     /// Jump straight to a sidebar section (opening the window if needed), then search.

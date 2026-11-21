@@ -1,70 +1,31 @@
 # Design tokens
 
-The token definitions in source are authoritative. This page describes the
-roles that exist today; it does not define a separate cross-surface scale.
-There is no shared spacing-token API or automatic rounding rule.
+The token definitions in source are authoritative, and there is now one
+source: `Sources/UI/Shared/DesignTokens.swift` (colors with AppKit twins,
+radii, the six `TextRole`s) plus the button styles in
+`Sources/UI/Shared/DesignButtonStyles.swift`. How to use them:
+`docs/ui-tokens.md`.
 
-## Main-window SwiftUI surfaces
+The surface names read from it:
 
-`Sources/UI/Shared/LibraryTokens.swift` supplies the main-window pages,
-including Meetings, Dictations, Speakers, Writing, Agent and Settings. The
-AppKit menu bar popover uses `MenuTokens` instead. The overlays keep their
-own drawing constants.
+- `LibraryTokens` (main window, onboarding, Writing tab) keeps its names:
+  `accent` is `DesignTokens.live`, `ink`/`ink2`/`ink3`, `hairline`,
+  `rowHover`/`raisedFill` (`fill`), `title` (display, SF 28 semibold), `heading`,
+  `rowTitle` (13 medium), `body`, `meta`, `small`, `label` (mono 10.5 with
+  `labelTracking`), `radiusControl` (6), `radiusRaised` (12),
+  `minimumHitTarget` (40). `LibrarySectionLabel` draws the mono label.
+- `MenuTokens` (AppKit popover) maps its text, row and button colors to the
+  shared ink and fills; filled buttons are the ink primary. `MenuTokens.Font`
+  uses the shared roles (row titles body 13, details and trailing small 11,
+  header status meta 12). Layout stays popover-specific: a 304 × 480 panel,
+  `innerPadding` 10, `sectionSpacing` 7, action rows 42 and 40. When assigning
+  a menu color to a `CALayer`, use `NSView.menuResolvedCGColor(_:)` and resolve
+  it again when the view's effective appearance changes.
+- `NotchIslandPalette` (always-black island) takes the shared capture green
+  (`DesignTokens.NS.liveOnDark`), danger red and the meta text role. Its
+  geometry and motion stay in `Sources/UI/Overlay/NotchIslandGeometry.swift`.
+- The Writing card (`NextSentenceCardStyle`, WritingBridge) can't name
+  UIShared, so it mirrors the island's values by hand; keep them in step.
 
-| `LibraryTokens` type role | Size / weight | Use |
-|---|---|---|
-| `title` | 28, semibold | Page titles |
-| `rowTitle` | 13, medium | Row titles |
-| `body` | 13, regular | Reading text and settings rows |
-| `meta` | 12, regular | Durations, counts and secondary detail |
-| `label` | 10.5, semibold | Whisper section labels, with `labelTracking` of 1.1 |
-
-Layout tokens are `radiusControl` (6), `radiusRaised` (10) and
-`minimumHitTarget` (40). `LibrarySectionLabel` applies the label font,
-tracking and tertiary ink to an uppercase section label.
-
-Color roles include `accent`, `attention`, `recording`, the Meetings,
-Dictation and Writing stream colors, `ink2`, `ink3`, `hairline`, `rowHover`,
-`raisedFill`, `raisedStroke`, `sidebarBackground` and `contentBackground`.
-The accent, attention, stream and background colors resolve for the current
-appearance; ink and translucent fills use the system primary color.
-
-## AppKit menu bar popover
-
-`Sources/UI/Shared/MenuTokens.swift` supplies the popover's colors, layout
-and `MenuTokens.Font` roles. Its current Swift callers are
-`MenuBarContentView`, `MenuBarHeaderView`, `MenuBarActionRowView` and
-`MenuBarPanelController`; Settings' hotkey recorder does not use it.
-
-| `MenuTokens.Font` role | Size / weight |
-|---|---|
-| `rowTitlePrimary` | 12.5, medium |
-| `rowTitleUtility` | 12.5, regular |
-| `rowDetail` | 10, regular |
-| `rowTrailingPrimary` | 10.5, medium, monospaced digits |
-| `rowTrailingUtility` | 10, medium, monospaced digits |
-| `headerStatus` | 11.5, medium |
-| `headerDetail` | 10, regular |
-
-Layout includes a 304 × 480 panel, `innerPadding` of 10,
-`sectionSpacing` of 7, `cardCornerRadius` of 8,
-`minimumHitTargetSize` of 40, and action row heights of 42 and 40.
-These are named surface constants, not aliases of a global spacing grid.
-
-Menu colors resolve for light and dark appearance. When assigning one to a
-`CALayer`, use `NSView.menuResolvedCGColor(_:)` and resolve it again when the
-view's effective appearance changes.
-
-## Notch island
-
-The AppKit overlay owns its geometry and drawing in
-`Sources/UI/Overlay/NotchIslandGeometry.swift` and
-`Sources/UI/Overlay/NotchIslandView.swift` and its extensions. It does not
-consume either of the token enums above.
-
-## Changing a view
-
-Reuse an existing role from the view's surface when it expresses the same
-purpose. Check the source definition before choosing a value. Preserve
-layout and accessibility contracts, and verify an intentional visual change
-in the app; this inventory is not a request to resize existing controls.
+There is no shared spacing scale yet. Reuse an existing role when it means the
+same thing, and verify an intentional visual change in the app.

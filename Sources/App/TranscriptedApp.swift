@@ -735,12 +735,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
     /// capture state; `StatusItemPresentation.apply` is the single writer.
     func refreshStatusItemPresentation() {
         guard let button = statusItem?.button else { return }
-        StatusItemPresentation.apply(
-            to: button,
-            meetingRecording: statusItemMeetingRecording,
-            dictating: statusItemDictationRecording,
-            updateTooltip: statusItemUpdateTooltip
-        )
+        applyStatusItemPresentation(to: button)
     }
 
     // MARK: - Menu Bar Commands

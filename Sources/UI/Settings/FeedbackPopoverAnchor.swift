@@ -64,7 +64,7 @@ struct FeedbackPopoverAnchor<Content: View>: NSViewRepresentable {
         }
 
         func update(content: Content) {
-            let root = AnyView(content.onExitCommand { [weak self] in self?.close() })
+            let root = AnyView(content.onExitCommand { [weak self] in self?.close() }.transcriptedRootTint())
             if let hostingController {
                 hostingController.rootView = root
             } else {

@@ -10,8 +10,8 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 0
         )
 
-        assertEqual(copy.title, "Starting microphone", "brief unready state should not flash switching copy")
-        assertEqual(copy.detail, "Opening the selected audio input.", "brief unready state should keep normal startup copy")
+        assertEqual(copy.title, "Mic starting", "brief unready state should not flash switching copy")
+        assertEqual(copy.detail, "Opening the selected mic.", "brief unready state should keep normal startup copy")
         assertEqual(copy.status, nil, "instant startup should not show a retry status")
     }
 
@@ -24,8 +24,8 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 0
         )
 
-        assertEqual(copy.title, "Switching microphone", "sustained recovery should still be visible")
-        assertEqual(copy.detail, "Connecting to the new audio device.", "real recovery should keep recovery detail")
+        assertEqual(copy.title, "Switching mic", "sustained recovery should still be visible")
+        assertEqual(copy.detail, "Connecting to the new mic.", "real recovery should keep recovery detail")
     }
 
     runSuite("DictationMicrophoneLoadingPresentationPolicy suppresses brief retry flicker") {
@@ -37,8 +37,8 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 2
         )
 
-        assertEqual(copy.title, "Starting microphone", "brief route churn should keep the initial title stable")
-        assertEqual(copy.detail, "Opening the selected audio input.", "brief route churn should avoid flashing switching copy")
+        assertEqual(copy.title, "Mic starting", "brief route churn should keep the initial title stable")
+        assertEqual(copy.detail, "Opening the selected mic.", "brief route churn should avoid flashing switching copy")
         assertNil(copy.status, "brief retry attempts should not flash a retry status before the switching delay")
     }
 
@@ -51,8 +51,8 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 2
         )
 
-        assertEqual(copy.title, "Switching microphone", "visible recovery should name the route change")
-        assertEqual(copy.detail, "Connecting to the new audio device.", "visible recovery should explain the wait")
+        assertEqual(copy.title, "Switching mic", "visible recovery should name the route change")
+        assertEqual(copy.detail, "Connecting to the new mic.", "visible recovery should explain the wait")
         assertEqual(copy.status, "Retrying MacBook Pro Microphone", "retry status should arrive with the switching copy")
     }
 
@@ -65,7 +65,7 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 2
         )
 
-        assertEqual(copy.title, "Starting microphone", "a slow start with no live recovery is not a switch")
+        assertEqual(copy.title, "Mic starting", "a slow start with no live recovery is not a switch")
         assertEqual(copy.status, "Retrying MacBook Pro Microphone", "retry status should stay explicit")
     }
 
@@ -80,7 +80,7 @@ func testDictationMicrophoneLoadingPresentationPolicy() {
             startAttempts: 1
         )
 
-        assertEqual(copy.title, "Starting microphone", "deferred idle readiness keeps the normal start title")
-        assertEqual(copy.detail, "Opening the selected audio input.", "deferred idle readiness keeps the normal start detail")
+        assertEqual(copy.title, "Mic starting", "deferred idle readiness keeps the normal start title")
+        assertEqual(copy.detail, "Opening the selected mic.", "deferred idle readiness keeps the normal start detail")
     }
 }

@@ -1067,7 +1067,7 @@ func testAnalyticsEventPolicy() {
             ],
             allowedKeys: allowed
         )
-        assertEqual(sanitized["start_retry"], "true", "a request sent by a Try Again action must stay separable from a first press")
+        assertEqual(sanitized["start_retry"], "true", "a request sent by a Try again action must stay separable from a first press")
         assertEqual(sanitized["model_state"], "not_ready", "model readiness at request time should survive as a coarse enum")
         assertEqual(sanitized["trigger"], "physical_key", "the attempt event should stay attributable to its trigger")
         assertEqual(sanitized["input_device_class"], "bluetooth", "coarse input class should survive sanitization")

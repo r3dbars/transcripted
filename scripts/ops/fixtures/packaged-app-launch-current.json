@@ -43,10 +43,10 @@
       "checkUpdates": {
         "automationIdentifier": "transcripted.menubar.utility.check-updates",
         "detail": "",
-        "displayTitle": "Check for Updates",
-        "isEnabled": false,
-        "isVisible": true,
-        "title": "Check for Updates",
+        "displayTitle": "Check for updates",
+        "isEnabled": true,
+        "isVisible": false,
+        "title": "Check for updates",
         "toolTip": "",
         "trailingText": ""
       },

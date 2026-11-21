@@ -88,14 +88,14 @@ func testDictationSessionPipeline() async {
                    "a refused Quit lets presses start again")
     }
 
-    runSuite("Try Again restarts the failed take marked as a retry") {
+    runSuite("Try again restarts the failed take marked as a retry") {
         let host = PipelineFakeHost()
         host.currentDictationTrigger = .physicalKey
 
         host.retryDictation(sourceApp: nil)
 
         assertEqual(host.starts.count, 1)
-        assertEqual(host.starts.first?.isRetry, true, "four taps on Try Again must not read as five attempts")
+        assertEqual(host.starts.first?.isRetry, true, "four taps on Try again must not read as five attempts")
         assertEqual(host.starts.first?.trigger, .physicalKey, "the retry keeps the failed take's trigger")
     }
 
@@ -272,7 +272,7 @@ func testDictationSessionPipeline() async {
                     "the engine is cancelled, dropping any preserved recovery audio, before the failure is reported")
         assertFalse(host.isDictating)
         retry?()
-        assertEqual(host.starts.map(\.isRetry), [true], "Try Again is a retry")
+        assertEqual(host.starts.map(\.isRetry), [true], "Try again is a retry")
     }
 
     // MARK: Empty take

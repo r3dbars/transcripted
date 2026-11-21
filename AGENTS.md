@@ -89,7 +89,7 @@ Read `docs/release-packaging.md` and `docs/sparkle-updates.md` before changing r
 
 ## Observability
 
-Sentry and PostHog are bounded integrations, not log sinks. Off-device events pass allowlists in `Sources/Observability/SentryEventPolicy.swift` and `AnalyticsEventPolicy.swift`; if payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change. Keep the crash-reporting and analytics toggles in Settings and "Send diagnostics" in About. Config keys, env overrides, and sinks: `Sources/Observability/AGENTS.md` and `docs/observability.md`.
+Sentry and PostHog are bounded integrations, not log sinks. Off-device events pass allowlists in `Sources/Observability/SentryEventPolicy.swift` and `AnalyticsEventPolicy.swift`; if payload shape changes, update `SentryPayloadSanitizer.swift` and `AnalyticsPayloadSanitizer.swift` in the same change. Keep the crash-reporting and analytics toggles and "Send diagnostics" visible in Settings › Privacy (Send diagnostics is the last row there, under Crash reports and Usage stats). Config keys, env overrides, and sinks: `Sources/Observability/AGENTS.md` and `docs/observability.md`.
 
 ## Storage
 

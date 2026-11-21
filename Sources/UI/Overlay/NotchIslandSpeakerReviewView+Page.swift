@@ -1,10 +1,10 @@
 // NotchIslandSpeakerReviewView+Page.swift
 // The island's "Who spoke?" drawn as a card on Settings › Speakers, one saved
 // meeting at a time (`Chrome.page`). The rows, ✓ / ✕, the name field and its
-// suggestions, All me, Not a person and the footer's glowing dots are the
-// island's own. What differs: the header names the meeting ("Who spoke? ·
-// Weekly sync" and its date), each voice shows its quote, there's no Later
-// ring, and the buttons are Skip and "Done, next meeting". Done hands the
+// suggestions, the mic line, Not a person and the footer's glowing dots are
+// the island's own. What differs: the header names the meeting ("Who spoke? ·
+// Weekly sync", with "1 of 8" or its date), each voice shows its quote,
+// there's no Later ring, and the buttons are Skip and Done. Done hands the
 // answers to the page and leaves the card as it is, so the page's Undo can
 // bring it back with every answer still in place.
 
@@ -20,7 +20,7 @@ extension NotchIslandSpeakerReviewView {
         return nil
     }
 
-    /// "Who spoke? · Weekly sync" on the left, the meeting's date on the right.
+    /// "Who spoke? · Weekly sync" on the left, "1 of 8" or the date on the right.
     func pageHeaderLine() -> NSView {
         let title = NotchIslandPalette.label(
             pageCard?.title ?? NotchIslandSpeakerReviewPolicy.headerTitle,
@@ -46,13 +46,13 @@ extension NotchIslandSpeakerReviewView {
         return line
     }
 
-    /// Skip, then "Done, next meeting".
+    /// Skip (or Later), then Done.
     func pageButtons(_ card: PageCard, done: NotchIslandButton) -> NSStackView {
         let skip = NotchIslandButton(title: card.skipTitle, style: .link, height: 30, fontSize: 13)
         skip.setAccessibilityHelp(card.skipHelp)
         skip.setAccessibilityIdentifier("transcripted.speakers.who-spoke.skip")
         skip.onPress = { [weak self] in self?.skipPage() }
-        done.setAccessibilityHelp("Save these names and go on to the next meeting.")
+        done.setAccessibilityHelp("Save these names.")
         done.setAccessibilityIdentifier("transcripted.speakers.who-spoke.done")
         let buttons = NSStackView(views: [skip, done])
         buttons.orientation = .horizontal
@@ -63,19 +63,21 @@ extension NotchIslandSpeakerReviewView {
     }
 
     /// Something on the card was answered or typed, so rebuilding it would
-    /// lose work.
+    /// lose work. The mic line's default (You) isn't an answer.
     var hasDraft: Bool {
-        keepsMicAsYou || rows.contains { row in
+        micAsYouChanged || rows.contains { row in
             row.answer != .none || row.isDiscarded || !row.nameField.stringValue.isEmpty
         }
     }
 
-    /// The page's words changed (Done becomes "Done, next meeting" when
-    /// another meeting lines up). The answers on the card stay as they are.
+    /// The page's words changed ("1 of 8" moves along, or the meeting was
+    /// renamed). The answers on the card stay as they are.
     func updatePageCard(_ card: PageCard) {
         guard case .page(let current) = chrome, current != card else { return }
         chrome = .page(card)
-        if current.doneTitle != card.doneTitle {
+        if current.title != card.title || current.detail != card.detail {
+            redrawKeepingAnswers()
+        } else if current.doneTitle != card.doneTitle {
             pageDoneButton?.replaceTitle(card.doneTitle)
             pageDoneButton?.setAccessibilityLabel(card.doneTitle)
             onLayoutChange?()

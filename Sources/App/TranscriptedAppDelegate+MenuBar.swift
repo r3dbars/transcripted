@@ -11,28 +11,16 @@ import TranscriptedCore
 import UniformTypeIdentifiers
 
 extension TranscriptedAppDelegate {
+    /// The update used to be an orange dot pinned on the icon, the one color
+    /// in a one-color glyph. It is now the glyph's own template dot
+    /// (`MenuBarGlyph.attention`), so the old badge view stays hidden.
     func installStatusItemUpdateBadge(on button: NSStatusBarButton) {
-        guard statusItemUpdateBadge.superview !== button else { return }
-
-        statusItemUpdateBadge.translatesAutoresizingMaskIntoConstraints = false
-        statusItemUpdateBadge.wantsLayer = true
-        statusItemUpdateBadge.layer?.backgroundColor = NSColor.systemOrange.cgColor
-        statusItemUpdateBadge.layer?.cornerRadius = 3.5
-        statusItemUpdateBadge.layer?.masksToBounds = true
         statusItemUpdateBadge.isHidden = true
-
-        button.addSubview(statusItemUpdateBadge)
-        NSLayoutConstraint.activate([
-            statusItemUpdateBadge.widthAnchor.constraint(equalToConstant: 7),
-            statusItemUpdateBadge.heightAnchor.constraint(equalToConstant: 7),
-            statusItemUpdateBadge.trailingAnchor.constraint(equalTo: button.trailingAnchor, constant: -2),
-            statusItemUpdateBadge.topAnchor.constraint(equalTo: button.topAnchor, constant: 3),
-        ])
     }
 
     func bindStatusItemUpdateBadge() {
         // The automatic-download setting decides whether an available update
-        // needs a click, so the badge follows both publishers.
+        // needs a click, so the dot follows both publishers.
         appState.sparkleUpdater.$updateStatus
             .combineLatest(appState.sparkleUpdater.$automaticUpdateSettings)
             .receive(on: RunLoop.main)
@@ -44,6 +32,42 @@ extension TranscriptedAppDelegate {
             for: appState.sparkleUpdater.updateStatus,
             settings: appState.sparkleUpdater.automaticUpdateSettings
         )
+    }
+
+    /// What `refreshStatusItemPresentation` writes: capture, a transcript
+    /// being made, and anything that needs a click.
+    func applyStatusItemPresentation(to button: NSStatusBarButton) {
+        let state = statusItemWorkAndAttention()
+        StatusItemPresentation.apply(
+            to: button,
+            meetingRecording: statusItemMeetingRecording,
+            dictating: statusItemDictationRecording,
+            transcribing: state.transcribing,
+            attention: state.attention,
+            updateTooltip: statusItemUpdateTooltip
+        )
+    }
+
+    /// Whether a meeting transcript is being made, and whether something
+    /// needs a click, read live for `refreshStatusItemPresentation`. A key
+    /// that can't work (Accessibility off) outranks an update.
+    func statusItemWorkAndAttention() -> (transcribing: Bool, attention: StatusItemPresentation.Attention?) {
+        var transcribing = false
+        if #available(macOS 14.0, *), case .transcribing = appState.meetingSession.state {
+            transcribing = true
+        }
+        let attention: StatusItemPresentation.Attention?
+        if appState.contextCapture.hotkeyError == ContextCaptureEngine.accessibilityPermissionErrorMessage {
+            attention = .shortcutsNeedAccessibility
+        } else if SparkleUpdaterController.updateNeedsUserAction(
+            status: appState.sparkleUpdater.updateStatus,
+            settings: appState.sparkleUpdater.automaticUpdateSettings
+        ) {
+            attention = .updateNeedsClick
+        } else {
+            attention = nil
+        }
+        return (transcribing, attention)
     }
 
     /// Keeps the status-item glyph in sync with active capture so the menu bar
@@ -73,27 +97,39 @@ extension TranscriptedAppDelegate {
                     self.refreshStatusItemPresentation()
                 }
                 .store(in: &statusItemSubscriptions)
+
+            // The working ring while a meeting transcript is being made.
+            appState.meetingSession.$state
+                .map { state -> Bool in
+                    if case .transcribing = state { return true }
+                    return false
+                }
+                .removeDuplicates()
+                .dropFirst()
+                .receive(on: DispatchQueue.main)
+                .sink { [weak self] _ in self?.refreshStatusItemPresentation() }
+                .store(in: &statusItemSubscriptions)
         }
+
+        // The attention dot while the keys can't work without Accessibility.
+        appState.contextCapture.$hotkeyError
+            .map { $0 == ContextCaptureEngine.accessibilityPermissionErrorMessage }
+            .removeDuplicates()
+            .dropFirst()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in self?.refreshStatusItemPresentation() }
+            .store(in: &statusItemSubscriptions)
     }
 
-    /// The orange dot shows as soon as an update needs a click: a downloaded
-    /// update waiting for a restart, or an update Sparkle will not download on
-    /// its own. It used to wait for a downloaded update only, so with
-    /// automatic downloads off a found update never showed at all.
+    /// The attention dot shows as soon as an update needs a click: a
+    /// downloaded update waiting for a restart, or an update Sparkle will not
+    /// download on its own. The tooltip uses the popover's update words.
     private func updateStatusItemBadge(
         for status: SparkleUpdaterController.UpdateStatus,
         settings: SparkleUpdaterController.AutomaticUpdateSettings
     ) {
         let needsAction = SparkleUpdaterController.updateNeedsUserAction(status: status, settings: settings)
-        statusItemUpdateBadge.isHidden = !needsAction
-
-        if let readyVersion = status.readyToInstallVersion {
-            statusItemUpdateTooltip = "restart to update to \(readyVersion)"
-        } else if needsAction, let availableVersion = status.availableUpdateVersion {
-            statusItemUpdateTooltip = "update \(availableVersion) available"
-        } else {
-            statusItemUpdateTooltip = nil
-        }
+        statusItemUpdateTooltip = needsAction ? UpdateStatusWords.statusItemNote(for: .init(status.state)) : nil
         refreshStatusItemPresentation()
     }
 
@@ -139,12 +175,9 @@ extension TranscriptedAppDelegate {
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
-
-        guard let button = statusItem?.button, let popover = popover else { return }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
-            guard let self else { return }
-            self.showMainPopover(relativeTo: button, popover: popover, entrypoint: "onboarding_completed")
-        }
+        // Setup ends on Today in the main window, not the popover: the person
+        // already dictated in setup, and Today is where they land from now on.
+        showSettingsWindow(page: .today, source: "onboarding_completed")
     }
 
     func showMainPopover(

@@ -115,7 +115,7 @@ private final class ClickAwayFixture {
 // async so the runner hops to the main thread: windows need it.
 @MainActor
 func testHomeBackgroundTapCatcher() async {
-    let doneTitle = SpeakerMeetingReviewPolicy.doneTitle(meetingsAfterThis: 2)
+    let doneTitle = SpeakerMeetingReviewPolicy.doneTitle
 
     await runSuite("A click on empty space still closes the open card") {
         let fixture = ClickAwayFixture(title: doneTitle)

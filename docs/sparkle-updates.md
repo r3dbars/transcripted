@@ -67,12 +67,15 @@ Future agents should treat this as a release requirement:
 - an `Install` click that lands while Sparkle is still reading the feed is
   kept and runs when Sparkle holds the update or finishes that check, instead
   of doing nothing
-- the menu bar footer includes a manual `Check for updates` action; without
-  automatic downloads, a prominent install action can still appear when Sparkle
-  finds a newer release
-- the settings sidebar footer becomes an update action under the same rule as
-  the badge: `Update ready` once Sparkle has staged the update, `Update
-  available` when the person has to start the install
+- the menu bar popover has no update row while idle; a `Downloading update`
+  row shows while one downloads, and without automatic downloads a filled
+  callout (`Update to X` / `Install`) still appears when Sparkle finds a newer
+  release. The manual check is Settings › Advanced › About and a click on the
+  sidebar's version line
+- the settings sidebar's version line becomes an update action under the same
+  rule as the badge: `X is ready` once Sparkle has staged the update, `Update
+  to X` when the person has to start the install (words from
+  `Sources/UI/Shared/UpdateStatusWords.swift`)
 - the About settings page exposes one `Automatic updates` control with three
   positions — `Check on launch` / `Notify me` / `Download automatically` —
   backed by the same two Sparkle booleans (`Download automatically` is hidden

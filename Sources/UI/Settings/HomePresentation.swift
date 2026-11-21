@@ -17,7 +17,9 @@ enum HomeCaptureListCopy {
     static let emptyDictations = "No recent dictations."
     static let noMeetingMatches = "No meetings match your search."
     static let searchingMeetings = "Searching all meetings…"
-    static let noStarredMeetings = "No starred meetings yet. Star one from its \u{22EF} menu."
+    /// The Keep audio filter with nothing kept. (The filter reads the
+    /// transcript's `starred` flag, which is what Keep audio sets.)
+    static let noStarredMeetings = "No meetings keep their audio yet. Turn on Keep audio from a meeting's \u{22EF} menu."
 
     /// What an empty Meetings list says. A search (or the Starred filter)
     /// doesn't claim "none" before its pass over the library has looked.
@@ -40,6 +42,15 @@ enum HomeCaptureListCopy {
         static let value = "Choose"
         static let help = "Pick an audio or video file. The transcript lands with your meetings."
         static let automationIdentifier = "transcripted.settings.general.transcribe-audio-file"
+    }
+
+    /// The Meetings header ⋯ menu's import item: the file picker, same as
+    /// the Settings row (Advanced › Transcription), ⌘O, and dropping files
+    /// on the page.
+    enum TranscribeFileAction {
+        static let title = "Transcribe a file\u{2026}"
+        static let help = "Choose audio or video to transcribe on this Mac. You can also drop files here or press \u{2318}O."
+        static let automationIdentifier = "transcripted.home.new.transcribe-file"
     }
 
     /// The empty Meetings list's second button, which opens the same picker.
@@ -134,22 +145,23 @@ enum HomeDayGroupedRows {
 
 // MARK: - Meeting speaker palette selection
 
-/// Foundation-pure palette-slot selection for meeting speaker chips.
-///
-/// `HomeMeetingSpeakerColor.color(for:)` returns a SwiftUI `Color`, but the
-/// underlying decision — which stable palette slot a speaker name maps to — is
-/// deterministic and Foundation-only. That selection lives here so it can be
-/// fast-tested; `color(for:)` keeps the slot -> `Color` mapping in `HomeView`.
+/// Foundation-pure palette choice for transcript speaker names. It is the
+/// voice-print palette (`VoicePrintStyle`), so a saved person is the same
+/// color in a transcript, on the Speakers page and in the island review.
+/// `HomeMeetingSpeakerColor` (HomeMeetingAudioPlayer.swift) turns the index
+/// into a readable SwiftUI color.
 enum HomeMeetingSpeakerPalette {
-    /// Number of palette slots the speaker-color mapping spreads names across.
-    static let slotCount = 8
+    /// Number of palette slots: the voice-print palette.
+    static var slotCount: Int { VoicePrintStyle.palette.count }
 
-    /// Stable palette slot index in `0..<slotCount` for a speaker name.
-    static func slotIndex(for speaker: String, slotCount: Int = slotCount) -> Int {
-        let normalized = speaker.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-        let value = normalized.unicodeScalars.reduce(UInt32(0)) { partial, scalar in
-            partial &+ scalar.value
+    /// A saved person keys by profile ID, exactly like their print; an
+    /// unsaved voice by its transcript key, so it stays put across launches.
+    /// Takes the identity's parts (`HomeMeetingSpeakerIdentity.persistentSpeakerID`
+    /// and `.stableID`) so this file stays free of the preview types.
+    static func colorIndex(persistentSpeakerID: UUID?, stableID: String) -> Int {
+        if let persistentSpeakerID {
+            return VoicePrintStyle(id: persistentSpeakerID).preferredColorIndex
         }
-        return Int(value % UInt32(slotCount))
+        return VoicePrintStyle(seedString: stableID).preferredColorIndex
     }
 }

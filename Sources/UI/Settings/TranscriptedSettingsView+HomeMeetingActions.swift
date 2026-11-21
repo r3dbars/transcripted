@@ -116,7 +116,8 @@ extension TranscriptedSettingsView {
         Task { @MainActor in
             do {
                 let (result, audio) = try await renameTask.value
-                if homeExpandedMeetingID == preview.id || homeExpandedMeetingPreview?.id == preview.id {
+                if homeMeetingOpenState.isOpen(preview.id, expandedID: homeExpandedMeetingID)
+                    || homeExpandedMeetingPreview?.id == preview.id {
                     // Base the update on the loaded preview when it arrived
                     // meanwhile (keeps the transcript body); fall back to the
                     // rename's own preview otherwise.
@@ -129,9 +130,14 @@ extension TranscriptedSettingsView {
                         audio: audio
                     )
                     // The expansion is keyed by the row id (transcript path),
-                    // which the rename just changed — follow it so the card
-                    // stays open on the renamed capture after refresh.
-                    homeExpandedMeetingID = result.transcriptURL.path
+                    // which the rename just changed. Follow it as the same
+                    // card: open, with its transcript reveal and Show all,
+                    // and the old row stays open until the list refreshes.
+                    let renamedID = result.transcriptURL.path
+                    if let openID = homeExpandedMeetingID {
+                        homeMeetingOpenState.followRename(from: openID, to: renamedID)
+                    }
+                    homeExpandedMeetingID = renamedID
                 }
                 refreshRecentCaptures(force: true)
             } catch HomeMeetingRenameError.emptyTitle {
@@ -210,6 +216,22 @@ extension TranscriptedSettingsView {
         }
     }
 
+    /// Opens a failed meeting in place, or closes it when it is the open
+    /// one. It shares the saved rows' open slot, so opening it closes a saved
+    /// card the same way opening another saved row does (playback goes on).
+    func toggleHomeFailedMeetingExpansion(_ item: MeetingSessionController.FailedMeetingItem) {
+        let key = MeetingsPageOpenState.failedMeetingKey(item.id)
+        guard MeetingsPageOpenState.nextOpenID(current: homeExpandedMeetingID, tapped: key) != nil else {
+            collapseHomeMeetingExpansion(stopsPlayback: false)
+            return
+        }
+        homeMeetingPreviewLoadTask?.cancel()
+        homeExpandedMeetingPreview = nil
+        withAnimation(Self.homeRowAnimation) {
+            homeExpandedMeetingID = key
+        }
+    }
+
     func failedMeetingAudioAttachment(
         for item: MeetingSessionController.FailedMeetingItem
     ) -> MeetingAudioAttachment? {
@@ -254,6 +276,10 @@ extension TranscriptedSettingsView {
                 }
             )
         } else {
+            // The deleted meeting was the open one: nothing is open now.
+            if homeExpandedMeetingID == MeetingsPageOpenState.failedMeetingKey(item.id) {
+                collapseHomeMeetingExpansion(stopsPlayback: false)
+            }
             ActivationTelemetry.trackWorkflowAbandoned(
                 workflowKind: HomeFailedMeetingCleanupTelemetry.workflowKind,
                 stage: HomeFailedMeetingCleanupTelemetry.stage,
@@ -587,7 +613,7 @@ extension TranscriptedSettingsView {
             return "Wait for the current meeting to finish saving or transcribing before retrying."
         }
         if meetingSession.isSpeakerReviewPending {
-            return "Finish the speaker review window before retrying a failed meeting."
+            return "Finish naming speakers on the island (Who spoke?) before retrying a failed meeting."
         }
         return nil
     }

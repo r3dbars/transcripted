@@ -5,8 +5,13 @@ enum PermissionsOnboardingPreferences {
     static let forceKey = "forcePermissionsOnboarding"
     static let firstDictationSavedTrackedKey = "permissionsOnboardingFirstDictationSavedTracked"
     static let resumeStepIndexKey = "permissionsOnboardingResumeStepIndex"
-    /// The permissions step. Setup never resumes past it, so the microphone
-    /// check always runs again before the Done screen.
+    /// Set when setup finishes on a build that has Today's setup checklist.
+    /// Someone whose setup finished on an older build never has it, so an
+    /// update doesn't hand everyone a setup list (`TodaySetupChecklistState`).
+    static let finishedWithTodayChecklistKey = "permissionsOnboardingFinishedWithTodayChecklist"
+    /// The microphone step (`OnboardingStepKind.microphone`, index 1). Setup
+    /// never resumes past it, so the microphone check always runs again
+    /// before the Done screen.
     static let maxResumeStepIndex = 1
 
     static func hasCompleted(userDefaults: UserDefaults = .standard) -> Bool {
@@ -18,6 +23,7 @@ enum PermissionsOnboardingPreferences {
 
     static func markCompleted(userDefaults: UserDefaults = .standard) {
         userDefaults.set(true, forKey: completionKey)
+        userDefaults.set(true, forKey: finishedWithTodayChecklistKey)
         userDefaults.removeObject(forKey: forceKey)
         userDefaults.removeObject(forKey: resumeStepIndexKey)
     }

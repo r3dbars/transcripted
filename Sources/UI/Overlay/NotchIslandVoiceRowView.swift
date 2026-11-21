@@ -69,7 +69,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
     var hoverArea: NSTrackingArea?
     /// "Not a person": not saved to People.
     var isDiscarded = false
-    /// "All me" is on for this local mic voice.
+    /// The mic line says You for this local mic voice.
     var isKeptAsYou = false
     /// The name field holds the calendar 1:1 name and nobody has touched it.
     var prefilledUntouched = false
@@ -282,7 +282,7 @@ final class NotchIslandVoiceRowView: NSView, NSTextFieldDelegate {
         focusField()
     }
 
-    /// "All me" was switched on or off for the local mic voices.
+    /// The mic line switched between You and naming each mic voice.
     func setKeptAsYou(_ kept: Bool) {
         guard isMic, kept != isKeptAsYou else { return }
         isKeptAsYou = kept

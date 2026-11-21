@@ -1,6 +1,6 @@
 // NotchIslandButton.swift
-// The island's pill buttons: plain, accent, warning and destructive, with an
-// optional countdown ring. Split out of NotchIslandView.swift.
+// The island's pill buttons: plain, accent (the white primary), warning and
+// destructive, with an optional countdown ring. Split out of NotchIslandView.swift.
 
 import AppKit
 
@@ -19,6 +19,7 @@ final class NotchIslandButton: NSButton {
     var onPress: (() -> Void)?
     private let style: Style
     private var countdownSeconds: Double?
+    private var countdownFromFraction: Double = 1
     private var countdownStarted = false
     private var countdownPaused = false
     private let ringTrack = CAShapeLayer()
@@ -83,15 +84,38 @@ final class NotchIslandButton: NSButton {
         setAccessibilityLabel(title)
     }
 
-    /// Traces a ring around the button that runs down over `seconds`.
-    func startCountdown(seconds: Double) {
+    /// Traces a ring around the button that runs down over `seconds`,
+    /// starting from `fromFraction` of a full ring (a countdown already
+    /// under way when the drop-down was built).
+    /// `words` says what happens at zero for VoiceOver ("Stops in 12
+    /// seconds"); the button's accessibility value reads it from the ring's
+    /// current position, so it stays right as the ring runs and while it's held.
+    func startCountdown(seconds: Double, fromFraction: Double = 1, words: ((Int) -> String)? = nil) {
         countdownSeconds = seconds
+        countdownFromFraction = min(1, max(0, fromFraction))
+        countdownWords = words
         needsLayout = true
+    }
+
+    private var countdownWords: ((Int) -> String)?
+
+    override func accessibilityValue() -> Any? {
+        guard let seconds = countdownSeconds, let countdownWords else { return super.accessibilityValue() }
+        // Before the first layout the ring hasn't started: the full count is left.
+        let left: Double
+        if countdownStarted, countdownFromFraction > 0 {
+            let fractionLeft = Double(ring.presentation()?.strokeEnd ?? ring.strokeEnd)
+            left = fractionLeft * seconds / countdownFromFraction
+        } else {
+            left = seconds
+        }
+        return countdownWords(Int(left.rounded(.up)))
     }
 
     /// Takes the ring away for good (the person started answering).
     func stopCountdown() {
         countdownSeconds = nil
+        countdownWords = nil
         ring.removeAllAnimations()
         ring.removeFromSuperlayer()
         ringTrack.removeFromSuperlayer()
@@ -134,9 +158,10 @@ final class NotchIslandButton: NSButton {
         var flip = CGAffineTransform(a: 1, b: 0, c: 0, d: -1, tx: 0, ty: bounds.height)
         let traced: CGPath = isFlipped ? (path.copy(using: &flip) ?? path) : path
         // On the white pill the ring is drawn dark so it still shows.
-        let ink: CGFloat = style == .white ? 0 : 1
-        let trackAlpha: CGFloat = style == .white ? 0.14 : 0.10
-        let ringAlpha: CGFloat = style == .white ? 0.6 : 0.85
+        let whiteFill = style == .white || style == .accent
+        let ink: CGFloat = whiteFill ? 0 : 1
+        let trackAlpha: CGFloat = whiteFill ? 0.14 : 0.10
+        let ringAlpha: CGFloat = whiteFill ? 0.6 : 0.85
         for (shape, color) in [(ringTrack, NSColor(white: ink, alpha: trackAlpha)), (ring, NSColor(white: ink, alpha: ringAlpha))] {
             shape.path = traced
             shape.fillColor = nil
@@ -149,7 +174,7 @@ final class NotchIslandButton: NSButton {
         guard !countdownStarted else { return }
         countdownStarted = true
         let run = CABasicAnimation(keyPath: "strokeEnd")
-        run.fromValue = 1
+        run.fromValue = countdownFromFraction
         run.toValue = 0
         run.duration = seconds
         ring.strokeEnd = 0
@@ -162,11 +187,13 @@ final class NotchIslandButton: NSButton {
 
     private var foreground: NSColor {
         switch style {
-        case .plain, .accent, .destructive: return .white
+        case .plain, .destructive: return .white
         case .subtle: return NSColor(white: 1, alpha: 0.82)
         case .warning: return NotchIslandPalette.warning
         case .link: return NSColor(white: 1, alpha: 0.55)
-        case .white: return .black
+        // The primary action is ink on the black island: a white pill.
+        // Green means live, so it is never a button.
+        case .accent, .white: return .black
         }
     }
 
@@ -174,7 +201,7 @@ final class NotchIslandButton: NSButton {
         switch style {
         case .plain: return NotchIslandPalette.buttonPlain
         case .subtle: return NotchIslandPalette.buttonSubtle
-        case .accent: return NotchIslandPalette.accent
+        case .accent: return .white
         case .destructive: return NotchIslandPalette.destructive
         case .warning: return NotchIslandPalette.warning.withAlphaComponent(0.22)
         case .link: return .clear

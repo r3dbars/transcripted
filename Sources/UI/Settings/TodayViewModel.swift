@@ -235,7 +235,7 @@ final class TodayViewModel: ObservableObject {
         let dictationItems = savedDictations.map { entry in
             TodayRecentItem(
                 kind: .dictation,
-                id: "dictation-\(entry.id)",
+                id: TodayRecentItem.dictationIDPrefix + entry.id,
                 title: TodayRecentActivity.dictationTitle(text: entry.text, fallback: entry.title),
                 date: entry.createdAt,
                 durationSeconds: nil,

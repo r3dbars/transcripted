@@ -112,6 +112,43 @@ enum ClipboardTargetActivationPolicy {
     }
 }
 
+/// Dictating into one of Transcripted's own text fields: setup's practice
+/// field, search, rename, the feedback composer. A posted ⌘V reaches this
+/// process only after paste-back's confirmation wait returns (the wait holds
+/// the main thread, and AppKit dispatches the key event after it), so nothing
+/// could confirm it: every own-window take ended "Not pasted" and saved as
+/// copied, and the words landed a moment later anyway. Inside this process
+/// the words go straight into the focused field instead, which is a delivery
+/// we can see. Other apps keep the ⌘V path and its checks unchanged.
+@MainActor
+enum OwnWindowTextDelivery {
+    static func targetsThisProcess(
+        _ target: DictationPasteTarget?,
+        processIdentifier: pid_t = ProcessInfo.processInfo.processIdentifier
+    ) -> Bool {
+        guard let targetProcessIdentifier = target?.processIdentifier else { return false }
+        return targetProcessIdentifier == processIdentifier
+    }
+
+    /// The focused field in Transcripted's key window, while Transcripted is
+    /// the active app. False (nothing inserted) for anything else.
+    static func insertIntoFocusedField(_ text: String) -> Bool {
+        guard let app = NSApp, app.isActive else { return false }
+        return insert(text, into: app.keyWindow?.firstResponder)
+    }
+
+    /// Text fields edit through their field editor, an `NSTextView`, and
+    /// SwiftUI's `TextField` / `TextEditor` are built on the same. Inserting
+    /// at the selection is what a paste does, undo included. True only when
+    /// the field's text actually changed.
+    static func insert(_ text: String, into responder: NSResponder?) -> Bool {
+        guard !text.isEmpty, let textView = responder as? NSTextView, textView.isEditable else { return false }
+        let before = textView.string
+        textView.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        return textView.string != before
+    }
+}
+
 struct DictationPasteTarget: Equatable {
     let processIdentifier: pid_t?
     let bundleIdentifier: String?

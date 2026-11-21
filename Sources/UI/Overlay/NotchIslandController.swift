@@ -17,7 +17,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     var meetingActionHandler: ((NotchIslandAction) -> Void)?
     var callActionHandler: ((NotchIslandAction) -> Void)?
     var callHoverHandler: ((Bool) -> Void)?
-    /// Right-click menu while a meeting records (Discard Recording…).
+    /// Right-click menu while a meeting records (Discard recording…).
     var meetingMenuProvider: (() -> NSMenu?)?
     /// "Paste again" on the dictation that just landed.
     var onPasteLastDictation: ((String) -> Void)?

@@ -6,91 +6,35 @@ import UniformTypeIdentifiers
 
 extension TranscriptedSettingsView {
     var generalPage: some View {
-        GeneralSettingsPage(
-            launchAtLoginEnabled: Binding(
-                get: { launchAtLogin.isEnabled },
-                set: { updateLaunchAtLogin($0) }
-            ),
-            launchAtLoginStatus: launchAtLogin.statusDescription,
-            launchAtLoginNotice: LaunchAtLoginNoticePolicy.notice(
-                needsApproval: launchAtLogin.needsApproval,
-                failureMessage: launchAtLoginFailureMessage
-            ),
-            onOpenLoginItems: {
-                trackSettingsAction("open_login_items", page: .general)
-                LaunchAtLoginController.openLoginItemsSettings()
-            },
-            showTranscriptedInDock: persistedSettingsBinding(
-                $showTranscriptedInDock,
-                persist: { DockVisibilityPreferences.setVisible($0) },
-                track: { trackSettingsToggle("show_in_dock", enabled: $0, page: .general) }
-            ),
-            uiSoundsEnabled: persistedSettingsBinding(
-                $uiSoundsEnabled,
-                persist: { UISoundPreferences.setEnabled($0) },
-                track: { trackSettingsToggle("dictation_sounds", enabled: $0, page: .general) }
-            ),
+        let modelNeedsAttention = generalModelNeedsAttention
+        let permissionsNeedAttention = !missingRequiredPermissions.isEmpty
+        return GeneralSettingsPage(
             dictationCleanupEnabled: persistedSettingsBinding(
                 $dictationCleanupEnabled,
                 persist: { DictationCleanupPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("dictation_cleanup", enabled: $0, page: .general) }
-            ),
-            dictationMuffleEnabled: persistedSettingsBinding(
-                $dictationMuffleEnabled,
-                persist: { DictationMufflePreferences.setEnabled($0) },
-                track: { trackSettingsToggle("dictation_muffle", enabled: $0, page: .general) },
-                sideEffect: { Self.dictationMuffleSettingChanged($0) }
             ),
             autoDetectCallsEnabled: persistedSettingsBinding(
                 $autoDetectCallsEnabled,
                 persist: { AutoCallDetectionPreferences.setEnabled($0) },
                 track: { trackSettingsToggle("auto_call_detection", enabled: $0, page: .general) }
             ),
-            autoRecordDetectedCallsEnabled: Binding(
-                get: { autoDetectCallsEnabled && autoRecordDetectedCallsEnabled },
-                set: { newValue in
-                    guard autoDetectCallsEnabled else { return }
-                    if newValue, AutoRecordDetectedCallsConsentPolicy.shouldConfirm(
-                        acknowledged: AutoRecordDetectedCallsPreferences.hasAcknowledgedConsent()
-                    ) {
-                        confirmsAutoRecordConsent = true
-                        return
-                    }
-                    autoRecordDetectedCallsEnabled = newValue
-                    trackSettingsToggle("auto_record_detected_calls", enabled: newValue, page: .general)
-                    AutoRecordDetectedCallsPreferences.setEnabled(newValue)
-                }
-            ),
-            correctionsStatusLine: customDictionaryStatusLine,
-            onTrackAction: { actionID in
-                trackSettingsAction(actionID, page: .general)
-            },
-            onImportAudioFile: {
-                trackSettingsAction("import_recording", page: .general)
-                actions.importAudioFile()
-            },
-            onEditCorrections: { showCorrectionsSheet = true },
-            shortcutEditor: { generalShortcutSettingsEditor },
-            bluetoothMicEditor: { generalBluetoothMicEditor },
+            showsPermissionsUpTop: permissionsNeedAttention,
+            showsModelUpTop: modelNeedsAttention,
+            dictationKeyEditor: { generalDictationKeyEditor },
+            microphoneEditor: { generalBluetoothMicEditor },
             autoSendEditor: { generalAutoSendEditor },
-            speakerEditor: { generalSpeakerMatchingEditor },
-            modelEditor: { generalModelSettingsEditor },
-            micProcessingEditor: {
-                VStack(alignment: .leading, spacing: 0) {
-                    // With the Mac mic recorder on, the one Microphone choice
-                    // above covers meetings too, including the macOS input.
-                    if microphoneSettingsRows.showsMeetingMacInputToggle {
-                        MeetingMicrophoneSettingRow(usesSystemInput: persistedSettingsBinding(
-                            $useSystemMeetingMicrophone,
-                            persist: { MeetingMicrophonePreferences.setUsesSystemInput($0) }
-                        ))
-                    }
-                    generalMicProcessingEditor
-                }
-            },
+            meetingsKeyEditor: { generalMeetingsKeyEditor },
+            libraryEditor: { storagePage },
+            privacyEditor: { generalReportingEditor },
             permissionsEditor: { generalPermissionsEditor },
-            reportingEditor: { generalReportingEditor },
-            developerPreviewEditor: { DeveloperPreviewSettingsRows() }
+            modelEditor: { generalModelSettingsEditor },
+            advanced: {
+                generalAdvancedSection(
+                    showsPermissions: !permissionsNeedAttention,
+                    showsModel: !modelNeedsAttention
+                )
+            }
         )
         .confirmationDialog(
             AutoRecordDetectedCallsConsentPolicy.title,
@@ -126,7 +70,7 @@ extension TranscriptedSettingsView {
         }
     }
 
-    private var generalModelSettingsEditor: some View {
+    var generalModelSettingsEditor: some View {
         let modelCard = FirstRunExperience.modelCard(
             for: sttRouter.modelDownloadState,
             model: effectiveTranscriptionModel,
@@ -134,14 +78,14 @@ extension TranscriptedSettingsView {
         )
         return VStack(alignment: .leading, spacing: 0) {
             SettingsControlRow(
-                title: "Model",
+                title: "Voice model",
                 info: GeneralInfo(
-                    title: "Model",
-                    message: "All models run on this Mac. Parakeet V3 is the multilingual default; Parakeet V2 is English-only; Whisper adds broader language coverage; Apple Speech uses the engine built into macOS. Captures keep the model they started with. Overlapping captures on the same engine share that model until they finish."
+                    title: "Voice model",
+                    message: "Every voice model runs on this Mac. Parakeet V3 suits most people; Whisper covers more languages."
                 ),
                 automationIdentifier: "transcripted.settings.general.model"
             ) {
-                Picker("Model", selection: Binding(
+                Picker("Voice model", selection: Binding(
                     get: { preferredTranscriptionModel },
                     set: { updatePreferredTranscriptionModel($0, page: .general) }
                 )) {
@@ -164,7 +108,7 @@ extension TranscriptedSettingsView {
             // is in flight; a healthy ready state stays quiet.
             if modelCard.tone != .ready || modelCard.progress != nil {
                 SettingsStatusCard(
-                    title: "Model files",
+                    title: "Voice model files",
                     status: modelCard.status,
                     detail: modelCard.detail,
                     tone: tone(for: modelCard.tone),
@@ -179,7 +123,7 @@ extension TranscriptedSettingsView {
 
     // Speaker matching: who's-who behavior for meetings. The call-audio voiceprint
     // (ReDimNet2) is always on now, so the only choice left here is the room split.
-    private var generalSpeakerMatchingEditor: some View {
+    var generalSpeakerMatchingEditor: some View {
         VStack(alignment: .leading, spacing: 0) {
             GeneralToggleRow(
                 title: "People in the room",
@@ -191,7 +135,7 @@ extension TranscriptedSettingsView {
                 help: splitLocalSpeakersEnabled ? "Name voices sharing this Mac's mic." : "Your mic stays labeled You.",
                 info: GeneralInfo(
                     title: "People in the room",
-                    message: "After shared-room meetings, asks you to name the voices your mic captured. Off keeps your mic labeled \"You\" — simpler when it's just you. Applies when the meeting is transcribed."
+                    message: "Asks you to name the voices your mic picked up in a shared room. Off keeps your mic labeled \"You\"."
                 ),
                 automationIdentifier: "transcripted.settings.general.people-in-room",
                 showsDivider: false
@@ -200,7 +144,7 @@ extension TranscriptedSettingsView {
     }
 
     /// Which mic rows show; the rules live in `MicrophoneSettingsPolicy`.
-    private var microphoneSettingsRows: MicrophoneSettingsRows {
+    var microphoneSettingsRows: MicrophoneSettingsRows {
         MicrophoneSettingsPolicy.rows(
             recorderOn: pinnedMicrophoneRecorderOn,
             usesAppleVoiceProcessing: meetingMicProcessingMode.usesAppleVoiceProcessing
@@ -234,7 +178,7 @@ extension TranscriptedSettingsView {
             title: "Microphone",
             info: GeneralInfo(
                 title: "Microphone",
-                message: "Used for dictation and meetings. Automatic records the mic selected in macOS Sound settings, except AirPods and other Bluetooth headsets: it records your Mac's own mic instead, so your AirPods keep playing clean audio. Pick a mic to record that one whenever it's connected. \"Same as macOS Sound settings\" records AirPods too, in lower call quality. With Apple voice processing (Mic processing), dictation follows macOS Sound settings instead, unless Faster Bluetooth dictation is on. Applies to the next recording."
+                message: "Used for dictation and meetings. Automatic skips AirPods and uses your Mac's mic, so your AirPods keep sounding good. Pick a mic to always use it."
             ),
             automationIdentifier: "transcripted.settings.general.microphone",
             showsDivider: false
@@ -331,81 +275,110 @@ extension TranscriptedSettingsView {
         }
     }
 
+    /// Per-app Auto Enter, shown as one row, "Auto-send". Its send key and
+    /// the per-app switches sit right under it while it's on; nothing is
+    /// behind a disclosure.
     private var generalAutoSendEditor: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GeneralToggleRow(
-                title: "Press send after pasting",
-                isOn: persistedSettingsBinding(
+        let apps = mergedAutoSendApps
+        let allowedCount = autoEnterAllowedBundleIDs.count
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                GeneralTitleLabel(
+                    title: "Auto-send",
+                    info: GeneralInfo(
+                        title: "Auto-send",
+                        message: "Presses the send key after pasting, only in the apps you turn on."
+                    )
+                )
+                Spacer(minLength: 10)
+                Text(autoSendSummary(enabled: autoEnterEnabled, allowedCount: allowedCount))
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .lineLimit(1)
+                Toggle("Auto-send", isOn: persistedSettingsBinding(
                     $autoEnterEnabled,
                     persist: { DictationAutoSendPreferences.setEnabled($0) },
                     track: { trackSettingsToggle("auto_send", enabled: $0, page: .general) }
-                ),
-                help: autoEnterEnabled ? "Sends \(autoEnterKey.title) after pasting in chosen apps." : "Dictation only pastes text.",
-                info: GeneralInfo(
-                    title: "Press send after pasting",
-                    message: "After pasting your dictation, Transcripted presses the send key for you — only in the apps you choose below."
-                ),
-                automationIdentifier: "transcripted.settings.general.auto-send"
-            )
-
-            SettingsControlRow(title: "Send key") {
-                Picker("Send key", selection: persistedSettingsBinding(
-                    $autoEnterKey,
-                    persist: { DictationAutoSendPreferences.setSendKey($0) },
-                    track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
-                )) {
-                    ForEach(DictationAutoSendKey.allCases) { key in
-                        Text(key.title).tag(key)
-                    }
-                }
+                ))
                 .labelsHidden()
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .disabled(!autoEnterEnabled)
+                .toggleStyle(.switch)
+                .controlSize(.regular)
+                .help(autoEnterEnabled ? "Sends \(autoEnterKey.title) after pasting in chosen apps." : "Dictation only pastes text.")
+                .accessibilityLabel(Text("Auto-send"))
+                .accessibilityValue(Text(autoEnterEnabled ? "On" : "Off"))
+                .accessibilityIdentifier("transcripted.settings.general.auto-send")
+            }
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .overlay(alignment: .bottom) {
+                if autoEnterEnabled { Divider() }
             }
 
-            // One list backs one preference: every app Transcripted knows
-            // about — allowed apps plus currently running candidates — with a
-            // toggle each. "Add" stays as the only way to allow an app that
-            // isn't running right now.
-            SettingsControlRow(
-                title: "Apps",
-                info: GeneralInfo(
-                    title: "Apps",
-                    message: "Auto-send only happens in these apps. Toggle a running app below, or use Add to allow one that isn't open right now."
-                ),
-                // Same as `!mergedAutoSendApps.isEmpty` without building the
-                // list (and its app-name lookups) a second time per render.
-                showsDivider: !(autoEnterAllowedBundleIDs.isEmpty && autoEnterAppCandidates.isEmpty)
-            ) {
-                HStack(spacing: 8) {
-                    SettingsInlineActionButton(title: "Refresh") {
-                        trackSettingsAction("refresh_auto_send_apps", page: .general)
-                        refreshAutoEnterAppCandidates()
+            if autoEnterEnabled {
+                VStack(alignment: .leading, spacing: 0) {
+                    SettingsControlRow(title: "Send key") {
+                        Picker("Send key", selection: persistedSettingsBinding(
+                            $autoEnterKey,
+                            persist: { DictationAutoSendPreferences.setSendKey($0) },
+                            track: { _ in trackSettingsAction("change_auto_send_key", page: .general) }
+                        )) {
+                            ForEach(DictationAutoSendKey.allCases) { key in
+                                Text(key.title).tag(key)
+                            }
+                        }
+                        .labelsHidden()
+                        .pickerStyle(.segmented)
+                        .fixedSize()
                     }
-                    SettingsInlineActionButton(title: "Add…", symbolName: "plus") {
-                        trackSettingsAction("add_auto_send_app", page: .general)
-                        chooseAutoEnterApp(page: .general)
+
+                    // One list backs one preference: every app Transcripted
+                    // knows about (allowed apps plus running candidates), a
+                    // switch each. Add… allows one that isn't running.
+                    SettingsControlRow(
+                        title: "Apps",
+                        info: GeneralInfo(
+                            title: "Apps",
+                            message: "Turn on a running app below, or use Add… for one that isn't open."
+                        ),
+                        showsDivider: !apps.isEmpty
+                    ) {
+                        HStack(spacing: 8) {
+                            SettingsInlineActionButton(title: "Refresh") {
+                                trackSettingsAction("refresh_auto_send_apps", page: .general)
+                                refreshAutoEnterAppCandidates()
+                            }
+                            SettingsInlineActionButton(title: "Add…", symbolName: "plus") {
+                                trackSettingsAction("add_auto_send_app", page: .general)
+                                chooseAutoEnterApp(page: .general)
+                            }
+                        }
+                    }
+
+                    ForEach(Array(apps.enumerated()), id: \.element.bundleID) { index, app in
+                        GeneralToggleRow(
+                            title: app.name,
+                            isOn: Binding(
+                                get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
+                                set: { isAllowed in
+                                    setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
+                                }
+                            ),
+                            help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name).",
+                            showsDivider: index < apps.count - 1
+                        )
                     }
                 }
+                .padding(.leading, 12)
             }
-            .disabled(!autoEnterEnabled)
+        }
+    }
 
-            let apps = mergedAutoSendApps
-            ForEach(Array(apps.enumerated()), id: \.element.bundleID) { index, app in
-                GeneralToggleRow(
-                    title: app.name,
-                    isOn: Binding(
-                        get: { autoEnterAllowedBundleIDs.contains(app.bundleID) },
-                        set: { isAllowed in
-                            setAutoEnterApp(app.bundleID, isAllowed: isAllowed, page: .general)
-                        }
-                    ),
-                    help: "Allow Transcripted to send \(autoEnterKey.title) after pasting into \(app.name).",
-                    showsDivider: index < apps.count - 1
-                )
-                .disabled(!autoEnterEnabled)
-            }
+    private func autoSendSummary(enabled: Bool, allowedCount: Int) -> String {
+        guard enabled else { return "Off" }
+        switch allowedCount {
+        case 0: return "No apps yet"
+        case 1: return "In 1 app"
+        default: return "In \(allowedCount) apps"
         }
     }
 
@@ -420,7 +393,7 @@ extension TranscriptedSettingsView {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    private var generalPermissionsEditor: some View {
+    var generalPermissionsEditor: some View {
         VStack(alignment: .leading, spacing: 8) {
             ForEach(TranscriptedPermissionKind.allCases) { kind in
                 PermissionStatusRow(
@@ -439,7 +412,7 @@ extension TranscriptedSettingsView {
         .padding(14)
     }
 
-    private var generalMicProcessingEditor: some View {
+    var generalMicProcessingEditor: some View {
         VStack(alignment: .leading, spacing: 0) {
             generalMicProcessingPicker
             if showsMicBoostMigrationNote {
@@ -447,17 +420,17 @@ extension TranscriptedSettingsView {
                 // already shows may not call the binding at all.
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(MicrophoneProcessingPreferences.boostMigrationNote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .font(LibraryTokens.meta)
+                        .foregroundStyle(LibraryTokens.ink2)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note")
                     Spacer(minLength: 0)
-                    Button("OK") {
+                    Button("Dismiss") {
                         MicrophoneProcessingPreferences.dismissBoostMigrationNote()
                         showsMicBoostMigrationNote = false
                     }
-                    .buttonStyle(.borderless)
-                    .font(.caption)
+                    .buttonStyle(.transcriptedQuiet)
+                    .controlSize(.small)
                     .accessibilityIdentifier("transcripted.settings.meeting-mic-processing-boost-note-dismiss")
                 }
                 .padding(.horizontal, 14)
@@ -471,7 +444,7 @@ extension TranscriptedSettingsView {
             title: "Mic processing",
             info: GeneralInfo(
                 title: "Mic processing",
-                message: "Auto-level (default) evens out quiet meeting mics. Raw records unprocessed meeting input. Apple voice processing applies to meetings and dictation (dictation skips it on split Bluetooth playback) and turns off while Zoom, Teams, Webex or FaceTime is open. Applies from the next recording. Boost Mic during a meeting lasts for that meeting only."
+                message: "Software autogain evens out quiet meeting mics. Off records exactly what your mic hears. Apple voice processing also applies to dictation."
             ),
             showsDivider: false
         ) {
@@ -513,7 +486,7 @@ extension TranscriptedSettingsView {
                 help: crashReportingFootnote,
                 info: GeneralInfo(
                     title: "Crash reports",
-                    message: "Privacy-safe crash and error reports. Never includes transcripts, audio, names, emails, or file paths."
+                    message: "Scrubbed crash and error reports. Never transcripts, audio, names, emails or file paths."
                 ),
                 automationIdentifier: "transcripted.settings.general.crash-reports"
             )
@@ -550,12 +523,24 @@ extension TranscriptedSettingsView {
                 help: analyticsFootnote,
                 info: GeneralInfo(
                     title: "Usage stats",
-                    message: "Shares feature use, duration and count ranges, error codes, permissions, and an anonymous install ID. Never shares recordings, words, titles, names, or email."
+                    message: "Anonymous counts of which features get used. Never recordings, words, titles, names or email."
                 ),
-                automationIdentifier: "transcripted.settings.general.usage-stats",
-                showsDivider: false
+                automationIdentifier: "transcripted.settings.general.usage-stats"
             )
             .disabled(!AnalyticsReporter.isAvailable)
+
+            SendDiagnosticsSettingsRow(
+                status: diagnosticsActionStatus,
+                crashReportingEnabled: crashReportingEnabled,
+                isSending: diagnosticEventSendInFlight,
+                onSend: {
+                    trackSettingsAction("send_diagnostic_event", page: .general)
+                    sendDiagnosticEvent()
+                },
+                onEmailSupport: {
+                    actions.sendFeedback()
+                }
+            )
         }
     }
 
@@ -657,8 +642,8 @@ extension TranscriptedSettingsView {
                 .buttonStyle(SettingsHoverButtonStyle(
                     tone: .accent,
                     cornerRadius: 8,
-                    normalFill: Color.accentColor.opacity(0.08),
-                    normalStroke: Color.accentColor.opacity(0.16)
+                    normalFill: LibraryTokens.ink.opacity(0.08),
+                    normalStroke: LibraryTokens.ink.opacity(0.16)
                 ))
                 .frame(minHeight: 40)
                 .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
