@@ -11,6 +11,16 @@ import TranscriptedCore
 import UniformTypeIdentifiers
 
 extension TranscriptedAppDelegate {
+    /// Runs before any window exists, so the registered default is in place for the first drag.
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // Private AppKit key (not public API). With `.fullSizeContentView` and a
+        // transparent titlebar, dragging a window onto another display makes AppKit
+        // snap it mid-drag to the frame it last had on that display, so it jumps away
+        // from the pointer. NO turns that snap off. `register(defaults:)` only holds
+        // the value in memory; nothing is written to the user's preferences.
+        UserDefaults.standard.register(defaults: ["NSScreenLayoutAdjustOnWindowMove": false])
+    }
+
     /// macOS tags a login-item start on the open-application event.
     static func wasLaunchedAsLoginItem() -> Bool {
         guard let event = NSAppleEventManager.shared().currentAppleEvent,
