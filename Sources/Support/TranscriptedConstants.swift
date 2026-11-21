@@ -344,7 +344,7 @@ enum TranscriptedConstants {
     static let dictationStopSoundFileName = "dictation-stop.wav"
     /// A quick double click for "nothing was pasted": a cancelled dictation or one with no speech.
     static let dictationCancelledSoundFileName = "dictation-cancelled.wav"
-    static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.mp3"
+    static let meetingTranscriptCompleteSoundFileName = "meeting-transcript-complete.wav"
 
     // MARK: - Hotkeys
 

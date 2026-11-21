@@ -20,7 +20,11 @@ All three were picked on the Dictation Sound Bench ("Hairline" start and stop,
 The ticks are normalized to a 0.72 peak, the error to 0.36. Start and stop play at about 49%
 volume. They were made for Transcripted, so they are under the repo's MIT license.
 
-`meeting-transcript-complete.mp3` is the older cue for a finished meeting transcript.
+`meeting-transcript-complete.wav` plays when the transcription pipeline saves a
+meeting. It is a soft 150 ms rise from 660 to 880 Hz, synthesized with gently faded
+sine tones and rendered as 44.1 kHz mono, 16-bit PCM. It was made for Transcripted
+and is MIT licensed. It plays at about 10% volume when the app's Sounds setting
+is on.
 
 `menu-hover.wav` is the quiet tick when the pointer lands on Record, Dictate, or
 Restart to Update in the menu bar menu. It was made for Transcripted in code (a

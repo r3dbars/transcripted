@@ -12,6 +12,14 @@ func testMeetingCaptureSounds() {
                     "no new interface-sounds preference gate")
     }
 
+    runSuite("Meeting transcript completion plays at the quiet menu press level") {
+        let cue = AppSoundPlayer.Cue.meetingTranscriptComplete
+        assertEqual(cue.playbackVolume, AppSoundPlayer.Cue.menuPress.playbackVolume,
+                    "the longer completion cue stays at about 10% volume")
+        assertFalse(cue.followsSystemInterfaceSounds,
+                    "completion follows the app's sound switch")
+    }
+
     runSuite("Meeting cue loading is lazy and playback stays on the output queue") {
         let queue = DispatchQueue(label: "test.meeting-cue-output")
         let outputKey = DispatchSpecificKey<Bool>()
@@ -115,11 +123,18 @@ func testMeetingCaptureSounds() {
             MeetingCueFakePlayer(onPlay: { played.append(url.lastPathComponent) })
         }
         player.play(.dictationStart)
+        player.play(.meetingTranscriptComplete)
         player.play(.meetingRecordingStart, respectingPreferences: false)
         player.play(.meetingRecordingStop, respectingPreferences: false)
         queue.sync {}
-        assertEqual(played, ["Tink.aiff", "Pop.aiff"], "legacy meeting cues remain unconditional; dictation stays muted")
+        assertEqual(played, ["Tink.aiff", "Pop.aiff"], "recording cues play while dictation and completion stay muted")
         assertFalse(UISoundPreferences.isEnabled(), "preference stays disabled")
+
+        UISoundPreferences.setEnabled(true)
+        player.play(.meetingTranscriptComplete)
+        queue.sync {}
+        assertEqual(played, ["Tink.aiff", "Pop.aiff", "meeting-transcript-complete.wav"],
+                    "the app's sound switch enables the completion cue")
     }
 }
 

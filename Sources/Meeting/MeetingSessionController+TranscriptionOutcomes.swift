@@ -58,12 +58,6 @@ extension MeetingSessionController {
     func handleDisplayStatusChange(from previousStatus: DisplayStatus, to status: DisplayStatus) {
         switch status {
         case .transcriptSaved:
-            if taskManager.lastTranscriptSaveOrigin == .speakerReview {
-                // Preserve review feedback without consuming a running job's
-                // checkpoint, completion telemetry, or terminal outcome.
-                AppSoundPlayer.shared.play(.meetingTranscriptComplete)
-                return
-            }
             guard MeetingTranscriptSavedPolicy.completesPipelineJob(
                 origin: taskManager.lastTranscriptSaveOrigin,
                 savedTaskID: taskManager.lastSavedTranscriptTaskId,
