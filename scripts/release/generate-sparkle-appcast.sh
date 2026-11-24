@@ -94,6 +94,7 @@ fi
 DELTA_MANIFEST="$UPDATES_DIR/sparkle-deltas.txt"
 
 python3 - "$GENERATED_APPCAST" "$REPO_APPCAST_PATH" "$INFO_PLIST_PATH" "$REPO_SLUG" "$UPDATES_DIR" "$DELTA_MANIFEST" "$APPCAST_FEED_URL" <<'PY'
+import html
 import os
 import plistlib
 import re
@@ -235,10 +236,17 @@ if link_node is None:
     link_node = ET.SubElement(latest_item, "link")
 link_node.text = expected_tag_url
 
-release_notes_node = latest_item.find(f"{{{sparkle_ns}}}releaseNotesLink")
-if release_notes_node is None:
-    release_notes_node = ET.SubElement(latest_item, f"{{{sparkle_ns}}}releaseNotesLink")
-release_notes_node.text = expected_tag_url
+# Sparkle verifies separately downloaded release notes when the host requires
+# a signed feed. GitHub renders the tag page, so embed a notice covered by the
+# feed signature and keep the full notes available as a browser link.
+for tag in ("description", f"{{{sparkle_ns}}}releaseNotesLink", f"{{{sparkle_ns}}}fullReleaseNotesLink"):
+    for node in latest_item.findall(tag):
+        latest_item.remove(node)
+ET.SubElement(latest_item, "description").text = (
+    f'<p><a href="{html.escape(expected_tag_url)}">'
+    f'Read the full release notes for Transcripted {html.escape(version)} on GitHub</a>.</p>'
+)
+ET.SubElement(latest_item, f"{{{sparkle_ns}}}fullReleaseNotesLink").text = expected_tag_url
 
 repo_tree = load_tree(repo_path)
 repo_root = repo_tree.getroot()

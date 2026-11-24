@@ -310,7 +310,10 @@ final class PackagedAppSmokeRunner {
 
     private func validateSparkleConfig(sourceInfo: [String: Any], builtInfo: [String: Any]) -> [PackagedAppSmokeCheck] {
         var checks: [PackagedAppSmokeCheck] = []
-        let keys = ["SUFeedURL", "SUPublicEDKey", "SUEnableAutomaticChecks", "SUAllowsAutomaticUpdates", "SUScheduledCheckInterval", "SUVerifyUpdateBeforeExtraction"]
+        let keys = [
+            "SUFeedURL", "SUPublicEDKey", "SUEnableAutomaticChecks", "SUAllowsAutomaticUpdates",
+            "SUScheduledCheckInterval", "SUVerifyUpdateBeforeExtraction", "SURequireSignedFeed",
+        ]
         let drift = keys.compactMap { key -> String? in
             plistValuesEqual(sourceInfo[key], builtInfo[key]) ? nil : "\(key) drifted"
         }

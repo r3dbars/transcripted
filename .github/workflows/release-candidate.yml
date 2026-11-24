@@ -374,10 +374,9 @@ jobs:
         shell: bash
         run: bash scripts/release/fetch-sparkle-tools.sh
 
-      # The feed is the appcast.xml asset of the latest GitHub release. Start
-      # from the one published with the previous release so history is kept; the
-      # first release on this feed starts from the frozen legacy
-      # docs/appcast.xml instead.
+      # Authenticate the previous release's feed before its items can become
+      # part of the next signed feed. The frozen legacy feed has already been
+      # migrated and cannot supply the current release history.
       - name: Fetch the current feed
         shell: bash
         run: |
@@ -385,19 +384,13 @@ jobs:
           feed_dir="$RUNNER_TEMP/feed"
           mkdir -p "$feed_dir/base"
           previous_tag="$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName --jq .tagName)"
-          if gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir "$feed_dir/base"; then
-            echo "Merging into the feed published with $previous_tag."
-          elif [ -f config/release/legacy-appcast-freeze.json ]; then
-            # After the freeze every release carries the feed. A latest release
-            # without one is a broken publish (or a failed download), and
-            # starting over from the legacy file would drop every release
-            # since the freeze.
-            echo "::error::$previous_tag has no appcast.xml asset (or it could not be downloaded), and the legacy feed is frozen. Fix the latest release's feed first."
+          if ! gh release download "$previous_tag" --repo "$GITHUB_REPOSITORY" --pattern appcast.xml --dir "$feed_dir/base"; then
+            echo "::error::$previous_tag has no appcast.xml asset or could not be downloaded. Fix the latest release's feed first."
             exit 1
-          else
-            echo "::notice::$previous_tag has no appcast.xml asset; starting from the frozen legacy docs/appcast.xml (first release on the release-asset feed)."
-            cp docs/appcast.xml "$feed_dir/base/appcast.xml"
           fi
+          public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' Info.plist)"
+          node scripts/release/verify-sparkle-appcast.mjs "$feed_dir/base/appcast.xml" "$public_key"
+          echo "Merging into the authenticated feed published with $previous_tag."
 
       - name: Generate Sparkle metadata
         shell: bash
@@ -481,6 +474,13 @@ jobs:
           fi
           bash scripts/release/sign-appcast.sh "$feed"
           cp "$feed" build/appcast.xml
+
+      - name: Verify the new feed signature
+        shell: bash
+        run: |
+          set -euo pipefail
+          public_key="$(/usr/libexec/PlistBuddy -c 'Print :SUPublicEDKey' Info.plist)"
+          node scripts/release/verify-sparkle-appcast.mjs build/appcast.xml "$public_key"
 
       - name: Prepare Homebrew cask metadata
         shell: bash
@@ -582,6 +582,9 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          VERIFY_APPCAST_FILE=build/appcast.xml \
+            VERIFY_INFO_PLIST=build/Transcripted.app/Contents/Info.plist \
+            bash scripts/release/verify-sparkle-release.sh "$RELEASE_VERSION"
           swift run --package-path Tools/TranscriptedQA transcripted-qa packaged-app-smoke \
             --app build/Transcripted.app \
             --dsym build/Transcripted.app.dSYM \

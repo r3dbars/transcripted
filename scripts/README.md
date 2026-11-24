@@ -95,7 +95,8 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/release/freeze-legacy-appcast.py` — run once for the first release on the release-asset feed: writes the final entry into the legacy `docs/appcast.xml` and the freeze record that `check-known-traps.py` enforces
 - `scripts/release/mark-appcast-critical.py` — mark the newest item in an explicit `--appcast` scratch feed critical for older versions, before signing; the frozen legacy default permits only `--check`/`--dry-run` after freeze (local edit only)
 - `scripts/release/post-dmg-release-audit.py` — read-only audit for the post-DMG release surfaces before or after publishing
-- `scripts/release/verify-sparkle-release.sh` — verify a GitHub release DMG, its delta updates, the Sparkle appcast entry, and app updater settings line up
+- `scripts/release/verify-sparkle-release.sh` — verify the signed Sparkle feed and updater settings, with GitHub asset checks in live mode and an offline candidate mode
+- `scripts/release/verify-sparkle-appcast.mjs` — verify exact feed bytes with the shipped public key before inheriting or handing off a feed
 - `scripts/release/update-cask.sh` — bump `Casks/transcripted.rb` to point at a newly published GitHub release
 - `scripts/release/sentry-release-metadata.py` — print the Sentry release/dist that the app will report from `Info.plist`
 - `scripts/release/sentry-release-dry-run.py` — read-only Sentry release/dSYM readiness check; it never creates/finalizes releases, sets commits, or uploads debug files

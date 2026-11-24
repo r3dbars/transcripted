@@ -97,6 +97,7 @@
     "SUFeedURL": "https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml",
     "SUPublicEDKey": "Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q=",
     "SUVerifyUpdateBeforeExtraction": true,
+    "SURequireSignedFeed": true,
     "SUEnableAutomaticChecks": true,
     "SUAllowsAutomaticUpdates": true,
     "SUAutomaticallyUpdate": true,

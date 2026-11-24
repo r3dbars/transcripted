@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Guards scripts/release/generate-sparkle-appcast.sh's delta-update handling
+# Guards scripts/release/generate-sparkle-appcast.sh's feed merge and delta handling
 # with a stub generate_appcast. No Sparkle tools, signing keys, DMGs, or network
-# are involved, and the real docs/appcast.xml is only read, never written.
+# are involved, and all writes go to a scratch appcast.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 SCRIPT="$ROOT_DIR/scripts/release/generate-sparkle-appcast.sh"
+ACTIVE_FEED="$ROOT_DIR/Tests/Fixtures/release-health-appcast-1.1.76.xml"
 test_root="$(mktemp -d "${TMPDIR:-/tmp}/transcripted-sparkle-deltas.XXXXXX")"
 trap 'rm -rf "$test_root"' EXIT
 
@@ -74,6 +75,9 @@ with open(os.path.join(updates_dir, "appcast.xml"), "w") as fh:
       <title>9.9.9</title>
       <sparkle:version>9.9.9</sparkle:version>
       <sparkle:shortVersionString>9.9.9</sparkle:shortVersionString>
+      <sparkle:releaseNotesLink>https://example.invalid/notes.html</sparkle:releaseNotesLink>
+      <sparkle:releaseNotesLink xml:lang="fr">https://example.invalid/notes-fr.html</sparkle:releaseNotesLink>
+      <description sparkle:format="markdown">Stale generated notes</description>
       <enclosure url="Transcripted-9.9.9.dmg" length="510000000" type="application/octet-stream" sparkle:edSignature="c2lnLWRtZw=="/>
       {delta_xml}
     </item>
@@ -105,14 +109,14 @@ write_plist() {
 PLIST
 }
 
-# Runs the real script against a fresh copy of the committed appcast.
+# Runs the real script against a fresh copy of an archived release-asset feed.
 # Usage: run_case <name> <plist-version> [env assignments...]
 run_case() {
     local name="$1" plist_version="$2"
     shift 2
     case_dir="$test_root/$name"
     mkdir -p "$case_dir/updates"
-    cp "$ROOT_DIR/docs/appcast.xml" "$case_dir/appcast.xml"
+    cp "$ACTIVE_FEED" "$case_dir/appcast.xml"
     write_plist "$case_dir/Info.plist" "$plist_version"
     env -u SPARKLE_PRIVATE_KEY -u SPARKLE_MAXIMUM_DELTAS \
         SPARKLE_APPCAST_TOOL="$stub" \
@@ -129,14 +133,14 @@ expect_failure() {
         fail "$name: script accepted a bad release"
     fi
     grep -q -- "$message" "$case_dir/out.txt" || { cat "$case_dir/out.txt" >&2; fail "$name: missing error '$message'"; }
-    cmp -s "$ROOT_DIR/docs/appcast.xml" "$case_dir/appcast.xml" || fail "$name: appcast was written despite the failure"
+    cmp -s "$ACTIVE_FEED" "$case_dir/appcast.xml" || fail "$name: appcast was written despite the failure"
 }
 
 # 1. Deltas: URLs point at the release, manifest lists them, history is kept.
 run_case deltas 9.9.9 || { cat "$test_root/deltas/out.txt" >&2; fail "deltas: script failed"; }
 grep -qx -- "--maximum-deltas" "$case_dir/updates/stub-args.txt" || fail "deltas: --maximum-deltas not passed"
 grep -qx "5" "$case_dir/updates/stub-args.txt" || fail "deltas: default of 5 deltas not passed"
-python3 - "$ROOT_DIR/docs/appcast.xml" "$case_dir/appcast.xml" "$case_dir/updates/sparkle-deltas.txt" <<'PY'
+python3 - "$ACTIVE_FEED" "$case_dir/appcast.xml" "$case_dir/updates/sparkle-deltas.txt" <<'PY'
 import sys
 import xml.etree.ElementTree as ET
 
@@ -148,8 +152,20 @@ prefix = "https://github.com/r3dbars/transcripted/releases/download/v9.9.9/"
 original = ET.parse(original_path).getroot().findall("./channel/item")
 items = ET.parse(merged_path).getroot().findall("./channel/item")
 assert len(items) == len(original) + 1, "older feed history must be kept"
+assert [ET.tostring(item) for item in items[1:]] == [ET.tostring(item) for item in original], (
+    "older feed items must keep their links, update rules and signed enclosures"
+)
 latest = items[0]
 assert latest.findtext("sparkle:shortVersionString", namespaces=ns) == "9.9.9"
+release_url = "https://github.com/r3dbars/transcripted/releases/tag/v9.9.9"
+assert latest.findtext("link") == release_url
+assert latest.findtext("sparkle:fullReleaseNotesLink", namespaces=ns) == release_url
+assert not latest.findall("sparkle:releaseNotesLink", namespaces=ns), "a signed-feed client must not fetch unsigned notes"
+description, = latest.findall("description")
+assert not description.attrib and len(description) == 0, "embed HTML as XML text"
+notes = ET.fromstring(f"<notes>{description.text}</notes>")
+assert [node.tag for node in notes.iter()] == ["notes", "p", "a"], "embedded markup needs only a browser link"
+assert notes.find("./p/a").attrib == {"href": release_url}
 enclosure = latest.find("enclosure")
 assert enclosure.attrib["url"] == prefix + "Transcripted-9.9.9.dmg", enclosure.attrib["url"]
 assert enclosure.attrib[sig]
@@ -173,11 +189,11 @@ first_enclosure = first_item[first_item.index("<enclosure"):]
 assert first_enclosure.split(">", 1)[0].count("Transcripted-9.9.9.dmg") == 1
 PY
 
-# The merged feed is served from the release-asset URL, so its self link must
-# say so. The legacy docs/appcast.xml keeps its own link.
+# The merged feed is served from the release-asset URL and needs a fresh signature.
 grep -q 'href="https://github.com/r3dbars/transcripted/releases/latest/download/appcast.xml"' "$case_dir/appcast.xml" \
     || fail "deltas: merged feed self link was not moved to the release-asset URL"
 grep -q 'raw.githubusercontent.com' "$case_dir/appcast.xml" && fail "deltas: merged feed still names the legacy feed URL"
+grep -q 'sparkle-signatures' "$case_dir/appcast.xml" && fail "deltas: merged feed retained a stale feed signature"
 
 # 2. No deltas: the item has no sparkle:deltas and the manifest is empty.
 run_case none 9.9.9 STUB_MODE=none || { cat "$test_root/none/out.txt" >&2; fail "none: script failed"; }
