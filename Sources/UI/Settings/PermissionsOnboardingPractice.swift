@@ -75,12 +75,12 @@ struct OnboardingPracticeStage: View {
             onTakeStarted()
         }
         .onReceive(
-            NotificationCenter.default.publisher(for: .dictationTranscriptDidSave).receive(on: DispatchQueue.main)
-        ) { _ in
-            guard takeInFlight, !isDone else { return }
+            NotificationCenter.default.publisher(for: .foregroundDictationDidSave)
+        ) { notification in
+            guard takeInFlight, !isDone, let savedText = notification.object as? String else { return }
             takeInFlight = false
             onTakeSaved()
-            showSavedWordsIfPasteMissed()
+            showSavedWordsIfPasteMissed(savedText)
         }
         .onReceive(
             NotificationCenter.default.publisher(for: .dictationNoSpeechDetected).receive(on: DispatchQueue.main)
@@ -167,17 +167,14 @@ struct OnboardingPracticeStage: View {
     /// the island says Pasted. It can still miss (the field lost focus, or
     /// focus moved to another app). The take was saved either way, so after a
     /// short grace period show the saved words here instead of an empty field.
-    private func showSavedWordsIfPasteMissed() {
+    private func showSavedWordsIfPasteMissed(_ savedText: String) {
         let before = textAtTakeStart
+        let saved = savedText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !saved.isEmpty else { return }
         fillTask?.cancel()
         fillTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: Self.pasteGraceNanoseconds)
             guard !Task.isCancelled, text == before else { return }
-            let saved = await Task.detached(priority: .userInitiated) {
-                DictationTranscriptStore.latestSavedText()
-            }.value
-            guard !Task.isCancelled, text == before,
-                  let saved = saved?.trimmingCharacters(in: .whitespacesAndNewlines), !saved.isEmpty else { return }
             text = before.isEmpty ? saved : before + " " + saved
         }
     }

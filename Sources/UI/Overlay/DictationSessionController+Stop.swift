@@ -491,6 +491,9 @@ extension DictationSessionController {
             if saveResult.saved != nil, self.stoppedAudioRecovery == recovery {
                 self.stoppedAudioRecovery = nil
             }
+            if saveResult.saved != nil {
+                NotificationCenter.default.post(name: .foregroundDictationDidSave, object: text)
+            }
             stopTiming.saveStartedAt = saveResult.startedAt
             stopTiming.savedAt = saveResult.finishedAt
             stopTiming.savePublishedAt = CFAbsoluteTimeGetCurrent()

@@ -529,18 +529,6 @@ extension TranscriptedSettingsView {
             )
             .disabled(!AnalyticsReporter.isAvailable)
 
-            SendDiagnosticsSettingsRow(
-                status: diagnosticsActionStatus,
-                crashReportingEnabled: crashReportingEnabled,
-                isSending: diagnosticEventSendInFlight,
-                onSend: {
-                    trackSettingsAction("send_diagnostic_event", page: .general)
-                    sendDiagnosticEvent()
-                },
-                onEmailSupport: {
-                    actions.sendFeedback()
-                }
-            )
         }
     }
 

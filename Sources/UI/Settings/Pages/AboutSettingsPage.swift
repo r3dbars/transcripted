@@ -8,10 +8,7 @@ import SwiftUI
 /// and is passed in as a closure.
 ///
 /// It renders inside Settings › Advanced: the version and update check,
-/// Automatic updates, and the one Feedback row. Send diagnostics sits in the
-/// visible Privacy group (`SendDiagnosticsSettingsRow`), and email support is
-/// offered there after diagnostics are sent, so the composer is the only
-/// standing feedback entry here.
+/// automatic updates, feedback, and diagnostics and email support.
 struct AboutSettingsPage: View {
     @ObservedObject var sparkleUpdater: SparkleUpdaterController
     let onTrackSettingsToggle: (String, Bool, TranscriptedSettingsPage?) -> Void
@@ -21,6 +18,7 @@ struct AboutSettingsPage: View {
     let onPerformUpdateAction: () -> Void
 
     let onSubmitFeedback: () -> Void
+    let diagnosticsRow: SendDiagnosticsSettingsRow
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -88,13 +86,14 @@ struct AboutSettingsPage: View {
                         title: "Feedback",
                         message: "Write to Transcripted support. You review the report before it goes to help@transcripted.app."
                     ),
-                    automationIdentifier: "transcripted.settings.about.support",
-                    showsDivider: false
+                    automationIdentifier: "transcripted.settings.about.support"
                 ) {
                     SettingsInlineActionButton(title: "Send feedback…") {
                         onSubmitFeedback()
                     }
                 }
+
+                diagnosticsRow
             }
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("transcripted.settings.section.about")
@@ -228,9 +227,7 @@ struct AboutSettingsPage: View {
     }
 }
 
-/// Privacy's last row: send an anonymous app snapshot to support. Needs Crash
-/// reports. After a send (or a failure) the status line offers email support,
-/// which carries the report ID so the two can be matched.
+/// Sending a snapshot requires Crash reports. The email fallback stays available.
 struct SendDiagnosticsSettingsRow: View {
     let status: String?
     let crashReportingEnabled: Bool
@@ -255,25 +252,23 @@ struct SendDiagnosticsSettingsRow: View {
                 .disabled(!(CrashReporter.isAvailable && crashReportingEnabled) || isSending)
             }
 
-            if let footnote {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 4) {
+                if let footnote {
                     Text(footnote)
                         .font(LibraryTokens.meta)
                         .foregroundStyle(LibraryTokens.ink2)
                         .fixedSize(horizontal: false, vertical: true)
-                    if status != nil {
-                        Button("Email support") {
-                            onEmailSupport()
-                        }
-                        .buttonStyle(.transcriptedQuiet)
-                        .controlSize(.small)
-                        .accessibilityIdentifier("transcripted.settings.about.email-support")
-                    }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
+                Button("Email support") {
+                    onEmailSupport()
+                }
+                .buttonStyle(.transcriptedQuiet)
+                .controlSize(.small)
+                .accessibilityIdentifier("transcripted.settings.about.email-support")
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
         }
     }
 
