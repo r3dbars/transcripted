@@ -300,7 +300,8 @@ final class MicDictationGateTests: XCTestCase {
                                       timing: .native(hostSeconds: 9 + duration, received: 12.01), writeContext: harness.writeContext)
         harness.audio.handleMicBuffer(makeSpeech(level: 0.25),
                                       timing: .native(hostSeconds: 13, received: 13.01), writeContext: harness.writeContext)
-        let expected = [Float(0.125), 0, 0.25].flatMap { Array(repeating: $0, count: Int(Self.frames)) }
+        let levels: [Float] = [0.125, 0, 0.25]
+        let expected = levels.flatMap { Array(repeating: $0, count: Int(Self.frames)) }
         XCTAssertEqual(try savedSamples(harness).map(abs), expected)
     }
 
