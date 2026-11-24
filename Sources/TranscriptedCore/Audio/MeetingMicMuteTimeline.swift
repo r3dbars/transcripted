@@ -97,6 +97,19 @@ final class MeetingMicMuteTimeline: @unchecked Sendable {
         // A coherent empty history proves these frames cannot contain a muted
         // interval, even if the driver supplied no useful clock.
         guard edge != nil else { return }
+        // Receipt comes from the capture callback, before any app-owned
+        // queue. A packet delivered during mute stays silent even if its
+        // device timestamp looks adjacent to pre-mute audio.
+        var receiptEdge = edge
+        while let transition = receiptEdge?.pointee, transition.seconds > received {
+            receiptEdge = transition.previous
+        }
+        if let transition = receiptEdge?.pointee, transition.muted || end <= transition.seconds {
+            // A callback during mute may contain pre-mute frames. A callback
+            // after unmute stamped wholly before that edge is also ambiguous.
+            clear(buffer, frames: 0..<frames)
+            return
+        }
         // Across a route start or gap, a plausible but stale stamp can put
         // the entire buffer before a switch that already happened by receipt.
         // A switch after receipt (e.g. while queued) cannot cause this ambiguity.
