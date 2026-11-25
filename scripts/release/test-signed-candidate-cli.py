@@ -124,7 +124,7 @@ def qualify(original, root, source_sha, run, require, tree_digest, sha):
     pristine = tree_digest(original)
     require(tree_digest(app) == pristine, 'CLI relocated app differs')
     info = plistlib.loads((app/'Contents/Info.plist').read_bytes())
-    require(info.get('CFBundleShortVersionString') == '1.1.76' and info.get('CFBundleVersion') == '1.1.76'
+    require(info.get('CFBundleShortVersionString') == '1.1.77' and info.get('CFBundleVersion') == '1.1.77'
             and info.get('TranscriptedBuildRevision') == source_sha[:12]
             and info.get('TranscriptedBuildChannel') == 'release', 'CLI candidate build identity mismatch')
     model_proof = {}
