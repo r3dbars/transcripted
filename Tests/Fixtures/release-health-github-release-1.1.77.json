@@ -1,0 +1,100 @@
+{
+  "assets": [
+    {
+      "contentType": "application/xml",
+      "digest": "sha256:671c708b7d8625a1fdf10e02a21369e7e69a738d5dd6c86108677ff69c84ffbb",
+      "id": 792316502,
+      "name": "appcast.xml",
+      "size": 90147,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/appcast.xml"
+    },
+    {
+      "contentType": "application/x-apple-diskimage",
+      "digest": "sha256:9fd2084d61485f0718926c669715f4a02f447b65fd2044a7b9f5e17e746cc182",
+      "id": 792316516,
+      "name": "Transcripted-1.1.77.dmg",
+      "size": 704188984,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted-1.1.77.dmg"
+    },
+    {
+      "contentType": "application/zip",
+      "digest": "sha256:19fa59984e1775001d873a74ae955012d4849ec581cd862facee3309186c5fd2",
+      "id": 792316517,
+      "name": "Transcripted-1.1.77.dSYM.zip",
+      "size": 18450031,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted-1.1.77.dSYM.zip"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:435a14e2220b391f3f3cd458d54aa8f69887f20e18aead831ad143bb0525a4de",
+      "id": 792336233,
+      "name": "transcripted-mcp.mcpb",
+      "size": 2810877,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/transcripted-mcp.mcpb"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:4a877127b5181326c7ef32c252c809e769188f58cd3222910b895f7f7765a427",
+      "id": 792316507,
+      "name": "Transcripted1.1.77-1.1.72.delta",
+      "size": 7099862,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted1.1.77-1.1.72.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:aadae0e3017000abe9229ac5fc2ddaf3abcf12e33cf1d9a8b3b54f6651c3ea98",
+      "id": 792316521,
+      "name": "Transcripted1.1.77-1.1.73.delta",
+      "size": 6209130,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted1.1.77-1.1.73.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:adb34e924507f6e83895f22ef260b8e5ad6dc405159fbfd6079ecdd7fb191e1f",
+      "id": 792316619,
+      "name": "Transcripted1.1.77-1.1.74.delta",
+      "size": 5991458,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted1.1.77-1.1.74.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:86e7ffc3e03f10f58a9073afa1efb6e9d0167ce2aff08f0152199bf01d650337",
+      "id": 792316756,
+      "name": "Transcripted1.1.77-1.1.75.delta",
+      "size": 5738018,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted1.1.77-1.1.75.delta"
+    },
+    {
+      "contentType": "application/octet-stream",
+      "digest": "sha256:ce0aa3ffab0f487d2fd2d954ffd536f156f43e02b84387079664ed691b23f921",
+      "id": 792316773,
+      "name": "Transcripted1.1.77-1.1.76.delta",
+      "size": 5408142,
+      "state": "uploaded",
+      "url": "https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted1.1.77-1.1.76.delta"
+    }
+  ],
+  "isDraft": false,
+  "isPrerelease": false,
+  "tagName": "v1.1.77",
+  "url": "https://github.com/r3dbars/transcripted/releases/tag/v1.1.77",
+  "_fixture": {
+    "kind": "Archived live GitHub release metadata; offline test input, not current live release proof",
+    "release_id": 458374431,
+    "captured_at_utc": "2026-11-25T16:51:17.922Z",
+    "published_at_utc": "2026-11-25T16:50:12Z",
+    "candidate_run_id": 45649749132,
+    "signed_artifact_id": 15043685633,
+    "built_source_sha": "8f5511210b69270fc30c68b4926992a9d3157131",
+    "workflow_sha": "1f161162c16c50379c8eb559294e3326767a9ac2",
+    "publication_note": "GitHub reported the release and uploaded asset IDs, byte lengths and digests after publication."
+  }
+}
