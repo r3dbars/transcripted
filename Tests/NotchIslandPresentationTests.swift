@@ -60,12 +60,13 @@ func testNotchIslandPresentation() {
         assertEqual(layout.right, [.dictationBars(count: 9), .text("28s left", .warning)])
     }
 
-    runSuite("NotchIslandPresentation shows the Esc confirm prompt as a warning") {
+    runSuite("NotchIslandPresentation shows the Esc confirm prompt where the timer was") {
         var content = listening()
-        content.notice = "Press Esc again to discard"
+        content.notice = DictationEscapeCancelPolicy.confirmNotice
         let layout = notchLayout(dictation: content)
-        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Press Esc again to discard", .warning)])
-        assertEqual(layout.right, [.dictationBars(count: 9)])
+        assertEqual(layout.left, [.symbol(.mic, .accent), .text("Listening", .title)],
+                    "Listening never moves, so the island doesn't lurch wider")
+        assertEqual(layout.right, [.dictationBars(count: 9), .text("Esc again to discard", .warning)])
     }
 
     runSuite("NotchIslandPresentation shows loading with a ring only for a real number") {
@@ -100,10 +101,10 @@ func testNotchIslandPresentation() {
     }
 
     runSuite("NotchIslandPresentation opens a dictation message by itself until it is closed") {
-        let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again")
+        let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try again")
         let content = NotchIslandDictationContent(phase: .message(message))
         let layout = notchLayout(dictation: content)
-        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Dictation", .title)])
+        assertEqual(layout.left, [.symbol(.warning, .warning), .text("Didn't start", .title)])
         assertEqual(layout.drop, .dictationMessage(message))
         assertTrue(layout.dropIsSticky, "a message opens the drop-down by itself")
 
@@ -127,7 +128,8 @@ func testNotchIslandPresentation() {
             let message = NotchIslandDictationContent.Message(tone: tone, text: text, actionTitle: nil)
             assertEqual(NotchIslandPresentation.messageLabel(message), label, "\(text) should read \(label)")
             let layout = notchLayout(dictation: NotchIslandDictationContent(phase: .message(message)))
-            assertEqual(layout.left.first, .symbol(symbol, tone == .error || tone == .noSpeech ? .warning : .accent))
+            // Green means live; a notice or a save is done, so it is neutral.
+            assertEqual(layout.left.first, .symbol(symbol, tone == .error || tone == .noSpeech ? .warning : .neutral))
         }
     }
 
@@ -154,7 +156,7 @@ func testNotchIslandPresentation() {
         assertEqual(NotchIslandPresentation.messageLabel(message), "Not pasted")
         let content = NotchIslandDictationContent(phase: .message(message))
         let layout = notchLayout(dictation: content)
-        assertEqual(layout.left, [.symbol(.clipboard, .accent), .text("Not pasted", .title)])
+        assertEqual(layout.left, [.symbol(.clipboard, .neutral), .text("Not pasted", .title)])
         assertEqual(layout.drop, .dictationMessage(message), "the words and the Paste button open by themselves")
 
         var next = message
@@ -201,15 +203,15 @@ func testNotchIslandPresentation() {
     runSuite("NotchIslandPresentation shows the call prompt with one Record") {
         let prompt = NotchIslandCallPromptContent(title: "Zoom call", detail: "Record this meeting?", secondsLeft: 30)
         let open = notchLayout(callPrompt: prompt)
-        assertEqual(open.left, [.symbol(.video, .accent), .text("Call", .title)])
+        assertEqual(open.left, [.symbol(.video, .neutral), .text("Call", .title)])
         assertEqual(open.drop, .callPrompt(title: "Zoom call", detail: "Record this meeting?"))
         assertTrue(open.dropIsSticky)
-        assertEqual(open.right, [.live(.callSeconds, .secondary)], "the drop-down has the Record button, so the wing just counts")
+        assertEqual(open.right, [], "the countdown is the ring on Skip, so the wing doesn't repeat it")
 
         let key = NotchIslandPresentation.stickyKey(dictation: nil, meeting: nil, callPrompt: prompt)
         let closed = notchLayout(callPrompt: prompt, collapsedStickyKey: key)
         assertNil(closed.drop)
-        assertEqual(closed.right, [.chip("Record", .destructive, .callRecord)], "closed, the wing offers Record")
+        assertEqual(closed.right, [.chip("Record", .primary, .callRecord)], "closed, the wing offers Record as the white primary, never red")
     }
 
     runSuite("NotchIslandPresentation holds a prompt while a dictation runs") {
@@ -294,7 +296,7 @@ func testNotchIslandPresentation() {
 
         var callAudioOn = recording()
         callAudioOn.callAudioNote = .onForNextMeeting
-        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio next time", .secondary)])
+        assertEqual(notchLayout(meeting: callAudioOn).right, [.text("Call audio: next meeting", .secondary)])
 
         var unverified = recording()
         unverified.systemAudioUnverified = true
@@ -381,7 +383,7 @@ func testNotchIslandPresentation() {
             )
         )
         let layout = notchLayout(meeting: meeting)
-        assertEqual(layout.left, [.symbol(.video, .accent), .text("Missed call", .title)])
+        assertEqual(layout.left, [.symbol(.video, .neutral), .text("Missed call", .title)])
         assertEqual(layout.drop, .meetingPrompt(meeting.prompt!))
     }
 
@@ -395,7 +397,7 @@ func testNotchIslandPresentation() {
         assertTrue(transcribing.showsEdgeProgress, "progress runs along the lower edge")
 
         let saved = notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: "Weekly sync")))
-        assertEqual(saved.left, [.symbol(.check, .accent), .text("Saved", .title)])
+        assertEqual(saved.left, [.symbol(.check, .neutral), .text("Saved", .title)], "saved is done, not live: no green")
         assertEqual(saved.right, [.chip("Open", .plain, .meetingOpen)])
         let savedOpen = notchLayout(meeting: NotchIslandMeetingContent(phase: .saved(title: "Weekly sync")), expanded: true)
         assertEqual(savedOpen.drop, .meetingSaved(title: "Weekly sync"))
@@ -517,7 +519,7 @@ func testNotchIslandPresentation() {
         let message = NotchIslandDictationContent.Message(
             tone: .error,
             text: "Mic didn't start.",
-            actionTitle: "Try Again"
+            actionTitle: "Try again"
         )
         let covering: [NotchIslandDictationContent] = [
             NotchIslandDictationContent(phase: .starting),
@@ -620,7 +622,7 @@ func testNotchIslandPresentation() {
         )
         let others: [(String, NotchIslandDrop)] = [
             ("dictationLoading", .dictationLoading(title: "Warming up", detail: "Starts when ready.")),
-            ("dictationMessage", .dictationMessage(NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try Again"))),
+            ("dictationMessage", .dictationMessage(NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try again"))),
             ("dictationMessage notice", .dictationMessage(NotchIslandDictationContent.Message(tone: .notice, text: "Copied", actionTitle: nil))),
             ("justInserted", .justInserted(text: "Hello there", words: 2)),
             ("meetingPreparing", .meetingPreparing(title: "Starting", detail: "Getting the mic ready.")),

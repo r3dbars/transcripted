@@ -10,11 +10,14 @@ enum ProductUsageTelemetry {
         case sidebar, settingsAction = "settings_action", menuBar = "menu_bar"
         case menuCommand = "menu_command", appMenu = "app_menu", dockIcon = "dock_icon"
         case singleInstanceReopen = "single_instance_reopen", meetingOverlay = "meeting_overlay"
-        case appLaunch = "app_launch", unknown
+        case appLaunch = "app_launch"
+        /// Setup's Done opens the main window on Today by itself.
+        case onboardingCompleted = "onboarding_completed"
+        case unknown
 
         var initiation: String {
             switch self {
-            case .appLaunch: return "automatic"
+            case .appLaunch, .onboardingCompleted: return "automatic"
             case .unknown: return "unknown"
             default: return "user"
             }

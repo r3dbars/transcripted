@@ -159,14 +159,14 @@ struct DictationInterruptionPlan: Equatable {
             return DictationInterruptionPlan(
                 cancelRecording: false,
                 message: "Recording was interrupted. Transcripted kept the audio captured so far.",
-                actionTitle: "Transcribe Captured Audio",
+                actionTitle: "Transcribe captured audio",
                 action: .transcribeCapturedAudio(autoPaste: false)
             )
         }
         return DictationInterruptionPlan(
             cancelRecording: true,
             message: "Recording was interrupted. Check your microphone or audio device, then try again.",
-            actionTitle: "Retry Dictation",
+            actionTitle: "Retry dictation",
             action: .retryDictation
         )
     }

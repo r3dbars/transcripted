@@ -89,7 +89,7 @@ func testDictationStartedTelemetryContract() async {
     }
 
     // The controller's wiring of these rules (the real request and refusal
-    // events, the session id minted after the count, and every Try Again
+    // events, the session id minted after the count, and every Try again
     // restart marked as a retry) runs through DictationSessionPipeline.swift
     // and is a behavior test in DictationSessionPipelineTests.swift.
 }

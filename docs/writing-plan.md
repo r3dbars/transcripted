@@ -97,63 +97,54 @@ The full list is in [Parity checklist](#parity-checklist).
 
 Today, Meetings, Dictations, **Writing** `New`, Speakers, Agent. Shortcuts
 become ⌘1 to ⌘6 (Writing takes ⌘4; Speakers moves to ⌘5 and Agent to ⌘6). The
-`New` badge stays until the user finishes setup or dismisses the intro.
+`New` badge stays until the user finishes setup or picks **Not now** on setup screen 1.
 
-### Intro, page 1 of 2
+The owner approved a two-screen setup on 2026-11-18 (UI refresh). It replaces
+the earlier two intro pages plus three steps: two screens, two questions.
+Nothing the old screens set is gone; what isn't asked any more gets a default
+and stays changeable on the Writing page.
 
-The Writing tab opens here until setup is done. Nothing is asked for yet.
+### Setup, screen 1 of 2: Turn on Writing
 
-- Small title: **Writing**
+The Writing tab opens here until setup is done. It's the pitch and both
+questions on one screen.
+
+- Small title **Writing** in Writing's amber (a mark, not a fill).
 - Headline: **Your AI knows what you said. Not what you wrote.**
-- Body: "Transcripted already saves your meetings and dictations. But a lot of
-  your work happens in writing: Slack replies, emails, notes. Writing in
-  Transcripted adds that context, and helps you write faster."
-- **Your context** row: Meetings ✓, Dictations ✓, Writing + (highlighted).
-- Three points:
-  - **Fuller context for your AI.** "Your notes and replies sit next to your
-    meetings, so your AI can pick up where you left off."
-  - **You're in control.** "Pick the apps. Pause or delete anytime."
-  - **100% local.** "No account. Your writing never leaves your Mac. It's saved
-    as plain files you can point any AI agent at."
-- Page dots, **Next**.
+- Body: "A lot of your work happens in writing: Slack replies, emails, notes.
+  Writing saves it next to your meetings and dictations, and helps you finish
+  your sentences."
+- The looping autocomplete demo: a sentence types itself, an underlined
+  suggestion fades in, `Tab` is pressed once per word, then "N keystrokes
+  saved". It cycles a Slack reply, an email and a note. A SwiftUI animation,
+  not a video; it holds still when Reduce Motion is on. Key hints under it:
+  `Tab` adds the next word, `~` takes the whole suggestion, `Esc` hides it.
+- **What should Writing do?**
+  - **Save my writing** (switch, starts on): "Your AI can read what you
+    wrote. Files stay on this Mac, only in apps you choose."
+  - **Autocomplete** (switch, starts on): "Suggests the next words. Tab to
+    accept."
+  - At least one must be on ("Turn on at least one to continue.").
+- **Which apps?**
+  - **All apps** (default): "Password managers are always skipped."
+  - **Only apps I pick**: "Both use the same apps." Chips for installed apps,
+    with Slack, Notes, Mail, Messages, Chrome, Notion and Linear first when
+    installed. At least one ("Pick at least one app.").
+- **Stays on your Mac.** "No account. It's saved as plain files you can point
+  any AI agent at. Only Write for Me sends text, and only when you press its
+  key."
+- Page dots, **Not now**, **Continue**.
 
 Copy rule: say "what you wrote", never "what you typed". The feature must not
 read like a keylogger.
 
-### Intro, page 2 of 2
+Dropped from the old flow: the "Your context" chips, two of the three intro
+points, the separate autocomplete page (its demo and keys moved here), and
+the model question.
 
-- Headline: **Autocomplete finishes your sentences.**
-- Body: "As you type, Transcripted suggests the next few words right where
-  you're typing. Take them or leave them."
-- A looping demo: a sentence types itself, an underlined suggestion fades in,
-  `Tab` is pressed once per word, then "N keystrokes saved". It cycles a Slack
-  reply, an email and a note. Build it as a SwiftUI animation, not a video, so
-  it stays sharp in dark mode and costs nothing in download size. It holds
-  still when Reduce Motion is on.
-- Key hints: `Tab` adds the next word, `~` takes the whole suggestion, keep
-  typing to ignore it, `Esc` hides it.
-- Page dots, **Back**, **Set up writing**.
+### Setup, screen 2 of 2: Allow and download
 
-### Setup, step 1 of 3: "What should writing do?"
-
-- **Save my writing** (toggle, starts on): "Your AI can read what you wrote.
-  Files stay on this Mac, only in apps you choose."
-- **Autocomplete** (toggle, starts on): "Suggests the next words. Hit Tab to
-  accept."
-- One **Continue** button. With both on, Continue is the turn-on-everything
-  path. At least one must be on ("Turn on at least one to continue.").
-
-### Setup, step 2 of 3: "Which apps?"
-
-- **All apps**: "Password managers are always skipped."
-- **Only apps I pick**: chips for installed apps, with Slack, Notes, Mail,
-  Messages, Chrome, Notion and Linear first when installed. At least one
-  ("Pick at least one app.").
-- "Autocomplete uses the same apps."
-
-### Setup, step 3 of 3: "Allow and download"
-
-Only the rows the step 1 toggles need are shown.
+Only the rows the screen 1 switches need are shown.
 
 - **Transcripted keyboard** (`Both` or `Needed`): "You add it in Keyboard
   settings. No privacy prompt." Once the keyboard is installed, the row shows
@@ -164,20 +155,27 @@ Only the rows the step 1 toggles need are shown.
     Settings**.
   - Not enabled, and first installed during this login session: "macOS lists
     new keyboards after you log out and back in. Log out, then add
-    Transcripted in Keyboard settings." Button: **Open Keyboard Settings**.
+    Transcripted in Keyboard settings." Button: **Open keyboard settings**.
     Transcripted never logs out for the user.
   - Enabled but another input source is current: "Choose Transcripted from
     the input menu in the menu bar."
   - Selected: done.
 - **Screen Recording** (`Autocomplete`): "Reads the window you're replying in,
   on this Mac."
-- **Model** (`Autocomplete`): Gemma 4 E2B, 3.4 GB, faster (default). Qwen 3.5
-  9B, 5.6 GB, better. On Macs with less than 16 GB of memory, Qwen is greyed
-  out with "Your Mac needs 16 GB of memory for this model." The same rule
-  applies to the model switch in the everyday view.
+- **Model** (`Autocomplete`): not a question. Setup picks the smaller model
+  (Gemma 4 E2B, 3.4 GB) unless one was already chosen: "Gemma 4 E2B (3.4 GB)
+  downloads after you turn on writing. You can switch models later on this
+  page." The everyday Settings card has the model switch: Gemma 4 E2B, 3.4
+  GB, faster (default), or Qwen 3.5 9B, 5.6 GB, better. On Macs with less
+  than 16 GB of memory, Qwen is greyed out with "Your Mac needs 16 GB of
+  memory for this model."
 - Footnote: "Suggestion counts only, never text. Follows your analytics
   setting."
-- **Back**, **Turn on writing**.
+- Page dots, **Back**, **Turn on writing**.
+
+**Edit setup** on the everyday view opens screen 1 without the pitch (title
+"Edit setup", **Cancel** instead of **Not now**), then screen 2. Both
+switches off there turns Writing off instead of continuing.
 
 Order of operations after **Turn on writing**: install the keyboard (and select
 it if it's already enabled) first, start the model download in the background,
@@ -189,9 +187,10 @@ granted, so Transcripted must hold that relaunch while a meeting is recording.
 
 Shaped like the Dictations page:
 
-- Title **Writing**, summary "N words today" (or "Autocomplete only").
-- Status line: keyboard on/off, model and its state (downloading, ready,
-  error), app scope.
+- Title **Writing**. No day count (Today owns it); the line under the title
+  only says "Writing is off" when both switches are off.
+- Status line with Writing's small amber dot while it runs: keyboard on/off,
+  model and its state (downloading, ready, error), app scope.
 - Today's saved writing, newest first, in the same row style as dictations.
 - "N suggestions accepted today".
 - Actions: **Edit setup**, **Pause for 1 hour**, **Delete all writing**, a
@@ -200,8 +199,11 @@ Shaped like the Dictations page:
   stopped suggestions). Delete all writing keeps the model; Delete model
   removes every downloaded model and turns Autocomplete off first if it's
   on, saying so and that turning it back on downloads the model again.
-- The intro has a quiet **Not now** that leaves Writing off and clears the
-  sidebar's `New` badge.
+- Setup screen 1 has a quiet **Not now** that leaves Writing off and clears
+  the sidebar's `New` badge.
+- While Write for Me (Developer Preview) is on, the Settings card shows
+  **Write for Me sounds**, the same `NextSentenceSounds` preference as
+  Settings › Advanced.
 
 ## Permissions
 
@@ -216,7 +218,7 @@ Shaped like the Dictations page:
 - macOS 26 ignores an app-initiated enable: `TISEnableInputSource` returns `noErr` and the keyboard stays off, even in a later process (seen on Justin's Mac, 2026-09-25). Transcripted still calls it, reads the source again, and logs the truth.
 - So the user adds the keyboard by hand: Keyboard settings › Input Sources › Edit… › +, then English › Transcripted.
 - A keyboard first copied into `~/Library/Input Methods` during this login session isn't listed there until the user logs out and back in (`killall TextInputMenuAgent` doesn't help). Transcripted remembers the login session it first installed the keyboard in (boot time plus audit session ID) and says so.
-- The Writing tab re-checks on app activation and on the Input Sources change notifications while it's on screen. The moment the keyboard is enabled, it selects it once. Only the **Open Keyboard Settings** button opens System Settings.
+- The Writing tab re-checks on app activation and on the Input Sources change notifications while it's on screen. The moment the keyboard is enabled, it selects it once. Only the **Open keyboard settings** button opens System Settings.
 
 **Screen Recording.** It's required for autocomplete, same as Tilde. Without it the keyboard stays silent, and the Writing tab says why with a one-click path to grant it.
 
@@ -252,7 +254,7 @@ Source: Tilde `f36f6562`. "Same" means a straight port, with only identities and
 | `llama-server` helper, restart backoff, health probes, orphan reaping, scaffold prewarm | Same. **Change:** use a port other than Tilde's `17872`, so both can run during migration. **Change:** a fresh API key per helper launch (`LLAMA_API_KEY` in the environment) and `--no-webui`, so other local processes and web pages can't query the helper |
 | Pinned Gemma/Qwen download: resume, retries, disk check, SHA-256 verify, excluded from backup | Same. **New:** adopt an already-verified Tilde model file instead of downloading again |
 | Model switch relaunches the app | **Change:** restart only the helper. Transcripted can't relaunch mid-meeting |
-| Setup window | **Replaced** by the Writing tab intro and setup above |
+| Setup window | **Replaced** by the Writing tab's two-screen setup above |
 | Keyboard installer: staged copy to `~/Library/Input Methods`, signature and Team ID check, replace on newer version, kill the running keyboard | Same, plus a `TISEnableInputSource` try that's checked afterwards (macOS 26 ignores it) and guidance for adding the keyboard by hand |
 | Menu bar: status, pause for 1 hour, ignore the front app | Moves to the Writing tab. Menu bar rows are an open question |
 | Settings: on/off, model, personalized suggestions, Screen Memory, exact screen text, ignored apps, data size and delete, fix screen access, redownload model, run setup again, export diagnostics | Same controls in the Writing tab's settings section. Launch at login is already Transcripted's |
@@ -325,7 +327,7 @@ Sources/
                  capture-change notifications for Home and Today.
   UI/Settings/Pages/WritingSettingsPage.swift
   UI/Settings/Writing/
-                 Intro pages, demo animation, setup steps, everyday view,
+                 Two setup screens, demo animation, everyday view,
                  settings section.
 Tests/
   TranscriptedWritingTests/
@@ -499,7 +501,7 @@ Each phase lands as its own PR (or a small stack) with the checks `.agents/test-
 **Phase 4: the Writing tab.**
 - Scope:
   - The sidebar with the `New` badge and renumbered shortcuts.
-  - The two intro pages and the demo animation, the three setup steps, the everyday view with stats, and the settings section.
+  - The setup (two intro pages and three steps then; two screens since 2026-11-18) with the demo animation, the everyday view with stats, and the settings section.
   - The permission copy fixes, and updates to every pinned test.
 - Exit:
   - The tab matches the approved design and copy.

@@ -43,11 +43,13 @@ enum HomeMeetingListFilter {
     }
 
     /// Everything a saved meeting row can be found by: the shown and saved
-    /// titles, date words, and the named speakers. Metadata only, never the
+    /// titles, date words, the named speakers, and the on-device line and
+    /// summary when there are ones. Metadata only (frontmatter), never the
     /// transcript body.
     static func searchFields(for meeting: RecentMeetingItem) -> [String] {
         let titles = meeting.displayTitle == meeting.title ? [meeting.title] : [meeting.displayTitle, meeting.title]
         return titles + [dateSearchText(for: meeting.date)] + meeting.speakerNames
+            + [meeting.summaryLine, meeting.summary].compactMap { $0 }
     }
 
     /// Searchable date tokens for a meeting so users can filter by typing a

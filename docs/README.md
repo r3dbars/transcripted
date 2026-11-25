@@ -15,7 +15,8 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/transcription-language.md` — the meeting-language picker and how Auto samples audio
 - `docs/ui-settings-menubar-spec.md` — product intent for the menu bar popover and the Settings window
 - `docs/chatgpt-companion.md` — companion capabilities and local desktop-host connection setup
-- `docs/DESIGN_TOKENS.md` — type, spacing, and corner-radius tokens
+- `docs/ui-tokens.md` — how to use the shared colors, text roles, radii and button styles
+- `docs/DESIGN_TOKENS.md` — which surface token names map to the shared tokens
 
 ## Writing
 

@@ -32,13 +32,27 @@ struct DictationsSettingsPage: View {
     @StateObject private var audioInfo = DictationAudioInfoStore()
     @ObservedObject private var transcribeAgain = DictationTranscribeAgainRunner.shared
     @ObservedObject private var captureUndo = CaptureUndoManager.shared
+    @StateObject private var search = DictationSearchModel()
+    @State private var findIsVisible = false
+    @State private var searchQuery = ""
+    @State private var findFieldFocusToken = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 24) {
-            SettingsPageIntro(
-                title: "Dictations",
-                summary: dictationsSummary
-            )
+            // No day count here: Today owns that number.
+            header
+
+            if findIsVisible || !searchQuery.isEmpty {
+                HomeMeetingSearchField(
+                    query: $searchQuery,
+                    focusRequestToken: findFieldFocusToken,
+                    placeholder: "Find dictations",
+                    clearAccessibilityLabel: "Clear dictation filter",
+                    automationIdentifier: "transcripted.dictations.search.field"
+                )
+                .padding(.top, 6)
+                .transition(.opacity)
+            }
 
             orphanedUndoOffers
 
@@ -47,12 +61,76 @@ struct DictationsSettingsPage: View {
         .onDisappear {
             playback.stop()
         }
+        .onChange(of: searchQuery) { _, query in
+            search.update(query: query)
+        }
+        // Read the library again when what's on disk moves under a search:
+        // a refresh, a delete or its undo, a save or Transcribe again.
+        .onChange(of: homeViewModel.dictationDaySections.flatMap(\.items).map(\.id)) { _, _ in
+            search.libraryChanged()
+        }
+        .onChange(of: captureUndo.offers.map(\.id)) { old, new in
+            // A new offer keeps its card in place as the undo line; only an
+            // offer that ended (undone or expired) means the file changed.
+            if !Set(old).isSubset(of: Set(new)) {
+                search.libraryChanged()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .dictationTranscriptDidSave)) { _ in
+            search.libraryChanged()
+        }
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.settings.page.dictations")
     }
 
-    private var dictationsSummary: String {
-        "\(homeViewModel.todayDictationCount) today"
+    /// Same title and Find button as the Meetings header, so the two pages
+    /// read as one family. ⌘F reveals and focuses the field while this page
+    /// is showing (the window handles it before the menu's Find Meetings).
+    private var header: some View {
+        HStack(alignment: .center, spacing: 6) {
+            Text("Dictations")
+                .font(LibraryTokens.title)
+            Spacer()
+            QuietHeaderIconButton(
+                systemName: "magnifyingglass",
+                help: "Find dictations",
+                automationIdentifier: "transcripted.dictations.find.toggle",
+                action: toggleFind
+            )
+        }
+        .background {
+            Button("Find dictations", action: revealFind)
+                .keyboardShortcut("f", modifiers: .command)
+                .opacity(0)
+                .frame(width: 0, height: 0)
+                .accessibilityHidden(true)
+        }
+    }
+
+    private func toggleFind() {
+        withAnimation(.snappy(duration: 0.18)) {
+            findIsVisible.toggle()
+            if findIsVisible {
+                findFieldFocusToken += 1
+            } else {
+                searchQuery = ""
+            }
+        }
+    }
+
+    private func revealFind() {
+        withAnimation(.snappy(duration: 0.18)) {
+            findIsVisible = true
+        }
+        findFieldFocusToken += 1
+    }
+
+    private var isSearching: Bool {
+        DictationSearch.isActive(query: searchQuery)
+    }
+
+    private var listSections: [HomeDaySection<SavedDictationEntry>] {
+        isSearching ? search.sections : homeViewModel.dictationDaySections
     }
 
     /// Undo offers whose entry is no longer in the loaded day sections
@@ -62,7 +140,7 @@ struct DictationsSettingsPage: View {
     @ViewBuilder
     private var orphanedUndoOffers: some View {
         let visibleIDs = Set(
-            homeViewModel.dictationDaySections
+            listSections
                 .flatMap { $0.items }
                 .map { DictationUndoID.id(for: $0) }
         )
@@ -80,21 +158,31 @@ struct DictationsSettingsPage: View {
 
     private var homeDictationsListSection: some View {
         HomeCaptureListSection(
-            sections: homeViewModel.dictationDaySections,
-            emptyMessage: HomeCaptureListCopy.emptyDictations,
-            emptyState: HomeListEmptyState(
+            sections: listSections,
+            emptyMessage: isSearching
+                ? DictationSearch.emptyMessage(isSearchPassRunning: search.isSearching)
+                : HomeCaptureListCopy.emptyDictations,
+            emptyState: isSearching ? nil : HomeListEmptyState(
                 symbolName: "mic",
                 title: "No dictations yet",
-                message: "Hold your dictation shortcut and speak in any app — Transcripted types it out for you and keeps a copy here.",
+                message: "Hold your dictation key and talk in any app. Transcripted types it and keeps a copy here.",
                 actionTitle: "Start a dictation",
                 automationIdentifier: "transcripted.home.dictations.empty.start",
                 action: onStartDictation
             ),
-            isLoading: homeViewModel.isLoading,
-            isLoadingMore: homeViewModel.isLoadingMore,
-            canLoadMore: homeViewModel.canLoadMoreDictations,
+            // A background refresh of the recent slice shouldn't hide
+            // search results behind a spinner.
+            isLoading: isSearching ? false : homeViewModel.isLoading,
+            isLoadingMore: isSearching ? false : homeViewModel.isLoadingMore,
+            canLoadMore: isSearching ? search.canLoadMore : homeViewModel.canLoadMoreDictations,
             getID: { AnyHashable($0.id) },
-            onLoadMore: onLoadMoreDictations,
+            onLoadMore: {
+                if isSearching {
+                    search.loadMore()
+                } else {
+                    onLoadMoreDictations()
+                }
+            },
             showsRowDividers: false
         ) { entry in
             dictationRow(for: entry)

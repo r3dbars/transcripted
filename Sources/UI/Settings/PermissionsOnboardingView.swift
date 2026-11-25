@@ -1,9 +1,11 @@
 // PermissionsOnboardingView.swift
-// First-run onboarding for Transcripted's local dictation and meeting capture.
+// First-run setup for Transcripted's local dictation and meeting capture.
 //
-// Three quiet steps, one path, no branching: welcome, permissions, done.
-// Visual language matches the quiet-library main window (see LibraryTokens)
-// instead of the old skeuomorphic 14-step walkthrough.
+// One ask per screen (microphone, paste access, optional call audio), two
+// real dictations in between, the promise, then Done lands on Today. Steps
+// and buttons come from `OnboardingNavigation`; the screens are in
+// PermissionsOnboardingStages.swift, PermissionsOnboardingPractice.swift and
+// PermissionsOnboardingShell.swift.
 
 import SwiftUI
 import AppKit
@@ -19,8 +21,8 @@ extension Notification.Name {
 @MainActor
 struct PermissionsOnboardingView: View {
     var onComplete: () -> Void
-    /// Watched so the Done screen can say the voice model is still
-    /// downloading instead of "You're set." while it isn't.
+    /// Watched so the practice and Done screens can say the voice model is
+    /// still downloading, and so practice sees a take start and end.
     @ObservedObject var sttRouter: STTRouter
 
     static let preferredSize = NSSize(width: 640, height: 560)
@@ -34,10 +36,9 @@ struct PermissionsOnboardingView: View {
     @State private var systemAudioProbeResult: TranscriptedPermissionAccess.SystemAudioPermissionProbeResult?
     @State private var systemAudioRequestTask: Task<Void, Never>?
     @State private var calendarGranted = false
-    // macOS never asks twice. After a Don't Allow the row says so and its
-    // button opens System Settings instead of reading "Grant".
+    // macOS never asks twice. After a Don't Allow the step says so and its
+    // button opens System Settings instead.
     @State private var micBlocked = false
-    @State private var calendarBlocked = false
     @State private var flowStartedAt: CFAbsoluteTime?
     @State private var stepStartedAt: CFAbsoluteTime?
     @State private var didTrackCompletion = false
@@ -48,6 +49,10 @@ struct PermissionsOnboardingView: View {
     // though importing files needs no mic. Skipping only reaches Done; it
     // doesn't change what the app can record.
     @State private var skippedMicrophone = false
+    // A first take saved earlier in this setup (before a relaunch) counts.
+    @State private var tryItDone = PermissionsOnboardingPreferences.hasTrackedFirstDictationSaved()
+    @State private var tryHandsFreeDone = false
+    @State private var didTrackTakeStartForStep: OnboardingStepKind?
 
     init(sttRouter: STTRouter, onComplete: @escaping () -> Void) {
         _sttRouter = ObservedObject(wrappedValue: sttRouter)
@@ -55,12 +60,28 @@ struct PermissionsOnboardingView: View {
         _currentStepIndex = State(initialValue: PermissionsOnboardingPreferences.resumeStepIndex())
     }
 
+    private var systemAudioPresentation: TranscriptedPermissionKind.SystemAudioOnboardingPresentation {
+        TranscriptedPermissionKind.systemAudioOnboardingPresentation(
+            state: systemAudioState,
+            result: systemAudioProbeResult,
+            isChecking: systemAudioRequestTask != nil
+        )
+    }
+
     private var navigation: OnboardingNavigation {
         OnboardingNavigation(
             step: OnboardingNavigation.step(at: currentStepIndex),
             microphoneGranted: micGranted,
             microphoneBlocked: micBlocked,
-            skippedMicrophone: skippedMicrophone
+            skippedMicrophone: skippedMicrophone,
+            accessibilityGranted: accessibilityGranted,
+            dictationKeyEnabled: HotkeyPreferences.dictationShortcutsEnabled(),
+            keyBehavior: HotkeyPreferences.dictationKeyBehavior(),
+            tryItDone: tryItDone,
+            tryHandsFreeDone: tryHandsFreeDone,
+            systemAudioVerified: systemAudioPresentation.isVerified,
+            systemAudioChecking: systemAudioRequestTask != nil,
+            systemAudioActionTitle: systemAudioPresentation.actionTitle
         )
     }
 
@@ -72,31 +93,15 @@ struct PermissionsOnboardingView: View {
         navigation.hasRequiredPermissions
     }
 
-    private var primaryButtonTitle: String {
-        navigation.primaryTitle
-    }
-
-    private var canFinishSetup: Bool {
-        navigation.canFinishSetup
-    }
-
-    private var primaryButtonDisabled: Bool {
-        navigation.primaryDisabled
-    }
-
-    private var secondaryButtonTitle: String? {
-        navigation.secondaryTitle
-    }
-
     var body: some View {
         OnboardingWindowShell(
-            canGoBack: currentStepIndex > 0,
-            primaryTitle: primaryButtonTitle,
-            primaryDisabled: primaryButtonDisabled,
-            secondaryTitle: secondaryButtonTitle,
+            canGoBack: navigation.previousStep != nil,
+            primaryTitle: navigation.primaryTitle,
+            primaryDisabled: navigation.primaryDisabled,
+            secondaryTitle: navigation.secondaryTitle,
             onBack: goBack,
-            onNext: goNextOrComplete,
-            onSecondary: skipMicrophone
+            onNext: performPrimaryAction,
+            onSecondary: performSecondaryAction
         ) {
             stepContent
                 .id(currentStep)
@@ -150,26 +155,48 @@ struct PermissionsOnboardingView: View {
     private var stepContent: some View {
         switch currentStep {
         case .welcome:
-            WelcomeStage()
-        case .permissions:
-            PermissionsStage(
-                micGranted: micGranted,
+            OnboardingWelcomeStage()
+        case .microphone:
+            OnboardingMicrophoneStage(
+                progressLabel: navigation.progressLabel,
+                granted: micGranted,
+                blocked: micBlocked
+            )
+        case .accessibility:
+            OnboardingAccessibilityStage(
+                progressLabel: navigation.progressLabel,
+                granted: accessibilityGranted
+            )
+        case .tryIt, .tryHandsFree:
+            OnboardingPracticeStage(
+                kind: currentStep == .tryIt ? .first : .handsFree,
+                progressLabel: navigation.progressLabel,
+                sttRouter: sttRouter,
                 accessibilityGranted: accessibilityGranted,
-                systemAudioPresentation: TranscriptedPermissionKind.systemAudioOnboardingPresentation(
+                keyEnabled: HotkeyPreferences.dictationShortcutsEnabled(),
+                keyDisplay: Self.dictationShortcutDisplay ?? "your dictation key",
+                keyBehavior: HotkeyPreferences.dictationKeyBehavior(),
+                isDone: currentStep == .tryIt ? tryItDone : tryHandsFreeDone,
+                onTakeStarted: trackPracticeTakeStarted,
+                onHeardNothing: trackPracticeTakeEmpty,
+                onTakeSaved: markPracticeTakeSaved
+            )
+        case .systemAudio:
+            OnboardingSystemAudioStage(
+                progressLabel: navigation.progressLabel,
+                note: OnboardingSystemAudioStage.note(
+                    actionTitle: systemAudioPresentation.actionTitle,
                     state: systemAudioState,
-                    result: systemAudioProbeResult,
-                    isChecking: systemAudioRequestTask != nil
+                    isVerified: systemAudioPresentation.isVerified
                 ),
-                systemAudioChecking: systemAudioRequestTask != nil,
-                calendarGranted: calendarGranted,
-                micBlocked: micBlocked,
-                calendarBlocked: calendarBlocked,
+                isVerified: systemAudioPresentation.isVerified,
                 onSystemAudioSettings: {
                     pendingSystemSettingsHandoff = true
                     TranscriptedPermissionAccess.openSystemAudioRecordingSettings()
-                },
-                onRequest: { kind in requestPermission(kind, required: kind == .microphone) }
+                }
             )
+        case .promise:
+            OnboardingPromiseStage()
         case .done:
             DoneStage(
                 modelPresentation: FirstRunExperience.onboardingDoneModelPresentation(
@@ -182,6 +209,7 @@ struct PermissionsOnboardingView: View {
                     pendingSystemSettingsHandoff = true
                     TranscriptedPermissionAccess.openSettings(for: .microphone)
                 },
+                onAllowPasteAccess: { requestPermission(.accessibility, required: false) },
                 functionKeyWarning: Self.functionKeyWarning,
                 dictationShortcutDisplay: Self.dictationShortcutDisplay,
                 meetingShortcutDisplay: Self.meetingShortcutDisplay,
@@ -227,44 +255,58 @@ struct PermissionsOnboardingView: View {
         )
     }
 
-    private func goBack() {
-        guard currentStepIndex > 0 else { return }
+    // MARK: - Moving between steps
+
+    private func move(to step: OnboardingStepKind) {
         stopPermissionRevalidation()
         withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-            currentStepIndex -= 1
+            currentStepIndex = OnboardingNavigation.index(of: step)
         }
     }
 
+    private func goBack() {
+        guard let previous = navigation.previousStep else { return }
+        move(to: previous)
+    }
+
     private func goNext() {
-        guard currentStepIndex < OnboardingNavigation.steps.count - 1 else { return }
-        stopPermissionRevalidation()
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
-            currentStepIndex += 1
+        guard let next = navigation.nextStep else { return }
+        move(to: next)
+    }
+
+    private func performPrimaryAction() {
+        guard !navigation.primaryDisabled else { return }
+        trackPrimaryCTAClicked()
+        switch navigation.primaryAction {
+        case .advance:
+            goNext()
+        case .requestMicrophone:
+            requestPermission(.microphone, required: true)
+        case .requestAccessibility:
+            requestPermission(.accessibility, required: false)
+        case .requestSystemAudio:
+            requestPermission(.systemAudioRecording, required: false)
+        case .finish:
+            completeOnboarding()
         }
     }
-    private func skipMicrophone() {
-        guard navigation.canSkipMicrophone else { return }
-        AnalyticsReporter.track(
-            "onboarding_primary_cta_clicked",
-            properties: [
-                "cta": "skip_microphone",
-                "cta_type": "secondary",
-                "flow_elapsed_bucket": flowElapsedBucket(now: CFAbsoluteTimeGetCurrent()),
-                "step_elapsed_bucket": stepElapsedBucket(now: CFAbsoluteTimeGetCurrent()),
-                "step_id": currentStep.analyticsID,
-            ]
-        )
-        skippedMicrophone = true
-        goNext()
-    }
-    private func goNextOrComplete() {
-        guard !primaryButtonDisabled else { return }
-        trackPrimaryCTAClicked()
-        if currentStepIndex == OnboardingNavigation.steps.count - 1 {
-            completeOnboarding()
-        } else {
+
+    private func performSecondaryAction() {
+        guard let action = navigation.secondaryAction else { return }
+        switch action {
+        case .skipMicrophone:
+            skipMicrophone()
+        case .skip:
+            trackSecondaryCTAClicked("skip")
             goNext()
         }
+    }
+
+    private func skipMicrophone() {
+        guard navigation.canSkipMicrophone else { return }
+        trackSecondaryCTAClicked("skip_microphone")
+        skippedMicrophone = true
+        move(to: .done)
     }
 
     private func checkAllPermissions(trackChanges: Bool) {
@@ -279,7 +321,6 @@ struct PermissionsOnboardingView: View {
         systemAudioState = TranscriptedPermissionAccess.systemAudioRecordingStatus()
         calendarGranted = TranscriptedPermissionAccess.isGranted(.calendar)
         micBlocked = TranscriptedPermissionAccess.microphoneAccessBlocked()
-        calendarBlocked = TranscriptedPermissionAccess.calendarAccessBlocked()
         // A live audio check still belongs to the explicit button, never
         // window activation or polling.
 
@@ -295,11 +336,44 @@ struct PermissionsOnboardingView: View {
         systemAudioRequestTask = nil
     }
     private func completeOnboarding() {
-        guard canFinishSetup else { return }
+        guard navigation.canFinishSetup else { return }
         stopPermissionRevalidation()
         trackCompletionIfNeeded()
         onComplete()
     }
+
+    // MARK: - Practice
+
+    private func markPracticeTakeSaved() {
+        switch currentStep {
+        case .tryIt: tryItDone = true
+        case .tryHandsFree: tryHandsFreeDone = true
+        default: break
+        }
+    }
+
+    /// Reuses the funnel's take-started event, once per practice screen.
+    private func trackPracticeTakeStarted() {
+        guard didTrackTakeStartForStep != currentStep else { return }
+        didTrackTakeStartForStep = currentStep
+        AnalyticsReporter.track(
+            "onboarding_first_dictation_started",
+            properties: [
+                "model_state": sttRouter.modelDownloadState.diagnosticName,
+                "step_id": currentStep.analyticsID,
+            ]
+        )
+    }
+
+    private func trackPracticeTakeEmpty() {
+        AnalyticsReporter.track(
+            "onboarding_first_dictation_empty",
+            properties: ["step_id": currentStep.analyticsID]
+        )
+    }
+
+    // MARK: - Analytics
+
     private func trackCompletionIfNeeded() {
         guard !didTrackCompletion else { return }
         didTrackCompletion = true
@@ -402,6 +476,20 @@ struct PermissionsOnboardingView: View {
         )
     }
 
+    private func trackSecondaryCTAClicked(_ cta: String) {
+        let now = CFAbsoluteTimeGetCurrent()
+        AnalyticsReporter.track(
+            "onboarding_primary_cta_clicked",
+            properties: [
+                "cta": cta,
+                "cta_type": "secondary",
+                "flow_elapsed_bucket": flowElapsedBucket(now: now),
+                "step_elapsed_bucket": stepElapsedBucket(now: now),
+                "step_id": currentStep.analyticsID,
+            ]
+        )
+    }
+
     private func trackPermissionStatusChanges(
         from previousStatuses: [TranscriptedPermissionKind: String],
         to updatedStatuses: [TranscriptedPermissionKind: String]
@@ -425,13 +513,16 @@ struct PermissionsOnboardingView: View {
         }
     }
 
+    /// Series-stable ids: "set_up" on welcome, "allow" for a permission ask,
+    /// "continue" to move on, and "open_transcripted" for Done (its old title).
     private var primaryCTAAnalyticsID: String {
-        switch currentStep {
-        case .welcome:
-            return "set_up"
-        case .permissions:
+        if currentStep == .welcome { return "set_up" }
+        switch navigation.primaryAction {
+        case .advance:
             return "continue"
-        case .done:
+        case .requestMicrophone, .requestAccessibility, .requestSystemAudio:
+            return "allow"
+        case .finish:
             return "open_transcripted"
         }
     }
@@ -455,207 +546,5 @@ struct PermissionsOnboardingView: View {
 
     private func permissionStatus(for kind: TranscriptedPermissionKind) -> String {
         currentPermissionStatuses()[kind] ?? "unknown"
-    }
-}
-
-// MARK: - Welcome
-
-private struct WelcomeStage: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: 0)
-            VStack(spacing: 16) {
-                Image(systemName: "waveform")
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundStyle(LibraryTokens.accent)
-
-                Text("Transcripted")
-                    .font(LibraryTokens.title)
-                    .foregroundStyle(.primary)
-
-                Text("Dictation and meeting transcripts, saved as Markdown on your Mac.")
-                    .font(LibraryTokens.body)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 380)
-                    .fixedSize(horizontal: false, vertical: true)
-
-                Text("Audio and transcripts never leave this Mac. Anonymous usage stats and crash reports help us fix bugs; turn them off in Settings.")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-                    .multilineTextAlignment(.center)
-                    .frame(maxWidth: 360)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 4)
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 48)
-    }
-}
-
-// MARK: - Permissions
-
-private struct PermissionsStage: View {
-    let micGranted: Bool
-    let accessibilityGranted: Bool
-    let systemAudioPresentation: TranscriptedPermissionKind.SystemAudioOnboardingPresentation
-    let systemAudioChecking: Bool
-    let calendarGranted: Bool
-    let micBlocked: Bool
-    let calendarBlocked: Bool
-    let onSystemAudioSettings: () -> Void
-    let onRequest: (TranscriptedPermissionKind) -> Void
-
-    private static let blockedNote = " macOS won't ask again, so turn it on in System Settings."
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 22) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Permissions")
-                    .font(LibraryTokens.title)
-                    .foregroundStyle(.primary)
-                Text("Microphone is required. Everything else is optional and can wait.")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-            }
-            .padding(.top, 44)
-
-            VStack(spacing: 0) {
-                QuietPermissionRow(
-                    title: "Microphone",
-                    summary: "Needed to hear you, for dictation and your side of meetings."
-                        + (micBlocked ? Self.blockedNote : ""),
-                    icon: "mic.fill",
-                    granted: micGranted,
-                    isRequired: true,
-                    automationIdentifier: "transcripted.onboarding.permissions.microphone",
-                    actionTitle: micBlocked ? "Open Settings" : nil
-                ) { onRequest(.microphone) }
-
-                divider
-
-                QuietPermissionRow(
-                    title: "Keyboard shortcuts and paste-back",
-                    summary: "Needed for the shortcuts and for pasting into other apps. Without it, start from the menu bar and dictations copy to the clipboard.",
-                    icon: "hand.raised.fill",
-                    granted: accessibilityGranted,
-                    isRequired: false,
-                    automationIdentifier: "transcripted.onboarding.permissions.accessibility"
-                ) { onRequest(.accessibility) }
-
-                divider
-
-                QuietPermissionRow(
-                    title: "System Audio",
-                    summary: systemAudioPresentation.summary,
-                    icon: "speaker.wave.2.fill",
-                    granted: systemAudioPresentation.isVerified,
-                    isRequired: false,
-                    automationIdentifier: "transcripted.onboarding.permissions.system-audio",
-                    actionTitle: systemAudioPresentation.actionTitle,
-                    isChecking: systemAudioChecking,
-                    settingsAction: onSystemAudioSettings
-                ) { onRequest(.systemAudioRecording) }
-
-                divider
-
-                QuietPermissionRow(
-                    title: "Calendar",
-                    summary: "Reminds you to record a few minutes before scheduled meetings."
-                        + (calendarBlocked ? Self.blockedNote : ""),
-                    icon: "calendar",
-                    granted: calendarGranted,
-                    isRequired: false,
-                    automationIdentifier: "transcripted.onboarding.permissions.calendar",
-                    actionTitle: calendarBlocked ? "Open Settings" : nil
-                ) { onRequest(.calendar) }
-            }
-
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 48)
-    }
-
-    private var divider: some View {
-        Rectangle().fill(LibraryTokens.hairline).frame(height: 1)
-    }
-}
-
-private struct QuietPermissionRow: View {
-    let title: String
-    let summary: String
-    let icon: String
-    let granted: Bool
-    let isRequired: Bool
-    let automationIdentifier: String
-    var actionTitle: String? = nil
-    var isChecking = false
-    var settingsAction: (() -> Void)? = nil
-    let action: () -> Void
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: granted ? "checkmark.circle.fill" : icon)
-                .font(.system(size: 15, weight: .medium))
-                .foregroundStyle(granted ? LibraryTokens.accent : LibraryTokens.ink2)
-                .frame(width: 22)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title)
-                        .font(LibraryTokens.rowTitle)
-                        .foregroundStyle(.primary)
-                    if isRequired && !granted {
-                        Text("REQUIRED")
-                            .font(LibraryTokens.label)
-                            .tracking(LibraryTokens.labelTracking)
-                            .foregroundStyle(LibraryTokens.attention)
-                    }
-                }
-                Text(summary)
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            Spacer(minLength: 12)
-
-            VStack(spacing: 4) {
-                Button(actionTitle ?? (granted ? "Granted" : "Grant")) {
-                    action()
-                }
-                .buttonStyle(QuietPermissionButtonStyle(isSubtle: granted))
-                .disabled(granted || isChecking)
-                .accessibilityIdentifier(automationIdentifier)
-                if let settingsAction, !granted, !isChecking {
-                    Button("Settings", action: settingsAction)
-                        .buttonStyle(.plain)
-                        .font(LibraryTokens.meta)
-                        .foregroundStyle(LibraryTokens.ink2)
-                        .accessibilityIdentifier(automationIdentifier + ".settings")
-                }
-            }
-        }
-        .padding(.vertical, 13)
-        .frame(minHeight: LibraryTokens.minimumHitTarget)
-    }
-}
-
-struct QuietPermissionButtonStyle: ButtonStyle {
-    var isSubtle = false
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .font(.system(size: 12, weight: .semibold))
-            .foregroundStyle(isSubtle ? LibraryTokens.ink3 : LibraryTokens.accent)
-            .padding(.horizontal, 14)
-            .frame(minWidth: 88, minHeight: LibraryTokens.minimumHitTarget)
-            .background(
-                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                    .fill(isSubtle ? Color.clear : LibraryTokens.raisedFill)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
-            .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }

@@ -1,104 +1,81 @@
 import AppKit
 import SwiftUI
 
-/// Shared design tokens for the quiet-library main-window redesign.
+/// Main-window names for the shared tokens in `DesignTokens.swift`.
 ///
-/// One accent, four ink levels, one hairline, two radii, five type roles.
-/// Main-window surfaces (Home, Dictations, Speakers, Agent, Settings, menu
-/// bar popover) should draw from here instead of inlining sizes and colors.
-/// The overlays (`Sources/UI/Overlay/`) intentionally keep their own tokens
-/// and are out of scope for this pass.
+/// The values live in `DesignTokens` (one source for the main window, the
+/// popover and the island); these names stay so existing pages keep working.
+/// New code can use either. Guide: `docs/ui-tokens.md`.
 enum LibraryTokens {
     // MARK: Color
 
-    /// The single brand accent: a tamed capture-green. Selection, links,
-    /// live progress, played audio. Never used to say "everything is fine".
-    static let accent = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.180, green: 0.741, blue: 0.549, alpha: 1),
-        light: NSColor(red: 0.122, green: 0.541, blue: 0.400, alpha: 1)
-    ))
+    /// Capture green: live or just-worked only (listening, recording, pasted,
+    /// live progress, played audio). Never a button, never "starred",
+    /// "copied", "saved", "You" or today's date.
+    static let accent = DesignTokens.live
 
     /// Attention amber for failed / needs-action states only.
-    static let attention = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.878, green: 0.639, blue: 0.243, alpha: 1),
-        light: NSColor(red: 0.690, green: 0.494, blue: 0.122, alpha: 1)
-    ))
+    static let attention = DesignTokens.attention
 
-    /// Recording red. Recording, and nothing but recording.
-    static let recording = Color(nsColor: .systemRed)
+    /// The recording dot. Recording is live, so it is capture green, the
+    /// same as every other live mark. Red is only a destructive confirm.
+    static let recording = DesignTokens.live
 
-    /// Stream colors shared with the Context app's Days palette: one hue per
-    /// capture stream, used where Today shows meetings and dictation side by
-    /// side. Not a second accent; never used for selection or state.
-    static let meetingsStream = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.702, green: 0.588, blue: 0.855, alpha: 1),
-        light: NSColor(red: 0.420, green: 0.298, blue: 0.541, alpha: 1)
-    ))
-    static let dictationStream = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.478, green: 0.733, blue: 0.647, alpha: 1),
-        light: NSColor(red: 0.184, green: 0.365, blue: 0.314, alpha: 1)
-    ))
-    static let writingStream = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.878, green: 0.659, blue: 0.416, alpha: 1),
-        light: NSColor(red: 0.620, green: 0.373, blue: 0.118, alpha: 1)
-    ))
+    /// Stream colors: one hue per capture stream, used as small marks where
+    /// meetings, dictation and writing sit side by side. Not a second accent;
+    /// never used for selection, state or fills.
+    static let meetingsStream = DesignTokens.meetingsStream
+    static let dictationStream = DesignTokens.dictationStream
+    static let writingStream = DesignTokens.writingStream
+
+    /// Primary ink: text and the primary-button fill.
+    static let ink = DesignTokens.ink
 
     /// Secondary ink for meta text (durations, counts, status lines).
-    static let ink2 = Color.primary.opacity(0.55)
+    static let ink2 = DesignTokens.ink2
 
     /// Tertiary ink for whisper text (timestamps, labels, hints).
-    static let ink3 = Color.primary.opacity(0.34)
+    static let ink3 = DesignTokens.ink3
 
     /// The only divider in the main window.
-    static let hairline = Color.primary.opacity(0.08)
+    static let hairline = DesignTokens.hairline
 
     /// Hover / selection fill for rows. No stroke.
-    static let rowHover = Color.primary.opacity(0.045)
+    static let rowHover = DesignTokens.fill
 
     /// Raised surface fill for the inline expansion card and find bar.
-    static let raisedFill = Color.primary.opacity(0.035)
-    static let raisedStroke = Color.primary.opacity(0.08)
+    static let raisedFill = DesignTokens.fill
+    static let raisedStroke = DesignTokens.hairline
 
-    /// The two-tone window split (Things-style): a solid darker sidebar
-    /// against a solid lighter content pane. No materials, no gradients,
-    /// no border boxes — the tone change IS the boundary.
-    static let sidebarBackground = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.100, green: 0.100, blue: 0.106, alpha: 1),
-        light: NSColor(red: 0.922, green: 0.922, blue: 0.914, alpha: 1)
-    ))
-    static let contentBackground = Color(nsColor: dynamicColor(
-        dark: NSColor(red: 0.137, green: 0.137, blue: 0.145, alpha: 1),
-        light: NSColor(red: 0.969, green: 0.969, blue: 0.961, alpha: 1)
-    ))
+    /// The two-tone window split: a solid darker sidebar against a solid
+    /// lighter content pane (paper). No materials, no gradients.
+    static let sidebarBackground = DesignTokens.paperSidebar
+    static let contentBackground = DesignTokens.paper
 
     // MARK: Type
 
-    /// Page titles (Meetings, Dictations, Speakers, …).
-    static let title = Font.system(size: 28, weight: .semibold)
+    /// Page titles (Meetings, Dictations, Speakers, …): the display role.
+    static var title: Font { TextRole.display.font() }
+    /// Card and sheet headings.
+    static var heading: Font { TextRole.heading.font() }
     /// Row titles.
     static let rowTitle = Font.system(size: 13, weight: .medium)
     /// Reading text: transcript, summaries, settings rows.
     static let body = Font.system(size: 13)
     /// Meta text: durations, counts, the header sentence.
     static let meta = Font.system(size: 12)
-    /// Whisper labels (TRANSCRIPT, NEEDS A NAME). Apply `labelTracking`.
-    static let label = Font.system(size: 10.5, weight: .semibold)
-    static let labelTracking: CGFloat = 1.1
+    /// Footnotes and captions.
+    static let small = Font.system(size: 11)
+    /// Whisper labels (TRANSCRIPT, NEEDS A NAME): the mono label. Apply
+    /// `labelTracking` and uppercase, or use `.textRole(.label)`.
+    static var label: Font { TextRole.label.font() }
+    static let labelTracking: CGFloat = TextRole.label.tracking
 
     // MARK: Layout
 
-    static let radiusControl: CGFloat = 6
-    static let radiusRaised: CGFloat = 10
-    static let minimumHitTarget: CGFloat = 40
-
-    // MARK: Helpers
-
-    private static func dynamicColor(dark: NSColor, light: NSColor) -> NSColor {
-        NSColor(name: nil) { appearance in
-            let match = appearance.bestMatch(from: [.darkAqua, .aqua])
-            return match == .darkAqua ? dark : light
-        }
-    }
+    static let radiusControl: CGFloat = DesignTokens.Radius.control
+    static let radiusRaised: CGFloat = DesignTokens.Radius.surface
+    static let minimumHitTarget: CGFloat = DesignTokens.minimumHitTarget
 }
 
 /// Whisper section label ("TRANSCRIPT", "NEEDS A NAME", "EVERYONE").

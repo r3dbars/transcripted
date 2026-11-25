@@ -14,7 +14,8 @@ struct DeveloperPreviewSettingsRows: View {
                 let showsKey = feature == DeveloperPreview.nextSentence && on[feature.id] == true
                 DeveloperPreviewRow(feature: feature, isOn: binding(for: feature), showsDivider: showsKey || index < DeveloperPreview.all.count - 1)
                 if showsKey {
-                    WriteForMeKeyRow(showsDivider: index < DeveloperPreview.all.count - 1)
+                    WriteForMeKeyRow(showsDivider: true)
+                    WriteForMeSoundsRow(showsDivider: index < DeveloperPreview.all.count - 1)
                 }
             }
         }
@@ -59,7 +60,6 @@ private struct DeveloperPreviewRow: View {
                 .labelsHidden()
                 .toggleStyle(.switch)
                 .controlSize(.regular)
-                .tint(.accentColor)
                 .accessibilityLabel(Text("\(feature.title), Developer Preview"))
                 .accessibilityValue(Text(isOn ? "On" : "Off"))
                 .accessibilityIdentifier("transcripted.settings.developer-preview.\(feature.id)")
@@ -104,7 +104,7 @@ private struct WriteForMeKeyRow: View {
                 if recording {
                     Text(rejected ? "Add ⌘, ⌥ or ⌃, or use one modifier key" : "Press a key or a combination…")
                         .font(.subheadline)
-                        .foregroundStyle(rejected ? Color.orange : Color.secondary)
+                        .foregroundStyle(rejected ? LibraryTokens.attention : LibraryTokens.ink2)
                     Button("Cancel") { stopRecording() }
                 } else {
                     Picker("Write for Me key", selection: Binding(get: { key }, set: { choose($0) })) {
@@ -122,8 +122,8 @@ private struct WriteForMeKeyRow: View {
             }
             if let other = NextSentencePreferences.hotkeyClash(key) {
                 Text("\(other) uses this key too, so it won't open Write for Me. Pick another one here, or change the \(other.lowercased()) key above.")
-                    .font(.caption)
-                    .foregroundStyle(Color.orange)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.attention)
             }
         }
         .padding(.horizontal, 14)
@@ -220,15 +220,32 @@ private struct WriteForMeKeyRow: View {
     }
 }
 
+/// Write for Me's card sounds. Same key and default as before (on unless
+/// set off); this is just the switch for it.
+private struct WriteForMeSoundsRow: View {
+    let showsDivider: Bool
+    @AppStorage(NextSentencePreferences.soundsKey) private var soundsEnabled = true
+
+    var body: some View {
+        GeneralToggleRow(
+            title: "Write for Me sounds",
+            isOn: $soundsEnabled,
+            help: soundsEnabled ? "Write for Me plays its sounds." : "Write for Me is silent.",
+            automationIdentifier: "transcripted.settings.developer-preview.next-sentence.sounds",
+            showsDivider: showsDivider
+        )
+    }
+}
+
 /// The small tag on every Developer Preview row.
 struct DeveloperPreviewTag: View {
     var body: some View {
         Text("Developer Preview")
-            .font(.caption2.weight(.semibold))
-            .foregroundStyle(Color.orange)
+            .font(TextRole.small.font(weight: .semibold))
+            .foregroundStyle(LibraryTokens.ink2)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
-            .background(Capsule().fill(Color.orange.opacity(0.14)))
+            .background(Capsule().fill(DesignTokens.fill))
             .fixedSize()
             .accessibilityHidden(true)
     }

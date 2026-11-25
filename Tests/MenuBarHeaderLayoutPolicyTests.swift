@@ -10,7 +10,7 @@ func testMenuBarHeaderLayoutPolicy() {
 
         let warmupWarningTop = MenuBarHeaderLayoutPolicy.warningTop(isReady: false, showsStatus: true) - 1
         assertTrue(
-            warmupWarningTop >= MenuBarHeaderLayoutPolicy.detailTop + 24,
+            warmupWarningTop >= MenuBarHeaderLayoutPolicy.detailTop + MenuBarHeaderLayoutPolicy.detailHeight,
             "a warning during warmup should start below the warmup detail text"
         )
 

@@ -38,7 +38,7 @@ private struct HomeEmptyStateView: View {
                 Button(action: state.action) {
                     Text(state.actionTitle)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.transcriptedPrimary)
                 .controlSize(.large)
                 .accessibilityIdentifier(state.automationIdentifier)
 
@@ -48,7 +48,7 @@ private struct HomeEmptyStateView: View {
                     Button(action: secondaryAction) {
                         Text(secondaryTitle)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.transcriptedSecondary)
                     .controlSize(.large)
                     .accessibilityIdentifier(secondaryAutomationIdentifier)
                 }
@@ -73,6 +73,13 @@ private enum HomeDayGroupedListFormatting {
     }()
 }
 
+/// How a day header reads. Dictations keep the ruled header; Meetings use
+/// the quiet mono label with no rule ("TODAY", "MONDAY, NOV 16").
+enum HomeDayHeaderStyle {
+    case ruled
+    case label
+}
+
 struct HomeDayGroupedList<Item, Row: View>: View {
     let sections: [HomeDaySection<Item>]
     let emptyMessage: String
@@ -83,6 +90,7 @@ struct HomeDayGroupedList<Item, Row: View>: View {
     /// Hairline dividers between rows. Off for lists of cards (Dictations),
     /// which carry their own edges.
     var showsRowDividers = true
+    var headerStyle: HomeDayHeaderStyle = .ruled
     @ViewBuilder let row: (Item) -> Row
 
     private static var headerFormatter: DateFormatter {
@@ -117,18 +125,29 @@ struct HomeDayGroupedList<Item, Row: View>: View {
             VStack(alignment: .leading, spacing: sectionSpacing) {
                 ForEach(sections) { section in
                     VStack(alignment: .leading, spacing: headerSpacing) {
-                        Text(Self.headerTitle(for: section))
-                            .font(.system(size: 11, weight: .semibold))
-                            .tracking(0.88)
-                            .textCase(.uppercase)
-                            .foregroundStyle(LibraryTokens.ink2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.bottom, 6)
-                            .overlay(alignment: .bottom) {
-                                Rectangle()
-                                    .fill(LibraryTokens.hairline)
-                                    .frame(height: 1)
-                            }
+                        switch headerStyle {
+                        case .ruled:
+                            Text(Self.headerTitle(for: section))
+                                .font(.system(size: 11, weight: .semibold))
+                                .tracking(0.88)
+                                .textCase(.uppercase)
+                                .foregroundStyle(LibraryTokens.ink2)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.bottom, 6)
+                                .overlay(alignment: .bottom) {
+                                    Rectangle()
+                                        .fill(LibraryTokens.hairline)
+                                        .frame(height: 1)
+                                }
+                        case .label:
+                            // "Monday, Nov 16" (HomeDaySectionLabel), as the
+                            // section was grouped.
+                            Text(section.label)
+                                .textRole(.label)
+                                .foregroundStyle(LibraryTokens.ink3)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .accessibilityAddTraits(.isHeader)
+                        }
 
                         VStack(alignment: .leading, spacing: 0) {
                             ForEach(
@@ -165,6 +184,10 @@ struct HomeMeetingSearchField: View {
     /// the token is already non-zero, so a request made while the bar was
     /// hidden lands once it mounts.
     var focusRequestToken: Int = 0
+    /// Dictations reuses the field with its own words and ids.
+    var placeholder: String = "Find meetings"
+    var clearAccessibilityLabel: String = "Clear meeting filter"
+    var automationIdentifier: String = "transcripted.home.meeting-search.field"
 
     @FocusState private var isFocused: Bool
 
@@ -174,7 +197,7 @@ struct HomeMeetingSearchField: View {
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
 
-            TextField("Find meetings", text: $query)
+            TextField(placeholder, text: $query)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13))
                 .focused($isFocused)
@@ -182,7 +205,7 @@ struct HomeMeetingSearchField: View {
                     guard focusRequestToken > 0 else { return }
                     isFocused = true
                 }
-                .accessibilityIdentifier("transcripted.home.meeting-search.field")
+                .accessibilityIdentifier(automationIdentifier)
 
             if !query.isEmpty {
                 Button {
@@ -194,7 +217,7 @@ struct HomeMeetingSearchField: View {
                 }
                 .buttonStyle(.plain)
                 .help("Clear filter")
-                .accessibilityLabel("Clear meeting filter")
+                .accessibilityLabel(Text(clearAccessibilityLabel))
             }
         }
         .padding(.horizontal, 10)
@@ -220,6 +243,7 @@ struct HomeCaptureListSection<Item, Row: View>: View {
     let getID: (Item) -> AnyHashable
     let onLoadMore: () -> Void
     var showsRowDividers = true
+    var headerStyle: HomeDayHeaderStyle = .ruled
     @ViewBuilder let row: (Item) -> Row
 
     var body: some View {
@@ -240,9 +264,10 @@ struct HomeCaptureListSection<Item, Row: View>: View {
                     emptyMessage: emptyMessage,
                     emptyState: emptyState,
                     getID: getID,
-                    sectionSpacing: 14,
+                    sectionSpacing: headerStyle == .label ? 22 : 14,
                     headerSpacing: 2,
                     showsRowDividers: showsRowDividers,
+                    headerStyle: headerStyle,
                     row: row
                 )
 

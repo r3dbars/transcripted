@@ -363,12 +363,19 @@ import TranscriptedCore
                 getID: { AnyHashable($0.id) },
                 onLoadMore: { viewModel.loadMoreMeetings() }
             ) { item in
-                QuietMeetingRow(
+                QuietMeetingCard(
                     item: item,
+                    isExpanded: false,
+                    preview: nil,
                     isCopied: false,
-                    onOpen: {},
+                    menuItems: [],
+                    knownPeople: [],
+                    savedSpeakerIDs: [],
+                    onToggleExpanded: {},
+                    onCollapse: {},
                     onCopy: {},
-                    menuItems: []
+                    onWhoSpoke: {},
+                    onAssignSpeakers: { _, completion in completion(false) }
                 )
             }
         }

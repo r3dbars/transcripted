@@ -96,7 +96,7 @@ func testFeedbackIssueBuilder() {
 
     runSuite("Send Diagnostics status gives a plain next step") {
         let status = SupportDiagnosticsStatusCopy.sent(eventID: "1a2b3c4d5e6f47a8")
-        assertTrue(status.contains("Email Support"), "the status should point at the next step")
+        assertTrue(status.contains("Email support"), "the status should point at the next step")
         assertTrue(status.contains("1a2b3c4d"), "the status should show the short report ID")
         assertFalse(status.contains("5e6f47a8"), "the status should only show the short form of the ID")
     }

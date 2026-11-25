@@ -10,7 +10,7 @@
 // and only when the user's own hotkey ends a session whose microphone start
 // had not landed yet (a push-to-talk release, or a hands-free second press;
 // both arrive as `trigger: physical_key`). A start that exhausts the wait
-// budget surfaces a different message entirely, with a Try Again button. So
+// budget surfaces a different message entirely, with a Try again button. So
 // neither the wait budget nor the per-operation CoreAudio fences are part of
 // this profile: raising either could not affect that symptom, because the
 // user ends the session before either one expires.

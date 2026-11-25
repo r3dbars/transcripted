@@ -170,7 +170,7 @@ extension DictationSessionController {
                             inputFormatReady: appState.sttRouter.inputFormatReady,
                             routeContext: appState.sttRouter.dictationAudioRouteAnalyticsContext
                         ),
-                        actionTitle: "Try Again",
+                        actionTitle: "Try again",
                         action: retry
                     )
                 }
@@ -490,6 +490,9 @@ extension DictationSessionController {
             ) else { return }
             if saveResult.saved != nil, self.stoppedAudioRecovery == recovery {
                 self.stoppedAudioRecovery = nil
+            }
+            if saveResult.saved != nil {
+                NotificationCenter.default.post(name: .foregroundDictationDidSave, object: text)
             }
             stopTiming.saveStartedAt = saveResult.startedAt
             stopTiming.savedAt = saveResult.finishedAt

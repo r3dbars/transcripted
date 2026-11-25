@@ -176,6 +176,15 @@ final class MenuBarActionRowView: NSControl {
             titleColor = MenuTokens.textSecondaryNS
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textMutedNS
+        } else if isFilledButton {
+            // Filled buttons are the primary look: ink fill, paper text.
+            // Hover and press only soften the ink.
+            let fillAlpha: CGFloat = isPressing ? 0.78 : (isHovering ? 0.88 : 1)
+            backgroundColor = MenuTokens.buttonBackgroundNS.withAlphaComponent(fillAlpha)
+            iconTint = rowTone == .standard ? MenuTokens.buttonTextNS : toneColors().normal
+            titleColor = MenuTokens.buttonTextNS
+            detailColor = MenuTokens.buttonTextNS
+            trailingColor = MenuTokens.buttonTextNS
         } else if isPressing {
             backgroundColor = MenuTokens.flatRowPressedNS
             iconTint = toneColors().pressed
@@ -183,16 +192,13 @@ final class MenuBarActionRowView: NSControl {
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textSecondaryNS
         } else if isHovering {
-            // A button's resting fill is already hover-strength, so its hover
-            // steps up to the pressed fill.
-            backgroundColor = isFilledButton ? MenuTokens.flatRowPressedNS : MenuTokens.flatRowHoverNS
+            backgroundColor = MenuTokens.flatRowHoverNS
             iconTint = toneColors().pressed
             titleColor = MenuTokens.textPrimaryNS
             detailColor = MenuTokens.textSecondaryNS
             trailingColor = MenuTokens.textSecondaryNS
         } else {
-            // Buttons keep a quiet fill at rest so they read as buttons.
-            backgroundColor = isFilledButton ? MenuTokens.buttonBackgroundNS : .clear
+            backgroundColor = .clear
             iconTint = toneColors().normal
             titleColor = MenuTokens.textPrimaryNS
             detailColor = MenuTokens.textSecondaryNS
@@ -216,7 +222,7 @@ final class MenuBarActionRowView: NSControl {
         case .warning:
             return (MenuTokens.statusOrangeNS, MenuTokens.statusOrangeNS)
         case .recording:
-            return (MenuTokens.statusRedNS, MenuTokens.statusRedNS)
+            return (MenuTokens.statusRecordingNS, MenuTokens.statusRecordingNS)
         }
     }
 
@@ -250,22 +256,29 @@ final class MenuBarActionRowView: NSControl {
             height: symbolSize
         )
 
+        // Line heights come from the fonts (title 13, detail and trailing 11),
+        // so the text never clips when a role's size changes. Two lines fit
+        // the 40/42 pt rows: about 16 + 1 + 14.
         let textX = symbolWellView.frame.maxX + Self.buttonIconGap
+        let titleHeight = Self.lineHeight(of: titleLabel)
+        let trailingHeight = Self.lineHeight(of: trailingLabel)
         if !hasDetail {
-            let centeredY = (bounds.height - 16) / 2
-            titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: 16)
+            let centeredY = floor((bounds.height - titleHeight) / 2)
+            titleLabel.frame = NSRect(x: textX, y: centeredY, width: textWidth, height: titleHeight)
             detailLabel.frame = .zero
         } else {
-            let textBlockHeight: CGFloat = 30
-            let titleY = floor((bounds.height - textBlockHeight) / 2)
-            titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: 16)
-            detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: 13)
+            let detailHeight = Self.lineHeight(of: detailLabel)
+            let textBlockHeight = titleHeight + 1 + detailHeight
+            let titleY = max(0, floor((bounds.height - textBlockHeight) / 2))
+            titleLabel.frame = NSRect(x: textX, y: titleY, width: textWidth, height: titleHeight)
+            detailLabel.frame = NSRect(x: textX, y: titleLabel.frame.maxY + 1, width: textWidth, height: detailHeight)
         }
 
         if trailingWidth > 0 {
             let trailingX = bounds.width - padX - trailingWidth
-            let trailingY = hasDetail ? titleLabel.frame.minY + 1 : (bounds.height - 14) / 2
-            trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: 14)
+            // Trailing text sits on the title's baseline row.
+            let trailingY = titleLabel.frame.minY + floor((titleHeight - trailingHeight) / 2) + 1
+            trailingLabel.frame = NSRect(x: trailingX, y: trailingY, width: trailingWidth, height: trailingHeight)
         }
     }
 
@@ -297,18 +310,27 @@ final class MenuBarActionRowView: NSControl {
         let showsTrailing = !trailingLabel.stringValue.isEmpty
         trailingLabel.isHidden = !showsTrailing
 
-        let titleY = floor((bounds.height - 16) / 2)
-        titleLabel.frame = NSRect(x: textX, y: titleY, width: min(titleWidth, available), height: 16)
+        let titleHeight = Self.lineHeight(of: titleLabel)
+        let trailingHeight = Self.lineHeight(of: trailingLabel)
+        let titleY = floor((bounds.height - titleHeight) / 2)
+        titleLabel.frame = NSRect(x: textX, y: titleY, width: min(titleWidth, available), height: titleHeight)
         if showsTrailing {
             trailingLabel.frame = NSRect(
                 x: bounds.width - padX - trailingWidth,
-                y: floor((bounds.height - 14) / 2),
+                y: floor((bounds.height - trailingHeight) / 2),
                 width: trailingWidth,
-                height: 14
+                height: trailingHeight
             )
         } else {
             trailingLabel.frame = .zero
         }
+    }
+
+    /// One line of a label's font, rounded up, so frames never clip
+    /// descenders.
+    private static func lineHeight(of label: NSTextField) -> CGFloat {
+        guard let font = label.font else { return 16 }
+        return ceil(font.ascender - font.descender + font.leading)
     }
 
     /// The width a label's cell actually draws. On macOS 26 a label's

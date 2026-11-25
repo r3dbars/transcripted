@@ -24,7 +24,7 @@ func testDictationTranscriptPersistence() async {
         assertEqual(presentations[3].addingPendingAudioNotice(true), .error("Auto Enter failed \(pending)"))
         assertTrue(DictationDeliveryPresentation.success(title: "Pasted").canOfferAudioRetentionRetry)
         assertEqual(DictationSessionCapSavePolicy.presentation(saveFailureMessage: nil, audioRetentionPending: true),
-                    .savedNotice(message: "Saved to Markdown. Paste it now, or find it later in Dictations. \(pending)", actionTitle: "Paste It"))
+                    .savedNotice(message: "Saved to Markdown. Paste it now, or find it later in Dictations. \(pending)", actionTitle: "Paste"))
     }
     runSuite("Session-cap completion labels a failed Markdown save as failed delivery") {
         let saved = DictationSessionCapCompletionTelemetryPolicy.snapshot(saveSucceeded: true)

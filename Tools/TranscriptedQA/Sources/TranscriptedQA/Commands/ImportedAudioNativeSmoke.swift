@@ -210,7 +210,7 @@ private final class ImportedAudioNativeSmokeRunner {
             return buildReport(checks: checks, evidenceRoot: evidenceRoot, captureLibrary: captureLibrary, appLogPath: launched.logURL.path, selectedAudioPath: selectedAudio.path, transcriptPath: nil)
         }
 
-        guard appInspector.performPressOrClick(identifier: "transcripted.settings.general.transcribe-audio-file", maxDepth: 12) else {
+        guard appInspector.performPressOrClick(identifier: "transcripted.settings.general.transcribe-audio-file", maxDepth: 16) else {
             add(.fail("open-native-picker", "General import action opens the native file picker", target: "transcripted.settings.general.transcribe-audio-file", detail: "Could not press the Transcribe Audio File control."))
             return buildReport(checks: checks, evidenceRoot: evidenceRoot, captureLibrary: captureLibrary, appLogPath: launched.logURL.path, selectedAudioPath: selectedAudio.path, transcriptPath: nil)
         }
@@ -287,10 +287,17 @@ private final class ImportedAudioNativeSmokeRunner {
             return false
         }
 
-        // The settings area is one combined scrolling page — no tab strip to
-        // wait for or click; the import control appears directly.
+        // The settings area is one combined scrolling page; the import row
+        // sits in its Advanced disclosure, which a fresh home starts closed.
+        let advancedToggleID = "transcripted.settings.advanced.toggle"
+        if waitUntil(timeout: timeout, condition: {
+            appInspector.snapshot(maxDepth: 12).contains { $0.identifier == advancedToggleID }
+        }), !appInspector.snapshot(maxDepth: 16).contains(where: { $0.identifier == "transcripted.settings.section.advanced" }) {
+            _ = appInspector.performPressOrClick(identifier: advancedToggleID)
+        }
+
         guard waitUntil(timeout: timeout, condition: {
-            appInspector.snapshot(maxDepth: 12).contains { $0.identifier == "transcripted.settings.general.transcribe-audio-file" }
+            appInspector.snapshot(maxDepth: 16).contains { $0.identifier == "transcripted.settings.general.transcribe-audio-file" }
         }) else {
             checks.append(.fail("settings-general", "General import control is visible", target: "transcripted.settings.general.transcribe-audio-file", detail: "General page did not expose the Transcribe Audio File control."))
             return false

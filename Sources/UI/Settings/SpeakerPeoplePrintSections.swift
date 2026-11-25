@@ -60,8 +60,8 @@ private struct SpeakerPrintSectionHeader: View {
             }
 
             Text(SpeakerPrintDirectory.title(section, count: members.count))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(LibraryTokens.ink2)
+                .font(TextRole.meta.font(weight: .medium))
+                .foregroundStyle(LibraryTokens.ink3)
                 .accessibilityAddTraits(.isHeader)
         }
         .padding(.bottom, 6)
@@ -80,7 +80,7 @@ enum SpeakerPrintInk {
         return Color(.sRGB, red: ink.red, green: ink.green, blue: ink.blue, opacity: ink.alpha)
     }
 
-    /// The same hue for small text ("One more yes"): darker on a light window
+    /// The same hue for small text ("4 of 5"): darker on a light window
     /// so it reads at 4.5:1 (`SpeakerPrintTextInk`, tested).
     static func hintColor(for id: UUID, colorScheme: ColorScheme) -> Color {
         let ink = SpeakerPrintTextInk.hint(

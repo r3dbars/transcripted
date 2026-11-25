@@ -104,7 +104,7 @@ final class NextSentenceCard: NSObject {
     let waveform = NextSentenceWaveform(frame: .zero)
     let micButton = NextSentenceCapsuleButton(title: "", fill: NextSentenceCardStyle.buttonSubtle)
     let remixButton = NextSentenceCapsuleButton(title: "", fill: NextSentenceCardStyle.buttonSubtle)
-    let insertButton = NextSentenceCapsuleButton(title: "Insert", fill: NextSentenceCardStyle.accent, wide: true)
+    let insertButton = NextSentenceCapsuleButton(title: "Insert", fill: NextSentenceCardStyle.primaryFill, titleColor: NextSentenceCardStyle.primaryText, wide: true)
     let float = NextSentenceWordFloat(frame: .zero)
     let tip = NextSentenceSourceTip(frame: .zero)
     let buttonTip = NextSentenceSourceTip(frame: .zero)
@@ -448,12 +448,12 @@ final class NextSentenceCard: NSObject {
 
     private func placeOptions(_ options: [String], for range: NSRange) {
         optionsRange = range
-        // The picked part stands out: bright blue behind white text.
+        // The picked part stands out: a light wash behind white text.
         if isEditing { textView.setSelectedRange(range) }
         if let previous = optionsRange, previous != range, NSMaxRange(previous) <= (textView.string as NSString).length {
             clearHighlight(previous)
         }
-        textView.layoutManager?.addTemporaryAttributes([.backgroundColor: NextSentenceCardStyle.accent.withAlphaComponent(0.7),
+        textView.layoutManager?.addTemporaryAttributes([.backgroundColor: NextSentenceCardStyle.selection,
                                                         .foregroundColor: NSColor.white], forCharacterRange: range)
         let rect = textView.convert(textView.rect(for: range), to: root)
         float.show(options, above: rect, within: root.bounds.insetBy(dx: 6, dy: 0))

@@ -46,6 +46,10 @@ struct CachedRecentMeetingMetadata: Codable, Sendable {
     // search learned speaker names miss once and get reparsed, instead of
     // leaving those meetings unfindable by name.
     var speakerNames: [String] = []
+    // Required on decode too: payloads written before the Meetings row
+    // learned which voices were on the mic miss once and reparse, so a named
+    // mic voice isn't listed next to "You".
+    var micVoices: [String] = []
     // Required on decode too: payloads written before rows showed the speech
     // model (and imports were listed by import time) miss once and reparse.
     var transcriptionEngine: String = ""
@@ -78,6 +82,7 @@ extension CachedRecentMeetingMetadata {
         self.audioHealthMicBoostOutcome = item.audioHealth?.micBoostPromptOutcome
         self.systemAudioSignalVerified = item.systemAudioSignalVerified
         self.speakerNames = item.speakerNames
+        self.micVoices = item.micVoices
         self.transcriptionEngine = item.transcriptionEngine ?? ""
         self.importedAt = item.importedAt
         self.isStarred = item.isStarred
@@ -101,6 +106,7 @@ extension CachedRecentMeetingMetadata {
                 : nil,
             systemAudioSignalVerified: systemAudioSignalVerified,
             speakerNames: speakerNames,
+            micVoices: micVoices,
             transcriptionEngine: transcriptionEngine.isEmpty ? nil : transcriptionEngine,
             importedAt: importedAt,
             isStarred: isStarred ?? false,

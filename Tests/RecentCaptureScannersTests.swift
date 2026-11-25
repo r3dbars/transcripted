@@ -241,7 +241,7 @@ func testRecentCaptureScanners() async {
     runSuite("RecentMeetingRetranscriptionMenuActionPolicy says why re-transcribe is greyed out") {
         assertEqual(
             RecentMeetingRetranscriptionMenuActionPolicy.title(globalUnavailableReason: nil),
-            "Re-transcribe",
+            "Transcribe again",
             "an available item keeps a short plain title"
         )
         assertEqual(
@@ -253,12 +253,12 @@ func testRecentCaptureScanners() async {
                     hasMeetingWork: true
                 )
             ),
-            "Re-transcribe (after this recording)",
+            "Transcribe again (after this recording)",
             "a disabled item names what it waits on, since a menu item has no tooltip"
         )
         assertEqual(
             RecentMeetingRetranscriptionMenuActionPolicy.title(globalUnavailableReason: "something new"),
-            "Re-transcribe (not available right now)",
+            "Transcribe again (not available right now)",
             "an unmapped reason still explains itself"
         )
     }

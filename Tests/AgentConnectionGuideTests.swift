@@ -18,17 +18,17 @@ func testAgentConnectionGuide() {
         let prompt = AgentConnectionGuide.starterPrompt(filename: "Planning Sync")
 
         assertTrue(
-            prompt.contains("Use Transcripted direct tools first if they are connected:"),
-            "prompt should tell local agents to use direct tools when available"
+            prompt.contains("Use the Transcripted tools first if they are connected (start with recent_context and search_context)."),
+            "prompt should tell local agents to use the tools when available, naming only where to start"
         )
         assertTrue(
             AgentConnectionGuide.directToolNames.count == 15,
-            "prompt should track the full Transcripted MCP direct tool set"
+            "the guide should track the full Transcripted MCP direct tool set"
         )
-        for toolName in AgentConnectionGuide.directToolNames {
-            assertTrue(
-                prompt.contains("- \(toolName)"),
-                "prompt should name the \(toolName) direct tool"
+        for toolName in AgentConnectionGuide.directToolNames where !AgentConnectionGuide.starterToolNames.contains(toolName) {
+            assertFalse(
+                prompt.contains("- \(toolName)\n") || prompt.hasSuffix("- \(toolName)"),
+                "the pasted prompt should not list raw tool names like \(toolName)"
             )
         }
         assertEqual(

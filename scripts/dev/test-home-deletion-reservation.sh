@@ -46,6 +46,8 @@ swiftc -parse-as-library -Onone -target arm64-apple-macos26.0 \
     Sources/UI/Shared/HomeMeetingDeletion.swift \
     Sources/UI/Shared/CaptureUndo.swift \
     Sources/UI/Shared/LibraryTokens.swift \
+    Sources/UI/Shared/DesignTokens.swift \
+    Sources/UI/Shared/BundledFonts.swift \
     Tests/Integration/HomeMeetingDeletion/ReservationSmoke.swift \
     "$CORE_LIBRARY" -L "$REPO_ROOT/deps-libs" -lExternalDeps -lc++ -lsqlite3 \
     -framework AppKit -framework SwiftUI -framework Combine \

@@ -1,11 +1,13 @@
 // SpeakerWhoSpokeCards.swift
-// The top of Settings › Speakers: "12 voices from your meetings need a name",
-// "Meeting 1 of 8" with a segmented bar, then one meeting's "Who spoke?" card
-// at a time, with the edges of the next ones peeking out underneath. The card
-// is the island's own review (NotchIslandSpeakerReviewView in its page
-// chrome), so a voice reads, plays and gets named exactly as it does after a
-// meeting, minus the countdown. Done shows "Weekly sync is done · 3 voices
-// named" with Undo while its answers wait to save, and the next card comes up.
+// The top of Settings › Speakers: one meeting's "Who spoke?" card at a time,
+// with nothing stacked in front of it and the edges of the next ones peeking
+// out underneath. "1 of 8" on the card says where the visit is. The card is
+// the island's own review (NotchIslandSpeakerReviewView in its page chrome),
+// so a voice reads, plays and gets named exactly as it does after a meeting,
+// minus the countdown. Done shows "Weekly sync is done · 3 voices named" with
+// Undo while its answers wait to save, and the next card comes up. A meeting
+// the Meetings page asked about that the queue has nothing for gets the same
+// card built from its transcript (SpeakerTranscriptWhoSpoke), on top.
 // Copy and progress: SpeakerMeetingReviewPolicy. What the card asks and what
 // it saves: SpeakerPeopleSettingsViewModel+MeetingReview.
 
@@ -14,6 +16,7 @@ import SwiftUI
 
 struct SpeakerWhoSpokeSection: View {
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
+    @ObservedObject private var transcriptRequests = SpeakerTranscriptWhoSpokeRequests.shared
     @StateObject private var store = SpeakerWhoSpokeViewStore()
 
     private typealias Policy = SpeakerMeetingReviewPolicy
@@ -24,79 +27,62 @@ struct SpeakerWhoSpokeSection: View {
         let position = Policy.position(meetingsDone: review.meetingsDone, meetingsLeft: calls.count)
 
         VStack(alignment: .leading, spacing: 14) {
-            if let headline = Policy.headline(voiceCount: model.reviewStack.voiceCount) {
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack(alignment: .firstTextBaseline, spacing: 12) {
-                        Text(headline)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Color.primary)
-                        Spacer(minLength: 8)
-                        if let position {
-                            Text(Policy.positionLine(position))
-                                .font(LibraryTokens.meta)
-                                .monospacedDigit()
-                                .foregroundStyle(LibraryTokens.ink2)
+            if let error = model.meetingSaveError {
+                errorLine(error, identifier: "transcripted.speakers.who-spoke.save-error")
+            }
+
+            if let card = transcriptRequests.card {
+                // A meeting asked for from Meetings, named from its transcript.
+                if let error = transcriptRequests.saveError {
+                    errorLine(error, identifier: "transcripted.speakers.who-spoke.transcript-save-error")
+                }
+                SpeakerWhoSpokeCardFrame(
+                    review: store.transcriptReview(for: card, model: model, requests: transcriptRequests),
+                    invitees: []
+                )
+                .speakerWhoSpokeCardChrome()
+                .id(card.id)
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .accessibilityElement(children: .contain)
+                .accessibilityLabel(Policy.cardTitle(meetingTitle: card.meetingTitle))
+            } else {
+                if let finished = review.finished {
+                    SpeakerWhoSpokeDoneBanner(finished: finished) {
+                        withAnimation(.snappy(duration: 0.28)) { model.undoFinishedMeeting() }
+                    }
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                }
+
+                if let call = calls.first {
+                    VStack(spacing: 0) {
+                        SpeakerWhoSpokeCardFrame(
+                            review: store.review(for: call, position: position, model: model),
+                            invitees: model.inviteesByCallKey[call.id] ?? []
+                        )
+                        .speakerWhoSpokeCardChrome()
+                        .onAppear { model.loadInvitees(for: call) }
+                        .zIndex(2)
+
+                        if calls.count > 1 {
+                            stackEdge(inset: 12).zIndex(1)
+                        }
+                        if calls.count > 2 {
+                            stackEdge(inset: 24).opacity(0.7)
                         }
                     }
-                    if let position {
-                        SpeakerWhoSpokeProgressBar(progress: Policy.progress(position), position: position)
-                    }
+                    .id(call.id)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .move(edge: .top).combined(with: .opacity)
+                    ))
+                    .accessibilityElement(children: .contain)
+                    .accessibilityLabel(Policy.cardTitle(meetingTitle: call.meetingTitle))
                 }
-            }
-
-            if let error = model.meetingSaveError {
-                Label(error, systemImage: "exclamationmark.triangle")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.attention)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .accessibilityIdentifier("transcripted.speakers.who-spoke.save-error")
-            }
-
-            if let finished = review.finished {
-                SpeakerWhoSpokeDoneBanner(finished: finished) {
-                    withAnimation(.snappy(duration: 0.28)) { model.undoFinishedMeeting() }
-                }
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            if let call = calls.first {
-                VStack(spacing: 0) {
-                    SpeakerWhoSpokeCardFrame(
-                        review: store.review(for: call, meetingsAfterThis: calls.count - 1, model: model),
-                        invitees: model.inviteesByCallKey[call.id] ?? []
-                    )
-                    .padding(.horizontal, SpeakerWhoSpokeLayout.cardPadding)
-                    .padding(.vertical, 18)
-                    .background(
-                        RoundedRectangle(cornerRadius: SpeakerWhoSpokeLayout.cornerRadius, style: .continuous)
-                            .fill(SpeakerWhoSpokeLayout.cardFill)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: SpeakerWhoSpokeLayout.cornerRadius, style: .continuous)
-                            .stroke(SpeakerWhoSpokeLayout.cardStroke, lineWidth: 1)
-                    )
-                    .environment(\.colorScheme, .dark)
-                    .onAppear { model.loadInvitees(for: call) }
-                    .zIndex(2)
-
-                    if calls.count > 1 {
-                        stackEdge(inset: 12).zIndex(1)
-                    }
-                    if calls.count > 2 {
-                        stackEdge(inset: 24).opacity(0.7)
-                    }
-                }
-                .id(call.id)
-                .transition(.asymmetric(
-                    insertion: .move(edge: .bottom).combined(with: .opacity),
-                    removal: .move(edge: .top).combined(with: .opacity)
-                ))
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel(Policy.cardTitle(meetingTitle: call.meetingTitle))
             }
         }
         .animation(.spring(response: 0.34, dampingFraction: 0.82), value: calls.first?.id)
         .animation(.snappy(duration: 0.28), value: review.finished?.token)
+        .animation(.snappy(duration: 0.28), value: transcriptRequests.card?.id)
         .onChange(of: calls.map(\.id)) { _, keys in
             store.keep(
                 callKeys: Set(keys.prefix(1)).union(model.meetingReview.finished.map { [$0.callKey] } ?? []),
@@ -104,6 +90,16 @@ struct SpeakerWhoSpokeSection: View {
             )
             model.meetingReview.resetProgressIfIdle(meetingsLeft: keys.count)
         }
+        // The transcript card is for this visit; leaving the page closes it.
+        .onDisappear { transcriptRequests.close() }
+    }
+
+    private func errorLine(_ text: String, identifier: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle")
+            .font(LibraryTokens.meta)
+            .foregroundStyle(LibraryTokens.attention)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityIdentifier(identifier)
     }
 
     /// The lower edge of a card waiting under the top one.
@@ -122,6 +118,30 @@ struct SpeakerWhoSpokeSection: View {
     }
 }
 
+/// The black card around a "Who spoke?" review, like the island.
+private struct SpeakerWhoSpokeCardChrome: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, SpeakerWhoSpokeLayout.cardPadding)
+            .padding(.vertical, 18)
+            .background(
+                RoundedRectangle(cornerRadius: SpeakerWhoSpokeLayout.cornerRadius, style: .continuous)
+                    .fill(SpeakerWhoSpokeLayout.cardFill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: SpeakerWhoSpokeLayout.cornerRadius, style: .continuous)
+                    .stroke(SpeakerWhoSpokeLayout.cardStroke, lineWidth: 1)
+            )
+            .environment(\.colorScheme, .dark)
+    }
+}
+
+private extension View {
+    func speakerWhoSpokeCardChrome() -> some View {
+        modifier(SpeakerWhoSpokeCardChrome())
+    }
+}
+
 enum SpeakerWhoSpokeLayout {
     /// The island's review rows at the page card's width.
     static let contentWidth: CGFloat = 600
@@ -130,27 +150,6 @@ enum SpeakerWhoSpokeLayout {
     static let cardFill = Color(red: 0.043, green: 0.043, blue: 0.047)
     static let edgeFill = Color(red: 0.07, green: 0.07, blue: 0.075)
     static let cardStroke = Color.white.opacity(0.16)
-}
-
-/// The meetings in this visit, one segment each (several each past twelve);
-/// the lit ones are done or on the card now.
-private struct SpeakerWhoSpokeProgressBar: View {
-    let progress: SpeakerMeetingReviewPolicy.Progress
-    let position: SpeakerMeetingReviewPolicy.Position
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(0..<progress.segments, id: \.self) { index in
-                Capsule()
-                    .fill(index < progress.lit ? Color.primary.opacity(0.85) : LibraryTokens.hairline)
-                    .frame(height: 4)
-            }
-        }
-        .animation(.easeOut(duration: 0.25), value: progress)
-        .accessibilityElement()
-        .accessibilityLabel("Meetings to name")
-        .accessibilityValue(SpeakerMeetingReviewPolicy.positionLine(position))
-    }
 }
 
 /// "Weekly sync is done · 3 voices named", who they were, and Undo.
@@ -187,7 +186,7 @@ private struct SpeakerWhoSpokeDoneBanner: View {
             Button("Undo", action: onUndo)
                 .buttonStyle(.bordered)
                 .controlSize(.small)
-                .help("Bring this meeting back. Nothing has been saved yet.")
+                .help(SpeakerMeetingReviewPolicy.undoHelp)
                 .accessibilityIdentifier("transcripted.speakers.who-spoke.undo")
         }
         .padding(.horizontal, 18)
@@ -215,13 +214,13 @@ final class SpeakerWhoSpokeViewStore: ObservableObject {
 
     func review(
         for call: SpeakerPendingMeetingGroup,
-        meetingsAfterThis: Int,
+        position: SpeakerMeetingReviewPolicy.Position?,
         model: SpeakerPeopleSettingsViewModel
     ) -> NotchIslandSpeakerReviewView {
         let card = NotchIslandSpeakerReviewView.PageCard(
             title: SpeakerMeetingReviewPolicy.cardTitle(meetingTitle: call.meetingTitle),
-            detail: Self.dateLine(for: call),
-            doneTitle: SpeakerMeetingReviewPolicy.doneTitle(meetingsAfterThis: meetingsAfterThis),
+            detail: position.flatMap(SpeakerMeetingReviewPolicy.positionLine) ?? Self.dateLine(for: call),
+            doneTitle: SpeakerMeetingReviewPolicy.doneTitle,
             skipTitle: SpeakerMeetingReviewPolicy.skipTitle,
             skipHelp: SpeakerMeetingReviewPolicy.skipHelp
         )
@@ -248,6 +247,43 @@ final class SpeakerWhoSpokeViewStore: ObservableObject {
         }
         reviews = reviews.filter { $0.key.hasPrefix(call.id + "|") == false }
         reviews[key] = (review, people)
+        return review
+    }
+
+    /// The transcript card's review, kept while that card is open so a
+    /// failed save keeps its answers.
+    private var transcript: (id: UUID, view: NotchIslandSpeakerReviewView)?
+
+    func transcriptReview(
+        for card: SpeakerTranscriptCard,
+        model: SpeakerPeopleSettingsViewModel,
+        requests: SpeakerTranscriptWhoSpokeRequests
+    ) -> NotchIslandSpeakerReviewView {
+        if let transcript, transcript.id == card.id { return transcript.view }
+        let built = model.transcriptReviewInput(for: card)
+        let review = NotchIslandSpeakerReviewView(
+            input: built.input,
+            chrome: .page(NotchIslandSpeakerReviewView.PageCard(
+                title: SpeakerMeetingReviewPolicy.cardTitle(meetingTitle: card.meetingTitle),
+                detail: Self.dateFormatter.string(from: card.date),
+                doneTitle: SpeakerMeetingReviewPolicy.doneTitle,
+                skipTitle: SpeakerMeetingReviewPolicy.laterTitle,
+                skipHelp: SpeakerMeetingReviewPolicy.laterHelp
+            )),
+            width: SpeakerWhoSpokeLayout.contentWidth
+        )
+        review.setMeetingTitle(card.meetingTitle)
+        let identities = built.identities
+        review.onDone = { [weak model, weak requests] updates, _ in
+            guard let model else { return }
+            withAnimation(.snappy(duration: 0.3)) {
+                requests?.finish(updates: updates, identities: identities, model: model)
+            }
+        }
+        review.onSkip = { [weak requests] _ in
+            withAnimation(.snappy(duration: 0.3)) { requests?.close() }
+        }
+        transcript = (card.id, review)
         return review
     }
 

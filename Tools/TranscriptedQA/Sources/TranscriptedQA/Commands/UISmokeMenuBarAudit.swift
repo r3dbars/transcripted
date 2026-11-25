@@ -41,7 +41,7 @@ struct MenuBarAuditRow: Equatable {
             title: "Audit row 31: menu utility actions are visible, enabled, and 40pt",
             targets: [
                 MenuBarAuditTarget("transcripted.menubar.utility.open-transcripted"),
-                MenuBarAuditTarget("transcripted.menubar.utility.check-updates", requiresEnabled: nil),
+                // No check-updates row: it shows only while an update needs attention.
                 MenuBarAuditTarget("transcripted.menubar.utility.quit"),
             ],
             minimumHitSize: 40

@@ -1,9 +1,11 @@
 // SpeakerPeoplePersonRow.swift
 // One saved person in Settings › Speakers: their voice print (play in the
 // center plays their saved clip), name, meetings and the day last heard, and how far
-// they are from being named on their own. Hover shows ••• with rename, merge,
-// undo merge and delete; a click opens the card in place. Sections and
-// copy: SpeakerPeoplePrintSections.swift and SpeakerPrintDirectory.swift.
+// they are from being named on their own ("4 of 5"). Hover shows ••• with
+// rename, merge, undo merge and delete; a click opens the rename field in
+// place; a likely duplicate says who ("Same as Marcus?") and opens the merge
+// confirm. Sections and copy: SpeakerPeoplePrintSections.swift and
+// SpeakerPrintDirectory.swift.
 
 import SwiftUI
 import AppKit
@@ -12,8 +14,7 @@ import TranscriptedCore
 struct SpeakerPersonRow: View {
     let profile: SpeakerProfile
     @ObservedObject var model: SpeakerPeopleSettingsViewModel
-    /// Observed directly so play/stop/finish reliably re-renders THIS row —
-    /// see the matching note on `SpeakerVoiceToNameRow`.
+    /// Observed directly so play/stop/finish reliably re-renders THIS row.
     @ObservedObject private var playback = SpeakerClipPlayback.shared
     /// Lifted to the parent list so opening one person closes any other —
     /// "one person open at a time", per spec.
@@ -22,7 +23,6 @@ struct SpeakerPersonRow: View {
     @State private var nameDraft: String = ""
     @State private var renameErrorMessage: String?
     @State private var isSavingRename = false
-    @State private var expansionClipDuration = SpeakerClipProgressBar.fallbackDuration
     @State private var showDeleteConfirmation = false
     @State private var actionErrorMessage: String?
     @State private var pendingMergeTarget: SpeakerProfile?
@@ -35,8 +35,9 @@ struct SpeakerPersonRow: View {
 
     private var isExpandedRow: Bool { expandedPersonID == profile.id }
 
-    /// ••• stays hidden until hover; the print is always there.
-    private var showsRowActions: Bool { isHovering }
+    /// ••• shows on hover and while the person is open, so a keyboard or
+    /// VoiceOver user who opens a row can reach Merge into and Delete.
+    private var showsRowActions: Bool { isHovering || isExpandedRow }
 
     /// Print size in Settings, from the approved mockup.
     static let printDiameter: CGFloat = 36
@@ -76,11 +77,23 @@ struct SpeakerPersonRow: View {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 8) {
                         Text(displayName)
-                            .font(.system(size: 14, weight: .semibold))
+                            .font(TextRole.body.font(weight: .semibold))
                             .foregroundStyle(profile.displayName == nil ? LibraryTokens.ink2 : Color.primary)
                             .lineLimit(1)
 
-                        if let badge {
+                        if let duplicate = likelyDuplicate {
+                            // Says who, and one click asks to merge them.
+                            Button {
+                                pendingMergeTarget = duplicate
+                                showMergeConfirmation = true
+                            } label: {
+                                SpeakerStatusBadge(title: SpeakerVoiceRowMenuPolicy.sameAsTitle(for: duplicate.displayName))
+                                    .underline(pattern: .dot)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Merge into \(SpeakerDuplicateCandidate.displayName(for: duplicate))")
+                            .accessibilityIdentifier("transcripted.speakers.person.same-as")
+                        } else if let badge {
                             SpeakerStatusBadge(title: badge)
                         }
                     }
@@ -103,12 +116,12 @@ struct SpeakerPersonRow: View {
 
                     if let quote = displayedQuote {
                         Text("“\(quote)”")
-                            .font(.system(size: 12.5))
+                            .font(LibraryTokens.meta)
                             .foregroundStyle(LibraryTokens.ink2)
                             .lineLimit(2)
                     }
                 }
-                .help(standingExplanation ?? "Open speaker")
+                .help(standingExplanation ?? (profile.displayName == nil ? "Name this voice" : "Rename"))
                 .accessibilityHint(standingExplanation ?? "")
 
                 Spacer(minLength: 12)
@@ -116,7 +129,7 @@ struct SpeakerPersonRow: View {
                 // An unnamed voice says what to do with it.
                 if profile.displayName == nil, !isExpandedRow {
                     Button("Name") { toggleExpansion() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.transcriptedQuiet)
                         .controlSize(.small)
                         .accessibilityIdentifier("transcripted.speakers.person.name")
                 }
@@ -133,7 +146,7 @@ struct SpeakerPersonRow: View {
             .padding(.horizontal, 12)
             .contentShape(Rectangle())
             .background(
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
                     .fill((isHovering || isExpandedRow) ? LibraryTokens.rowHover : Color.clear)
             )
             .padding(.horizontal, -12)
@@ -157,7 +170,7 @@ struct SpeakerPersonRow: View {
                 expansionCard
             }
         }
-        .alert("Delete this speaker?", isPresented: $showDeleteConfirmation) {
+        .alert(deleteConfirmationTitle, isPresented: $showDeleteConfirmation) {
             Button("Delete", role: .destructive) {
                 actionErrorMessage = nil
                 model.delete(profile: profile) { didDelete in
@@ -167,7 +180,7 @@ struct SpeakerPersonRow: View {
             Button("Cancel", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
         } message: {
-            Text("This removes the saved voice profile and sample clip. Past transcripts stay unchanged.")
+            Text("Removes their voice and its sample. Transcripts keep the name.")
         }
         .alert(
             mergeConfirmationTitle,
@@ -177,7 +190,7 @@ struct SpeakerPersonRow: View {
             Button("Merge") {
                 actionErrorMessage = nil
                 model.merge(source: profile, into: target) { didMerge in
-                    actionErrorMessage = didMerge ? nil : "Couldn't merge these speakers. Try again."
+                    actionErrorMessage = didMerge ? nil : "Couldn't merge them. Try again."
                 }
                 // Only collapse an expansion that belongs to the merge —
                 // an unrelated open speaker (and its rename draft) stays put.
@@ -187,15 +200,15 @@ struct SpeakerPersonRow: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: { _ in
-            Text("This combines their voices into one and renames them in past transcripts. You can split the voices apart later from this speaker's ••• menu, but past transcripts keep the merged name.")
+            Text("Combines their voices and renames past transcripts. You can undo it from •••; past transcripts keep the merged name.")
         }
         .alert(unmergeConfirmationTitle, isPresented: $showUnmergeConfirmation) {
-            Button("Undo Merge") {
+            Button("Undo merge") {
                 model.unmerge(into: profile)
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This splits the merged voice back into two separate profiles so future recordings match the right person. Past transcripts keep the merged name.")
+            Text("Splits them again for future meetings. Past transcripts keep the merged name.")
         }
     }
 
@@ -205,13 +218,13 @@ struct SpeakerPersonRow: View {
 
     private var rowMenu: some View {
         Menu {
-            Button(profile.displayName == nil ? "Add Name…" : "Rename…") {
+            Button(profile.displayName == nil ? "Name…" : "Rename…") {
                 expandedPersonID = profile.id
             }
 
             let mergeTargets = model.mergeTargets(for: profile)
             if !mergeTargets.isEmpty {
-                Menu("Merge Into") {
+                Menu("Merge into") {
                     ForEach(mergeTargets, id: \.id) { target in
                         Button(mergeLabel(for: target)) {
                             pendingMergeTarget = target
@@ -222,7 +235,7 @@ struct SpeakerPersonRow: View {
             }
 
             if model.undoableMerge(for: profile) != nil {
-                Button("Undo Last Merge…") {
+                Button("Undo merge…") {
                     showUnmergeConfirmation = true
                 }
             }
@@ -243,8 +256,8 @@ struct SpeakerPersonRow: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("Rename, merge, or delete this speaker")
-        .accessibilityLabel("Speaker actions")
+        .help("Rename, merge or delete")
+        .accessibilityLabel(profile.displayName == nil ? "Voice actions" : "Person actions")
         .accessibilityIdentifier("transcripted.speakers.person.menu")
     }
 
@@ -255,7 +268,7 @@ struct SpeakerPersonRow: View {
     private var mergeConfirmationTitle: String {
         let source = SpeakerDuplicateCandidate.displayName(for: profile)
         guard let pendingMergeTarget else {
-            return "Merge “\(source)” into another speaker?"
+            return "Merge “\(source)” into someone else?"
         }
         return "Merge “\(source)” into “\(SpeakerDuplicateCandidate.displayName(for: pendingMergeTarget))”?"
     }
@@ -274,26 +287,17 @@ struct SpeakerPersonRow: View {
 
     // MARK: - Expansion
 
-    /// The opened person, expanded in place as a raised card: title (already
-    /// shown in the row above), meta line, a voice-sample player, an inline
-    /// rename field (autocomplete-backed, same as the queue row), and a quiet
-    /// "Merge into…" affordance that shares this row's own merge alert.
+    /// The opened row, in place: just the rename field (the row above is
+    /// still the identity, the print still plays, ••• still merges and
+    /// deletes), plus, for an unnamed voice with a queued meeting, saved
+    /// people still learning as one-click names.
     private var expansionCard: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(displayName)
-                    .font(.system(size: 15, weight: .semibold))
-                Text(metadataLine)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(LibraryTokens.ink3)
-            }
-
-            expansionPlayerRow
-            expansionRenameRow
+        VStack(alignment: .leading, spacing: 10) {
+            expansionNameField
             if !joinChips.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Or pick someone you already saved. It counts as a yes for them.")
-                        .font(.system(size: 11.5))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Or one of these. It counts as a yes for them.")
+                        .font(TextRole.small.font())
                         .foregroundStyle(LibraryTokens.ink3)
                     HStack(spacing: 6) {
                         ForEach(joinChips) { chip in
@@ -309,21 +313,14 @@ struct SpeakerPersonRow: View {
                 Text(renameErrorMessage).font(LibraryTokens.meta).foregroundStyle(LibraryTokens.attention)
             }
         }
-        .padding(16)
+        .padding(.leading, Self.printDiameter + 14)
+        .padding(.vertical, 4)
         .contentShape(Rectangle())
         // Swallow taps inside the card so the section's background tap
         // catcher (click-away collapse) doesn't fire for clicks on the
         // card's own non-interactive areas — same trick as
         // `QuietMeetingExpansion`.
         .onTapGesture {}
-        .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .fill(LibraryTokens.raisedFill)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusRaised, style: .continuous)
-                .stroke(LibraryTokens.raisedStroke, lineWidth: 1)
-        )
         .overlay(alignment: .topTrailing) {
             // Zero-size hidden control so Esc collapses the expansion,
             // matching `QuietMeetingExpansion`'s same trick on Home.
@@ -338,92 +335,20 @@ struct SpeakerPersonRow: View {
         .onAppear {
             nameDraft = profile.displayName ?? ""
             renameErrorMessage = nil
-            if let clipURL = model.clipURL(for: profile.id) {
-                expansionClipDuration = probeClipDuration(clipURL)
-            }
         }
         .onChange(of: nameDraft) { _, _ in renameErrorMessage = nil }
         .accessibilityIdentifier("transcripted.speakers.person.expansion")
     }
 
-    private var expansionPlayerRow: some View {
-        HStack(spacing: 6) {
-            SpeakerQuietPlayButton(
-                hasClip: hasClip,
-                isPlaying: isPlaying,
-                action: { model.playSample(for: profile.id) },
-                accessibilityIdentifier: "transcripted.speakers.person.expansion.play"
-            )
-
-            Text(isPlaying ? "playing voice sample" : "voice sample")
-                .font(.system(size: 11))
-                .foregroundStyle(isPlaying ? LibraryTokens.ink2 : LibraryTokens.ink3)
-
-            SpeakerClipProgressBar(isPlaying: isPlaying, duration: expansionClipDuration)
-                .frame(maxWidth: 160)
-                .opacity(isPlaying ? 1 : 0)
-                .animation(.easeOut(duration: 0.18), value: isPlaying)
-
-            Spacer(minLength: 0)
-        }
-    }
-
-    private var expansionRenameRow: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .top, spacing: 10) {
-                expansionNameField
-                Text("⏎ to rename")
-                    .font(.system(size: 11))
-                    .foregroundStyle(LibraryTokens.ink3)
-                Spacer(minLength: 8)
-                mergeIntoAffordance
-            }
-
-            VStack(alignment: .leading, spacing: 8) {
-                expansionNameField
-                HStack {
-                    Text("⏎ to rename")
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryTokens.ink3)
-                    Spacer()
-                    mergeIntoAffordance
-                }
-            }
-        }
-    }
-
     private var expansionNameField: some View {
         SpeakerNameAutocompleteField(
             text: $nameDraft,
-            placeholder: "Speaker name",
+            placeholder: "Who\u{2019}s this?",
             options: nameSuggestions,
             accessibilityIdentifier: "transcripted.speakers.person.expansion.name",
             onSubmit: commitRename
         )
-        .frame(minWidth: 180, maxWidth: 240)
-    }
-
-    @ViewBuilder
-    private var mergeIntoAffordance: some View {
-        let targets = model.mergeTargets(for: profile)
-        if !targets.isEmpty {
-            Menu {
-                ForEach(targets, id: \.id) { target in
-                    Button(mergeLabel(for: target)) {
-                        pendingMergeTarget = target
-                        showMergeConfirmation = true
-                    }
-                }
-            } label: {
-                Text("Merge into…")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
-            }
-            .buttonStyle(.plain)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .accessibilityIdentifier("transcripted.speakers.person.expansion.merge")
-        }
+        .frame(minWidth: 180, maxWidth: 280)
     }
 
     private var nameSuggestions: [SpeakerNameChoice] {
@@ -472,10 +397,19 @@ struct SpeakerPersonRow: View {
         }
     }
 
+    /// Someone this voice is probably the same as: the first merge target,
+    /// since duplicates sort first there.
+    private var likelyDuplicate: SpeakerProfile? {
+        guard model.duplicateCount(for: profile) > 0 else { return nil }
+        return model.mergeTargets(for: profile).first
+    }
+
+    private var deleteConfirmationTitle: String {
+        guard let name = profile.displayName, !name.isEmpty else { return "Delete this voice?" }
+        return "Delete \(name)?"
+    }
+
     private var badge: String? {
-        if model.duplicateCount(for: profile) > 0 {
-            return "Possible duplicate"
-        }
         if profile.disputeCount > 0 {
             return "Check name"
         }

@@ -70,6 +70,8 @@ extension TranscriptedAppDelegate {
             return
         }
 
+        // Today's checklist counts an import any way it starts.
+        TodaySetupChecklistPreferences.noteFilesImported(count: importable.count)
         pendingAudioImports.add(importable)
 
         if appState.meetingSession.isCaptureSessionActive {
@@ -160,6 +162,9 @@ extension TranscriptedAppDelegate {
         let pasteTarget = DictationPasteTarget.capture(sourceApp: sourceApp)
         sourceApp?.activate(options: [])
         let outcome = settingsTextPaster.paste(text, target: pasteTarget)
+        // The island shows how it went, like any take; the card by the
+        // pointer is only for when a new take already has the island.
+        guard !sessionController.showPasteAgainOutcome(outcome, text: text) else { return }
         PasteLastDictationFeedbackPresenter.shared.present(.presentation(for: outcome))
     }
 

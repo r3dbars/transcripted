@@ -19,14 +19,35 @@ extension TranscriptedSettingsView {
 
             Spacer(minLength: 0)
 
-            sidebarFeedbackButton
-                .padding(.horizontal, 12)
-                .padding(.bottom, 8)
+            VStack(spacing: 1) {
+                sidebarSettingsButton
+                sidebarFeedbackButton
+            }
+            .padding(.horizontal, 8)
 
-            sidebarBottomLine
+            sidebarVersionLine
         }
         .frame(maxHeight: .infinity)
         .background(LibraryTokens.sidebarBackground.ignoresSafeArea())
+    }
+
+    /// Settings by name, a row like the six above it (it used to be a 12 pt
+    /// gear). Keeps the old toggle's automation id.
+    private var sidebarSettingsButton: some View {
+        Button {
+            trackSettingsAction("open_settings_area", page: navigation.selectedPage)
+            navigation.select(.general, source: .sidebar)
+        } label: {
+            SettingsSidebarRowLabel(
+                title: TranscriptedSettingsPage.general.title,
+                systemImage: "gearshape",
+                isSelected: SettingsSidebarSection.isSettingsPage(navigation.selectedPage),
+                help: "Settings  ⌘,"
+            )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Settings")
+        .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
     }
 
     private var sidebarFeedbackButton: some View {
@@ -34,15 +55,14 @@ extension TranscriptedSettingsView {
             feedbackComposer.open(area: "general")
             feedbackIsPresented = true
         } label: {
-            Label("Feedback", systemImage: "bubble.left")
-                .font(.system(size: 13.5))
-                .foregroundStyle(Color.primary.opacity(0.72))
-                .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
-                .padding(.horizontal, 9)
-                .contentShape(RoundedRectangle(cornerRadius: 6))
+            SettingsSidebarRowLabel(
+                title: "Feedback",
+                systemImage: "bubble.left",
+                isSelected: false,
+                help: "Report a problem or share an idea"
+            )
         }
-        .buttonStyle(SidebarQuietButtonStyle())
-        .help("Send a problem, idea, or screenshot to Transcripted support")
+        .buttonStyle(.plain)
         .accessibilityIdentifier("transcripted.settings.sidebar.feedback")
         .background {
             FeedbackPopoverAnchor(isPresented: $feedbackIsPresented) {
@@ -55,28 +75,14 @@ extension TranscriptedSettingsView {
         }
     }
 
-    /// One quiet line at the bottom of the sidebar (Things-style): a tiny
-    /// gear that opens the settings area, and the app version. The version is
-    /// always clickable — it runs an update check and answers inline ("You're
-    /// up to date"); when an update is downloaded it swaps for "Update ready".
-    private var sidebarBottomLine: some View {
-        let isInSettings = SettingsSidebarSection.isSettingsPage(navigation.selectedPage)
+    /// The version, small and quiet, under Settings and Feedback. Clicking it
+    /// checks for updates and answers in place ("Up to date" for a few
+    /// seconds). An update that needs a click takes its place, with the
+    /// attention dot. Every word comes from `UpdateStatusWords`.
+    private var sidebarVersionLine: some View {
+        let phase = UpdateStatusWords.Phase(sparkleUpdater.updateStatus.state)
+        let downloadsAutomatically = sparkleUpdater.availableUpdateDownloadsAutomatically
         return HStack(spacing: 4) {
-            Button {
-                trackSettingsAction("open_settings_area", page: navigation.selectedPage)
-                navigation.select(.general, source: .sidebar)
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(isInSettings ? Color.primary : Color.primary.opacity(0.45))
-                    .frame(width: 24, height: 24)
-                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-            }
-            .buttonStyle(SidebarQuietButtonStyle())
-            .help("Settings")
-            .accessibilityLabel("Settings")
-            .accessibilityIdentifier("transcripted.settings.sidebar.settings-toggle")
-
             if settingsFooterShowsUpdateBadge {
                 Button {
                     guard settingsFooterActionEnabled else { return }
@@ -85,19 +91,22 @@ extension TranscriptedSettingsView {
                 } label: {
                     HStack(spacing: 5) {
                         Circle()
-                            .fill(Color.orange)
+                            .fill(LibraryTokens.attention)
                             .frame(width: 6, height: 6)
-                        Text(settingsFooterUpdateIsDownloaded ? "Update ready" : "Update available")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(Color.primary.opacity(0.75))
+                        Text(UpdateStatusWords.title(for: phase, downloadsAutomatically: downloadsAutomatically))
+                            .textRole(.small, weight: .medium)
+                            .foregroundStyle(LibraryTokens.ink)
+                            .lineLimit(1)
                     }
                     .padding(.horizontal, 6)
                     .frame(height: 24)
-                    .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
                 }
                 .buttonStyle(SidebarQuietButtonStyle())
                 .disabled(!settingsFooterActionEnabled)
-                .help(settingsFooterUpdateIsDownloaded ? "Install the downloaded update" : "Install the new version")
+                .help(UpdateStatusWords.detail(for: phase, downloadsAutomatically: downloadsAutomatically)
+                    ?? UpdateStatusWords.action(for: phase, downloadsAutomatically: downloadsAutomatically)
+                    ?? "")
                 .accessibilityIdentifier("transcripted.settings.footer.check-updates")
             } else {
                 Button {
@@ -105,25 +114,27 @@ extension TranscriptedSettingsView {
                     footerVersionCheckActive = true
                     sparkleUpdater.checkForUpdates()
                 } label: {
-                    Text(footerVersionLabel)
-                        .font(.system(size: 11))
+                    Text(footerVersionLabel(phase: phase, downloadsAutomatically: downloadsAutomatically))
+                        .textRole(.small)
                         .foregroundStyle(LibraryTokens.ink3)
+                        .lineLimit(1)
                         .padding(.horizontal, 6)
                         .frame(height: 24)
-                        .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
                 }
                 .buttonStyle(SidebarQuietButtonStyle())
-                .help("Check for updates")
-                .accessibilityLabel("Check for updates")
+                .help(UpdateStatusWords.checkForUpdates)
+                .accessibilityLabel(UpdateStatusWords.checkForUpdates)
                 .accessibilityIdentifier("transcripted.settings.footer.version")
             }
 
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 11)
+        .padding(.top, 2)
+        .padding(.bottom, 8)
         .onChange(of: sparkleUpdater.updateStatus) { _, status in
-            // Let "You're up to date" linger briefly, then settle back to the
+            // Let "Up to date" linger briefly, then settle back to the
             // plain version number.
             guard footerVersionCheckActive, case .noUpdateAvailable = status.state else { return }
             Task { @MainActor in
@@ -133,18 +144,16 @@ extension TranscriptedSettingsView {
         }
     }
 
-    private var footerVersionLabel: String {
+    /// The version alone, or what the check the person started found.
+    private func footerVersionLabel(phase: UpdateStatusWords.Phase, downloadsAutomatically: Bool) -> String {
         guard footerVersionCheckActive else { return appVersionText }
-        switch sparkleUpdater.updateStatus.state {
-        case .checking:
-            return "Checking…"
-        case .noUpdateAvailable:
-            return "You're up to date"
-        case .updateAvailable, .downloading:
-            return "Downloading update…"
-        case .unknown, .readyToCheck, .readyToInstall:
-            return appVersionText
-        }
+        let checkedUpToDate: Bool
+        if case .noUpdateAvailable = sparkleUpdater.updateStatus.state { checkedUpToDate = true } else { checkedUpToDate = false }
+        return UpdateStatusWords.versionNote(
+            for: phase,
+            checkedUpToDate: checkedUpToDate,
+            downloadsAutomatically: downloadsAutomatically
+        ) ?? appVersionText
     }
 
     private var appVersionText: String {
@@ -194,7 +203,8 @@ extension TranscriptedSettingsView {
         ForEach(pages) { page in
             SettingsSidebarButton(
                 page: page,
-                isSelected: navigation.selectedPage == page
+                isSelected: navigation.selectedPage == page,
+                isRecordingMeeting: meetingSession.isRecording
             ) {
                 navigation.select(page, source: .sidebar)
             }
@@ -206,10 +216,10 @@ extension TranscriptedSettingsView {
         switch navigation.selectedPage {
         case .today:
             todayPage
-        case .home:
+        case .home, .files:
+            // `.files` never gets here (navigation redirects it), but a
+            // stray one still lands on Meetings.
             homePage
-        case .files:
-            fileTranscriptionPage
         case .dictations:
             dictationsPage
         case .writing:
@@ -223,18 +233,16 @@ extension TranscriptedSettingsView {
         }
     }
 
-    /// The whole settings surface as one scrolling page: what used to be the
-    /// General / Storage / About tab strip now renders stacked, so everything
-    /// is findable by scrolling instead of tab-hunting.
+    /// The whole settings surface as one scrolling page. `generalPage` lays
+    /// out the four groups and Advanced, and places Library (`storagePage`)
+    /// and About (`aboutPage`) inside them.
     private var settingsPage: some View {
         VStack(alignment: .leading, spacing: 16) {
             generalPage
-            storagePage
-                .padding(.top, 8)
-            aboutPage
-                .padding(.top, 8)
 
-            Text("Transcripts and audio never leave this Mac.")
+            // Write for Me and the ChatGPT companion can send text off this Mac
+            // (DeveloperPreview.nextSentence, CompanionSettingsCard), so say when.
+            Text("Recordings and transcripts stay on this Mac. Write for Me and the ChatGPT companion send text only when you use them.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: 620)
@@ -243,88 +251,9 @@ extension TranscriptedSettingsView {
         }
     }
 
-    private var todayPage: some View {
-        // The Now label and tape marker own their own minute TimelineViews.
-        // Wrapping this page used to rebuild every session row each minute.
-        TodaySettingsPage(
-            todayViewModel: todayViewModel,
-            onOpenRecentItem: { item in
-                switch item.kind {
-                case .meeting:
-                    trackSettingsAction("today_open_recent_meeting", page: .today)
-                    if let transcriptURL = item.transcriptURL {
-                        navigation.select(.home, source: .settingsAction)
-                        navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
-                    }
-                case .dictation:
-                    trackSettingsAction("today_open_recent_dictation", page: .today)
-                    navigation.select(.dictations, source: .settingsAction)
-                case .writing:
-                    // A writing mark opens its day's Markdown file.
-                    if let dayFile = item.transcriptURL {
-                        NSWorkspace.shared.open(dayFile)
-                    }
-                }
-            },
-            onStartMeeting: {
-                trackSettingsAction("empty_start_meeting", page: .today)
-                actions.startMeeting()
-            },
-            onImportAudioFile: {
-                trackSettingsAction("empty_import_audio", page: .today)
-                actions.importAudioFile()
-            },
-            onStartDictation: {
-                trackSettingsAction("empty_start_dictation", page: .today)
-                actions.startDictation()
-            }
-        )
-        .onAppear {
-            todayViewModel.setShown(true)
-        }
-        .onDisappear {
-            todayViewModel.cancel()
-        }
-        .onReceive(todayViewModel.$snapshot) { snapshot in
-            // The window opens on Today now, so the return signal Meetings
-            // used to send on open comes from Today's list. Home owns the
-            // once-per-window latch, so visiting Meetings after doesn't count twice.
-            homeViewModel.trackActivationReturnProxyIfNeeded(todayRecent: snapshot.recent)
-        }
-    }
-
-    private var fileTranscriptionPage: some View {
-        FileTranscriptionSettingsPage(
-            onImportAudioFile: actions.importAudioFile,
-            onShowMeetings: { navigation.select(.home, source: .settingsAction) }
-        ) {
-            if let activity = homeTranscriptionActivity {
-                QuietWorkingRow(
-                    title: activity.title,
-                    status: activity.status,
-                    progress: activity.progress,
-                    symbolName: activity.symbolName,
-                    tone: activity.tone,
-                    onCancel: homeTranscriptionActivityIsCancellable ? {
-                        actions.cancelPendingAudioImports()
-                        meetingSession.cancelActiveTranscription()
-                    } : nil,
-                    detail: activity.tone == .caution ? activity.detail : nil,
-                    onOpen: activity.transcriptURL.map { transcriptURL in
-                        {
-                            navigation.select(.home, source: .settingsAction)
-                            navigation.requestHomeRevealMeeting(transcriptURL: transcriptURL)
-                        }
-                    }
-                )
-            }
-        }
-    }
-
     private var homePage: some View {
         HomeSettingsPage(
             homeViewModel: homeViewModel,
-            capturesToday: homeViewModel.todayMeetingCount,
             attentionTitle: homeAttentionIssues.first?.title,
             meetingDaySections: homeMeetingDaySections,
             homeCopiedRowID: homeCopiedRowID,
@@ -343,6 +272,7 @@ extension TranscriptedSettingsView {
             homeMeetingSearchQuery: $homeMeetingSearchQuery,
             homeStarredOnly: $homeStarredOnly,
             homeFindFieldFocusToken: homeFindFieldFocusToken,
+            openState: $homeMeetingOpenState,
             onAttention: {
                 if let issue = homeAttentionIssues.first {
                     reviewHomeAttentionIssue(issue)
@@ -406,14 +336,6 @@ extension TranscriptedSettingsView {
             onCopyMeeting: { meeting in
                 handleCopyMeeting(meeting)
             },
-            onRevealMeetingInFinder: { meeting in
-                trackSettingsAction("reveal_meeting_in_finder", page: .home)
-                _ = revealOwnFile(
-                    candidateURLs: [meeting.transcriptURL],
-                    failureTitle: "Could not show file",
-                    failureMessage: SettingsArtifactMessage.meetingTranscriptNotFound
-                )
-            },
             onCollapseMeetingExpansion: {
                 collapseHomeMeetingExpansion()
             },
@@ -421,19 +343,22 @@ extension TranscriptedSettingsView {
             savedSpeakerIDs: homeSavedSpeakerIDs,
             onAssignMeetingSpeakers: { meeting, assignments, completion in
                 guard let preview = homeExpandedMeetingPreview,
-                      preview.id == meeting.id else {
+                      preview.id == homeExpandedMeetingID,
+                      homeMeetingOpenState.isOpen(meeting.id, expandedID: homeExpandedMeetingID) else {
                     completion(false)
                     return
                 }
                 assignMeetingSpeakers(assignments, in: preview, completion: completion)
             },
             meetingRowMenuItems: { item in meetingRowMenuItems(for: item) },
-            onToggleMeetingStar: { item in toggleMeetingStar(item) },
             meetingVoicesToName: { item in
                 speakerPeopleModel.hasLoadedProfiles ? speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) : 0
             },
             onWhoSpoke: { item in
-                openHomeSpeakerReview(actionName: "review_meeting_speakers_pill", transcriptURL: item.transcriptURL)
+                openWhoSpokeCard(for: item)
+            },
+            onToggleFailedMeeting: { failedMeeting in
+                toggleHomeFailedMeetingExpansion(failedMeeting)
             },
             onRetryFailedMeeting: { failedMeeting in
                 trackSettingsAction("home_retry_failed_meeting", page: navigation.selectedPage)
@@ -494,6 +419,24 @@ extension TranscriptedSettingsView {
         .onReceive(homeViewModel.$meetingDaySections) { sections in
             revealPendingHomeMeeting(in: sections)
         }
+        // The open card re-reads its transcript when its file changes under
+        // it (Transcribe again, a titles pass), so it never shows old lines.
+        .onReceive(NotificationCenter.default.publisher(for: .meetingCaptureArtifactsDidChange).receive(on: DispatchQueue.main)) { note in
+            let ids = note.userInfo?[CaptureLibraryChange.affectedTranscriptIDsKey] as? [String] ?? []
+            rereadOpenMeetingCard(affectedIDs: ids)
+        }
+        .onChange(of: meetingSession.savedMeetingReplacementCommitCount) { _, _ in
+            rereadOpenMeetingCard(affectedIDs: [])
+        }
+    }
+
+    private func rereadOpenMeetingCard(affectedIDs: [String]) {
+        guard let preview = homeExpandedMeetingPreview,
+              HomeMeetingCardPresentation.shouldRereadOpenCard(
+                  openTranscriptURL: preview.transcriptURL,
+                  affectedIDs: affectedIDs
+              ) else { return }
+        reloadExpandedMeetingPreview(preview)
     }
 
     private static func homeRevealKey(for transcriptURL: URL) -> String {
@@ -550,6 +493,27 @@ extension TranscriptedSettingsView {
                 )
             }
         )
+        .task(id: navigation.dictationRevealToken) {
+            guard navigation.dictationRevealToken > dictationRevealConsumedToken,
+                  let entryID = navigation.dictationRevealEntryID else { return }
+            dictationRevealConsumedToken = navigation.dictationRevealToken
+            dictationPendingReveal = DictationPendingReveal(entryID: entryID)
+            revealPendingDictation(in: homeViewModel.dictationDaySections)
+            // Older entries may take a few pages to load. Stop waiting after
+            // a while so a much later load never scrolls out of nowhere.
+            try? await Task.sleep(for: TodayDictationRevealPolicy.giveUpAfter)
+            guard !Task.isCancelled else { return }
+            dictationPendingReveal = nil
+        }
+        .onReceive(homeViewModel.$dictationDaySections) { _ in
+            // The list publishes before its load flags settle (same pass),
+            // so look once that pass is over.
+            guard dictationPendingReveal != nil else { return }
+            Task { @MainActor in
+                revealPendingDictation(in: homeViewModel.dictationDaySections)
+            }
+        }
+        .onDisappear { dictationPendingReveal = nil }
     }
 
     /// Quiet-library delete for a dictation entry: the day file is rewritten
@@ -653,7 +617,7 @@ extension TranscriptedSettingsView {
         )
     }
 
-    private var storagePage: some View {
+    var storagePage: some View {
         StorageSettingsPage(
             captureLibraryURL: captureLibraryURL,
             unavailableCaptureLibraryPath: unavailableCaptureLibraryPath,
@@ -670,8 +634,8 @@ extension TranscriptedSettingsView {
             modelCacheCleanupStatus: modelCacheCleanupStatus,
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
+            writingModelRoot: writingController.modelRoot,
             meetingTitlesModelIsReclaimable: !MeetingTitlesController.shared.isEnabled,
-            supportFilesFolder: appStateFolder.deletingLastPathComponent(),
             onChooseCaptureLibrary: {
                 trackSettingsAction("choose_capture_library", page: .general)
                 chooseCaptureLibrary()
@@ -726,7 +690,7 @@ extension TranscriptedSettingsView {
         )
     }
 
-    private var aboutPage: some View {
+    var aboutPage: some View {
         AboutSettingsPage(
             sparkleUpdater: sparkleUpdater,
             onTrackSettingsToggle: { settingID, enabled, page in
@@ -743,20 +707,21 @@ extension TranscriptedSettingsView {
                 trackSettingsAction(settingsUpdateActionID, page: .general)
                 sparkleUpdater.performUserUpdateAction(surface: "settings_about")
             },
-            diagnosticsActionStatus: diagnosticsActionStatus,
-            crashReportingEnabled: crashReportingEnabled,
             onSubmitFeedback: {
                 trackSettingsAction("submit_feedback", page: .general)
                 feedbackComposer.open(area: "general")
                 feedbackIsPresented = true
             },
-            onEmailSupport: {
-                actions.sendFeedback()
-            },
-            onSendDiagnosticEvent: {
-                trackSettingsAction("send_diagnostic_event", page: .general)
-                sendDiagnosticEvent()
-            }
+            diagnosticsRow: SendDiagnosticsSettingsRow(
+                status: diagnosticsActionStatus,
+                crashReportingEnabled: crashReportingEnabled,
+                isSending: diagnosticEventSendInFlight,
+                onSend: {
+                    trackSettingsAction("send_diagnostic_event", page: .general)
+                    sendDiagnosticEvent()
+                },
+                onEmailSupport: { actions.sendFeedback() }
+            )
         )
     }
 }

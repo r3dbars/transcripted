@@ -47,8 +47,8 @@ struct SettingsPageIntro: View {
 
             if let summaryText {
                 Text(summaryText)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -78,11 +78,11 @@ enum SettingsInteractionPalette {
         case .neutral:
             return Color.primary.opacity(0.04)
         case .accent:
-            return Color.accentColor.opacity(0.13)
+            return LibraryTokens.ink.opacity(0.13)
         case .warning:
-            return Color.orange.opacity(0.12)
+            return LibraryTokens.attention.opacity(0.12)
         case .destructive:
-            return Color.red.opacity(0.10)
+            return DesignTokens.danger.opacity(0.10)
         }
     }
 
@@ -91,11 +91,11 @@ enum SettingsInteractionPalette {
         case .neutral:
             return Color.primary.opacity(0.07)
         case .accent:
-            return Color.accentColor.opacity(0.18)
+            return LibraryTokens.ink.opacity(0.18)
         case .warning:
-            return Color.orange.opacity(0.17)
+            return LibraryTokens.attention.opacity(0.17)
         case .destructive:
-            return Color.red.opacity(0.15)
+            return DesignTokens.danger.opacity(0.15)
         }
     }
 
@@ -104,11 +104,11 @@ enum SettingsInteractionPalette {
         case .neutral:
             return Color.primary.opacity(0.10)
         case .accent:
-            return Color.accentColor.opacity(0.30)
+            return LibraryTokens.ink.opacity(0.30)
         case .warning:
-            return Color.orange.opacity(0.26)
+            return LibraryTokens.attention.opacity(0.26)
         case .destructive:
-            return Color.red.opacity(0.22)
+            return DesignTokens.danger.opacity(0.22)
         }
     }
 }
@@ -250,11 +250,11 @@ struct SettingsInlineActionButton: View {
         case .neutral:
             return Color.primary.opacity(0.025)
         case .accent:
-            return Color.accentColor.opacity(0.08)
+            return LibraryTokens.ink.opacity(0.08)
         case .warning:
-            return Color.orange.opacity(0.08)
+            return LibraryTokens.attention.opacity(0.08)
         case .destructive:
-            return Color.red.opacity(0.06)
+            return DesignTokens.danger.opacity(0.06)
         }
     }
 
@@ -263,11 +263,11 @@ struct SettingsInlineActionButton: View {
         case .neutral:
             return Color.primary.opacity(0.06)
         case .accent:
-            return Color.accentColor.opacity(0.16)
+            return LibraryTokens.ink.opacity(0.16)
         case .warning:
-            return Color.orange.opacity(0.16)
+            return LibraryTokens.attention.opacity(0.16)
         case .destructive:
-            return Color.red.opacity(0.14)
+            return DesignTokens.danger.opacity(0.14)
         }
     }
 }
@@ -352,11 +352,11 @@ struct SettingsStatusCard: View {
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
-                .fill(Color(nsColor: .controlBackgroundColor).opacity(0.78))
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.surface, style: .continuous)
+                .fill(DesignTokens.fill)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 16, style: .continuous)
+            RoundedRectangle(cornerRadius: DesignTokens.Radius.surface, style: .continuous)
                 .stroke(tintColor.opacity(0.16), lineWidth: 1)
         )
     }
@@ -364,11 +364,12 @@ struct SettingsStatusCard: View {
     private var tintColor: Color {
         switch tone {
         case .ready:
-            return .green
+            return LibraryTokens.ink2
         case .working:
-            return .blue
+            // Live progress is the one place green belongs here.
+            return LibraryTokens.accent
         case .caution:
-            return .orange
+            return LibraryTokens.attention
         }
     }
 
@@ -415,7 +416,7 @@ struct PermissionStatusRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: granted ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(granted ? Color.green : Color.orange)
+                .foregroundStyle(granted ? LibraryTokens.ink2 : LibraryTokens.attention)
                 .font(.system(size: 16, weight: .semibold))
                 .padding(.top, 2)
 

@@ -2,11 +2,10 @@ import AppKit
 import SwiftUI
 
 // Small pieces shared by the Writing tab's intro, setup and everyday views.
-// Colors, type and radii come from `LibraryTokens`; the buttons match the
-// first-run onboarding's (`PermissionsOnboardingView`).
+// Colors, type and radii come from `LibraryTokens`; the primary button is the
+// shared `TranscriptedButtonStyle`, like the first-run onboarding's.
 
-/// The accent-filled primary action: Next, Continue, Set up writing, Turn on
-/// writing.
+/// The ink primary action: Continue, Turn on writing.
 struct WritingPrimaryButton: View {
     let title: String
     var isEnabled = true
@@ -16,23 +15,15 @@ struct WritingPrimaryButton: View {
     var body: some View {
         Button(action: action) {
             Text(title)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.white)
-                .padding(.horizontal, 22)
-                .frame(minHeight: LibraryTokens.minimumHitTarget)
-                .background(
-                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                        .fill(isEnabled ? LibraryTokens.accent : LibraryTokens.ink3)
-                )
-                .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.transcriptedPrimary)
+        .controlSize(.large)
         .disabled(!isEnabled)
         .accessibilityIdentifier(automationIdentifier)
     }
 }
 
-/// The quiet text action: Back, Cancel.
+/// The quiet text action: Back, Cancel, Not now.
 struct WritingSecondaryButton: View {
     let title: String
     let automationIdentifier: String
@@ -52,7 +43,7 @@ struct WritingSecondaryButton: View {
     }
 }
 
-/// Page dots for the two intro pages.
+/// Page dots for the two setup screens.
 struct WritingPageDots: View {
     let count: Int
     let current: Int
@@ -61,7 +52,7 @@ struct WritingPageDots: View {
         HStack(spacing: 6) {
             ForEach(1...max(1, count), id: \.self) { page in
                 Circle()
-                    .fill(page == current ? LibraryTokens.accent : LibraryTokens.ink3.opacity(0.6))
+                    .fill(page == current ? LibraryTokens.ink : LibraryTokens.ink3.opacity(0.6))
                     .frame(width: 6, height: 6)
             }
         }
@@ -76,7 +67,7 @@ struct WritingBadge: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold))
+            .font(LibraryTokens.small.weight(.medium))
             .foregroundStyle(LibraryTokens.ink2)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
@@ -92,35 +83,71 @@ struct WritingKeyCap: View {
 
     var body: some View {
         Text(key)
-            .font(.system(size: 11, weight: .semibold, design: .rounded))
-            .foregroundStyle(isPressed ? Color.white : Color.primary)
+            .font(LibraryTokens.small.weight(.semibold))
+            .foregroundStyle(isPressed ? DesignTokens.paper : LibraryTokens.ink)
             .padding(.horizontal, 7)
             .frame(minWidth: 26, minHeight: 20)
             .background(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .fill(isPressed ? LibraryTokens.accent : LibraryTokens.raisedFill)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                    .fill(isPressed ? LibraryTokens.ink : LibraryTokens.raisedFill)
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 4, style: .continuous)
-                    .stroke(isPressed ? LibraryTokens.accent : LibraryTokens.raisedStroke, lineWidth: 1)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                    .stroke(isPressed ? LibraryTokens.ink : LibraryTokens.raisedStroke, lineWidth: 1)
             )
             .accessibilityLabel(Text(key == "~" ? "tilde key" : key))
     }
 }
 
-/// "Step 1 of 3" over the step's title.
-struct WritingStepHeader: View {
-    let step: Int
-    let title: String
+/// A setup question ("What should Writing do?", "Which apps?"): the
+/// heading role, so it sits between the page title and the rows.
+struct WritingQuestionTitle: View {
+    let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(WritingSetupPresentation.stepLabel(step))
-                .font(LibraryTokens.meta)
-                .foregroundStyle(LibraryTokens.ink2)
-            Text(title)
-                .font(.system(size: 22, weight: .semibold))
-                .fixedSize(horizontal: false, vertical: true)
+        Text(text)
+            .font(LibraryTokens.heading)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// One switch row in a `SettingsCard`: the title in the body role (13
+/// medium) over its 12 pt line, never the other way round. Setup's two
+/// features and the everyday Settings card share it.
+struct WritingToggleRow: View {
+    let title: String
+    let line: String
+    @Binding var isOn: Bool
+    var isEnabled = true
+    let automationIdentifier: String
+    var showsDivider = true
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(LibraryTokens.rowTitle)
+                Text(line)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Toggle(title, isOn: $isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .disabled(!isEnabled)
+                .accessibilityLabel(Text(title))
+                .accessibilityHint(Text(line))
+                .accessibilityIdentifier(automationIdentifier)
+        }
+        .opacity(isEnabled ? 1 : 0.6)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .frame(minHeight: 56)
+        .overlay(alignment: .bottom) {
+            if showsDivider { Divider() }
         }
     }
 }
@@ -143,14 +170,14 @@ struct WritingAppChip: View {
                     .font(LibraryTokens.body)
                     .lineLimit(1)
             }
-            .foregroundStyle(isSelected ? LibraryTokens.accent : Color.primary)
+            .foregroundStyle(LibraryTokens.ink)
             .padding(.horizontal, 10)
             .frame(minHeight: 28)
             .background(
-                Capsule().fill(isSelected ? LibraryTokens.accent.opacity(0.12) : LibraryTokens.raisedFill)
+                Capsule().fill(isSelected ? DesignTokens.fillStrong : LibraryTokens.raisedFill)
             )
             .overlay(
-                Capsule().stroke(isSelected ? LibraryTokens.accent.opacity(0.45) : LibraryTokens.raisedStroke, lineWidth: 1)
+                Capsule().stroke(isSelected ? DesignTokens.hairlineStrong : LibraryTokens.raisedStroke, lineWidth: 1)
             )
             .contentShape(Capsule())
         }
@@ -178,7 +205,7 @@ struct WritingChoiceRow: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
                     .font(.system(size: 14))
-                    .foregroundStyle(isSelected ? LibraryTokens.accent : LibraryTokens.ink3)
+                    .foregroundStyle(isSelected ? LibraryTokens.ink : LibraryTokens.ink3)
                     .padding(.top, 1)
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {

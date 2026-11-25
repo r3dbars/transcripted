@@ -98,7 +98,7 @@ struct TranscriptedSettingsView: View {
     @State var feedbackIsPresented = false
     @State var homeFindIsVisible = false
     /// True while a footer-initiated update check is in flight or its
-    /// "You're up to date" answer is lingering.
+    /// "Up to date" answer is lingering.
     @State var footerVersionCheckActive = false
     @State var homeFindConsumedFocusToken = 0
     @State var homeRevealConsumedToken = 0
@@ -108,6 +108,8 @@ struct TranscriptedSettingsView: View {
     @State var homeFindFieldFocusToken = 0
     @State var homeExpandedMeetingID: String?
     @State var homeExpandedMeetingPreview: HomeMeetingPreview?
+    /// The open Meetings card's transcript reveal; Rename carries it over.
+    @State var homeMeetingOpenState = MeetingsPageOpenState()
     @ObservedObject var captureUndo = CaptureUndoManager.shared
     @State var homeDeletionIDs: Set<String> = []  // meeting ids and dictation undo ids being deleted
     @State var homeMeetingSearchQuery = ""
@@ -118,6 +120,16 @@ struct TranscriptedSettingsView: View {
     @State var captureLibraryMigrationStatusDetails: String?
     @State var speakerInboxScrollRequest = 0
     @State var speakerInboxScrollAwaitingQueue = false
+    /// Today's setup checklist: dismissed or done means gone for good.
+    @AppStorage(TodaySetupChecklistPreferences.dismissedKey) var todaySetupRetired = false
+    @AppStorage(TodaySetupChecklistPreferences.triedFileImportKey) var todaySetupTriedFileImport = false
+    /// Setup finished on a build with the checklist; older setups never get it.
+    @AppStorage(PermissionsOnboardingPreferences.finishedWithTodayChecklistKey) var todaySetupOffered = false
+    /// Nil until the off-main check of the agents' configs answers.
+    @State var todayAgentConnected: Bool?
+    @State var dictationRevealConsumedToken = 0
+    /// A dictation a Today click asked Dictations to scroll to.
+    @State var dictationPendingReveal: DictationPendingReveal?
 
     init(
         appState: TranscriptedAppState,
@@ -145,7 +157,7 @@ struct TranscriptedSettingsView: View {
     var body: some View {
         // Things-style two-tone split: solid darker sidebar, solid lighter
         // content, no toolbar chrome. The sidebar is permanent and narrow —
-        // seven destinations plus one quiet bottom line need no more.
+        // six places, Settings, Feedback and the version need no more.
         HStack(spacing: 0) {
             sidebarColumn
                 .frame(width: 184)
@@ -155,6 +167,8 @@ struct TranscriptedSettingsView: View {
         }
         .frame(minWidth: 880, minHeight: 640)
         .background(LibraryTokens.contentBackground.ignoresSafeArea())
+        // Ink, not the Mac's accent: switches, checkboxes, progress, focus.
+        .transcriptedRootTint()
         .environment(recordingClock)
         // One Home alert modifier, not two. Stacking multiple legacy `.alert(item:)`
         // on the same view shadows all but the last — which silently killed the
@@ -393,12 +407,19 @@ struct TranscriptedSettingsView: View {
     /// Expand a capture in place (quiet-library interaction). Clicking the
     /// same row again, pressing Esc, or expanding another row collapses it.
     func toggleHomeMeetingExpansion(_ item: RecentMeetingItem) {
-        if homeExpandedMeetingID == item.id {
-            collapseHomeMeetingExpansion()
+        // The row still listed under its old path while a rename settles is
+        // the open one.
+        let current = homeMeetingOpenState.isOpen(item.id, expandedID: homeExpandedMeetingID) ? item.id : homeExpandedMeetingID
+        guard MeetingsPageOpenState.nextOpenID(current: current, tapped: item.id) != nil else {
+            // Closing only folds the card; audio started from its play
+            // button keeps playing. Leaving the page or Esc still stops it.
+            collapseHomeMeetingExpansion(stopsPlayback: false)
             return
         }
         trackSettingsAction("preview_recent_meeting", page: .home)
-        withAnimation(.snappy(duration: 0.22)) {
+        // The opened card reads this one transcript off the main thread, so
+        // its line count and reveal are ready; closed rows never read one.
+        withAnimation(Self.homeRowAnimation) {
             homeExpandedMeetingID = item.id
         }
         homeExpandedMeetingPreview = nil
@@ -423,13 +444,20 @@ struct TranscriptedSettingsView: View {
         }
     }
 
-    func collapseHomeMeetingExpansion() {
+    func collapseHomeMeetingExpansion(stopsPlayback: Bool = true) {
         homeMeetingPreviewLoadTask?.cancel()
-        MeetingAudioPlayback.shared.stop()
-        withAnimation(.snappy(duration: 0.22)) {
+        if stopsPlayback {
+            MeetingAudioPlayback.shared.stop()
+        }
+        withAnimation(Self.homeRowAnimation) {
             homeExpandedMeetingID = nil
         }
         homeExpandedMeetingPreview = nil
+    }
+
+    /// Opening and closing a Meetings row: gentle, and none with Reduce Motion.
+    static var homeRowAnimation: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? nil : .snappy(duration: 0.22)
     }
 
     static func readMeetingMarkdown(at url: URL) async -> HomeMeetingMarkdownReadResult {
@@ -518,8 +546,11 @@ struct TranscriptedSettingsView: View {
 
     func meetingRowMenuItems(for item: RecentMeetingItem) -> [HomeRowMenuItem] {
         let audioRevealURLs = HomeMeetingRowActionTargets.audioRevealURLs(for: item)
+        // The opened card always lists Who spoke? (greyed until it has a
+        // card to open); closed rows keep it for voices still to name.
+        let whoSpoke = homeWhoSpokeAvailability(for: item)
         let entries = HomeRowMenuPolicy.meetingEntries(
-            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item),
+            hasPendingSpeakerReview: hasSpeakerReviewWork(for: item) || whoSpoke != .hidden,
             offersMicBoost: RecentMeetingMicBoostHintPolicy.shouldOfferEnableAction(
                 audioHealth: item.audioHealth,
                 meetingDate: item.date,
@@ -539,7 +570,14 @@ struct TranscriptedSettingsView: View {
                     promptRenameMeeting(item)
                 }
             case .starMeeting, .unstarMeeting:
-                return HomeRowMenuItem(title: title, symbolName: symbolName, automationIdentifier: "transcripted.home.meeting.star-toggle") {
+                // Keep audio: the same `starred` flag retention reads.
+                return HomeRowMenuItem(
+                    title: title,
+                    symbolName: symbolName,
+                    automationIdentifier: "transcripted.home.meeting.star-toggle",
+                    isChecked: menuEntry.isChecked,
+                    toolTip: menuEntry.toolTip
+                ) {
                     toggleMeetingStar(item)
                 }
             case .reportIssue:
@@ -572,11 +610,18 @@ struct TranscriptedSettingsView: View {
                 }
             case .reviewSpeakers:
                 let title = HomeRowMenuPolicy.whoSpokeTitle(voicesToName: speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL))
-                return HomeRowMenuItem(title: title, symbolName: symbolName) {
-                    openHomeSpeakerReview(actionName: "review_meeting_speakers_row", transcriptURL: item.transcriptURL)
+                return HomeRowMenuItem(
+                    title: title,
+                    symbolName: symbolName,
+                    isEnabled: whoSpoke == .enabled,
+                    toolTip: whoSpoke == .enabled ? nil : "No speakers to name yet"
+                ) {
+                    // Queued voices get the queue's card; otherwise the card
+                    // is built from the opened transcript.
+                    openWhoSpokeCard(for: item)
                 }
             case .boostMic:
-                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                return HomeRowMenuItem(title: title, symbolName: symbolName, placement: menuEntry.placement) {
                     // One meeting only, like the in-meeting Boost Mic prompt.
                     trackSettingsToggle("meeting_mic_boost_next_meeting", enabled: true, page: .home)
                     MicrophoneProcessingPreferences.requestBoostForNextMeeting()
@@ -595,7 +640,7 @@ struct TranscriptedSettingsView: View {
                     handleRetranscribeMeeting(item)
                 }
             case .showAudio:
-                return HomeRowMenuItem(title: title, symbolName: symbolName) {
+                return HomeRowMenuItem(title: title, symbolName: symbolName, placement: menuEntry.placement) {
                     trackSettingsAction("reveal_meeting_audio_in_finder", page: .home)
                     revealOwnFile(
                         candidateURLs: audioRevealURLs,
@@ -623,7 +668,7 @@ struct TranscriptedSettingsView: View {
     private func deleteMeetingWithUndo(_ item: RecentMeetingItem) {
         guard !captureUndo.isPending(item.id),
               homeDeletionIDs.insert(item.id).inserted else { return }
-        if homeExpandedMeetingID == item.id {
+        if homeMeetingOpenState.isOpen(item.id, expandedID: homeExpandedMeetingID) {
             collapseHomeMeetingExpansion()
         }
         if let audio = item.audio {

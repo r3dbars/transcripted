@@ -68,44 +68,47 @@ enum SpeakerNamingTierPresentation {
         let usesPersonColor: Bool
     }
 
-    /// The short line under a name in the review, or nil for none.
+    /// The short line under a name in the review, or nil for none. One
+    /// format everywhere: "4 of 5" (confirmed meetings out of the bar), then
+    /// "Auto" once Transcripted names them on its own. The long sentence
+    /// (and any "meeting context") lives in the hover tip, `explanation`.
     /// `confirmedBefore` is the count before this review.
     static func reviewHint(moment: ReviewMoment, confirmedBefore: Int, required: Int, isTrusted: Bool, earnsConfirmation: Bool = true) -> ReviewHint? {
         let bar = max(1, required)
+        let before = max(0, confirmedBefore)
         switch moment {
         case .asking:
-            guard earnsConfirmation, isTrusted, bar - max(0, confirmedBefore) == 1 else { return nil }
-            return ReviewHint(
-                text: bar < segmentCount ? "One more yes to auto-name with meeting context" : "One more yes to auto-name",
-                usesPersonColor: true
-            )
+            // Nothing to count yet, or on probation: no number to promise.
+            guard earnsConfirmation, isTrusted, before > 0, before < bar else { return nil }
+            return ReviewHint(text: progressText(confirmed: before, required: bar), usesPersonColor: bar - before == 1)
         case .confirmed:
-            let after = max(0, confirmedBefore) + (earnsConfirmation ? 1 : 0)
+            let after = before + (earnsConfirmation ? 1 : 0)
             if after >= bar {
                 // Past the bar on probation, a yes restores trust over time; don't
                 // promise auto-naming that the health check may still withhold.
-                return isTrusted ? ReviewHint(
-                    text: bar < segmentCount ? "Auto-named with matching meeting context" : "Named automatically from now on",
-                    usesPersonColor: true
-                ) : nil
+                return isTrusted ? ReviewHint(text: autoText, usesPersonColor: true) : nil
             }
-            let left = bar - after
-            return ReviewHint(text: left == 1 ? "1 more to go" : "\(left) more to go", usesPersonColor: false)
+            return ReviewHint(text: progressText(confirmed: after, required: bar), usesPersonColor: false)
         case .savedNew:
-            let left = bar - 1
-            guard left > 0 else { return nil }
-            let scope = bar < segmentCount ? " with meeting context" : ""
-            return ReviewHint(text: "Saved · \(left) more to auto-name\(scope)", usesPersonColor: false)
+            guard bar > 1 else { return nil }
+            return ReviewHint(text: progressText(confirmed: 1, required: bar), usesPersonColor: false)
         }
     }
+
+    /// "4 of 5": confirmed meetings out of the bar.
+    static func progressText(confirmed: Int, required: Int) -> String {
+        "\(max(0, confirmed)) of \(max(1, required))"
+    }
+
+    /// Named on their own from now on.
+    static let autoText = "Auto"
 
     /// The review footer next to the glowing dots, or nil when no one on the
     /// call is named automatically.
     static func autoNamedFooter(count: Int) -> String? {
         switch count {
         case ..<1: return nil
-        case 1: return "1 person named automatically"
-        default: return "\(count) people named automatically"
+        default: return "\(count) auto-named"
         }
     }
 }

@@ -26,7 +26,7 @@ struct MenuBarShortcutWarningPresentation: Equatable {
         guard let hotkeyError, !hotkeyError.isEmpty else { return nil }
         if hotkeyError == accessibilityErrorMessage {
             return MenuBarShortcutWarningPresentation(
-                text: "Shortcuts need Accessibility access. Click to turn it on.",
+                text: "Your keys need Accessibility to work. Click to turn it on.",
                 action: .openAccessibilitySettings
             )
         }

@@ -7,6 +7,7 @@ import SwiftUI
 
 struct MeetingTitlesSettingsRow: View {
     @ObservedObject var controller: MeetingTitlesController = .shared
+    var showsDivider = true
 
     private static let title = "Titles and summaries"
 
@@ -31,7 +32,6 @@ struct MeetingTitlesSettingsRow: View {
             .labelsHidden()
             .toggleStyle(.switch)
             .controlSize(.regular)
-            .tint(.accentColor)
             .help(MeetingTitlesSettingsCopy.help(isEnabled: controller.isEnabled, status: controller.modelStatus))
             .accessibilityLabel(Text(Self.title))
             .accessibilityValue(Text(controller.isEnabled ? "On" : "Off"))
@@ -39,7 +39,11 @@ struct MeetingTitlesSettingsRow: View {
         }
         .padding(.horizontal, 14)
         .frame(minHeight: 44)
-        .overlay(alignment: .bottom) { Divider() }
+        .overlay(alignment: .bottom) {
+            if showsDivider {
+                Divider()
+            }
+        }
     }
 
     @ViewBuilder
@@ -47,16 +51,16 @@ struct MeetingTitlesSettingsRow: View {
         switch MeetingTitlesSettingsCopy.state(isEnabled: controller.isEnabled, status: controller.modelStatus, activity: controller.activity) {
         case .caption(let text):
             Text(text)
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.ink2)
         case .progress(let fraction, let text):
             HStack(spacing: 8) {
                 ProgressView(value: fraction)
                     .progressViewStyle(.linear)
                     .frame(width: 80)
                 Text(text)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
                     .monospacedDigit()
             }
             .accessibilityElement(children: .combine)
@@ -64,7 +68,7 @@ struct MeetingTitlesSettingsRow: View {
         case .failed(let text):
             HStack(spacing: 8) {
                 Text(text)
-                    .font(.caption)
+                    .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.attention)
                 SettingsInlineActionButton(title: "Try again", symbolName: "arrow.clockwise") {
                     controller.retry()

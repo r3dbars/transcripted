@@ -2,6 +2,68 @@ import Foundation
 import TranscriptedCore
 
 extension TranscriptedSettingsView {
+    /// A meeting's "Who spoke?" (its amber "2 to name", and ⋯ on an opened
+    /// card): its card on Speakers. Voices still in the review queue get the
+    /// queue's card; a meeting with nothing queued gets the same card built
+    /// from its transcript, so every name in it can be fixed at once. Both
+    /// save the way they always have. With neither (lines still loading, or
+    /// no speaker lines) it does nothing; ⋯ shows it greyed then
+    /// (`homeWhoSpokeAvailability`).
+    func openWhoSpokeCard(for item: RecentMeetingItem) {
+        let queued = speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) > 0
+        if !queued, let preview = homeOpenPreview(for: item),
+           preview.content.transcriptLines.contains(where: { !$0.speaker.isEmpty }) {
+            SpeakerTranscriptWhoSpokeRequests.shared.open(SpeakerTranscriptCard(
+                meetingTitle: preview.title,
+                date: preview.date,
+                transcriptURL: preview.transcriptURL,
+                lines: preview.content.transcriptLines,
+                audio: preview.audio,
+                save: { assignments, completion in
+                    assignMeetingSpeakers(assignments, in: preview, completion: completion)
+                }
+            ))
+        } else if queued || hasSpeakerReviewWork(for: item) {
+            SpeakerTranscriptWhoSpokeRequests.shared.close()
+        } else {
+            return
+        }
+        openHomeSpeakerReview(
+            actionName: queued ? "review_meeting_speakers_pill" : "review_meeting_speakers_row",
+            transcriptURL: item.transcriptURL
+        )
+    }
+
+    /// Whether ⋯ lists "Who spoke?" for this meeting, and whether it can open
+    /// a card yet (`HomeMeetingCardPresentation.whoSpokeAvailability`).
+    func homeWhoSpokeAvailability(for item: RecentMeetingItem) -> HomeMeetingCardPresentation.WhoSpokeAvailability {
+        let hasQueuedReview = hasSpeakerReviewWork(for: item)
+            || speakerPeopleModel.voicesToName(forTranscript: item.transcriptURL) > 0
+        let transcript: HomeMeetingCardPresentation.TranscriptRead
+        if let preview = homeOpenPreview(for: item, requireReadable: false) {
+            transcript = preview.readError == nil
+                ? .loaded(speakerLineCount: preview.content.transcriptLines.filter { !$0.speaker.isEmpty }.count)
+                : .failed
+        } else {
+            transcript = .notLoaded
+        }
+        return HomeMeetingCardPresentation.whoSpokeAvailability(
+            isOpen: homeMeetingOpenState.isOpen(item.id, expandedID: homeExpandedMeetingID),
+            hasQueuedReview: hasQueuedReview,
+            transcript: transcript
+        )
+    }
+
+    /// The opened card's read transcript when it belongs to `item` (also
+    /// under its old path while a rename settles).
+    private func homeOpenPreview(for item: RecentMeetingItem, requireReadable: Bool = true) -> HomeMeetingPreview? {
+        guard let preview = homeExpandedMeetingPreview,
+              homeMeetingOpenState.isOpen(item.id, expandedID: homeExpandedMeetingID),
+              preview.id == homeExpandedMeetingID else { return nil }
+        if requireReadable, preview.readError != nil { return nil }
+        return preview
+    }
+
     func assignMeetingSpeakers(
         _ assignments: [HomeMeetingSpeakerAssignment],
         in preview: HomeMeetingPreview,
@@ -115,7 +177,7 @@ extension TranscriptedSettingsView {
 
         func finishPartialFailure() {
             // At least one canonical mutation committed, so the old drafts are
-            // no longer a safe retry surface. Close the sheet, reload persisted
+            // no longer a safe retry surface. Close the card, reload persisted
             // truth, and tell the user to review the remaining voices. New
             // people are only linked by the local rewrite, which didn't land.
             discardNewlyEnrolled()
@@ -124,7 +186,7 @@ extension TranscriptedSettingsView {
             completion(true)
             presentHomeActionFailure(
                 title: "Some speaker names were saved",
-                message: "Transcripted saved part of this batch but couldn't finish it. Reopen Name speakers to review what's left.",
+                message: "Transcripted saved part of this batch but couldn't finish it. Open Who spoke? again to see what's left.",
                 retryTitle: "Refresh meeting",
                 retry: { reloadExpandedMeetingPreview(preview) }
             )

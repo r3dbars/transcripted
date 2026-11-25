@@ -2,7 +2,9 @@ import SwiftUI
 
 /// The Today page: one sentence for the day, the week as a strip, the picked
 /// day as three lanes (meetings, dictation, writing) with a preview of the
-/// picked capture under them, then the day in sessions. Pure view assembly;
+/// picked capture under them, then the day in sessions. The first day
+/// teaches the dictation key instead (`TodayFirstDay.swift`), and a small
+/// setup checklist sits at the bottom until it's done or dismissed. Pure view assembly;
 /// loading lives in `TodayViewModel`, numbers and copy in
 /// `TodayPresentation.swift`, and every navigation or capture action is
 /// injected by the settings shell.
@@ -11,7 +13,14 @@ struct TodaySettingsPage: View {
     let onOpenRecentItem: (TodayRecentItem) -> Void
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
-    let onStartDictation: () -> Void
+    /// The person's own dictation key and behavior, for the first day.
+    let keyHint: TodayKeyHint
+    let meetingShortcut: String?
+    let setupChecklist: TodaySetupChecklistState
+    let onSetupStep: (TodaySetupStep) -> Void
+    let onDismissSetup: () -> Void
+    /// A meeting is recording now: today's meetings lane draws it live.
+    let isRecordingMeeting: Bool
 
     /// Shared by the week strip and the day card; nil means today.
     @State private var selectedDayID: TimeInterval?
@@ -31,16 +40,27 @@ struct TodaySettingsPage: View {
         Locale.current.identifier + "|" + TimeZone.current.identifier + "|" + "\(Calendar.current.identifier)"
     }
 
+    /// Nothing saved yet, ever (as far as the last read knows).
+    private var isFirstDay: Bool {
+        todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty && !isRecordingMeeting
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 26) {
             header
 
-            if !stats.hasAnyCapture && snapshot.recent.isEmpty && todayViewModel.isRefreshing {
+            if !stats.hasAnyCapture && snapshot.recent.isEmpty && todayViewModel.isRefreshing && !isRecordingMeeting {
                 Text("Loading…")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink3)
-            } else if todayViewModel.hasLoaded && !stats.hasAnyCapture && snapshot.recent.isEmpty {
-                emptyState
+            } else if isFirstDay {
+                TodayFirstDayIntro(
+                    hint: keyHint,
+                    meetingShortcut: meetingShortcut,
+                    showsTranscribeFile: !setupChecklist.isShown,
+                    onStartMeeting: onStartMeeting,
+                    onImportAudioFile: onImportAudioFile
+                )
             } else if let selectedDay {
                 // Equatable: the shell publishes up to 20 times a second
                 // during a capture, and the card only changes with its day,
@@ -48,6 +68,7 @@ struct TodaySettingsPage: View {
                 TodayDayCard(
                     day: selectedDay,
                     pickedMarkID: pickedMarkID,
+                    isRecordingMeeting: isRecordingMeeting,
                     onPick: { pickedMarkID = $0 },
                     onOpen: onOpenRecentItem,
                     formatKey: formatKey
@@ -58,6 +79,11 @@ struct TodaySettingsPage: View {
                 Text("Loading…")
                     .font(LibraryTokens.meta)
                     .foregroundStyle(LibraryTokens.ink3)
+            }
+
+            if todayViewModel.hasLoaded && setupChecklist.isShown {
+                TodaySetupChecklist(state: setupChecklist, onStep: onSetupStep, onDismiss: onDismissSetup)
+                    .padding(.top, isFirstDay ? 6 : 10)
             }
         }
         .onChange(of: selectedDay?.id) { _, _ in
@@ -111,10 +137,16 @@ struct TodaySettingsPage: View {
                 }
             }
             // Its own full-width line: next to the week strip it got clipped.
-            if todayViewModel.isRefreshing {
-                Text("Updating saved captures…")
-                    .font(LibraryTokens.meta)
-                    .foregroundStyle(LibraryTokens.ink3)
+            // It stays put while a read runs and changes when the read lands.
+            // The first day says it in the key line below instead.
+            if isFirstDay {
+                EmptyView()
+            } else if todayViewModel.isRefreshing && TodayTapeBuilder.headerParts(headerStats).isEmpty {
+                // A stale empty snapshot must not announce "nothing"
+                // before the read finishes: hold the line's height.
+                Text(" ")
+                    .font(TodaySentence.font)
+                    .accessibilityHidden(true)
                     .accessibilityIdentifier("transcripted.today.refreshing")
             } else {
                 TodaySentence(stats: headerStats, isToday: isToday)
@@ -155,31 +187,6 @@ struct TodaySettingsPage: View {
         }
         .accessibilityIdentifier("transcripted.today.sessions")
     }
-
-    // MARK: Empty
-
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Nothing captured yet.")
-                .font(.system(size: 15, weight: .semibold))
-            Text("Dictate into any app or record a meeting. Everything you save lands here, and your AI tools can read it.")
-                .font(LibraryTokens.body)
-                .foregroundStyle(LibraryTokens.ink2)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: 460, alignment: .leading)
-            HStack(spacing: 8) {
-                Button("Start dictation", action: onStartDictation)
-                    .accessibilityIdentifier("transcripted.today.empty.start-dictation")
-                Button("Record a meeting", action: onStartMeeting)
-                    .accessibilityIdentifier("transcripted.today.empty.record-meeting")
-                Button("Transcribe a file…", action: onImportAudioFile)
-                    .accessibilityIdentifier("transcripted.today.empty.transcribe-file")
-            }
-            .controlSize(.regular)
-            .padding(.top, 4)
-        }
-        .padding(.top, 8)
-    }
 }
 
 // MARK: - Pieces
@@ -208,6 +215,8 @@ private struct TodaySentence: View {
     let stats: TodayContextStats
     let isToday: Bool
 
+    static let font = TextRole.heading.font(weight: .regular)
+
     @State private var showsApps = false
 
     var body: some View {
@@ -234,7 +243,7 @@ private struct TodaySentence: View {
                 Text(".")
             }
         }
-        .font(.system(size: 15))
+        .font(Self.font)
         .lineLimit(1)
         .accessibilityElement(children: .combine)
         .accessibilityIdentifier("transcripted.today.header.sentence")
@@ -278,6 +287,8 @@ private struct TodayDayCard: View, Equatable {
     /// Owned by the page so a session click can pick a mark; it clears it
     /// when the day changes.
     let pickedMarkID: String?
+    /// Draws the live bar on today's meetings lane (`TodayLiveMeetingMark`).
+    let isRecordingMeeting: Bool
     let onPick: (String?) -> Void
     let onOpen: (TodayRecentItem) -> Void
     /// Locale, time zone and calendar, so a region change still re-renders.
@@ -290,7 +301,7 @@ private struct TodayDayCard: View, Equatable {
     /// Closures and hover state stay out: hover is the card's own state and
     /// re-renders it by itself.
     nonisolated static func == (lhs: TodayDayCard, rhs: TodayDayCard) -> Bool {
-        TodayClockPolicy.dayCardIdentity(
+        lhs.isRecordingMeeting == rhs.isRecordingMeeting && TodayClockPolicy.dayCardIdentity(
             day: lhs.day,
             pickedMarkID: lhs.pickedMarkID,
             formatKey: lhs.formatKey
@@ -312,12 +323,10 @@ private struct TodayDayCard: View, Equatable {
                     .tracking(LibraryTokens.labelTracking)
                     .foregroundStyle(LibraryTokens.ink3)
                 Spacer()
+                // A past day's date is already the header's date line and
+                // title; it doesn't need a third copy here.
                 if day.isToday {
                     TodayNowLabel()
-                } else {
-                    Text(TodayCopy.dateLine(for: day.day))
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryTokens.ink3)
                 }
             }
 
@@ -373,10 +382,13 @@ private struct TodayDayCard: View, Equatable {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.primary.opacity(0.08))
+                        .fill(LibraryTokens.hairline)
                         .frame(height: 2)
                     ForEach(marks) { mark in
                         markView(mark, color: kind.streamColor, width: geo.size.width, isPicked: mark.id == shownID)
+                    }
+                    if kind == .meeting && day.isToday && isRecordingMeeting {
+                        TodayLiveMeetingMark(tapeDay: day.day, width: geo.size.width)
                     }
                     if day.isToday {
                         TodayNowMarker(tapeDay: day.day, width: geo.size.width)
@@ -567,7 +579,7 @@ private struct TodayWeekCell: View, Equatable {
             VStack(alignment: .leading, spacing: 2) {
                 Text(TodayCopy.weekdayShort(for: day.day))
                     .font(.system(size: 10.5))
-                    .foregroundStyle(day.isToday ? LibraryTokens.accent : LibraryTokens.ink3)
+                    .foregroundStyle(day.isToday ? LibraryTokens.ink : LibraryTokens.ink3)
                 Text(TodayCopy.dayNumber(for: day.day))
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(day.isEmpty ? LibraryTokens.ink3 : Color.primary)
@@ -583,14 +595,14 @@ private struct TodayWeekCell: View, Equatable {
             .padding(.bottom, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
                     .fill(isSelected ? LibraryTokens.raisedFill : (isHovering ? LibraryTokens.rowHover : Color.clear))
             )
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .stroke(isSelected ? Color.primary.opacity(0.16) : Color.clear, lineWidth: 1)
+                RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
+                    .stroke(isSelected ? DesignTokens.hairlineStrong : Color.clear, lineWidth: 1)
             )
-            .contentShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous))
         }
         .buttonStyle(.plain)
         .onHover { isHovering = $0 }
@@ -603,7 +615,7 @@ private struct TodayWeekCell: View, Equatable {
     private func miniLane(_ marks: [TodayTapeMark], color: Color) -> some View {
         GeometryReader { geo in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.08))
+                Capsule().fill(LibraryTokens.hairline)
                 ForEach(marks) { mark in
                     let width = mark.isDot ? 4 : max(3, geo.size.width * CGFloat((mark.end ?? mark.start) - mark.start))
                     Capsule()

@@ -1,79 +1,73 @@
 import SwiftUI
 
-/// The General portion of the combined settings page. Runtime state and side
-/// effects stay in `TranscriptedSettingsView`; this view only renders layout
-/// from bindings and injected editor content.
+/// The combined settings page. Runtime state and side effects stay in
+/// `TranscriptedSettingsView`; this view only lays out bindings and injected
+/// editor content.
 ///
-/// Card-based layout (2026-08 settings restyle): every setting is an
-/// always-visible row inside a rounded card — no disclosures to hunt through.
-/// Rows carry at most a few words; the explanation for each setting lives in
-/// its ⓘ info popover. Sections: Dictation, Microphone, Send after
-/// dictation, Meetings, Speakers, Transcription, App, Permissions, Privacy,
-/// Developer Preview.
+/// Four visible groups hold the settings most people change: Dictation,
+/// Meetings, Library and Privacy. Everything else sits in one disclosure,
+/// Advanced, which remembers whether it was open. Nothing else on the page is
+/// hidden. Permissions and the voice model move up top whenever they need
+/// attention, so a missing permission is never one click down.
 struct GeneralSettingsPage<
-    ShortcutEditor: View,
-    BluetoothMicEditor: View,
+    DictationKeyEditor: View,
+    MicrophoneEditor: View,
     AutoSendEditor: View,
-    SpeakerEditor: View,
-    ModelEditor: View,
-    MicProcessingEditor: View,
+    MeetingsKeyEditor: View,
+    LibraryEditor: View,
+    PrivacyEditor: View,
     PermissionsEditor: View,
-    ReportingEditor: View,
-    DeveloperPreviewEditor: View
+    ModelEditor: View,
+    Advanced: View
 >: View {
-    @Binding var launchAtLoginEnabled: Bool
-    let launchAtLoginStatus: String
-    /// Inline line under the switch when it failed or macOS is waiting for
-    /// approval in Login Items. Nil when launch at login is working.
-    let launchAtLoginNotice: String?
-    let onOpenLoginItems: () -> Void
-    @Binding var showTranscriptedInDock: Bool
-    @Binding var uiSoundsEnabled: Bool
     @Binding var dictationCleanupEnabled: Bool
-    @Binding var dictationMuffleEnabled: Bool
     @Binding var autoDetectCallsEnabled: Bool
-    @Binding var autoRecordDetectedCallsEnabled: Bool
 
-    let correctionsStatusLine: String
+    /// A required permission is missing: Permissions shows first, not in Advanced.
+    let showsPermissionsUpTop: Bool
+    /// Model files are missing or downloading: the voice model shows first.
+    let showsModelUpTop: Bool
 
-    let onTrackAction: (String) -> Void
-    let onImportAudioFile: () -> Void
-    let onEditCorrections: () -> Void
-    let shortcutEditor: () -> ShortcutEditor
-    let bluetoothMicEditor: () -> BluetoothMicEditor
+    let dictationKeyEditor: () -> DictationKeyEditor
+    let microphoneEditor: () -> MicrophoneEditor
     let autoSendEditor: () -> AutoSendEditor
-    let speakerEditor: () -> SpeakerEditor
-    let modelEditor: () -> ModelEditor
-    let micProcessingEditor: () -> MicProcessingEditor
+    let meetingsKeyEditor: () -> MeetingsKeyEditor
+    let libraryEditor: () -> LibraryEditor
+    let privacyEditor: () -> PrivacyEditor
     let permissionsEditor: () -> PermissionsEditor
-    let reportingEditor: () -> ReportingEditor
-    let developerPreviewEditor: () -> DeveloperPreviewEditor
+    let modelEditor: () -> ModelEditor
+    let advanced: () -> Advanced
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            // Title only, no tagline. The window's own titlebar is hidden, so
-            // this heading is the only thing naming the page and it has to stay.
-            // The dropped summary ("Everything in one place — scroll to find
-            // it.") only described the scroll container, which the scrollbar
-            // already says; Speakers is title-only for the same reason, while
-            // Dictations and Agent keep summaries that carry real information.
+            // Title only: the window's titlebar is hidden, so this heading is
+            // the only thing naming the page.
             SettingsPageIntro(title: "Settings")
 
-            SettingsCardLabel(text: "Dictation")
+            if showsPermissionsUpTop {
+                SettingsGroup(title: "Permissions", identifier: "transcripted.settings.section.permissions") {
+                    permissionsEditor()
+                }
                 .padding(.top, 8)
-            SettingsCard {
-                GeneralToggleRow(
-                    title: "Sounds",
-                    isOn: $uiSoundsEnabled,
-                    help: uiSoundsEnabled ? "Dictation sounds are on." : "No dictation sounds.",
-                    info: GeneralInfo(
-                        title: "Sounds",
-                        message: "A click when dictation starts, another when you press Stop, and a soft drop if it hears no speech."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.dictation-sounds"
-                )
+            }
 
-                NotchIslandScreenSharingRow()
+            if showsModelUpTop {
+                SettingsGroup(title: "Voice model", identifier: "transcripted.settings.section.transcription") {
+                    modelEditor()
+                }
+                .padding(.top, 8)
+            }
+
+            SettingsGroup(title: "Dictation", identifier: "transcripted.settings.section.dictation") {
+                dictationKeyEditor()
+
+                // The section id stays the old one so smokes and anchors keep it.
+                VStack(alignment: .leading, spacing: 0) {
+                    microphoneEditor()
+                    Divider()
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("transcripted.settings.section.bluetooth-microphone")
 
                 GeneralToggleRow(
                     title: "Clean up pasted text",
@@ -81,9 +75,113 @@ struct GeneralSettingsPage<
                     help: dictationCleanupEnabled ? "Light cleanup before pasting." : "Paste the raw transcript.",
                     info: GeneralInfo(
                         title: "Clean up pasted text",
-                        message: "Lightly fixes filler words, repeats, and spacing before pasting. Off pastes the raw transcript."
+                        message: "Removes filler words, repeats and stray spaces before pasting."
                     ),
                     automationIdentifier: "transcripted.settings.general.cleanup-pasted-text"
+                )
+
+                VStack(alignment: .leading, spacing: 0) {
+                    autoSendEditor()
+                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("transcripted.settings.section.send-after-dictation")
+            }
+            .padding(.top, 8)
+
+            SettingsGroup(title: "Meetings", identifier: "transcripted.settings.section.meetings") {
+                meetingsKeyEditor()
+
+                GeneralToggleRow(
+                    title: "Auto-detect calls",
+                    isOn: $autoDetectCallsEnabled,
+                    help: autoDetectCallsEnabled ? "Offer to record detected calls." : "Only calendar and app detection.",
+                    info: GeneralInfo(
+                        title: "Auto-detect calls",
+                        message: "Offers to record when a call starts. Detection runs on this Mac."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.auto-detect-calls"
+                )
+
+                NotchIslandLiveTranscriptRow()
+
+                MeetingTitlesSettingsRow(showsDivider: false)
+            }
+            .padding(.top, 16)
+
+            libraryEditor()
+                .padding(.top, 16)
+
+            SettingsGroup(title: "Privacy", identifier: "transcripted.settings.section.privacy") {
+                privacyEditor()
+            }
+            .padding(.top, 16)
+
+            SettingsAdvancedDisclosure(
+                summary: "Sounds, call recording, mic processing, voice model, corrections, login and Dock, permissions, updates, feedback and Developer Preview."
+            ) {
+                advanced()
+            }
+            .padding(.top, 20)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("transcripted.settings.page.general")
+    }
+}
+
+/// What Settings › Advanced holds, grouped. Every row here used to sit on the
+/// flat page; none of them changed what it does.
+struct AdvancedSettingsSection<
+    KeyboardShortcutsEditor: View,
+    MicProcessingEditor: View,
+    SpeakerEditor: View,
+    ModelEditor: View,
+    PermissionsEditor: View,
+    AboutEditor: View,
+    SupportFilesEditor: View,
+    DeveloperPreviewEditor: View
+>: View {
+    @Binding var uiSoundsEnabled: Bool
+    @Binding var dictationMuffleEnabled: Bool
+    let autoDetectCallsEnabled: Bool
+    @Binding var autoRecordDetectedCallsEnabled: Bool
+    @Binding var launchAtLoginEnabled: Bool
+    let launchAtLoginStatus: String
+    /// Inline line under the switch when it failed or macOS is waiting for
+    /// approval in Login Items. Nil when launch at login is working.
+    let launchAtLoginNotice: String?
+    let onOpenLoginItems: () -> Void
+    @Binding var showTranscriptedInDock: Bool
+
+    let correctionsStatusLine: String
+    /// Permissions and the voice model show here only while they're healthy;
+    /// otherwise the page shows them at the top.
+    let showsPermissions: Bool
+    let showsModel: Bool
+
+    let onTrackAction: (String) -> Void
+    let onImportAudioFile: () -> Void
+    let onEditCorrections: () -> Void
+    let keyboardShortcutsEditor: () -> KeyboardShortcutsEditor
+    let micProcessingEditor: () -> MicProcessingEditor
+    let speakerEditor: () -> SpeakerEditor
+    let modelEditor: () -> ModelEditor
+    let permissionsEditor: () -> PermissionsEditor
+    let aboutEditor: () -> AboutEditor
+    let supportFilesEditor: () -> SupportFilesEditor
+    let developerPreviewEditor: () -> DeveloperPreviewEditor
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsGroup(title: "Dictation", identifier: "transcripted.settings.section.advanced-dictation") {
+                GeneralToggleRow(
+                    title: "Sounds",
+                    isOn: $uiSoundsEnabled,
+                    help: uiSoundsEnabled ? "Dictation sounds are on." : "No dictation sounds.",
+                    info: GeneralInfo(
+                        title: "Sounds",
+                        message: "A click when dictation starts and stops, and a soft drop if it hears nothing."
+                    ),
+                    automationIdentifier: "transcripted.settings.general.dictation-sounds"
                 )
 
                 GeneralToggleRow(
@@ -92,46 +190,17 @@ struct GeneralSettingsPage<
                     help: dictationMuffleEnabled ? "Music sounds muffled while you talk." : "Other audio plays normally.",
                     info: GeneralInfo(
                         title: "Muffle other audio",
-                        message: "While you dictate, music and videos keep playing but sound muffled, like stepping outside the club, then come back when you stop. Calls and other apps using a mic are left alone. Needs System Audio Recording access. Skipped during meetings, with Apple voice processing on, and on AirPlay, surround or virtual outputs, or headphones whose mic would have to switch on."
+                        message: "Music and videos get quieter while you talk, then come back. Calls are left alone. Needs System Audio Recording."
                     ),
                     automationIdentifier: "transcripted.settings.general.dictation-muffle"
                 )
 
-                shortcutEditor()
+                NotchIslandScreenSharingRow()
+
+                keyboardShortcutsEditor()
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.dictation")
 
-            SettingsCardLabel(text: "Microphone")
-                .padding(.top, 16)
-            SettingsCard {
-                bluetoothMicEditor()
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.bluetooth-microphone")
-
-            SettingsCardLabel(text: "Send after dictation")
-                .padding(.top, 16)
-            SettingsCard {
-                autoSendEditor()
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.send-after-dictation")
-
-            SettingsCardLabel(text: "Meetings")
-                .padding(.top, 16)
-            SettingsCard {
-                GeneralToggleRow(
-                    title: "Auto-detect calls",
-                    isOn: $autoDetectCallsEnabled,
-                    help: autoDetectCallsEnabled ? "Offer to record detected calls." : "Only calendar and app detection.",
-                    info: GeneralInfo(
-                        title: "Auto-detect calls",
-                        message: "Notices when a call starts — an app using your mic, call audio playing, or your camera turning on — and offers to record it. Detection is entirely local; nothing about the audio or video leaves this Mac."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.auto-detect-calls"
-                )
-
+            SettingsGroup(title: "Meetings", identifier: "transcripted.settings.section.advanced-meetings") {
                 GeneralToggleRow(
                     title: "Record detected calls automatically",
                     isOn: $autoRecordDetectedCallsEnabled,
@@ -140,7 +209,7 @@ struct GeneralSettingsPage<
                         : "Ask before recording a detected call.",
                     info: GeneralInfo(
                         title: "Record detected calls automatically",
-                        message: "When Zoom or Teams is using the mic, or the front Meet, Zoom, or Teams tab is, start recording without asking. A tab title or the camera is never enough on its own. Needs Auto-detect calls, plus microphone and System Audio Recording already allowed. Off by default: the other people on the call are not asked."
+                        message: "Starts recording Zoom, Teams and Meet calls without asking. Needs Auto-detect calls. Others on the call aren't asked, so it's off by default."
                     ),
                     automationIdentifier: "transcripted.settings.general.auto-record-detected-calls",
                     isEnabled: autoDetectCallsEnabled
@@ -148,102 +217,31 @@ struct GeneralSettingsPage<
 
                 MeetingMicMuteControlRow()
 
-                NotchIslandLiveTranscriptRow()
-
-                MeetingTitlesSettingsRow()
-
                 micProcessingEditor()
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.meetings")
 
-            SettingsCardLabel(text: "Speakers")
-                .padding(.top, 16)
-            SettingsCard {
-                speakerEditor()
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.speakers")
-
-            SettingsCardLabel(text: "Transcription")
-                .padding(.top, 16)
-            SettingsCard {
-                modelEditor()
-
-                SettingsControlRow(
-                    title: "Corrections",
-                    info: GeneralInfo(
-                        title: "Corrections",
-                        message: "Your fixes for words Transcripted mishears — \"okay ours → OKRs\". Applied to new dictations and meetings. If the mistake is in past meetings too, you can fix those from the list."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.corrections"
-                ) {
-                    HStack(spacing: 8) {
-                        Text(correctionsStatusLine)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        SettingsInlineActionButton(title: "Edit…") {
-                            onTrackAction("toggle_corrections")
-                            onEditCorrections()
-                        }
-                    }
+                VStack(alignment: .leading, spacing: 0) {
+                    speakerEditor()
                 }
-
-                GeneralActionRow(
-                    title: HomeCaptureListCopy.ImportFileRow.title,
-                    value: HomeCaptureListCopy.ImportFileRow.value,
-                    systemImage: "waveform",
-                    help: HomeCaptureListCopy.ImportFileRow.help,
-                    automationIdentifier: HomeCaptureListCopy.ImportFileRow.automationIdentifier,
-                    showsDivider: false
-                ) {
-                    onImportAudioFile()
-                }
+                .accessibilityElement(children: .contain)
+                .accessibilityIdentifier("transcripted.settings.section.speakers")
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.transcription")
-            .id("transcripted.settings.section.transcription")
+            .padding(.top, 8)
 
-            SettingsCardLabel(text: "App")
-                .padding(.top, 16)
-            SettingsCard {
-                GeneralToggleRow(
-                    title: "Launch at login",
-                    isOn: $launchAtLoginEnabled,
-                    help: launchAtLoginStatus,
-                    info: GeneralInfo(
-                        title: "Launch at login",
-                        message: "Opens Transcripted after you sign in, so shortcuts and meeting detection are ready without opening it yourself."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.launch-at-login",
-                    showsDivider: launchAtLoginNotice == nil
-                )
-
-                if let launchAtLoginNotice {
-                    HStack(alignment: .top, spacing: 8) {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.orange)
-
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(launchAtLoginNotice)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-
-                            Button("Open Login Items") {
-                                onOpenLoginItems()
-                            }
-                            .buttonStyle(.link)
-                            .accessibilityIdentifier("transcripted.settings.general.launch-at-login.open-login-items")
-                        }
-                    }
-                    .font(.caption)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 10)
-                    .overlay(alignment: .bottom) {
-                        Divider()
-                    }
+            if showsModel {
+                SettingsGroup(title: "Transcription", identifier: "transcripted.settings.section.transcription") {
+                    modelEditor()
+                    transcriptionExtras
                 }
+                .padding(.top, 8)
+            } else {
+                SettingsGroup(title: "Transcription", identifier: "transcripted.settings.section.transcription-extras") {
+                    transcriptionExtras
+                }
+                .padding(.top, 8)
+            }
+
+            SettingsGroup(title: "App", identifier: "transcripted.settings.section.app") {
+                launchAtLoginRows
 
                 GeneralToggleRow(
                     title: "Show in Dock",
@@ -251,41 +249,104 @@ struct GeneralSettingsPage<
                     help: showTranscriptedInDock ? "Visible in the Dock." : "Menu bar only while idle.",
                     info: GeneralInfo(
                         title: "Show in Dock",
-                        message: "Off keeps Transcripted menu-bar-only while idle. Settings and active recordings can still bring the app forward."
+                        message: "Off keeps Transcripted in the menu bar while idle."
                     ),
-                    automationIdentifier: "transcripted.settings.general.show-in-dock",
-                    showsDivider: false
+                    automationIdentifier: "transcripted.settings.general.show-in-dock"
                 )
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.app")
 
-            SettingsCardLabel(text: "Permissions")
-                .padding(.top, 16)
-            SettingsCard {
-                permissionsEditor()
+                supportFilesEditor()
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.permissions")
-            .id("transcripted.settings.section.permissions")
+            .padding(.top, 8)
 
-            SettingsCardLabel(text: "Privacy")
-                .padding(.top, 16)
-            SettingsCard {
-                reportingEditor()
+            if showsPermissions {
+                SettingsGroup(title: "Permissions", identifier: "transcripted.settings.section.permissions") {
+                    permissionsEditor()
+                }
+                .padding(.top, 8)
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.privacy")
 
-            SettingsCardLabel(text: "Developer Preview")
-                .padding(.top, 16)
-            SettingsCard {
+            aboutEditor()
+                .padding(.top, 8)
+
+            SettingsGroup(title: "Developer Preview", identifier: "transcripted.settings.section.developer-preview") {
                 developerPreviewEditor()
             }
-            .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("transcripted.settings.section.developer-preview")
+            .padding(.top, 8)
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("transcripted.settings.page.general")
+    }
+
+    @ViewBuilder
+    private var transcriptionExtras: some View {
+        SettingsControlRow(
+            title: "Corrections",
+            info: GeneralInfo(
+                title: "Corrections",
+                message: "Your fixes for words it mishears, like \"okay ours → OKRs\". Used for new dictations and meetings."
+            ),
+            automationIdentifier: "transcripted.settings.general.corrections"
+        ) {
+            HStack(spacing: 8) {
+                Text(correctionsStatusLine)
+                    .font(LibraryTokens.meta)
+                    .foregroundStyle(LibraryTokens.ink2)
+                SettingsInlineActionButton(title: "Edit…") {
+                    onTrackAction("toggle_corrections")
+                    onEditCorrections()
+                }
+            }
+        }
+
+        GeneralActionRow(
+            title: HomeCaptureListCopy.ImportFileRow.title,
+            value: HomeCaptureListCopy.ImportFileRow.value,
+            systemImage: "waveform",
+            help: HomeCaptureListCopy.ImportFileRow.help,
+            automationIdentifier: HomeCaptureListCopy.ImportFileRow.automationIdentifier,
+            showsDivider: false
+        ) {
+            onImportAudioFile()
+        }
+    }
+
+    @ViewBuilder
+    private var launchAtLoginRows: some View {
+        GeneralToggleRow(
+            title: "Launch at login",
+            isOn: $launchAtLoginEnabled,
+            help: launchAtLoginStatus,
+            info: GeneralInfo(
+                title: "Launch at login",
+                message: "Opens Transcripted when you sign in, so shortcuts and call detection are ready."
+            ),
+            automationIdentifier: "transcripted.settings.general.launch-at-login",
+            showsDivider: launchAtLoginNotice == nil
+        )
+
+        if let launchAtLoginNotice {
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(LibraryTokens.attention)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(launchAtLoginNotice)
+                        .foregroundStyle(LibraryTokens.ink2)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Button("Open Login Items") {
+                        onOpenLoginItems()
+                    }
+                    .buttonStyle(.transcriptedQuiet)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("transcripted.settings.general.launch-at-login.open-login-items")
+                }
+            }
+            .font(LibraryTokens.meta)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14)
+            .padding(.bottom, 10)
+            .overlay(alignment: .bottom) {
+                Divider()
+            }
+        }
     }
 }

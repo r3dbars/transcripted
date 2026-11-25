@@ -36,14 +36,15 @@ It uses a native macOS sidebar with these pages (`TranscriptedSettingsPage`):
 
 - `Today` (the default page, ⌘1)
 - `Meetings` (raw value `home`, kept so automation ids and analytics stay stable, ⌘2)
-- `Transcribe a file` (raw value `files`, no ⌘ number shortcut)
 - `Dictations` (⌘3)
 - `Writing` (⌘4)
 - `Speakers` (raw value `people`, ⌘5)
 - `Agent` (raw value `connectAgent`, ⌘6)
-- `Settings` (the gear; one combined page, see "Card layout" below)
+- `Settings` (a labelled row under the six, with Feedback and the version; one combined page, see "Card layout" below)
 
-There is no first-class `Advanced` page in this version.
+The old `Transcribe a file` page (raw value `files`) is retired: file import lives on Meetings, and `.files` redirects there so old deep links and analytics ids still land.
+
+There is no separate `Advanced` page; the Settings page has one Advanced disclosure (below).
 
 The per-area sections below (Shortcuts, General, Models, People, Dictation,
 Storage, Agent, About) began as separate pages. Today Shortcuts, General,
@@ -67,8 +68,8 @@ still hold.
 
 The header has no title. It only shows up when it has something to say:
 
-- a status line while a meeting records, a transcript is being made, or the
-  voice model is warming up (with progress)
+- a status line while a meeting starts, a transcript is being made, or the
+  voice model is warming up (with progress); saving shows on the button only
 - a one-line shortcut warning, clickable when it has a fix to open
 
 A ready, idle popover shows no header at all.
@@ -78,7 +79,7 @@ A ready, idle popover shows no header at all.
 Two small buttons sit side by side at the top:
 
 - `Record` (Record Meeting; becomes `Stop` with the elapsed time while recording)
-- `Dictate` (Start Dictation; becomes `Stop` while dictating)
+- `Dictate` (Start Dictation; becomes `Done` while dictating)
 
 Rules:
 
@@ -92,9 +93,21 @@ Rules:
 Under the buttons:
 
 - `Open Transcripted` (Settings lives inside it)
-- dynamic updates row: `Check for Updates`, `Checking for Updates…`, or an
-  update state; a prominent update callout replaces it when an update needs a click
 - `Quit`
+
+The idle popover is four controls. An update row appears only while an update
+downloads (`Downloading update`); a filled callout (`Update to X` / Install,
+`X is ready` / Restart) appears when it needs a click. The manual check is
+Settings › Advanced › About (`Check for updates`) and a click on the sidebar's
+version line; there is no app-menu item. Words come from
+`Sources/UI/Shared/UpdateStatusWords.swift`.
+
+### Status item
+
+A template glyph in every state, never tinted: outline (idle), filled
+(dictating), filled with a dot (meeting), outline with a ring (making a
+transcript), outline with a solid dot (the key needs Accessibility, or an
+update needs a click). Left and right click open the same popover.
 
 ## Settings Window
 
@@ -212,19 +225,25 @@ This page should reuse the simple "prompt first, manual setup second" mental mod
 
 ### Card layout (2026-08 restyle)
 
-The combined settings page has no disclosures: every setting is an
-always-visible row inside a rounded card, grouped under plain gray section
-labels (Dictation, Microphone, Send after dictation, Meetings,
-Speakers, Transcription, App, Permissions, Privacy, Developer Preview, Storage, About, Support).
-Rows carry at most a few words; each row's explanation lives in its ⓘ info
-popover. The page ends with the privacy line "Transcripts and audio never
-leave this Mac." Corrections open in a sheet; permissions render as status
-rows with a request action; mic processing sits in the Meetings card.
-While the Mac mic recorder (`PinnedMicrophoneCapturePreferences`) is on, the
-Microphone card holds one picker for dictation and meetings (Automatic, a
-specific mic, or "Same as macOS Sound settings") and the Meetings card drops
-"Use Mac-selected microphone". With it off, the card keeps Faster Bluetooth
-dictation and its mic picker.
+The combined settings page shows four groups under mono section labels:
+Dictation (Dictation key, Behavior, Microphone, Clean up pasted text,
+Auto-send), Meetings (Meetings key, Auto-detect calls, Live transcript),
+Library (Folder, Keep meeting audio, Keep dictation audio, Free up space) and
+Privacy (Crash reports, Usage stats, Send diagnostics). One disclosure,
+Advanced, holds everything else, grouped: Dictation (Sounds, Muffle, island in
+screen sharing, Keyboard shortcuts), Meetings (auto-record, mic mute control,
+mic processing, People in the room), Transcription (voice model, meeting
+language, Corrections, Transcribe a file), App (Launch at login, Show in Dock,
+Support files), Permissions, About (version, Automatic updates, Feedback) and
+Developer Preview. It remembers whether it's open. Permissions and the voice
+model show above Dictation instead whenever they need attention. Auto-send's
+send key and per-app switches show under it while it's on. Rows carry at most
+a few words; each row's explanation lives in its ⓘ info popover. The page ends
+with a privacy line. Corrections open in a sheet. While the Mac mic recorder
+(`PinnedMicrophoneCapturePreferences`) is on, Microphone is one picker for
+dictation and meetings (Automatic, a specific mic, or "Same as macOS Sound
+settings") and Advanced drops "Use Mac-selected microphone". With it off,
+Dictation keeps Faster Bluetooth dictation and its mic picker.
 
 ### About
 
@@ -233,10 +252,15 @@ Cover app identity, updates, and support links.
 
 Contents:
 
-- current app version
-- current update status
-- `Check for Updates` or `Update Available`
-- `Submit Feedback`
+It sits inside Settings › Advanced.
+
+- current app version and update status on one line
+- one update button whose word follows the status (`Check for updates`,
+  `Install`, `Restart`, ...; see `UpdateStatusWords.buttonTitle`)
+- `Automatic updates` (`Check on launch` / `Notify me` / `Download automatically`)
+- `Feedback` (`Send feedback…`)
+
+Send diagnostics is not here; it sits in the Privacy group next to Crash reports.
 
 Optional supporting text can explain local-first behavior in one short paragraph.
 
@@ -251,7 +275,8 @@ Optional supporting text can explain local-first behavior in one short paragraph
 
 ### Transcribe Audio File
 
-- appears on `Settings` (Transcription card)
+- appears in Settings › Advanced › Transcription (`Transcribe a file`)
+- appears in the Meetings page header's ⋯ menu, and on ⌘O and a file drop
 - appears as the second action on the Meetings page's empty state
 - does not appear in the menubar popover in this version
 
@@ -264,6 +289,6 @@ Optional supporting text can explain local-first behavior in one short paragraph
 ## Out Of Scope
 
 - no recents browser in the menubar popover
-- no dedicated `Advanced` page
+- no dedicated `Advanced` page (one Advanced disclosure on the Settings page)
 - no dedicated `Audio Files` sidebar page
 - no decorative theme treatment

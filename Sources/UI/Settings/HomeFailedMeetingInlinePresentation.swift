@@ -34,10 +34,10 @@ struct HomeFailedMeetingInlinePresentation: Equatable {
                 )
             }
 
-            // Say why it failed when that changes what to do first; a bare
-            // "Retry ready" sends people straight back into the same wall.
+            // Say why it failed when that changes what to do first; a
+            // bare status sends people straight back into the same wall.
             return HomeFailedMeetingInlinePresentation(
-                statusText: "Retry ready",
+                statusText: "Not transcribed",
                 inlineDetail: failureKind.flatMap(retryReason(for:))
                     ?? "Your audio is saved. Click Try again to transcribe it.",
                 canShowRetryAction: true
@@ -145,7 +145,7 @@ struct HomeFailedMeetingRowActions: Equatable {
                 hasAudioFiles: item.hasAudioFiles,
                 usableAudio: item.usableAudio
             ),
-            deleteTitle: "Delete failed meeting",
+            deleteTitle: "Delete",
             deleteIsDestructive: true,
             deleteDisabled: item.isRetrying
         )

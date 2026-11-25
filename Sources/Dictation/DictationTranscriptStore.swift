@@ -9,6 +9,7 @@ import TranscriptedCore
 
 extension Notification.Name {
     static let dictationTranscriptDidSave = Notification.Name("Transcripted.DictationTranscriptDidSave")
+    static let foregroundDictationDidSave = Notification.Name("Transcripted.ForegroundDictationDidSave")
     static let dictationNoSpeechDetected = Notification.Name("Transcripted.DictationNoSpeechDetected")
 }
 

@@ -56,7 +56,6 @@ func testFocusOrderContract() async {
                 [
                     "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
-                    "transcripted.settings.sidebar.files",
                     "transcripted.settings.sidebar.dictations",
                     "transcripted.settings.sidebar.writing",
                     "transcripted.settings.sidebar.people",
@@ -202,13 +201,12 @@ func testFocusOrderContract() async {
             )
         }
 
-        // Numbered Go shortcuts retain their relative order within the sidebar.
-        // File transcription has its existing ⌘O import shortcut instead.
+        // Numbered Go shortcuts match the sidebar's six rows, in order.
         let shortcutOrder = TranscriptedSettingsPage.allCases
             .compactMap { page in page.navigationShortcutKey.map { (key: $0, identifier: page.automationIdentifier) } }
             .sorted { $0.key < $1.key }
             .map(\.identifier)
-        let numberedFocusOrder = FocusOrderContract.settingsSidebarOrder.filter { $0 != TranscriptedSettingsPage.files.automationIdentifier }
+        let numberedFocusOrder = FocusOrderContract.settingsSidebarOrder
         assertEqual(
             shortcutOrder,
             numberedFocusOrder,
@@ -221,7 +219,7 @@ func testFocusOrderContract() async {
             FocusOrderContract.settingsSidebarOrder,
             "the sidebar's primary rows should list the pages in the focus order the contract pins"
         )
-        // The numbered pages keep their page order even with file import between them.
+        // The numbered pages keep their page order.
         assertEqual(
             numberedFocusOrder,
             TranscriptedSettingsPage.allCases

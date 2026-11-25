@@ -12,7 +12,7 @@ struct DictationTranscriptPersistenceResult: Sendable {
 
     var audioRetentionFailureMessage: String? {
         pendingAudioRetention == nil ? nil
-            : "Your text is saved. The recording is safe locally, but couldn't be moved to your save location. Check storage, then Retry Saving Audio."
+            : "Your text is saved. The recording is safe locally, but couldn't be moved to your save location. Check storage, then Retry saving audio."
     }
 
     var failureMessage: String? {
@@ -96,8 +96,14 @@ enum DictationSessionCapSavePolicy {
         return .savedNotice(
             message: "Saved to Markdown. Paste it now, or find it later in Dictations."
                 + (audioRetentionPending ? " \(DictationDeliveryPresentation.pendingAudioNotice)" : ""),
-            actionTitle: "Paste It"
+            actionTitle: "Paste"
         )
+    }
+
+    /// The line under the words in the island's not-pasted notice.
+    static func islandHint(audioRetentionPending: Bool) -> String {
+        "Saved at the 15-minute limit. "
+            + (audioRetentionPending ? DictationDeliveryPresentation.pendingAudioNotice : "It's also in Dictations.")
     }
 
     enum PasteItResult: Equatable {

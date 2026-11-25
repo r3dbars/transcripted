@@ -14,11 +14,7 @@ extension NotchIslandDropView {
             DispatchQueue.main.async { [weak preview] in preview?.scrollToNewest() }
         }
         // Released: the words are being written; there's nothing to press.
-        guard !isWriting else { return }
-        add(buttonRow(leading: [], trailing: [
-            button("Cancel", .plain, .dictationCancel),
-            button(Self.insertTitle(appName: appName), .accent, .dictationStop, appIcon: appName == nil ? nil : icon()),
-        ]))
+        addButtons(NotchIslandDropButtons.buttons(for: drop), targetIcon: icon)
     }
 
     /// The live words are one view every dictation drop-down shares. A kept
@@ -46,14 +42,11 @@ extension NotchIslandDropView {
         } else {
             add(body("“\(text)”", maxLines: 3))
         }
-        add(buttonRow(leading: [
-            button("Copy", .plain, .copyLastDictation),
-            button("Paste again", .plain, .pasteLastDictation),
-        ], trailing: []))
+        // Trailing like every other row, with Paste again as the primary.
+        addButtons(NotchIslandDropButtons.buttons(for: drop), targetIcon: { nil })
     }
 
     static func insertTitle(appName: String?) -> String {
-        guard let appName, !appName.isEmpty else { return "Insert now" }
-        return "Insert into \(appName)"
+        NotchIslandDropButtons.insertTitle(appName: appName)
     }
 }

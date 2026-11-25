@@ -230,6 +230,10 @@ def scan_privacy_files(paths: list[Path]) -> dict[str, int]:
     return counts
 
 
+UPDATE_ROW_KEY = "checkUpdates"
+UPDATE_ROW_IDENTIFIER = "transcripted.menubar.utility.check-updates"
+
+
 def validate_launch_report(report: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     for key in ("appLaunched", "statusItemExists", "popoverConfigured", "onboardingCompleted"):
@@ -244,7 +248,6 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     }
     required_utility = {
         "openTranscripted": ("Open Transcripted", "transcripted.menubar.utility.open-transcripted"),
-        "checkUpdates": ("Check for Updates", "transcripted.menubar.utility.check-updates"),
         "quit": ("Quit", "transcripted.menubar.utility.quit"),
     }
 
@@ -277,6 +280,13 @@ def validate_launch_report(report: dict[str, Any]) -> list[str]:
     for key in ("openTranscripted", "quit"):
         if not (utility.get(key) or {}).get("isEnabled"):
             errors.append(f"{key} row disabled")
+    # The update row is always built with its stable id. It shows only while
+    # an update is under way, and a packaged build may really find one, so
+    # only the id is required here (build.sh's launch smoke also checks that
+    # it stays hidden when idle).
+    update_row = utility.get(UPDATE_ROW_KEY) or {}
+    if update_row.get("automationIdentifier") != UPDATE_ROW_IDENTIFIER:
+        errors.append(f"{UPDATE_ROW_KEY} automation identifier mismatch")
 
     status = report.get("content", {}).get("header", {}).get("statusText")
     if status not in ("Ready", "On demand", "Cached"):
@@ -723,6 +733,8 @@ def self_test() -> int:
     # Submit Feedback rows. Their replacement and every remaining row are required.
     for group in ("primaryActions", "utilityActions"):
         for key in launch["content"][group]:
+            if key == UPDATE_ROW_KEY:
+                continue
             for mutation in ("missing", "hidden", "identifier", "title"):
                 broken = json.loads(json.dumps(launch))
                 row = broken["content"][group][key]
@@ -737,6 +749,22 @@ def self_test() -> int:
                 if not validate_launch_report(broken):
                     print(f"menu fixture accepted {mutation} required row {key}", file=sys.stderr)
                     return 1
+    for mutation in ("missing", "identifier"):
+        broken = json.loads(json.dumps(launch))
+        if mutation == "missing":
+            del broken["content"]["utilityActions"][UPDATE_ROW_KEY]
+        else:
+            broken["content"]["utilityActions"][UPDATE_ROW_KEY]["automationIdentifier"] = "incorrect"
+        if not validate_launch_report(broken):
+            print(f"menu fixture accepted {mutation} update row", file=sys.stderr)
+            return 1
+    found_update = json.loads(json.dumps(launch))
+    found_update["content"]["utilityActions"][UPDATE_ROW_KEY].update(
+        {"isVisible": True, "isEnabled": True, "title": "Downloading update", "displayTitle": "Downloading update"}
+    )
+    if errors := validate_launch_report(found_update):
+        print(f"menu fixture rejected a packaged build that found an update: {errors}", file=sys.stderr)
+        return 1
     for key in ("startDictation", "startMeeting"):
         broken = json.loads(json.dumps(launch))
         broken["content"]["primaryActions"][key]["displayTitle"] = broken["content"]["primaryActions"][key]["title"]

@@ -1,9 +1,8 @@
 // SpeakerReviewCardProgress.swift
 // What the Speakers page's "Review and name these people" stack says and draws
 // around a voice once it's named on a card: the person's print lighting one
-// more ring, the line under the name ("Named automatically from now on", "3
-// more to go", "Saved · 4 more to auto-name"), the card's "Weekly sync is done"
-// footer, and the closed summary card ("3 voices to name"). The words are the
+// more ring, the line under the name ("Auto", "2 of 5", or "1 of 5" for
+// someone new), and the "Weekly sync is done" banner. The words are the
 // island's (SpeakerNamingTierPresentation.reviewHint), so both places say the
 // same thing. Foundation-only so the fast tests can compile it.
 
@@ -54,49 +53,23 @@ enum SpeakerReviewCardProgress {
 
     /// The line under the name, the island's words for the same moment.
     static func hint(_ voice: SpeakerReviewNamedVoice) -> SpeakerNamingTierPresentation.ReviewHint? {
-        let hint = SpeakerNamingTierPresentation.reviewHint(
+        SpeakerNamingTierPresentation.reviewHint(
             moment: .confirmed,
             confirmedBefore: confirmedAfter(voice),
             required: voice.requiredMeetings,
             isTrusted: voice.isTrusted,
             earnsConfirmation: false
         )
-        guard voice.isNewPerson, let hint, !hint.usesPersonColor else { return hint }
-        return .init(text: "Saved · \(max(0, voice.requiredMeetings - confirmedAfter(voice))) more to auto-name", usesPersonColor: false)
     }
 
     /// "Weekly sync is done · 2 voices named", or just "Weekly sync is done".
     static func doneLine(callTitle: String, namedCount: Int) -> String {
         let title = callTitle.trimmingCharacters(in: .whitespacesAndNewlines)
-        let head = title.isEmpty ? "This call is done" : "\(title) is done"
+        let head = title.isEmpty ? "This meeting is done" : "\(title) is done"
         switch namedCount {
         case ..<1: return head
         case 1: return "\(head) · 1 voice named"
         default: return "\(head) · \(namedCount) voices named"
-        }
-    }
-
-    /// The done card's button: on to the next call, or close the stack.
-    static func nextTitle(callsAfterThis: Int) -> String {
-        callsAfterThis > 0 ? "Next call" : "Done"
-    }
-
-    /// The closed summary card's title.
-    static func summaryTitle(voiceCount: Int) -> String {
-        voiceCount == 1 ? "1 voice to name" : "\(voiceCount) voices to name"
-    }
-
-    /// "From Weekly sync", "From Weekly sync and Design review", or "From
-    /// Weekly sync and 3 other calls".
-    static func summarySource(callTitles: [String]) -> String? {
-        let titles = callTitles
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty }
-        guard let first = titles.first else { return nil }
-        switch titles.count {
-        case 1: return "From \(first)"
-        case 2: return "From \(first) and \(titles[1])"
-        default: return "From \(first) and \(titles.count - 1) other calls"
         }
     }
 

@@ -577,7 +577,7 @@ enum MeetingPromptHeuristics {
     /// user's current meeting shortcut as the menu bar shows it (for example
     /// "⌥M"), so a rebound shortcut is never shown as the default.
     static func runtimeReminderDetail(meetingShortcut: String) -> String {
-        "If this is a meeting, start recording now or press \(meetingShortcut) anytime."
+        "Or press \(meetingShortcut) anytime."
     }
 
     static func runtimePresentation(
@@ -589,7 +589,7 @@ enum MeetingPromptHeuristics {
     ) -> RuntimeMeetingPromptPresentation? {
         if isFrontmost {
             return RuntimeMeetingPromptPresentation(
-                title: "\(providerName) is active",
+                title: "\(providerName) is open",
                 detail: runtimeReminderDetail(meetingShortcut: meetingShortcut),
                 score: 4
             )
@@ -600,7 +600,7 @@ enum MeetingPromptHeuristics {
         guard age >= 0, age <= runtimeActivityFreshness else { return nil }
 
         return RuntimeMeetingPromptPresentation(
-            title: "\(providerName) just opened",
+            title: "\(providerName) is open",
             detail: runtimeReminderDetail(meetingShortcut: meetingShortcut),
             score: 3
         )

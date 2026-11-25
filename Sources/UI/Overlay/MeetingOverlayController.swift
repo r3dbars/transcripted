@@ -107,7 +107,7 @@ final class MeetingOverlayController: NSObject {
     /// from `autoHideTask`, which hides the whole panel after a save.
     var systemAudioAutoHideTask: Task<Void, Never>?
     var systemAudioAutoHideIdentity: MeetingIslandPromptIdentity?
-    var isShowingCancelConfirmation = false
+    let discardConfirmation = MeetingDiscardConfirmation()
 
     // The precedence lattice for these kinds lives in the pure
     // `MeetingPromptPriority.resolve` — kept in its own Foundation-pure file
@@ -118,7 +118,7 @@ final class MeetingOverlayController: NSObject {
 
     // Kept for the countdown-refresh pass, which rebuilds the display each tick.
     var missedCallPrompt: MeetingPromptUnrecordedCall?
-    private static let missedCallNudgeTimeoutSeconds = 30
+    static let missedCallNudgeTimeoutSeconds = 30
 
     deinit {
         autoHideTask?.cancel()

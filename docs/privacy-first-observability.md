@@ -75,7 +75,7 @@ references, meeting titles, speaker names, local paths, or user identifiers.
 8. Verify Settings also shows separate toggles for:
    - crash and error reports
    - anonymous usage statistics
-9. Use About > `Send diagnostics` to verify Sentry wiring (the dedicated
+9. Use Settings › Advanced › About › `Send diagnostics` to verify Sentry wiring (the dedicated
    `Send Test Sentry Event` settings row was removed in the settings
    simplification).
 10. Leave anonymous usage statistics on and verify only allowlisted events arrive
@@ -572,7 +572,8 @@ counts and boundary timing; event receipt is not continuous observation.
 `product_navigation` records explicit sidebar/control selections and window
 presentations with canonical `destination`/`previous_destination` plus bounded
 `source` and `initiation=user|automatic|unknown`. Use `initiation=user` for
-intentional navigation. Legacy `home` is unchanged: menu `home` opens Today,
+intentional navigation. App launch and setup's Done (`onboarding_completed`,
+which opens Today) count as `automatic`. Legacy `home` is unchanged: menu `home` opens Today,
 page `home` means Meetings. Rendering callbacks still feed the legacy series,
 not the new deliberate-navigation series.
 

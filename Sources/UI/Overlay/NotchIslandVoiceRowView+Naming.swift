@@ -126,7 +126,7 @@ extension NotchIslandVoiceRowView {
     /// row, or nil when the voice was left unnamed (or, for a recognized
     /// voice, left as it was). A name still sitting in an open field counts,
     /// read the way Return would read it, except an untouched calendar name
-    /// on Later. All me and Not a person win over any name, and build
+    /// on Later. The mic line's You and Not a person win over any name, and build
     /// the window's `.collapsedToMe` and `.discardedFromDatabase` updates.
     func buildUpdate(finish: Policy.Finish) -> SpeakerReviewUpdate? {
         if let lock {
