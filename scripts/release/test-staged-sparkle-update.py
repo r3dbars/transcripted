@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Real Sparkle 1.1.75 -> 1.1.76 install/relaunch proof; hosted CI only.
+"""Real Sparkle 1.1.76 -> 1.1.77 install/relaunch proof; hosted CI only.
 
 Never changes a release surface or signed app. The CLI owns installation; Python
 only downloads, stages, observes and verifies. Not a customer prompt/UI test.
@@ -26,28 +26,28 @@ import urllib.parse
 import uuid
 import xml.etree.ElementTree as ET
 
-SOURCE_SHA = 'caa17f1bb522324bf8f756239347fb4c6308ab52'
+SOURCE_SHA = '8f5511210b69270fc30c68b4926992a9d3157131'
 SPARKLE_SHA = '066e75a8b3e99962685d6a90cdd5293ebffd9261'
 TOOLKIT_SHA = 'c0dde519fd2a43ddfc6a1eb76aec284d7d888fe281414f9177de3164d98ba4c7'
 PUBLIC_KEY = 'Ib6MHm4eeZYjhsZblNT0DEo3LzK9fYvBLkmqvw/Vo7Q='
 BUNDLE_ID = 'com.justinbetker.draft'
 NS = '{http://www.andymatuschak.org/xml-namespaces/sparkle}'
 ASSETS = {
- 'Transcripted-1.1.75.dmg': ('1.1.75', '9e297c6c4154a5a6623c0fd711374fb45233faefab20bf718ded5b83068f6cca', 703372192),
  'Transcripted-1.1.76.dmg': ('1.1.76', 'c9c59dd56244592c200cccbc659ec103fda9a3a2cf06b1c6200369a9ef83c913', 703576924),
- 'Transcripted1.1.76-1.1.75.delta': ('1.1.76', '18bdf4fc7e303435d5f906291a6f52fa1de0beac561731306ff7c57b4002cb0c', 3046518),
+ 'Transcripted-1.1.77.dmg': ('1.1.77', '9fd2084d61485f0718926c669715f4a02f447b65fd2044a7b9f5e17e746cc182', 704188984),
+ 'Transcripted1.1.77-1.1.76.delta': ('1.1.77', 'ce0aa3ffab0f487d2fd2d954ffd536f156f43e02b84387079664ed691b23f921', 5408142),
 }
-RC_RUN = 41978929739
-RC_ARTIFACT = 13394641882
-RC_WORKFLOW_SHA = '9f7076de5ae5e98cadf90b43975161db667fc175'
-RC_ZIP_SHA = '0dc7201ebfb1fb60a88672c8d2d6bb4bb44ee87ba262fc90cbbf44189bb12348'
-RC_ZIP_SIZE = 743785306
-FEED_SHA = '2e8855adf7899bf57dc9235b5f5a62076d521c1b18e4b77138505be539ad27ae'
-FEED_SIZE = 86820
+RC_RUN = 45649749132
+RC_ARTIFACT = 15043685633
+RC_WORKFLOW_SHA = '1f161162c16c50379c8eb559294e3326767a9ac2'
+RC_ZIP_SHA = '425c5618015ad96d378605798dcbfb4ea21856a1b754fc6d625e59ca13b21f42'
+RC_ZIP_SIZE = 753221387
+FEED_SHA = '671c708b7d8625a1fdf10e02a21369e7e69a738d5dd6c86108677ff69c84ffbb'
+FEED_SIZE = 90147
 RC_MEMBERS = {
- 'build/Transcripted-1.1.76.dSYM.zip', 'build/Transcripted-1.1.76.dmg', 'build/appcast.xml',
- 'build/packaged-app-smoke.json', 'build/privacy-leak-sweep-report.json', 'Casks/transcripted.rb',
- *{f'build/sparkle-deltas/Transcripted1.1.76-1.1.{v}.delta' for v in range(71, 76)},
+ 'build/Transcripted-1.1.77.dSYM.zip', 'build/Transcripted-1.1.77.dmg', 'build/appcast.xml',
+ 'build/Transcripted-model-manifest.json', 'build/packaged-app-smoke.json', 'build/privacy-leak-sweep-report.json', 'Casks/transcripted.rb',
+ *{f'build/sparkle-deltas/Transcripted1.1.77-1.1.{v}.delta' for v in (72, 73, 74, 75, 76)},
 }
 CLI_FILES = {
  'Info.plist': '0d04f5392050cf6ecd2f50ea7c06799f77878328ca3838fc707a4439cb17b852',
@@ -175,7 +175,7 @@ def staged_feed(original, base, mode):
     require(channel is not None, 'Missing channel')
     items = channel.findall('item')
     require(mode in ('full', 'delta'), 'Unknown update mode')
-    require(items and items[0].findtext(NS+'version') == '1.1.76', 'Wrong candidate version')
+    require(items and items[0].findtext(NS+'version') == '1.1.77', 'Wrong candidate version')
     item = copy.deepcopy(items[0])
     for old in items:
         channel.remove(old)
@@ -189,16 +189,17 @@ def staged_feed(original, base, mode):
             item.remove(deltas)
     else:
         require(deltas is not None, 'Missing candidate deltas')
-        matches = [e for e in deltas if e.get(NS+'deltaFrom') == '1.1.75']
-        require(len(matches) == 1, 'Missing or duplicate 1.1.75 delta')
+        matches = [e for e in deltas if e.get(NS+'deltaFrom') == '1.1.76']
+        require(len(matches) == 1, 'Missing or duplicate 1.1.76 delta')
         for delta in list(deltas):
             if delta not in matches:
                 deltas.remove(delta)
         selected += matches
-    for entry in selected:
+    expected_names = ['Transcripted-1.1.77.dmg', 'Transcripted1.1.77-1.1.76.delta']
+    for entry, expected_name in zip(selected, expected_names):
         url = entry.get('url', '')
         name = url.rsplit('/', 1)[-1]
-        require(name in ASSETS and ASSETS[name][0] == '1.1.76', 'Unexpected artifact')
+        require(name == expected_name and ASSETS[name][0] == '1.1.77', 'Unexpected artifact')
         version, _, size = ASSETS[name]
         require(url == f'https://github.com/r3dbars/transcripted/releases/download/v{version}/{name}', 'Unexpected artifact URL')
         require(entry.get('length') == str(size) and bool(entry.get(NS+'edSignature')), 'Missing signed artifact metadata')
@@ -207,8 +208,9 @@ def staged_feed(original, base, mode):
 
 
 def selected_transport(mode, paths):
-    full = '/Transcripted-1.1.76.dmg' in paths
-    delta = '/Transcripted1.1.76-1.1.75.delta' in paths
+    require(mode in ('full', 'delta'), 'Unknown update mode')
+    full = '/Transcripted-1.1.77.dmg' in paths
+    delta = '/Transcripted1.1.77-1.1.76.delta' in paths
     if mode == 'full':
         require(full and not delta, 'Full run did not download the full artifact alone')
     else:
@@ -237,7 +239,7 @@ def tree_digest(bundle):
 
 def rc_metadata(metadata):
     require(metadata.get('id') == RC_ARTIFACT and metadata.get('expired') is False
-            and metadata.get('name') == 'Transcripted-1.1.76-release-candidate'
+            and metadata.get('name') == 'Transcripted-1.1.77-release-candidate'
             and metadata.get('size_in_bytes') == RC_ZIP_SIZE
             and metadata.get('digest') == 'sha256:'+RC_ZIP_SHA
             and metadata.get('workflow_run', {}).get('id') == RC_RUN
@@ -257,15 +259,15 @@ def stage_rc(archive, metadata, assets):
     require(archive.is_file() and archive.stat().st_size == RC_ZIP_SIZE and sha(archive) == RC_ZIP_SHA,
             'Wrong final RC ZIP bytes')
     selected = {'build/appcast.xml': assets/'signed-appcast.xml',
-                'build/Transcripted-1.1.76.dmg': assets/'Transcripted-1.1.76.dmg',
-                'build/sparkle-deltas/Transcripted1.1.76-1.1.75.delta': assets/'Transcripted1.1.76-1.1.75.delta'}
+                'build/Transcripted-1.1.77.dmg': assets/'Transcripted-1.1.77.dmg',
+                'build/sparkle-deltas/Transcripted1.1.77-1.1.76.delta': assets/'Transcripted1.1.77-1.1.76.delta'}
     with zipfile.ZipFile(archive) as z:
         rc_members(z.infolist())
         for member, target in selected.items():
             with z.open(member) as src, target.open('xb') as dst:
                 import shutil
                 shutil.copyfileobj(src, dst)
-    for name in ('Transcripted-1.1.76.dmg', 'Transcripted1.1.76-1.1.75.delta'):
+    for name in ('Transcripted-1.1.77.dmg', 'Transcripted1.1.77-1.1.76.delta'):
         _, digest, size = ASSETS[name]
         require((assets/name).stat().st_size == size and sha(assets/name) == digest, 'Wrong final candidate bytes')
     feed = (assets/'signed-appcast.xml').read_bytes()
@@ -442,13 +444,23 @@ def restore_product_preferences(home, pids, proof, command=run, read=None,
     proof['absence_restored'] = True
 
 
+def update_flags(info, version):
+    # Only a non-enforcing source client can consume the intentionally rewritten
+    # loopback feed. Its archive signature remains mandatory before extraction.
+    require(info.get('SUVerifyUpdateBeforeExtraction') is True, 'Missing archive verification')
+    require(info.get('SURequireSignedFeed', False) is (version == '1.1.77'),
+            'Wrong signed-feed policy for installed version')
+    return {'verify_before_extraction': True, 'require_signed_feed': version == '1.1.77'}
+
+
 def verify_app(app, version):
     info = plistlib.loads((app/'Contents/Info.plist').read_bytes())
     require(info['CFBundleShortVersionString'] == info['CFBundleVersion'] == version, 'Wrong version/build')
     require(info['CFBundleIdentifier'] == BUNDLE_ID and info['SUPublicEDKey'] == PUBLIC_KEY, 'Wrong app identity/key')
+    flags = update_flags(info, version)
     run('codesign', '--verify', '--deep', '--strict', app)
     run('spctl', '--assess', '--type', 'execute', '--verbose=2', app)
-    return tree_digest(app)
+    return tree_digest(app), flags
 
 
 def copy_from_dmg(dmg, destination, mount):
@@ -544,7 +556,7 @@ def main():
     os.umask(0o077)
     out.mkdir(parents=True, mode=0o700)
     receipt = {'status': 'INCOMPLETE', 'candidate_sha': SOURCE_SHA, 'workflow_sha': workflow_sha, 'sparkle_source_sha': SPARKLE_SHA,
-               'scope': 'External Sparkle install/relaunch and signed CLI synthetic import; native customer update prompt NOT TESTED',
+               'scope': 'Non-enforcing source client install/relaunch via loopback and signed CLI synthetic import; installed-client feed enforcement and native update prompt NOT TESTED',
                'rc_run': RC_RUN, 'rc_artifact': RC_ARTIFACT, 'rc_zip_sha256': RC_ZIP_SHA, 'runs': []}
     cli = observer = None
     server = None
@@ -574,21 +586,25 @@ def main():
         assets = out/'assets'
         assets.mkdir()
         original = stage_rc(args.rc_archive, args.rc_metadata, assets)
-        name = 'Transcripted-1.1.75.dmg'
+        run('node', Path(__file__).with_name('verify-sparkle-appcast.mjs'),
+            assets/'signed-appcast.xml', PUBLIC_KEY)
+        receipt['original_feed_signature_verified'] = True
+        name = 'Transcripted-1.1.76.dmg'
         version, digest, size = ASSETS[name]
         download(f'https://github.com/r3dbars/transcripted/releases/download/v{version}/{name}', assets/name, digest, size)
         receipt['assets'] = {name: {'sha256': sha(assets/name), 'size': (assets/name).stat().st_size} for name in ASSETS}
-        for version in ('1.1.75', '1.1.76'):
+        for version in ('1.1.76', '1.1.77'):
             run('xcrun', 'stapler', 'validate', assets/f'Transcripted-{version}.dmg', log=out/f'notarization-{version}.log')
             copy_from_dmg(assets/f'Transcripted-{version}.dmg', out/f'original-{version}.app', out/f'mount-{version}')
-        old_digest = verify_app(out/'original-1.1.75.app', '1.1.75')
-        new_digest = verify_app(out/'original-1.1.76.app', '1.1.76')
-        receipt['original_bundle_digests'] = {'1.1.75': old_digest, '1.1.76': new_digest}
+        old_digest, old_flags = verify_app(out/'original-1.1.76.app', '1.1.76')
+        new_digest, new_flags = verify_app(out/'original-1.1.77.app', '1.1.77')
+        receipt['original_update_flags'] = {'1.1.76': old_flags, '1.1.77': new_flags}
+        receipt['original_bundle_digests'] = {'1.1.76': old_digest, '1.1.77': new_digest}
         # Exercise CLI before any app launch can seed a model cache.
         import runpy
         cli_proof = runpy.run_path(str(Path(__file__).with_name('test-signed-candidate-cli.py')))
         fresh_account(Path(user.pw_dir))
-        receipt['cli_import'] = cli_proof['qualify'](out/'original-1.1.76.app', out/'cli-import',
+        receipt['cli_import'] = cli_proof['qualify'](out/'original-1.1.77.app', out/'cli-import',
                                                    SOURCE_SHA, run, require, tree_digest, sha)
         receipt['original_feed_sha256'] = hashlib.sha256(original).hexdigest()
         (out/'candidate-appcast.xml').write_bytes(original)
@@ -611,7 +627,7 @@ def main():
             target = case/'Transcripted.app'
             requests.clear()
             try:
-                run('ditto', out/'original-1.1.75.app', target)
+                run('ditto', out/'original-1.1.76.app', target)
                 require(tree_digest(target) == old_digest, 'Copied old bundle changed')
                 feed = staged_feed(original, base, mode)
                 (assets/'appcast.xml').write_bytes(feed)
@@ -640,7 +656,7 @@ def main():
                 require(not any(r['pid'] == old_pid for r in json.loads(run(observer))), 'Original process still running')
                 entry['new_pid'] = after[0]['pid']
                 owned_pids.add(after[0]['pid'])
-                actual_digest = verify_app(target, '1.1.76')
+                actual_digest, entry['installed_update_flags'] = verify_app(target, '1.1.77')
                 require(actual_digest == new_digest, 'Installed app differs from published new app bytes/symlinks')
                 entry['new_launch'] = launch_status(json.loads(new_report.read_text()))
                 entry.update(status='PASS', installed_bundle_sha256=actual_digest, relaunch_report='relaunched.json')

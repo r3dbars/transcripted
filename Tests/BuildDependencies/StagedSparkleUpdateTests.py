@@ -23,11 +23,11 @@ class StagedUpdateTests(unittest.TestCase):
     def feed(self):
         # Independent fixture: one signed target and two prior-version deltas.
         return f'''<rss xmlns:sparkle="{NS[1:-1]}"><channel><item>
-        <sparkle:version>1.1.76</sparkle:version>
-        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted-1.1.76.dmg" length="703576924" sparkle:edSignature="full-signature" />
-        <sparkle:deltas><enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.76/Transcripted1.1.76-1.1.75.delta" length="3046518" sparkle:deltaFrom="1.1.75" sparkle:edSignature="delta-signature" sparkle:deltaFromSparkleExecutableSize="977808" />
-        <enclosure sparkle:deltaFrom="1.1.74" /></sparkle:deltas>
-        </item><item><sparkle:version>1.1.75</sparkle:version></item></channel></rss>'''.encode()
+        <sparkle:version>1.1.77</sparkle:version>
+        <enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted-1.1.77.dmg" length="704188984" sparkle:edSignature="full-signature" />
+        <sparkle:deltas><enclosure url="https://github.com/r3dbars/transcripted/releases/download/v1.1.77/Transcripted1.1.77-1.1.76.delta" length="5408142" sparkle:deltaFrom="1.1.76" sparkle:edSignature="delta-signature" sparkle:deltaFromSparkleExecutableSize="977808" />
+        <enclosure sparkle:deltaFrom="1.1.75" /></sparkle:deltas>
+        </item><item><sparkle:version>1.1.76</sparkle:version></item></channel></rss>'''.encode()
 
     def test_only_verified_hosted_runner_account_can_execute(self):
         good = {'CI':'true','GITHUB_ACTIONS':'true','RUNNER_ENVIRONMENT':'github-hosted'}
@@ -49,8 +49,8 @@ class StagedUpdateTests(unittest.TestCase):
         self.assertIsNone(items[0].find(NS+'deltas'))
         enclosure = items[0].find('enclosure')
         self.assertEqual(enclosure.get(NS+'edSignature'),'full-signature')
-        self.assertEqual(enclosure.get('length'),'703576924')
-        self.assertEqual(enclosure.get('url'),'http://127.0.0.1:8000/Transcripted-1.1.76.dmg')
+        self.assertEqual(enclosure.get('length'),'704188984')
+        self.assertEqual(enclosure.get('url'),'http://127.0.0.1:8000/Transcripted-1.1.77.dmg')
         self.assertEqual(original,self.feed())
 
     def test_delta_feed_preserves_delta_validation_metadata_and_full_fallback(self):
@@ -59,24 +59,41 @@ class StagedUpdateTests(unittest.TestCase):
         self.assertIsNotNone(item.find('enclosure'))
         deltas = item.find(NS+'deltas')
         self.assertEqual(len(deltas),1)
-        self.assertEqual(deltas[0].get(NS+'deltaFrom'),'1.1.75')
+        self.assertEqual(deltas[0].get(NS+'deltaFrom'),'1.1.76')
         self.assertEqual(deltas[0].get(NS+'edSignature'),'delta-signature')
         self.assertEqual(deltas[0].get(NS+'deltaFromSparkleExecutableSize'),'977808')
 
     def test_wrong_release_artifact_or_length_rejected(self):
-        for original in [self.feed().replace(b'>1.1.76<',b'>1.1.77<'),
+        for original in [self.feed().replace(b'>1.1.77<',b'>1.1.78<'),
                          self.feed().replace(b'https://github.com/',b'https://attacker.example/'),
-                         self.feed().replace(b'703576924',b'703576925'),
+                         self.feed().replace(b'704188984',b'704188985'),
                          self.feed().replace(b'sparkle:edSignature="full-signature"',b'')]:
             with self.assertRaises(RuntimeError):
                 M['staged_feed'](original,'http://127.0.0.1:8000','full')
 
+    def test_installed_client_must_have_the_expected_verification_flags(self):
+        old = {'SUVerifyUpdateBeforeExtraction': True}
+        new = {**old, 'SURequireSignedFeed': True}
+        self.assertFalse(M['update_flags'](old, '1.1.76')['require_signed_feed'])
+        self.assertTrue(M['update_flags'](new, '1.1.77')['require_signed_feed'])
+        for flags, version in [(old, '1.1.77'), (new, '1.1.76'),
+                               ({**new, 'SURequireSignedFeed': 1}, '1.1.77'),
+                               ({**new, 'SUVerifyUpdateBeforeExtraction': False}, '1.1.77')]:
+            with self.assertRaises(RuntimeError):
+                M['update_flags'](flags, version)
+
+    def test_delta_cannot_be_offered_as_the_full_payload(self):
+        wrong = self.feed().replace(b'Transcripted-1.1.77.dmg', b'Transcripted1.1.77-1.1.76.delta')
+        wrong = wrong.replace(b'704188984', b'5408142')
+        with self.assertRaises(RuntimeError):
+            M['staged_feed'](wrong, 'http://127.0.0.1:8000', 'full')
+
     def test_delta_fallback_cannot_be_reported_as_delta_pass(self):
-        full='/Transcripted-1.1.76.dmg'
-        delta='/Transcripted1.1.76-1.1.75.delta'
+        full='/Transcripted-1.1.77.dmg'
+        delta='/Transcripted1.1.77-1.1.76.delta'
         self.assertEqual(M['selected_transport']('full',[full]),'full')
         self.assertEqual(M['selected_transport']('delta',[delta]),'delta')
-        for mode, paths in [('delta',[delta,full]),('delta',[full]),('full',[delta]),('full',[])]:
+        for mode, paths in [('delta',[delta,full]),('delta',[full]),('full',[delta]),('full',[]),('unknown',[delta])]:
             with self.assertRaises(RuntimeError): M['selected_transport'](mode,paths)
 
     def test_non_hosted_paths_and_symlink_escape_rejected(self):
@@ -103,7 +120,7 @@ class StagedUpdateTests(unittest.TestCase):
             with self.assertRaises(RuntimeError): M['workflow_provenance'](value,actual)
 
     def test_candidate_source_and_cleanup_are_fail_closed(self):
-        M['candidate_provenance']('caa17f1bb522324bf8f756239347fb4c6308ab52',True)
+        M['candidate_provenance']('8f5511210b69270fc30c68b4926992a9d3157131',True)
         for source,clean in [('a'*40,True),(M['SOURCE_SHA'],False)]:
             with self.assertRaises(RuntimeError): M['candidate_provenance'](source,clean)
         receipt={'status':'PASS'}
@@ -404,13 +421,13 @@ class StagedUpdateTests(unittest.TestCase):
                 if residue=='standard': self.assertEqual(plistlib.loads(source.read_bytes()),{'unexpected new source':True})
 
     def test_only_exact_final_rc_metadata_is_accepted(self):
-        good={'id':13394641882,'expired':False,'name':'Transcripted-1.1.76-release-candidate',
-              'size_in_bytes':743785306,'digest':'sha256:'+M['RC_ZIP_SHA'],
-              'workflow_run':{'id':41978929739,'head_sha':'9f7076de5ae5e98cadf90b43975161db667fc175'}}
+        good={'id':15043685633,'expired':False,'name':'Transcripted-1.1.77-release-candidate',
+              'size_in_bytes':753221387,'digest':'sha256:'+M['RC_ZIP_SHA'],
+              'workflow_run':{'id':45649749132,'head_sha':'1f161162c16c50379c8eb559294e3326767a9ac2'}}
         M['rc_metadata'](good)
-        for key,value in [('id',13394641881),('expired',True),('size_in_bytes',743785305),
-                          ('digest','sha256:'+'0'*64),('workflow_run',{'id':41978929738}),
-                          ('name','Transcripted-1.1.75-release-candidate')]:
+        for key,value in [('id',15043685632),('expired',True),('size_in_bytes',753221386),
+                          ('digest','sha256:'+'0'*64),('workflow_run',{'id':45649749131}),
+                          ('name','Transcripted-1.1.76-release-candidate')]:
             with self.assertRaises(RuntimeError): M['rc_metadata']({**good,key:value})
         with tempfile.TemporaryDirectory() as name:
             root=Path(name); archive=root/'rc.zip'; archive.write_bytes(b'wrong archive')
