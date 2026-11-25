@@ -67,7 +67,7 @@ on:
         required: false
         default: ""
       staged_update_source_sha:
-        description: Run only the signed 1.1.75-to-1.1.76 RC updater and offline packaged CLI proof against the fixed source SHA
+        description: Run only the signed 1.1.76-to-1.1.77 RC updater and offline packaged CLI proof against the fixed source SHA
         type: string
         required: false
         default: ""
@@ -732,7 +732,7 @@ jobs:
           echo '::error::Choose exactly one hosted validation mode, with run_hardware_smokes=false.'
           exit 1
 
-  # Validate exact signed 1.1.75 -> final 1.1.76 RC bytes; no public release mutations.
+  # Validate exact signed 1.1.76 -> final 1.1.77 RC bytes; no public release mutations.
   # Harness code is pinned to this workflow, independently of the candidate.
   staged-update-proof:
     if: >-
@@ -752,7 +752,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test "$SOURCE_SHA" = caa17f1bb522324bf8f756239347fb4c6308ab52 || { echo '::error::This updater proof is scoped to the verified 1.1.76 RC source SHA.'; exit 1; }
+          test "$SOURCE_SHA" = 8f5511210b69270fc30c68b4926992a9d3157131 || { echo '::error::This updater proof is scoped to the verified 1.1.77 RC source SHA.'; exit 1; }
           [[ "$RUNNER_ENVIRONMENT" = github-hosted && "$(uname -m)" = arm64 ]] || { echo '::error::Updater proof requires hosted Apple Silicon.'; exit 1; }
 
       - name: Checkout reviewed updater harness
@@ -789,8 +789,8 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          gh api repos/r3dbars/transcripted/actions/artifacts/13394641882 > "$RUNNER_TEMP/final-rc-metadata.json"
-          gh api repos/r3dbars/transcripted/actions/artifacts/13394641882/zip > "$RUNNER_TEMP/final-rc.zip"
+          gh api repos/r3dbars/transcripted/actions/artifacts/15043685633 > "$RUNNER_TEMP/final-rc-metadata.json"
+          gh api repos/r3dbars/transcripted/actions/artifacts/15043685633/zip > "$RUNNER_TEMP/final-rc.zip"
 
       - name: Exercise signed updater routes and offline packaged CLI
         shell: bash

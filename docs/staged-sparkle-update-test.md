@@ -1,23 +1,23 @@
-# Staged signed 1.1.75 → 1.1.76 RC verification
+# Staged signed 1.1.76 → 1.1.77 RC verification
 
 This disposable validation branch tests the unchanged final notarized RC before
 publication. It does not change a release surface or signed application. Only
 the existing `staged-update-proof` workflow mode selects it; normal required CI
 routing and the main-only signing workflow remain unchanged.
 
-This version-specific recipe is fixed to 1.1.75 -> 1.1.76 and its pinned RC.
-It is not the current release checklist. Current release work starts with
+This version-specific recipe is fixed to 1.1.76 -> 1.1.77 and its pinned RC.
+The [previous recipe](https://github.com/r3dbars/transcripted/blob/1f161162c16c50379c8eb559294e3326767a9ac2/docs/staged-sparkle-update-test.md) records the prior release. It is not the current release checklist. Current release work starts with
 `docs/release-packaging.md` and `docs/sparkle-updates.md`; broader validation
 is in `docs/qa-test-bench.md`.
 
-The source checkout is fixed at `caa17f1bb522324bf8f756239347fb4c6308ab52`.
+The source checkout is fixed at `8f5511210b69270fc30c68b4926992a9d3157131`.
 The harness checkout and receipt separately pin `github.workflow_sha`.
-The only accepted new artifact is final RC run `41978929739`, artifact
-`13394641882`, with its exact API metadata, ZIP length and SHA256. All archive
-members are allowlisted before extraction. The signed feed, 1.1.76 DMG and
-75→76 delta must also match their individually pinned raw bytes. New assets
-are never fetched from a public 1.1.76 URL, rebuilt or re-signed. Only the old
-public 1.1.75 DMG is downloaded from GitHub Releases.
+The only accepted new artifact is final RC run `45649749132`, artifact
+`15043685633`, with its exact API metadata, ZIP length and SHA256. All archive
+members are allowlisted before extraction. The signed feed, 1.1.77 DMG and
+76→77 delta must also match their individually pinned raw bytes. New assets
+are never fetched from a public 1.1.77 URL, rebuilt or re-signed. Only the old
+public 1.1.76 DMG is downloaded from GitHub Releases.
 
 The job needs only `contents: read` and `actions: read`. It runs on hosted
 `macos-26` ARM64, with the `runner` account and `/Users/runner` home independently
@@ -44,19 +44,19 @@ The harness builds official Sparkle CLI 2.9.1 from pinned upstream source
 archive are hash-pinned. Only this separate test CLI is ad-hoc signed; neither
 Transcripted application is changed.
 
-Both DMGs must have valid stapled notarization. Both enclosed apps must pass
+Both DMGs must have valid stapled notarization. The old app must enforce verification before extraction. The candidate and each installed copy must also require signed feeds. Both enclosed apps must pass
 deep strict code-signature and Gatekeeper checks, version/build, bundle ID and
 the unchanged old-client Sparkle public key. Entire bundle manifests include
 all files, modes, directories and literal symlink targets.
 
 A loopback-only server serves a **test copy** of the feed with rewritten URLs.
-The original signed feed is retained unchanged and hash-checked. Enclosure
+The original feed is retained unchanged, hash-checked and verified with the production Ed25519 public key before staging. The published 1.1.76 client does not require signed feeds. Enclosure
 signatures and delta validation attributes survive the rewrite. Full and delta
 runs each start with a pristine old app at a new owned path. Full offers no
 delta; delta keeps the full fallback but fails if it is requested. Exit zero
 alone is insufficient: each route requires the old PID to disappear, a new PID
 at the same bundle path, a fresh report confirming launch/status item/popover,
-and a complete installed-bundle match to the pristine notarized 1.1.76 app.
+and a complete installed-bundle match to the pristine notarized 1.1.77 app.
 
 ## Actual packaged CLI import
 
@@ -104,7 +104,7 @@ feeds, raw logs, transcript/audio and preference content stay on the disposable
 runner. The receipt distinguishes source, workflow and RC identities.
 
 This proves the external Sparkle install/relaunch pipeline and synthetic
-packaged CLI import. Transcripted's human update prompt, live capture,
+packaged CLI import. Feed enforcement by the installed 1.1.77 client, Transcripted's human update prompt, live capture,
 Bluetooth, pasteback, customer audio accuracy, and release health remain
 separate checks. No retry-until-green is built in.
 
