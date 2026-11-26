@@ -14,7 +14,6 @@ extension MeetingPromptDetector {
     func updateMicInputUsers(_ bundleIDs: Set<String>) {
         guard bundleIDs != micActiveBundleIDs else { return }
         micActiveBundleIDs = bundleIDs
-        refreshNativeMicSince()
         if bundleIDs.contains(where: MeetingPromptProvider.isBrowserBundleID) {
             browserMicEndTask?.cancel()
             browserMicEndTask = nil
@@ -106,10 +105,6 @@ extension MeetingPromptDetector {
         // Whether a meeting recording during this call already counted as a
         // "yes" for the learning.
         var countedRecordingForLearning = false
-        /// Providers the user explicitly stopped or discarded after an
-        /// auto-start. Cleared when this session ends; leftover signals must
-        /// not decline an unrelated provider that joins later.
-        var autoStartDeclinedProviders: Set<MeetingPromptProvider> = []
         /// Not nows to a native call app's prompt during this call, keyed by
         /// candidate id. Their quiet covers this call only, so the end of the
         /// call lifts it (`nativeNotNowCallEnded`).
@@ -219,12 +214,6 @@ extension MeetingPromptDetector {
         }
 
         if providers.isEmpty {
-            if !session.autoStartDeclinedProviders.isEmpty {
-                clearPromptPendingWindows(for: session)
-            }
-            if session.sawMeetingRecording || session.hasActiveUserDecline(at: now) || !session.autoStartDeclinedProviders.isEmpty {
-                autoStartBlockedUntil = now.addingTimeInterval(MeetingAutoRecordPolicy.autoStartBlockAfterCall)
-            }
             detectedCallSession = nil
             recordedCallSessionEnded(now: now)
             nativeNotNowCallEnded(session.nativeNotNows, now: now)
@@ -376,7 +365,7 @@ extension MeetingPromptDetector {
                 let cooldown = runtimeSuppressionReasons[candidate.provider]
                 recordSuppression(
                     candidate: candidate,
-                    reason: MeetingAutoRecordPolicy.runtimeSuppressionReason(cooldownReason: cooldown),
+                    reason: cooldown == MeetingPromptSuppressionReason.declinedThisCall.rawValue ? .declinedThisCall : .runtimeSuppressed,
                     now: now,
                     cooldownReason: cooldown
                 )
@@ -487,7 +476,6 @@ extension MeetingPromptDetector {
             meetingShortcut: meetingShortcutDisplay()
         )
 
-        let titleSession = evidence == .tabTitle ? browserTitles : nil
         return ScoredCandidate(
             candidate: Candidate(
                 id: id,
@@ -500,73 +488,10 @@ extension MeetingPromptDetector {
                 endDate: now.addingTimeInterval(MeetingPromptHeuristics.runtimeReminderSnoozeInterval),
                 meetingURL: nil,
                 suggestedTranscriptTitle: nil,
-                callEvidence: evidence,
-                holdsMicrophone: reason == .micInput,
-                isFocusedFrontWindow: evidence == .nativeApp || titleSession?.namedCallIsFocused == true,
-                isMeetPreJoin: titleSession?.namedCallIsPreJoin == true,
-                evidenceAge: autoRecordEvidenceAge(
-                    for: provider, evidence: evidence, reason: reason, now: now
-                ),
-                isPlayingCallAudio: evidence == .tabTitle
-                    ? (titleSession.map { browserIsPlayingAudio(families: $0.families) } ?? false)
-                    : evidence == .nativeApp && nativeAppIsPlayingCallAudio(provider),
-                nativeProcessHoldsMicrophone: evidence == .nativeApp && reason == .micInput
+                callEvidence: evidence
             ),
             score: presentation.score
         )
-    }
-
-    /// Auto-start may never undo the person's own choice. Once this call has
-    /// had a recording that is no longer running (Stop from the menu, hotkey
-    /// or island, an inactivity or warning stop, a 30-minute quiet running
-    /// out), or a declined auto-start, only the prompt may show. The same holds
-    /// for a call that starts soon after such a call ended (a mute that let go
-    /// of the mic).
-    func isAutoStartBlockedThisCall(now: Date) -> Bool {
-        if let until = autoStartBlockedUntil, until > now { return true }
-        guard let session = detectedCallSession else { return false }
-        if session.hasActiveUserDecline(at: now) || !session.autoStartDeclinedProviders.isEmpty { return true }
-        return session.sawMeetingRecording && currentOwnCaptureActivity() != .meetingRecording
-    }
-
-    /// The native call app is playing audio output (a joined call). Its mic
-    /// alone is also the pre-join meter or a mic test.
-    func nativeAppIsPlayingCallAudio(_ provider: MeetingPromptProvider) -> Bool {
-        audioOutputActiveBundleIDs.contains { MeetingPromptProvider.audioOutputProvider(forBundleID: $0) == provider }
-    }
-
-    func refreshNativeMicSince(now: Date = Date()) {
-        let native = Set(
-            micActiveBundleIDs.compactMap { bundleID -> MeetingPromptProvider? in
-                guard let provider = MeetingPromptProvider.micInputProvider(forBundleID: bundleID),
-                      provider != .googleMeet else { return nil }
-                return provider
-            }
-        )
-        for provider in native where nativeMicSince[provider] == nil {
-            nativeMicSince[provider] = now
-        }
-        nativeMicSince = nativeMicSince.filter { native.contains($0.key) }
-    }
-
-    func autoRecordEvidenceAge(
-        for provider: MeetingPromptProvider,
-        evidence: MeetingPromptCallEvidence,
-        reason: MeetingPromptReason,
-        now: Date
-    ) -> TimeInterval {
-        guard reason == .micInput else { return 0 }
-        let since: Date?
-        switch evidence {
-        case .tabTitle:
-            since = browserTitles?.autoStartProofSince ?? browserMicSince
-        case .nativeApp:
-            since = nativeMicSince[provider]
-        default:
-            return 0
-        }
-        guard let since else { return 0 }
-        return max(0, now.timeIntervalSince(since))
     }
 
     func micCandidateID(for provider: MeetingPromptProvider) -> String {

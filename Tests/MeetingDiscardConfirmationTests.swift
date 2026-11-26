@@ -75,17 +75,16 @@ func testMeetingDiscardConfirmation() {
                     "it opens the drop-down by itself, without bringing Transcripted to the front")
         assertTrue(layout.dropIsSticky)
 
-        var withNote = meeting
-        withNote.duration = 1
-        withNote.autoRecordNote = true
-        withNote.prompt = NotchIslandMeetingContent.Prompt(
+        var withWarning = meeting
+        withWarning.duration = 1
+        withWarning.prompt = NotchIslandMeetingContent.Prompt(
             title: "No sound", detail: "Nothing heard for 3 minutes.", countdown: "",
             primaryTitle: "Stop", secondaryTitle: "Dismiss", tertiaryTitle: nil
         )
         assertEqual(
-            NotchIslandPresentation.layout(dictation: nil, meeting: withNote, callPrompt: nil, recentInsert: nil, expanded: false).drop,
+            NotchIslandPresentation.layout(dictation: nil, meeting: withWarning, callPrompt: nil, recentInsert: nil, expanded: false).drop,
             .meetingPrompt(MeetingDiscardConfirmCopy.prompt(recordingID: id, secondsLeft: 7)),
-            "mid-answer, the question beats a warning and the auto-record note"
+            "mid-answer, the question beats a warning"
         )
 
         var stopped = meeting

@@ -25,9 +25,6 @@ enum AgentSetupFailureCopy {
         "\(agentName)'s settings file couldn't be read, so Transcripted saved a copy (\(backupFilename)) and started fresh. Other tools you'd added there may need adding again."
     }
 
-    static let codexInbox =
-        "Transcripted couldn't set up the Codex inbox. Check that Codex is installed and you have free disk space, then try again."
-
     /// What a failed setup shows: the plain message on the page, and the raw
     /// error kept for Copy Details only.
     struct Failure: Equatable {
@@ -37,9 +34,5 @@ enum AgentSetupFailureCopy {
 
     static func connectFailure(agentName: String, error: Error) -> Failure {
         Failure(message: connect(agentName: agentName), details: error.localizedDescription)
-    }
-
-    static func codexInboxFailure(error: Error) -> Failure {
-        Failure(message: codexInbox, details: error.localizedDescription)
     }
 }

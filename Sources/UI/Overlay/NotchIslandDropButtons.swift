@@ -61,12 +61,8 @@ enum NotchIslandDropButtons {
                 .init(title: "Copy", role: .standard, action: .copyLastDictation),
                 .init(title: "Paste again", role: .primary, action: .pasteLastDictation),
             ]
-        case .meetingControls(let note, _, let showsTranscript, let recordingID, let micAction):
+        case .meetingControls(let note, _, let recordingID, let micAction):
             var buttons: [NotchIslandDropButton] = []
-            if showsTranscript {
-                buttons.append(.init(title: "Copy all", role: .standard, action: .meetingCopyTranscript,
-                                     placement: .leading, symbol: "doc.on.doc"))
-            }
             if note == .off {
                 buttons.append(.init(title: "Turn on", role: .standard, action: .meetingCallAudio,
                                      placement: .leading, accessibilityLabel: "Turn on call audio"))

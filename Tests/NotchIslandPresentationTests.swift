@@ -189,13 +189,12 @@ func testNotchIslandPresentation() {
     }
 
     runSuite("NotchIslandPresentation keeps a meeting's hover during a dictation in it") {
-        var meeting = recording()
-        meeting.showsLiveTranscript = true
+        let meeting = recording()
         var content = listening()
         content.showsLivePreview = true
         assertEqual(
             notchLayout(dictation: content, meeting: meeting, expanded: true).drop,
-            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
+            .meetingControls(callAudioNote: nil, systemAudioUnverified: false),
             "hovering during a meeting shows the meeting, not the dictation's words"
         )
     }
@@ -253,29 +252,19 @@ func testNotchIslandPresentation() {
         )
         assertEqual(NotchIslandAction.meetingMicMute(id).owner, .meeting)
 
-        var transcribing = recording()
-        transcribing.showsLiveTranscript = true
+        let meetingDrop = NotchIslandDrop.meetingControls(callAudioNote: nil, systemAudioUnverified: false)
         assertEqual(
-            notchLayout(meeting: transcribing, expanded: true).drop,
-            .meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true),
-            "with Live transcript on, hovering shows the conversation"
-        )
-        assertEqual(notchLayout(meeting: transcribing).right, [.meetingMeters], "the collapsed island doesn't change")
-        assertEqual(NotchIslandAction.meetingCopyTranscript.owner, .island, "the island copies the transcript itself")
-
-        let meetingDrop = NotchIslandDrop.meetingControls(callAudioNote: nil, systemAudioUnverified: false, showsTranscript: true)
-        assertEqual(
-            notchLayout(dictation: listening(), meeting: transcribing, expanded: true).drop,
+            notchLayout(dictation: listening(), meeting: recording(), expanded: true).drop,
             meetingDrop,
             "a dictation inside the meeting doesn't take the meeting's hover"
         )
         assertEqual(
-            notchLayout(dictation: NotchIslandDictationContent(phase: .writing), meeting: transcribing, expanded: true).drop,
+            notchLayout(dictation: NotchIslandDictationContent(phase: .writing), meeting: recording(), expanded: true).drop,
             meetingDrop,
             "once the key is up, hovering shows the meeting again"
         )
         assertEqual(
-            notchLayout(meeting: transcribing, recentInsert: NotchIslandRecentInsert(title: "Pasted", text: "Hi there"), expanded: true).drop,
+            notchLayout(meeting: recording(), recentInsert: NotchIslandRecentInsert(title: "Pasted", text: "Hi there"), expanded: true).drop,
             meetingDrop,
             "the dictation that just landed doesn't take the meeting's hover"
         )
@@ -302,44 +291,6 @@ func testNotchIslandPresentation() {
         unverified.systemAudioUnverified = true
         unverified.callAudioNote = .off
         assertEqual(notchLayout(meeting: unverified).right, [.text("Can't confirm call", .warning)])
-    }
-
-    runSuite("NotchIslandPresentation shows the auto-record consent note until a warning wins") {
-        var meeting = recording()
-        meeting.duration = 1
-        meeting.autoRecordNote = true
-        let open = notchLayout(meeting: meeting)
-        assertEqual(open.drop, .meetingPrompt(MeetingAutoRecordNoteCopy.prompt))
-        assertTrue(open.dropIsSticky, "the consent note opens by itself")
-
-        meeting.asksAboutCallAudio = true
-        meeting.callAudioNote = .off
-        assertEqual(
-            notchLayout(meeting: meeting).drop,
-            .meetingCallAudioAsk,
-            "the call-audio ask must beat the auto-record note"
-        )
-        meeting.asksAboutCallAudio = false
-        meeting.duration = MeetingAutoRecordNoteCopy.visibleDuration
-        assertNil(
-            notchLayout(meeting: meeting).drop,
-            "the consent note clears after a short time"
-        )
-        meeting.duration = 1
-
-        meeting.prompt = NotchIslandMeetingContent.Prompt(
-            title: "Call ended",
-            detail: "Call audio stopped.",
-            countdown: "Stops in 30s",
-            primaryTitle: "Stop",
-            secondaryTitle: "Continue",
-            tertiaryTitle: nil
-        )
-        assertEqual(
-            notchLayout(meeting: meeting).drop,
-            .meetingPrompt(meeting.prompt!),
-            "Call ended keeps the existing countdown over the auto-record note"
-        )
     }
 
     runSuite("NotchIslandPresentation opens meeting warnings by itself") {
@@ -627,7 +578,7 @@ func testNotchIslandPresentation() {
             ("justInserted", .justInserted(text: "Hello there", words: 2)),
             ("meetingPreparing", .meetingPreparing(title: "Starting", detail: "Getting the mic ready.")),
             ("meetingControls", .meetingControls(callAudioNote: nil, systemAudioUnverified: false)),
-            ("meetingControls with note", .meetingControls(callAudioNote: .off, systemAudioUnverified: true, showsTranscript: true)),
+            ("meetingControls with note", .meetingControls(callAudioNote: .off, systemAudioUnverified: true)),
             ("meetingPrompt", .meetingPrompt(prompt)),
             ("meetingSaved", .meetingSaved(title: "Standup")),
             ("meetingSaved untitled", .meetingSaved(title: nil)),

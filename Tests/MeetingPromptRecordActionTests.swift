@@ -44,13 +44,13 @@ func testMeetingPromptRecordAction() async {
         onStartRequested: {
             startRequestedCount += 1
         },
-        startRecording: { _, _, _ in
+        startRecording: { _, _ in
             startInvocationCount += 1
             return await withCheckedContinuation { continuation in
                 startContinuation = continuation
             }
         },
-        onCompleted: { _, started, _ in
+        onCompleted: { _, started in
             completedOutcomes.append(started)
         }
     )

@@ -37,8 +37,8 @@ func testMeetingPromptQuietDeadline() async {
                      "a signal gap retains quiet until the original dismissal expires")
         assertTrue(detector.learnedSuppression(for: candidate, now: decision.until.addingTimeInterval(1)) == nil,
                    "a new call must not inherit an eight-hour extension")
-        assertTrue(!detector.isAutoStartBlockedThisCall(now: decision.until.addingTimeInterval(1)),
-                   "the inherited decline must expire for automatic recording too")
+        assertTrue(detector.detectedCallSession?.hasActiveUserDecline(at: decision.until.addingTimeInterval(1)) == false,
+                   "the inherited decline must expire with the original dismissal")
     }
 
     runSuite("Another provider ending cannot extend the first provider's grace") {
@@ -70,7 +70,7 @@ func testMeetingPromptQuietDeadline() async {
             observe([.zoom], after: 2)
             assertTrue(detector.detectedCallSession?.nativeNotNows[candidate.id] == nil,
                        "Zoom remaining live must release Teams' decline")
-            assertTrue(!detector.isAutoStartBlockedThisCall(now: now.addingTimeInterval(3)),
+            assertTrue(detector.detectedCallSession?.hasActiveUserDecline(at: now.addingTimeInterval(3)) == false,
                        "Teams declining cannot veto Zoom after Teams leaves")
             let returnTime = 2 + detector.recordedCallEndGrace + (withinGrace ? -1 : 1)
             observe([.teams, .zoom], after: returnTime)

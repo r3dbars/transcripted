@@ -8,19 +8,18 @@ import Foundation
 final class MeetingPromptRecordAction {
     typealias StartRecording = (
         MeetingPromptDetector.Candidate,
-        [String: String],
-        Bool
+        [String: String]
     ) async -> Bool
 
     private let onStartRequested: () -> Void
     private let startRecording: StartRecording
-    private let onCompleted: (MeetingPromptDetector.Candidate, Bool, Bool) -> Void
+    private let onCompleted: (MeetingPromptDetector.Candidate, Bool) -> Void
     private var startTask: Task<Void, Never>?
 
     init(
         onStartRequested: @escaping () -> Void,
         startRecording: @escaping StartRecording,
-        onCompleted: @escaping (MeetingPromptDetector.Candidate, Bool, Bool) -> Void
+        onCompleted: @escaping (MeetingPromptDetector.Candidate, Bool) -> Void
     ) {
         self.onStartRequested = onStartRequested
         self.startRecording = startRecording
@@ -31,16 +30,15 @@ final class MeetingPromptRecordAction {
     @discardableResult
     func record(
         candidate: MeetingPromptDetector.Candidate,
-        promptTelemetryProperties: [String: String],
-        autoStarted: Bool = false
+        promptTelemetryProperties: [String: String]
     ) -> Bool {
         guard startTask == nil else { return false }
 
         onStartRequested()
         startTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let started = await self.startRecording(candidate, promptTelemetryProperties, autoStarted)
-            self.onCompleted(candidate, started, autoStarted)
+            let started = await self.startRecording(candidate, promptTelemetryProperties)
+            self.onCompleted(candidate, started)
             self.startTask = nil
         }
         return true

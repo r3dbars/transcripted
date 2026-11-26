@@ -36,12 +36,6 @@ extension MeetingPromptDetector {
         var readStartedAt: Date?
         /// Browser kinds the user said Not now to in this session.
         var declinedKinds: [String: Date] = [:]
-        /// The named call is in the focused/front window right now.
-        var namedCallIsFocused = false
-        /// The focused window is Meet's pre-join lobby.
-        var namedCallIsPreJoin = false
-        /// When the focused in-call tab and the browser mic were both true.
-        var autoStartProofSince: Date?
 
         func verdict(now: Date, titleReadGiveUp: TimeInterval) -> BrowserCallTitleVerdict? {
             if let namedCall { return .call(provider: namedCall) }
@@ -240,20 +234,8 @@ extension MeetingPromptDetector {
         )
         browserTitles = session
         let readIsStale = session.readAt.map { now.timeIntervalSince($0) >= browserEvidenceTiming.titleReadSpacing } ?? true
-        let justRead = session.readAt.map { now.timeIntervalSince($0) < 0.05 } ?? false
-        if session.readTask == nil {
-            if session.namedCall == nil, readIsStale {
-                startBrowserTitleRead(families: families)
-            } else if isAutoRecordEnabled(), session.namedCall != nil, !justRead {
-                // Auto-record must re-check focus and lobby on every hold
-                // pass instead of aging the first snapshot.
-                startBrowserTitleRead(families: families)
-            }
-        }
-        if isAutoRecordEnabled(),
-           browserTitles?.namedCall != nil,
-           browserTitles?.readTask != nil {
-            return nil
+        if session.readTask == nil, session.namedCall == nil, readIsStale {
+            startBrowserTitleRead(families: families)
         }
         return (browserTitles ?? session).verdict(now: now, titleReadGiveUp: browserEvidenceTiming.titleReadGiveUp)
     }
@@ -298,19 +280,6 @@ extension MeetingPromptDetector {
             }
         case .unknown:
             break
-        }
-        if let focusedProof = BrowserCallEvidence.focusedInCallProof(in: titles) {
-            session.namedCallIsFocused = true
-            session.namedCallIsPreJoin = focusedProof.isMeetPreJoin
-            if !focusedProof.isMeetPreJoin, browserMicSince != nil {
-                session.autoStartProofSince = session.autoStartProofSince ?? now
-            } else {
-                session.autoStartProofSince = nil
-            }
-        } else {
-            session.namedCallIsFocused = false
-            session.namedCallIsPreJoin = false
-            session.autoStartProofSince = nil
         }
         browserTitles = session
     }

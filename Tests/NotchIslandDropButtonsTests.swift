@@ -18,15 +18,15 @@ func testNotchIslandDropButtons() {
     runSuite("Stop on a recording is the white primary, not red") {
         let id = UUID()
         let buttons = NotchIslandDropButtons.buttons(for: .meetingControls(
-            callAudioNote: .off, systemAudioUnverified: false, showsTranscript: true, recordingID: id,
+            callAudioNote: .off, systemAudioUnverified: false, recordingID: id,
             micAction: .meetingMicMute(id)
         ))
-        assertEqual(buttons.map(\.title), ["Copy all", "Turn on", "Mute mic", "Stop"])
-        assertEqual(buttons.map(\.role), [.standard, .standard, .standard, .primary], "Stop saves the meeting, so it's safe")
-        assertEqual(buttons.map(\.placement), [.leading, .leading, .trailing, .trailing])
+        assertEqual(buttons.map(\.title), ["Turn on", "Mute mic", "Stop"])
+        assertEqual(buttons.map(\.role), [.standard, .standard, .primary], "Stop saves the meeting, so it's safe")
+        assertEqual(buttons.map(\.placement), [.leading, .trailing, .trailing])
         assertEqual(buttons.last?.action, .meetingStop(id), "Stop names the recording it was drawn for")
         let unowned = NotchIslandDropButtons.buttons(for: .meetingControls(
-            callAudioNote: nil, systemAudioUnverified: false, showsTranscript: false
+            callAudioNote: nil, systemAudioUnverified: false
         ))
         assertEqual(unowned.map(\.title), [], "no recording to name, no Stop to press")
     }
@@ -57,15 +57,6 @@ func testNotchIslandDropButtons() {
         let message = NotchIslandDictationContent.Message(tone: .error, text: "Mic didn't start.", actionTitle: "Try again")
         assertEqual(NotchIslandDropButtons.buttons(for: .dictationMessage(message)).map(\.title), ["Dismiss", "Try again"])
         assertEqual(NotchIslandDropButtons.buttons(for: .meetingSaved(title: nil)).map(\.title), ["Open"])
-    }
-
-    runSuite("The auto-record note's Discard only asks, so it isn't red") {
-        let id = UUID()
-        var note = MeetingAutoRecordNoteCopy.prompt
-        note.identity = .autoRecord(id)
-        let buttons = NotchIslandDropButtons.buttons(for: .meetingPrompt(note))
-        assertEqual(buttons.map(\.title), ["Discard", "Stop"])
-        assertEqual(buttons.map(\.role), [.standard, .primary], "Stop keeps the recording; Discard opens the question")
     }
 
     runSuite("The discard question: red Discard far left, Keep primary on the right with the ring") {
@@ -135,8 +126,6 @@ func testNotchIslandDropButtons() {
 
     runSuite("No drop-down has more than one primary or a red that isn't a confirm") {
         let id = UUID()
-        var note = MeetingAutoRecordNoteCopy.prompt
-        note.identity = .autoRecord(id)
         let warning = NotchIslandMeetingContent.Prompt(
             title: "Call audio cut out", detail: "Your mic is still recording.", countdown: "",
             primaryTitle: "Stop", secondaryTitle: "Dismiss", tertiaryTitle: "Check access",
@@ -147,9 +136,8 @@ func testNotchIslandDropButtons() {
             .dictationMessage(.init(tone: .notice, text: "Not pasted", actionTitle: "Paste", preview: "hi", dismissSeconds: 15)),
             .dictationMessage(.init(tone: .error, text: "Mic didn't start.", actionTitle: "Try again")),
             .justInserted(text: "Hi", words: 1),
-            .meetingControls(callAudioNote: .off, systemAudioUnverified: false, showsTranscript: false, recordingID: id,
+            .meetingControls(callAudioNote: .off, systemAudioUnverified: false, recordingID: id,
                              micAction: .meetingMicMute(id)),
-            .meetingPrompt(note),
             .meetingPrompt(warning),
             .meetingPrompt(MeetingDiscardConfirmCopy.prompt(recordingID: id, secondsLeft: 10)),
             .meetingSaved(title: "Weekly sync"),

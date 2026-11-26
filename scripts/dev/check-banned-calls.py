@@ -197,7 +197,6 @@ RULES: tuple[Rule, ...] = (
         why="setup failures show AgentSetupFailureCopy; the raw error goes behind Copy Details",
         required=(
             "AgentSetupFailureCopy.connectFailure(agentName:",
-            "AgentSetupFailureCopy.codexInboxFailure(",
             "private func failureNotice(",
             "transcripted.settings.agent.connect-error-details.",
         ),
@@ -635,7 +634,6 @@ def self_test() -> None:
     good["Sources/UI/Settings/AgentConnectionSettingsPage.swift"] = (
         "phase = .failed(failure.message)\ndetails = error.localizedDescription\n"
         "let failure = AgentSetupFailureCopy.connectFailure(agentName: name, error: error)\n"
-        "let inbox = AgentSetupFailureCopy.codexInboxFailure(error: error)\n"
         "failureNotice(id: \"transcripted.settings.agent.connect-error-details.\\(agent.rawValue)\")\n"
         "private func failureNotice(id: String) -> some View { EmptyView() }\n"
     )
@@ -713,7 +711,6 @@ def self_test() -> None:
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "private func failureNotice(", "private func notice("),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "connect-error-details.", "details."),
         ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.connectFailure(", "Copy.other("),
-        ("Sources/UI/Settings/AgentConnectionSettingsPage.swift", "AgentSetupFailureCopy.codexInboxFailure(", "Copy.other("),
         # the retained-audio player drops its hit floor
         ("Sources/UI/Settings/HomeMeetingAudioPlayer.swift", "HomeHitTarget.hitSize(forVisibleSize: size)", "size"),
         ("Sources/UI/Settings/HomeMeetingAudioPlayer.swift", "width: hitTargetSize, height: hitTargetSize", "width: size, height: size"),

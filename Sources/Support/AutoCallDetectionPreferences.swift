@@ -208,11 +208,6 @@ enum AutoCallDetectionPreferences {
 
     private static func persistAndNotify(_ enabled: Bool, userDefaults: UserDefaults) {
         userDefaults.set(enabled, forKey: enabledKey)
-        if !enabled {
-            // Turning Auto-detect off must not quietly re-enable auto-record
-            // the next time Auto-detect comes back on.
-            AutoRecordDetectedCallsPreferences.setEnabled(false, userDefaults: userDefaults)
-        }
         NotificationCenter.default.post(name: .autoCallDetectionPrefsDidChange, object: nil)
     }
 }

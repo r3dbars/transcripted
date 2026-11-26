@@ -70,7 +70,7 @@ extension MeetingOverlayController {
                 current: promptKind, isRecording: true, splitOffered: session.meetingSplitOffer != nil
               ) == promptKind else { return false }
         switch identity {
-        case .autoRecord, .missedCall, .discardConfirm: return false
+        case .missedCall, .discardConfirm: return false
         case .split(let offer):
             return currentID == offer.recordingIdentity
                 && offer.matches(session.meetingSplitOffer)
@@ -217,7 +217,6 @@ extension MeetingOverlayController {
             micMuted: meetingSession?.isMeetingMicMuted == true,
             systemAudioUnverified: systemAudioDegradationWarning?.cause == .unverified,
             asksAboutCallAudio: islandCallAudioAskPending,
-            autoRecordNote: autoRecordNoteVisible,
             discardConfirmSecondsLeft: discardConfirmation.isAsking(about: meetingSession?.activeRecordingIdentity)
                 && MeetingSessionStateMachine.mayDiscardRecording(sessionState: sessionState)
                 ? discardConfirmation.secondsLeft : nil
@@ -241,36 +240,10 @@ extension MeetingOverlayController {
         }
     }
 
-    /// Quiet for a few seconds after an opt-in auto-start. Yields to the
-    /// call-audio ask so that prompt still owns the island.
-    var autoRecordNoteVisible: Bool {
-        MeetingAutoRecordNoteCopy.isVisible(
-            duration: currentDuration,
-            asksAboutCallAudio: islandCallAudioAskPending,
-            noteEnabled: state == .recording && meetingSession?.activeRecordingWasAutoStarted == true
-        )
-    }
-
     func handleIslandAction(_ action: NotchIslandAction) {
-        func autoRecordRoute() -> MeetingAutoRecordIslandActionPolicy.Route {
-            MeetingAutoRecordIslandActionPolicy.route(action: action, noteVisible: autoRecordNoteVisible,
-                recordingID: meetingSession?.activeRecordingIdentity)
-        }
         if case .meetingPrompt(let button, .discardConfirm(let id)) = action {
             handleDiscardAnswer(button, recordingID: id)
             return
-        }
-        switch autoRecordRoute() {
-        case .stop:
-            Task { @MainActor in
-                guard autoRecordRoute() == .stop else { return }
-                await meetingSession?.stopRecording(reason: .overlayStopButton)
-            }
-            return
-        case .discard:
-            handleDiscardRequested()
-            return
-        case .inherit: break
         }
         switch action {
         case .meetingCallAudioDismiss:

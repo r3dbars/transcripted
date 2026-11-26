@@ -341,7 +341,6 @@ func testAutomationSurfaceBehavior() async {
         assertTrue(migration.contains("still in ~/Transcripted"), "a stopped library copy says where the captures still are")
         let messages = [
             connect,
-            AgentSetupFailureCopy.codexInbox,
             SettingsActionFailureCopy.modelCacheRemoval,
             SettingsActionFailureCopy.launchAtLogin,
             SettingsActionFailureCopy.launchAtLoginUnavailable,
@@ -364,11 +363,6 @@ func testAutomationSurfaceBehavior() async {
         assertEqual(connect.message, AgentSetupFailureCopy.connect(agentName: "Claude Desktop"), "the page should show the plain connect copy")
         assertFalse(connect.message.contains("raw-detail-7"), "the raw error must not reach the visible message")
         assertEqual(connect.details, raw.localizedDescription, "Copy Details should carry the raw error")
-
-        let inbox = AgentSetupFailureCopy.codexInboxFailure(error: raw)
-        assertEqual(inbox.message, AgentSetupFailureCopy.codexInbox, "the inbox row should show the plain inbox copy")
-        assertFalse(inbox.message.contains("raw-detail-7"), "the raw error must not reach the visible message")
-        assertEqual(inbox.details, raw.localizedDescription, "Copy Details should carry the raw error")
     }
 
     // MARK: Retained audio

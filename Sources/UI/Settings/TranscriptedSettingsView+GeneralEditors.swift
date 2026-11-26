@@ -36,21 +36,6 @@ extension TranscriptedSettingsView {
                 )
             }
         )
-        .confirmationDialog(
-            AutoRecordDetectedCallsConsentPolicy.title,
-            isPresented: $confirmsAutoRecordConsent,
-            titleVisibility: .visible
-        ) {
-            Button(AutoRecordDetectedCallsConsentPolicy.confirmTitle) {
-                AutoRecordDetectedCallsPreferences.acknowledgeConsent()
-                autoRecordDetectedCallsEnabled = true
-                trackSettingsToggle("auto_record_detected_calls", enabled: true, page: .general)
-                AutoRecordDetectedCallsPreferences.setEnabled(true)
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text(AutoRecordDetectedCallsConsentPolicy.message)
-        }
         .sheet(isPresented: $showCorrectionsSheet) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {

@@ -19,22 +19,6 @@ extension TranscriptedSettingsView {
                 track: { trackSettingsToggle("dictation_muffle", enabled: $0, page: .general) },
                 sideEffect: { Self.dictationMuffleSettingChanged($0) }
             ),
-            autoDetectCallsEnabled: autoDetectCallsEnabled,
-            autoRecordDetectedCallsEnabled: Binding(
-                get: { autoDetectCallsEnabled && autoRecordDetectedCallsEnabled },
-                set: { newValue in
-                    guard autoDetectCallsEnabled else { return }
-                    if newValue, AutoRecordDetectedCallsConsentPolicy.shouldConfirm(
-                        acknowledged: AutoRecordDetectedCallsPreferences.hasAcknowledgedConsent()
-                    ) {
-                        confirmsAutoRecordConsent = true
-                        return
-                    }
-                    autoRecordDetectedCallsEnabled = newValue
-                    trackSettingsToggle("auto_record_detected_calls", enabled: newValue, page: .general)
-                    AutoRecordDetectedCallsPreferences.setEnabled(newValue)
-                }
-            ),
             launchAtLoginEnabled: Binding(
                 get: { launchAtLogin.isEnabled },
                 set: { updateLaunchAtLogin($0) }
