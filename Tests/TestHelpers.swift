@@ -3,33 +3,67 @@
 
 import Foundation
 
-var totalTests = 0
-var passedTests = 0
-var failedTests = 0
+private let testStateLock = NSLock()
+private var storedTotalTests = 0
+private var storedPassedTests = 0
+private var storedFailedTests = 0
+private var storedCurrentSuiteName = ""
+private var storedQuarantinedSuiteCount = 0
+private var recordedFailureLines: [String] = []
+
+var totalTests: Int {
+    get { testStateLock.withLock { storedTotalTests } }
+    set { testStateLock.withLock { storedTotalTests = newValue } }
+}
+
+var passedTests: Int {
+    get { testStateLock.withLock { storedPassedTests } }
+    set { testStateLock.withLock { storedPassedTests = newValue } }
+}
+
+var failedTests: Int {
+    get { testStateLock.withLock { storedFailedTests } }
+    set { testStateLock.withLock { storedFailedTests = newValue } }
+}
 
 /// Every FAIL line, in order. The runner repeats them under its summary, so a
 /// summary always names the tests behind its count. If two runs ever write to
 /// one log, each summary still says what failed. See Tests/README.md.
 var failureLines: [String] {
-    failureLinesLock.lock()
-    defer { failureLinesLock.unlock() }
-    return recordedFailureLines
+    testStateLock.withLock { recordedFailureLines }
 }
-private var recordedFailureLines: [String] = []
-private let failureLinesLock = NSLock()
 
 /// The suite runSuite is running now, so a recapped FAIL line says which test
 /// it came from.
-var currentSuiteName = ""
+var currentSuiteName: String {
+    get { testStateLock.withLock { storedCurrentSuiteName } }
+    set { testStateLock.withLock { storedCurrentSuiteName = newValue } }
+}
 
 /// Counts one failed check and prints its FAIL line.
 func recordFailure(_ line: String) {
-    failedTests += 1
-    let suite = currentSuiteName
-    failureLinesLock.lock()
-    recordedFailureLines.append(suite.isEmpty ? line : "\(line)  (in \(suite))")
-    failureLinesLock.unlock()
+    testStateLock.withLock {
+        storedFailedTests += 1
+        recordedFailureLines.append(storedCurrentSuiteName.isEmpty ? line : "\(line)  (in \(storedCurrentSuiteName))")
+    }
     print(line)
+}
+
+func recordAssertionResult(passed: Bool, failureLine: () -> String) {
+    if passed {
+        testStateLock.withLock {
+            storedTotalTests += 1
+            storedPassedTests += 1
+        }
+    } else {
+        let line = failureLine()
+        testStateLock.withLock {
+            storedTotalTests += 1
+            storedFailedTests += 1
+            recordedFailureLines.append(storedCurrentSuiteName.isEmpty ? line : "\(line)  (in \(storedCurrentSuiteName))")
+        }
+        print(line)
+    }
 }
 
 struct ObservabilitySanitizerCorpus: Decodable {
@@ -51,22 +85,16 @@ struct ObservabilitySanitizerCorpusCase: Decodable {
 }
 
 func assertEqual<T: Equatable>(_ actual: T, _ expected: T, _ message: String = "", file: String = #file, line: Int = #line) {
-    totalTests += 1
-    if actual == expected {
-        passedTests += 1
-    } else {
+    recordAssertionResult(passed: actual == expected) {
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "" : message + " — ")expected \(expected), got \(actual)")
+        return "  FAIL [\(loc)] \(message.isEmpty ? "" : message + " — ")expected \(expected), got \(actual)"
     }
 }
 
 func assertTrue(_ condition: Bool, _ message: String = "", file: String = #file, line: Int = #line) {
-    totalTests += 1
-    if condition {
-        passedTests += 1
-    } else {
+    recordAssertionResult(passed: condition) {
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "expected true" : message)")
+        return "  FAIL [\(loc)] \(message.isEmpty ? "expected true" : message)"
     }
 }
 
@@ -75,22 +103,16 @@ func assertFalse(_ condition: Bool, _ message: String = "", file: String = #file
 }
 
 func assertNil<T>(_ value: T?, _ message: String = "", file: String = #file, line: Int = #line) {
-    totalTests += 1
-    if value == nil {
-        passedTests += 1
-    } else {
+    recordAssertionResult(passed: value == nil) {
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "expected nil" : message), got \(String(describing: value))")
+        return "  FAIL [\(loc)] \(message.isEmpty ? "expected nil" : message), got \(String(describing: value))"
     }
 }
 
 func assertNotNil<T>(_ value: T?, _ message: String = "", file: String = #file, line: Int = #line) {
-    totalTests += 1
-    if value != nil {
-        passedTests += 1
-    } else {
+    recordAssertionResult(passed: value != nil) {
         let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] \(message.isEmpty ? "expected non-nil" : message)")
+        return "  FAIL [\(loc)] \(message.isEmpty ? "expected non-nil" : message)"
     }
 }
 
@@ -113,11 +135,14 @@ let quarantinedSuites: [String: String] = {
     return suites
 }()
 
-var quarantinedSuiteCount = 0
+var quarantinedSuiteCount: Int {
+    get { testStateLock.withLock { storedQuarantinedSuiteCount } }
+    set { testStateLock.withLock { storedQuarantinedSuiteCount = newValue } }
+}
 
 private func skipQuarantinedSuite(_ name: String) -> Bool {
     guard let reason = quarantinedSuites[name] else { return false }
-    quarantinedSuiteCount += 1
+    testStateLock.withLock { storedQuarantinedSuiteCount += 1 }
     print("Skipping \(name) (quarantined: \(reason))")
     return true
 }
@@ -177,9 +202,10 @@ func readSourceFixture(
     do {
         return try String(contentsOf: url, encoding: .utf8)
     } catch {
-        totalTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] could not read \(description ?? relativePath): \(error)")
+        recordAssertionResult(passed: false) {
+            let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+            return "  FAIL [\(loc)] could not read \(description ?? relativePath): \(error)"
+        }
         return ""
     }
 }
@@ -191,9 +217,10 @@ func loadJSONFixture<T: Decodable>(_ relativePath: String, as type: T.Type = T.s
         let data = try Data(contentsOf: url)
         return try JSONDecoder().decode(T.self, from: data)
     } catch {
-        totalTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] could not load fixture \(relativePath): \(error)")
+        recordAssertionResult(passed: false) {
+            let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+            return "  FAIL [\(loc)] could not load fixture \(relativePath): \(error)"
+        }
         fatalError("Missing required fixture \(relativePath)")
     }
 }

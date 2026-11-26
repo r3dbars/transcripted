@@ -2018,9 +2018,10 @@ private func loadRepoDataFile(_ relativePath: String, file: String = #file, line
     do {
         return try String(contentsOf: repoFixtureURL(relativePath), encoding: .utf8)
     } catch {
-        totalTests += 1
-        let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
-        recordFailure("  FAIL [\(loc)] could not read \(relativePath): \(error)")
+        recordAssertionResult(passed: false) {
+            let loc = "\(URL(fileURLWithPath: file).lastPathComponent):\(line)"
+            return "  FAIL [\(loc)] could not read \(relativePath): \(error)"
+        }
         return ""
     }
 }

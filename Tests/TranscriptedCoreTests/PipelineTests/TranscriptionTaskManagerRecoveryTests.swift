@@ -1033,6 +1033,123 @@ final class TranscriptionTaskManagerRecoveryTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
     }
 
+    func testOwnedMultiSegmentJournalIsNotRepairedOrMergedBeforeSkipping() async throws {
+        let (manager, paths) = makeManager()
+
+        let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_owned_multi_mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_owned_multi_mic_recovery.wav")
+        let mergedURL = paths.audioCaptures.appendingPathComponent("meeting_owned_multi_mic_merged.wav")
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        try corruptHeaderSizes(at: primaryURL)
+        try backdate(primaryURL)
+        try backdate(recoveryURL)
+        let primaryBytesBefore = try Data(contentsOf: primaryURL)
+        let recoveryBytesBefore = try Data(contentsOf: recoveryURL)
+
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: primaryURL.lastPathComponent,
+            segments: [
+                .init(filename: primaryURL.lastPathComponent, gapBefore: 0),
+                .init(filename: recoveryURL.lastPathComponent, gapBefore: 0.1)
+            ],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        // Simulate a queued transcription that owns the primary mic segment.
+        manager.reservedAudioURLsProvider = { [primaryURL] }
+
+        let recoveredWhileOwned = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+
+        XCTAssertEqual(recoveredWhileOwned, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primaryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recoveryURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: mergedURL.path))
+        XCTAssertEqual(try Data(contentsOf: primaryURL), primaryBytesBefore)
+        XCTAssertEqual(try Data(contentsOf: recoveryURL), recoveryBytesBefore)
+
+        // Once ownership clears, recovery repairs, merges, and queues the audio.
+        manager.reservedAudioURLsProvider = nil
+        let recoveredAfterRelease = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+
+        XCTAssertEqual(recoveredAfterRelease, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(entry.micAudioURL.lastPathComponent, mergedURL.lastPathComponent)
+    }
+
+    func testOwnedSecondarySegmentJournalIsNotRepairedOrMergedBeforeSkipping() async throws {
+        let (manager, paths) = makeManager()
+
+        let primaryURL = paths.audioCaptures.appendingPathComponent("meeting_owned_secondary_mic.wav")
+        let recoveryURL = paths.audioCaptures.appendingPathComponent("meeting_owned_secondary_mic_recovery.wav")
+        let mergedURL = paths.audioCaptures.appendingPathComponent("meeting_owned_secondary_mic_merged.wav")
+        try writeMonoWAV(to: primaryURL, sampleRate: 48_000, samples: Array(repeating: 0.3, count: 4_800))
+        try writeMonoWAV(to: recoveryURL, sampleRate: 48_000, samples: Array(repeating: 0.6, count: 4_800))
+        try corruptHeaderSizes(at: primaryURL)
+        try backdate(primaryURL)
+        try backdate(recoveryURL)
+        let primaryBytesBefore = try Data(contentsOf: primaryURL)
+        let recoveryBytesBefore = try Data(contentsOf: recoveryURL)
+        XCTAssertEqual(try AVAudioFile(forReading: primaryURL).length, 0)
+
+        let journalURL = try writeJournal(
+            in: paths.audioCaptures,
+            primaryMicFilename: primaryURL.lastPathComponent,
+            segments: [
+                .init(filename: primaryURL.lastPathComponent, gapBefore: 0),
+                .init(filename: recoveryURL.lastPathComponent, gapBefore: 0.1)
+            ],
+            startedAt: Date(timeIntervalSince1970: 1_000)
+        )
+
+        // Reserve only the secondary recovery segment, not primaryURL.
+        manager.reservedAudioURLsProvider = { [recoveryURL] }
+
+        let recoveredWhileOwned = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+
+        XCTAssertEqual(recoveredWhileOwned, 0)
+        XCTAssertTrue(manager.failedTranscriptionManager.failedTranscriptions.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: journalURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: primaryURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: recoveryURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: mergedURL.path))
+        XCTAssertEqual(try Data(contentsOf: primaryURL), primaryBytesBefore)
+        XCTAssertEqual(try AVAudioFile(forReading: primaryURL).length, 0)
+        XCTAssertEqual(try Data(contentsOf: recoveryURL), recoveryBytesBefore)
+
+        // Once ownership clears, recovery repairs the primary header, merges
+        // both segments, and queues the audio cleanly.
+        manager.reservedAudioURLsProvider = nil
+        let recoveredAfterRelease = await manager.recoverOrphanedRecordings(
+            in: paths.audioCaptures,
+            livenessWindow: 0,
+            waitForRecentJournals: false
+        )
+
+        XCTAssertEqual(recoveredAfterRelease, 1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: journalURL.path))
+        let entry = try XCTUnwrap(manager.failedTranscriptionManager.failedTranscriptions.first)
+        XCTAssertEqual(entry.micAudioURL.lastPathComponent, mergedURL.lastPathComponent)
+        let merged = try AVAudioFile(forReading: entry.micAudioURL)
+        XCTAssertGreaterThan(merged.length, 3_000)
+    }
+
     // MARK: - Fixtures
 
     private func makeManager(

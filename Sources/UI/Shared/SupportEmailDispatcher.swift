@@ -82,7 +82,7 @@ enum SupportEmailDispatcher {
 /// menu-bar commands such as Stop from running while it waits (see
 /// 6ca91395), so this alert just routes its buttons back to a callback.
 @MainActor
-private final class NonModalAlert: NSObject {
+final class NonModalAlert: NSObject {
     private let alert: NSAlert
     private let onButton: @MainActor (Int) -> Void
 
@@ -116,6 +116,12 @@ private final class NonModalAlert: NSObject {
 
     func bringToFront() {
         alert.window.makeKeyAndOrderFront(nil)
+    }
+
+    func dismiss() {
+        guard isShowing else { return }
+        isShowing = false
+        alert.window.orderOut(nil)
     }
 
     @objc private func buttonPressed(_ sender: NSButton) {

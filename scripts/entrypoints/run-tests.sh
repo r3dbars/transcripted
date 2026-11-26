@@ -23,7 +23,7 @@ BUILD_DIR="build"
 # incremental-compile-warm across invocations; the (much larger) APP_SOURCES
 # set is what the persistent cache below keeps warm.
 GENERATED_RUNNER="$BUILD_DIR/FastTestRunner.$$.swift"
-CACHE_ROOT="$REPO_ROOT/$BUILD_DIR/fast-tests-cache"
+CACHE_ROOT="$REPO_ROOT/.build/fast-tests-cache"
 CACHE_INPUT="$REPO_ROOT/$BUILD_DIR/.fast-tests-cache-input.$$"
 CACHE_OUTPUT_MAP=""
 TEST_OBJECT_DIR=""
@@ -119,12 +119,10 @@ TEST_DEFAULTS_DOMAIN="transcripted-fast-tests.${TRANSCRIPTED_CONTAINER_DIR##*.}"
 # overlapping run-tests.sh invocations in one worktree must not interleave.
 # mkdir is the portable atomic lock on macOS (no flock(1)); locks older than
 # 60 minutes are treated as crashed holders and stolen.
-# One full object directory (one object per APP_SOURCES file) per distinct APP_SOURCES content hash,
-# and nothing in the repo ever evicted them. Growth is bounded per editing window
-# — any Sources/** change needs build.sh, which rm -rf's build/ — but within one
-# window the loop is also the no-benefit loop: an app-source edit produces a fresh
-# empty key dir, so -incremental has nothing to reuse and you pay a full cold
-# compile *and* write a whole new object set. Keep the most recently used entries.
+# One full object directory (one object per APP_SOURCES file) per distinct APP_SOURCES content hash.
+# The cache lives under `.build/fast-tests-cache` so `build.sh`'s `rm -rf build`
+# does not wipe warm fast-test objects on every app build; `CACHE_MAX_ENTRIES`
+# keeps only the most recently used entries so disk growth stays bounded.
 CACHE_MAX_ENTRIES="${TRANSCRIPTED_FAST_TESTS_CACHE_ENTRIES:-5}"
 
 # Must run while the cache lock is held: a concurrent run could otherwise have its

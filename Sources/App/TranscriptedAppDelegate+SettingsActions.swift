@@ -62,8 +62,7 @@ extension TranscriptedAppDelegate {
     func importAudioFiles(_ urls: [URL]) {
         let importable = AudioImportQueue.importableFiles(from: urls)
         guard !importable.isEmpty else {
-            // Deferred so a drop's drag session finishes before the modal
-            // alert runs.
+            // Deferred so a drop's drag session finishes before the alert runs.
             DispatchQueue.main.async { [weak self] in
                 self?.presentNoImportableFilesAlert(count: urls.count)
             }
@@ -77,7 +76,10 @@ extension TranscriptedAppDelegate {
         if appState.meetingSession.isCaptureSessionActive {
             startAudioImportsWhenCaptureEnds()
             DispatchQueue.main.async { [weak self] in
-                self?.presentImportQueuedBehindActiveCaptureAlert(count: importable.count)
+                guard let self,
+                      self.appState.meetingSession.isCaptureSessionActive,
+                      !self.pendingAudioImports.isEmpty else { return }
+                self.presentImportQueuedBehindActiveCaptureAlert(count: self.pendingAudioImports.count)
             }
             return
         }
@@ -140,10 +142,12 @@ extension TranscriptedAppDelegate {
         alert.alertStyle = .informational
         alert.messageText = count == 1
             ? "This file will transcribe after your meeting"
-            : "These \(count) files will transcribe after your meeting"
-        alert.informativeText = "Transcripted starts on them as soon as you stop recording. Keep Transcripted open until then."
+            : "\(count) files will transcribe after your meeting"
+        alert.informativeText = count == 1
+            ? "Transcripted starts on it as soon as you stop recording. Keep Transcripted open until then."
+            : "Transcripted starts on them as soon as you stop recording. Keep Transcripted open until then."
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        ImportAlertPresenter.present(alert)
     }
 
     private func presentNoImportableFilesAlert(count: Int) {
@@ -154,7 +158,7 @@ extension TranscriptedAppDelegate {
             : "Transcripted can't transcribe those files"
         alert.informativeText = "Choose an audio file or a video recording with an audio track, like an .m4a, .mp3, .wav, or .mp4."
         alert.addButton(withTitle: "OK")
-        alert.runModal()
+        ImportAlertPresenter.present(alert)
     }
 
     func pasteRecentDictation(_ text: String) {
@@ -204,5 +208,34 @@ extension TranscriptedAppDelegate {
                 self?.applyAutoCallDetectionPreference()
             }
         }
+    }
+}
+
+/// Presents informational import alerts without `runModal()` so an active
+/// recording's menu-bar Stop command and hotkeys remain responsive.
+@MainActor
+private enum ImportAlertPresenter {
+    private static var activeAlert: NonModalAlert?
+
+    static func present(_ alert: NSAlert) {
+        NSApp.activate(ignoringOtherApps: true)
+        if let existing = activeAlert {
+            existing.dismiss()
+            activeAlert = nil
+        }
+
+        let presented = NonModalAlert(alert: alert) { _ in
+            // Runs inside the panel's button action: defer dropping the last
+            // reference until AppKit unwinds the click.
+            let retired = activeAlert
+            Task { @MainActor in
+                if activeAlert === retired {
+                    activeAlert = nil
+                }
+                withExtendedLifetime(retired) {}
+            }
+        }
+        activeAlert = presented
+        presented.show()
     }
 }

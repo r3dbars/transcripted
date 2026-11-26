@@ -177,7 +177,7 @@ and writes `summary.txt`, `coverage.profdata`, raw `.profraw`, and
 `bash run-tests.sh --filter <entryFn|File>` runs one fast-test file; the
 selector matches an entry function, a file name, or a case-insensitive
 substring of either. Compiled app sources are cached under
-`build/fast-tests-cache/` (keyed by the source list, file contents, compiler
+`.build/fast-tests-cache/` (keyed by the source list, file contents, compiler
 and flags), so later filtered runs skip that work;
 `TRANSCRIPTED_FAST_TESTS_NO_CACHE=1` forces a clean compile.
 

@@ -14,6 +14,7 @@ extension TranscriptionTaskManager {
                 micURL: URL?,
                 systemURL: URL?,
                 originalMicURL: URL?,
+                ownershipCandidateURLs: [URL],
                 startedAt: Date
             )
         }
@@ -102,11 +103,18 @@ extension TranscriptionTaskManager {
         var totalRecovered = 0
         while !Task.isCancelled {
             let passRequestGeneration = orphanedRecordingRecoveryRequestGeneration
+            // Capture active and queued audio ownership on @MainActor BEFORE the
+            // detached scan runs: `inspectOrphanedRecordingJournal` repairs WAV
+            // headers and merges multi-segment WAVs (unlinking source segments
+            // on full-fidelity merge), so it must skip owned journals before
+            // touching any files on disk.
+            let preScanOwnedAudioPaths = currentOwnedAudioPaths()
             let candidates = await Task.detached(priority: .utility) {
                 Self.collectOrphanedRecordingCandidates(
                     in: canonicalScratchDirectory,
                     now: clock.date(),
-                    livenessWindow: livenessWindow
+                    livenessWindow: livenessWindow,
+                    ownedAudioPaths: preScanOwnedAudioPaths
                 )
             }.value
             orphanedRecordingRecoveryPassObserver?()
@@ -114,16 +122,13 @@ extension TranscriptionTaskManager {
 
             var passRecovered = 0
             var retryAfter: TimeInterval?
-            // Audio that already has an owner. `isOwnedByLiveFinalizer` is
-            // released at the end of *stop* and the mtime window only covers
-            // freshly written files, so neither guard covers the transcription
-            // phase — nor a job still sitting in the app's queue, which has no
-            // entry in `tasks` at all. Recomputed each pass because both sets
-            // move while the scan loops.
-            let ownedAudioPaths = Set(
-                lifecycleOwnedAudioPaths()
-                + (reservedAudioURLsProvider?().map { $0.standardizedFileURL.path } ?? [])
-            )
+            // Recompute ownership after the detached scan in case a new
+            // transcription started and claimed a path while the scan was in
+            // flight. `isOwnedByLiveFinalizer` is released at the end of *stop*
+            // and the mtime window only covers freshly written files, so
+            // neither guard covers the transcription phase — nor a job still
+            // sitting in the app's queue, which has no entry in `tasks` at all.
+            let ownedAudioPaths = currentOwnedAudioPaths()
             for candidate in candidates {
                 switch candidate.disposition {
                 case .skip(let reason, let candidateRetryAfter):
@@ -145,7 +150,7 @@ extension TranscriptionTaskManager {
                         "file": candidate.journalURL.lastPathComponent,
                         "reason": reason
                     ])
-                case .recover(let micURL, let systemURL, let originalMicURL, let startedAt):
+                case .recover(let micURL, let systemURL, let originalMicURL, let ownershipCandidateURLs, let startedAt):
                     // Never archive-and-unlink audio that a running or queued
                     // transcription owns. For an in-flight pipeline the open
                     // file handles survive the unlink, so the meeting saves
@@ -154,10 +159,9 @@ extension TranscriptionTaskManager {
                     // audio is gone before it ever opens it, and that one hard
                     // fails. Defer instead — the rescan picks it up once the
                     // owner is done.
-                    let candidateAudioPaths = [micURL, systemURL, originalMicURL]
-                        .compactMap { $0?.standardizedFileURL.path }
-                    if candidateAudioPaths.contains(where: ownedAudioPaths.contains) {
-                        let ownerRetryAfter = Self.orphanedRecordingLivenessWindow
+                    let candidateAudioURLs = ownershipCandidateURLs + [micURL, systemURL, originalMicURL].compactMap { $0 }
+                    if Self.matchesOwnedAudioPaths(candidateAudioURLs, ownedAudioPaths: ownedAudioPaths) {
+                        let ownerRetryAfter = livenessWindow
                         retryAfter = min(retryAfter ?? ownerRetryAfter, ownerRetryAfter)
                         AppLogger.pipeline.info("Left recording journal in place", [
                             "file": candidate.journalURL.lastPathComponent,
@@ -259,10 +263,36 @@ extension TranscriptionTaskManager {
         return totalRecovered
     }
 
+    private func currentOwnedAudioPaths() -> Set<String> {
+        var paths = Set<String>()
+        for path in lifecycleOwnedAudioPaths() {
+            let url = URL(fileURLWithPath: path)
+            paths.insert(url.standardizedFileURL.path)
+            paths.insert(Self.canonicalURL(url).path)
+        }
+        for url in reservedAudioURLsProvider?() ?? [] {
+            paths.insert(url.standardizedFileURL.path)
+            paths.insert(Self.canonicalURL(url).path)
+        }
+        return paths
+    }
+
+    nonisolated private static func matchesOwnedAudioPaths(
+        _ urls: [URL],
+        ownedAudioPaths: Set<String>
+    ) -> Bool {
+        guard !ownedAudioPaths.isEmpty else { return false }
+        return urls.contains { url in
+            ownedAudioPaths.contains(url.standardizedFileURL.path)
+                || ownedAudioPaths.contains(canonicalURL(url).path)
+        }
+    }
+
     nonisolated private static func collectOrphanedRecordingCandidates(
         in directory: URL,
         now: Date,
-        livenessWindow: TimeInterval
+        livenessWindow: TimeInterval,
+        ownedAudioPaths: Set<String>
     ) -> [OrphanedRecordingCandidate] {
         let canonicalDirectory = canonicalDirectoryURL(directory)
         return MeetingRecordingJournalStore.journalURLs(in: canonicalDirectory).compactMap {
@@ -272,7 +302,8 @@ extension TranscriptionTaskManager {
                 at: $0,
                 directory: canonicalDirectory,
                 now: now,
-                livenessWindow: livenessWindow
+                livenessWindow: livenessWindow,
+                ownedAudioPaths: ownedAudioPaths
             )
         }
     }
@@ -281,7 +312,8 @@ extension TranscriptionTaskManager {
         at journalURL: URL,
         directory: URL,
         now: Date,
-        livenessWindow: TimeInterval
+        livenessWindow: TimeInterval,
+        ownedAudioPaths: Set<String>
     ) -> OrphanedRecordingCandidate? {
         guard !MeetingRecordingJournalStore.isOwnedByLiveFinalizer(at: journalURL) else {
             return OrphanedRecordingCandidate(
@@ -333,8 +365,35 @@ extension TranscriptionTaskManager {
         }
         let systemURL = resolve(journal.systemAudioFilename)
         let finalURL = resolve(journal.finalMicFilename)
-        let mergedSibling: URL? = journal.primaryMicFilename.flatMap { primaryName in
-            resolve((primaryName as NSString).deletingPathExtension + "_merged.wav")
+        let mergedSiblingFilename: String? = journal.primaryMicFilename.map { primaryName in
+            (primaryName as NSString).deletingPathExtension + "_merged.wav"
+        }
+        let mergedSibling = resolve(mergedSiblingFilename)
+
+        // Check active/queued ownership BEFORE touching any files on disk
+        // (WAV header repair or multi-segment merge that unlinks source WAVs).
+        let ownershipCandidateURLs = (
+            [
+                originalMicURL,
+                primaryURL,
+                systemURL,
+                identityURL(journal.systemAudioFilename),
+                finalURL,
+                identityURL(journal.finalMicFilename),
+                mergedSibling,
+                identityURL(mergedSiblingFilename),
+            ]
+            + segmentRecords.map(\.url)
+            + journal.micSegments.map { identityURL($0.filename) }
+        ).compactMap { $0 }
+        if matchesOwnedAudioPaths(ownershipCandidateURLs, ownedAudioPaths: ownedAudioPaths) {
+            return OrphanedRecordingCandidate(
+                journalURL: journalURL,
+                disposition: .skip(
+                    reason: "owned by active or queued transcription",
+                    retryAfter: livenessWindow
+                )
+            )
         }
 
         let allAudio = ([primaryURL, systemURL, finalURL, mergedSibling] + segmentRecords.map(\.url))
@@ -397,6 +456,7 @@ extension TranscriptionTaskManager {
                 micURL: micURL,
                 systemURL: systemURL,
                 originalMicURL: originalMicURL,
+                ownershipCandidateURLs: ownershipCandidateURLs,
                 startedAt: journal.startedAt
             )
         )
