@@ -16,6 +16,7 @@ set +e
 swiftc -parse-as-library -I "$OUT_DIR" -L "$OUT_DIR" -lFluidAudio \
     -Xlinker -rpath -Xlinker "$OUT_DIR" \
     Sources/Support/TranscriptionModelPreferences.swift \
+    Sources/Support/TranscriptionLanguagePreferences.swift \
     Sources/Support/TranscriptedConstants.swift \
     Sources/Speech/ParakeetRecoveryState.swift \
     Sources/TranscriptedCore/Utilities/SupersessionEpoch.swift \
