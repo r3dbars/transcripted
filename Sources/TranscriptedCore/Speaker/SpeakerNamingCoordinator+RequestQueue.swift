@@ -142,7 +142,7 @@ extension TranscriptionTaskManager {
     private struct SpeakerNamingRequestCleanupWork: Sendable {
         let clips: [SpeakerNamingEntry]
         let micAudioURL: URL?
-        let systemAudioURL: URL
+        let systemAudioURL: URL?
         let shouldRemoveMicAudio: Bool
         let shouldRemoveSystemAudio: Bool
         let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
@@ -392,7 +392,7 @@ extension TranscriptionTaskManager {
     nonisolated func cleanupNamingArtifacts(
         clips: [SpeakerNamingEntry],
         micURL: URL?,
-        systemURL: URL,
+        systemURL: URL?,
         shouldRemoveMicAudio: Bool,
         shouldRemoveSystemAudio: Bool,
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil

@@ -12,7 +12,7 @@ extension TranscriptionTaskManager {
         transcriptId: UUID,
         resolvedURL: URL,
         micURL: URL?,
-        systemURL: URL,
+        systemURL: URL?,
         sourceFailedTranscriptionId: UUID? = nil,
         splitLocalSpeakers: Bool = false,
         importedRecoverySession: (any ImportedTranscriptionRecoverySession)? = nil,
@@ -165,7 +165,7 @@ extension TranscriptionTaskManager {
         id: UUID,
         transcriptURL: URL,
         micURL: URL?,
-        systemURL: URL,
+        systemURL: URL?,
         splitLocalSpeakers: Bool,
         errorMessage: String,
         inputSnapshot: RetainedAudioInputSnapshot?

@@ -188,8 +188,23 @@ extension TranscriptionTaskManager {
         }
 
         AppLogger.pipeline.info("Using local \(speechEngine.displayName) mic-only recovery pipeline", [
+            "splitLocalSpeakers": "\(splitLocalSpeakers)",
             "transcription_engine": speechEngine.identifier
         ])
+
+        let speakerDB = await MainActor.run { transcription.speakerDB }
+        let speakerThresholds = await MainActor.run { transcription.diarization.activeSpeakerThresholds }
+        let lineupProvider = await MainActor.run { self.lineupNamingProvider }
+        let invitedNameKeys: Set<String>
+        let lineupIsFromInvite: Bool
+        if splitLocalSpeakers, let request = await lineupProvider?(recordingDate) {
+            let profilesBefore = speakerDB.allSpeakers()
+            invitedNameKeys = SpeakerNamingPolicy.lineupNameKeys(request, profilesBeforeMeeting: profilesBefore)
+            lineupIsFromInvite = SpeakerNamingPolicy.lineupIsFromInvite(request)
+        } else {
+            invitedNameKeys = []
+            lineupIsFromInvite = false
+        }
 
         let result = try await transcription.transcribeMicrophoneOnly(
             micURL: micURL,
@@ -199,10 +214,131 @@ extension TranscriptionTaskManager {
                 self?.displayStatus = .transcribing(progress: progress)
             }
         )
+        if let observer = await MainActor.run(body: { self.pipelineResultObserver }) {
+            observer(result)
+        }
+
+        // Classify local speakers when local-speaker split ran, mirroring
+        // `transcribeMultichannelPipeline`'s Phase 1.6. When `splitLocalSpeakers` is false,
+        // keep the legacy single-"You" save path with empty mappings and no naming request.
+        var speakerMappings: [String: SpeakerMapping] = [:]
+        var speakerSources: [String: String] = [:]
+        var speakerDbIds: [String: UUID] = [:]
+        var recentOutcomesByProfile: [UUID: [SpeakerMatchOutcomeKind]] = [:]
+        func cachedRecentOutcomes(_ profile: SpeakerProfile) -> [SpeakerMatchOutcomeKind] {
+            if let cached = recentOutcomesByProfile[profile.id] { return cached }
+            let recent = speakerDB.recentMatchOutcomes(
+                profileId: profile.id,
+                limit: SpeakerProfileHealth.recentOutcomeWindow
+            ).map(\.kind)
+            recentOutcomesByProfile[profile.id] = recent
+            return recent
+        }
+
+        let hasSplitMicSpeakers = splitLocalSpeakers && !result.micPersistentSpeakerIds.isEmpty
+        var cleanupProtectedProfileIds: Set<UUID> = []
+        if hasSplitMicSpeakers {
+            let micSpeakerIds = Array(result.micSpeakerIds).sorted()
+            let micDbKnowledge = Self.speakerClassificationKnowledge(
+                speakerIds: micSpeakerIds,
+                utterances: result.micUtterances,
+                contexts: result.micSpeakerContexts,
+                speakerDB: speakerDB
+            )
+
+            var micAutoAcceptedIds: Set<String> = []
+            var micNeedsActionIds: Set<String> = []
+            for sid in micSpeakerIds {
+                if let entry = micDbKnowledge.first(where: { $0.speakerId == sid }) {
+                    let canAutoAccept = SpeakerNamingPolicy.shouldAutoAccept(
+                        profile: entry.profile,
+                        similarity: entry.similarity,
+                        secondBestSimilarity: entry.secondSimilarity,
+                        recentOutcomes: cachedRecentOutcomes(entry.profile),
+                        marginSimilarities: entry.marginSimilarities,
+                        inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                            for: entry.profile,
+                            invitedNameKeys: invitedNameKeys,
+                            lineupIsFromInvite: lineupIsFromInvite,
+                            thresholds: speakerThresholds
+                        ),
+                        thresholds: speakerThresholds
+                    )
+                    if canAutoAccept {
+                        micAutoAcceptedIds.insert(sid)
+                    } else {
+                        micNeedsActionIds.insert(sid)
+                    }
+                } else {
+                    let hasProfile = result.micUtterances.contains {
+                        String($0.speakerId) == sid && $0.persistentSpeakerId != nil
+                    }
+                    if hasProfile {
+                        micNeedsActionIds.insert(sid)
+                    }
+                }
+            }
+
+            for entry in micDbKnowledge {
+                let key = "mic_\(entry.speakerId)"
+                let mapping = SpeakerNamingPolicy.initialMapping(
+                    speakerId: entry.speakerId,
+                    profile: entry.profile,
+                    similarity: entry.similarity,
+                    secondBestSimilarity: entry.secondSimilarity,
+                    recentOutcomes: recentOutcomesByProfile[entry.profile.id] ?? [],
+                    marginSimilarities: entry.marginSimilarities,
+                    inviteeBars: SpeakerNamingPolicy.inviteeBars(
+                        for: entry.profile,
+                        invitedNameKeys: invitedNameKeys,
+                        lineupIsFromInvite: lineupIsFromInvite,
+                        thresholds: speakerThresholds
+                    ),
+                    thresholds: speakerThresholds
+                )
+                speakerMappings[key] = mapping
+                speakerSources[key] = micAutoAcceptedIds.contains(entry.speakerId) ? "db" : "db_pending"
+            }
+
+            for utterance in result.micUtterances {
+                let key = "mic_\(utterance.speakerId)"
+                if let pid = utterance.persistentSpeakerId, speakerDbIds[key] == nil {
+                    speakerDbIds[key] = pid
+                }
+            }
+            for key in speakerDbIds.keys where speakerMappings[key] == nil {
+                let sid = key.split(separator: "_", maxSplits: 1, omittingEmptySubsequences: true).last.map(String.init) ?? key
+                speakerMappings[key] = SpeakerMapping(speakerId: sid)
+                if speakerSources[key] == nil {
+                    speakerSources[key] = "db_pending"
+                }
+            }
+
+            let protectedReviewProfileIds = Self.pendingReviewProfileIds(
+                systemUtterances: [],
+                micUtterances: result.micUtterances,
+                systemNeedsActionIds: [],
+                micQueuedReviewIds: result.micSpeakerIds
+            )
+            cleanupProtectedProfileIds = protectedReviewProfileIds
+                .union(speakerReviewProfileProtection.protectedProfileIds)
+
+            AppLogger.speakers.info("Per-mic-speaker classification (mic-only)", [
+                "autoAccepted": "\(micAutoAcceptedIds.count)",
+                "needsAction": "\(micNeedsActionIds.count)",
+                "total": "\(micSpeakerIds.count)"
+            ])
+        }
 
         let replacementTranscriptRollback = try ReplacementTranscriptRollback.capture(for: nil)
         let transcriptId = UUID()
         try Task.checkCancellation()
+
+        if hasSplitMicSpeakers {
+            speakerDB.mergeDuplicates(protecting: cleanupProtectedProfileIds)
+            speakerDB.pruneWeakProfiles(protecting: cleanupProtectedProfileIds)
+            try Task.checkCancellation()
+        }
 
         let notifier: TranscriptNotifier? = await MainActor.run {
             self.displayStatus = .finishing
@@ -225,14 +361,14 @@ extension TranscriptionTaskManager {
         guard let savedURL = TranscriptSaver.saveTranscript(
             result,
             transcriptId: transcriptId,
-            speakerMappings: [:],
-            speakerSources: [:],
-            speakerDbIds: [:],
+            speakerMappings: speakerMappings,
+            speakerSources: speakerSources,
+            speakerDbIds: speakerDbIds,
             directory: outputFolder,
             meetingTitle: meetingTitle,
             healthInfo: micOnlyHealth,
             notifier: nil,
-            speakerStore: nil,
+            speakerStore: splitLocalSpeakers ? speakerDB : nil,
             statsStore: DeferredTranscriptStatsStore(),
             recordingDate: transcriptDate,
             transcriptionEngine: speechEngine,
@@ -260,6 +396,160 @@ extension TranscriptionTaskManager {
         )
         try await rollback.checkCancellation()
 
+        let shouldRemoveMicScratch = archiveOutcome.canRemoveMicScratch && removeSourceAudioAfterArchive
+
+        if hasSplitMicSpeakers {
+            var namingEntries: [SpeakerNamingEntry] = []
+            do {
+                let micUtterancesWithProfiles = result.micUtterances.filter {
+                    $0.persistentSpeakerId != nil
+                }
+                let micClips = try SpeakerClipExtractor.extractClips(
+                    sourceAudioURL: micURL,
+                    utterances: micUtterancesWithProfiles,
+                    channel: .mic,
+                    speakerDB: speakerDB,
+                    clipsDirectory: transcription.speakerClipsDirectory
+                )
+                for clip in micClips {
+                    let context = result.micSpeakerContexts[clip.diarizerSpeakerId]
+                    namingEntries.append(SpeakerNamingEntry(
+                        id: clip.persistentSpeakerId,
+                        diarizerSpeakerId: clip.diarizerSpeakerId,
+                        channel: .mic,
+                        clipURL: clip.clipURL,
+                        sampleText: clip.sampleText,
+                        currentName: clip.currentName,
+                        matchSimilarity: clip.matchSimilarity,
+                        matchSecondSimilarity: context?.matchSecondSimilarity,
+                        callCount: context?.matchedProfileSnapshot?.callCount ?? 0,
+                        needsNaming: clip.currentName == nil,
+                        needsConfirmation: clip.currentName != nil,
+                        sessionEmbedding: context?.sessionEmbedding,
+                        matchedProfileSnapshot: context?.matchedProfileSnapshot
+                    ))
+                }
+                Self.registerSpeakerClipsRollback(micClips.map(\.clipURL), channel: "mic", into: rollback)
+            } catch {
+                AppLogger.pipeline.warning("Mic clip extraction failed in mic-only pipeline, skipping mic naming", [
+                    "error": error.localizedDescription
+                ])
+            }
+            try await rollback.checkCancellation()
+
+            let reviewListsRecognizedVoices = await MainActor.run {
+                self.reviewListsRecognizedVoicesProvider?() ?? false
+            }
+            if SpeakerNamingPolicy.shouldQueueSpeakerReview(
+                askedVoices: namingEntries.count,
+                recognizedVoices: 0,
+                reviewListsRecognizedVoices: reviewListsRecognizedVoices
+            ) {
+                let allProfiles = speakerDB.allSpeakers()
+                let confirmationIdentity = await MainActor.run { self.confirmationMeetingId(for: taskId) }
+                let earnsConfirmationByProfile = try Self.confirmationEligibility(
+                    profiles: allProfiles,
+                    store: speakerDB,
+                    transcriptId: transcriptId,
+                    meetingId: confirmationIdentity
+                )
+                let knownPeople: [SpeakerIdentityOption] = allProfiles.compactMap { profile in
+                    guard let name = profile.displayName, !name.isEmpty else { return nil }
+                    return SpeakerIdentityOption(
+                        id: profile.id,
+                        displayName: name,
+                        callCount: profile.callCount,
+                        confirmedMeetings: profile.confirmedMeetingCount,
+                        isTrusted: SpeakerNamingPolicy.isAutoRecognizable(
+                            profile: profile,
+                            recentOutcomes: cachedRecentOutcomes(profile),
+                            requiredConfirmations: 0
+                        ),
+                        earnsConfirmation: earnsConfirmationByProfile[profile.id] ?? false,
+                        requiredMeetings: SpeakerNamingPolicy.inviteeBars(
+                            for: profile,
+                            invitedNameKeys: invitedNameKeys,
+                            lineupIsFromInvite: lineupIsFromInvite,
+                            thresholds: speakerThresholds
+                        )?.requiredConfirmedMeetings ?? SpeakerNamingPolicy.requiredConfirmedMeetings
+                    )
+                }
+
+                let capturedEntries = Self.withConfirmationProgress(
+                    namingEntries,
+                    profile: { speakerDB.getSpeaker(id: $0) },
+                    trusted: { SpeakerNamingPolicy.isAutoRecognizable(profile: $0, recentOutcomes: cachedRecentOutcomes($0), requiredConfirmations: 0) },
+                    earnsConfirmation: { earnsConfirmationByProfile[$0] ?? false },
+                    invited: invitedNameKeys,
+                    fromInvite: lineupIsFromInvite,
+                    thresholds: speakerThresholds
+                )
+                let speakerNamingRequestId = UUID()
+                try await rollback.checkCancellation()
+                await MainActor.run {
+                    self.enqueueSpeakerNamingRequest(SpeakerNamingRequest(
+                        id: speakerNamingRequestId,
+                        speakers: capturedEntries,
+                        knownPeople: knownPeople,
+                        recognizedSpeakerNames: [],
+                        recognizedSpeakers: [],
+                        transcriptURL: savedURL,
+                        transcriptId: transcriptId,
+                        systemAudioURL: nil,
+                        micAudioURL: micURL,
+                        shouldRemoveTemporaryAudioOnCleanup: shouldRemoveMicScratch && sourceFailedTranscriptionId == nil,
+                        shouldRemoveMicAudioOnCleanup: shouldRemoveMicScratch && sourceFailedTranscriptionId == nil,
+                        shouldRemoveSystemAudioOnCleanup: false,
+                        sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                        importedRecoverySession: nil,
+                        onComplete: { [weak self] updates in
+                            self?.handleNamingComplete(
+                                updates: updates,
+                                transcriptURL: savedURL,
+                                transcriptId: transcriptId,
+                                transcriptionResult: result,
+                                micURL: micURL,
+                                systemURL: nil,
+                                splitLocalSpeakers: splitLocalSpeakers,
+                                shouldRemoveTemporaryAudio: shouldRemoveMicScratch,
+                                shouldRemoveMicAudio: shouldRemoveMicScratch,
+                                shouldRemoveSystemAudio: false,
+                                sourceFailedTranscriptionId: sourceFailedTranscriptionId,
+                                clips: capturedEntries,
+                                importedRecoverySession: nil,
+                                requestId: speakerNamingRequestId
+                            )
+                        }
+                    ))
+                }
+                let manager = self
+                rollback.register {
+                    await manager.cancelSpeakerNamingRequest(
+                        transcriptId: transcriptId,
+                        requestId: speakerNamingRequestId
+                    )
+                    AppLogger.pipeline.info("Rollback: cancelled queued mic-only speaker naming request", [
+                        "transcriptId": transcriptId.uuidString
+                    ])
+                }
+                try await rollback.checkCancellation()
+                try await commitSavedTranscriptSideEffectsUnlessCancelled(
+                    taskId: taskId,
+                    savedURL: savedURL,
+                    result: result,
+                    transcriptId: transcriptId,
+                    meetingTitle: meetingTitle,
+                    transcriptDate: transcriptDate,
+                    notifier: notifier,
+                    rollback: rollback
+                )
+                AppLogger.pipeline.info("Mic-only speaker naming requested", [
+                    "mic": "\(capturedEntries.count)"
+                ])
+                return savedURL
+            }
+        }
+
         try await commitSavedTranscriptSideEffectsUnlessCancelled(
             taskId: taskId,
             savedURL: savedURL,
@@ -271,7 +561,7 @@ extension TranscriptionTaskManager {
             rollback: rollback
         )
 
-        if archiveOutcome.canRemoveMicScratch && removeSourceAudioAfterArchive && sourceFailedTranscriptionId == nil {
+        if shouldRemoveMicScratch && sourceFailedTranscriptionId == nil {
             removeManagedCleanupFile(micURL, label: "completed mic-only scratch")
         }
 

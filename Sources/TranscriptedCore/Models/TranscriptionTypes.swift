@@ -274,7 +274,7 @@ public struct SpeakerNamingRequest {
     /// who was on the call.
     public let recognizedSpeakers: [SpeakerNamingEntry]
     public let transcriptURL: URL
-    public let systemAudioURL: URL
+    public let systemAudioURL: URL?
     public let micAudioURL: URL?
     public let shouldRemoveTemporaryAudioOnCleanup: Bool
     public let shouldRemoveMicAudioOnCleanup: Bool
@@ -291,7 +291,7 @@ public struct SpeakerNamingRequest {
         recognizedSpeakers: [SpeakerNamingEntry] = [],
         transcriptURL: URL,
         transcriptId: UUID,
-        systemAudioURL: URL,
+        systemAudioURL: URL?,
         micAudioURL: URL?,
         shouldRemoveTemporaryAudioOnCleanup: Bool = true,
         shouldRemoveMicAudioOnCleanup: Bool? = nil,
@@ -310,8 +310,8 @@ public struct SpeakerNamingRequest {
         self.systemAudioURL = systemAudioURL
         self.micAudioURL = micAudioURL
         let removeMic = shouldRemoveMicAudioOnCleanup ?? shouldRemoveTemporaryAudioOnCleanup
-        let removeSystem = shouldRemoveSystemAudioOnCleanup ?? shouldRemoveTemporaryAudioOnCleanup
-        self.shouldRemoveTemporaryAudioOnCleanup = removeMic && removeSystem
+        let removeSystem = shouldRemoveSystemAudioOnCleanup ?? (systemAudioURL != nil && shouldRemoveTemporaryAudioOnCleanup)
+        self.shouldRemoveTemporaryAudioOnCleanup = removeMic && (systemAudioURL == nil || removeSystem)
         self.shouldRemoveMicAudioOnCleanup = removeMic
         self.shouldRemoveSystemAudioOnCleanup = removeSystem
         self.sourceFailedTranscriptionId = sourceFailedTranscriptionId
