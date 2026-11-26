@@ -23,11 +23,21 @@ extension ParakeetEngine {
         guard !isRecording else { return }
         guard !audioStartInProgress else { return }
         if usesPinnedDictationMicrophone() {
-            let skipsEngineWarmup = await pinnedDictationSkipsEngineWarmup()
+            let decision = await pinnedDictationWarmupDecision()
             guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
-            if skipsEngineWarmup {
+            switch decision {
+            case .skipEngineWarmup:
                 markPinnedDictationInputReady()
                 return
+            case .systemInputBlocked:
+                // Never mark ready while the system-input circuit is open or
+                // stalled (that spins waitForEngineAndStart every 100 ms), and
+                // never fall through to AVAudioEngine.inputNode (AirPods-safe).
+                markFormatUnreadyAndPublish()
+                schedulePrewarmRetry()
+                return
+            case .runEngineWarmup:
+                break
             }
         }
         var admissionOwner = currentAudioEngineQueueOwnerToken()
@@ -181,8 +191,9 @@ extension ParakeetEngine {
             markFormatUnreadyAndPublish()
             let decision = await pinnedDictationWarmupDecision()
             guard !Task.isCancelled, !isShuttingDown, !isRecording, !audioStartInProgress else { return }
-            if decision.skipsEngineWarmup {
-                if decision.engineRecordsBluetoothInput {
+            switch decision {
+            case .skipEngineWarmup(let engineRecordsBluetoothInput):
+                if engineRecordsBluetoothInput {
                     // Starts on this headset keep failing against an engine
                     // bound to the old route. Swap in a fresh one, as a
                     // relaunch would; nothing opens the headset until the
@@ -191,6 +202,12 @@ extension ParakeetEngine {
                 }
                 markPinnedDictationInputReady()
                 return
+            case .systemInputBlocked:
+                // Keep format unready and avoid touching AVAudioEngine while
+                // the system-input circuit is open or timed out.
+                return
+            case .runEngineWarmup:
+                break
             }
         }
 

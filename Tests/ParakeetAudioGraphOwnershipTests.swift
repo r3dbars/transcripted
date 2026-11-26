@@ -835,6 +835,90 @@ func testParakeetAudioGraphOwnership() async {
         assertTrue(admittedAfterClose, "a closed report must match run admitting work")
     }
 
+    await runSuite("Parakeet system-input coordinator swaps out a still-blocked queue as soon as the circuit closes") {
+        let timeouts = ManualSystemInputTimeouts()
+        let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(
+            label: "test.parakeet.circuit-partial-close",
+            scheduleTimeout: timeouts.schedule
+        )
+        let releaseFirst = DispatchSemaphore(value: 0)
+        let releaseSecond = DispatchSemaphore(value: 0)
+        let firstCleanupDone = ParakeetAsyncInterleavingGate()
+        let secondCleanupDone = ParakeetAsyncInterleavingGate()
+
+        let firstEntered = DispatchSemaphore(value: 0)
+        let firstTask = Task {
+            try await coordinator.run(
+                operation: "stuck_0",
+                timeoutNanoseconds: 20_000_000,
+                cleanupAfterLateCompletion: { _ in
+                    Task { await firstCleanupDone.open() }
+                }
+            ) { () -> Bool in
+                firstEntered.signal()
+                _ = releaseFirst.wait(timeout: .now() + .seconds(30))
+                return true
+            }
+        }
+        guard await signalled(firstEntered) else {
+            assertTrue(false, "first stuck call must enter")
+            releaseFirst.signal()
+            releaseSecond.signal()
+            return
+        }
+        await timeouts.expireNext()
+        _ = try? await firstTask.value
+
+        let secondEntered = DispatchSemaphore(value: 0)
+        let secondTask = Task {
+            try await coordinator.run(
+                operation: "stuck_1",
+                timeoutNanoseconds: 20_000_000,
+                cleanupAfterLateCompletion: { _ in
+                    Task { await secondCleanupDone.open() }
+                }
+            ) { () -> Bool in
+                secondEntered.signal()
+                _ = releaseSecond.wait(timeout: .now() + .seconds(30))
+                return true
+            }
+        }
+        guard await signalled(secondEntered) else {
+            assertTrue(false, "second stuck call must enter")
+            releaseFirst.signal()
+            releaseSecond.signal()
+            return
+        }
+        await timeouts.expireNext()
+        _ = try? await secondTask.value
+
+        assertNotNil(
+            coordinator.circuitOpenError(operation: "start_recording"),
+            "two stuck calls must open the circuit"
+        )
+
+        // Release ONLY the first stuck call while the second remains blocked on
+        // the queue that was active when the circuit opened.
+        releaseFirst.signal()
+        await firstCleanupDone.wait()
+        assertNil(
+            coordinator.circuitOpenError(operation: "start_recording"),
+            "releasing one of two stuck calls must close the circuit"
+        )
+
+        let recoveredImmediately = (try? await coordinator.run(
+            operation: "recovered_call",
+            timeoutNanoseconds: 20_000_000
+        ) { true }) == true
+        assertTrue(
+            recoveredImmediately,
+            "the first admitted call after the circuit closes must run on a fresh queue instead of blocking behind the second stuck worker"
+        )
+
+        releaseSecond.signal()
+        await secondCleanupDone.wait()
+    }
+
     runSuite("Parakeet system-input budget that runs out before work starts skips it and spends no capacity") {
         let timeouts = ManualSystemInputTimeouts()
         let coordinator = ParakeetReplaceableSystemInputWorkCoordinator(

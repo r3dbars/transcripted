@@ -35,6 +35,8 @@ struct AgentMCPConnectorPaths {
     let homeDirectory: URL
     let applicationDirectories: [URL]
     let systemBinaryDirectories: [URL]
+    let searchEnvironmentPATH: Bool
+    let loginShellPATHLookup: (() -> [URL])?
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -42,7 +44,9 @@ struct AgentMCPConnectorPaths {
         systemBinaryDirectories: [URL] = [
             URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true),
             URL(fileURLWithPath: "/usr/local/bin", isDirectory: true),
-        ]
+        ],
+        searchEnvironmentPATH: Bool? = nil,
+        loginShellPATHLookup: (() -> [URL])? = nil
     ) {
         self.homeDirectory = homeDirectory.standardizedFileURL
         self.applicationDirectories = applicationDirectories ?? [
@@ -50,6 +54,8 @@ struct AgentMCPConnectorPaths {
             homeDirectory.appendingPathComponent("Applications", isDirectory: true),
         ]
         self.systemBinaryDirectories = systemBinaryDirectories
+        self.searchEnvironmentPATH = searchEnvironmentPATH ?? !systemBinaryDirectories.isEmpty
+        self.loginShellPATHLookup = loginShellPATHLookup
     }
 
     var claudeCodeUserConfigURL: URL {
@@ -63,7 +69,21 @@ struct AgentMCPConnectorPaths {
     var claudeCodeBinaryCandidates: [URL] {
         [
             homeDirectory.appendingPathComponent(".claude/local/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".claude/bin/claude", isDirectory: false),
             homeDirectory.appendingPathComponent(".local/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".local/node/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".volta/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".bun/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".npm-global/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".pnpm-global/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent("Library/pnpm/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".local/share/pnpm/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".fnm/aliases/default/bin/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".mise/shims/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".local/share/mise/shims/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".asdf/shims/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent(".nodenv/shims/claude", isDirectory: false),
+            homeDirectory.appendingPathComponent("n/bin/claude", isDirectory: false),
         ] + systemBinaryDirectories.map { $0.appendingPathComponent("claude", isDirectory: false) }
     }
 
@@ -161,6 +181,7 @@ enum AgentMCPConnector {
         case .claudeCode:
             return claudeCodeBinary(paths: paths, fileManager: fileManager) != nil
                 || fileManager.fileExists(atPath: paths.claudeCodeStateDirectory.path)
+                || fileManager.fileExists(atPath: paths.claudeCodeUserConfigURL.path)
         case .codex:
             return paths.applicationExists(named: "Codex.app", fileManager: fileManager)
                 || fileManager.fileExists(atPath: paths.codexStateDirectory.path)
@@ -289,46 +310,6 @@ enum AgentMCPConnector {
     /// silently drops every other MCP server the user had configured.
     static func replacedConfigNotice(for agent: AgentMCPAgent, backupURL: URL) -> String {
         "Your previous \(agent.displayName) config wasn't readable, so it was backed up as \(backupURL.lastPathComponent) next to the config file and replaced. Re-add any other tools you'd added there from that backup."
-    }
-
-    // MARK: - Claude Code
-
-    static func claudeCodeBinary(
-        paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
-        fileManager: FileManager = .default
-    ) -> URL? {
-        paths.claudeCodeBinaryCandidates.first { fileManager.isExecutableFile(atPath: $0.path) }
-    }
-
-    /// Registers through the `claude` CLI instead of editing `~/.claude.json`
-    /// directly — that file is Claude Code's live state file, and the CLI owns
-    /// its format. Reading it for status is safe; writing it is not.
-    private static func connectClaudeCode(
-        helperCommandPath: String,
-        paths: AgentMCPConnectorPaths,
-        fileManager: FileManager,
-        cliTimeout: TimeInterval
-    ) throws {
-        guard let binary = claudeCodeBinary(paths: paths, fileManager: fileManager) else {
-            throw AgentMCPConnectorError.agentCLINotFound(.claudeCode)
-        }
-
-        // `mcp add` fails when the name already exists; remove first so
-        // reconnect after an app move or helper path change stays one click.
-        _ = try? runCLI(
-            binary,
-            arguments: ["mcp", "remove", "--scope", "user", serverName],
-            timeout: cliTimeout
-        )
-
-        let result = try runCLI(
-            binary,
-            arguments: ["mcp", "add", "--scope", "user", serverName, helperCommandPath],
-            timeout: cliTimeout
-        )
-        guard result.status == 0 else {
-            throw AgentMCPConnectorError.agentCLIFailed(.claudeCode, status: result.status, output: result.output)
-        }
     }
 
     // MARK: - Codex
@@ -690,7 +671,7 @@ enum AgentMCPConnector {
 
     // MARK: - Shared
 
-    private static func configuredCommandPath(
+    static func configuredCommandPath(
         inJSONConfigAt configURL: URL,
         fileManager: FileManager
     ) -> String? {
@@ -707,9 +688,11 @@ enum AgentMCPConnector {
 
     static let defaultCLITimeout: TimeInterval = 30
 
-    private static func runCLI(
+    static func runCLI(
         _ executable: URL,
         arguments: [String],
+        environment: [String: String]? = nil,
+        currentDirectoryURL: URL? = nil,
         agent: AgentMCPAgent = .claudeCode,
         timeout: TimeInterval = defaultCLITimeout
     ) throws -> (status: Int32, output: String) {
@@ -718,6 +701,8 @@ enum AgentMCPConnector {
             result = try BoundedProcessRunner.run(
                 executable: executable,
                 arguments: arguments,
+                environment: environment,
+                currentDirectoryURL: currentDirectoryURL,
                 timeout: timeout
             )
         } catch is BoundedProcessRunner.RunError {

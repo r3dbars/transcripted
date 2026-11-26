@@ -500,7 +500,7 @@ extension ParakeetEngine {
                     hwFormat: snapshot.hwFormat,
                     error: error
                 )
-                let failureReason = operationTimedOut
+                let failureReason = operationBlocked
                     ? ParakeetStartRecordingFailureReason.audioEngineStartTimedOut
                     : ParakeetAudioFormatReadinessPolicy.startFailureReason(for: error as NSError)
                 lastRecordingStartFailureReason = failureReason

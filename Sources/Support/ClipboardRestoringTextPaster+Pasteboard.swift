@@ -52,8 +52,11 @@ enum ClipboardSnapshotReader {
     }
 
     /// Runs the fetch off the calling thread so a stalled promised item
-    /// cannot hold the main actor past the bound. The caller still waits
-    /// at most `remaining`, then treats the snapshot as incomplete.
+    /// cannot hold the main actor past the bound. When called on the main
+    /// thread and the fetch does not finish immediately, pumps `.defaultMode`
+    /// in short slices so an own-process lazy `NSPasteboardItemDataProvider`
+    /// (such as text copied inside Transcripted itself) can deliver its data
+    /// instead of self-deadlocking until `remaining` expires.
     static func waitOnSnapshotQueue(_ remaining: TimeInterval, work: @escaping @Sendable () -> Void) -> Bool {
         let group = DispatchGroup()
         group.enter()
@@ -61,7 +64,22 @@ enum ClipboardSnapshotReader {
             work()
             group.leave()
         }
-        return group.wait(timeout: .now() + remaining) == .success
+        guard Thread.isMainThread else {
+            return group.wait(timeout: .now() + remaining) == .success
+        }
+        let fastWait = min(remaining, 0.005)
+        if group.wait(timeout: .now() + fastWait) == .success {
+            return true
+        }
+        let deadline = ProcessInfo.processInfo.systemUptime + max(0, remaining - fastWait)
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if group.wait(timeout: .now()) == .success {
+                return true
+            }
+            let slice = min(0.01, max(0.001, deadline - ProcessInfo.processInfo.systemUptime))
+            _ = CFRunLoopRunInMode(.defaultMode, slice, true)
+        }
+        return group.wait(timeout: .now()) == .success
     }
 }
 
@@ -129,6 +147,54 @@ extension ClipboardRestoringTextPaster {
     /// is borrowed (a read that would look like the target pasting).
     nonisolated static let transientPasteboardType = NSPasteboard.PasteboardType("org.nspasteboard.TransientType")
 
+    /// File-promise pasteboard types that cannot be faithfully restored from
+    /// raw `Data` and whose eager read can trigger slow/stalling exports in
+    /// Photos, Preview, Mail, Chrome, or Figma. Skipped when an item carries
+    /// other readable representations; an item with ONLY promise types still
+    /// refuses paste-back so the user's clipboard is never clobbered.
+    nonisolated static let nonRestorablePromiseTypes: Set<NSPasteboard.PasteboardType> = [
+        NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-content-type"),
+        NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url"),
+        NSPasteboard.PasteboardType("com.apple.pasteboard.promised-suggested-file-name"),
+        NSPasteboard.PasteboardType("com.apple.NSFilePromiseItemMetaData"),
+        NSPasteboard.PasteboardType("Apple files promise pasteboard type"),
+    ]
+
+    /// Stably prioritizes lightweight canonical representations (privacy
+    /// markers, text, URLs, HTML/RTF, PNG/PDF) ahead of heavy uncompressed,
+    /// legacy, or dynamic formats (`public.tiff`, `com.apple.webarchive`,
+    /// `dyn.*`). That ensures an item's cheap representations are captured
+    /// before a huge secondary format can fill the snapshot byte budget or
+    /// stall a lazy provider.
+    nonisolated static func prioritizedSnapshotTypes(
+        _ types: [NSPasteboard.PasteboardType]
+    ) -> [NSPasteboard.PasteboardType] {
+        func tier(for type: NSPasteboard.PasteboardType) -> Int {
+            if privacyMarkerTypes.contains(type) { return 0 }
+            switch type {
+            case .string, .URL, .fileURL, .html, .rtf,
+                 NSPasteboard.PasteboardType("public.utf16-plain-text"),
+                 NSPasteboard.PasteboardType("public.utf16-external-plain-text"):
+                return 0
+            case .png, .pdf, .rtfd:
+                return 1
+            case .tiff,
+                 NSPasteboard.PasteboardType("com.apple.pict"),
+                 NSPasteboard.PasteboardType("com.apple.webarchive"):
+                return 3
+            default:
+                return type.rawValue.hasPrefix("dyn.") ? 3 : 2
+            }
+        }
+        return types.enumerated()
+            .sorted { lhs, rhs in
+                let lt = tier(for: lhs.element)
+                let rt = tier(for: rhs.element)
+                return lt == rt ? lhs.offset < rhs.offset : lt < rt
+            }
+            .map(\.element)
+    }
+
     @discardableResult
     func copyTextToClipboard(_ text: String, to pasteboard: any ClipboardPasteboard = NSPasteboard.general) -> Bool {
         pasteboard.clearContents()
@@ -158,8 +224,18 @@ extension ClipboardRestoringTextPaster {
             if timedOut { break }
             var typeData: [NSPasteboard.PasteboardType: Data] = [:]
             var skippedTypes = 0
+            var sawReadableEmptyValue = false
             var itemCause: ClipboardSnapshotCause?
-            for type in item.types {
+            let orderedTypes = Self.prioritizedSnapshotTypes(item.types)
+            let hasRestorableCandidateTypes = orderedTypes.contains { !Self.nonRestorablePromiseTypes.contains($0) }
+            for type in orderedTypes {
+                if Self.nonRestorablePromiseTypes.contains(type) {
+                    if !hasRestorableCandidateTypes {
+                        skippedTypes += 1
+                        itemCause = ClipboardSnapshotCause.preferring(itemCause, .unreadable)
+                    }
+                    continue
+                }
                 let remaining = timeout - (now() - started)
                 if remaining <= 0 {
                     timedOut = true
@@ -167,7 +243,8 @@ extension ClipboardRestoringTextPaster {
                     itemCause = ClipboardSnapshotCause.preferring(itemCause, .timeout)
                     break
                 }
-                if Self.privacyMarkerTypes.contains(type) {
+                let isPrivacyMarker = Self.privacyMarkerTypes.contains(type)
+                if isPrivacyMarker {
                     // Checked from the type list, before any data read, so a
                     // marker with no readable data still counts.
                     containsPrivacyMarker = true
@@ -186,8 +263,15 @@ extension ClipboardRestoringTextPaster {
                     skippedTypes += 1
                     itemCause = ClipboardSnapshotCause.preferring(itemCause, .timeout)
                 case .value(nil):
-                    skippedTypes += 1
-                    itemCause = ClipboardSnapshotCause.preferring(itemCause, .unreadable)
+                    if isPrivacyMarker {
+                        // Some password managers declare privacy markers with
+                        // nil data; keep the empty marker rather than failing
+                        // the snapshot as unreadable.
+                        typeData[type] = Data()
+                    } else {
+                        skippedTypes += 1
+                        itemCause = ClipboardSnapshotCause.preferring(itemCause, .unreadable)
+                    }
                 case .value(let data?):
                     guard data.count <= TranscriptedConstants.clipboardSnapshotMaxTypeBytes,
                           totalBytes + data.count <= TranscriptedConstants.clipboardSnapshotMaxTotalBytes else {
@@ -197,9 +281,11 @@ extension ClipboardRestoringTextPaster {
                     }
                     // Keep empty privacy markers so a restored password stays
                     // marked as concealed for clipboard managers.
-                    if !data.isEmpty || Self.privacyMarkerTypes.contains(type) {
+                    if !data.isEmpty || isPrivacyMarker {
                         typeData[type] = data
                         totalBytes += data.count
+                    } else {
+                        sawReadableEmptyValue = true
                     }
                 }
                 if timedOut { break }
@@ -209,7 +295,8 @@ extension ClipboardRestoringTextPaster {
             // block paste-back. Only an item that lost every representation
             // makes the snapshot incomplete — restoring it would erase the
             // user's clipboard, and that is the case paste-back refuses.
-            if typeData.isEmpty, skippedTypes > 0 {
+            let onlyEmptyValueWithUnreadableSecondary = sawReadableEmptyValue && itemCause == .unreadable
+            if typeData.isEmpty, skippedTypes > 0, !onlyEmptyValueWithUnreadableSecondary {
                 isComplete = false
                 incompleteCause = ClipboardSnapshotCause.preferring(incompleteCause, itemCause ?? .unreadable)
             }

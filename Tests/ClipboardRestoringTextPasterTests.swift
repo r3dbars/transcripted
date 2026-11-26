@@ -3126,6 +3126,123 @@ func testClipboardRestoringTextPaster() async {
         }
         assertEqual(finalData, customData, "a user copy is not ours to swap out for the older clipboard")
     }
+
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — own-process lazy provider does not self-deadlock on main") {
+        final class LazyStringProvider: NSObject, NSPasteboardItemDataProvider {
+            let value: String
+            var provided = false
+            init(_ value: String) { self.value = value }
+            func pasteboard(_ pasteboard: NSPasteboard?, item: NSPasteboardItem, provideDataForType type: NSPasteboard.PasteboardType) {
+                provided = true
+                item.setString(value, forType: type)
+            }
+        }
+
+        let pasteboardName = NSPasteboard.Name("TranscriptedOwnProcessLazyProviderTest-\(UUID().uuidString)")
+        let (snapshot, provided) = await MainActor.run { () -> (ClipboardRestoringTextPaster.PasteboardSnapshot, Bool) in
+            let pasteboard = NSPasteboard(name: pasteboardName)
+            pasteboard.clearContents()
+            let provider = LazyStringProvider("copied inside Transcripted")
+            let item = NSPasteboardItem()
+            item.setDataProvider(provider, forTypes: [.string])
+            pasteboard.writeObjects([item])
+            let snapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: pasteboard)
+            return (snapshot, provider.provided)
+        }
+
+        assertTrue(provided, "main-thread snapshot read should service an own-process lazy pasteboard provider")
+        assertTrue(snapshot.isComplete, "own-process lazy pasteboard must not time out as incomplete")
+        assertEqual(
+            snapshot.items.first?[.string].flatMap { String(data: $0, encoding: .utf8) },
+            "copied inside Transcripted",
+            "lazy provider text should be captured cleanly"
+        )
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — skips file-promise types when restorable types exist, refuses pure promises") {
+        let promiseType = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
+        await MainActor.run {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let mixed = NSPasteboardItem()
+            mixed.setData(Data([1, 2, 3]), forType: promiseType)
+            mixed.setData(Data([4, 5, 6]), forType: .png)
+            _ = board.writePasteboardItems([mixed])
+
+            var readTypes: [NSPasteboard.PasteboardType] = []
+            let mixedSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                readTypes.append(type)
+                return .value(Data([4, 5, 6]))
+            })
+            assertTrue(mixedSnapshot.isComplete, "file-promise type next to PNG must not fail or stall the snapshot")
+            assertFalse(readTypes.contains(promiseType), "file-promise type should never be eagerly materialized when PNG exists")
+            assertNotNil(mixedSnapshot.items.first?[.png], "PNG representation should be preserved")
+
+            let purePromise = NSPasteboardItem()
+            purePromise.setData(Data([1]), forType: promiseType)
+            _ = board.writePasteboardItems([purePromise])
+            var pureReads = 0
+            let pureSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, _, _ in
+                pureReads += 1
+                return .value(Data([1]))
+            })
+            assertFalse(pureSnapshot.isComplete, "a pure file-promise item must refuse paste-back instead of clobbering the clipboard")
+            assertEqual(pureSnapshot.incompleteCause, .unreadable, "pure file-promise refusal carries unreadable cause")
+            assertEqual(pureReads, 0, "pure file-promise item should refuse without triggering promise export")
+        }
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — prioritizes cheap canonical types ahead of heavy TIFF/dynamic formats") {
+        await MainActor.run {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let dynamicType = NSPasteboard.PasteboardType("dyn.ah62d4rv4gu8y6y4grf0gn5xbrzw1gydcr7u1e3cytf2gn")
+            let item = NSPasteboardItem()
+            item.setData(Data([1]), forType: .tiff)
+            item.setData(Data([2]), forType: dynamicType)
+            item.setData(Data([3]), forType: .png)
+            item.setString("screenshot caption", forType: .string)
+            _ = board.writePasteboardItems([item])
+
+            var readOrder: [NSPasteboard.PasteboardType] = []
+            let heavyData = Data(repeating: 0xaa, count: TranscriptedConstants.clipboardSnapshotMaxTypeBytes + 1)
+            let snapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                readOrder.append(type)
+                if type == .tiff || type == dynamicType {
+                    return .value(heavyData)
+                }
+                return .value("ok".data(using: .utf8) ?? Data())
+            })
+            assertTrue(snapshot.isComplete, "cheap text and PNG should save the item even when TIFF and dynamic types exceed the cap")
+            assertEqual(readOrder.first, .string, "plain text should be read before heavy representations")
+            assertEqual(readOrder[1], .png, "PNG should be read before TIFF and dynamic types")
+        }
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — handles nil-data privacy markers and empty strings gracefully") {
+        let transient = ClipboardRestoringTextPaster.transientPasteboardType
+        await MainActor.run {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let markerOnly = NSPasteboardItem()
+            markerOnly.setData(Data(), forType: transient)
+            _ = board.writePasteboardItems([markerOnly])
+
+            let markerSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, _, _ in
+                .value(nil)
+            })
+            assertTrue(markerSnapshot.isComplete, "a privacy marker returning nil data should be preserved as empty marker data")
+            assertTrue(markerSnapshot.containsPrivacyMarker, "privacy marker flag must stay set")
+            assertEqual(markerSnapshot.items.first?[transient], Data(), "marker should be retained as empty Data")
+
+            let emptyWithBadSecondary = NSPasteboardItem()
+            emptyWithBadSecondary.setString("", forType: .string)
+            emptyWithBadSecondary.setData(Data([1]), forType: .rtf)
+            _ = board.writePasteboardItems([emptyWithBadSecondary])
+
+            let emptySnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                type == .string ? .value(Data()) : .value(nil)
+            })
+            assertTrue(emptySnapshot.isComplete, "an empty string next to an unreadable secondary representation should not block paste-back")
+        }
+    }
 }
 
 @MainActor
