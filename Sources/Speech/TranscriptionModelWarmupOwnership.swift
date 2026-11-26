@@ -6,18 +6,15 @@ import TranscriptedCore
 enum TranscriptionModelRuntime: Hashable {
     case parakeet
     case whisper
-    case appleSpeech
 }
 
 extension TranscriptionModelChoice {
     var runtime: TranscriptionModelRuntime {
         switch self {
-        case .parakeetTDTv3, .parakeetTDTv2, .parakeetUltraExperimental:
+        case .parakeetTDTv3, .parakeetUltraExperimental:
             return .parakeet
-        case .whisperLargeV3Turbo, .whisperLargeV3:
+        case .whisperLargeV3Turbo:
             return .whisper
-        case .appleSpeech:
-            return .appleSpeech
         }
     }
 }

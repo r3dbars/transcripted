@@ -40,8 +40,8 @@ func testParakeetCacheMigration() {
             let target = root.appendingPathComponent(collision + "-target")
             try! fm.createDirectory(at: cache, withIntermediateDirectories: true)
             try! fm.createDirectory(at: target, withIntermediateDirectories: true)
-            let legacy = cache.appendingPathComponent(ParakeetModelVariant.v2.directoryName + "-coreml")
-            let current = cache.appendingPathComponent(ParakeetModelVariant.v2.directoryName)
+            let legacy = cache.appendingPathComponent(ParakeetModelVariant.v3.directoryName + "-coreml")
+            let current = cache.appendingPathComponent(ParakeetModelVariant.v3.directoryName)
             var suppliedCache = cache
             if collision == "source-link" {
                 try! fm.createSymbolicLink(at: legacy, withDestinationURL: target)
@@ -56,7 +56,7 @@ func testParakeetCacheMigration() {
                 }
             }
             assertFalse(try! ModelCacheInventory.migrateLegacyParakeetModelDirectory(
-                variant: .v2, fluidAudioModelsDirectory: suppliedCache
+                variant: .v3, fluidAudioModelsDirectory: suppliedCache
             ), "\(collision) must remain untouched")
             assertTrue(fm.fileExists(atPath: legacy.path))
             assertTrue(fm.fileExists(atPath: target.path))

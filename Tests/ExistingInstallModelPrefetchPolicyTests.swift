@@ -4,16 +4,16 @@
 import Foundation
 
 func testExistingInstallModelPrefetchPolicy() {
-    runSuite("Existing installs can prefetch selected Parakeet v2") {
+    runSuite("Existing installs can prefetch selected Parakeet v3") {
         assertTrue(ExistingInstallModelPrefetchPolicy.shouldPrefetch(
             ExistingInstallModelPrefetchContext(
-                isExistingInstall: true, selectedModel: .parakeetTDTv2,
+                isExistingInstall: true, selectedModel: .parakeetTDTv3,
                 isModelLoaded: false, isModelWorkInFlight: false, eagerModelWarmupEnabled: false
             )
         ))
         assertFalse(ExistingInstallModelPrefetchPolicy.shouldPrefetch(
             ExistingInstallModelPrefetchContext(
-                isExistingInstall: true, selectedModel: .parakeetTDTv2,
+                isExistingInstall: true, selectedModel: .parakeetTDTv3,
                 isModelLoaded: false, isModelWorkInFlight: true, eagerModelWarmupEnabled: false
             )
         ))

@@ -1,31 +1,37 @@
 import Foundation
 
 func testModelCacheInventory() {
-    runSuite("Parakeet v2 completeness is version-specific and cleanup preserves reusable caches") {
+    runSuite("Retired Parakeet v2 caches are reclaimable while active Parakeet v3 stays intact") {
         let root = FileManager.default.temporaryDirectory
-            .appendingPathComponent("ModelCacheV2-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("ModelCacheV2Retired-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
-        let variant = ParakeetModelVariant.v2
-        let v2 = root.appendingPathComponent(variant.directoryName)
-        for name in variant.requiredModelDirectoryNames {
-            writeTestFile(v2.appendingPathComponent("\(name)/coremldata.bin"), bytes: 1)
+        let v3 = root.appendingPathComponent(ParakeetModelVariant.v3.directoryName)
+        for name in ParakeetModelVariant.v3.requiredModelDirectoryNames {
+            writeTestFile(v3.appendingPathComponent("\(name)/coremldata.bin"), bytes: 1)
         }
-        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v2, fluidAudioModelsDirectory: root))
-        writeTestFile(v2.appendingPathComponent("parakeet_vocab.json"), bytes: 1)
-        assertNotNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v2, fluidAudioModelsDirectory: root))
-        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v3, fluidAudioModelsDirectory: root))
-        let legacy = root.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml")
-        writeTestFile(legacy.appendingPathComponent("model.bin"), bytes: 1)
-        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(fluidAudioModelsDirectory: root)
-        assertEqual(result?.removedBytes, 0)
-        assertEqual(result?.removedNames, [])
-        assertTrue(FileManager.default.fileExists(atPath: v2.path))
-        assertTrue(FileManager.default.fileExists(atPath: legacy.path))
+        for name in ParakeetModelVariant.v3.requiredFileNames {
+            writeTestFile(v3.appendingPathComponent(name), bytes: 1)
+        }
+        let v2 = root.appendingPathComponent("parakeet-tdt-0.6b-v2")
+        let v2Legacy = root.appendingPathComponent("parakeet-tdt-0.6b-v2-coreml")
+        writeTestFile(v2.appendingPathComponent("model.bin"), bytes: 13)
+        writeTestFile(v2Legacy.appendingPathComponent("model.bin"), bytes: 19)
 
-        let decoder = v2.appendingPathComponent("Decoder.mlmodelc")
+        let snapshot = ModelCacheInventory.snapshot(fluidAudioModelsDirectory: root)
+        assertEqual(snapshot.staleFluidAudioModelBytes, 32, "both retired Parakeet v2 folders should count as stale")
+        assertEqual(snapshot.staleFluidAudioModelNames, ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2-coreml"])
+
+        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(fluidAudioModelsDirectory: root)
+        assertEqual(result?.removedBytes, 32)
+        assertEqual(result?.removedNames, ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2-coreml"])
+        assertTrue(FileManager.default.fileExists(atPath: v3.path), "active Parakeet v3 cache must stay")
+        assertFalse(FileManager.default.fileExists(atPath: v2.path), "retired Parakeet v2 cache must be removed")
+        assertFalse(FileManager.default.fileExists(atPath: v2Legacy.path), "retired Parakeet v2 legacy cache must be removed")
+
+        let decoder = v3.appendingPathComponent("Decoder.mlmodelc")
         try! FileManager.default.removeItem(at: decoder)
-        try! FileManager.default.createSymbolicLink(at: decoder, withDestinationURL: v2.appendingPathComponent("Encoder.mlmodelc"))
-        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v2, fluidAudioModelsDirectory: root),
+        try! FileManager.default.createSymbolicLink(at: decoder, withDestinationURL: v3.appendingPathComponent("Encoder.mlmodelc"))
+        assertNil(ModelCacheInventory.activeParakeetModelDirectory(variant: .v3, fluidAudioModelsDirectory: root),
                   "symlinked compiled model directories must not satisfy completeness")
     }
 
@@ -247,28 +253,49 @@ func testModelCacheInventory() {
         assertFalse(FileManager.default.fileExists(atPath: whisperModels.path), "combined cleanup should remove optional Whisper models")
     }
 
-    runSuite("ModelCacheInventory combined cleanup can preserve Whisper") {
+    runSuite("ModelCacheInventory combined cleanup can preserve active Whisper Turbo while reclaiming retired Whisper Large V3") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelCacheInventoryTests-\(UUID().uuidString)", isDirectory: true)
         let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
-        let whisperModels = root.appendingPathComponent("cache/whisperkit/models", isDirectory: true)
+        let cache = root.appendingPathComponent("cache", isDirectory: true)
+        let whisperModels = cache.appendingPathComponent("whisperkit/models", isDirectory: true)
         let stale = fluid.appendingPathComponent("parakeet-tdt-0.6b-v3-coreml/Encoder.mlmodelc/data.bin")
-        let whisper = whisperModels.appendingPathComponent("openai_whisper-large-v3-v20240930_626MB/model.bin")
+        let activeWhisperTurbo = whisperModels.appendingPathComponent("argmaxinc/whisperkit-coreml/openai_whisper-large-v3-v20240930_turbo_632MB/model.bin")
+        let retiredWhisperLargeV3 = whisperModels.appendingPathComponent("argmaxinc/whisperkit-coreml/openai_whisper-large-v3-v20240930_626MB/model.bin")
+        let retiredWhisperManifest = whisperModels.appendingPathComponent(".transcripted/whisper-large-v3-v20240930_626MB.json")
         defer { try? FileManager.default.removeItem(at: root) }
 
         writeTestFile(stale, bytes: 17)
-        writeTestFile(whisper, bytes: 23)
+        writeTestFile(activeWhisperTurbo, bytes: 23)
+        writeTestFile(retiredWhisperLargeV3, bytes: 31)
+        writeTestFile(retiredWhisperManifest, bytes: 5)
+
+        let snapshot = ModelCacheInventory.snapshot(
+            fluidAudioModelsDirectory: fluid,
+            transcriptedCacheDirectory: cache,
+            whisperModelsDirectory: whisperModels
+        )
+        assertEqual(snapshot.staleWhisperModelBytes, 36, "retired Whisper Large V3 folder and manifest should count as reclaimable")
+        assertEqual(snapshot.reclaimableBytes(includeWhisper: false), 53, "reclaimable bytes while on Whisper Turbo should include stale FluidAudio plus retired Whisper Large V3")
+        assertEqual(snapshot.reclaimableBytes(includeWhisper: true), 76, "reclaimable bytes while on Parakeet should not double-count retired Whisper inside whisperModelsBytes")
 
         let result = try? ModelCacheInventory.removeReclaimableCaches(
             includeWhisper: false,
             fluidAudioModelsDirectory: fluid,
+            transcriptedCacheDirectory: cache,
             whisperModelsDirectory: whisperModels
         )
 
-        assertEqual(result?.removedBytes, 17, "combined cleanup should remove only stale models when Whisper is excluded")
-        assertEqual(result?.removedNames, ["parakeet-tdt-0.6b-v3-coreml"], "combined cleanup should not name preserved Whisper")
+        assertEqual(result?.removedBytes, 53, "combined cleanup should remove stale FluidAudio and retired Whisper Large V3 while keeping Turbo")
+        assertEqual(result?.removedNames, [
+            "parakeet-tdt-0.6b-v3-coreml",
+            "openai_whisper-large-v3-v20240930_626MB",
+            "whisper-large-v3-v20240930_626MB.json",
+        ])
         assertFalse(FileManager.default.fileExists(atPath: stale.path), "stale Parakeet should be removed")
-        assertTrue(FileManager.default.fileExists(atPath: whisper.path), "Whisper should stay when excluded")
+        assertFalse(FileManager.default.fileExists(atPath: retiredWhisperLargeV3.path), "retired Whisper Large V3 should be removed")
+        assertFalse(FileManager.default.fileExists(atPath: retiredWhisperManifest.path), "retired Whisper Large V3 manifest should be removed")
+        assertTrue(FileManager.default.fileExists(atPath: activeWhisperTurbo.path), "active Whisper Turbo should stay when Whisper is in use")
     }
 
     runSuite("ModelCacheInventory cleanup refuses non-Whisper model paths") {

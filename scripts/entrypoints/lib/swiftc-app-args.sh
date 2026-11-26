@@ -102,7 +102,6 @@ build_app_swiftc_args() {
         -framework MetalPerformanceShadersGraph
         -framework Network
         -framework ScreenCaptureKit
-        -framework Speech
         -framework Sentry
         -framework Sparkle
         -lsqlite3

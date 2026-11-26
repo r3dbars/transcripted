@@ -13,7 +13,7 @@ The app does: dictation with paste-back, Writing (opt-in autocomplete through it
 - `Meeting/` — app-side meeting bridge, call detection and prompts, imported-audio prep, live captions, failed-meeting recovery, transcript restyling
 - `Observability/` — events, diagnostics, analytics, Sentry crash reporting, Sparkle updater
 - `Reliability/` — wake / sleep recovery coordination
-- `Speech/` — local STT engines (Parakeet, Whisper, Apple Speech), `STTRouter`, audio engine and device handling, dictation audio recovery
+- `Speech/` — local STT engines (Parakeet V3, Whisper Large V3 Turbo), `STTRouter`, audio engine and device handling, dictation audio recovery
 - `Support/` — preferences, storage paths, the capture library, permissions, constants, clipboard paste-back, model-cache inventory, companion socket
 - `TranscriptedCore/` — the shared library: audio capture, meeting pipeline, speaker identity, storage. Built into a prebuilt archive, never compiled into the app target
 - `Writing/` — app side of Writing: `WritingController`, day files, the Writing tab's model, count-only analytics
@@ -34,7 +34,7 @@ The app does: dictation with paste-back, Writing (opt-in autocomplete through it
   - `HotkeyPreferences.swift` — `DictationKeyBehavior` (Hold or tap, the default; Hold only; Tap to toggle), right-Option enable, the Carbon-era bindings kept for compatibility.
   - `PhysicalDictationTriggerPreferences.swift` — the physical bindings: one dictation key (Right Option, not Fn, which also opens emoji) and the meeting key (Option-M). `DictationShortcutUpgrade` / `migrateToOneDictationKeyIfNeeded` move 1.1.69 upgraders onto that one key (a custom Hands-Free key becomes it). Paste-last stays unregistered.
   - `MicrophoneProcessingPreferences.swift` — mic processing mode for meetings and dictation; default is software AGC, with raw input and Apple voice processing as options. The in-meeting boost prompt and Home's "Boost mic next meeting" arm voice processing for one meeting and never save the mode. A one-time migration moves Boosts saved by 1.1.62 and older back to software AGC.
-  - `TranscriptionModelPreferences.swift` — one local model choice shared by dictation and meetings: Parakeet TDT V3 / V2, Whisper Large V3 Turbo / V3, Apple Speech, and the experimental Parakeet Ultra (never downloaded; it exists only once `scripts/models/parakeet-ultra` has installed it).
+  - `TranscriptionModelPreferences.swift` — one local model choice shared by dictation and meetings: Parakeet TDT V3 (default), Whisper Large V3 Turbo (broader language coverage), and the hidden experimental Parakeet Ultra (never downloaded; it exists only once `scripts/models/parakeet-ultra` has installed it). Retired stored choices migrate safely (`whisper-large-v3` -> Whisper Turbo; `parakeet-tdt-v2`, `apple-speech`, `parakeet-ultra`, Nemotron -> Parakeet V3).
   - Others (dictionary, Dock, local speaker, onboarding, storage paths, `TranscriptedConstants.swift`): read the file name; `Support/AGENTS.md` lists them.
 - Dictation limits live in `Support/TranscriptedConstants.swift` (take cap `dictationSessionMaxDuration`, 15 minutes). Kept dictation audio is `Dictation/DictationAudioArchive.swift` (30 days by default).
 
