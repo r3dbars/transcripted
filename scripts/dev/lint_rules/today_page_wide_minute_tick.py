@@ -1,29 +1,28 @@
-"""today-page-wide-minute-tick: Settings > Today must not rebuild the page
-each minute.
+"""today-page-wide-minute-tick: Settings > Stats (`.today`) must not rebuild on
+a minute timer.
 
 A page-wide `TimelineView(.everyMinute)` around `TodaySettingsPage` (and
-passing `now` into the day card) made every session row format times once a
-minute. That showed up as main-thread hangs (Sentry APPLE-MACOS-5X/5Y/4Q/3K;
-PR #2275). The Now label and tape marker keep their own minute timelines in
-`TodayClockViews.swift`. Fast tests compile `TodayPresentation.swift` but not
-the views, so a behavior suite cannot catch the wrap coming back.
+passing `now` into its cards/rows) caused main-thread hangs once a minute
+(Sentry APPLE-MACOS-5X/5Y/4Q/3K; PR #2275). Stats uses `TodayDayRollover`
+with `TodayMidnightSchedule` in `TodayClockViews.swift` — zero per-minute
+timers. Fast tests compile `TodayPresentation.swift` but not the views, so a
+behavior suite cannot catch a minute-ticking wrap coming back.
 """
 
 from __future__ import annotations
 
 import re
-from pathlib import Path
 
 from lint_rules._base import swift_file
 
 RULE = {
     "id": "today-page-wide-minute-tick",
-    "summary": "Settings > Today must not wrap the page in TimelineView(.everyMinute) or pass now into the page, day card, or session row",
-    "why": "a page-wide minute TimelineView rebuilt every session row through TodayFormatterCache "
+    "summary": "Settings > Stats (`.today`) must not use TimelineView(.everyMinute) or pass `now: Date` into the Stats page, cards, or rows",
+    "why": "a page-wide minute TimelineView rebuilt rows through TodayFormatterCache "
            "and hung the main thread about once a minute (Sentry APPLE-MACOS-5X/5Y/4Q/3K; 3b788a79b, PR #2275)",
-    "fix": "keep TimelineView(.everyMinute) only on TodayNowLabel / TodayNowMarker in "
-           "Sources/UI/Settings/TodayClockViews.swift; TodaySettingsPage, TodayDayCard, and "
-           "TodaySessionRow take no `now:` — the snapshot rolls over via TodayClockPolicy.needsRollover",
+    "fix": "keep Stats free of TimelineView(.everyMinute) and roll over only at midnight via "
+           "TodayDayRollover / TodayMidnightSchedule in Sources/UI/Settings/TodayClockViews.swift; "
+           "TodaySettingsPage and its cards/rows take no `now: Date`",
     "owner_doc": "Sources/UI/Settings/AGENTS.md",
     "level": "lint",
     "paths": ["Sources/UI/Settings/**/*.swift"],
@@ -37,26 +36,33 @@ RULE = {
 
 EVERY_MINUTE = re.compile(r"TimelineView\s*\(\s*\.everyMinute\s*\)")
 NOW_STORED = re.compile(r"\b(?:let|var)\s+now\s*:\s*Date\b")
-NO_NOW_TYPES = frozenset({"TodaySettingsPage", "TodayDayCard", "TodaySessionRow"})
-CLOCK_VIEWS = "TodayClockViews.swift"
+NO_NOW_TYPES = frozenset({
+    "TodaySettingsPage",
+    "StatsSevenDayCard",
+    "StatsStreakCard",
+    "StatsCaptureMixCard",
+    "StatsRecentMeetingRow",
+    # Historical names kept so the PR #2275 regression proof continues to match.
+    "TodayDayCard",
+    "TodaySessionRow",
+})
 
 
 def check(path: str, text: str):
     sf = swift_file(text)
     out = []
-    if Path(path).name != CLOCK_VIEWS:
-        for line, _ in sf.find(EVERY_MINUTE):
-            out.append((
-                line,
-                "TimelineView(.everyMinute) belongs only on TodayNowLabel / TodayNowMarker "
-                "in TodayClockViews.swift; wrapping TodaySettingsPage rebuilds every session row each minute",
-            ))
+    for line, _ in sf.find(EVERY_MINUTE):
+        out.append((
+            line,
+            "Settings views must not use TimelineView(.everyMinute); "
+            "Stats rolls over at midnight via TodayDayRollover / TodayMidnightSchedule in TodayClockViews.swift",
+        ))
     for line, match in sf.find(NOW_STORED):
         owner = sf.type_at(match.start())
         if owner is not None and owner.name in NO_NOW_TYPES:
             out.append((
                 line,
-                f"{owner.name} must not take now: the day card and session rows skip minute ticks; "
-                "live clock pieces live in TodayClockViews.swift",
+                f"{owner.name} must not take `now: Date`: Stats skips minute ticks and rolls over via "
+                "TodayDayRollover / TodayClockPolicy.needsRollover in TodayClockViews.swift",
             ))
     return out

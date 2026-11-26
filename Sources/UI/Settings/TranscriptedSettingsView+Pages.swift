@@ -373,12 +373,22 @@ extension TranscriptedSettingsView {
             },
             failedMeetingAudioAttachment: { failedMeeting in
                 failedMeetingAudioAttachment(for: failedMeeting)
-            }
+            },
+            keyHint: todayKeyHint,
+            setupChecklist: todaySetupChecklistState,
+            onSetupStep: { step in performTodaySetupStep(step, page: .home) },
+            onDismissSetup: { dismissTodaySetup(page: .home) }
         )
         .homeBackgroundTapCatcher {
             if homeExpandedMeetingID != nil {
                 collapseHomeMeetingExpansion()
             }
+        }
+        .task {
+            await refreshTodayAgentConnectedIfNeeded()
+        }
+        .onChange(of: todaySetupChecklistState.isComplete, initial: true) { _, isComplete in
+            if isComplete { todaySetupRetired = true }
         }
         .onDisappear {
             homeViewModel.finishMeetingReveal(token: homeRevealConsumedToken)

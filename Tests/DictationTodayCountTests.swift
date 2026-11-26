@@ -202,6 +202,53 @@ func testDictationTodayCount() async {
             assertEqual(entry?.createdAt, modified, "unparseable Captured falls back to the file's modification date")
         }
     }
+
+    runSuite("savedDictationDayCounts(since: nil) — returns every day file across history") {
+        withTodayCountDirectorySync { dir in
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = Calendar.current.timeZone
+            let today = todayCountNoon(year: 2026, month: 9, day: 24)
+            let daysAgo60 = todayCountNoon(year: 2026, month: 7, day: 26)
+            let daysAgo15 = todayCountNoon(year: 2026, month: 9, day: 9)
+            let daysAgo2 = todayCountNoon(year: 2026, month: 9, day: 22)
+
+            saveTodayCountDictation("one two three", at: daysAgo60, in: dir)
+            saveTodayCountDictation("four five", at: daysAgo15, in: dir)
+            saveTodayCountDictation("six", at: daysAgo2, in: dir)
+            saveTodayCountDictation("seven eight nine ten", at: today, in: dir)
+            saveTodayCountDictation("eleven", at: today.addingTimeInterval(60), in: dir)
+
+            DictationTranscriptStore.resetSavedDictationCountsCacheForTesting()
+            defer { DictationTranscriptStore.resetSavedDictationCountsCacheForTesting() }
+
+            let allDays = DictationTranscriptStore.savedDictationDayCounts(
+                directory: dir,
+                since: nil,
+                calendar: calendar
+            )
+            assertEqual(allDays.count, 4, "since: nil returns every day file regardless of age")
+            assertEqual(
+                allDays.map(\.day),
+                [
+                    calendar.startOfDay(for: daysAgo60),
+                    calendar.startOfDay(for: daysAgo15),
+                    calendar.startOfDay(for: daysAgo2),
+                    calendar.startOfDay(for: today),
+                ],
+                "day counts are returned oldest-first keyed by startOfDay"
+            )
+            assertEqual(allDays.map(\.entries), [1, 1, 1, 2], "per-day entry counts match saved dictations")
+            assertEqual(allDays.map(\.words), [3, 2, 1, 5], "per-day word counts match saved dictations")
+
+            let recentOnly = DictationTranscriptStore.savedDictationDayCounts(
+                directory: dir,
+                since: daysAgo15,
+                calendar: calendar
+            )
+            assertEqual(recentOnly.count, 3, "non-nil since filters out older day files")
+            assertEqual(recentOnly.first?.day, calendar.startOfDay(for: daysAgo15), "since boundary is inclusive")
+        }
+    }
 }
 
 private func todayCountNoon(year: Int, month: Int, day: Int) -> Date {

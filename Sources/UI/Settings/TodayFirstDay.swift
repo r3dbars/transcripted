@@ -1,8 +1,9 @@
 import SwiftUI
 
-// Today's first day: one line that teaches the dictation key, and a small
-// checklist for the three things that left setup (calendar, an agent, a
-// file). The checklist retires for good once it's dismissed or done.
+// First-day guidance shared by Meetings' empty state and Stats: one line that
+// teaches the dictation key, and a small checklist for the three things that
+// left setup (calendar, an agent, a file). The checklist retires for good once
+// it's dismissed or done.
 
 /// "Hold Right ⌥ in any app and talk. Let go to paste.", worded for the
 /// person's own key and key behavior. A nil key means dictation shortcuts
@@ -30,7 +31,7 @@ struct TodayKeyHint: Equatable {
     }
 }
 
-/// One thing setup used to ask for and now leaves to Today.
+/// One thing setup used to ask for and now leaves to the post-setup checklist.
 enum TodaySetupStep: String, CaseIterable, Identifiable {
     case calendar
     case agent
@@ -134,9 +135,40 @@ enum TodaySetupChecklistPreferences {
 
 // MARK: - Views
 
-/// The empty first day under the header: the key line, where captures go,
-/// and Record a meeting. Transcribe a file… sits here only once the
-/// checklist (which has it) is gone.
+/// Reusable dictation-key instruction line ("Hold Right ⌥ in any app and talk.")
+/// shared by Meetings' empty state and Stats' first-day intro.
+struct TodayKeyHintLine: View {
+    enum Style {
+        case heading
+        case compact
+    }
+
+    let hint: TodayKeyHint
+    var style: Style = .heading
+    var automationIdentifier: String = "transcripted.today.empty.key-hint"
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text(hint.lead)
+            if let key = hint.key {
+                TodayKeyCap(text: key)
+            }
+            if !hint.tail.isEmpty {
+                Text(hint.tail)
+            }
+        }
+        .font(style == .heading ? TextRole.heading.font(weight: .regular) : LibraryTokens.meta)
+        .foregroundStyle(style == .heading ? LibraryTokens.ink : LibraryTokens.ink2)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(hint.text)
+        .accessibilityIdentifier(automationIdentifier)
+    }
+}
+
+/// The empty first day under the Stats header: the key line, where stats
+/// come from, and Record a meeting. Transcribe a file… sits here only once
+/// the checklist (which has it) is gone.
 struct TodayFirstDayIntro: View {
     let hint: TodayKeyHint
     let meetingShortcut: String?
@@ -146,8 +178,8 @@ struct TodayFirstDayIntro: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            keyLine
-            Text("What you say shows up here.")
+            TodayKeyHintLine(hint: hint, style: .heading)
+            Text("Activity, totals, and streaks show up here once you start capturing.")
                 .textRole(.body)
                 .foregroundStyle(LibraryTokens.ink2)
             HStack(spacing: 8) {
@@ -171,23 +203,6 @@ struct TodayFirstDayIntro: View {
             .padding(.top, 10)
         }
         .accessibilityIdentifier("transcripted.today.empty")
-    }
-
-    private var keyLine: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 6) {
-            Text(hint.lead)
-            if let key = hint.key {
-                TodayKeyCap(text: key)
-            }
-            if !hint.tail.isEmpty {
-                Text(hint.tail)
-            }
-        }
-        .textRole(.heading, weight: .regular)
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(hint.text)
-        .accessibilityIdentifier("transcripted.today.empty.key-hint")
     }
 }
 

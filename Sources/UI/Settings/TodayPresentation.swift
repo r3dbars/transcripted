@@ -29,6 +29,15 @@ struct TodayWritingFact: Equatable, Sendable {
     let text: String
 }
 
+/// Lightweight per-file summary of a `Writing_<date>.md` day file, cached
+/// instead of retaining full entry body text in memory.
+struct TodayWritingDaySummary: Equatable, Sendable {
+    let day: Date
+    let entryCount: Int
+    let wordCount: Int
+    let latestEntryDate: Date?
+}
+
 // MARK: - Stats overview
 
 enum TodayStatsRange: String, CaseIterable, Identifiable, Sendable {
@@ -52,6 +61,7 @@ enum TodayStatsRange: String, CaseIterable, Identifiable, Sendable {
 /// Aggregated KPI totals for one time window.
 struct TodayRangeSummary: Equatable, Sendable {
     let meetings: Int
+    let meetingsWithDurationCount: Int
     let meetingMinutes: Int
     let dictations: Int
     let dictationWords: Int
@@ -60,6 +70,7 @@ struct TodayRangeSummary: Equatable, Sendable {
 
     static let empty = TodayRangeSummary(
         meetings: 0,
+        meetingsWithDurationCount: 0,
         meetingMinutes: 0,
         dictations: 0,
         dictationWords: 0,
@@ -72,11 +83,11 @@ struct TodayRangeSummary: Equatable, Sendable {
     var hasAnyCapture: Bool { totalCaptures > 0 || totalWords > 0 }
     var hasWriting: Bool { writingEntries > 0 || writingWords > 0 }
 
-    /// Average meeting length in rounded minutes, or nil when there are no
-    /// recorded minutes.
+    /// Average meeting length in rounded minutes across meetings that recorded
+    /// a positive duration, or nil when there are no recorded minutes.
     var averageMeetingMinutes: Int? {
-        guard meetings > 0, meetingMinutes > 0 else { return nil }
-        return max(1, Int((Double(meetingMinutes) / Double(meetings)).rounded()))
+        guard meetingsWithDurationCount > 0, meetingMinutes > 0 else { return nil }
+        return max(1, Int((Double(meetingMinutes) / Double(meetingsWithDurationCount)).rounded()))
     }
 }
 
@@ -170,6 +181,7 @@ enum TodayStatsBuilder {
 
     private struct MutableTotals {
         var meetings = 0
+        var meetingsWithDurationCount = 0
         var meetingSeconds = 0
         var dictations = 0
         var dictationWords = 0
@@ -179,6 +191,7 @@ enum TodayStatsBuilder {
         func freeze() -> TodayRangeSummary {
             TodayRangeSummary(
                 meetings: meetings,
+                meetingsWithDurationCount: meetingsWithDurationCount,
                 meetingMinutes: TodayStatsBuilder.minutes(fromSeconds: meetingSeconds),
                 dictations: dictations,
                 dictationWords: dictationWords,
@@ -192,12 +205,21 @@ enum TodayStatsBuilder {
         meetings: [TodayMeetingFact],
         dictationDays: [TodayDictationDayFact],
         writing: [TodayWritingFact] = [],
+        writingDays: [TodayWritingDaySummary] = [],
         now: Date,
         calendar: Calendar = .current
     ) -> TodayStatsOverview {
         let today = calendar.startOfDay(for: now)
-        let sevenDayStart = calendar.date(byAdding: .day, value: -(activityDayCount - 1), to: today) ?? today
-        let thirtyDayStart = calendar.date(byAdding: .day, value: -(rollingMonthDayCount - 1), to: today) ?? today
+        let sevenDayStart = TodayClockPolicy.startOfDay(
+            addingDays: -(activityDayCount - 1),
+            to: today,
+            calendar: calendar
+        ) ?? today
+        let thirtyDayStart = TodayClockPolicy.startOfDay(
+            addingDays: -(rollingMonthDayCount - 1),
+            to: today,
+            calendar: calendar
+        ) ?? today
 
         var todayTotals = MutableTotals()
         var sevenTotals = MutableTotals()
@@ -207,30 +229,33 @@ enum TodayStatsBuilder {
         var activeDays = Set<Date>()
 
         func addDay(_ day: Date, update: (inout MutableTotals) -> Void) {
+            guard day <= today else { return }
             update(&allTotals)
+            activeDays.insert(day)
             if day == today {
                 update(&todayTotals)
             }
-            if day >= sevenDayStart && day <= today {
+            if day >= sevenDayStart {
                 update(&sevenTotals)
                 var bucket = byDay[day] ?? MutableTotals()
                 update(&bucket)
                 byDay[day] = bucket
             }
-            if day >= thirtyDayStart && day <= today {
+            if day >= thirtyDayStart {
                 update(&thirtyTotals)
-            }
-            if day <= today {
-                activeDays.insert(day)
             }
         }
 
         for meeting in meetings {
             let day = calendar.startOfDay(for: meeting.date)
             let seconds = max(0, meeting.durationSeconds ?? 0)
+            let hasPositiveDuration = (meeting.durationSeconds ?? 0) > 0
             addDay(day) {
                 $0.meetings += 1
                 $0.meetingSeconds += seconds
+                if hasPositiveDuration {
+                    $0.meetingsWithDurationCount += 1
+                }
             }
         }
 
@@ -252,8 +277,17 @@ enum TodayStatsBuilder {
             }
         }
 
+        for summary in writingDays where summary.entryCount > 0 {
+            let day = calendar.startOfDay(for: summary.day)
+            let words = max(0, summary.wordCount)
+            addDay(day) {
+                $0.writingEntries += summary.entryCount
+                $0.writingWords += words
+            }
+        }
+
         let dailyActivity: [TodayActivityDay] = (0..<activityDayCount).reversed().compactMap { offset in
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            guard let day = TodayClockPolicy.startOfDay(addingDays: -offset, to: today, calendar: calendar) else { return nil }
             let totals = byDay[day] ?? MutableTotals()
             return TodayActivityDay(
                 day: day,
@@ -338,7 +372,7 @@ enum TodayStatsBuilder {
         let anchor: Date?
         if activeDays.contains(today) {
             anchor = today
-        } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+        } else if let yesterday = TodayClockPolicy.startOfDay(addingDays: -1, to: today, calendar: calendar),
                   activeDays.contains(yesterday) {
             anchor = yesterday
         } else {
@@ -349,7 +383,7 @@ enum TodayStatsBuilder {
         if var cursor = anchor {
             while activeDays.contains(cursor) {
                 currentDays += 1
-                guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+                guard let previous = TodayClockPolicy.startOfDay(addingDays: -1, to: cursor, calendar: calendar) else { break }
                 cursor = previous
             }
         }
@@ -360,7 +394,7 @@ enum TodayStatsBuilder {
         var previousDay: Date?
         for day in sorted {
             if let prev = previousDay,
-               let expectedNext = calendar.date(byAdding: .day, value: 1, to: prev),
+               let expectedNext = TodayClockPolicy.startOfDay(addingDays: 1, to: prev, calendar: calendar),
                expectedNext == day {
                 run += 1
             } else {
@@ -460,6 +494,18 @@ enum TodayWritingParser {
     private static func parseDate(_ value: String) -> Date? {
         guard let parsed = (try? fractionalStyle.parse(value)) ?? (try? plainStyle.parse(value)) else { return nil }
         return Date(timeIntervalSince1970: (parsed.timeIntervalSince1970 * 1_000).rounded() / 1_000)
+    }
+
+    static func daySummary(fromDayFile contents: String, day: Date) -> TodayWritingDaySummary {
+        let parsed = entries(fromDayFile: contents)
+        let wordCount = parsed.reduce(0) { $0 + max(0, $1.words) }
+        let latestEntryDate = parsed.map(\.date).max()
+        return TodayWritingDaySummary(
+            day: day,
+            entryCount: parsed.count,
+            wordCount: wordCount,
+            latestEntryDate: latestEntryDate
+        )
     }
 
     static func title(for text: String, maxLength: Int = 70) -> String {
@@ -579,7 +625,7 @@ enum TodayCopy {
         let template: String
         if day == today {
             template = "jmm"
-        } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: today), day == yesterday {
+        } else if let yesterday = TodayClockPolicy.startOfDay(addingDays: -1, to: today, calendar: calendar), day == yesterday {
             return "Yesterday"
         } else if let daysAgo = calendar.dateComponents([.day], from: day, to: today).day, daysAgo < 7 {
             template = "EEEE"
@@ -587,6 +633,46 @@ enum TodayCopy {
             template = "MMMd"
         }
         return TodayFormatterCache.string(from: date, template: template, locale: locale, calendar: calendar)
+    }
+}
+
+// MARK: - Bar & mix layout
+
+/// Proportional segment sizing with inter-segment spacing and a per-segment
+/// minimum floor whose sum never exceeds the container size.
+enum TodayStatsBarLayout {
+    static func segmentSizes(
+        weights: [Double],
+        totalSize: Double,
+        spacing: Double,
+        minimumSegment: Double
+    ) -> [Double] {
+        let positive = weights.map { max(0, $0) }
+        guard !positive.isEmpty else { return [] }
+        let totalSpacing = spacing * Double(max(0, positive.count - 1))
+        let available = max(0, totalSize - totalSpacing)
+        guard available > 0 else { return Array(repeating: 0, count: positive.count) }
+
+        let weightSum = positive.reduce(0, +)
+        guard weightSum > 0 else { return Array(repeating: 0, count: positive.count) }
+
+        let effectiveFloor = min(max(0, minimumSegment), available / Double(positive.count))
+        let raw = positive.map { max(effectiveFloor, available * ($0 / weightSum)) }
+        let rawSum = raw.reduce(0, +)
+        guard rawSum > 0 else { return Array(repeating: 0, count: positive.count) }
+
+        if rawSum <= available {
+            return raw
+        }
+
+        let floorTotal = effectiveFloor * Double(positive.count)
+        let flexibleBudget = available - floorTotal
+        let excess = raw.map { max(0, $0 - effectiveFloor) }
+        let excessSum = excess.reduce(0, +)
+        if excessSum > 0, flexibleBudget > 0 {
+            return excess.map { effectiveFloor + flexibleBudget * ($0 / excessSum) }
+        }
+        return raw.map { $0 * (available / rawSum) }
     }
 }
 
@@ -598,9 +684,17 @@ enum TodayClockPolicy {
         calendar.startOfDay(for: date)
     }
 
+    /// Adds whole calendar days and re-normalizes with `startOfDay(for:)` so
+    /// time zones whose DST transition skips 00:00 (e.g. America/Santiago)
+    /// stay aligned with `startOfDay` keys.
+    static func startOfDay(addingDays offset: Int, to day: Date, calendar: Calendar = .current) -> Date? {
+        guard let shifted = calendar.date(byAdding: .day, value: offset, to: day) else { return nil }
+        return calendar.startOfDay(for: shifted)
+    }
+
     static func nextMidnight(after date: Date, calendar: Calendar = .current) -> Date {
         let start = calendar.startOfDay(for: date)
-        return calendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        return startOfDay(addingDays: 1, to: start, calendar: calendar) ?? start.addingTimeInterval(86_400)
     }
 
     /// True when the snapshot's calendar day is not the local day of `now`.
