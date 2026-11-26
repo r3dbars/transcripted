@@ -3217,8 +3217,11 @@ func testClipboardRestoringTextPaster() async {
         }
     }
 
-    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — handles nil-data privacy markers and empty strings gracefully") {
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — handles nil-data privacy markers and empty strings safely") {
         let transient = ClipboardRestoringTextPaster.transientPasteboardType
+        let concealed = NSPasteboard.PasteboardType("org.nspasteboard.ConcealedType")
+        let dynamicType = NSPasteboard.PasteboardType("dyn.ah62d4rv4gu8y6y4grf0gn5xbrzw1gydcr7u1e3cytf2gn")
+        let promiseType = NSPasteboard.PasteboardType("com.apple.pasteboard.promised-file-url")
         await MainActor.run {
             let board = FakeClipboardPasteboard(initialString: nil)
             let markerOnly = NSPasteboardItem()
@@ -3232,15 +3235,110 @@ func testClipboardRestoringTextPaster() async {
             assertTrue(markerSnapshot.containsPrivacyMarker, "privacy marker flag must stay set")
             assertEqual(markerSnapshot.items.first?[transient], Data(), "marker should be retained as empty Data")
 
-            let emptyWithBadSecondary = NSPasteboardItem()
-            emptyWithBadSecondary.setString("", forType: .string)
-            emptyWithBadSecondary.setData(Data([1]), forType: .rtf)
-            _ = board.writePasteboardItems([emptyWithBadSecondary])
+            // P2-1: A privacy marker + unreadable password string MUST be marked incomplete so passwords are never clobbered.
+            let concealedWithFailedPassword = NSPasteboardItem()
+            concealedWithFailedPassword.setData(Data(), forType: concealed)
+            concealedWithFailedPassword.setString("top-secret-password", forType: .string)
+            _ = board.writePasteboardItems([concealedWithFailedPassword])
 
-            let emptySnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+            let concealedSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                type == concealed ? .value(Data()) : .value(nil)
+            })
+            assertFalse(concealedSnapshot.isComplete, "a privacy marker alone must not make an item complete when its real payload failed to read")
+            assertEqual(concealedSnapshot.incompleteCause, .unreadable, "failed password read must report unreadable")
+            assertTrue(concealedSnapshot.containsPrivacyMarker, "privacy marker flag must still be set")
+
+            // P2-2: Empty string keeps its Data() type, allows unreadable dyn.* or file-promise secondary,
+            // and refuses unreadable canonical secondary types like RTF.
+            let emptyWithDynSecondary = NSPasteboardItem()
+            emptyWithDynSecondary.setString("", forType: .string)
+            emptyWithDynSecondary.setData(Data([1]), forType: dynamicType)
+            _ = board.writePasteboardItems([emptyWithDynSecondary])
+
+            let emptyDynSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
                 type == .string ? .value(Data()) : .value(nil)
             })
-            assertTrue(emptySnapshot.isComplete, "an empty string next to an unreadable secondary representation should not block paste-back")
+            assertTrue(emptyDynSnapshot.isComplete, "an empty string next to an unreadable dyn.* secondary should stay complete")
+            assertEqual(emptyDynSnapshot.items.first?[.string], Data(), "empty string representation must be preserved so restore keeps the type")
+
+            let emptyWithPromise = NSPasteboardItem()
+            emptyWithPromise.setString("", forType: .string)
+            emptyWithPromise.setData(Data([1]), forType: promiseType)
+            _ = board.writePasteboardItems([emptyWithPromise])
+
+            let emptyPromiseSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                type == .string ? .value(Data()) : .value(nil)
+            })
+            assertTrue(emptyPromiseSnapshot.isComplete, "an empty string next to a file-promise secondary should stay complete")
+            assertEqual(emptyPromiseSnapshot.items.first?[.string], Data(), "empty string representation must survive alongside a skipped promise")
+
+            let emptyWithCanonicalUnreadable = NSPasteboardItem()
+            emptyWithCanonicalUnreadable.setString("", forType: .string)
+            emptyWithCanonicalUnreadable.setData(Data([1]), forType: .rtf)
+            _ = board.writePasteboardItems([emptyWithCanonicalUnreadable])
+
+            let emptyCanonicalSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                type == .string ? .value(Data()) : .value(nil)
+            })
+            assertFalse(emptyCanonicalSnapshot.isComplete, "an empty string next to an unreadable canonical RTF representation must refuse paste-back")
+            assertEqual(emptyCanonicalSnapshot.incompleteCause, .unreadable, "unreadable canonical secondary must carry unreadable cause")
+        }
+    }
+
+    await runSuite("ClipboardRestoringTextPaster.snapshotPasteboardItems — stops early when superseded and blocks nested snapshots") {
+        await MainActor.run {
+            let board = FakeClipboardPasteboard(initialString: nil)
+            let item = NSPasteboardItem()
+            item.setString("first", forType: .string)
+            item.setData(Data([1, 2]), forType: .html)
+            item.setData(Data([3, 4]), forType: .rtf)
+            _ = board.writePasteboardItems([item])
+
+            // P2-3a: Supersession stops reading remaining types immediately.
+            var isCurrent = true
+            var reads = 0
+            let supersededSnapshot = ClipboardRestoringTextPaster().snapshotPasteboardItems(
+                from: board,
+                isCurrentOperation: { isCurrent },
+                readType: { _, _, _ in
+                    reads += 1
+                    isCurrent = false
+                    return .value(Data([1]))
+                }
+            )
+            assertEqual(reads, 1, "superseded snapshot must stop before reading remaining representations")
+            assertFalse(supersededSnapshot.isComplete, "superseded snapshot must not report complete")
+            assertEqual(supersededSnapshot.incompleteCause, .changed, "superseded snapshot should carry changed cause")
+
+            // P2-3b: Nested snapshot re-entrancy guard refuses inner snapshot without clobbering outer snapshot.
+            let paster = ClipboardRestoringTextPaster()
+            var nestedResult: ClipboardRestoringTextPaster.PasteboardSnapshot?
+            let outerSnapshot = paster.snapshotPasteboardItems(from: board, readType: { _, type, _ in
+                if nestedResult == nil {
+                    nestedResult = paster.snapshotPasteboardItems(from: board, readType: { _, _, _ in
+                        assertTrue(false, "nested snapshot must be rejected before reading any pasteboard types")
+                        return .value(Data())
+                    })
+                }
+                return .value(type == .string ? Data("ok".utf8) : Data([1]))
+            })
+            assertTrue(outerSnapshot.isComplete, "outer snapshot should finish cleanly after refusing nested snapshot")
+            assertEqual(nestedResult?.isComplete, false, "nested snapshot must be refused by the re-entrancy guard")
+            assertEqual(nestedResult?.incompleteCause, .changed, "refused nested snapshot carries changed cause")
+
+            // P2-3c: Runloop pump exits early when isCurrentOperation flips false mid-wait.
+            var pumpCurrent = true
+            let blocker = DispatchSemaphore(value: 0)
+            CFRunLoopPerformBlock(CFRunLoopGetCurrent(), CFRunLoopMode.defaultMode.rawValue) {
+                pumpCurrent = false
+            }
+            let finished = ClipboardSnapshotReader.waitOnSnapshotQueue(
+                2.0,
+                isCurrentOperation: { pumpCurrent },
+                work: { _ = blocker.wait(timeout: .now() + 2.0) }
+            )
+            blocker.signal()
+            assertFalse(finished, "waitOnSnapshotQueue must exit early when isCurrentOperation becomes false during runloop pump")
         }
     }
 }

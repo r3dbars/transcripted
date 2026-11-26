@@ -12,10 +12,9 @@ model picker, for meetings and imported recordings. Dictation is unchanged.
 - An explicit language, such as **Finnish**, tells Whisper to use that language
   for every segment. It does not translate speech and does not eliminate every
   possible recognition error or hallucination.
-- Parakeet V3 retains its built-in multilingual decoding. Parakeet V2 remains
-  English-only. These engines cannot enforce an exact spoken-language choice,
-  so explicit choices require selecting a Whisper model. The picker does not
-  silently change models or download one.
+- Parakeet V3 retains its built-in multilingual decoding and cannot enforce an
+  exact spoken-language choice, so explicit choices require selecting Whisper
+  Large V3 Turbo. The picker does not silently change models or download one.
 
 The choice is captured when recording or import begins. Changing Settings
 affects subsequent jobs, not existing captures or queued work. Import journals,

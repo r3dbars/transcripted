@@ -14,10 +14,6 @@ extension TranscriptedAppDelegate {
             }
             .store(in: &meetingPromptSubscriptions)
 
-        // Warm the in-memory preference cache off-main before MicActivityMonitor
-        // starts delivering periodic snapshots so hot-path checks never stall on cfprefsd.
-        AutoCallDetectionPreferences.warmStandardCache()
-
         // Assign callbacks before start; HAL reads remain on the monitor queue.
         micActivityMonitor.defaultInputDeviceMonitor = DefaultInputDeviceMonitor.shared
         micActivityMonitor.onChange = { [weak self] users in

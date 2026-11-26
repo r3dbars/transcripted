@@ -1,5 +1,5 @@
 // ExternalEngineTranscription.swift
-// Whisper and Apple Speech transcribe samples Parakeet recorded, under a
+// Whisper transcribes samples Parakeet recorded, under a
 // recorded-transcription lease. The lease is released when the run ends,
 // and only after a thrown model error has been classified, so the
 // classification still sees the take as owned.

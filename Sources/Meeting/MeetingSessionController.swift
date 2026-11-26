@@ -204,47 +204,11 @@ extension MeetingSessionController {
             || startDecision.mayRaiseSystemAudioPermissionPrompt
             ? TranscriptedConstants.systemAudioPermissionRequestTimeout
             : TranscriptedConstants.meetingStartTimeout
-        var started = await capture.startRecording(
+        let started = await capture.startRecording(
             timeout: startTimeout,
             languageSelection: recordingLanguageSelection,
             capturesSystemAudio: startDecision.capturesSystemAudio
         )
-        var startRetryAttempted = false
-        if !started {
-            let initialMessage = capture.errorMessage ?? ""
-            let initialStage = capture.startFailureStage.rawValue
-            let initialFailureKind = meetingStartFailureKind(from: initialMessage, stage: initialStage)
-            if MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
-                failureKind: initialFailureKind,
-                startFailureStage: initialStage,
-                message: initialMessage,
-                explicitSystemAudioPermissionDenialObserved: capture.systemAudioStartPermissionExplicitlyDenied,
-                recordingStartAllowed: recordingStartAllowed()
-            ) {
-                startRetryAttempted = true
-                DiagnosticsTrail.record(
-                    level: .warning,
-                    engine: "meeting",
-                    event: "meeting_start_mic_retry",
-                    message: "Retrying meeting capture start once after transient microphone graph failure",
-                    context: baseDiagnosticsContext(
-                        extra: [
-                            "failure_kind": initialFailureKind,
-                            "start_failure_stage": initialStage,
-                            "trigger": trigger.rawValue,
-                        ]
-                    )
-                )
-                try? await Task.sleep(nanoseconds: MeetingStartRetryPolicy.retrySettleDelayNanoseconds)
-                if recordingStartAllowed() {
-                    started = await capture.startRecording(
-                        timeout: startTimeout,
-                        languageSelection: recordingLanguageSelection,
-                        capturesSystemAudio: startDecision.capturesSystemAudio
-                    )
-                }
-            }
-        }
         guard started else {
             let failedStartIdentity = activeRecordingIdentity
             await capture.flushSharedDictationMicHandler()
@@ -269,7 +233,6 @@ extension MeetingSessionController {
                         stage: capture.startFailureStage.rawValue
                     ),
                     "start_failure_stage": capture.startFailureStage.rawValue,
-                    "start_retry_attempted": startRetryAttempted ? "true" : "false",
                     "trigger": trigger.rawValue,
                 ],
                 uniquingKeysWith: { _, new in new }

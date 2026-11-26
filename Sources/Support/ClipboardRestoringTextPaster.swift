@@ -47,6 +47,9 @@ final class ClipboardRestoringTextPaster {
     /// clipboard (dictation, Paste Last and the menu bar all borrow the same
     /// one) and so quitting can put back all of them.
     private static var registeredPasters: [WeakPasterReference] = []
+    /// Re-entrancy guard against nested clipboard snapshots while the main
+    /// runloop is pumped for own-process lazy pasteboard providers.
+    static var isSnapshottingPasteboard = false
     /// Non-zero while `paste()` is running on this paster, including a nested
     /// paste started while it waits. Another paster never touches a restore
     /// that belongs to a paste still in flight.
@@ -262,7 +265,11 @@ final class ClipboardRestoringTextPaster {
         let accessibilityConfirmation = confirmationSource?() ?? FocusedTextPasteConfirmation.capture()
         accessibilityCaptureMS = max(0, Int(((CFAbsoluteTimeGetCurrent() - accessibilityStartedAt) * 1_000).rounded()))
         guard isCurrentOperation() else { return cancelledOutcome }
-        let snapshot = snapshotClipboardForPaste(from: pasteboard, read: snapshotRead)
+        let snapshot = snapshotClipboardForPaste(
+            from: pasteboard,
+            read: snapshotRead,
+            isCurrentOperation: isCurrentOperation
+        )
         clipboardSnapshotMS = snapshot.snapshotMS
         guard isCurrentOperation() else { return cancelledOutcome }
         if let refusal = snapshot.refusal { return refusal }

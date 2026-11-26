@@ -130,7 +130,7 @@ enum DictationEmptyInferencePolicy {
         return hasUsableSpeechSignal ? .audioNeedsRecovery : .noSpeech
     }
 
-    /// Why an external engine (Whisper, Apple Speech) produced no dictation,
+    /// Why an external engine (Whisper) produced no dictation,
     /// or nil when it returned words. Empty text over usable captured audio
     /// needs recovery; only quiet audio counts as no speech.
     static func externalEngineEmptyReason(text: String, samples16k: [Float]) -> DictationEmptyTranscriptionReason? {
