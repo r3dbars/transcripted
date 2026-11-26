@@ -57,7 +57,6 @@ ACTIVATION_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
-    "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
     "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
@@ -91,7 +90,6 @@ ARTIFACT_EVENTS = (
 AGENT_PAYOFF_EVENTS = (
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
-    "onboarding_agent_cta_clicked",
     "agent_capture_query_observed",
 )
 
@@ -138,8 +136,6 @@ ONBOARDING_FRICTION_EVENTS = (
     "onboarding_first_dictation_started",
     "onboarding_first_dictation_saved",
     "onboarding_first_dictation_empty",
-    "onboarding_model_state_changed",
-    "onboarding_meeting_dry_run_clicked",
     "product_friction_observed",
     "workflow_abandoned",
 )
@@ -345,7 +341,7 @@ SELECT
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved')) AS strict_saved_markdown_devices,
   uniqIf(distinct_id, event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed')) AS saved_markdown_or_dictation_proxy_devices,
   uniqIf(distinct_id, event = 'activation_artifact_action_clicked') AS artifact_action_devices,
-  uniqIf(distinct_id, event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_proxy_devices,
+  uniqIf(distinct_id, event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')) AS agent_proxy_devices,
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
   uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
   uniqIf(distinct_id, event = 'activation_habit_loop_actioned') AS habit_loop_devices,
@@ -377,7 +373,7 @@ FROM (
       event IN ('dictation_started', 'onboarding_first_dictation_started', 'meeting_recording_started'),
       event IN ('activation_first_artifact_saved', 'onboarding_first_dictation_saved', 'meeting_transcript_saved', 'dictation_completed'),
       event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked'),
-      event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')
+      event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')
     ) AS deepest_step
   FROM events
   WHERE timestamp >= now() - INTERVAL {days} DAY
@@ -932,7 +928,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {days} DAY
-  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')
+  AND event IN ('activation_artifact_action_clicked', 'activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')
   {app_version_filter(app_version)}
 GROUP BY event, surface, artifact_kind, action_kind, result, trigger, duration_bucket, agent_target
 ORDER BY events DESC

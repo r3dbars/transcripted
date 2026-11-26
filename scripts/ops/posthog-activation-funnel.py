@@ -28,7 +28,6 @@ RELEVANT_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
-    "onboarding_agent_cta_clicked",
     "activation_return_proxy_observed",
     "activation_first_artifact_saved",
     "activation_second_artifact_saved",
@@ -156,7 +155,7 @@ REACH_STEPS = (
     StepDefinition(
         "agent_setup_devices",
         "Agent setup signal",
-        "event IN ('activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')",
+        "event = 'activation_agent_setup_cta_clicked'",
         "proxy",
         "Agent setup CTAs and onboarding agent CTAs.",
     ),
@@ -198,7 +197,7 @@ SEQUENCE_STEPS = (
     ),
     (
         "Agent setup/prompt signal",
-        "event IN ('activation_agent_setup_cta_clicked', 'activation_agent_prompt_action_clicked', 'onboarding_agent_cta_clicked')",
+        "event IN ('activation_agent_setup_cta_clicked', 'activation_agent_prompt_action_clicked')",
     ),
 )
 
@@ -370,7 +369,7 @@ SELECT
   uniq(distinct_id) AS devices
 FROM events
 WHERE timestamp >= now() - INTERVAL {int(days)} DAY
-  AND event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')
+  AND event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked')
   {app_version_filter(app_version)}
 GROUP BY event, prompt_kind, setup_kind, agent_target, result, surface
 ORDER BY events DESC

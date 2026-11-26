@@ -139,23 +139,49 @@ extension TranscriptionTaskManager {
             }
     }
 
+    private struct SpeakerNamingRequestCleanupWork: Sendable {
+        let clips: [SpeakerNamingEntry]
+        let micAudioURL: URL?
+        let systemAudioURL: URL
+        let shouldRemoveMicAudio: Bool
+        let shouldRemoveSystemAudio: Bool
+        let importedRecoverySession: (any ImportedTranscriptionRecoverySession)?
+
+        init(request: SpeakerNamingRequest, preservingSourceAudio: Bool) {
+            self.clips = request.speakers + request.recognizedSpeakers
+            self.micAudioURL = request.micAudioURL
+            self.systemAudioURL = request.systemAudioURL
+            self.shouldRemoveMicAudio = !preservingSourceAudio && request.shouldRemoveMicAudioOnCleanup
+            self.shouldRemoveSystemAudio = !preservingSourceAudio && request.shouldRemoveSystemAudioOnCleanup
+            self.importedRecoverySession = request.importedRecoverySession
+        }
+    }
+
     private func cleanupSpeakerNamingRequest(
         _ request: SpeakerNamingRequest,
         preservingSourceAudio: Bool = false
     ) {
-        if !preservingSourceAudio
-            && (request.shouldRemoveMicAudioOnCleanup || request.shouldRemoveSystemAudioOnCleanup) {
-            if request.importedRecoverySession?.prepareForScratchCleanup() != false {
-                let removedMic = !request.shouldRemoveMicAudioOnCleanup
-                    || removeManagedCleanupFile(request.micAudioURL, label: "pending mic audio")
-                let removedSystem = !request.shouldRemoveSystemAudioOnCleanup
-                    || removeManagedCleanupFile(request.systemAudioURL, label: "pending system audio")
+        cleanupSpeakerNamingRequestWork(
+            SpeakerNamingRequestCleanupWork(
+                request: request,
+                preservingSourceAudio: preservingSourceAudio
+            )
+        )
+    }
+
+    nonisolated private func cleanupSpeakerNamingRequestWork(_ work: SpeakerNamingRequestCleanupWork) {
+        if work.shouldRemoveMicAudio || work.shouldRemoveSystemAudio {
+            if work.importedRecoverySession?.prepareForScratchCleanup() != false {
+                let removedMic = !work.shouldRemoveMicAudio
+                    || removeManagedCleanupFile(work.micAudioURL, label: "pending mic audio")
+                let removedSystem = !work.shouldRemoveSystemAudio
+                    || removeManagedCleanupFile(work.systemAudioURL, label: "pending system audio")
                 if removedMic && removedSystem {
-                    request.importedRecoverySession?.scratchCleanupConfirmed()
+                    work.importedRecoverySession?.scratchCleanupConfirmed()
                 }
             }
         }
-        cleanupSpeakerClips(request.speakers + request.recognizedSpeakers)
+        cleanupSpeakerClips(work.clips)
     }
 
     func clearCompletedSpeakerNamingRequest(
@@ -219,10 +245,21 @@ extension TranscriptionTaskManager {
             }
         }.value
         guard didInvalidate else { return false }
-        removeSpeakerNamingRequests(
-            transcriptId: transcriptId, requestIds: [requestId],
-            preservingSourceAudio: false, ownershipAlreadyInvalidated: true
+        let cancelledRequests = dequeueSpeakerNamingRequests(
+            transcriptId: transcriptId,
+            requestIds: [requestId],
+            ownershipAlreadyInvalidated: true
         )
+        let cleanupWork = cancelledRequests.map {
+            SpeakerNamingRequestCleanupWork(request: $0, preservingSourceAudio: false)
+        }
+        if !cleanupWork.isEmpty {
+            await Task.detached(priority: .utility) {
+                for work in cleanupWork {
+                    self.cleanupSpeakerNamingRequestWork(work)
+                }
+            }.value
+        }
         return true
     }
 
@@ -284,6 +321,24 @@ extension TranscriptionTaskManager {
         preservingSourceAudio: Bool,
         ownershipAlreadyInvalidated: Bool = false
     ) {
+        let cancelledRequests = dequeueSpeakerNamingRequests(
+            transcriptId: transcriptId,
+            requestIds: requestIds,
+            ownershipAlreadyInvalidated: ownershipAlreadyInvalidated
+        )
+        for request in cancelledRequests {
+            cleanupSpeakerNamingRequest(
+                request,
+                preservingSourceAudio: preservingSourceAudio
+            )
+        }
+    }
+
+    private func dequeueSpeakerNamingRequests(
+        transcriptId: UUID,
+        requestIds: Set<UUID>?,
+        ownershipAlreadyInvalidated: Bool = false
+    ) -> [SpeakerNamingRequest] {
         let matchesTarget: (SpeakerNamingRequest) -> Bool = { request in
             request.transcriptId == transcriptId
                 && (requestIds.map { $0.contains(request.id) } ?? true)
@@ -324,13 +379,8 @@ extension TranscriptionTaskManager {
         deferredSpeakerNamingRequests = deferredSpeakerNamingRequests.filter {
             !matchesTarget($0.value)
         }
-        for request in cancelledRequests {
-            cleanupSpeakerNamingRequest(
-                request,
-                preservingSourceAudio: preservingSourceAudio
-            )
-        }
         promoteNextSpeakerNamingRequestIfNeeded()
+        return cancelledRequests
     }
 
     private func promoteNextSpeakerNamingRequestIfNeeded() {

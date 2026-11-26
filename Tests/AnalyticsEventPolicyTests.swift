@@ -97,8 +97,6 @@ func testAnalyticsEventPolicy() {
         let permissionClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_permission_cta_clicked")
         let permissionChanged = AnalyticsEventPolicy.policy(forEvent: "onboarding_permission_status_changed")
         let firstSaved = AnalyticsEventPolicy.policy(forEvent: "onboarding_first_dictation_saved")
-        let meetingDryRun = AnalyticsEventPolicy.policy(forEvent: "onboarding_meeting_dry_run_clicked")
-        let agentClicked = AnalyticsEventPolicy.policy(forEvent: "onboarding_agent_cta_clicked")
         let completed = AnalyticsEventPolicy.policy(forEvent: "onboarding_completed")
 
         assertEqual(shown?.allowedProperties.contains("meeting_recording_ready"), true, "onboarding shown should preserve meeting-readiness attribution")
@@ -107,8 +105,6 @@ func testAnalyticsEventPolicy() {
         assertEqual(permissionClicked?.allowedProperties.contains("permission_kind"), true, "permission clicks should preserve the clicked permission")
         assertEqual(permissionChanged?.allowedProperties.contains("to_status"), true, "permission status changes should preserve the new status")
         assertEqual(firstSaved?.allowedProperties.contains("word_count_bucket"), true, "first saved dictation should keep coarse word count")
-        assertEqual(meetingDryRun?.allowedProperties.contains("meeting_recording_ready"), true, "meeting dry runs should keep setup readiness")
-        assertEqual(agentClicked?.allowedProperties.contains("agent_cta"), true, "agent CTAs should preserve the action id")
         assertEqual(completed?.allowedProperties.contains("first_dictation_saved"), true, "completion should preserve whether first value happened")
         assertEqual(completed?.allowedProperties.contains("flow_elapsed_bucket"), true, "completion should preserve coarse time to finish")
 
@@ -132,16 +128,12 @@ func testAnalyticsEventPolicy() {
         assertEqual(sanitized["step_id"], "meeting_setup", "step id should survive sanitization")
     }
 
-    runSuite("AnalyticsEventPolicy pins active onboarding activation events") {
+    runSuite("AnalyticsEventPolicy pins active onboarding activation events and excludes retired legacy ones") {
         let expected: [(String, Set<String>)] = [
-            ("onboarding_model_state_changed", ["from_status", "step_id", "to_status"]),
             ("onboarding_primary_cta_clicked", ["cta", "cta_type", "flow_elapsed_bucket", "model_state", "step_elapsed_bucket", "step_id"]),
             ("onboarding_first_dictation_started", ["model_state", "step_id"]),
             ("onboarding_first_dictation_saved", ["delivery", "step_id", "word_count_bucket"]),
-            ("onboarding_first_dictation_stop_clicked", ["step_id"]),
             ("onboarding_first_dictation_empty", ["step_id"]),
-            ("onboarding_agent_cta_clicked", ["agent_cta", "step_id"]),
-            ("onboarding_reporting_toggle_changed", ["available", "enabled", "reporting_kind", "step_id"]),
         ]
 
         for (event, properties) in expected {
@@ -149,6 +141,19 @@ func testAnalyticsEventPolicy() {
                 AnalyticsEventPolicy.policy(forEvent: event)?.allowedProperties ?? Set<String>(),
                 properties,
                 "\(event) should keep a narrow activation payload"
+            )
+        }
+
+        for retiredEvent in [
+            "onboarding_agent_cta_clicked",
+            "onboarding_first_dictation_stop_clicked",
+            "onboarding_meeting_dry_run_clicked",
+            "onboarding_model_state_changed",
+            "onboarding_reporting_toggle_changed",
+        ] {
+            assertNil(
+                AnalyticsEventPolicy.policy(forEvent: retiredEvent),
+                "\(retiredEvent) has no live emitter and should not remain allowlisted"
             )
         }
     }
@@ -740,6 +745,49 @@ func testAnalyticsEventPolicy() {
         assertNil(sanitized["source_app_bundle"], "source app bundle IDs should stay out of friction analytics")
         assertNil(sanitized["transcript_text"], "transcript text should stay out of friction analytics")
         assertNil(sanitized["retry_count"], "raw retry counts should stay out of friction analytics")
+    }
+
+    runSuite("ProductFrictionTelemetry only emits update download friction on failures") {
+        assertNil(
+            ProductFrictionTelemetry.updateDownloadFriction(
+                event: "update_download_started",
+                failureKind: nil
+            ),
+            "starting an update download is normal lifecycle telemetry, not product friction"
+        )
+        assertNil(
+            ProductFrictionTelemetry.updateDownloadFriction(
+                event: "update_download_finished",
+                failureKind: nil
+            ),
+            "a successful update download must not emit product_friction_observed"
+        )
+        assertNil(
+            ProductFrictionTelemetry.updateDownloadFriction(
+                event: "update_download_finished",
+                failureKind: ""
+            ),
+            "an empty failure kind must not emit product_friction_observed"
+        )
+        assertNil(
+            ProductFrictionTelemetry.updateDownloadFriction(
+                event: "update_ready_to_install",
+                failureKind: "download_failed"
+            ),
+            "non-download lifecycle events must not emit update_download friction"
+        )
+        assertEqual(
+            ProductFrictionTelemetry.updateDownloadFriction(
+                event: "update_download_finished",
+                failureKind: "download_failed"
+            ),
+            ProductFrictionTelemetry.UpdateDownloadFriction(
+                stage: "update_download",
+                result: .failed,
+                failureKind: "download_failed"
+            ),
+            "a failed update download should emit product_friction_observed with failed result and failure_kind"
+        )
     }
 
     runSuite("AnalyticsEventPolicy allows menu and settings behavior events") {

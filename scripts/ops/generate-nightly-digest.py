@@ -80,7 +80,6 @@ POSTHOG_FIRST_VALUE_EVENTS = (
     "dictation_completed",
     "onboarding_first_dictation_saved",
     "meeting_transcript_saved",
-    "onboarding_agent_cta_clicked",
     "activation_first_artifact_saved",
     "activation_second_artifact_saved",
     "activation_artifact_action_clicked",

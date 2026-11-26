@@ -33,7 +33,6 @@ SAFE_EVENTS = (
     "activation_artifact_action_clicked",
     "activation_agent_prompt_action_clicked",
     "activation_agent_setup_cta_clicked",
-    "onboarding_agent_cta_clicked",
     "activation_habit_loop_actioned",
     "activation_return_proxy_observed",
     "agent_capture_query_observed",
@@ -127,7 +126,7 @@ SELECT
   uniqIf(distinct_id, event = 'activation_first_artifact_saved') AS first_artifact_devices,
   uniqIf(distinct_id, event = 'activation_second_artifact_saved') AS second_artifact_devices,
   uniqIf(distinct_id, event = 'activation_agent_prompt_action_clicked') AS agent_prompt_devices,
-  uniqIf(distinct_id, event IN ('activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked')) AS agent_setup_devices,
+  uniqIf(distinct_id, event = 'activation_agent_setup_cta_clicked') AS agent_setup_devices,
   uniqIf(distinct_id, event = 'agent_capture_query_observed') AS true_agent_query_devices,
   uniqIf(distinct_id, event = 'activation_habit_loop_actioned') AS habit_loop_devices,
   uniqIf(distinct_id, event = 'activation_return_proxy_observed') AS return_proxy_devices,
@@ -230,7 +229,7 @@ SELECT
     event IN ('dictation_started', 'dictation_completed'), 'dictation',
     event IN ('meeting_recording_started', 'meeting_transcript_saved'), 'meetings',
     event IN ('activation_artifact_action_clicked', 'activation_first_artifact_saved', 'activation_second_artifact_saved'), 'artifact_actions',
-    event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked', 'onboarding_agent_cta_clicked'), 'agent_bridge',
+    event IN ('activation_agent_prompt_action_clicked', 'activation_agent_setup_cta_clicked'), 'agent_bridge',
     event = 'activation_habit_loop_actioned', 'habit_loop',
     event IN ('update_check_finished', 'update_download_finished'), 'updates',
     'other'
@@ -740,8 +739,8 @@ def run_self_test() -> int:
     if pack["activation"]["true_agent_query_devices"] != 0:
         print("self-test failed: fixture should preserve zero true-agent-query proof", file=sys.stderr)
         return 1
-    if "onboarding_agent_cta_clicked" not in SAFE_EVENTS:
-        print("self-test failed: onboarding agent setup events should be queryable", file=sys.stderr)
+    if "activation_agent_setup_cta_clicked" not in SAFE_EVENTS:
+        print("self-test failed: agent setup events should be queryable", file=sys.stderr)
         return 1
     if not pack["recommendations"] or "sourced-agent-use" not in pack["recommendations"][0]["title"]:
         print("self-test failed: first recommendation should close agent-use proof", file=sys.stderr)

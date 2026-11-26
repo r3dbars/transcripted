@@ -105,6 +105,47 @@ final class SpeakerNamingCleanupResponsivenessTests: XCTestCase {
     }
 
     @MainActor
+    func testDeletedReviewDismissalCleansUpFilesOffMainActorWhileLeavingMainActorResponsive() async throws {
+        let harness = try makeHarness()
+        defer { harness.removeOwnedDirectory() }
+        let enteredCleanup = expectation(description: "Deleted-review cleanup reached the durable preparation boundary")
+        let recovery = HeldNamingCleanupRecovery(
+            entered: enteredCleanup,
+            sourceURLs: [harness.micURL, harness.systemURL]
+        )
+        defer { recovery.resume() }
+        let request = harness.enqueue(recovery: recovery)
+        try FileManager.default.removeItem(at: harness.transcriptURL)
+
+        let dismissalTask = Task { @MainActor in
+            await harness.manager.dismissDeletedSpeakerNamingRequest(
+                transcriptId: harness.transcriptID,
+                requestId: request.id
+            )
+        }
+        await fulfillment(of: [enteredCleanup], timeout: 60)
+
+        // Main actor stays responsive while file deletion is held on the utility executor.
+        XCTAssertFalse(recovery.snapshot.preparedOnMain)
+        XCTAssertNil(harness.manager.speakerNamingRequest)
+        XCTAssertFalse(harness.manager.speakerReviewProfileProtection.protectedProfileIds.contains(harness.profileID))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: harness.micURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: harness.systemURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: harness.clipURL.path))
+        XCTAssertFalse(recovery.snapshot.confirmed)
+
+        recovery.resume()
+        let dismissed = await dismissalTask.value
+
+        XCTAssertTrue(dismissed)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.micURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.systemURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.clipURL.path))
+        XCTAssertEqual(recovery.snapshot.transitions, ["prepare", "confirm"])
+        XCTAssertTrue(recovery.snapshot.confirmedAfterSourcesWereRemoved)
+    }
+
+    @MainActor
     private func makeHarness(microphoneOutsideCleanupRoot: Bool = false) throws -> NamingCleanupHarness {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("NamingCleanup-\(UUID().uuidString)", isDirectory: true)

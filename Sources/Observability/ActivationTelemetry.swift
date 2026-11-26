@@ -552,6 +552,31 @@ enum ProductFrictionTelemetry {
         case started
     }
 
+    struct UpdateDownloadFriction: Equatable {
+        let stage: String
+        let result: Result
+        let failureKind: String
+    }
+
+    /// Update downloads only represent product friction when they fail.
+    /// Normal starts and completed downloads are already tracked by
+    /// `update_download_started` and `update_download_finished`.
+    static func updateDownloadFriction(
+        event: String,
+        failureKind: String?
+    ) -> UpdateDownloadFriction? {
+        guard event == "update_download_finished",
+              let failureKind,
+              !failureKind.isEmpty else {
+            return nil
+        }
+        return UpdateDownloadFriction(
+            stage: "update_download",
+            result: .failed,
+            failureKind: failureKind
+        )
+    }
+
     static func track(
         surface: Surface,
         stage: String,

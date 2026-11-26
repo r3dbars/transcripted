@@ -50,22 +50,16 @@ extension SparkleUpdaterController {
         }
         AnalyticsReporter.track(event, properties: properties)
 
-        switch event {
-        case "update_download_started":
+        if let friction = ProductFrictionTelemetry.updateDownloadFriction(
+            event: event,
+            failureKind: failureKind
+        ) {
             ProductFrictionTelemetry.track(
                 surface: .update,
-                stage: "update_download",
-                result: .started
+                stage: friction.stage,
+                result: friction.result,
+                failureKind: friction.failureKind
             )
-        case "update_download_finished":
-            ProductFrictionTelemetry.track(
-                surface: .update,
-                stage: "update_download",
-                result: failureKind == nil ? .completed : .failed,
-                failureKind: failureKind
-            )
-        default:
-            break
         }
     }
 
