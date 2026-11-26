@@ -99,14 +99,18 @@ struct ModelCacheCleanupResult: Equatable {
 }
 
 enum ModelCacheInventory {
+    /// Retired Parakeet V2 folders in FluidAudio's shared cache. Because
+    /// `~/Library/Application Support/FluidAudio/Models` is shared across
+    /// FluidAudio apps, only treat these as stale when Transcripted itself
+    /// migrated this user away from `"parakeet-tdt-v2"`.
+    static let retiredParakeetV2ModelDirectories: Set<String> = [
+        "parakeet-tdt-0.6b-v2",
+        "parakeet-tdt-0.6b-v2-coreml",
+    ]
+
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
         // Legacy FluidAudio 0.7.9 -coreml v3 folder; 0.15+ uses parakeet-tdt-0.6b-v3.
         "parakeet-tdt-0.6b-v3-coreml",
-        // Retired Parakeet V2 (removed when narrowing the STT matrix to
-        // Parakeet V3 + Whisper Large V3 Turbo): both the 0.15+ folder and
-        // the 0.7.9 -coreml folder are reclaimable.
-        "parakeet-tdt-0.6b-v2",
-        "parakeet-tdt-0.6b-v2-coreml",
         // The retired Nemotron streaming beta (removed 2026-08) downloaded
         // ~600 MB via FluidAudio; both folder-name derivations of its repo
         // (raw basename and suffix-stripped) are listed so whichever exists
@@ -115,6 +119,15 @@ enum ModelCacheInventory {
         "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b",
         "nemotron-3.5-asr-streaming-multilingual-0.6b",
     ]
+
+    static func staleFluidAudioModelDirectories(
+        userDefaults: UserDefaults = .standard
+    ) -> Set<String> {
+        if TranscriptionModelPreferences.didMigrateFromParakeetV2(userDefaults: userDefaults) {
+            return knownStaleFluidAudioModelDirectories.union(retiredParakeetV2ModelDirectories)
+        }
+        return knownStaleFluidAudioModelDirectories
+    }
 
     /// Retired Whisper model directories/manifests under `cache/whisperkit/models`
     /// (Whisper Large V3 non-turbo was retired in favor of Whisper Large V3 Turbo).
@@ -131,9 +144,10 @@ enum ModelCacheInventory {
         transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
         whisperModelsDirectory: URL = defaultWhisperModelsDirectory(),
         meetingTitlesModelsDirectory: URL = defaultMeetingTitlesModelsDirectory(),
-        writingModelsDirectory: URL = defaultWritingModelsDirectory()
+        writingModelsDirectory: URL = defaultWritingModelsDirectory(),
+        userDefaults: UserDefaults = .standard
     ) -> ModelCacheSnapshot {
-        let staleEntries = knownStaleFluidAudioModelDirectories
+        let staleEntries = staleFluidAudioModelDirectories(userDefaults: userDefaults)
             .sorted()
             .map { name in
                 (name, fluidAudioModelsDirectory.appendingPathComponent(name, isDirectory: true))
@@ -232,13 +246,14 @@ enum ModelCacheInventory {
 
     static func removeKnownStaleFluidAudioModels(
         fileManager: FileManager = .default,
-        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory()
+        fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
+        userDefaults: UserDefaults = .standard
     ) throws -> ModelCacheCleanupResult {
         let root = fluidAudioModelsDirectory.standardizedFileURL.resolvingSymlinksInPath()
         var removedBytes: Int64 = 0
         var removedNames: [String] = []
 
-        for name in knownStaleFluidAudioModelDirectories.sorted() {
+        for name in staleFluidAudioModelDirectories(userDefaults: userDefaults).sorted() {
             let candidate = root.appendingPathComponent(name, isDirectory: true)
                 .standardizedFileURL
                 .resolvingSymlinksInPath()
@@ -373,11 +388,13 @@ enum ModelCacheInventory {
         fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
         transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
         whisperModelsDirectory: URL = defaultWhisperModelsDirectory(),
-        modelsRootDirectory: URL = defaultLocalModelsDirectory()
+        modelsRootDirectory: URL = defaultLocalModelsDirectory(),
+        userDefaults: UserDefaults = .standard
     ) throws -> ModelCacheCleanupResult {
         var result = try removeKnownStaleFluidAudioModels(
             fileManager: fileManager,
-            fluidAudioModelsDirectory: fluidAudioModelsDirectory
+            fluidAudioModelsDirectory: fluidAudioModelsDirectory,
+            userDefaults: userDefaults
         )
 
         if includeWhisper {

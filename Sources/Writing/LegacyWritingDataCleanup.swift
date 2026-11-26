@@ -35,6 +35,7 @@ enum LegacyWritingDataCleanup {
         "com.justinbetker.draft.preview9b.writing.personal-history",
     ]
     static let legacyKeychainAccount = "aes-gcm-key-v1"
+    static let launchCleanupCompletedDefaultsKey = "legacyWritingDataCleanedUp"
 
     static func keychainQuery(service: String) -> [CFString: Any] {
         [
@@ -42,13 +43,39 @@ enum LegacyWritingDataCleanup {
             kSecAttrService: service,
             kSecAttrAccount: legacyKeychainAccount,
             kSecAttrSynchronizable: false,
+            kSecUseAuthenticationUI: kSecUseAuthenticationUISkip as CFString,
         ]
+    }
+
+    @discardableResult
+    static func runLaunchCleanupIfNeeded(
+        appSupportRoot: URL,
+        userDefaults: UserDefaults = .standard,
+        relativePaths: [String] = legacyRelativePaths,
+        fileManager: FileManager = .default,
+        deleteKeychainItem: ([CFString: Any]) -> OSStatus = { SecItemDelete($0 as CFDictionary) }
+    ) -> Result? {
+        if userDefaults.bool(forKey: launchCleanupCompletedDefaultsKey) {
+            return nil
+        }
+        let result = cleanUp(
+            appSupportRoot: appSupportRoot,
+            relativePaths: relativePaths,
+            userDefaults: userDefaults,
+            fileManager: fileManager,
+            deleteKeychainItem: deleteKeychainItem
+        )
+        if result.succeeded {
+            userDefaults.set(true, forKey: launchCleanupCompletedDefaultsKey)
+        }
+        return result
     }
 
     @discardableResult
     static func cleanUp(
         appSupportRoot: URL,
         relativePaths: [String] = legacyRelativePaths,
+        userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default,
         deleteKeychainItem: ([CFString: Any]) -> OSStatus = { SecItemDelete($0 as CFDictionary) }
     ) -> Result {
@@ -56,12 +83,29 @@ enum LegacyWritingDataCleanup {
         var refusedUnsafePaths: [String] = []
         var failedRelativePaths: [String] = []
 
+        let configuredLibraryPaths = TranscriptedStoragePreferences.configuredCaptureLibraryPaths(
+            userDefaults: userDefaults
+        )
         let root = appSupportRoot.standardizedFileURL
         let rootIsLink = isSymbolicLink(at: root, fileManager: fileManager)
         var rootIsDirectory: ObjCBool = false
         let rootExists = fileManager.fileExists(atPath: root.path, isDirectory: &rootIsDirectory)
 
-        if rootIsLink || (rootExists && !rootIsDirectory.boolValue) {
+        if rootIsLink {
+            for relativePath in relativePaths {
+                guard let components = safeRelativeComponents(relativePath) else {
+                    refusedUnsafePaths.append(relativePath)
+                    continue
+                }
+                if targetExistsBehindSymlink(
+                    from: root,
+                    remainingComponents: components[...],
+                    fileManager: fileManager
+                ) {
+                    refusedUnsafePaths.append(relativePath)
+                }
+            }
+        } else if rootExists && !rootIsDirectory.boolValue {
             refusedUnsafePaths.append(contentsOf: relativePaths)
         } else if rootExists {
             let resolvedRoot = root.resolvingSymlinksInPath().standardizedFileURL
@@ -72,16 +116,29 @@ enum LegacyWritingDataCleanup {
                 }
 
                 var current = root
-                var sawSymlink = false
-                for component in components {
+                var refusedSymlink = false
+                var skippedAbsentBehindSymlink = false
+                for (index, component) in components.enumerated() {
                     current = current.appendingPathComponent(component)
                     if isSymbolicLink(at: current, fileManager: fileManager) {
-                        sawSymlink = true
+                        let isLeaf = index == components.count - 1
+                        if isLeaf || targetExistsBehindSymlink(
+                            from: current,
+                            remainingComponents: components[(index + 1)...],
+                            fileManager: fileManager
+                        ) {
+                            refusedSymlink = true
+                        } else {
+                            skippedAbsentBehindSymlink = true
+                        }
                         break
                     }
                 }
-                if sawSymlink {
+                if refusedSymlink {
                     refusedUnsafePaths.append(relativePath)
+                    continue
+                }
+                if skippedAbsentBehindSymlink {
                     continue
                 }
 
@@ -97,6 +154,19 @@ enum LegacyWritingDataCleanup {
                 guard resolvedCandidate.path == expectedResolved.path,
                       resolvedCandidate.path.hasPrefix(resolvedRoot.path + "/")
                 else {
+                    refusedUnsafePaths.append(relativePath)
+                    continue
+                }
+
+                if TranscriptedStoragePreferences.targetOverlapsConfiguredCaptureLibrary(
+                    candidate,
+                    configuredPaths: configuredLibraryPaths,
+                    fileManager: fileManager
+                ) || TranscriptedStoragePreferences.targetOverlapsConfiguredCaptureLibrary(
+                    resolvedCandidate,
+                    configuredPaths: configuredLibraryPaths,
+                    fileManager: fileManager
+                ) {
                     refusedUnsafePaths.append(relativePath)
                     continue
                 }
@@ -128,6 +198,26 @@ enum LegacyWritingDataCleanup {
             keychainItemsDeleted: keychainItemsDeleted,
             keychainDeleteFailed: keychainDeleteFailed
         )
+    }
+
+    private static func targetExistsBehindSymlink(
+        from base: URL,
+        remainingComponents: ArraySlice<String>,
+        fileManager: FileManager
+    ) -> Bool {
+        var current = base.resolvingSymlinksInPath().standardizedFileURL
+        for (offset, component) in remainingComponents.enumerated() {
+            current = current.appendingPathComponent(component)
+            let isLast = offset == remainingComponents.count - 1
+            if isLast {
+                return fileManager.fileExists(atPath: current.path)
+                    || isSymbolicLink(at: current, fileManager: fileManager)
+            }
+            if isSymbolicLink(at: current, fileManager: fileManager) {
+                current = current.resolvingSymlinksInPath().standardizedFileURL
+            }
+        }
+        return false
     }
 
     private static func safeRelativeComponents(_ relativePath: String) -> [String]? {

@@ -1080,6 +1080,56 @@ func testAgentMCPConnector() {
         assertFalse(components.contains("node_modules/.bin"), "'node_modules/.bin' must be stripped from PATH")
         assertTrue(components.contains("/opt/tools/bin"), "absolute inherited PATH entries must be preserved")
     }
+
+    runSuite("AgentMCPConnector.connect(.claudeCode) — carries login-shell PATH directories when claude and node live separately") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeSeparateShellBins-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        let claudeBinDir = tempRoot.appendingPathComponent("shell-only-claude/bin", isDirectory: true)
+        let nodeBinDir = tempRoot.appendingPathComponent("shell-only-node/bin", isDirectory: true)
+        let fakeClaude = claudeBinDir.appendingPathComponent("claude", isDirectory: false)
+        let fakeNode = nodeBinDir.appendingPathComponent("transcripted-shell-only-node", isDirectory: false)
+        let callLogURL = tempRoot.appendingPathComponent("separate-bins-calls.log", isDirectory: false)
+
+        try? FileManager.default.createDirectory(at: claudeBinDir, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: nodeBinDir, withIntermediateDirectories: true)
+
+        try? "#!/bin/sh\nshift\necho \"$@\" >> \"\(callLogURL.path)\"\nexit 0\n"
+            .write(to: fakeNode, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: fakeNode.path)
+
+        try? "#!/usr/bin/env transcripted-shell-only-node\n"
+            .write(to: fakeClaude, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: fakeClaude.path)
+
+        let paths = AgentMCPConnectorPaths(
+            homeDirectory: tempRoot,
+            applicationDirectories: [],
+            systemBinaryDirectories: [],
+            loginShellPATHLookup: { [claudeBinDir, nodeBinDir] }
+        )
+
+        do {
+            try AgentMCPConnector.connect(
+                .claudeCode,
+                helperCommandPath: "/tmp/transcripted-mcp",
+                paths: paths
+            )
+        } catch {
+            assertTrue(false, "connect(.claudeCode) should succeed when claude and node live in separate login-shell PATH directories: \(error)")
+        }
+
+        let calls = ((try? String(contentsOf: callLogURL, encoding: .utf8)) ?? "")
+            .split(separator: "\n")
+            .map(String.init)
+        assertEqual(calls.count, 2, "separate shell-only bins should run remove then add through the login-shell node runtime")
+        assertEqual(
+            calls.last ?? "",
+            "mcp add --scope user transcripted /tmp/transcripted-mcp",
+            "claude invoked via login-shell PATH should resolve node from sibling login-shell PATH directory"
+        )
+    }
 }
 
 private func filePermissions(at url: URL) -> NSNumber? {

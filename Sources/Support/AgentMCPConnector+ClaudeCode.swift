@@ -109,11 +109,28 @@ extension AgentMCPConnector {
 
     static let loginShellPATHLookupTimeout: TimeInterval = 2.0
 
+    private struct ClaudeCodeBinaryResolution {
+        let executable: URL
+        let loginShellPATHDirectories: [URL]
+    }
+
     static func claudeCodeBinary(
         paths: AgentMCPConnectorPaths = AgentMCPConnectorPaths(),
         fileManager: FileManager = .default,
         allowLoginShellLookup: Bool = false
     ) -> URL? {
+        resolveClaudeCodeBinary(
+            paths: paths,
+            fileManager: fileManager,
+            allowLoginShellLookup: allowLoginShellLookup
+        )?.executable
+    }
+
+    private static func resolveClaudeCodeBinary(
+        paths: AgentMCPConnectorPaths,
+        fileManager: FileManager,
+        allowLoginShellLookup: Bool
+    ) -> ClaudeCodeBinaryResolution? {
         var candidates = paths.claudeCodeBinaryCandidates
         candidates.append(contentsOf: paths.nodeManagerBinaryDirectories(fileManager: fileManager)
             .map { $0.appendingPathComponent("claude", isDirectory: false) })
@@ -128,7 +145,7 @@ extension AgentMCPConnector {
             let path = candidate.standardizedFileURL.path
             guard seen.insert(path).inserted else { continue }
             if fileManager.isExecutableFile(atPath: path) {
-                return candidate
+                return ClaudeCodeBinaryResolution(executable: candidate, loginShellPATHDirectories: [])
             }
         }
 
@@ -136,13 +153,24 @@ extension AgentMCPConnector {
               paths.searchEnvironmentPATH || paths.loginShellPATHLookup != nil else {
             return nil
         }
-        let shellDirectories = paths.loginShellPATHLookup?() ?? resolveLoginShellPATHDirectories()
-        for directory in shellDirectories {
+        let rawShellDirectories = paths.loginShellPATHLookup?() ?? resolveLoginShellPATHDirectories()
+        var seenShellDirs: Set<String> = []
+        let validatedShellDirectories: [URL] = rawShellDirectories.compactMap { directory in
+            let path = directory.standardizedFileURL.path
+            guard !path.isEmpty, path.hasPrefix("/"), seenShellDirs.insert(path).inserted else {
+                return nil
+            }
+            return URL(fileURLWithPath: path, isDirectory: true)
+        }
+        for directory in validatedShellDirectories {
             let candidate = directory.appendingPathComponent("claude", isDirectory: false)
             let path = candidate.standardizedFileURL.path
             guard seen.insert(path).inserted else { continue }
             if fileManager.isExecutableFile(atPath: path) {
-                return candidate
+                return ClaudeCodeBinaryResolution(
+                    executable: candidate,
+                    loginShellPATHDirectories: validatedShellDirectories
+                )
             }
         }
         return nil
@@ -157,6 +185,7 @@ extension AgentMCPConnector {
         for executable: URL,
         paths: AgentMCPConnectorPaths,
         baseEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        additionalPATHDirectories: [URL] = [],
         fileManager: FileManager = .default
     ) -> [String: String] {
         var env = baseEnvironment
@@ -172,6 +201,9 @@ extension AgentMCPConnector {
 
         appendDir(executable.deletingLastPathComponent().standardizedFileURL.path)
         appendDir(executable.resolvingSymlinksInPath().deletingLastPathComponent().standardizedFileURL.path)
+        for dir in additionalPATHDirectories {
+            appendDir(dir.standardizedFileURL.path)
+        }
 
         for candidate in paths.claudeCodeBinaryCandidates {
             let dir = candidate.deletingLastPathComponent().standardizedFileURL.path
@@ -211,7 +243,7 @@ extension AgentMCPConnector {
         fileManager: FileManager,
         cliTimeout: TimeInterval
     ) throws {
-        guard let binary = claudeCodeBinary(
+        guard let resolution = resolveClaudeCodeBinary(
             paths: paths,
             fileManager: fileManager,
             allowLoginShellLookup: true
@@ -225,10 +257,12 @@ extension AgentMCPConnector {
             }
             throw AgentMCPConnectorError.agentCLINotFound(.claudeCode)
         }
+        let binary = resolution.executable
 
         let environment = claudeCodeCLIEnvironment(
             for: binary,
             paths: paths,
+            additionalPATHDirectories: resolution.loginShellPATHDirectories,
             fileManager: fileManager
         )
         let workingDirectory: URL? = fileManager.fileExists(atPath: paths.homeDirectory.path)

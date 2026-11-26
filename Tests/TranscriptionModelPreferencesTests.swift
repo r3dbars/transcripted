@@ -100,7 +100,11 @@ func testTranscriptionModelPreferences() {
         ]
 
         for (legacyRawValue, expected) in expectedMigrations {
-            defaults.set(legacyRawValue, forKey: "transcription-model-preference")
+            let iterSuite = "TranscriptionModelPreferencesTests.migrate.\(legacyRawValue).\(UUID().uuidString)"
+            let iterDefaults = UserDefaults(suiteName: iterSuite)!
+            defer { iterDefaults.removePersistentDomain(forName: iterSuite) }
+
+            iterDefaults.set(legacyRawValue, forKey: "transcription-model-preference")
             assertEqual(
                 TranscriptionModelPreferences.migratedModel(
                     forStoredRawValue: legacyRawValue,
@@ -112,16 +116,21 @@ func testTranscriptionModelPreferences() {
             )
             assertEqual(
                 TranscriptionModelPreferences.preferredModel(
-                    userDefaults: defaults,
+                    userDefaults: iterDefaults,
                     preferredLanguages: ["en-US"]
                 ),
                 expected,
                 "stored '\(legacyRawValue)' must seamlessly migrate to \(expected.rawValue)"
             )
+            assertEqual(
+                TranscriptionModelPreferences.didMigrateFromParakeetV2(userDefaults: iterDefaults),
+                legacyRawValue == "parakeet-tdt-v2",
+                "only parakeet-tdt-v2 migration should set the Parakeet V2 cache reclamation flag"
+            )
         }
     }
 
-    runSuite("TranscriptionModelPreferences migrates apple-speech to Whisper Turbo for non-European languages and persists once") {
+    runSuite("TranscriptionModelPreferences migrates apple-speech to Whisper Turbo for any explicit language or non-European locale") {
         // Explicit non-Parakeet language (ja) migrates to Whisper Large V3 Turbo even on an English Mac.
         assertEqual(
             TranscriptionModelPreferences.migratedModel(
@@ -131,6 +140,27 @@ func testTranscriptionModelPreferences() {
             ),
             .whisperLargeV3Turbo,
             "apple-speech with explicit Japanese meeting language must migrate to Whisper Large V3 Turbo"
+        )
+
+        // Explicit European languages (de, es) also migrate to Whisper Large V3 Turbo because
+        // STTRouter rejects Parakeet V3 + .explicit language on recovered imports and retries.
+        assertEqual(
+            TranscriptionModelPreferences.migratedModel(
+                forStoredRawValue: "apple-speech",
+                languageRawValue: "de",
+                preferredLanguages: ["en-US"]
+            ),
+            .whisperLargeV3Turbo,
+            "apple-speech with explicit German meeting language must migrate to Whisper Large V3 Turbo"
+        )
+        assertEqual(
+            TranscriptionModelPreferences.migratedModel(
+                forStoredRawValue: "apple-speech",
+                languageRawValue: "es",
+                preferredLanguages: ["en-US"]
+            ),
+            .whisperLargeV3Turbo,
+            "apple-speech with explicit Spanish meeting language must migrate to Whisper Large V3 Turbo"
         )
 
         // Auto meeting language on a Japanese Mac migrates to Whisper Large V3 Turbo.
@@ -212,5 +242,51 @@ func testTranscriptionModelPreferences() {
                 "unknown saved model identifier '\(invalid)' should fall back to Parakeet V3"
             )
         }
+    }
+
+    runSuite("TranscriptionModelPreferences handles retired value in argumentDomain without notification, overwrite, or recursion") {
+        let suiteName = "TranscriptionModelPreferencesTests.argDomain.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let originalArgDomain = defaults.volatileDomain(forName: UserDefaults.argumentDomain)
+        defer {
+            defaults.setVolatileDomain(originalArgDomain, forName: UserDefaults.argumentDomain)
+            defaults.removePersistentDomain(forName: suiteName)
+        }
+
+        defaults.set(TranscriptionModelChoice.whisperLargeV3Turbo.rawValue, forKey: "transcription-model-preference")
+        var argDomain = originalArgDomain
+        argDomain["transcription-model-preference"] = "parakeet-tdt-v2"
+        defaults.setVolatileDomain(argDomain, forName: UserDefaults.argumentDomain)
+
+        var notificationCount = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: .transcriptionModelPreferenceDidChange,
+            object: nil,
+            queue: nil
+        ) { _ in
+            notificationCount += 1
+            // Re-entering preferredModel() mimics STTRouter's observer and would
+            // recurse infinitely if preferredModel() posted the notification.
+            _ = TranscriptionModelPreferences.preferredModel(userDefaults: defaults)
+        }
+        defer { NotificationCenter.default.removeObserver(observer) }
+
+        assertEqual(
+            TranscriptionModelPreferences.preferredModel(userDefaults: defaults),
+            .parakeetTDTv3,
+            "retired value in argumentDomain must still resolve to its migrated successor"
+        )
+        assertEqual(notificationCount, 0, "migrating on read must not post transcriptionModelPreferenceDidChange")
+        assertFalse(
+            TranscriptionModelPreferences.didMigrateFromParakeetV2(userDefaults: defaults),
+            "transient argumentDomain override must not persist the Parakeet V2 migration flag"
+        )
+
+        let persistent = defaults.persistentDomain(forName: suiteName) ?? [:]
+        assertEqual(
+            persistent["transcription-model-preference"] as? String,
+            TranscriptionModelChoice.whisperLargeV3Turbo.rawValue,
+            "retired value in argumentDomain must not overwrite the persistent domain"
+        )
     }
 }

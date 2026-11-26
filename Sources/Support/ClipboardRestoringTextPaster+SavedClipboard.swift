@@ -115,6 +115,50 @@ extension ClipboardRestoringTextPaster {
         return .copied
     }
 
+    func copyTextForManualPasteUsingSnapshot(
+        _ text: String,
+        savedItems: PasteboardSnapshot,
+        expectedChangeCount: Int,
+        to pasteboard: any ClipboardPasteboard,
+        isCurrentOperation: @escaping () -> Bool
+    ) -> ClipboardManualCopyResult {
+        guard isCurrentOperation() else {
+            return .refused(.failed("Paste was cancelled.", reason: .cancelled))
+        }
+        guard pasteboard.changeCount == expectedChangeCount else {
+            return .refused(.failed(
+                ClipboardSnapshotCause.changed.refusalMessage,
+                reason: .clipboardSnapshotIncomplete(.changed)
+            ))
+        }
+        guard copyTextToClipboard(text, to: pasteboard) else { return .writeFailed }
+        saveClipboardForNextPaste(
+            savedItems,
+            fallbackText: text,
+            fallbackChangeCount: pasteboard.changeCount,
+            pasteboard: pasteboard
+        )
+        return .copied
+    }
+
+    func focusChangedManualCopyOutcome(
+        _ result: ClipboardManualCopyResult,
+        isCurrentOperation: () -> Bool
+    ) -> TextPasteOutcome {
+        outcomeForManualCopy(
+            result,
+            isCurrentOperation: isCurrentOperation,
+            copied: .copied(
+                "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
+                reason: .focusChanged
+            ),
+            writeFailed: .failed(
+                "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
+                reason: .focusChangeClipboardWriteFailed
+            )
+        )
+    }
+
     func outcomeForManualCopy(
         _ result: ClipboardManualCopyResult,
         isCurrentOperation: () -> Bool,
