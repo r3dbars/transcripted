@@ -30,6 +30,27 @@ struct WritingCaptureSettingsCard: View {
                     }
                 }
                 Spacer(minLength: 12)
+                if model.isRunning {
+                    if model.isPaused {
+                        SettingsInlineActionButton(
+                            title: "Resume",
+                            symbolName: "play.fill",
+                            automationIdentifier: "transcripted.settings.agent.writing-capture.resume"
+                        ) {
+                            model.resumeCapture()
+                        }
+                        .disabled(model.isDeleting)
+                    } else {
+                        SettingsInlineActionButton(
+                            title: "Pause 1 hour",
+                            symbolName: "pause.fill",
+                            automationIdentifier: "transcripted.settings.agent.writing-capture.pause"
+                        ) {
+                            model.pauseForOneHour()
+                        }
+                        .disabled(model.isDeleting)
+                    }
+                }
             }
 
             Text("Save what you type as local Markdown so your AI can search your meetings, dictations, and writing together. Password managers and secure fields are never captured, and secrets are scrubbed before saving.")
@@ -42,7 +63,7 @@ struct WritingCaptureSettingsCard: View {
                     title: "Capture writing for AI context",
                     info: GeneralInfo(
                         title: "Capture writing for AI context",
-                        message: "Off by default. Saves typed text into local Markdown day files in your capture folder using a lightweight macOS input source. Nothing leaves this Mac, and no model download or Screen Recording permission is needed."
+                        message: "Off by default. Saves typed text into local Markdown day files in your capture folder using a lightweight macOS input source. Saved locally on this Mac until an AI agent you connect reads it — no model download or Screen Recording permission is needed."
                     ),
                     automationIdentifier: "transcripted.settings.agent.writing-capture.toggle",
                     showsDivider: model.isEnabled
@@ -64,6 +85,18 @@ struct WritingCaptureSettingsCard: View {
 
             if model.isEnabled && model.scopeMode == .picked && showPickedApps {
                 pickedAppsList
+            }
+
+            if model.isEnabled && !model.isRunning {
+                Label(
+                    model.startFailed
+                        ? "Writing capture couldn't start. Another copy of Transcripted may already be running."
+                        : "Writing capture isn't running yet.",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(LibraryTokens.meta)
+                .foregroundStyle(LibraryTokens.attention)
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             if model.saveProblem {
@@ -255,6 +288,17 @@ struct WritingCaptureSettingsCard: View {
 
     private var statusText: String {
         if !model.isEnabled { return "Off · opt in to include writing in your AI context" }
+        if !model.isRunning {
+            return model.startFailed
+                ? "Error · capture listener couldn't start"
+                : "Off · capture listener isn't running"
+        }
+        if model.isPaused {
+            if let resumeTime = model.pauseResumeTimeText {
+                return "Paused · resumes at \(resumeTime)"
+            }
+            return "Paused · typing isn't being saved"
+        }
         if model.saveProblem { return "Needs attention · folder unavailable" }
         switch model.keyboardStatus {
         case .ready: return "On · saving local Markdown day files"
@@ -267,6 +311,8 @@ struct WritingCaptureSettingsCard: View {
 
     private var statusColor: Color {
         if !model.isEnabled { return LibraryTokens.ink2 }
+        if !model.isRunning { return LibraryTokens.attention }
+        if model.isPaused { return LibraryTokens.ink2 }
         if model.saveProblem { return LibraryTokens.attention }
         return model.keyboardStatus == .ready ? LibraryTokens.accent : LibraryTokens.attention
     }

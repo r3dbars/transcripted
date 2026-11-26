@@ -134,21 +134,6 @@ class DictationSessionController: ObservableObject {
     var currentRequestIsFirstSinceLaunch = false
     var currentDictationTrigger: DictationTrigger = .unknown
     var currentDictationSessionID = UUID()
-    /// The take Write for Me's voice started, if any: its words go to `handOffText`, never pasted.
-    /// See DictationSessionController+HandOff.swift.
-    var handOffSessionID: UUID?
-    /// True only while `startHandOffDictation` is starting its take.
-    var isStartingHandOff = false
-    /// The words of the last hand-off take, set when it's transcribed (empty when nothing was heard).
-    @Published var handOffText: String?
-    /// The take `handOffText` came from, until the feature that started it claims the words.
-    var unclaimedHandOffSessionID: UUID?
-    /// Whether dictation's own analytics count this take (never a hand-off).
-    var sendsDictationAnalytics: Bool {
-        DictationHandOffPolicy.sendsAnalytics(
-            isStartingHandOff: isStartingHandOff, sessionID: currentDictationSessionID, handOffSessionID: handOffSessionID
-        )
-    }
     /// Whether this session's start click has played. It plays once, on key
     /// press or after recording starts (see `DictationStartCuePolicy`).
     var didPlayStartCue = false
@@ -221,13 +206,6 @@ class DictationSessionController: ObservableObject {
     ) {
         let requestStartedAt = CFAbsoluteTimeGetCurrent()
         guard let (appState, overlayController) = readyState() else { return }
-        // Only a hand-off take keeps the island hidden (its card is the listening UI). Every other start
-        // shows it, even if an earlier hand-off ended without putting the overlay away.
-        let quiet = DictationHandOffPolicy.overlayIsQuiet(startingHandOff: isStartingHandOff)
-        if overlayController.quiet != quiet { overlayController.quiet = quiet }
-        handOffSessionID = DictationHandOffPolicy.handOffSession(
-            onStartRequest: handOffSessionID, startingHandOff: isStartingHandOff, isDictating: isDictating
-        )
         // DictationStartAdmission (run by `admitDictationStart` in
         // DictationSessionPipeline.swift) decides whether this press becomes
         // a take and counts it: a press while already dictating or queued
@@ -386,7 +364,6 @@ class DictationSessionController: ObservableObject {
         // `request_to_recording_ms`: how long the user waited between asking
         // and the mic recording. It is the one field `dictation_start_requested`
         // cannot carry, since the request fires before anything has started.
-        guard sendsDictationAnalytics else { return }
         AnalyticsReporter.track(
             "dictation_started",
             properties: dictationAnalyticsProperties(
@@ -458,7 +435,6 @@ class DictationSessionController: ObservableObject {
         if currentDictationTrigger == .onboarding {
             NotificationCenter.default.post(name: .dictationNoSpeechDetected, object: nil)
         }
-        guard sendsDictationAnalytics else { return }
         AnalyticsReporter.track(
             "dictation_cancelled",
             properties: dictationAnalyticsProperties(
@@ -525,13 +501,12 @@ extension DictationSessionController: DictationSessionPipelineHost {
     }
 
     func trackDictationStartRequested(trigger: DictationTrigger, isRetry: Bool) {
-        // Counted before the take has its own session, so only a hand-off start in progress says it's one.
-        guard let appState, !isStartingHandOff else { return }
+        guard let appState else { return }
         trackDictationStartRequested(appState: appState, trigger: trigger, isRetry: isRetry)
     }
 
     func trackDictationStartRefused(trigger: DictationTrigger, failureKind: String) {
-        guard let appState, !isStartingHandOff else { return }
+        guard let appState else { return }
         trackDictationStartRefused(appState: appState, trigger: trigger, failureKind: failureKind)
     }
 

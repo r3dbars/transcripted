@@ -19,15 +19,27 @@ final class GhostInputController: IMKInputController {
     var historySegmentIdentifier = UUID().uuidString
     var historyDeletions = PersonalHistoryDeletionTracker()
     var historyContinuity = PersonalHistoryCaretContinuity()
+    var defaults: UserDefaults = .standard
+    var capture: PersonalHistoryCapture = .shared
+    var isSecureEventInputEnabled: () -> Bool = { IsSecureEventInputEnabled() }
+    var now: () -> Date = { Date() }
 
     override func handle(_ event: NSEvent!, client sender: Any!) -> Bool {
         guard let event, event.type == .keyDown, let client = sender as? IMKTextInput else {
             return false
         }
 
-        let secureInput = IsSecureEventInputEnabled()
+        // Fast-path consent check BEFORE any cross-process IMKTextInput IPC
+        // (`client.bundleIdentifier()` / `selectedRange()`) so a disabled
+        // keyboard adds zero IPC overhead on every keystroke.
+        guard defaults.bool(forKey: PersonalHistorySettingsContract.enabledKey) else {
+            breakHistorySegment()
+            return false
+        }
+
+        let secureInput = isSecureEventInputEnabled()
         if secureInput {
-            PersonalHistoryCapture.shared.sensitiveInputBegan()
+            capture.sensitiveInputBegan()
             breakHistorySegment()
             return false
         }
@@ -41,10 +53,9 @@ final class GhostInputController: IMKInputController {
             return false
         }
 
-        let defaults = UserDefaults.standard
         let paused = PersonalHistorySettingsContract.isPaused(
             pausedUntil: defaults.double(forKey: PersonalHistorySettingsContract.pausedUntilKey),
-            now: Date()
+            now: now()
         )
         if paused {
             breakHistorySegment()
@@ -67,7 +78,7 @@ final class GhostInputController: IMKInputController {
     }
 
     override func deactivateServer(_ sender: Any!) {
-        PersonalHistoryCapture.shared.flush()
+        capture.flush()
         breakHistorySegment()
         super.deactivateServer(sender)
     }
@@ -88,7 +99,7 @@ final class GhostInputController: IMKInputController {
         secureInput: Bool
     ) {
         let bundle = client.bundleIdentifier()
-        guard let permit = PersonalHistoryCapture.shared.permit(
+        guard let permit = capture.permit(
             appBundleIdentifier: bundle,
             secureInput: secureInput
         ) else {
@@ -100,7 +111,7 @@ final class GhostInputController: IMKInputController {
             selection: client.selectedRange()
         )
         guard prepareHistoryInsertion(text, observation: observation) else { return }
-        PersonalHistoryCapture.shared.record(
+        capture.record(
             text: text,
             source: .typed,
             sessionIdentifier: historySegmentIdentifier,
@@ -144,7 +155,7 @@ final class GhostInputController: IMKInputController {
             selection: client.selectedRange()
         )
         guard historyContinuity.isAtOwnTextEnd(bundle: observation.bundle, selection: observation.selection),
-              let permit = PersonalHistoryCapture.shared.permit(
+              let permit = capture.permit(
                 appBundleIdentifier: observation.bundle,
                 secureInput: secureInput
               ),
@@ -158,7 +169,7 @@ final class GhostInputController: IMKInputController {
             )
         }
         historyContinuity.backspaced(utf16Length: backspace.utf16Length, caret: observation.selection.location)
-        PersonalHistoryCapture.shared.recordDeletion(
+        capture.recordDeletion(
             utf16Length: backspace.utf16Length,
             sessionIdentifier: historySegmentIdentifier,
             permit: permit

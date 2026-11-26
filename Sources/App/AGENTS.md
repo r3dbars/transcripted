@@ -29,7 +29,6 @@
 - `TranscriptedAppDelegate+Lifecycle.swift` - login-item launch detection and the Quit confirmation dialogs.
 - `TranscriptedAppDelegate+LaunchReports.swift` - launch UI smoke and first-run reliability reports for automated launches.
 - `TranscriptedAppDelegate+CallActivity.swift` - wires mic, output and camera activity monitors into `MeetingPromptDetector` and the meeting session.
-- `TranscriptedAppDelegate+NextSentence.swift` - wires Write for Me's hand-off dictation, microphone level and live words.
 - `TranscriptedAppDelegate+OpenScreenDiagnostics.swift` - feeds the fixed-vocabulary open-screen tag without constructing lazy windows.
 - `TranscriptedMenuCommands.swift` - app-active command menus for capture, import, navigation, speaker search. The shortcut lists live in `Sources/UI/Settings/TranscriptedMenuCommandCatalog.swift`.
 - `TranscriptedAppState.swift` - module `AppState` (card in `Sources/AGENTS.md`): the service container.

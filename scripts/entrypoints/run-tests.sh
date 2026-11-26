@@ -481,7 +481,6 @@ APP_SOURCES=(
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber.swift"
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber+InlineRules.swift"
     "Sources/TranscriptedWriting/Core/Text/WritingSecretScrubber+Prompts.swift"
-    "Sources/Dictation/DictationHandOff.swift"
     "Sources/Dictation/DictationSessionTimeout.swift"
     "Sources/Dictation/DictationStoppedAudioRecovery.swift"
     "Sources/Dictation/DictationAudioArchive.swift"
@@ -865,6 +864,7 @@ APP_SOURCES=(
     "Sources/Support/CoalescedRefreshState.swift"
     "Sources/Writing/WritingDayFileReader.swift"
     "Sources/Writing/WritingStorageUsage.swift"
+    "Sources/Writing/LegacyWritingDataCleanup.swift"
 )
 
 # Fail early on a stale APP_SOURCES entry (renamed or deleted source) so the
