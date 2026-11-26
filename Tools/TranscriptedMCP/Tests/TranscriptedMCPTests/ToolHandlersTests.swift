@@ -30,7 +30,104 @@ final class ToolHandlersTests: XCTestCase {
         super.tearDown()
     }
 
-    func testHydrateMeetingSearchTitlesUsesFrontmatterTitle() throws {
+    func testSearchHydratesMeetingFrontmatterTitlesAndFiltersByKind() throws {
+        let meetingDir = tempDir.appendingPathComponent("meetings", isDirectory: true)
+        let dictationDir = tempDir.appendingPathComponent("dictations", isDirectory: true)
+        let writingDir = tempDir.appendingPathComponent("writing", isDirectory: true)
+        for dir in [meetingDir, dictationDir, writingDir] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Roadmap Sync",
+                date: "2026-03-26T16:04:11-0500",
+                utterances: [("system_0", 0.0, 5.0, "Let's finalize the roadmap pricing plan")]
+            ),
+            filename: "Call_2026-03-26_16-04-11",
+            to: meetingDir
+        )
+        try writeFixture(
+            makeFixtureJSON(
+                date: "2026-03-27T11:00:00-0500",
+                utterances: [("mic_0", 0.0, 5.0, "Quick untitled roadmap check-in")]
+            ),
+            filename: "Call_2026-03-27_11-00-00",
+            to: meetingDir
+        )
+        try writeFixture(
+            makeDictationDayJSON(entries: [
+                ("dictation-20260407-091500-000", "2026-04-07T09:15:00-0500", "Roadmap memo", "Send roadmap follow-up notes", "Slack", "copied"),
+            ]),
+            filename: "Dictations_2026-04-07",
+            to: dictationDir
+        )
+        try writeFixture(
+            makeWritingDayMarkdown(date: "2026-09-25", entries: [
+                ("writing-20260925-104211-001", "2026-09-25T15:42:11.000Z", "10:42 AM - Roadmap draft", "Notes", nil, 5, 32, 0, "Drafting the Q4 roadmap update"),
+            ]),
+            filename: "Writing_2026-09-25",
+            to: writingDir
+        )
+        try index.reconcile(meetingDirs: [meetingDir], dictationDirs: [dictationDir], writingDirs: [writingDir])
+
+        // Unified search across all three capture kinds.
+        let allResult = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("roadmap")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        XCTAssertNotEqual(allResult.isError, true)
+        let allDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(allResult).utf8))
+        XCTAssertEqual(Set(allDecoded.results.map(\.kind)), [.meeting, .dictation, .writing])
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "mixed")
+
+        let titled = try XCTUnwrap(allDecoded.results.first { $0.filename == "Call_2026-03-26_16-04-11" })
+        XCTAssertEqual(titled.title, "Roadmap Sync")
+        let untitled = try XCTUnwrap(allDecoded.results.first { $0.filename == "Call_2026-03-27_11-00-00" })
+        XCTAssertEqual(untitled.title, "Call_2026-03-27_11-00-00")
+
+        // Filter to meetings only.
+        let meetingsOnly = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("roadmap"), "kind": .string("meeting")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let meetingsDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(meetingsOnly).utf8))
+        XCTAssertEqual(meetingsDecoded.results.count, 2)
+        XCTAssertTrue(meetingsDecoded.results.allSatisfy { $0.kind == .meeting })
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+
+        // Filter by speaker restricts to matching meeting utterances.
+        let bySpeaker = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("roadmap"), "speaker": .string("Jenny")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let speakerDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(bySpeaker).utf8))
+        XCTAssertEqual(speakerDecoded.results.map(\.filename), ["Call_2026-03-26_16-04-11"])
+
+        // Filter to writing only.
+        let writingOnly = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("roadmap"), "kind": .string("writing")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let writingDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(writingOnly).utf8))
+        XCTAssertEqual(writingDecoded.results.map(\.kind), [.writing])
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "writing")
+    }
+
+    func testWhoIsReturnsSpeakerProfileAndTracksTelemetry() throws {
         try writeFixture(
             makeFixtureJSON(title: "Roadmap Sync", date: "2026-03-26T16:04:11-0500"),
             filename: "Call_2026-03-26_16-04-11",
@@ -38,50 +135,25 @@ final class ToolHandlersTests: XCTestCase {
         )
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        var results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
-        XCTAssertEqual(results.results.count, 1)
-        // Before hydration the index reports the filename-derived title.
-        XCTAssertEqual(results.results[0].meetingTitle, "2026:03:26 16:04:11")
+        let foundParams = CallTool.Parameters(name: "who_is", arguments: ["speaker": .string("Jenny")])
+        let foundResult = try withAgentCaptureQueryTelemetry(params: foundParams) {
+            try handleWhoIs(params: foundParams, index: index)
+        }
+        XCTAssertNotEqual(foundResult.isError, true)
+        let profile = try JSONDecoder().decode(PersonProfile.self, from: Data(resultText(foundResult).utf8))
+        XCTAssertEqual(profile.name, "Jenny Wen")
+        XCTAssertEqual(profile.meetingCount, 1)
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "speaker_lookup")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.result, "success")
 
-        hydrateMeetingSearchTitles(in: &results, meetingDirs: [tempDir])
-
-        XCTAssertEqual(results.results[0].meetingTitle, "Roadmap Sync")
-    }
-
-    func testHydrateMeetingSearchTitlesKeepsFilenameDerivedTitleWithoutFrontmatterTitle() throws {
-        try writeFixture(
-            makeFixtureJSON(date: "2026-03-26T16:04:11-0500"),
-            filename: "Call_2026-03-26_16-04-11",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        var results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
-        XCTAssertEqual(results.results.count, 1)
-
-        hydrateMeetingSearchTitles(in: &results, meetingDirs: [tempDir])
-
-        XCTAssertEqual(results.results[0].meetingTitle, "2026:03:26 16:04:11")
-    }
-
-    func testHydrateMeetingSearchTitlesKeepsFilenameDerivedTitleWhenMarkdownIsMissing() throws {
-        try writeFixture(
-            makeFixtureJSON(title: "Roadmap Sync", date: "2026-03-26T16:04:11-0500"),
-            filename: "Call_2026-03-26_16-04-11",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        var results = try index.searchUtterances(query: "roadmap", speaker: nil, dateFrom: nil, dateTo: nil)
-        XCTAssertEqual(results.results.count, 1)
-
-        // Hydrating against a directory that has no matching markdown file
-        // must leave the filename-derived title intact.
-        let emptyDir = makeTempDir()
-        defer { removeTempDir(emptyDir) }
-        hydrateMeetingSearchTitles(in: &results, meetingDirs: [emptyDir])
-
-        XCTAssertEqual(results.results[0].meetingTitle, "2026:03:26 16:04:11")
+        let missingParams = CallTool.Parameters(name: "who_is", arguments: ["speaker": .string("Nobody Known")])
+        let missingResult = try withAgentCaptureQueryTelemetry(params: missingParams) {
+            try handleWhoIs(params: missingParams, index: index)
+        }
+        XCTAssertNotEqual(missingResult.isError, true)
+        XCTAssertTrue(try resultText(missingResult).contains("No meetings found"))
+        XCTAssertEqual(telemetry.observations.last?.result, "empty_not_found")
     }
 
     func testListMeetingsTracksBucketedAgentQueryTelemetry() throws {
@@ -156,22 +228,6 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(observation.resultCountBucket, "0")
     }
 
-    func testEmptyReceiptQueryEmitsOneEmptyNotFoundTerminalEvent() throws {
-        let params = CallTool.Parameters(name: "decisions", arguments: ["count": .int(10)])
-        let result = try withAgentCaptureQueryTelemetry(params: params) {
-            try handleDecisions(params: params, index: index, meetingDirs: [tempDir])
-        }
-
-        XCTAssertNotEqual(result.isError, true)
-        XCTAssertEqual(telemetry.observations.count, 1)
-        let observation = try XCTUnwrap(telemetry.observations.first)
-        XCTAssertEqual(observation.toolKind, "decisions")
-        XCTAssertEqual(observation.captureKind, "meeting")
-        XCTAssertEqual(observation.result, "empty_not_found")
-        XCTAssertEqual(observation.sourceCountBucket, "0")
-        XCTAssertEqual(observation.resultCountBucket, "0")
-    }
-
     func testInvalidQueryEmitsOneInvalidInputTerminalEvent() throws {
         let params = CallTool.Parameters(name: "search", arguments: ["query": .string("   ")])
         let result = try withAgentCaptureQueryTelemetry(params: params) {
@@ -182,7 +238,7 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(telemetry.observations.count, 1)
         let observation = try XCTUnwrap(telemetry.observations.first)
         XCTAssertEqual(observation.toolKind, "search")
-        XCTAssertEqual(observation.captureKind, "meeting")
+        XCTAssertEqual(observation.captureKind, "mixed")
         XCTAssertEqual(observation.result, "invalid_input")
         XCTAssertEqual(observation.sourceCountBucket, "unknown")
         XCTAssertEqual(observation.resultCountBucket, "unknown")
@@ -208,7 +264,7 @@ final class ToolHandlersTests: XCTestCase {
     }
 
     func testThrownQueryEmitsOneInternalErrorTerminalEvent() throws {
-        let params = CallTool.Parameters(name: "search", arguments: ["query": .string("topic")])
+        let params = CallTool.Parameters(name: "search", arguments: ["query": .string("topic"), "kind": .string("meeting")])
 
         XCTAssertThrowsError(
             try withAgentCaptureQueryTelemetry(params: params) {
@@ -248,186 +304,6 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(observation.resultCountBucket, "2_3")
     }
 
-    func testSummaryRollupsTrackSourcedAgentQueryTelemetry() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                date: "2026-04-18",
-                time: "09:15:00",
-                decisions: ["Ship the beta on Friday", "Keep onboarding unchanged"],
-                actionItems: ["Jenny: send the revised spec", "Robin: prep launch notes"],
-                openQuestions: ["Do we need a migration window?", "Who owns the support note?"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        _ = try handleListActionItems(
-            params: CallTool.Parameters(name: "list_action_items", arguments: ["count": .int(10)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "action_items")
-        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "2_3")
-
-        _ = try handleListDecisions(
-            params: CallTool.Parameters(name: "list_decisions", arguments: ["count": .int(10)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "decisions")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "2_3")
-
-        _ = try handleDigest(
-            params: CallTool.Parameters(name: "digest", arguments: ["date_from": .string("2026-04-18"), "date_to": .string("2026-04-18")]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "digest")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "1")
-    }
-
-    func testReceiptToolsTrackSourcedAgentQueryTelemetry() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                date: "2026-04-18",
-                time: "09:15:00",
-                decisions: ["Ship the beta on Friday", "Keep onboarding unchanged"],
-                actionItems: ["Jenny: send the revised spec", "Robin: prep launch notes"],
-                openQuestions: ["Do we need a migration window?", "Who owns the support note?"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        _ = try handleDecisions(
-            params: CallTool.Parameters(name: "decisions", arguments: ["count": .int(10)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "decisions")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "2_3")
-
-        _ = try handleCommitments(
-            params: CallTool.Parameters(name: "commitments", arguments: ["count": .int(10)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "commitments")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "2_3")
-
-        _ = try handleOpenQuestions(
-            params: CallTool.Parameters(name: "open_questions", arguments: ["count": .int(10)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "open_questions")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "2_3")
-
-        try writeFixture(
-            makeFixtureJSON(
-                date: "2026-04-19T09:15:00-0500",
-                utterances: [
-                    ("mic_0", 0.0, 5.0, "Pricing receipt needs a product follow-up"),
-                    ("mic_0", 10.0, 15.0, "Pricing receipt also needs a support follow-up"),
-                ]
-            ),
-            filename: "Call_2026-04-19_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        _ = try handleSearchMeetings(
-            params: CallTool.Parameters(name: "search_meetings", arguments: ["query": .string("pricing receipt")]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "2_3")
-    }
-
-    func testRecapReturnsStructuredSummaryWhenPresent() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                date: "2026-04-18",
-                time: "09:15:00",
-                decisions: ["Ship the beta on Friday"],
-                actionItems: ["Jenny: send the revised spec (due: Friday)"],
-                openQuestions: ["Do we need a migration window?"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let recap = try decodedRecap(date: "2026-04-18")
-        let meeting = try XCTUnwrap(recap.meetings.first)
-
-        XCTAssertEqual(meeting.title, "Beta launch sync")
-        XCTAssertEqual(meeting.summarySource, "summary")
-        XCTAssertEqual(meeting.decisions, ["Ship the beta on Friday"])
-        XCTAssertEqual(meeting.actionItems, [
-            RecapActionItem(owner: "Jenny", text: "send the revised spec", due: "Friday")
-        ])
-        XCTAssertEqual(meeting.openQuestions, ["Do we need a migration window?"])
-        XCTAssertTrue(meeting.preview.contains("## Decisions"))
-        XCTAssertFalse(meeting.preview.contains("[00:00]"), "recap should not leak raw dialogue when a summary exists")
-    }
-
-    func testRecapFallsBackToRawLinesWhenSummaryIsMissing() throws {
-        try writeFixture(
-            makeFixtureJSON(
-                title: "Fallback Sync",
-                date: "2026-04-19T10:00:00-0500",
-                utterances: [
-                    ("mic_0", 0.0, 5.0, "This raw line is only for fallback"),
-                    ("system_0", 5.0, 10.0, "Second fallback line"),
-                ]
-            ),
-            filename: "Call_2026-04-19_10-00-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let meeting = try XCTUnwrap(decodedRecap(date: "2026-04-19").meetings.first)
-        XCTAssertEqual(meeting.summarySource, "transcript_fallback")
-        XCTAssertTrue(meeting.decisions.isEmpty)
-        XCTAssertTrue(meeting.actionItems.isEmpty)
-        XCTAssertTrue(meeting.openQuestions.isEmpty)
-        XCTAssertTrue(meeting.preview.contains("This raw line is only for fallback"))
-    }
-
-    func testRecapFallsBackForMalformedEmptySummary() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                date: "2026-04-20",
-                time: "11:00:00",
-                decisions: [],
-                actionItems: [],
-                openQuestions: []
-            ),
-            filename: "Call_2026-04-20_11-00-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let meeting = try XCTUnwrap(decodedRecap(date: "2026-04-20").meetings.first)
-        XCTAssertEqual(meeting.summarySource, "transcript_fallback")
-        XCTAssertTrue(meeting.decisions.isEmpty)
-        XCTAssertTrue(meeting.actionItems.isEmpty)
-        XCTAssertTrue(meeting.openQuestions.isEmpty)
-        XCTAssertTrue(meeting.preview.contains("Let's lock the launch."))
-    }
-
     func testStatusToolReportsDirectoriesAndIndexCounts() throws {
         try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: tempDir)
@@ -447,10 +323,8 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(payload.indexedMeetings, 1)
         XCTAssertEqual(payload.indexedDictationDays, 1)
         XCTAssertEqual(payload.indexedDictationEntries, 2)
-        // Fixture summary: 2 decisions + 2 action items + 1 open question.
-        XCTAssertEqual(payload.indexedSummaryItems, 5)
-        XCTAssertEqual(payload.summarizedMeetings, 1)
-        XCTAssertTrue(payload.summariesIndexed)
+        XCTAssertEqual(payload.indexedWritingDays, 0)
+        XCTAssertEqual(payload.indexedWritingEntries, 0)
     }
 
     func testStatusToolReportsZeroCountsOnEmptyIndex() throws {
@@ -460,8 +334,9 @@ final class ToolHandlersTests: XCTestCase {
         let payload = try JSONDecoder().decode(StatusResult.self, from: Data(resultText(result).utf8))
         XCTAssertEqual(payload.indexedMeetings, 0)
         XCTAssertEqual(payload.indexedDictationDays, 0)
-        XCTAssertEqual(payload.indexedSummaryItems, 0)
-        XCTAssertFalse(payload.summariesIndexed)
+        XCTAssertEqual(payload.indexedDictationEntries, 0)
+        XCTAssertEqual(payload.indexedWritingDays, 0)
+        XCTAssertEqual(payload.indexedWritingEntries, 0)
     }
 
     func testEmptyListMeetingsDescribesSearchedDirectoriesAndHint() throws {
@@ -525,28 +400,6 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(payload.indexedMeetings, 0)
         XCTAssertEqual(payload.indexedDictationDays, 0)
         XCTAssertTrue(payload.hint.contains("Nothing is indexed"))
-    }
-
-    func testEmptyActionItemsExplainMissingSummaries() throws {
-        // Meeting without a saved summary: indexed, but no summary rows.
-        try writeFixture(
-            makeFixtureJSON(date: "2026-03-26T16:04:11-0500"),
-            filename: "Call_2026-03-26_16-04-11",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleListActionItems(
-            params: CallTool.Parameters(name: "list_action_items", arguments: [:]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        XCTAssertNotEqual(result.isError, true)
-        let payload = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(resultText(result).utf8))
-        XCTAssertEqual(payload.indexedMeetings, 1)
-        XCTAssertEqual(payload.indexedSummaryItems, 0)
-        XCTAssertTrue(payload.hint.contains("No structured summaries are indexed"))
     }
 
     func testReadMeetingSmallFullReadStaysByteIdenticalRawMarkdown() throws {
@@ -836,219 +689,12 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "1")
     }
 
-    func testListActionItemsDoneStatusReturnsStructuredEmptyResult() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                actionItems: ["Jenny: Confirm the venue (done)"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleListActionItems(
-            params: CallTool.Parameters(name: "list_action_items", arguments: ["status": .string("done")]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        XCTAssertNotEqual(result.isError, true)
-        let text = try resultText(result)
-        let decoded = try JSONDecoder().decode(ActionItemsResult.self, from: Data(text.utf8))
-        XCTAssertEqual(decoded.status, "done")
-        XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded.items.first?.text, "Confirm the venue")
-        XCTAssertEqual(decoded.items.first?.status, "done")
-    }
-
-    func testDecisionsToolReturnsStructuredReceipts() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                decisions: ["Keep pricing simple", "Ship the beta on Friday"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleDecisions(
-            params: CallTool.Parameters(
-                name: "decisions",
-                arguments: ["topic": .string("pricing"), "range": .string("2026-04-18")]
-            ),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        let decoded = try decodeCrossMeetingResult(result)
-        XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded.results.first?.meetingId, "Call_2026-04-18_09-15-00")
-        XCTAssertEqual(decoded.results.first?.timestamp, nil)
-        XCTAssertEqual(decoded.results.first?.quote, "Keep pricing simple")
-    }
-
-    func testCommitmentsToolFiltersByPerson() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                actionItems: ["Jenny: send the revised spec", "Sam: draft the launch note"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleCommitments(
-            params: CallTool.Parameters(
-                name: "commitments",
-                arguments: ["person": .string("Jenny"), "range": .string("2026-04-01..2026-04-30")]
-            ),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        let decoded = try decodeCrossMeetingResult(result)
-        XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded.results.first?.person, "Jenny")
-        XCTAssertEqual(decoded.results.first?.quote, "Jenny: send the revised spec")
-    }
-
-    func testOpenQuestionsToolFiltersByProject() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                openQuestions: ["Should the pricing page mention credits?", "Do we need a migration window?"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleOpenQuestions(
-            params: CallTool.Parameters(
-                name: "open_questions",
-                arguments: ["project": .string("pricing credits")]
-            ),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        let decoded = try decodeCrossMeetingResult(result)
-        XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded.results.first?.kind, "open_question")
-        XCTAssertEqual(decoded.results.first?.quote, "Should the pricing page mention credits?")
-    }
-
-    func testSearchMeetingsToolReturnsUtteranceReceiptsWithTimestamps() throws {
-        try writeFixture(
-            makeFixtureJSON(
-                utterances: [
-                    ("mic_0", 0.0, 5.0, "Good morning everyone"),
-                    ("system_0", 125.0, 135.0, "The pricing decision needs a receipt"),
-                ]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleSearchMeetings(
-            params: CallTool.Parameters(name: "search_meetings", arguments: ["query": .string("pricing receipt")]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        let decoded = try decodeCrossMeetingResult(result)
-        XCTAssertEqual(decoded.count, 1)
-        XCTAssertEqual(decoded.results.first?.meetingId, "Call_2026-04-18_09-15-00")
-        XCTAssertEqual(decoded.results.first?.timestamp, "2:05")
-        XCTAssertEqual(decoded.results.first?.quote, "The pricing decision needs a receipt")
-        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
-        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
-        XCTAssertEqual(telemetry.observations.last?.sourceCountBucket, "1")
-        XCTAssertEqual(telemetry.observations.last?.resultCountBucket, "1")
-    }
-
-    func testCrossMeetingToolsReturnStructuredEmptyCorpusResults() throws {
-        let decisions = try decodeCrossMeetingResult(try handleDecisions(
-            params: CallTool.Parameters(name: "decisions", arguments: ["topic": .string("pricing")]),
-            index: index,
-            meetingDirs: [tempDir]
-        ))
-        let commitments = try decodeCrossMeetingResult(try handleCommitments(
-            params: CallTool.Parameters(name: "commitments", arguments: ["person": .string("Jenny")]),
-            index: index,
-            meetingDirs: [tempDir]
-        ))
-        let questions = try decodeCrossMeetingResult(try handleOpenQuestions(
-            params: CallTool.Parameters(name: "open_questions", arguments: ["project": .string("pricing")]),
-            index: index,
-            meetingDirs: [tempDir]
-        ))
-        let search = try decodeCrossMeetingResult(try handleSearchMeetings(
-            params: CallTool.Parameters(name: "search_meetings", arguments: ["query": .string("pricing")]),
-            index: index,
-            meetingDirs: [tempDir]
-        ))
-
-        XCTAssertEqual(decisions.count, 0)
-        XCTAssertEqual(commitments.count, 0)
-        XCTAssertEqual(questions.count, 0)
-        XCTAssertEqual(search.count, 0)
-    }
-
-    func testCrossMeetingToolsIgnoreMeetingsWithoutSummaries() throws {
-        try writeFixture(makeFixtureJSON(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleDecisions(
-            params: CallTool.Parameters(name: "decisions", arguments: ["topic": .string("pricing")]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        let decoded = try decodeCrossMeetingResult(result)
-        XCTAssertEqual(decoded.count, 0)
-        XCTAssertTrue(decoded.results.isEmpty)
-    }
-
-    func testCrossMeetingToolResultLimitsAreCappedAndTruncated() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(
-                decisions: ["Decision one", "Decision two", "Decision three"]
-            ),
-            filename: "Call_2026-04-18_09-15-00",
-            to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let result = try handleDecisions(
-            params: CallTool.Parameters(name: "decisions", arguments: ["count": .int(2)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-
-        let decoded = try decodeCrossMeetingResult(result)
-        XCTAssertEqual(decoded.count, 2)
-        XCTAssertTrue(decoded.truncated)
-        XCTAssertEqual(decoded.results.map(\.quote), ["Decision one", "Decision two"])
-    }
-
     private func resultText(_ result: CallTool.Result) throws -> String {
         guard case .text(let text, _, _) = try XCTUnwrap(result.content.first) else {
             XCTFail("Expected text content")
             return ""
         }
         return text
-    }
-
-    private func decodedRecap(date: String) throws -> RecapResult {
-        let result = try handleRecap(
-            params: CallTool.Parameters(name: "recap", arguments: ["date_from": .string(date), "date_to": .string(date)]),
-            index: index,
-            meetingDirs: [tempDir]
-        )
-        let text = try XCTUnwrap(result.textContent)
-        let data = try XCTUnwrap(text.data(using: .utf8))
-        return try JSONDecoder().decode(RecapResult.self, from: data)
     }
 }
 
@@ -1086,22 +732,4 @@ private final class RequestCapturingAgentCaptureQueryTelemetry: AgentCaptureQuer
         }
         self.properties = properties.compactMapValues { $0 as? String }
     }
-}
-
-private extension CallTool.Result {
-    var textContent: String? {
-        guard let first = content.first,
-              case .text(let text, _, _) = first else {
-            return nil
-        }
-        return text
-    }
-}
-
-private func decodeCrossMeetingResult(_ result: CallTool.Result) throws -> CrossMeetingToolResult {
-    guard case .text(let text, _, _) = result.content.first else {
-        XCTFail("Expected text tool result")
-        throw NSError(domain: "ToolHandlersTests", code: 1)
-    }
-    return try JSONDecoder().decode(CrossMeetingToolResult.self, from: Data(text.utf8))
 }

@@ -127,6 +127,126 @@ final class ProcessStartupTests: XCTestCase {
         XCTAssertEqual(serverInfo["version"] as? String, TranscriptedMCP.serverVersion)
     }
 
+    func testExecutableListsExactCoreToolsetOverStdio() throws {
+        let executable = builtExecutable()
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path))
+
+        let dataRoot = makeTempDir()
+        defer { removeTempDir(dataRoot) }
+
+        let process = Process()
+        let standardInput = Pipe()
+        let standardOutput = Pipe()
+        process.executableURL = executable
+        process.standardInput = standardInput
+        process.standardOutput = standardOutput
+        process.standardError = Pipe()
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["TRANSCRIPTED_DATA_DIR"] = dataRoot.path
+        environment["TRANSCRIPTED_INDEX_DIR"] = dataRoot.appendingPathComponent("index").path
+        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
+        process.environment = environment
+
+        let toolsReceived = expectation(description: "tools/list response")
+        let responseBox = ProcessResponseBox()
+        let outputLock = NSLock()
+        var outputBuffer = Data()
+        standardOutput.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+
+            outputLock.lock()
+            outputBuffer.append(data)
+            while let newline = outputBuffer.firstIndex(of: 0x0A) {
+                let line = outputBuffer[..<newline]
+                outputBuffer.removeSubrange(...newline)
+                guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
+                      let response = object as? [String: Any],
+                      (response["id"] as? NSNumber)?.intValue == 2 else {
+                    continue
+                }
+                responseBox.set(response)
+                toolsReceived.fulfill()
+                break
+            }
+            outputLock.unlock()
+        }
+
+        try process.run()
+        defer {
+            standardOutput.fileHandleForReading.readabilityHandler = nil
+            try? standardInput.fileHandleForWriting.close()
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        let frames = [
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"synthetic-test-client","version":"1.0"}}}"#,
+            #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            #"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+        ].joined(separator: "\n") + "\n"
+        try standardInput.fileHandleForWriting.write(contentsOf: Data(frames.utf8))
+
+        XCTAssertEqual(XCTWaiter.wait(for: [toolsReceived], timeout: 5), .completed)
+        let response = try XCTUnwrap(responseBox.get())
+        let result = try XCTUnwrap(response["result"] as? [String: Any])
+        let tools = try XCTUnwrap(result["tools"] as? [[String: Any]])
+        let names = tools.compactMap { $0["name"] as? String }
+        XCTAssertEqual(
+            names,
+            [
+                "list_meetings",
+                "read_meeting",
+                "list_dictations",
+                "read_dictation",
+                "list_writing",
+                "read_writing",
+                "search",
+                "recent_context",
+                "who_is",
+                "status",
+            ]
+        )
+    }
+
+    func testSelfTestFlagExitsCleanlyWithValidJSON() throws {
+        let executable = builtExecutable()
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path))
+
+        let dataRoot = makeTempDir()
+        defer { removeTempDir(dataRoot) }
+
+        let process = Process()
+        let standardOutput = Pipe()
+        process.executableURL = executable
+        process.arguments = ["--self-test"]
+        process.standardOutput = standardOutput
+        process.standardError = Pipe()
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["TRANSCRIPTED_DATA_DIR"] = dataRoot.path
+        environment["TRANSCRIPTED_MEETINGS_DIR"] = dataRoot.appendingPathComponent("meetings").path
+        environment["TRANSCRIPTED_DICTATIONS_DIR"] = dataRoot.appendingPathComponent("dictations").path
+        environment["TRANSCRIPTED_WRITING_DIR"] = dataRoot.appendingPathComponent("writing").path
+        environment["TRANSCRIPTED_INDEX_DIR"] = dataRoot.appendingPathComponent("index").path
+        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
+        process.environment = environment
+
+        try process.run()
+        process.waitUntilExit()
+
+        XCTAssertEqual(process.terminationStatus, 0)
+        let output = standardOutput.fileHandleForReading.readDataToEndOfFile()
+        let object = try XCTUnwrap(try JSONSerialization.jsonObject(with: output) as? [String: Any])
+        XCTAssertEqual(object["ok"] as? Bool, true)
+        XCTAssertEqual(object["meeting_file_count"] as? Int, 0)
+        XCTAssertEqual(object["dictation_file_count"] as? Int, 0)
+        XCTAssertEqual(object["writing_file_count"] as? Int, 0)
+    }
+
     func testConcurrentExecutablesAnswerInitializeAgainstSharedColdIndex() throws {
         let executable = builtExecutable()
         XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path))

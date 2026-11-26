@@ -435,9 +435,6 @@ struct StatusResult: Codable {
     let indexedDictationEntries: Int
     let indexedWritingDays: Int
     let indexedWritingEntries: Int
-    let indexedSummaryItems: Int
-    let summarizedMeetings: Int
-    let summariesIndexed: Bool
 
     enum CodingKeys: String, CodingKey {
         case serverVersion = "server_version"
@@ -452,9 +449,6 @@ struct StatusResult: Codable {
         case indexedDictationEntries = "indexed_dictation_entries"
         case indexedWritingDays = "indexed_writing_days"
         case indexedWritingEntries = "indexed_writing_entries"
-        case indexedSummaryItems = "indexed_summary_items"
-        case summarizedMeetings = "summarized_meetings"
-        case summariesIndexed = "summaries_indexed"
     }
 }
 
@@ -468,7 +462,6 @@ struct EmptyQueryResult: Codable {
     let indexedDictationEntries: Int?
     var indexedWritingDays: Int? = nil
     var indexedWritingEntries: Int? = nil
-    let indexedSummaryItems: Int?
     let hint: String
 
     enum CodingKeys: String, CodingKey {
@@ -478,7 +471,6 @@ struct EmptyQueryResult: Codable {
         case indexedDictationEntries = "indexed_dictation_entries"
         case indexedWritingDays = "indexed_writing_days"
         case indexedWritingEntries = "indexed_writing_entries"
-        case indexedSummaryItems = "indexed_summary_items"
         case hint
     }
 }
@@ -558,131 +550,6 @@ struct WritingDayPage: Codable {
         case totalEntries = "total_entries"
         case nextOffset = "next_offset"
     }
-}
-
-// MARK: - Summary-Fact Rollups (cross-meeting tools)
-
-/// Open/done/all filter for `list_action_items`.
-enum ActionItemStatusFilter: String {
-    case open
-    case done
-    case all
-
-    init(raw: String?) {
-        switch raw?.lowercased() {
-        case "done", "closed", "completed": self = .done
-        case "all", "any": self = .all
-        default: self = .open
-        }
-    }
-}
-
-struct ActionItemRecord: Codable {
-    let filename: String
-    var meetingTitle: String
-    let date: String
-    let datetime: String
-    let text: String
-    let owner: String?
-    let status: String?
-    let due: String?
-
-    enum CodingKeys: String, CodingKey {
-        case filename, date, datetime, text, owner, status, due
-        case meetingTitle = "meeting_title"
-    }
-}
-
-struct ActionItemsResult: Codable {
-    let owner: String?
-    let status: String
-    let count: Int
-    let truncated: Bool
-    var items: [ActionItemRecord]
-}
-
-struct DecisionRecord: Codable {
-    let filename: String
-    var meetingTitle: String
-    let date: String
-    let datetime: String
-    let text: String
-
-    enum CodingKeys: String, CodingKey {
-        case filename, date, datetime, text
-        case meetingTitle = "meeting_title"
-    }
-}
-
-struct DecisionsResult: Codable {
-    let count: Int
-    let truncated: Bool
-    var decisions: [DecisionRecord]
-}
-
-struct DigestActionItem: Codable {
-    let text: String
-    let owner: String?
-    let status: String?
-    let due: String?
-}
-
-struct DigestMeeting: Codable {
-    let filename: String
-    var title: String
-    let date: String
-    let datetime: String
-    let decisions: [String]
-    let actionItems: [DigestActionItem]
-    let openQuestions: [String]
-
-    enum CodingKeys: String, CodingKey {
-        case filename, title, date, datetime, decisions
-        case actionItems = "action_items"
-        case openQuestions = "open_questions"
-    }
-}
-
-struct DigestResult: Codable {
-    let dateRange: String
-    let meetingCount: Int
-    let truncated: Bool
-    let actionItemCount: Int
-    let openActionItemCount: Int
-    let decisionCount: Int
-    let openQuestionCount: Int
-    var meetings: [DigestMeeting]
-
-    enum CodingKeys: String, CodingKey {
-        case dateRange = "date_range"
-        case meetingCount = "meeting_count"
-        case actionItemCount = "action_item_count"
-        case openActionItemCount = "open_action_item_count"
-        case decisionCount = "decision_count"
-        case openQuestionCount = "open_question_count"
-        case meetings, truncated
-    }
-}
-
-// MARK: - WS2.3 Cross-Meeting Retrieval
-
-struct CrossMeetingReceipt: Codable {
-    let meetingId: String
-    var meetingTitle: String
-    let timestamp: String?
-    let quote: String
-    let date: String
-    let datetime: String
-    let kind: String?
-    let person: String?
-}
-
-struct CrossMeetingToolResult: Codable {
-    let query: String?
-    let range: String?
-    let count: Int
-    let truncated: Bool
-    var results: [CrossMeetingReceipt]
 }
 
 // MARK: - Errors

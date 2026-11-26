@@ -2,7 +2,7 @@
 
 Standalone stdio MCP server (`transcripted-mcp`) for querying saved Transcripted meetings, dictations, and writing from Claude Desktop or any MCP client. Setup and client config are in [README.md](README.md).
 
-It never writes capture data and has no compile-time dependency on the app target. It builds its own SQLite index from the Markdown on disk, plus a small companion bridge to the running app (see Companion).
+It never writes capture data and has no compile-time dependency on the app target. It builds its own SQLite index from the Markdown on disk.
 
 ## Where it reads
 
@@ -20,20 +20,15 @@ Overrides: `TRANSCRIPTED_DATA_DIR`, `TRANSCRIPTED_MEETINGS_DIR`, `TRANSCRIPTED_D
 
 ## Tools
 
-All read-only. Registered in `ToolHandlers.swift`; bodies live in `ToolHandlers+*.swift`.
+All 10 tools are read-only. Registered in `ToolHandlers.swift`; bodies live in `ToolHandlers+*.swift`.
 
 | Family | Tools |
 |--------|-------|
 | Meetings | `list_meetings`, `read_meeting` (`section` full/transcript/speakers, `offset`/`limit`) |
 | Dictations | `list_dictations`, `read_dictation` (day, `entry_id`, or `offset`/`limit`) |
 | Writing | `list_writing`, `read_writing` (same shape as dictations) |
-| Search | `search`, `search_context` (meetings/dictations/writing/all; writing is full-text only), `recent_context`, `who_is`. `mode` is `hybrid` (default), `lexical`, or `semantic` |
-| Rollups | `recap`, `list_action_items` (`status` open/done/all; default open, done matches parsed completion markers), `list_decisions`, `digest` |
-| Receipts | `decisions`, `commitments`, `open_questions`, `search_meetings` (share `handleReceiptQuery`) |
+| Search | `search` (unified across `all`/meetings/dictations/writing; `mode` is `hybrid` default, `lexical`, or `semantic`; writing is full-text only), `recent_context`, `who_is` |
 | Diagnostics | `status`: version, resolved dirs and which rule chose them, index location, counts |
-| MCP Apps | `show_recent_meetings` returns a `ui://` HTML widget plus `structuredContent` (`UIResourceHandlers.swift`) |
-
-Rollups and receipts read local `meeting_summary_items` and utterance FTS. No embeddings, cloud calls, or LLM synthesis.
 
 Common shapes:
 
@@ -41,15 +36,9 @@ Common shapes:
 - by speaker: `search {"query":"topic","speaker":"Name"}` or `who_is {"speaker":"Name"}`
 - dictations by day: `list_dictations {"date":"2026-04-29"}`, then `read_dictation` with the returned filename
 
-## Companion
+## Transport compatibility
 
-A separate tool surface that talks to the running app over a local socket: `show_companion`, `get_recording_status`, `start_meeting`, `stop_meeting`, `set_live_context_sharing`, `read_live_transcript`, `get_live_meeting_context`, `browse_companion_context`, `read_context_passage`. Resource `transcripted_companion` (`text/html;profile=mcp-app`).
-
-- `CompanionClient.swift` reads `<Application Support>/Transcripted/companion/connection.json` (root overridable with `TRANSCRIPTED_CONTAINER_DIR`). It requires owner-only dir and socket, no symlinks, socket inside the root. Keep those checks strict. It never logs credentials, paths, or native payloads.
-- `CompanionTools.swift` keeps view data in tool-result `_meta` so it stays out of model context until the user attaches it.
-- `CompanionUI.swift` is self-contained: no analytics, network fetches, audio, or model replies.
-- `CompanionTransport.swift` wraps `BlockingStdioTransport` and only rewrites the `initialize` experimental-capabilities field (SDK 0.12 expects strings, MCP Apps hosts send objects). Never rewrite tool requests or replies.
-- `test-support/companion_preview.py` is a fixture-only preview with an invented socket. No app, mic, or real library.
+- `CompanionTransport.swift` wraps `BlockingStdioTransport` and only rewrites the `initialize` experimental-capabilities field (SDK 0.12 expects strings, while newer MCP hosts send objects). Never rewrite tool requests or replies.
 
 ## Data flow and index
 
@@ -58,8 +47,7 @@ captures/*.md -> TranscriptLoader (direct reads: read_meeting/read_dictation/rea
               -> TranscriptIndex.reconcile() at startup -> FileWatcher incremental updates -> SQLite
 ```
 
-- Index tables: meetings, speakers and utterance rows, `meeting_summary_items` (one row per Decision / Action Item with owner / Open Question, `kind` discriminator, FTS5), dictation days and entries, `writing_days` / `writing_entries` + FTS5. Schema version is 6 (`TranscriptIndex.swift`); an older `user_version` rebuilds from disk. DDL is in `TranscriptIndex+Schema.swift`.
-- Summary items come from `TranscriptedCaptureKit.CaptureSummaryParser` during `indexMeeting`: heuristic `auto_summary_*` frontmatter from the current meeting-save pipeline, older `local_summary_*` fields and inline blocks, or a legacy `<stem>.summary.md` sidecar. The current heuristic extraction does not use an AI model; meetings without indexable summary fields contribute no summary rows. Cross-meeting queries go through `TranscriptIndex.listSummaryItems(kind:owner:dateFrom:dateTo:)`.
+- Index tables: meetings, speakers and utterance rows, `meeting_summary_documents` + FTS5 (summary title/attendees/decisions/action items/open questions so `search` matches summary fields alongside dialogue), dictation days and entries, `writing_days` / `writing_entries` + FTS5. Schema version is 11 (`TranscriptIndex.swift`); an older `user_version` rebuilds from disk. DDL is in `TranscriptIndex+Schema.swift`.
 - `FileWatcher` debounces 500ms and also scans on a 5-minute timer.
 
 ## Semantic search
@@ -78,10 +66,9 @@ All under `Sources/TranscriptedMCP/`:
 | File | Owns |
 |------|------|
 | `Main.swift` | Entry point, `--help` / `--version` / `--self-test`, startup order, watchers |
-| `BlockingStdioTransport.swift`, `Companion*.swift` | Transport and companion bridge above |
+| `BlockingStdioTransport.swift`, `CompanionTransport.swift` | Stdio transport and SDK 0.12 `initialize` compatibility wrapper |
 | `DataDirectories.swift`, `PathSecurity.swift` | Index-dir resolution over the kit resolver; traversal/symlink guard for direct reads |
-| `ToolHandlers.swift`, `ToolHandlers+*.swift` | Registration and per-family handlers |
-| `UIResourceHandlers.swift`, `RecentMeetingsWidget*.swift` | MCP Apps widget, model, builder |
+| `ToolHandlers.swift`, `ToolHandlers+*.swift` | Registration, `status`, and per-family handlers |
 | `TranscriptIndex.swift`, `TranscriptIndex+*.swift` | Connection lifecycle, schema gate, reconcile, per-kind queries |
 | `SQLiteHelpers.swift` | Plumbing shared by `TranscriptIndex` and `EmbeddingStore` |
 | `EmbeddingProvider.swift`, `EmbeddingStore.swift`, `SemanticSearchFusion.swift` | Semantic layer |
@@ -113,7 +100,7 @@ swift build -c release && swift test
 )
 ```
 
-- `Tests/TranscriptedMCPTests/` covers directory resolution, index lifecycle, summary rollups, tool handlers, loader and frontmatter parity, embeddings (backfill, cache, search), transports, companion, widget, telemetry, and writing. `ProcessStartupTests` launches the built executable for a real `initialize` round trip. `TestHelpers.swift` has the fixtures.
+- `Tests/TranscriptedMCPTests/` covers directory resolution, index lifecycle, tool handlers, loader and frontmatter parity, embeddings (backfill, cache, search), transports, telemetry, and writing. `ProcessStartupTests` launches the built executable for `initialize`, `tools/list`, and `--self-test` round trips. `TestHelpers.swift` has the fixtures.
 - App builds bundle a signed copy at `Transcripted.app/Contents/Helpers/transcripted-mcp`. The in-app Claude Desktop installer copies it to `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`.
 
 ## Gotchas

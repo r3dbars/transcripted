@@ -98,15 +98,11 @@ struct TranscriptedMCP {
             name: "transcripted",
             version: serverVersion,
             capabilities: .init(
-                resources: .init(subscribe: false, listChanged: false),
                 tools: .init(listChanged: false)
             )
         )
 
         await registerToolHandlers(server: server, index: index, directories: directories)
-        await TranscriptedUIResources.register(
-            server: server, index: index, directories: directories, serverVersion: serverVersion
-        )
 
         // Start stdio transport
         let transport = CompanionTransport()
@@ -135,7 +131,7 @@ struct TranscriptedMCP {
     }
 
     private static let helpText = """
-    OVERVIEW: Local MCP server for Transcripted context and its opt-in ChatGPT companion.
+    OVERVIEW: Local read-only MCP server for Transcripted meetings, dictations, and writing.
 
     USAGE: transcripted-mcp [--self-test] [--version] [--help]
 

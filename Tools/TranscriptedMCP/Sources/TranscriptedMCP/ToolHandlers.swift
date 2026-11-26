@@ -91,39 +91,8 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
-                name: "search",
-                description: "Search meeting transcripts. Defaults to hybrid search: exact full-text matches PLUS on-device semantic matches, so paraphrases hit (e.g. 'pricing pushback' finds 'they balked at the cost'). Returns matching utterances with speaker, timestamp, and meeting context. When truncated is true, total_meetings_matched is a lower bound; narrow the query or date range for more focused results. Optionally filter by speaker name (supports variants: Mike finds Michael) or date range.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "query": .object([
-                            "type": .string("string"),
-                            "description": .string("Search query (e.g. 'product roadmap discussion')")
-                        ]),
-                        "speaker": .object([
-                            "type": .string("string"),
-                            "description": .string("Filter to utterances by this speaker")
-                        ]),
-                        "mode": .object([
-                            "type": .string("string"),
-                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical' (exact/stemmed only), or 'semantic' (paraphrase only). Semantic and hybrid fall back to lexical when the on-device embedding model is unavailable.")
-                        ]),
-                        "date_from": .object([
-                            "type": .string("string"),
-                            "description": .string("Start date filter (YYYY-MM-DD)")
-                        ]),
-                        "date_to": .object([
-                            "type": .string("string"),
-                            "description": .string("End date filter (YYYY-MM-DD)")
-                        ]),
-                    ]),
-                    "required": .array([.string("query")]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
                 name: "read_dictation",
-                description: "Read a saved dictation day, one specific entry by ID, or a bounded window of entries. Use list_dictations or recent_context first to find the filename or entry_id you need. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
+                description: "Read a saved dictation day, one specific entry by ID, or a bounded window of entries. Use list_dictations, recent_context, or search first to find the filename or entry_id you need. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -133,7 +102,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "entry_id": .object([
                             "type": .string("string"),
-                            "description": .string("Optional entry ID from recent_context or search_context to return one dictation entry")
+                            "description": .string("Optional entry ID from recent_context or search to return one dictation entry")
                         ]),
                         "offset": .object([
                             "type": .string("integer"),
@@ -176,7 +145,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             ),
             Tool(
                 name: "read_writing",
-                description: "Read a saved writing day, one specific entry by ID, or a bounded window of entries. Use list_writing, recent_context, or search_context first to find the filename or entry_id. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
+                description: "Read a saved writing day, one specific entry by ID, or a bounded window of entries. Use list_writing, recent_context, or search first to find the filename or entry_id. Prefer entry_id for a single entry. Without entry_id, pass offset/limit to page through entries; day files over ~30k characters are automatically truncated to a window with total_entries, next_offset, and a continuation hint.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
@@ -186,7 +155,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                         ]),
                         "entry_id": .object([
                             "type": .string("string"),
-                            "description": .string("Optional entry ID from recent_context or search_context to return one writing entry")
+                            "description": .string("Optional entry ID from recent_context or search to return one writing entry")
                         ]),
                         "offset": .object([
                             "type": .string("integer"),
@@ -202,30 +171,30 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
-                name: "search_context",
-                description: "Search across saved meetings, dictations, writing, or all of them. Defaults to hybrid (full-text + on-device semantic), so paraphrases match, not just exact wording; writing is matched by full text only. Results are ranked by relevance across kinds, not by date; use recent_context for newest first. When truncated is true, total_items_matched is a lower bound; increase count or narrow the query/date range. Great for finding everything you captured about a topic, whether it came from a meeting, a quick dictated note, or something you wrote.",
+                name: "search",
+                description: "Search across saved meetings, dictations, and writing (or filter to a single capture type with kind). Defaults to hybrid search (full-text + on-device semantic) so paraphrases match, not just exact wording; writing is matched by full text. Results are ranked by relevance across kinds, not by date; use recent_context for newest first. Optionally filter by speaker name (meetings only; supports variants like Mike -> Michael), kind, count, or date range.",
                 inputSchema: .object([
                     "type": .string("object"),
                     "properties": .object([
                         "query": .object([
                             "type": .string("string"),
-                            "description": .string("Search query")
+                            "description": .string("Search query (e.g. 'product roadmap discussion')")
                         ]),
                         "kind": .object([
                             "type": .string("string"),
-                            "description": .string("Which context to search: 'all' (default), 'meeting', 'dictation', or 'writing'")
+                            "description": .string("Capture type to search: 'all' (default), 'meeting', 'dictation', or 'writing'")
                         ]),
                         "mode": .object([
                             "type": .string("string"),
-                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical', or 'semantic'. Falls back to lexical when the embedding model is unavailable.")
+                            "description": .string("Search strategy: 'hybrid' (default — FTS + semantic), 'lexical' (exact/stemmed only), or 'semantic' (paraphrase only). Falls back to lexical when the on-device embedding model is unavailable.")
                         ]),
                         "speaker": .object([
                             "type": .string("string"),
-                            "description": .string("Optional speaker filter for meeting results")
+                            "description": .string("Optional speaker filter for meeting results (supports variants: Mike finds Michael)")
                         ]),
                         "count": .object([
                             "type": .string("integer"),
-                            "description": .string("Maximum number of context items to return (default: 10, max: 50)")
+                            "description": .string("Maximum number of matching items to return (default: 10, max: 50)")
                         ]),
                         "date_from": .object([
                             "type": .string("string"),
@@ -282,191 +251,6 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
-                name: "recap",
-                description: "Get a structured digest of up to 50 meetings in a date range. Reports truncated=true when more match; narrow the date range to retrieve omitted meetings. Returns each meeting with title, speakers, duration, and a preview of the first ~200 words. Perfect for 'What did I miss Monday through Wednesday?' or 'Summarize today's meetings'.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "date_from": .object([
-                            "type": .string("string"),
-                            "description": .string("Start date (YYYY-MM-DD). Defaults to today.")
-                        ]),
-                        "date_to": .object([
-                            "type": .string("string"),
-                            "description": .string("End date (YYYY-MM-DD). Defaults to same as date_from.")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "list_action_items",
-                description: "Roll up action items across every meeting. Filter by owner (supports name variants: Nate finds Nate Smith), by status ('open' by default, 'done', or 'all'), by a free-text query, or by date range. Use this for 'every open action item assigned to me' or 'what did we commit to last week'. Depends on the meeting summary index.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "owner": .object([
-                            "type": .string("string"),
-                            "description": .string("Filter to action items assigned to this person (e.g. 'Nate')")
-                        ]),
-                        "status": .object([
-                            "type": .string("string"),
-                            "description": .string("Which items to return: 'open' (default), 'done', or 'all'.")
-                        ]),
-                        "query": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional full-text filter on the action item text, owner, status, or due metadata")
-                        ]),
-                        "date_from": .object([
-                            "type": .string("string"),
-                            "description": .string("Start date filter (YYYY-MM-DD)")
-                        ]),
-                        "date_to": .object([
-                            "type": .string("string"),
-                            "description": .string("End date filter (YYYY-MM-DD)")
-                        ]),
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Maximum items to return (default: 50, max: 200)")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "list_decisions",
-                description: "Roll up decisions across every meeting. Optionally filter by a free-text query or date range. Use this for 'what did we decide about pricing' or 'all decisions this quarter'. Depends on the meeting summary index.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "query": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional full-text filter on the decision text")
-                        ]),
-                        "date_from": .object([
-                            "type": .string("string"),
-                            "description": .string("Start date filter (YYYY-MM-DD)")
-                        ]),
-                        "date_to": .object([
-                            "type": .string("string"),
-                            "description": .string("End date filter (YYYY-MM-DD)")
-                        ]),
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Maximum decisions to return (default: 50, max: 200)")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "digest",
-                description: "Returns up to 50 matching meetings and reports truncated=true when more exist; counts cover returned meetings. Cross-meeting summary for a time window with each returned meeting's structured decisions, action items, and open questions, plus rolled-up counts. Use for 'what happened across all my meetings this week'. Depends on the meeting summary index.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "date_from": .object([
-                            "type": .string("string"),
-                            "description": .string("Start date (YYYY-MM-DD). Defaults to today.")
-                        ]),
-                        "date_to": .object([
-                            "type": .string("string"),
-                            "description": .string("End date (YYYY-MM-DD). Defaults to same as date_from.")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "decisions",
-                description: "Find decisions across meeting summaries. Returns local structured receipts with meetingId, timestamp when available, and quote. No semantic embeddings or LLM synthesis.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "topic": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional topic filter, e.g. pricing")
-                        ]),
-                        "range": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
-                        ]),
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "commitments",
-                description: "Find action-item commitments across meeting summaries. Filter by person and date range. Returns local structured receipts with meetingId, timestamp when available, and quote.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "person": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional person/owner filter, e.g. Sarah")
-                        ]),
-                        "range": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
-                        ]),
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "open_questions",
-                description: "Find open questions across meeting summaries for a project/topic. Returns local structured receipts with meetingId, timestamp when available, and quote.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "project": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional project/topic filter")
-                        ]),
-                        "range": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
-                        ]),
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
-                name: "search_meetings",
-                description: "Keyword search over local meeting transcript utterances. Returns structured receipts with meetingId, timestamp, and quote. This is not semantic search.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "query": .object([
-                            "type": .string("string"),
-                            "description": .string("Keyword query")
-                        ]),
-                        "range": .object([
-                            "type": .string("string"),
-                            "description": .string("Optional date range: YYYY-MM-DD, YYYY-MM-DD..YYYY-MM-DD, today, or all")
-                        ]),
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Maximum receipts to return (default: 20, max: 100)")
-                        ]),
-                    ]),
-                    "required": .array([.string("query")]),
-                ]),
-                annotations: .init(readOnlyHint: true)
-            ),
-            Tool(
                 name: "status",
                 description: "Server status and configuration: version, resolved capture directories, which resolution rule selected them, index location, and indexed counts. Call this when other tools return empty results to see whether anything is indexed at all.",
                 inputSchema: .object([
@@ -475,34 +259,18 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 ]),
                 annotations: .init(readOnlyHint: true)
             ),
-            Tool(
-                name: "show_recent_meetings",
-                description: "Render recent meetings with raw transcript text and size-capped recorded audio as an MCP Apps widget. Transcript and audio bytes are returned to the connected host. Clients without inline UI receive a text list. Unavailable in companion mode, which exports text only.",
-                inputSchema: .object([
-                    "type": .string("object"),
-                    "properties": .object([
-                        "count": .object([
-                            "type": .string("integer"),
-                            "description": .string("Number of recent meetings to show (default: 5, max: 15)")
-                        ]),
-                    ]),
-                ]),
-                annotations: .init(readOnlyHint: true),
-                _meta: TranscriptedUIResources.toolMeta
-            ),
-        ].filter { !CompanionTools.companionMode || $0.name != "show_recent_meetings" } + CompanionTools.tools)
+        ])
     }
     await server.withMethodHandler(CallTool.self) { params in
-        if let reply = await CompanionTools.intercept(params, index: index, directories: directories) { return reply }
         do {
             return try withAgentCaptureQueryTelemetry(params: params) {
                 switch params.name {
                 case "list_meetings":
                     return try handleListMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "list_dictations":
-                    return try handleListDictations(params: params, index: index, dictationDirs: directories.dictationDirs)
                 case "read_meeting":
                     return try handleReadMeeting(params: params, meetingDirs: directories.meetingDirs)
+                case "list_dictations":
+                    return try handleListDictations(params: params, index: index, dictationDirs: directories.dictationDirs)
                 case "read_dictation":
                     return try handleReadDictation(params: params, dictationDirs: directories.dictationDirs)
                 case "list_writing":
@@ -510,36 +278,25 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                 case "read_writing":
                     return try handleReadWriting(params: params, writingDirs: directories.writingDirs)
                 case "search":
-                    return try handleSearch(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "search_context":
-                    return try handleSearchContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, writingDirs: directories.writingDirs)
+                    return try handleSearch(
+                        params: params,
+                        index: index,
+                        meetingDirs: directories.meetingDirs,
+                        dictationDirs: directories.dictationDirs,
+                        writingDirs: directories.writingDirs
+                    )
                 case "recent_context":
-                    return try handleRecentContext(params: params, index: index, meetingDirs: directories.meetingDirs, dictationDirs: directories.dictationDirs, writingDirs: directories.writingDirs)
+                    return try handleRecentContext(
+                        params: params,
+                        index: index,
+                        meetingDirs: directories.meetingDirs,
+                        dictationDirs: directories.dictationDirs,
+                        writingDirs: directories.writingDirs
+                    )
                 case "who_is":
                     return try handleWhoIs(params: params, index: index)
-                case "recap":
-                    return try handleRecap(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "list_action_items":
-                    return try handleListActionItems(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "list_decisions":
-                    return try handleListDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "digest":
-                    return try handleDigest(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "decisions":
-                    return try handleDecisions(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "commitments":
-                    return try handleCommitments(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "open_questions":
-                    return try handleOpenQuestions(params: params, index: index, meetingDirs: directories.meetingDirs)
-                case "search_meetings":
-                    return try handleSearchMeetings(params: params, index: index, meetingDirs: directories.meetingDirs)
                 case "status":
                     return try handleStatus(index: index, directories: directories)
-                case "show_recent_meetings":
-                    let count = min(max(params.arguments?["count"]?.intValue ?? TranscriptedUIResources.defaultRecentCount, 1), 15)
-                    return try TranscriptedUIResources.showRecentMeetingsResult(
-                        count: count, index: index, directories: directories, serverVersion: TranscriptedMCP.serverVersion
-                    )
                 default:
                     return textResult("Unknown tool: \(params.name)", isError: true)
                 }
@@ -548,6 +305,29 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
             return textResult("Error: \(error.localizedDescription)", isError: true)
         }
     }
+}
+
+// MARK: - status
+
+func handleStatus(index: TranscriptIndex, directories: TranscriptedDataDirectories) throws -> CallTool.Result {
+    let counts = try index.counts()
+    let result = StatusResult(
+        serverVersion: TranscriptedMCP.serverVersion,
+        meetingDirectories: directories.meetingDirs.map(\.path),
+        dictationDirectories: directories.dictationDirs.map(\.path),
+        writingDirectories: directories.writingDirs.map(\.path),
+        resolutionSource: directories.resolutionSource.rawValue,
+        legacyFallbackAppended: directories.legacyFallbackAppended,
+        indexDirectory: directories.indexDir.path,
+        indexedMeetings: counts.meetings,
+        indexedDictationDays: counts.dictationDays,
+        indexedDictationEntries: counts.dictationEntries,
+        indexedWritingDays: counts.writingDays,
+        indexedWritingEntries: counts.writingEntries
+    )
+
+    let json = try JSONEncoder.pretty.encode(result)
+    return textResult(String(data: json, encoding: .utf8) ?? "{}")
 }
 
 extension JSONEncoder {

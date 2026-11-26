@@ -2,8 +2,8 @@ import SQLite3
 import XCTest
 @testable import transcripted_mcp
 
-/// parse → index → query coverage for the structured summary fields
-/// (Decisions / Action Items / Open Questions) added to the MCP index.
+/// parse → index → query coverage for meeting summary search documents and
+/// index schema migration / concurrency behavior.
 final class SummaryItemIndexTests: XCTestCase {
     var index: TranscriptIndex!
     var tempDir: URL!
@@ -18,19 +18,6 @@ final class SummaryItemIndexTests: XCTestCase {
         index = nil
         removeTempDir(tempDir)
         super.tearDown()
-    }
-
-    func testIndexesInlineSummaryItems() throws {
-        try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let decisions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision)
-        XCTAssertEqual(decisions.map(\.text), ["Ship the beta on Friday", "Cut the legacy import path"])
-        XCTAssertEqual(decisions.map(\.position), [0, 1])
-        XCTAssertEqual(decisions.first?.meetingDate, "2026-04-18")
-
-        let questions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.openQuestion)
-        XCTAssertEqual(questions.map(\.text), ["Do we need a migration window?"])
     }
 
     func testSearchIndexesSummaryTitleAttendeesAndSections() throws {
@@ -71,8 +58,6 @@ final class SummaryItemIndexTests: XCTestCase {
             to: tempDir
         )
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        XCTAssertTrue(try index.listSummaryItems().isEmpty)
 
         let attendee = try index.searchUtterances(query: "Priya", speaker: nil, dateFrom: nil, dateTo: nil)
         XCTAssertEqual(attendee.results.first?.filename, "Call_2026-04-18_09-15-00")
@@ -118,82 +103,30 @@ final class SummaryItemIndexTests: XCTestCase {
         }) == true)
     }
 
-    func testIndexesActionItemOwnerAndUnassigned() throws {
-        try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let actions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.actionItem)
-        XCTAssertEqual(actions.count, 2)
-        XCTAssertEqual(actions[0].owner, "Jenny")
-        XCTAssertEqual(actions[0].text, "send the revised spec")
-        XCTAssertNil(actions[1].owner)
-
-        // Owner filter rolls up across meetings; "" selects unassigned.
-        let jenny = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.actionItem, owner: "jenny")
-        XCTAssertEqual(jenny.map(\.text), ["send the revised spec"])
-        let unassigned = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.actionItem, owner: "")
-        XCTAssertEqual(unassigned.map(\.text), ["Follow up with legal"])
-    }
-
-    func testRollsUpAcrossMeetingsNewestFirst() throws {
-        try writeFixture(
-            makeMeetingWithInlineSummary(date: "2026-04-10", decisions: ["Older decision"]),
-            filename: "Call_2026-04-10_09-15-00", to: tempDir
-        )
-        try writeFixture(
-            makeMeetingWithInlineSummary(date: "2026-04-20", decisions: ["Newer decision"]),
-            filename: "Call_2026-04-20_09-15-00", to: tempDir
-        )
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-
-        let decisions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision)
-        XCTAssertEqual(decisions.map(\.text), ["Newer decision", "Older decision"])
-
-        let dated = try index.listSummaryItems(
-            kind: TranscriptIndex.SummaryItemKind.decision,
-            dateFrom: "2026-04-15"
-        )
-        XCTAssertEqual(dated.map(\.text), ["Newer decision"])
-    }
-
-    func testReindexReplacesSummaryItems() throws {
+    func testReindexReplacesSummarySearchDocument() throws {
         let filename = "Call_2026-04-18_09-15-00"
-        try writeFixture(makeMeetingWithInlineSummary(), filename: filename, to: tempDir)
+        try writeFixture(makeMeetingWithInlineSummary(decisions: ["Original decision token"]), filename: filename, to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertEqual(try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count, 2)
+        XCTAssertEqual(try index.searchUtterances(query: "Original decision token", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
 
-        // Rewrite the same meeting with a single decision; reconcile should
-        // replace, not accumulate.
-        try writeFixture(
-            makeMeetingWithInlineSummary(decisions: ["Only one decision now"]),
-            filename: filename, to: tempDir
-        )
-        // Bump mtime so reconcile re-indexes.
+        try writeFixture(makeMeetingWithInlineSummary(decisions: ["Replacement decision token"]), filename: filename, to: tempDir)
         let url = tempDir.appendingPathComponent("\(filename).md")
         try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: url.path)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
 
-        let decisions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision)
-        XCTAssertEqual(decisions.map(\.text), ["Only one decision now"])
+        XCTAssertTrue(try index.searchUtterances(query: "Original decision token", speaker: nil, dateFrom: nil, dateTo: nil).results.isEmpty)
+        XCTAssertEqual(try index.searchUtterances(query: "Replacement decision token", speaker: nil, dateFrom: nil, dateTo: nil).results.count, 1)
     }
 
-    func testRemovingMeetingClearsSummaryItems() throws {
+    func testRemovingMeetingClearsSummarySearchDocument() throws {
         let filename = "Call_2026-04-18_09-15-00"
         try writeFixture(makeMeetingWithInlineSummary(), filename: filename, to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertFalse(try index.listSummaryItems().isEmpty)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), 1)
 
         try FileManager.default.removeItem(at: tempDir.appendingPathComponent("\(filename).md"))
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertTrue(try index.listSummaryItems().isEmpty)
-    }
-
-    func testMeetingWithoutSummaryIndexesNoItems() throws {
-        try writeFixture(makeFixtureJSON(), filename: "Call_2026-03-29_10-00-00", to: tempDir)
-        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertTrue(try index.listSummaryItems().isEmpty)
-        // The transcript itself still indexes as a meeting.
-        XCTAssertEqual(try index.listMeetings(count: 10).count, 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), 0)
     }
 
     func testOldMisclassifiedDayIsRebuiltWithoutChangingItsMtime() throws {
@@ -218,12 +151,9 @@ final class SummaryItemIndexTests: XCTestCase {
     }
 
     func testOlderSchemaVersionForcesRebuild() throws {
-        // Simulate a pre-v2 index: index a meeting-with-summary, then stamp the
-        // on-disk DB back to an older user_version to mimic an index built before
-        // meeting_summary_items existed.
         try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
-        XCTAssertFalse(try index.listSummaryItems().isEmpty)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), 1)
         index = nil // close the handle (deinit closes the db)
 
         let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
@@ -236,10 +166,10 @@ final class SummaryItemIndexTests: XCTestCase {
         let reopened = try TranscriptIndex(indexDir: tempDir)
         XCTAssertTrue(try reopened.listMeetings(count: 10).isEmpty)
 
-        // A reconcile rebuilds everything, now including summary items.
+        // A reconcile rebuilds everything, now including summary search documents.
         try reopened.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         XCTAssertEqual(try reopened.listMeetings(count: 10).count, 1)
-        XCTAssertEqual(try reopened.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count, 2)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), 1)
     }
 
     func testRebuildKeepsOtherServersConnectionsWorking() throws {
@@ -369,12 +299,10 @@ final class SummaryItemIndexTests: XCTestCase {
         XCTAssertEqual(meetings.count, 1)
         XCTAssertEqual(meetings.first?.filename, "2026-04-18 Beta sync")
 
-        // Its summary feeds the parent transcript's summary items.
-        let decisions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision)
-        XCTAssertEqual(decisions.map(\.text), ["Adopt the sidecar plan"])
-        XCTAssertEqual(decisions.first?.filename, "2026-04-18 Beta sync")
-        let actions = try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.actionItem)
-        XCTAssertEqual(actions.first?.owner, "Sam")
+        // Its summary feeds the parent transcript's summary search document.
+        let search = try index.searchUtterances(query: "Adopt the sidecar plan", speaker: nil, dateFrom: nil, dateTo: nil)
+        XCTAssertEqual(search.results.first?.filename, "2026-04-18 Beta sync")
+        XCTAssertEqual(search.results.first?.snippets.first?.speaker, "Summary")
     }
 
     // Two MCP clients (a desktop chat app and an IDE agent) each launch their own
@@ -410,10 +338,6 @@ final class SummaryItemIndexTests: XCTestCase {
         XCTAssertTrue(failures.isEmpty, "reconcile failed: \(failures)")
         XCTAssertEqual(try index.listMeetings(count: 100).count, meetingCount)
         XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_documents"), meetingCount)
-        XCTAssertEqual(
-            try index.listSummaryItems(kind: TranscriptIndex.SummaryItemKind.decision).count,
-            meetingCount * 2
-        )
     }
 
     // An index left with a summary row from an earlier interrupted pass must heal

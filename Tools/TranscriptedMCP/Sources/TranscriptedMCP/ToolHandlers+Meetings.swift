@@ -257,7 +257,7 @@ func frontmatterBlock(of content: String) -> String? {
     return String(content[content.startIndex..<end])
 }
 
-// MARK: - Meeting title hydration (shared across Search / Rollups / Receipts)
+// MARK: - Meeting title hydration (shared with Search)
 
 /// Frontmatter title for a meeting markdown file, or nil when the file is
 /// unreadable or its frontmatter has no title.
@@ -273,10 +273,6 @@ func frontmatterMeetingTitle(for filename: String, meetingDirs: [URL]) -> String
     return extractTitle(from: content)
 }
 
-func meetingTitle(for filename: String, meetingDirs: [URL]) -> String {
-    frontmatterMeetingTitle(for: filename, meetingDirs: meetingDirs) ?? filename
-}
-
 /// Read each meeting at most once per response. Missing titles stay absent so
 /// callers retain their existing fallback; no cache survives into a later call.
 func frontmatterMeetingTitles(for filenames: [String], meetingDirs: [URL]) -> [String: String] {
@@ -287,16 +283,4 @@ func frontmatterMeetingTitles(for filenames: [String], meetingDirs: [URL]) -> [S
         }
     }
     return titles
-}
-
-/// Replace the index's filename-derived meeting titles with real frontmatter
-/// titles. Groups whose markdown has no frontmatter title keep the
-/// filename-derived title they already carry.
-func hydrateMeetingSearchTitles(in results: inout GroupedSearchResult, meetingDirs: [URL]) {
-    let titles = frontmatterMeetingTitles(for: results.results.map(\.filename), meetingDirs: meetingDirs)
-    for index in results.results.indices {
-        if let title = titles[results.results[index].filename] {
-            results.results[index].meetingTitle = title
-        }
-    }
 }
