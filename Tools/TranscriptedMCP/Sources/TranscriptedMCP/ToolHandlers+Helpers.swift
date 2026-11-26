@@ -99,7 +99,7 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedWritingDays: counts.writingDays,
             indexedWritingEntries: counts.writingEntries,
             hint: counts.writingDays == 0
-                ? "No writing is indexed. Writing is saved only when Save my writing is on in Transcripted's Writing settings; call the status tool to see the writing folder."
+                ? "No writing is indexed. Writing is saved only when Capture my writing is on (Transcripted › Agent page); call the status tool to see the writing folder."
                 : "No writing matched these filters — try widening the date range or changing the query."
         )
     case .mixed:

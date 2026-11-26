@@ -29,7 +29,7 @@ In order of harm if it leaks or breaks:
 
 - The app is not sandboxed and has library validation off, because the ML stack ships dylibs with mixed signing. User-level malware that writes into the app bundle inherits its permissions. Don't widen this.
 - The MCP server has no caller authentication and is strictly read-only. Don't add write tools without adding auth.
-- Speech and diarization model downloads aren't hash-pinned. Trust rests on TLS to huggingface.co. Writing verifies downloaded weights against the SHA-256 digest in its bundled model descriptor (`ModelManager.swift`).
+- Speech and diarization model downloads aren't hash-pinned. Trust rests on TLS to huggingface.co. Opt-in Meeting Titles verifies downloaded weights against its pinned SHA-256 digest (`MeetingTitlesModelStore.swift`).
 
 ## What a reviewer should flag as high severity
 

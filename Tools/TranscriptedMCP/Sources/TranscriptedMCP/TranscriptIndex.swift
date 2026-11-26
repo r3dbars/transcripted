@@ -116,8 +116,9 @@ final class TranscriptIndex: @unchecked Sendable {
     /// entries with stable IDs instead of old per-parse random IDs; v9 reclassifies
     /// metadata-identified dictation days that older indexes treated as meetings;
     /// v10 reparses dictation bodies whose Markdown headings became false entries.
-    /// `meeting_summary_items` stays in the v10 DDL (unused by new reads/writes)
-    /// so upgrading never wipes pre-existing embeddings or breaks live v10 helpers.
+    /// `meeting_summary_items` stays in the v10 DDL and continues to be populated
+    /// on meeting index writes so upgrading never wipes pre-existing embeddings
+    /// or leaves stale/empty summary items for still-running older v10 helpers.
     private static let schemaVersion: Int32 = 10
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
@@ -375,6 +376,7 @@ final class TranscriptIndex: @unchecked Sendable {
         )
 
         if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: url) {
+            try insertSummaryItems(summary, filename: filename)
             try insertSummarySearchDocument(summary, filename: filename)
         }
 
@@ -382,6 +384,40 @@ final class TranscriptIndex: @unchecked Sendable {
         committed = true
         log("Indexed meeting (utterance_count_bucket=\(MCPLogPrivacy.countBucket(transcript.utterances.count)))")
         return true
+    }
+
+    private enum SummaryItemKind {
+        static let decision = "decision"
+        static let actionItem = "action_item"
+        static let openQuestion = "open_question"
+    }
+
+    /// Keep populating `meeting_summary_items` while sharing schema v10 so any
+    /// still-running older v10 MCP helper sees current rows after a reindex.
+    private func insertSummaryItems(_ summary: ParsedMeetingSummary, filename: String) throws {
+        try bindExecRows(
+            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+            rows: summary.decisions.enumerated().map { position, text -> [SQLBinding] in
+                [.text(filename), .text(SummaryItemKind.decision), .int(position), .null, .text(text)]
+            }
+        )
+        try bindExecRows(
+            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due) VALUES (?,?,?,?,?,?,?)",
+            rows: summary.actionItems.enumerated().map { position, item -> [SQLBinding] in
+                [
+                    .text(filename), .text(SummaryItemKind.actionItem), .int(position),
+                    item.owner.map { .text($0) } ?? .null, .text(item.text),
+                    item.status.map { .text($0) } ?? .null,
+                    item.due.map { .text($0) } ?? .null
+                ]
+            }
+        )
+        try bindExecRows(
+            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
+            rows: summary.openQuestions.enumerated().map { position, text -> [SQLBinding] in
+                [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
+            }
+        )
     }
 
     private func insertSummarySearchDocument(_ summary: ParsedMeetingSummary, filename: String) throws {

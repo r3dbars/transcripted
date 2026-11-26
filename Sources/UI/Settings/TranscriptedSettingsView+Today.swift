@@ -86,9 +86,20 @@ extension TranscriptedSettingsView {
     }
 
     var todaySetupChecklistState: TodaySetupChecklistState {
-        TodaySetupChecklistState(
-            calendarConnected: permissionStates[.calendar] ?? false,
-            calendarBlocked: TranscriptedPermissionAccess.calendarAccessBlocked(),
+        guard todaySetupOffered, !todaySetupRetired else {
+            return TodaySetupChecklistState(
+                calendarConnected: false,
+                calendarBlocked: false,
+                agentConnected: nil,
+                triedFileImport: false,
+                dismissed: todaySetupRetired,
+                offered: todaySetupOffered
+            )
+        }
+        let calendarConnected = permissionStates[.calendar] ?? false
+        return TodaySetupChecklistState(
+            calendarConnected: calendarConnected,
+            calendarBlocked: calendarConnected ? false : permissionStates.calendarAccessBlocked,
             agentConnected: todayAgentConnected,
             triedFileImport: todaySetupTriedFileImport,
             dismissed: todaySetupRetired,

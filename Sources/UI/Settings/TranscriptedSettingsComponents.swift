@@ -391,6 +391,9 @@ struct PermissionSnapshot {
     /// True when the System Audio Recording value came from macOS itself,
     /// not the app's cached history.
     private(set) var systemAudioStatusIsLive = false
+    /// Cached Calendar denied/restricted/write-only status so SwiftUI redraws
+    /// never call `EKEventStore.authorizationStatus` synchronously.
+    private(set) var calendarAccessBlocked = false
 
     subscript(kind: TranscriptedPermissionKind) -> Bool? {
         values[kind]
@@ -398,11 +401,14 @@ struct PermissionSnapshot {
 
     static func current() -> PermissionSnapshot {
         let systemStatus = TranscriptedPermissionAccess.refreshSystemAudioRecordingStatusFromSystem()
+        let values = Dictionary(uniqueKeysWithValues: TranscriptedPermissionKind.allCases.map {
+            ($0, TranscriptedPermissionAccess.isGranted($0))
+        })
+        let calendarGranted = values[.calendar] ?? false
         return PermissionSnapshot(
-            values: Dictionary(uniqueKeysWithValues: TranscriptedPermissionKind.allCases.map {
-                ($0, TranscriptedPermissionAccess.isGranted($0))
-            }),
-            systemAudioStatusIsLive: systemStatus != .unavailable
+            values: values,
+            systemAudioStatusIsLive: systemStatus != .unavailable,
+            calendarAccessBlocked: calendarGranted ? false : TranscriptedPermissionAccess.calendarAccessBlocked()
         )
     }
 }

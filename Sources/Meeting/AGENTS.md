@@ -90,8 +90,7 @@ Saved-meeting reprocessing takes an independent `RetainedAudioInputSnapshot` bef
 - Telemetry: `MeetingPromptCallTelemetry` plus `onDetectedCallEnded` emit one `meeting_detected_call_ended` per detected call (1 min or longer), the capture-rate denominator. Prompt events carry the `MeetingPromptSignalSnapshot` booleans and `dismiss_streak_bucket`. Bucketed enums only: never raw durations, bundle IDs or device names.
 - Local mic diarization is opt-in (`LocalSpeakerPreferences`); by default the mic side stays one "You".
 
-**Live transcript and dictation preview**
-- Live transcript is Settings > General "Live transcript", off by default. Text is provisional and never reaches disk, logs or telemetry; the saved meeting is transcribed again after Stop.
+**Dictation preview**
 - The dictation hover preview is on by default. `TRANSCRIPTED_DICTATION_PREVIEW=off` disables it and `alternate` streams every other take. It never runs under `AutomatedLaunchEnvironment` or during a meeting.
 - The Foundation-only `LiveMeetingCaptionTrack` owns the sequencing. It closes a turn at the end-of-utterance token (`eouDebounceMs: 0`; FluidAudio's 1.28 s default skipped every chunk in that window, losing speech that resumed after a short pause) and pushes about 630 ms of silence through before each reset, one encoder shift at a time with yield and cancellation checks, so the buffered tail is decoded before its ordered commit. `LiveMeetingCaptionTrackTests` uses a held fake recognizer, never live models or audio.
 - The live path adds nothing to the audio engine: it reads 16 kHz audio from the same live-PCM tap as the agent preview. Drain loops run at utility priority and pause while a dictation runs.

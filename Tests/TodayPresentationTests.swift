@@ -332,7 +332,45 @@ func testTodayPresentation() {
         )
         assertEqual(onlyUnknown.today.meetings, 2, "meetings still count without durations")
         assertEqual(onlyUnknown.today.meetingsWithDurationCount, 0, "no meetings have positive duration")
+        assertNil(onlyUnknown.today.averageMeetingDurationSeconds, "average seconds is nil when no durations were recorded")
         assertNil(onlyUnknown.today.averageMeetingMinutes, "average is nil when no durations were recorded")
+        assertEqual(TodayCopy.meetingTimeSubtitle(for: onlyUnknown.today), "No durations saved", "meetings without durations show No durations saved")
+        assertEqual(TodayCopy.meetingTimeSubtitle(for: .empty), "Across recorded calls", "empty range shows Across recorded calls")
+    }
+
+    runSuite("TodayStatsBuilder - average meeting duration computes from total seconds without double rounding") {
+        let twoSeventyFiveSecond = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: sep(24, 9), durationSeconds: 75),
+                TodayMeetingFact(date: sep(24, 11), durationSeconds: 75),
+            ],
+            dictationDays: [],
+            now: now,
+            calendar: calendar
+        )
+        assertEqual(twoSeventyFiveSecond.today.meetings, 2, "two 75s meetings counted")
+        assertEqual(twoSeventyFiveSecond.today.meetingsWithDurationCount, 2, "both 75s meetings have positive duration")
+        assertEqual(twoSeventyFiveSecond.today.meetingDurationSeconds, 150, "total seconds preserved without pre-rounding")
+        assertEqual(twoSeventyFiveSecond.today.averageMeetingDurationSeconds, 75, "150 / 2 = 75s average")
+        assertEqual(twoSeventyFiveSecond.today.averageMeetingMinutes, 1, "75s rounds to 1m (not 2m from pre-rounded 3m / 2)")
+        assertEqual(TodayCopy.duration(seconds: 75), "1m", "75s formats as 1m")
+        assertEqual(TodayCopy.meetingTimeSubtitle(for: twoSeventyFiveSecond.today), "1m avg per meeting", "two 75s meetings show 1m avg")
+
+        let singleTwentyFiveSecond = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: sep(24, 9), durationSeconds: 25),
+            ],
+            dictationDays: [],
+            now: now,
+            calendar: calendar
+        )
+        assertEqual(singleTwentyFiveSecond.today.meetings, 1, "one 25s meeting counted")
+        assertEqual(singleTwentyFiveSecond.today.meetingsWithDurationCount, 1, "25s meeting has positive duration")
+        assertEqual(singleTwentyFiveSecond.today.meetingDurationSeconds, 25, "25s preserved")
+        assertEqual(singleTwentyFiveSecond.today.averageMeetingDurationSeconds, 25, "25s average")
+        assertEqual(singleTwentyFiveSecond.today.averageMeetingMinutes, 0, "sub-minute average is non-nil 0")
+        assertEqual(TodayCopy.duration(seconds: 25), "< 1m", "25s formats as < 1m")
+        assertEqual(TodayCopy.meetingTimeSubtitle(for: singleTwentyFiveSecond.today), "< 1m avg per meeting", "sub-minute meeting shows < 1m avg, never No durations saved")
     }
 
     runSuite("TodayStatsBuilder - future-dated captures are skipped across all totals and streaks") {

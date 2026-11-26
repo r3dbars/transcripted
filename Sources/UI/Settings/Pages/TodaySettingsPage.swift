@@ -100,18 +100,13 @@ struct TodaySettingsPage: View {
     private var kpiGrid: some View {
         let meetingSubtitle: String = {
             if summary.meetings == 0 { return "No meetings in range" }
-            if summary.meetingMinutes > 0 {
-                return "\(TodayCopy.duration(minutes: summary.meetingMinutes)) recorded"
+            if summary.meetingDurationSeconds > 0 {
+                return "\(TodayCopy.duration(seconds: summary.meetingDurationSeconds)) recorded"
             }
             return "Duration not recorded"
         }()
 
-        let meetingTimeSubtitle: String = {
-            guard let avg = summary.averageMeetingMinutes else {
-                return summary.meetings > 0 ? "No durations saved" : "Across recorded calls"
-            }
-            return "\(TodayCopy.duration(minutes: avg)) avg per meeting"
-        }()
+        let meetingTimeSubtitle = TodayCopy.meetingTimeSubtitle(for: summary)
 
         let dictationsSubtitle: String = {
             if summary.dictations == 0 { return "No dictations in range" }
@@ -138,7 +133,7 @@ struct TodaySettingsPage: View {
             )
             StatsKPICard(
                 label: "Meeting time",
-                value: TodayCopy.duration(minutes: summary.meetingMinutes),
+                value: TodayCopy.duration(seconds: summary.meetingDurationSeconds),
                 subtitle: meetingTimeSubtitle,
                 streamColor: nil
             )

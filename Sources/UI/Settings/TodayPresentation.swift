@@ -62,6 +62,7 @@ enum TodayStatsRange: String, CaseIterable, Identifiable, Sendable {
 struct TodayRangeSummary: Equatable, Sendable {
     let meetings: Int
     let meetingsWithDurationCount: Int
+    let meetingDurationSeconds: TimeInterval
     let meetingMinutes: Int
     let dictations: Int
     let dictationWords: Int
@@ -71,6 +72,7 @@ struct TodayRangeSummary: Equatable, Sendable {
     static let empty = TodayRangeSummary(
         meetings: 0,
         meetingsWithDurationCount: 0,
+        meetingDurationSeconds: 0,
         meetingMinutes: 0,
         dictations: 0,
         dictationWords: 0,
@@ -83,11 +85,20 @@ struct TodayRangeSummary: Equatable, Sendable {
     var hasAnyCapture: Bool { totalCaptures > 0 || totalWords > 0 }
     var hasWriting: Bool { writingEntries > 0 || writingWords > 0 }
 
-    /// Average meeting length in rounded minutes across meetings that recorded
-    /// a positive duration, or nil when there are no recorded minutes.
+    /// Average meeting length in seconds across meetings that recorded a
+    /// positive duration, or nil when no meetings have recorded durations.
+    var averageMeetingDurationSeconds: TimeInterval? {
+        guard meetingsWithDurationCount > 0, meetingDurationSeconds > 0 else { return nil }
+        return meetingDurationSeconds / Double(meetingsWithDurationCount)
+    }
+
+    /// Average meeting length in rounded minutes computed from total recorded
+    /// seconds across meetings with a positive duration (returns `0` for
+    /// positive sub-minute averages, or nil when no durations were recorded).
     var averageMeetingMinutes: Int? {
-        guard meetingsWithDurationCount > 0, meetingMinutes > 0 else { return nil }
-        return max(1, Int((Double(meetingMinutes) / Double(meetingsWithDurationCount)).rounded()))
+        guard let avgSeconds = averageMeetingDurationSeconds else { return nil }
+        if avgSeconds < 60 { return 0 }
+        return Int((avgSeconds / 60).rounded())
     }
 }
 
@@ -182,7 +193,7 @@ enum TodayStatsBuilder {
     private struct MutableTotals {
         var meetings = 0
         var meetingsWithDurationCount = 0
-        var meetingSeconds = 0
+        var meetingDurationSeconds: TimeInterval = 0
         var dictations = 0
         var dictationWords = 0
         var writingEntries = 0
@@ -192,7 +203,8 @@ enum TodayStatsBuilder {
             TodayRangeSummary(
                 meetings: meetings,
                 meetingsWithDurationCount: meetingsWithDurationCount,
-                meetingMinutes: TodayStatsBuilder.minutes(fromSeconds: meetingSeconds),
+                meetingDurationSeconds: meetingDurationSeconds,
+                meetingMinutes: TodayStatsBuilder.minutes(fromSeconds: meetingDurationSeconds),
                 dictations: dictations,
                 dictationWords: dictationWords,
                 writingEntries: writingEntries,
@@ -252,7 +264,7 @@ enum TodayStatsBuilder {
             let hasPositiveDuration = (meeting.durationSeconds ?? 0) > 0
             addDay(day) {
                 $0.meetings += 1
-                $0.meetingSeconds += seconds
+                $0.meetingDurationSeconds += TimeInterval(seconds)
                 if hasPositiveDuration {
                     $0.meetingsWithDurationCount += 1
                 }
@@ -293,7 +305,7 @@ enum TodayStatsBuilder {
                 day: day,
                 isToday: offset == 0,
                 meetings: totals.meetings,
-                meetingMinutes: minutes(fromSeconds: totals.meetingSeconds),
+                meetingMinutes: minutes(fromSeconds: totals.meetingDurationSeconds),
                 dictations: totals.dictations,
                 dictationWords: totals.dictationWords,
                 writingEntries: totals.writingEntries,
@@ -416,8 +428,8 @@ enum TodayStatsBuilder {
         )
     }
 
-    private static func minutes(fromSeconds seconds: Int) -> Int {
-        Int((Double(seconds) / 60).rounded())
+    private static func minutes(fromSeconds seconds: TimeInterval) -> Int {
+        Int((seconds / 60).rounded())
     }
 }
 
@@ -558,6 +570,23 @@ enum TodayCopy {
         if hours == 0 { return "\(rest)m" }
         if rest == 0 { return "\(hours)h" }
         return "\(hours)h \(rest)m"
+    }
+
+    /// Compact duration from real seconds: `"< 1m"` for positive sub-minute
+    /// durations, otherwise rounded minutes via `duration(minutes:)`.
+    static func duration(seconds: TimeInterval) -> String {
+        guard seconds > 0 else { return "0m" }
+        if seconds < 60 { return "< 1m" }
+        return duration(minutes: Int((seconds / 60).rounded()))
+    }
+
+    /// Subtitle for the "Meeting time" KPI card, computed from unrounded
+    /// meeting seconds so short meetings never display "No durations saved".
+    static func meetingTimeSubtitle(for summary: TodayRangeSummary) -> String {
+        guard let avgSeconds = summary.averageMeetingDurationSeconds else {
+            return summary.meetings > 0 ? "No durations saved" : "Across recorded calls"
+        }
+        return "\(duration(seconds: avgSeconds)) avg per meeting"
     }
 
     /// Row meta for a meeting length; nil under a minute or unknown.

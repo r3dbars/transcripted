@@ -2,7 +2,7 @@
 
 `Sources/` is the app target (one Swift target), plus three folders that build separately: `TranscriptedCore/` (library), `TranscriptedWriting/Core/` (static module) and `TranscriptedKeyboard/` (input-method bundle). Read the root `AGENTS.md` first; this file maps the folders and holds the module cards that have no folder of their own.
 
-The app does: dictation with paste-back, Writing (opt-in autocomplete through its own keyboard, plus Save my writing day files), meeting capture, imported-audio transcription and transcript browsing, optional local-speaker review, and wake / sleep recovery for active recordings. If a doc or file name sounds like an older "Draft"-era subsystem, check the file list here before trusting it.
+The app does: dictation with paste-back, Writing (opt-in writing capture on the Agent page, saving scrubbed day files through its own keyboard), meeting capture, imported-audio transcription and transcript browsing, optional local-speaker review, and wake / sleep recovery for active recordings. If a doc or file name sounds like an older "Draft"-era subsystem, check the file list here before trusting it.
 
 ## Directory map
 
@@ -16,8 +16,8 @@ The app does: dictation with paste-back, Writing (opt-in autocomplete through it
 - `Speech/` — local STT engines (Parakeet V3, Whisper Large V3 Turbo), `STTRouter`, audio engine and device handling, dictation audio recovery
 - `Support/` — preferences, storage paths, the capture library, permissions, constants, clipboard paste-back, model-cache inventory
 - `TranscriptedCore/` — the shared library: audio capture, meeting pipeline, speaker identity, storage. Built into a prebuilt archive, never compiled into the app target
-- `Writing/` — app side of Writing: `WritingController`, day files, the Writing tab's model, count-only analytics
-- `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde. `Core/` is pure policy and builds as `TranscriptedWritingCore`; `Runtime/` compiles into the app module. Both are tested under `swift test`
+- `Writing/` — app side of Writing: `WritingController`, day files, the opt-in writing capture model on the Agent page, count-only analytics
+- `TranscriptedWriting/` — Writing's opt-in writing capture library (secret scrubbing, excluded-app policy, and runtime support). `Core/` is pure policy and builds as `TranscriptedWritingCore`; `Runtime/` compiles into the app module. Both are tested under `swift test`
 - `TranscriptedKeyboard/` — Writing's IMKit input method, a separate bundle built by `scripts/entrypoints/lib/bundle-input-method.sh`; excluded from the app binary
 - `UI/` — `Overlay/`, `MenuBar/`, `Settings/`, `Shared/`
 
@@ -62,7 +62,7 @@ Module boundaries are absolute: every forbidden crossing fails. Move the type do
 - focused-editor AX metadata, overlay placement, paste-back context: `Sources/Accessibility/AGENTS.md`
 - wake / sleep recovery, hotkey recovery: `Sources/Reliability/AGENTS.md`
 - crash reporting, analytics, logs, diagnostics, Sparkle: `Sources/Observability/AGENTS.md`
-- Writing: the tab's runtime, Save my writing, analytics: `Sources/Writing/AGENTS.md`; the library: `Sources/TranscriptedWriting/AGENTS.md`; the keyboard: `Sources/TranscriptedKeyboard/AGENTS.md`
+- Writing: opt-in writing capture on the Agent page, day files, analytics: `Sources/Writing/AGENTS.md`; the library: `Sources/TranscriptedWriting/AGENTS.md`; the keyboard: `Sources/TranscriptedKeyboard/AGENTS.md`
 - tests or package boundaries: `Tests/README.md`
 
 A new `Sources/` folder needs a module entry in `.agents/modules.json` and its own `AGENTS.md`.

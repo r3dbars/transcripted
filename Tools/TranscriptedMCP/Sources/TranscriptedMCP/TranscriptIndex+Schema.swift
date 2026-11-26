@@ -172,10 +172,10 @@ extension TranscriptIndex {
             END
         """)
 
-        // Legacy v10 table retained in DDL (never read or written by current
-        // code, only cleaned up in deleteIndexedRows) so keeping schemaVersion
-        // at 10 preserves user embeddings on upgrade and keeps live v10 helpers
-        // sharing this index working without table-missing errors.
+        // Legacy v10 table retained in DDL and kept populated on meeting writes
+        // (and cleaned up in deleteIndexedRows) so keeping schemaVersion at 10
+        // preserves user embeddings on upgrade and keeps live older v10 helpers
+        // sharing this index seeing fresh summary items after a reindex.
         exec("""
             CREATE TABLE IF NOT EXISTS meeting_summary_items (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,

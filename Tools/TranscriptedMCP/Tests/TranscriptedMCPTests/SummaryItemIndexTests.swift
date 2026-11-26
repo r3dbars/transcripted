@@ -198,8 +198,7 @@ final class SummaryItemIndexTests: XCTestCase {
 
     func testV10UpgradeKeepsLegacySummaryItemsWorkingAndPreservesEmbeddings() throws {
         // Keeping schemaVersion at 10 preserves user embeddings on upgrade and
-        // lets live v10 MCP helpers keep touching meeting_summary_items while
-        // the current server ignores it except for row cleanup on reindex/remove.
+        // lets live v10 MCP helpers keep reading and maintaining meeting_summary_items.
         try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
         try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
         index = nil
@@ -211,6 +210,7 @@ final class SummaryItemIndexTests: XCTestCase {
 
         let seedSQL = """
             PRAGMA user_version=10;
+            DELETE FROM meeting_summary_items;
             INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due)
                 VALUES ('Call_2026-04-18_09-15-00', 'action_item', 0, 'Priya', 'Send launch checklist', 'open', '2026-04-20');
             CREATE TABLE IF NOT EXISTS embedding_meta (
@@ -277,6 +277,46 @@ final class SummaryItemIndexTests: XCTestCase {
         try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-04-18_09-15-00.md"))
         try currentIndex.reconcile(meetingsDir: tempDir, dictationsDir: tempDir, updateEmbeddings: false)
         XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items"), 0)
+    }
+
+    func testReindexRepopulatesLegacyV10SummaryItems() throws {
+        let filename = "Call_2026-04-18_09-15-00"
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                decisions: ["Initial decision"],
+                actionItems: ["Priya: initial task"],
+                openQuestions: ["Initial question?"]
+            ),
+            filename: filename,
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir, updateEmbeddings: false)
+
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)'"), 3)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND kind = 'decision' AND text = 'Initial decision'"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND kind = 'action_item' AND owner = 'Priya'"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND kind = 'open_question' AND text = 'Initial question?'"), 1)
+
+        // Modifying the meeting and reindexing must repopulate meeting_summary_items
+        // so still-running older v10 helpers do not see silently emptied rows.
+        try writeFixture(
+            makeMeetingWithInlineSummary(
+                decisions: ["Updated decision A", "Updated decision B"],
+                actionItems: ["Sam: ship updated build"],
+                openQuestions: ["Updated open question?"]
+            ),
+            filename: filename,
+            to: tempDir
+        )
+        let url = tempDir.appendingPathComponent("\(filename).md")
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(5)], ofItemAtPath: url.path)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir, updateEmbeddings: false)
+
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)'"), 4)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND text = 'Initial decision'"), 0)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND kind = 'decision' AND text = 'Updated decision B'"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND kind = 'action_item' AND owner = 'Sam'"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items WHERE filename = '\(filename)' AND kind = 'open_question' AND text = 'Updated open question?'"), 1)
     }
 
     func testOpeningNeverLowersANewerSchemaVersion() throws {

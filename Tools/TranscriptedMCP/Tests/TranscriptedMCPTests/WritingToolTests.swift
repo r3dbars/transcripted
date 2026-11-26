@@ -145,6 +145,8 @@ final class WritingToolTests: XCTestCase {
         XCTAssertEqual(payload.indexedWritingDays, 0)
         XCTAssertNil(payload.indexedMeetings)
         XCTAssertTrue(payload.hint.contains("No writing is indexed"))
+        XCTAssertTrue(payload.hint.contains("Capture my writing is on (Transcripted › Agent page)"))
+        XCTAssertFalse(payload.hint.contains("Writing settings"))
         XCTAssertEqual(telemetry.observations.last?.result, "empty_not_found")
     }
 

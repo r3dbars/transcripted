@@ -352,6 +352,7 @@ final class ToolHandlersTests: XCTestCase {
         XCTAssertEqual(writingPayload.indexedWritingDays, 0)
         XCTAssertEqual(writingPayload.indexedWritingEntries, 0)
         XCTAssertTrue(writingPayload.hint.contains("No writing is indexed"))
+        XCTAssertTrue(writingPayload.hint.contains("Capture my writing is on (Transcripted › Agent page)"))
     }
 
     func testSearchContextAliasTracksSearchTelemetry() throws {
