@@ -1,11 +1,11 @@
 import Foundation
 
-// Foundation-pure numbers and copy for the Today page. Everything here is
-// computed from local capture files only: meeting start/end times from the
-// meeting library and per-day entry counts from the dictation day files.
-// No SwiftUI, so it runs in the fast tests.
+// Foundation-pure numbers and copy for the Stats page (stored under the
+// `.today` page id). Everything here is computed from local capture files
+// only: meeting dates and durations, dictation day files, and optional
+// writing day files. No SwiftUI, so it runs in the fast tests.
 
-/// One saved meeting, reduced to what Today counts.
+/// One saved meeting, reduced to what Stats counts.
 struct TodayMeetingFact: Equatable, Sendable {
     let date: Date
     /// Recorded length in seconds; nil when the transcript has no duration.
@@ -29,410 +29,361 @@ struct TodayWritingFact: Equatable, Sendable {
     let text: String
 }
 
-/// Words written in one app today, for the header's per-app breakdown.
-struct TodayAppWords: Equatable, Sendable {
-    let appName: String
-    let words: Int
+// MARK: - Stats overview
+
+enum TodayStatsRange: String, CaseIterable, Identifiable, Sendable {
+    case today
+    case last7Days
+    case last30Days
+    case allTime
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .today: return "Today"
+        case .last7Days: return "7 days"
+        case .last30Days: return "30 days"
+        case .allTime: return "All time"
+        }
+    }
 }
 
-struct TodayContextStats: Equatable, Sendable {
-    let todayMeetings: Int
-    let todayDictations: Int
-    let todayMeetingMinutes: Int
-    let todayDictationWords: Int
-    let weekMeetings: Int
-    let weekDictations: Int
-    let weekMeetingMinutes: Int
-    let weekDictationWords: Int
-    var todayWritingWords: Int = 0
-    var todayWritingEntries: Int = 0
-    var weekWritingWords: Int = 0
-    /// Most words first.
-    var todayWritingApps: [TodayAppWords] = []
+/// Aggregated KPI totals for one time window.
+struct TodayRangeSummary: Equatable, Sendable {
+    let meetings: Int
+    let meetingMinutes: Int
+    let dictations: Int
+    let dictationWords: Int
+    let writingEntries: Int
+    let writingWords: Int
 
-    static let empty = TodayContextStats(
-        todayMeetings: 0,
-        todayDictations: 0,
-        todayMeetingMinutes: 0,
-        todayDictationWords: 0,
-        weekMeetings: 0,
-        weekDictations: 0,
-        weekMeetingMinutes: 0,
-        weekDictationWords: 0
+    static let empty = TodayRangeSummary(
+        meetings: 0,
+        meetingMinutes: 0,
+        dictations: 0,
+        dictationWords: 0,
+        writingEntries: 0,
+        writingWords: 0
     )
 
-    var hasAnyCapture: Bool {
-        weekMeetings + weekDictations + todayMeetings + todayDictations + weekWritingWords + todayWritingWords > 0
+    var totalWords: Int { dictationWords + writingWords }
+    var totalCaptures: Int { meetings + dictations + writingEntries }
+    var hasAnyCapture: Bool { totalCaptures > 0 || totalWords > 0 }
+    var hasWriting: Bool { writingEntries > 0 || writingWords > 0 }
+
+    /// Average meeting length in rounded minutes, or nil when there are no
+    /// recorded minutes.
+    var averageMeetingMinutes: Int? {
+        guard meetings > 0, meetingMinutes > 0 else { return nil }
+        return max(1, Int((Double(meetingMinutes) / Double(meetings)).rounded()))
+    }
+}
+
+/// One column in the rolling 7-day activity bar strip.
+struct TodayActivityDay: Identifiable, Equatable, Sendable {
+    let day: Date
+    let isToday: Bool
+    let meetings: Int
+    let meetingMinutes: Int
+    let dictations: Int
+    let dictationWords: Int
+    let writingEntries: Int
+    let writingWords: Int
+
+    var id: TimeInterval { day.timeIntervalSinceReferenceDate }
+    var totalCaptures: Int { meetings + dictations + writingEntries }
+    var isEmpty: Bool { totalCaptures == 0 }
+}
+
+/// Consecutive active days and active-day density.
+struct TodayStreakSummary: Equatable, Sendable {
+    /// Active days in a row ending today, or ending yesterday when nothing has
+    /// been captured yet today (so a streak stays intact in the morning).
+    let currentDays: Int
+    let longestDays: Int
+    let activeDaysLast7: Int
+    let activeDaysLast30: Int
+    let totalActiveDays: Int
+
+    static let empty = TodayStreakSummary(
+        currentDays: 0,
+        longestDays: 0,
+        activeDaysLast7: 0,
+        activeDaysLast30: 0,
+        totalActiveDays: 0
+    )
+}
+
+/// One stream's share in the Capture Mix breakdown.
+struct TodayCaptureMixSegment: Identifiable, Equatable, Sendable {
+    let kind: TodayRecentItem.Kind
+    let title: String
+    let count: Int
+    let detail: String
+    let share: Double
+
+    var id: TodayRecentItem.Kind { kind }
+    var percentage: Int { Int((share * 100).rounded()) }
+}
+
+/// Complete Stats snapshot precomputed off the main thread.
+struct TodayStatsOverview: Equatable, Sendable {
+    let today: TodayRangeSummary
+    let last7Days: TodayRangeSummary
+    let last30Days: TodayRangeSummary
+    let allTime: TodayRangeSummary
+    /// Rolling 7 calendar days, oldest first, last is today.
+    let dailyActivity: [TodayActivityDay]
+    let streak: TodayStreakSummary
+
+    static let empty = TodayStatsOverview(
+        today: .empty,
+        last7Days: .empty,
+        last30Days: .empty,
+        allTime: .empty,
+        dailyActivity: [],
+        streak: .empty
+    )
+
+    var hasAnyCapture: Bool { allTime.hasAnyCapture }
+    var hasWriting: Bool { allTime.hasWriting }
+
+    func summary(for range: TodayStatsRange) -> TodayRangeSummary {
+        switch range {
+        case .today: return today
+        case .last7Days: return last7Days
+        case .last30Days: return last30Days
+        case .allTime: return allTime
+        }
+    }
+
+    func captureMix(for range: TodayStatsRange) -> [TodayCaptureMixSegment] {
+        let summary = summary(for: range)
+        return TodayStatsBuilder.captureMix(for: summary, includeWriting: hasWriting)
     }
 }
 
 enum TodayStatsBuilder {
-    static func build(
+    static let activityDayCount = 7
+    static let rollingMonthDayCount = 30
+
+    private struct MutableTotals {
+        var meetings = 0
+        var meetingSeconds = 0
+        var dictations = 0
+        var dictationWords = 0
+        var writingEntries = 0
+        var writingWords = 0
+
+        func freeze() -> TodayRangeSummary {
+            TodayRangeSummary(
+                meetings: meetings,
+                meetingMinutes: TodayStatsBuilder.minutes(fromSeconds: meetingSeconds),
+                dictations: dictations,
+                dictationWords: dictationWords,
+                writingEntries: writingEntries,
+                writingWords: writingWords
+            )
+        }
+    }
+
+    static func buildOverview(
         meetings: [TodayMeetingFact],
         dictationDays: [TodayDictationDayFact],
         writing: [TodayWritingFact] = [],
         now: Date,
         calendar: Calendar = .current
-    ) -> TodayContextStats {
+    ) -> TodayStatsOverview {
         let today = calendar.startOfDay(for: now)
-        let week = calendar.dateInterval(of: .weekOfYear, for: now)
-            ?? DateInterval(start: today, duration: 7 * 24 * 60 * 60)
+        let sevenDayStart = calendar.date(byAdding: .day, value: -(activityDayCount - 1), to: today) ?? today
+        let thirtyDayStart = calendar.date(byAdding: .day, value: -(rollingMonthDayCount - 1), to: today) ?? today
 
-        var todayMeetings = 0
-        var todayMeetingSeconds = 0
-        var weekMeetings = 0
-        var weekMeetingSeconds = 0
+        var todayTotals = MutableTotals()
+        var sevenTotals = MutableTotals()
+        var thirtyTotals = MutableTotals()
+        var allTotals = MutableTotals()
+        var byDay: [Date: MutableTotals] = [:]
+        var activeDays = Set<Date>()
+
+        func addDay(_ day: Date, update: (inout MutableTotals) -> Void) {
+            update(&allTotals)
+            if day == today {
+                update(&todayTotals)
+            }
+            if day >= sevenDayStart && day <= today {
+                update(&sevenTotals)
+                var bucket = byDay[day] ?? MutableTotals()
+                update(&bucket)
+                byDay[day] = bucket
+            }
+            if day >= thirtyDayStart && day <= today {
+                update(&thirtyTotals)
+            }
+            if day <= today {
+                activeDays.insert(day)
+            }
+        }
+
         for meeting in meetings {
             let day = calendar.startOfDay(for: meeting.date)
             let seconds = max(0, meeting.durationSeconds ?? 0)
-            if day == today {
-                todayMeetings += 1
-                todayMeetingSeconds += seconds
-            }
-            if week.contains(meeting.date) {
-                weekMeetings += 1
-                weekMeetingSeconds += seconds
+            addDay(day) {
+                $0.meetings += 1
+                $0.meetingSeconds += seconds
             }
         }
 
-        var todayDictations = 0
-        var todayWords = 0
-        var weekDictations = 0
-        var weekWords = 0
         for fact in dictationDays where fact.entries > 0 {
             let day = calendar.startOfDay(for: fact.day)
-            if day == today {
-                todayDictations += fact.entries
-                todayWords += fact.words
-            }
-            if week.contains(day) {
-                weekDictations += fact.entries
-                weekWords += fact.words
+            let words = max(0, fact.words)
+            addDay(day) {
+                $0.dictations += fact.entries
+                $0.dictationWords += words
             }
         }
 
-        var todayWritingWords = 0
-        var todayWritingEntries = 0
-        var weekWritingWords = 0
-        var wordsByApp: [String: Int] = [:]
         for entry in writing {
-            if calendar.isDate(entry.date, inSameDayAs: now) {
-                todayWritingWords += entry.words
-                todayWritingEntries += 1
-                wordsByApp[entry.appName, default: 0] += entry.words
+            let day = calendar.startOfDay(for: entry.date)
+            let words = max(0, entry.words)
+            addDay(day) {
+                $0.writingEntries += 1
+                $0.writingWords += words
             }
-            if week.contains(entry.date) { weekWritingWords += entry.words }
         }
-        let apps = wordsByApp
-            .map { TodayAppWords(appName: $0.key, words: $0.value) }
-            .sorted { $0.words != $1.words ? $0.words > $1.words : $0.appName < $1.appName }
 
-        var stats = TodayContextStats(
-            todayMeetings: todayMeetings,
-            todayDictations: todayDictations,
-            todayMeetingMinutes: minutes(fromSeconds: todayMeetingSeconds),
-            todayDictationWords: todayWords,
-            weekMeetings: weekMeetings,
-            weekDictations: weekDictations,
-            weekMeetingMinutes: minutes(fromSeconds: weekMeetingSeconds),
-            weekDictationWords: weekWords
+        let dailyActivity: [TodayActivityDay] = (0..<activityDayCount).reversed().compactMap { offset in
+            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
+            let totals = byDay[day] ?? MutableTotals()
+            return TodayActivityDay(
+                day: day,
+                isToday: offset == 0,
+                meetings: totals.meetings,
+                meetingMinutes: minutes(fromSeconds: totals.meetingSeconds),
+                dictations: totals.dictations,
+                dictationWords: totals.dictationWords,
+                writingEntries: totals.writingEntries,
+                writingWords: totals.writingWords
+            )
+        }
+
+        let streak = buildStreak(
+            activeDays: activeDays,
+            today: today,
+            sevenDayStart: sevenDayStart,
+            thirtyDayStart: thirtyDayStart,
+            calendar: calendar
         )
-        stats.todayWritingWords = todayWritingWords
-        stats.todayWritingEntries = todayWritingEntries
-        stats.weekWritingWords = weekWritingWords
-        stats.todayWritingApps = apps
-        return stats
+
+        return TodayStatsOverview(
+            today: todayTotals.freeze(),
+            last7Days: sevenTotals.freeze(),
+            last30Days: thirtyTotals.freeze(),
+            allTime: allTotals.freeze(),
+            dailyActivity: dailyActivity,
+            streak: streak
+        )
+    }
+
+    static func captureMix(
+        for summary: TodayRangeSummary,
+        includeWriting: Bool
+    ) -> [TodayCaptureMixSegment] {
+        let total = summary.meetings + summary.dictations + (includeWriting ? summary.writingEntries : 0)
+        func share(of count: Int) -> Double {
+            guard total > 0 else { return 0 }
+            return Double(count) / Double(total)
+        }
+        var segments: [TodayCaptureMixSegment] = [
+            TodayCaptureMixSegment(
+                kind: .meeting,
+                title: "Meetings",
+                count: summary.meetings,
+                detail: summary.meetingMinutes > 0
+                    ? TodayCopy.duration(minutes: summary.meetingMinutes)
+                    : TodayCopy.count(summary.meetings, singular: "meeting", plural: "meetings"),
+                share: share(of: summary.meetings)
+            ),
+            TodayCaptureMixSegment(
+                kind: .dictation,
+                title: "Dictations",
+                count: summary.dictations,
+                detail: TodayCopy.words(summary.dictationWords),
+                share: share(of: summary.dictations)
+            ),
+        ]
+        if includeWriting {
+            segments.append(
+                TodayCaptureMixSegment(
+                    kind: .writing,
+                    title: "Writing",
+                    count: summary.writingEntries,
+                    detail: TodayCopy.words(summary.writingWords),
+                    share: share(of: summary.writingEntries)
+                )
+            )
+        }
+        return segments
+    }
+
+    private static func buildStreak(
+        activeDays: Set<Date>,
+        today: Date,
+        sevenDayStart: Date,
+        thirtyDayStart: Date,
+        calendar: Calendar
+    ) -> TodayStreakSummary {
+        guard !activeDays.isEmpty else { return .empty }
+
+        let anchor: Date?
+        if activeDays.contains(today) {
+            anchor = today
+        } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: today),
+                  activeDays.contains(yesterday) {
+            anchor = yesterday
+        } else {
+            anchor = nil
+        }
+
+        var currentDays = 0
+        if var cursor = anchor {
+            while activeDays.contains(cursor) {
+                currentDays += 1
+                guard let previous = calendar.date(byAdding: .day, value: -1, to: cursor) else { break }
+                cursor = previous
+            }
+        }
+
+        let sorted = activeDays.sorted()
+        var longestDays = 0
+        var run = 0
+        var previousDay: Date?
+        for day in sorted {
+            if let prev = previousDay,
+               let expectedNext = calendar.date(byAdding: .day, value: 1, to: prev),
+               expectedNext == day {
+                run += 1
+            } else {
+                run = 1
+            }
+            if run > longestDays { longestDays = run }
+            previousDay = day
+        }
+
+        let activeLast7 = activeDays.filter { $0 >= sevenDayStart && $0 <= today }.count
+        let activeLast30 = activeDays.filter { $0 >= thirtyDayStart && $0 <= today }.count
+
+        return TodayStreakSummary(
+            currentDays: currentDays,
+            longestDays: longestDays,
+            activeDaysLast7: activeLast7,
+            activeDaysLast30: activeLast30,
+            totalActiveDays: activeDays.count
+        )
     }
 
     private static func minutes(fromSeconds seconds: Int) -> Int {
         Int((Double(seconds) / 60).rounded())
-    }
-}
-
-// MARK: - Day tape
-
-/// One capture drawn on the day tape (the Context app's Days view): a
-/// meeting is a capsule from its start to its end, a dictation is a dot.
-/// Positions are fractions of the tape window, 6 AM to midnight; anything
-/// earlier sits at the left edge.
-struct TodayTapeMark: Identifiable, Equatable, Sendable {
-    let item: TodayRecentItem
-    let start: Double
-    /// nil draws a dot.
-    let end: Double?
-    /// The hover line ("Weekly sync · 2:10 PM · 42 min"), made once when the
-    /// day is built (`TodayTapeBuilder.days`), so the day card doesn't format
-    /// a date for every mark each time it draws.
-    var hoverText = ""
-
-    var id: String { item.id }
-    var isDot: Bool { end == nil }
-}
-
-struct TodayTapeDay: Identifiable, Equatable, Sendable {
-    let day: Date
-    let isToday: Bool
-    let meetings: [TodayTapeMark]
-    let dictations: [TodayTapeMark]
-    let writing: [TodayTapeMark]
-    /// Every mark in time order, for stepping through the day. Sorted once
-    /// here: the day card reads it for every mark it draws, and a busy day
-    /// has hundreds of dictations.
-    let allMarks: [TodayTapeMark]
-    /// The day split into sessions (`TodaySessionBuilder`), also made once.
-    let sessions: [TodaySession]
-
-    init(
-        day: Date,
-        isToday: Bool,
-        meetings: [TodayTapeMark],
-        dictations: [TodayTapeMark],
-        writing: [TodayTapeMark] = []
-    ) {
-        self.day = day
-        self.isToday = isToday
-        self.meetings = meetings
-        self.dictations = dictations
-        self.writing = writing
-        allMarks = (meetings + dictations + writing)
-            .sorted { $0.start != $1.start ? $0.start < $1.start : $0.id < $1.id }
-        sessions = TodaySessionBuilder.sessions(allMarks.map(\.item))
-    }
-
-    var id: TimeInterval { day.timeIntervalSinceReferenceDate }
-    var isEmpty: Bool { meetings.isEmpty && dictations.isEmpty && writing.isEmpty }
-}
-
-/// What the day card shows, worked out once per draw instead of once per
-/// mark: the hovered mark, else the picked one, else the day's latest
-/// capture, and where that sits in the day for Prev and Next.
-struct TodayTapeSelection: Equatable {
-    let picked: TodayTapeMark?
-    let shown: TodayTapeMark?
-    /// `shown`'s place in `TodayTapeDay.allMarks`.
-    let shownIndex: Int?
-
-    init(day: TodayTapeDay, pickedID: String?, hoveredID: String?) {
-        let marks = day.allMarks
-        let picked = marks.first { $0.id == pickedID } ?? marks.max { $0.item.date < $1.item.date }
-        let shown = marks.first { $0.id == hoveredID } ?? picked
-        self.picked = picked
-        self.shown = shown
-        shownIndex = shown.flatMap { shown in marks.firstIndex { $0.id == shown.id } }
-    }
-}
-
-enum TodayTapeBuilder {
-    static let windowStartHour = 6
-    static let dayCount = 7
-
-    /// Seven days, oldest first, the last one is today. Captures are the same
-    /// rows the sessions list uses; a meeting's end comes from its duration.
-    static func days(
-        captures: [TodayRecentItem],
-        now: Date,
-        calendar: Calendar = .current,
-        locale: Locale = .current
-    ) -> [TodayTapeDay] {
-        let today = calendar.startOfDay(for: now)
-        return (0..<dayCount).reversed().compactMap { offset -> TodayTapeDay? in
-            guard let day = calendar.date(byAdding: .day, value: -offset, to: today) else { return nil }
-            let onDay = captures
-                .filter { calendar.isDate($0.date, inSameDayAs: day) }
-                .sorted { $0.date < $1.date }
-            func mark(_ item: TodayRecentItem) -> TodayTapeMark {
-                let start = fraction(of: item.date, onDayStarting: day, calendar: calendar)
-                var mark: TodayTapeMark
-                if item.kind != .dictation, let seconds = item.durationSeconds, seconds > 0 {
-                    let end = fraction(of: item.date.addingTimeInterval(TimeInterval(seconds)), onDayStarting: day, calendar: calendar)
-                    mark = TodayTapeMark(item: item, start: start, end: max(start, end))
-                } else {
-                    mark = TodayTapeMark(item: item, start: start, end: item.kind == .dictation ? nil : start)
-                }
-                mark.hoverText = markDescription(mark, now: now, locale: locale, calendar: calendar)
-                return mark
-            }
-            return TodayTapeDay(
-                day: day,
-                isToday: offset == 0,
-                meetings: onDay.filter { $0.kind == .meeting }.map(mark),
-                dictations: onDay.filter { $0.kind == .dictation }.map(mark),
-                writing: onDay.filter { $0.kind == .writing }.map(mark)
-            )
-        }
-    }
-
-    /// Where a moment sits on its day's tape, clamped to 0...1.
-    static func fraction(of date: Date, onDayStarting day: Date, calendar: Calendar = .current) -> Double {
-        let dayStart = calendar.startOfDay(for: day)
-        guard let windowStart = calendar.date(byAdding: .hour, value: windowStartHour, to: dayStart),
-              let windowEnd = calendar.date(byAdding: .day, value: 1, to: dayStart) else { return 0 }
-        let span = windowEnd.timeIntervalSince(windowStart)
-        guard span > 0 else { return 0 }
-        return min(1, max(0, date.timeIntervalSince(windowStart) / span))
-    }
-
-    /// A past day's numbers for the header, from its tape marks: meeting
-    /// count and length, dictation count, words written and in which apps.
-    /// Only the `today…` fields are filled; the header reads those.
-    static func dayStats(_ day: TodayTapeDay) -> TodayContextStats {
-        let meetingSeconds = day.meetings.reduce(0) { $0 + max(0, $1.item.durationSeconds ?? 0) }
-        var wordsByApp: [String: Int] = [:]
-        for mark in day.writing {
-            wordsByApp[mark.item.appName ?? "Unknown app", default: 0] += mark.item.words ?? 0
-        }
-        var stats = TodayContextStats(
-            todayMeetings: day.meetings.count,
-            todayDictations: day.dictations.count,
-            todayMeetingMinutes: Int((Double(meetingSeconds) / 60).rounded()),
-            todayDictationWords: day.dictations.reduce(0) { $0 + ($1.item.words ?? 0) },
-            weekMeetings: 0,
-            weekDictations: 0,
-            weekMeetingMinutes: 0,
-            weekDictationWords: 0
-        )
-        stats.todayWritingWords = wordsByApp.values.reduce(0, +)
-        stats.todayWritingEntries = day.writing.count
-        stats.todayWritingApps = wordsByApp
-            .map { TodayAppWords(appName: $0.key, words: $0.value) }
-            .sorted { $0.words != $1.words ? $0.words > $1.words : $0.appName < $1.appName }
-        return stats
-    }
-
-    /// Header sentence pieces: "4 meetings (2h 10m)", "12 dictations",
-    /// "1,280 words written". Only the streams with something today.
-    static func headerParts(_ stats: TodayContextStats) -> [(kind: TodayRecentItem.Kind, text: String)] {
-        var parts: [(TodayRecentItem.Kind, String)] = []
-        if stats.todayMeetings > 0 {
-            let minutes = stats.todayMeetingMinutes > 0 ? " (\(TodayCopy.duration(minutes: stats.todayMeetingMinutes)))" : ""
-            parts.append((.meeting, TodayCopy.count(stats.todayMeetings, singular: "meeting", plural: "meetings") + minutes))
-        }
-        if stats.todayDictations > 0 {
-            parts.append((.dictation, TodayCopy.count(stats.todayDictations, singular: "dictation", plural: "dictations")))
-        }
-        if stats.todayWritingWords > 0 {
-            parts.append((.writing, TodayCopy.words(stats.todayWritingWords) + " written"))
-        }
-        return parts
-    }
-
-    /// Hour labels under the full tape, evenly spaced across 6 AM to midnight.
-    static let hourLabels = ["6am", "9", "noon", "3", "6", "9pm"]
-
-    /// Hover line for a mark: "Weekly sync · 2:10 PM · 42 min".
-    static func markDescription(
-        _ mark: TodayTapeMark,
-        now: Date,
-        locale: Locale = .current,
-        calendar: Calendar = .current
-    ) -> String {
-        var parts = [mark.item.title, TodayCopy.rowWhen(for: mark.item.date, now: now, locale: locale, calendar: calendar)]
-        if let duration = TodayCopy.rowDuration(seconds: mark.item.durationSeconds) {
-            parts.append(duration)
-        }
-        return parts.joined(separator: " \u{00B7} ")
-    }
-}
-
-// MARK: - Sessions
-
-/// A stretch of one day with no long pause in it: a meeting and the
-/// dictations around it, or a run of writing in one app. Items oldest first.
-struct TodaySession: Identifiable, Equatable, Sendable {
-    let items: [TodayRecentItem]
-    let start: Date
-    let end: Date
-    let title: String
-
-    var id: String { items.first?.id ?? "" }
-    /// Which streams it holds, in lane order, for the row's dots.
-    var kinds: [TodayRecentItem.Kind] {
-        [.meeting, .dictation, .writing].filter { kind in items.contains { $0.kind == kind } }
-    }
-}
-
-/// Groups a day's captures into sessions and names each one by rule, no
-/// model: the first meeting's title, else the first dictation's opening
-/// words, else "Writing in <app>" when the writing all came from one app.
-enum TodaySessionBuilder {
-    /// A pause longer than this starts a new session.
-    static let gap: TimeInterval = 30 * 60
-    static let titleLength = 60
-
-    static func sessions(_ items: [TodayRecentItem]) -> [TodaySession] {
-        let sorted = items.sorted { $0.date != $1.date ? $0.date < $1.date : $0.id < $1.id }
-        var groups: [[TodayRecentItem]] = []
-        var groupEnd = Date.distantPast
-        for item in sorted {
-            if groups.isEmpty || item.date.timeIntervalSince(groupEnd) > gap {
-                groups.append([item])
-                groupEnd = end(of: item)
-            } else {
-                groups[groups.count - 1].append(item)
-                groupEnd = max(groupEnd, end(of: item))
-            }
-        }
-        return groups.map { group in
-            TodaySession(
-                items: group,
-                start: group[0].date,
-                end: group.map(end(of:)).max() ?? group[0].date,
-                title: title(for: group)
-            )
-        }
-    }
-
-    /// A meeting runs for its length; a writing entry for its estimate.
-    static func end(of item: TodayRecentItem) -> Date {
-        guard item.kind != .dictation, let seconds = item.durationSeconds, seconds > 0 else { return item.date }
-        return item.date.addingTimeInterval(TimeInterval(seconds))
-    }
-
-    /// A meeting shorter than this doesn't name a session that has other
-    /// captures in it: a 1-minute "Quick notes" isn't what a morning of
-    /// dictation was about.
-    static let titleMeetingMinimumSeconds = 5 * 60
-
-    static func title(for items: [TodayRecentItem]) -> String {
-        let meetings = items.filter { $0.kind == .meeting }
-        if let meeting = meetings.first(where: { ($0.durationSeconds ?? 0) >= titleMeetingMinimumSeconds }) {
-            return wordTrimmed(meeting.title, maxLength: titleLength)
-        }
-        if let dictation = items.first(where: { $0.kind == .dictation }) {
-            return wordTrimmed(line(for: dictation), maxLength: titleLength)
-        }
-        let writing = items.filter { $0.kind == .writing }
-        let apps = Set(writing.compactMap(\.appName))
-        if apps.count == 1, let app = apps.first, app != "Unknown app", writing.allSatisfy({ $0.appName == app }) {
-            return "Writing in \(app)"
-        }
-        // Only short meetings left, or writing across several apps.
-        let first = writing.first ?? meetings.first
-        return wordTrimmed(first.map(line(for:)) ?? "", maxLength: titleLength)
-    }
-
-    /// One capture as plain text: a meeting's title, else what was said or
-    /// written, without the quotes a dictation title carries.
-    static func line(for item: TodayRecentItem) -> String {
-        if item.kind != .meeting, let preview = item.preview {
-            let collapsed = preview.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-            if !collapsed.isEmpty { return collapsed }
-        }
-        return item.title.trimmingCharacters(in: CharacterSet(charactersIn: "\u{201C}\u{201D}\u{2026} "))
-    }
-
-    /// At most `maxLength` characters, cut at a word boundary with an
-    /// ellipsis, so a title never ends in half a word.
-    /// A word boundary in the first half would throw most of the room
-    /// away, so a run with no early space is cut hard instead.
-    static func wordTrimmed(_ text: String, maxLength: Int) -> String {
-        let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-        guard collapsed.count > maxLength else { return collapsed }
-        let head = collapsed.prefix(maxLength + 1)
-        var cut = head.lastIndex(of: " ").map { head[..<$0] } ?? head.prefix(maxLength)
-        while let last = cut.last, ",;:-\u{2013}\u{2014}".contains(last) { cut = cut.dropLast() }
-        if cut.count < maxLength / 2 { cut = collapsed.prefix(maxLength) }
-        return cut.trimmingCharacters(in: .whitespaces) + "\u{2026}"
     }
 }
 
@@ -453,7 +404,7 @@ struct TodayRecentItem: Equatable, Identifiable, Sendable {
     /// Meeting transcript to reveal on the Meetings page, or a writing
     /// entry's day file; nil for dictations.
     let transcriptURL: URL?
-    /// The first lines of what was said or written, for the preview card.
+    /// The first lines of what was said or written.
     var preview: String? = nil
     /// Where it was written ("Slack"); writing only.
     var appName: String? = nil
@@ -467,13 +418,6 @@ struct TodayRecentItem: Equatable, Identifiable, Sendable {
 /// Reads Save my writing's `Writing_<YYYY-MM-dd>.md` day files (the format in
 /// docs/capture-format.md). Pure text in, entries out.
 enum TodayWritingParser {
-    /// A writing entry's bar on the tape: the file keeps only the first
-    /// keystroke, so the length is estimated from the words at a steady
-    /// typing pace, at least a minute and at most an hour.
-    static func estimatedSeconds(words: Int) -> Int {
-        min(3_600, max(60, words * 3))
-    }
-
     static func entries(fromDayFile contents: String) -> [TodayWritingFact] {
         var facts: [TodayWritingFact] = []
         let normalized = contents.replacingOccurrences(of: "\r\n", with: "\n")
@@ -509,20 +453,15 @@ enum TodayWritingParser {
     }
 
     // Sendable value types: no shared mutable formatter, and no ICU
-    // formatter built per entry (that was ~180 us an entry).
+    // formatter built per entry.
     private static let fractionalStyle = Date.ISO8601FormatStyle(includingFractionalSeconds: true)
     private static let plainStyle = Date.ISO8601FormatStyle()
 
     private static func parseDate(_ value: String) -> Date? {
-        // The writer stores "...:ss.SSSZ", so the fractional form goes first.
         guard let parsed = (try? fractionalStyle.parse(value)) ?? (try? plainStyle.parse(value)) else { return nil }
-        // FormatStyle can land one ulp (~0.12 us) off the millisecond; snapping
-        // keeps the Date identical to what ISO8601DateFormatter returned.
         return Date(timeIntervalSince1970: (parsed.timeIntervalSince1970 * 1_000).rounded() / 1_000)
     }
 
-    /// A writing row's title: the first line, trimmed like a dictation title
-    /// but without quotes, since it's the user's own text.
     static func title(for text: String, maxLength: Int = 70) -> String {
         let collapsed = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard !collapsed.isEmpty else { return "Writing" }
@@ -582,7 +521,8 @@ enum TodayCopy {
     }
 
     static func count(_ value: Int, singular: String, plural: String) -> String {
-        "\(value) \(value == 1 ? singular : plural)"
+        let number = TodayFormatterCache.decimalString(max(0, value))
+        return "\(number) \(value == 1 ? singular : plural)"
     }
 
     static func words(_ value: Int) -> String {
@@ -595,11 +535,6 @@ enum TodayCopy {
         TodayFormatterCache.string(from: date, template: "EEEEMMMMd", locale: locale, calendar: calendar)
     }
 
-    /// "Friday".
-    static func weekdayLong(for date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
-        TodayFormatterCache.string(from: date, template: "EEEE", locale: locale, calendar: calendar)
-    }
-
     /// "Thu".
     static func weekdayShort(for date: Date, locale: Locale = .current, calendar: Calendar = .current) -> String {
         TodayFormatterCache.string(from: date, template: "EEE", locale: locale, calendar: calendar)
@@ -610,24 +545,26 @@ enum TodayCopy {
         "\(calendar.component(.day, from: date))"
     }
 
-    /// A session's clock time on its own day: "5:15 – 6:31 AM", or just the
-    /// start when it lasted under five minutes.
-    static func sessionTime(
-        start: Date,
-        end: Date,
+    /// Hover tooltip for one bar in the 7-day strip.
+    static func dayActivityTooltip(
+        _ day: TodayActivityDay,
         locale: Locale = .current,
         calendar: Calendar = .current
     ) -> String {
-        guard end.timeIntervalSince(start) >= 5 * 60 else {
-            return TodayFormatterCache.string(from: start, template: "jmm", locale: locale, calendar: calendar)
+        let header = dateLine(for: day.day, locale: locale, calendar: calendar)
+        guard !day.isEmpty else { return "\(header) \u{00B7} No captures" }
+        var parts: [String] = []
+        if day.meetings > 0 {
+            let length = day.meetingMinutes > 0 ? " (\(duration(minutes: day.meetingMinutes)))" : ""
+            parts.append(count(day.meetings, singular: "meeting", plural: "meetings") + length)
         }
-        return TodayFormatterCache.timeRange(from: start, to: end, locale: locale, calendar: calendar)
-    }
-
-    /// Whole minutes since the reference date. The Now label uses this so a
-    /// tick that has not changed the displayed clock time can skip work.
-    static func minuteKey(_ date: Date) -> Int64 {
-        Int64((date.timeIntervalSinceReferenceDate / 60).rounded(.down))
+        if day.dictations > 0 {
+            parts.append(count(day.dictations, singular: "dictation", plural: "dictations"))
+        }
+        if day.writingEntries > 0 {
+            parts.append(words(day.writingWords) + " written")
+        }
+        return "\(header) \u{00B7} \(parts.joined(separator: ", "))"
     }
 
     /// Time of day for today's rows, "Yesterday", or a short weekday/date.
@@ -653,26 +590,9 @@ enum TodayCopy {
     }
 }
 
-// MARK: - Clock
+// MARK: - Day rollover
 
-/// What the day card compares. It does not include the current minute, so a
-/// clock tick does not rebuild the tape, preview, or session list.
-struct TodayDayCardIdentity: Equatable, Sendable {
-    let day: TodayTapeDay
-    let pickedMarkID: String?
-    let formatKey: String
-}
-
-/// What a session row compares. Locale / time zone live in `formatKey` so a
-/// region change still redraws the formatted times.
-struct TodaySessionRowIdentity: Equatable, Sendable {
-    let session: TodaySession
-    let isOpen: Bool
-    let formatKey: String
-}
-
-/// Calendar-day helpers for Today's live clock leaves. Minute ticks stay on
-/// the Now label and tape marker; a day change rebuilds the snapshot.
+/// Calendar-day helpers for Stats' midnight rollover leaf.
 enum TodayClockPolicy {
     static func dayKey(_ date: Date, calendar: Calendar = .current) -> Date {
         calendar.startOfDay(for: date)
@@ -692,48 +612,9 @@ enum TodayClockPolicy {
     ) -> Bool {
         !calendar.isDate(storedDay, inSameDayAs: now)
     }
-
-    /// Where the Now marker sits on the tape, or nil when `tapeDay` is not
-    /// the local day of `now` (stale `isToday` after midnight, or a past day).
-    static func nowMarkerFraction(
-        now: Date,
-        tapeDay: Date,
-        calendar: Calendar = .current
-    ) -> Double? {
-        guard calendar.isDate(tapeDay, inSameDayAs: now) else { return nil }
-        return TodayTapeBuilder.fraction(of: now, onDayStarting: dayKey(now, calendar: calendar), calendar: calendar)
-    }
-
-    static func dayCardIdentity(
-        day: TodayTapeDay,
-        pickedMarkID: String?,
-        formatKey: String
-    ) -> TodayDayCardIdentity {
-        TodayDayCardIdentity(day: day, pickedMarkID: pickedMarkID, formatKey: formatKey)
-    }
-
-    static func sessionRowIdentity(
-        session: TodaySession,
-        isOpen: Bool,
-        formatKey: String
-    ) -> TodaySessionRowIdentity {
-        TodaySessionRowIdentity(session: session, isOpen: isOpen, formatKey: formatKey)
-    }
-
-    static func nowLabelText(
-        now: Date,
-        locale: Locale = .current,
-        calendar: Calendar = .current
-    ) -> String {
-        "Now \(TodayCopy.rowWhen(for: now, now: now, locale: locale, calendar: calendar))"
-    }
 }
 
-/// Today's copy runs per session row and twice per tape mark on every render
-/// (hover re-renders the tape), so building a DateFormatter per call adds up
-/// on a busy day. Formatters are reused per template, locale, calendar and
-/// time zone. Foundation formatters are safe to share for reads; the lock
-/// only guards the dictionary.
+/// Reused Foundation formatters keyed by template, locale, calendar and time zone.
 enum TodayFormatterCache {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var dateFormatters: [String: DateFormatter] = [:]
@@ -756,29 +637,6 @@ enum TodayFormatterCache {
         }
         lock.unlock()
         return formatter.string(from: date)
-    }
-
-    nonisolated(unsafe) private static var intervalFormatters: [String: DateIntervalFormatter] = [:]
-
-    static func timeRange(from start: Date, to end: Date, locale: Locale, calendar: Calendar) -> String {
-        let key = [locale.identifier, "\(calendar.identifier)", calendar.timeZone.identifier].joined(separator: "|")
-        lock.lock()
-        let formatter: DateIntervalFormatter
-        if let cached = intervalFormatters[key] {
-            formatter = cached
-        } else {
-            formatter = DateIntervalFormatter()
-            formatter.locale = locale
-            formatter.calendar = calendar
-            formatter.timeZone = calendar.timeZone
-            formatter.dateTemplate = "jmm"
-            intervalFormatters[key] = formatter
-        }
-        // Unlike DateFormatter, DateIntervalFormatter isn't documented as
-        // safe to share, so it formats under the lock.
-        let text = formatter.string(from: start, to: end)
-        lock.unlock()
-        return text
     }
 
     static func decimalString(_ value: Int, locale: Locale = .current) -> String {

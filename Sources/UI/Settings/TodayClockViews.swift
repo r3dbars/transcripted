@@ -1,43 +1,9 @@
 import AppKit
 import SwiftUI
 
-/// "Now 2:41 PM" on today's tape. Its own minute TimelineView so the rest
-/// of the day card can skip a tick.
-struct TodayNowLabel: View {
-    var body: some View {
-        TimelineView(.everyMinute) { context in
-            Text(TodayClockPolicy.nowLabelText(now: context.date))
-                .font(.system(size: 11))
-                .foregroundStyle(LibraryTokens.ink3)
-        }
-    }
-}
-
-/// The accent line at the current time of day on today's tape. The day it
-/// sits on comes from the TimelineView clock, not the snapshot's stored
-/// `isToday`, so a stale tape after midnight or sleep hides the marker
-/// instead of pinning it to yesterday's right edge.
-struct TodayNowMarker: View {
-    let tapeDay: Date
-    let width: CGFloat
-
-    var body: some View {
-        TimelineView(.everyMinute) { context in
-            if let fraction = TodayClockPolicy.nowMarkerFraction(now: context.date, tapeDay: tapeDay) {
-                Rectangle()
-                    .fill(LibraryTokens.accent)
-                    .frame(width: 2, height: 22)
-                    .offset(x: width * fraction - 1)
-                    .allowsHitTesting(false)
-            }
-        }
-        .allowsHitTesting(false)
-    }
-}
-
-/// Zero-size leaf that refreshes the snapshot when the calendar day of
+/// Zero-size leaf that refreshes the Stats snapshot when the calendar day of
 /// `storedDay` is no longer today: local midnight, appear, wake, the app
-/// becoming active, or the window becoming key.
+/// becoming active, or the window becoming key. No per-minute timers.
 struct TodayDayRollover: View {
     let storedDay: Date
     let onRollover: () -> Void

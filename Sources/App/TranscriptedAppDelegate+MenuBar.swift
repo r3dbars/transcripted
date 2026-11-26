@@ -134,7 +134,7 @@ extension TranscriptedAppDelegate {
     }
 
     func showSettingsWindow(
-        page: TranscriptedSettingsPage = .today,
+        page: TranscriptedSettingsPage = .home,
         source: String = "unknown"
     ) {
         settingsWindowController.present(page: page, source: source)
@@ -175,9 +175,9 @@ extension TranscriptedAppDelegate {
         appState.recoverHotkeysAfterPermissionChange()
         onboardingWindowController.dismiss()
         closePopover()
-        // Setup ends on Today in the main window, not the popover: the person
-        // already dictated in setup, and Today is where they land from now on.
-        showSettingsWindow(page: .today, source: "onboarding_completed")
+        // Setup ends on Meetings in the main window, not the popover: the person
+        // already dictated in setup, and Meetings is where they land from now on.
+        showSettingsWindow(page: .home, source: "onboarding_completed")
     }
 
     func showMainPopover(

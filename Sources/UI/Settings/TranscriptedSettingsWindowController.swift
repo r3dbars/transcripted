@@ -47,7 +47,7 @@ final class TranscriptedSettingsWindowController: NSWindowController, NSWindowDe
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func present(page requested: TranscriptedSettingsPage = .today, source: String = "unknown") {
+    func present(page requested: TranscriptedSettingsPage = .home, source: String = "unknown") {
         guard let window else { return }
         // The retired file page opens Meetings, and reports it as Meetings.
         let page = requested.redirected

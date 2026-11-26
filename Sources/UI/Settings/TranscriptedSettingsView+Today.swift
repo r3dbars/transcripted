@@ -5,8 +5,6 @@ import TranscriptedCore
 /// setup checklist, and landing a Today dictation click on its entry.
 extension TranscriptedSettingsView {
     var todayPage: some View {
-        // The Now label and tape marker own their own minute TimelineViews.
-        // Wrapping this page used to rebuild every session row each minute.
         TodaySettingsPage(
             todayViewModel: todayViewModel,
             onOpenRecentItem: { item in
@@ -30,6 +28,10 @@ extension TranscriptedSettingsView {
                         NSWorkspace.shared.open(dayFile)
                     }
                 }
+            },
+            onOpenMeetings: {
+                trackSettingsAction("today_open_meetings", page: .today)
+                navigation.select(.home, source: .settingsAction)
             },
             onStartMeeting: {
                 trackSettingsAction("empty_start_meeting", page: .today)

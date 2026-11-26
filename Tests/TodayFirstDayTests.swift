@@ -1,9 +1,8 @@
 import Foundation
 
-// Promises: Today's first day names the person's own dictation key and how
+// Promises: the empty state names the person's own dictation key and how
 // it behaves; the setup checklist shows only what's left and retires for
-// good; a live meeting sits on today's lane from its start to now; a Today
-// dictation click knows which saved entry to land on.
+// good; a dictation click knows which saved entry to land on.
 func testTodayFirstDay() {
     runSuite("The first-day key line uses the configured key and behavior") {
         let hold = TodayKeyHint.make(keyDisplay: "Right ⌥", behavior: .holdOrTap)
@@ -92,25 +91,6 @@ func testTodayFirstDay() {
         TodaySetupChecklistPreferences.noteFilesImported(count: 2, userDefaults: defaults)
         assertTrue(TodaySetupChecklistPreferences.hasTriedFileImport(userDefaults: defaults),
                    "a drop or ⌘O import checks the step off")
-    }
-
-    runSuite("A live meeting spans its start to now on today's lane") {
-        var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = TimeZone(identifier: "America/Los_Angeles")!
-        let now = calendar.date(from: DateComponents(year: 2026, month: 9, day: 24, hour: 15))!
-        let today = calendar.startOfDay(for: now)
-        guard let span = TodayLiveMeetingSpan.make(elapsedSeconds: 18 * 60, now: now, tapeDay: today, calendar: calendar) else {
-            assertTrue(false, "today's lane should get a live span")
-            return
-        }
-        // The window is 6 AM to midnight: 18 hours.
-        assertEqual(span.end, 9.0 / 18.0, "the bar ends at now")
-        assertEqual(span.start, 31_320.0 / 64_800.0, "the bar starts when the recording did")
-        let yesterday = calendar.date(byAdding: .day, value: -1, to: today)!
-        assertNil(TodayLiveMeetingSpan.make(elapsedSeconds: 60, now: now, tapeDay: yesterday, calendar: calendar),
-                  "a past day never shows a live bar")
-        let early = TodayLiveMeetingSpan.make(elapsedSeconds: 20 * 3600, now: now, tapeDay: today, calendar: calendar)
-        assertEqual(early?.start, 0, "a recording older than the window starts at the left edge")
     }
 
     runSuite("A Today dictation row knows its saved entry") {

@@ -88,7 +88,7 @@ final class TranscriptedSettingsNavigationModel {
     }
 
     init(
-        selectedPage: TranscriptedSettingsPage = .today,
+        selectedPage: TranscriptedSettingsPage = .home,
         pageViewSink: @escaping PageViewSink = { page, source in
             AnalyticsReporter.track("settings_page_viewed", properties: [
                 "page_id": page.analyticsValue,

@@ -1,23 +1,22 @@
 import Foundation
 import TranscriptedCore
 
-/// Everything the Today page shows, built from local capture files.
+/// Everything the Stats page shows, built off-main from local capture files.
 struct TodaySnapshot: Sendable {
-    let stats: TodayContextStats
-    /// Last seven days for the tape, oldest first.
-    let tapeDays: [TodayTapeDay]
+    let overview: TodayStatsOverview
+    /// Most recent meetings for the quick-jump list on Stats.
+    let recentMeetings: [TodayRecentItem]
     /// Latest captures across kinds; the shell's return signal reads them.
     let recent: [TodayRecentItem]
     let builtAt: Date
 
-    static let empty = TodaySnapshot(stats: .empty, tapeDays: [], recent: [], builtAt: .distantPast)
+    static let empty = TodaySnapshot(overview: .empty, recentMeetings: [], recent: [], builtAt: .distantPast)
 }
 
-/// Loads the Today snapshot off the main thread. Sources are the same local
+/// Loads the Stats snapshot off the main thread. Sources are the same local
 /// libraries Meetings and Dictations use: bounded meeting metadata
-/// (`RecentMeetingsScanner.loadTodayIndex`), the dictation day files, and
-/// Save my writing's day files.
-/// Nothing leaves the Mac.
+/// (`RecentMeetingsScanner.loadTodayIndex`), cached dictation day counts,
+/// and optional writing day files. Nothing leaves the Mac.
 @MainActor
 final class TodayViewModel: ObservableObject {
     @Published private(set) var snapshot: TodaySnapshot = .empty
@@ -42,8 +41,8 @@ final class TodayViewModel: ObservableObject {
 
     /// How many latest captures the snapshot keeps for the return signal.
     nonisolated static let recentLimit = TodayRecentActivity.pageSize
-    /// Upper bound on dictations read to fill the week's tape.
-    nonisolated static let maxTapeDictations = 1_000
+    /// How many recent meetings the Stats quick-jump list shows.
+    nonisolated static let recentMeetingsLimit = 5
     /// App activation, saves and window opens can each ask for a refresh; a
     /// whole-library scan runs at most this often, with one trailing run so the
     /// last change still shows.
@@ -87,8 +86,6 @@ final class TodayViewModel: ObservableObject {
     /// refresh before the first frame. Presentation starts the current read.
     func windowWillShow() {
         if let held = windowHold.windowWillShow() { publish(held) }
-        // Set before the retained view becomes visible: an old empty snapshot
-        // must not announce "Nothing captured" while the reveal read is pending.
         isRefreshing = true
     }
 
@@ -150,10 +147,16 @@ final class TodayViewModel: ObservableObject {
         isRefreshing = true
         let generation = refreshGeneration.begin()
         let limit = Self.recentLimit
+        let meetingsLimit = Self.recentMeetingsLimit
         let previous = previousMeetingIndex
         refreshTask = Task { @MainActor in
             let work = Task.detached(priority: .utility) {
-                Self.loadSnapshot(now: Date(), recentLimit: limit, previousMeetingIndex: previous)
+                Self.loadSnapshot(
+                    now: Date(),
+                    recentLimit: limit,
+                    recentMeetingsLimit: meetingsLimit,
+                    previousMeetingIndex: previous
+                )
             }
             // A detached task doesn't inherit cancellation; forward it so the
             // `Task.isCancelled` checks in the scan actually stop stale work.
@@ -178,6 +181,7 @@ final class TodayViewModel: ObservableObject {
     nonisolated private static func loadSnapshot(
         now: Date,
         recentLimit: Int,
+        recentMeetingsLimit: Int,
         previousMeetingIndex: [String: RecentMeetingIndexEntry]
     ) -> (snapshot: TodaySnapshot, meetingIndex: [String: RecentMeetingIndexEntry])? {
         let calendar = Calendar.current
@@ -193,19 +197,15 @@ final class TodayViewModel: ObservableObject {
             TodayMeetingFact(date: item.date, durationSeconds: durationSeconds(of: item))
         }
 
-        // Covers both this calendar week and the rolling seven-day tape.
-        let todayStart = calendar.startOfDay(for: now)
-        let tapeStart = calendar.date(byAdding: .day, value: -(TodayTapeBuilder.dayCount - 1), to: todayStart) ?? todayStart
-        let weekStart = calendar.dateInterval(of: .weekOfYear, for: now)?.start ?? tapeStart
-        let lookbackStart = min(tapeStart, weekStart)
         let dictationDays = DictationTranscriptStore
-            .savedDictationDayCounts(since: lookbackStart, calendar: calendar)
+            .savedDictationDayCounts(since: nil, calendar: calendar)
             .map { TodayDictationDayFact(day: $0.day, entries: $0.entries, words: $0.words) }
         if Task.isCancelled { return nil }
-        let writing = loadWriting(since: lookbackStart, calendar: calendar)
+
+        let writing = loadWriting(calendar: calendar)
         if Task.isCancelled { return nil }
 
-        let stats = TodayStatsBuilder.build(
+        let overview = TodayStatsBuilder.buildOverview(
             meetings: meetingFacts,
             dictationDays: dictationDays,
             writing: writing.map(\.fact),
@@ -223,16 +223,11 @@ final class TodayViewModel: ObservableObject {
                 transcriptURL: item.transcriptURL
             )
         }
-        // Meetings are sorted newest first, so the week is a prefix.
-        let weekMeetings = meetings.prefix { $0.date >= tapeStart }.map(meetingItem)
-        let recentMeetings = meetings.prefix(recentLimit).map(meetingItem)
+        let recentMeetings = Array(meetings.prefix(recentMeetingsLimit).map(meetingItem))
+        let recentMeetingsForReturn = Array(meetings.prefix(recentLimit).map(meetingItem))
 
-        // Enough dictation entries to place every one from the last seven days.
-        let weekDictationCount = dictationDays.filter { $0.day >= tapeStart }.reduce(0) { $0 + $1.entries }
-        let savedDictations = DictationTranscriptStore.recentSavedDictations(
-            limit: min(maxTapeDictations, max(recentLimit, weekDictationCount))
-        )
-        let dictationItems = savedDictations.map { entry in
+        let savedDictations = DictationTranscriptStore.recentSavedDictations(limit: recentLimit)
+        let recentDictations = savedDictations.map { entry in
             TodayRecentItem(
                 kind: .dictation,
                 id: TodayRecentItem.dictationIDPrefix + entry.id,
@@ -245,48 +240,44 @@ final class TodayViewModel: ObservableObject {
                 words: entry.text.split(whereSeparator: \.isWhitespace).count
             )
         }
-        let writingItems = writing.map { entry in
-            TodayRecentItem(
-                kind: .writing,
-                id: "writing-\(entry.fact.entryID)",
-                title: TodayWritingParser.title(for: entry.fact.text),
-                date: entry.fact.date,
-                durationSeconds: TodayWritingParser.estimatedSeconds(words: entry.fact.words),
-                transcriptURL: entry.file,
-                preview: entry.fact.text,
-                appName: entry.fact.appName,
-                words: entry.fact.words,
-                acceptedWords: entry.fact.acceptedWords
-            )
-        }.sorted { $0.date > $1.date }
-        let tapeDays = TodayTapeBuilder.days(
-            captures: weekMeetings + dictationItems.filter { $0.date >= tapeStart } + writingItems.filter { $0.date >= tapeStart },
-            now: now,
-            calendar: calendar
-        )
-        let recentDictations = dictationItems.prefix(recentLimit)
+        let recentWriting = writing
+            .sorted { $0.fact.date > $1.fact.date }
+            .prefix(recentLimit)
+            .map { entry in
+                TodayRecentItem(
+                    kind: .writing,
+                    id: "writing-\(entry.fact.entryID)",
+                    title: TodayWritingParser.title(for: entry.fact.text),
+                    date: entry.fact.date,
+                    durationSeconds: nil,
+                    transcriptURL: entry.file,
+                    preview: entry.fact.text,
+                    appName: entry.fact.appName,
+                    words: entry.fact.words,
+                    acceptedWords: entry.fact.acceptedWords
+                )
+            }
         if Task.isCancelled { return nil }
 
         let merged = TodayRecentActivity.merge(
-            meetings: Array(recentMeetings),
-            dictations: Array(recentDictations),
-            writing: Array(writingItems.prefix(recentLimit)),
+            meetings: recentMeetingsForReturn,
+            dictations: recentDictations,
+            writing: recentWriting,
             limit: recentLimit
         )
 
         let snapshot = TodaySnapshot(
-            stats: stats,
-            tapeDays: tapeDays,
+            overview: overview,
+            recentMeetings: recentMeetings,
             recent: merged,
             builtAt: now
         )
         return (snapshot, meetingIndexByPath)
     }
 
-    /// Writing entries from day files on or after `since`. Reads only the
-    /// `Writing_<date>.md` files in the capture library's `writing/` folder.
+    /// Writing entries from `Writing_<date>.md` day files in the capture
+    /// library's `writing/` folder, cached by file signature.
     nonisolated private static func loadWriting(
-        since: Date,
         calendar: Calendar
     ) -> [(fact: TodayWritingFact, file: URL)] {
         let folder = FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
@@ -301,25 +292,20 @@ final class TodayViewModel: ObservableObject {
         parser.calendar = calendar
         parser.timeZone = calendar.timeZone
         parser.dateFormat = "yyyy-MM-dd"
-        let firstDay = calendar.startOfDay(for: since)
         var result: [(fact: TodayWritingFact, file: URL)] = []
         var scanned: [URL] = []
         for file in files {
             let name = file.lastPathComponent
             guard name.hasPrefix("Writing_"), name.hasSuffix(".md"),
-                  let day = parser.date(from: String(name.dropFirst(8).dropLast(3))),
-                  day >= firstDay else { continue }
+                  parser.date(from: String(name.dropFirst(8).dropLast(3))) != nil else { continue }
             scanned.append(file)
-            // Unchanged day files reuse their last parse.
             guard let facts = cache.facts(
                 for: file,
                 signature: TodayWritingDayFileCache.signature(of: file),
                 read: { try? String(contentsOf: file, encoding: .utf8) }
             ) else { continue }
             if Task.isCancelled { return [] }
-            result += facts
-                .filter { $0.date >= since }
-                .map { ($0, file) }
+            result += facts.map { ($0, file) }
         }
         cache.retainOnly(scanned)
         return result

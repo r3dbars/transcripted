@@ -344,17 +344,18 @@ final class UIAutomationSmokeRunner {
         }
 
         let settingsSidebarIDs = [
-            "transcripted.settings.sidebar.today",
             "transcripted.settings.sidebar.home",
             "transcripted.settings.sidebar.dictations",
             "transcripted.settings.sidebar.writing",
             "transcripted.settings.sidebar.people",
             "transcripted.settings.sidebar.connect-agent",
+            "transcripted.settings.sidebar.today",
             "transcripted.settings.sidebar.settings-toggle",
         ]
-        // Open Transcripted lands on Today; Meetings (empty here, so it offers import) is checked below.
+        // Open Transcripted lands on Meetings (empty here, so it offers import).
         let homeIDs = [
-            "transcripted.today.page",
+            "transcripted.home.find.toggle",
+            "transcripted.home.meetings.empty.import-audio",
         ]
 
         guard waitUntil(timeout: timeout, condition: {
@@ -363,27 +364,21 @@ final class UIAutomationSmokeRunner {
         }) else {
             builder.add(.fail(
                 "settings-home",
-                "Today opens as the first page",
+                "Meetings opens as the first page",
                 target: "Transcripted Settings",
-                detail: "The window did not open on Today with the expected sidebar rows.",
+                detail: "The window did not open on Meetings with the expected sidebar rows.",
                 observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
             ))
             return builder.build()
         }
         builder.add(.pass(
             "settings-home",
-            "Today opens as the first page",
+            "Meetings opens as the first page",
             target: "Transcripted Settings",
             observed: observedElements(for: settingsSidebarIDs + homeIDs, inspector: appInspector)
         ))
 
         let primaryPageChecks: [(id: String, title: String, triggerID: String, requiredIDs: [String])] = [
-            (
-                id: "settings-meetings",
-                title: "Meetings settings surface is visible",
-                triggerID: "transcripted.settings.sidebar.home",
-                requiredIDs: ["transcripted.home.find.toggle", "transcripted.home.meetings.empty.import-audio"]
-            ),
             (
                 id: "settings-dictations",
                 title: "Dictations settings surface is visible",
@@ -407,6 +402,12 @@ final class UIAutomationSmokeRunner {
                 title: "Agent settings surface is visible",
                 triggerID: "transcripted.settings.sidebar.connect-agent",
                 requiredIDs: ["transcripted.settings.page.agent"]
+            ),
+            (
+                id: "settings-stats",
+                title: "Stats settings surface is visible",
+                triggerID: "transcripted.settings.sidebar.today",
+                requiredIDs: ["transcripted.today.page"]
             ),
         ]
 

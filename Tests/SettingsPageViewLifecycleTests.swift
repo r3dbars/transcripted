@@ -7,7 +7,14 @@ func testSettingsPageViewLifecycle() {
         return
     }
 
-    runSuite("Navigation model initialization does not manufacture a page view") {
+    runSuite("Navigation model defaults to Meetings without manufacturing a page view") {
+        let defaultModel = TranscriptedSettingsNavigationModel(
+            pageViewSink: { _, _ in assertTrue(false, "default init must not emit page views") },
+            navigationSink: { _, _, _ in assertTrue(false, "default init must not emit navigation") }
+        )
+        assertEqual(defaultModel.selectedPage, .home, "Meetings should be the default landing page")
+        assertEqual(defaultModel.presentedPage, .home, "presented page should also default to Meetings")
+
         let fixture = SettingsPageViewFixture(page: .writing)
         assertEqual(fixture.model.selectedPage, .writing)
         assertEqual(fixture.model.presentedPage, .writing)

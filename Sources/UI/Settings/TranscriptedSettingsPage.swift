@@ -3,7 +3,6 @@ import Foundation
 enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     /// First page and the default on open. Meetings keeps the `home` raw
     /// value so automation identifiers and analytics `page_id` stay stable.
-    case today
     case home
     /// Retired: file import lives on Meetings now (its header, a drop
     /// anywhere on the page, ⌘O). Kept so old deep links, the debug channel
@@ -11,9 +10,12 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     case files
     case dictations
     case writing
-    case general
     case people
     case connectAgent
+    /// Stats / activity overview. Keeps the `today` raw value so automation
+    /// identifiers and analytics `page_id` stay stable.
+    case today
+    case general
 
     var id: String { rawValue }
 
@@ -55,14 +57,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .today: return "Today"
         case .home: return "Meetings"
         case .files: return "Transcribe a file"
         case .dictations: return "Dictations"
         case .writing: return "Writing"
-        case .general: return "Settings"
         case .people: return "Speakers"
         case .connectAgent: return "Agent"
+        case .today: return "Stats"
+        case .general: return "Settings"
         }
     }
 
@@ -72,18 +74,18 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
     /// page (⌘, instead) and the retired file page.
     var navigationShortcutKey: String? {
         switch self {
-        case .today: return "1"
-        case .home: return "2"
-        case .dictations: return "3"
-        case .writing: return "4"
-        case .people: return "5"
-        case .connectAgent: return "6"
+        case .home: return "1"
+        case .dictations: return "2"
+        case .writing: return "3"
+        case .people: return "4"
+        case .connectAgent: return "5"
+        case .today: return "6"
         default: return nil
         }
     }
 
     /// Tooltip text for a sidebar row, including its navigation shortcut when
-    /// one exists (e.g. "Speakers  ⌘5").
+    /// one exists (e.g. "Speakers  ⌘4").
     var navigationHelp: String {
         guard let key = navigationShortcutKey else { return title }
         return "\(title)  ⌘\(key)"
@@ -91,14 +93,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var systemImage: String {
         switch self {
-        case .today: return "sun.max.fill"
         case .home: return "bubble.left.and.bubble.right.fill"
         case .files: return "waveform"
         case .dictations: return "mic.fill"
         case .writing: return "keyboard.fill"
-        case .general: return "gearshape.fill"
         case .people: return "person.2.fill"
         case .connectAgent: return "sparkles"
+        case .today: return "chart.bar.fill"
+        case .general: return "gearshape.fill"
         }
     }
 }

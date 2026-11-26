@@ -3,10 +3,10 @@ import SwiftUI
 struct SettingsSidebarSection {
     let pages: [TranscriptedSettingsPage]
 
-    /// The six places, on ⌘1 to ⌘6: Today, the capture library, plus the
-    /// agent connection. File import is an action on Meetings, not a place.
+    /// The six places, on ⌘1 to ⌘6: Meetings first, then the rest of the
+    /// capture library, Agent, and Stats. File import is an action on Meetings, not a place.
     static let primarySection = SettingsSidebarSection(
-        pages: [.today, .home, .dictations, .writing, .people, .connectAgent]
+        pages: [.home, .dictations, .writing, .people, .connectAgent, .today]
     )
 
     /// Configuration lives on one combined scrolling page (.general),
