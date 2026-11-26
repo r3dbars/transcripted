@@ -76,9 +76,9 @@ For helper and legacy scripts, see `scripts/README.md`.
 - `.github/` — issue templates, PR template, and repository workflows
 - `.githooks/` — git hooks (`commit-msg`, `pre-push`, the public-repo guard); see the Docs Map entry below
 - `.claude/` — Claude Code settings, skills, slash commands, subagents and the `stop-lint.sh` Stop hook
-- `.claude-plugin/` — marketplace metadata for the `transcripted-live` Claude Code plugin (source in `Tools/TranscriptedLive/claude-mod`)
+- `.claude-plugin/` — Claude Code plugin marketplace manifest (currently empty)
 - `.codex/` — the Codex environment; its Run action calls `script/build_and_run.sh --verify`
-- `script/` — `build_and_run.sh`, the companion build-and-launch entrypoint; its default run builds the app, packages Companion and opens the app, with a running-app guard
+- `script/` — `build_and_run.sh`, local build-and-launch entrypoint with a running-app guard
 - `AppIcon/` — the app icon source (`Transcripted.icon`)
 - `glama.json`, `server.json` — MCP registry metadata
 - `Sources/` — macOS app target
@@ -213,9 +213,9 @@ Split hotspots. These were over 1,500 lines until 2026-10; each is now a core fi
 - `Sources/Support/ClipboardRestoringTextPaster.swift` plus `+Pasteboard`, `+SavedClipboard`, `ClipboardPasteOutcome.swift`, `ClipboardPasteTarget.swift` and `FocusedTextPasteConfirmation.swift` — dictation paste-back: borrows the clipboard, pastes, waits for it to land, restores. Edits to any of the six also need `bash run-slow-pasteback-smoke.sh`.
 - `Sources/UI/Settings/TranscriptedSettingsView.swift` (stored state, `init`, `body`, Home row actions) plus `+Pages`, `+HomeMeetingActions`, `+GeneralEditors`, `+Refresh`, `+Preferences` — the Settings window shell, page routing, and every Home side effect. Pages live under `Sources/UI/Settings/Pages/`; the shell keeps their bindings. The Home row actions in the core file are still pinned by source-text assertions in `Tests/UIAutomationSurfaceContractTests.swift`.
 - `Sources/UI/Settings/HomeView.swift` plus `HomeViewModel.swift`, `HomeModels.swift`, `HomeMeetingPreview.swift`, `HomeScanWarningCard.swift`, `HomeCaptureList.swift` — the Meetings page (page id `home`).
-- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeoplePersonRow.swift` (the person row; `SpeakerPeopleRows.swift` holds the undrawn voice-to-name row), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete).
+- `Sources/UI/Settings/SpeakerPeopleSettingsSection.swift` (the section view, empty state, shared play/link/icon controls) plus `SpeakerPeoplePersonRow.swift` (the person row), `SpeakerPeopleSettingsViewModel.swift` (state, rename/merge/delete) and `SpeakerPeopleSettingsViewModel+Duplicates.swift` (duplicate detection and clip files) — the Speakers directory (review, rename, merge, delete).
 - `Tools/TranscriptedQA/Sources/TranscriptedQA/Commands/PackagedAppSmoke.swift` plus `PackagedAppSmokeRunner.swift`, the `FirstRunReliability*.swift` files and `PrivacyLogScanner.swift` — the packaged-app release smoke; a break here blocks shipping.
-- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+SummaryRollups`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
+- `Tools/TranscriptedMCP/Sources/TranscriptedMCP/TranscriptIndex.swift` (connection, schema gate, reconcile, indexing) plus `+MeetingQueries`, `+DictationQueries`, `+Context`, `+Schema`, `+Writing` — the MCP server's SQLite surface.
 
 ## Historical Zones
 

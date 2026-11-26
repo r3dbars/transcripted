@@ -9,12 +9,9 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/capture-format.md` — the authoritative spec for saved Markdown: meetings, dictation day files, writing day files
 - `docs/storage-paths.md` — where every file lives, including the capture library, app state, models, logs, and old `Draft` fallbacks
 - `docs/agent-connect.md` — how an agent finds the saved folder, and the MCP setup behind the Agent page
-- `docs/cross-meeting-tools.md` — MCP rollups across meeting summaries (`list_action_items`, `list_decisions`, `digest`)
-- `docs/mcp-ui-recent-meetings.md` — the MCP server's interactive recent-meetings view
 - `docs/auto-call-detection-spec.md` — meeting auto-detection: signals, prompt flow, phase status
 - `docs/transcription-language.md` — the meeting-language picker and how Auto samples audio
 - `docs/ui-settings-menubar-spec.md` — product intent for the menu bar popover and the Settings window
-- `docs/chatgpt-companion.md` — companion capabilities and local desktop-host connection setup
 - `docs/ui-tokens.md` — how to use the shared colors, text roles, radii and button styles
 - `docs/DESIGN_TOKENS.md` — which surface token names map to the shared tokens
 
@@ -48,7 +45,6 @@ When you add, move, or retire a doc here, update this list. `python3 scripts/dev
 - `docs/testing-source-text-inventory.md` — historical source-text test cleanup record, with commands for the live inventory
 - `docs/board-scorecard.md` — the agent-runnable per-board health task list
 - `docs/hosted-full-qa-bench.md` — hosted full-bench procedure and proof boundaries
-- `docs/chatgpt-companion-testing.md` — companion test procedures and version-specific verification records
 
 ## Labs and evals
 

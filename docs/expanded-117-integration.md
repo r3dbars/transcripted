@@ -199,7 +199,7 @@ tree identical to its first parent.
 | #2590 | `6da667b51` | B | resolved, no-net-change | `d08a2be8c` | `NextSentenceSounds.swift`, `NextSentenceSynth.swift` | NextSentenceSounds/Synth.swift: candidate already has the stronger AirPods/inputNode note; kept candidate. |
 | #2591 | `388a9d4ea` | B | resolved, changes | `55ae0c259` | `WritingController+Actions.swift`, `WritingController.swift` | WritingController(+Actions).swift: candidate's async, cancellation-aware keyboard flow kept; the three write-only vars are gone. |
 | #2592 | `01291481a` | B | resolved, changes | `5e561dc53` | `RawContinuationPrompt.swift`, `ScreenScene.swift` | RawContinuationPrompt.swift, ScreenScene.swift: comment wording; kept candidate. |
-| #2593 | `f3e66de63` | B | resolved, no-net-change | `05f4ce921` | `LiveMeetingTranscriptService.swift` | LiveMeetingTranscriptService.swift: candidate already has the fix (`queue: nil` + async hop to main); kept candidate comment. |
+| #2593 | `f3e66de63` | B | resolved, no-net-change | `05f4ce921` | `LiveMeetingTranscriptService.swift` (later removed) | LiveMeetingTranscriptService.swift: candidate already has the fix (`queue: nil` + async hop to main); kept candidate comment. |
 | #2594 | `2e62c7b7f` | B | resolved, no-net-change | `639dbbf32` | `ScreenCaptureService.swift` | ScreenCaptureService.swift: comment; kept candidate. |
 | #2595 | `86df283d6` | B | resolved, no-net-change | `95c9533e3` | `AB_DOT_VS_CLOUD.md`, `Package.swift` | AB_DOT_VS_CLOUD.md, SpeakerEvalHarness/Package.swift: wording; kept candidate. |
 | #2596 | `613abadc2` | A | clean, no-net-change | `1be4d9212` | - | clean merge |

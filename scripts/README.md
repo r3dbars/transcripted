@@ -45,7 +45,6 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 
 ## Active helper scripts
 
-- `scripts/dev/test-live-claude-mod.py` — BLOCKED prototype for isolated Claude mod validation/tests (pinned SDK currently fails Bun startup; no actual mod tests run); CI runs only offline wrapper contracts: `python3 scripts/dev/test-live-claude-mod-tests.py`.
 - `scripts/dev/test-parakeet-lifecycle.sh` — compile the production Parakeet lifecycle executor against deterministic delayed model fakes; see `Tests/Integration/ParakeetLifecycle/README.md` for scope and limitations
 
 - `scripts/dev/agent-preflight.sh` — summarize branch state, changed paths, trusted docs, and suggested checks selected directly from the agent test matrix
@@ -56,7 +55,7 @@ The wrappers share code from `scripts/entrypoints/lib/`:
 - `scripts/dev/benchmark-home-recent-captures.sh` — compile and run the Settings Home recent-capture loader benchmark; pass `--max-average-load-ms` and `--max-cancellation-ms` to fail on regression
 - `scripts/dev/verify-change.sh` — app-level checks picked from what changed (paste-back, the built app importing a meeting, UI smoke, launch p95 under 400 ms), listing changed files no check covers, all in isolated state; writes `.build/verify/summary.md`. Driven by the `verify` skill in `.claude/skills/verify/`
   - Usage: `bash scripts/dev/verify-change.sh --list`, then without `--list`
-- `scripts/dev/agent-check.py` — run mapped Transcripted checks sequentially and write a bounded proof report; runs the deps build right before the first check that links prebuilt deps (adding it when `deps-libs/` is missing), and names every failed or blocked check before the overall verdict. A check that can't run here (a manual smoke, the blocked Claude mod SDK wrapper, or a native app-launch smoke on an account `scripts/ops/native-smoke-isolation.py` refuses) is reported BLOCKED, never FAIL, and leaves the proof unknown
+- `scripts/dev/agent-check.py` — run mapped Transcripted checks sequentially and write a bounded proof report; runs the deps build right before the first check that links prebuilt deps (adding it when `deps-libs/` is missing), and names every failed or blocked check before the overall verdict. A check that can't run here (a manual smoke, or a native app-launch smoke on an account `scripts/ops/native-smoke-isolation.py` refuses) is reported BLOCKED, never FAIL, and leaves the proof unknown
 - `scripts/dev/agent-context.py` — print bounded, machine-backed context for a Transcripted change or symptom
 - `scripts/dev/check-duplicate-declarations.py` — heuristic static scan for same-scope duplicate Swift declarations (the merge-collision shapes `swift -frontend -parse` misses)
 - `scripts/dev/check-superseded.py` — checks whether a dirty/conflicting PR's fix already merged under a different PR number before a repair branch gets spun up; with `--pr` it first checks whether that PR is merged or its head is already on `origin/main`

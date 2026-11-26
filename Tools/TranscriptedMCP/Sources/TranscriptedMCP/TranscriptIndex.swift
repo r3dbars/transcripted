@@ -115,9 +115,10 @@ final class TranscriptIndex: @unchecked Sendable {
     /// metadata using the app-compatible scalar decoder; v8 reindexes legacy day
     /// entries with stable IDs instead of old per-parse random IDs; v9 reclassifies
     /// metadata-identified dictation days that older indexes treated as meetings;
-    /// v10 reparses dictation bodies whose Markdown headings became false entries;
-    /// v11 drops the retired `meeting_summary_items` rollup tables.
-    private static let schemaVersion: Int32 = 11
+    /// v10 reparses dictation bodies whose Markdown headings became false entries.
+    /// `meeting_summary_items` stays in the v10 DDL (unused by new reads/writes)
+    /// so upgrading never wipes pre-existing embeddings or breaks live v10 helpers.
+    private static let schemaVersion: Int32 = 10
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -474,6 +475,7 @@ final class TranscriptIndex: @unchecked Sendable {
     /// clears rows the same way the meeting and dictation indexers do.
     func deleteIndexedRows(filename: String) throws {
         try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
+        try bindExec("DELETE FROM meeting_summary_items WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_summary_documents WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])

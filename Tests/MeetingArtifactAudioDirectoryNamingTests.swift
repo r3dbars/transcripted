@@ -1,15 +1,8 @@
 import Foundation
 
-/// Drift guard: `audio/<stem>_audio/` is hardcoded in both
-/// `Sources/Meeting/MeetingArtifactRenamer.swift` (`audioDirectoryURL(for:)`) and
-/// `Tools/TranscriptedMCP/Sources/TranscriptedMCP/RecentMeetingsWidgetBuilder.swift`
-/// (`audioDirectory(for:)`). The two packages can't share a module, so this test
-/// and its MCP counterpart —
-/// `Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/AudioDirectoryNamingTests.swift`
-/// — run over the same fixture table (codebase audit 2026-07-08). A future rename
-/// of the convention in either place, without updating the other, is caught by
-/// review diffing both tests' literal fixture tables and by whichever side's
-/// implementation drifted from its own pinned expectation.
+/// Contract test for `Sources/Meeting/MeetingArtifactRenamer.swift`
+/// (`audioDirectoryURL(for:)`): retained meeting audio lives under
+/// `audio/<stem>_audio/` beside the transcript Markdown file.
 func testMeetingArtifactAudioDirectoryNaming() {
     runSuite("MeetingArtifactRenamer.audioDirectoryURL — audio/<stem>_audio/ naming") {
         for fixture in meetingArtifactAudioDirectoryNamingFixtures {
@@ -25,7 +18,6 @@ func testMeetingArtifactAudioDirectoryNaming() {
     }
 }
 
-/// Same fixture inputs as `Tools/TranscriptedMCP/Tests/TranscriptedMCPTests/AudioDirectoryNamingTests.swift`.
 private let meetingArtifactAudioDirectoryNamingFixtures: [(transcriptPath: String, expectedAudioDirectoryPath: String)] = [
     (
         "/tmp/x/Call_2026-01-01_10-00-00.md",

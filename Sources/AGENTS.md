@@ -14,7 +14,7 @@ The app does: dictation with paste-back, Writing (opt-in autocomplete through it
 - `Observability/` — events, diagnostics, analytics, Sentry crash reporting, Sparkle updater
 - `Reliability/` — wake / sleep recovery coordination
 - `Speech/` — local STT engines (Parakeet V3, Whisper Large V3 Turbo), `STTRouter`, audio engine and device handling, dictation audio recovery
-- `Support/` — preferences, storage paths, the capture library, permissions, constants, clipboard paste-back, model-cache inventory, companion socket
+- `Support/` — preferences, storage paths, the capture library, permissions, constants, clipboard paste-back, model-cache inventory
 - `TranscriptedCore/` — the shared library: audio capture, meeting pipeline, speaker identity, storage. Built into a prebuilt archive, never compiled into the app target
 - `Writing/` — app side of Writing: `WritingController`, day files, the Writing tab's model, count-only analytics
 - `TranscriptedWriting/` — Writing's autocomplete library ported from Tilde. `Core/` is pure policy and builds as `TranscriptedWritingCore`; `Runtime/` compiles into the app module. Both are tested under `swift test`

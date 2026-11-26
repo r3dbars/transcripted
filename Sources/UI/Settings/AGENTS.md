@@ -98,8 +98,7 @@ The combined settings page is card-based: four visible groups (Dictation, Meetin
 
 ### Agent page
 
-- `AgentConnectionSettingsPage.swift` - connecting first: the status line, one row per detected agent (via `AgentMCPConnector`; connected agents stay listed with a check), Claude Desktop with Get when it isn't installed, and the universal copy-prompt row; then `CompanionSettingsCard()`, then the Folders disclosure (the three capture folders and Copy folder paths). No Disconnect: the connector can't remove its config entry safely yet. Row copy avoids jargon ("Terminal", not "CLI"; no "MCP servers"). The Codex inbox setup (`codexInboxDetails`) is implemented but off the view tree.
-- `CompanionSettingsCard.swift` - ChatGPT companion plugin card. Readiness describes the local bridge; it never implies ChatGPT has connected.
+- `AgentConnectionSettingsPage.swift` - connecting first: the status line, one row per detected agent (via `AgentMCPConnector`; connected agents stay listed with a check), Claude Desktop with Get when it isn't installed, and the universal copy-prompt row; then the Folders disclosure (the three capture folders and Copy folder paths). No Disconnect: the connector can't remove its config entry safely yet. Row copy avoids jargon ("Terminal", not "CLI"; no "MCP servers").
 - Onboarding has no agent step; connection lives only here.
 
 ### Onboarding

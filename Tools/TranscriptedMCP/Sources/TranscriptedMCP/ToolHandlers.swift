@@ -277,7 +277,7 @@ func registerToolHandlers(server: Server, index: TranscriptIndex, directories: T
                     return try handleListWriting(params: params, index: index, writingDirs: directories.writingDirs)
                 case "read_writing":
                     return try handleReadWriting(params: params, writingDirs: directories.writingDirs)
-                case "search":
+                case "search", "search_context":
                     return try handleSearch(
                         params: params,
                         index: index,

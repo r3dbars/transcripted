@@ -172,6 +172,45 @@ extension TranscriptIndex {
             END
         """)
 
+        // Legacy v10 table retained in DDL (never read or written by current
+        // code, only cleaned up in deleteIndexedRows) so keeping schemaVersion
+        // at 10 preserves user embeddings on upgrade and keeps live v10 helpers
+        // sharing this index working without table-missing errors.
+        exec("""
+            CREATE TABLE IF NOT EXISTS meeting_summary_items (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                filename TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                position INTEGER NOT NULL,
+                owner TEXT,
+                text TEXT NOT NULL,
+                status TEXT,
+                due TEXT
+            )
+        """)
+
+        exec("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_items_fts USING fts5(
+                text, owner, status, due,
+                content='meeting_summary_items', content_rowid='rowid',
+                tokenize='porter unicode61'
+            )
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ai AFTER INSERT ON meeting_summary_items BEGIN
+                INSERT INTO meeting_summary_items_fts(rowid, text, owner, status, due)
+                VALUES (new.rowid, new.text, new.owner, new.status, new.due);
+            END
+        """)
+
+        exec("""
+            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ad AFTER DELETE ON meeting_summary_items BEGIN
+                INSERT INTO meeting_summary_items_fts(meeting_summary_items_fts, rowid, text, owner, status, due)
+                VALUES ('delete', old.rowid, old.text, old.owner, old.status, old.due);
+            END
+        """)
+
         // Meeting summary search document (title, attendees, decisions, action
         // items, open questions) so unified search finds summary hits alongside
         // raw transcript utterances.
@@ -219,6 +258,9 @@ extension TranscriptIndex {
         exec("CREATE INDEX IF NOT EXISTS idx_writing_days_date ON writing_days(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_writing_entries_filename ON writing_entries(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_writing_entries_created_at ON writing_entries(created_at)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
+        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_documents_filename ON meeting_summary_documents(filename)")
     }
 }

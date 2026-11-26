@@ -61,8 +61,6 @@ full reinstall.
 
 Current `transcripted-mcp` saved-context and diagnostic tools:
 
-- `recent_context`
-- `search_context`
 - `list_meetings`
 - `read_meeting`
 - `list_dictations`
@@ -70,47 +68,21 @@ Current `transcripted-mcp` saved-context and diagnostic tools:
 - `list_writing`
 - `read_writing`
 - `search`
+- `recent_context`
 - `who_is`
-- `recap`
-- `list_action_items`
-- `list_decisions`
-- `digest`
-- `decisions`
-- `commitments`
-- `open_questions`
-- `search_meetings`
 - `status`
-- `show_recent_meetings`
 
-`list_action_items`, `list_decisions`, and `digest` roll up structured summary
-fields (decisions, action items, open questions) across saved meetings. They only return rows for meetings
-that have a saved summary; see `docs/cross-meeting-tools.md`.
-
-`decisions`, `commitments`, and `open_questions` query those saved summary
-fields; `search_meetings` searches saved utterances. `status` reports the helper
-version, resolved directories, and index counts. `show_recent_meetings` opens
-the recent-meetings widget, which can return transcript text and size-capped
-recorded audio to the connected host. That widget is omitted in packaged
-companion mode, which exports text only.
+`status` reports the helper version, resolved directories, and index counts.
 
 Agents can read what you wrote, too, if Save my writing is on.
 `list_writing` and `read_writing` open the daily `Writing_<date>.md` files.
-`search_context` and `recent_context` include writing by default; pass
+`search` and `recent_context` include writing by default; pass
 `kind: "writing"` to get only writing. Writing search is full text only, not
 semantic.
 
 These tools are read-only, but they are not redacted. `read_meeting`,
 `read_dictation`, and `read_writing` can return local transcript or writing
 text to the agent you connected.
-
-The helper also registers companion tools: `show_companion`,
-`get_recording_status`, `start_meeting`, `stop_meeting`,
-`set_live_context_sharing`, `read_live_transcript`, `get_live_meeting_context`,
-`browse_companion_context`, and `read_context_passage`. Meeting controls and
-live-sharing changes are actions, not read-only queries. They require the
-running app's local-companion access, with separate meeting-control and
-live-sharing permissions in Agent settings. Live text also requires sharing
-to be enabled for the current meeting. Starting a meeting leaves sharing off.
 
 ### Anonymous Usage Ping
 

@@ -166,13 +166,8 @@ Claude Desktop integration installs the bundled read-only MCP helper under:
 - MCP helper: `~/Library/Application Support/Transcripted/mcp/transcripted-mcp`
 - MCP directory manifest: `~/Library/Application Support/Transcripted/mcp-directories.json`
 
-The opt-in live meeting helper (`Tools/TranscriptedLive`) writes outside the app's folder, under
-`~/Library/Application Support/TranscriptedLive/` (or `TRANSCRIPTED_LIVE_DIR`):
-
-- `session.json`: the helper's state and current ghost lines
-- `meetings/<id>.jsonl`: the rough transcript of each meeting it heard; the helper deletes ones older
-  than 24 h when it starts. Deleting a meeting in the app, moving the capture library and the app's
-  cleanup never touch this folder
+On launch, the app also removes any leftover `~/Library/Application Support/Transcripted/companion/`
+directory left by earlier experimental builds (verified strictly under the app-support root, never following symlinks).
 
 Script-installed experimental models (never downloaded by the app) live under:
 

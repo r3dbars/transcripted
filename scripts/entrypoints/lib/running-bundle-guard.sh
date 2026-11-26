@@ -11,7 +11,7 @@ refuse_if_bundle_running() {
     [ -d "$bundle" ] || return 0
     [ "${FORCE_REBUILD_RUNNING:-0}" = "1" ] && return 0
 
-    # Contents/ covers the app and its helpers (llama-server, transcripted-live).
+    # Contents/ covers the app and its helpers (llama-server, transcripted-mcp, transcripted-cli).
     # Match the resolved path, plus a relative launch from this folder
     # (./build/Transcripted.app/...). The relative pattern is anchored to the
     # start of an argument so another worktree's absolute path doesn't match.
