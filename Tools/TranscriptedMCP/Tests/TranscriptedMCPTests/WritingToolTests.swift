@@ -154,8 +154,8 @@ final class WritingToolTests: XCTestCase {
         try index.reconcile(meetingDirs: [], dictationDirs: [dictationDir], writingDirs: [writingDir])
 
         // `kind` all with nothing matching: the empty answer covers every kind.
-        let result = try handleSearchContext(
-            params: CallTool.Parameters(name: "search_context", arguments: ["query": .string("no-such-phrase-anywhere")]),
+        let result = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("no-such-phrase-anywhere")]),
             index: index,
             meetingDirs: [],
             dictationDirs: [dictationDir],
@@ -267,26 +267,26 @@ final class WritingToolTests: XCTestCase {
         XCTAssertEqual(meeting.isError, true, "a meeting sharing the folder is not readable as writing")
     }
 
-    // MARK: - search_context / recent_context
+    // MARK: - search / recent_context
 
-    func testSearchContextFindsWritingAndRespectsKind() throws {
+    func testSearchFindsWritingAndRespectsKind() throws {
         let writingDir = try makeWritingDir()
         let dictationDir = tempDir.appendingPathComponent("dictations", isDirectory: true).creatingDirectory()
         try writeFixture(makeDictationDayJSON(), filename: "Dictations_2026-04-07", to: dictationDir)
         try index.reconcile(meetingDirs: [], dictationDirs: [dictationDir], writingDirs: [writingDir])
 
-        let writingOnly = try searchContext(["query": .string("AirPods"), "kind": .string("writing")], dictationDir: dictationDir, writingDir: writingDir)
+        let writingOnly = try search(["query": .string("AirPods"), "kind": .string("writing")], dictationDir: dictationDir, writingDir: writingDir)
         XCTAssertEqual(writingOnly.results.map(\.kind), [.writing])
         XCTAssertEqual(writingOnly.results.first?.entryId, "writing-20260925-104211-387-4f2a9c1e")
         XCTAssertEqual(writingOnly.results.first?.snippets.first?.sourceAppName, "Slack")
         XCTAssertNil(writingOnly.results.first?.snippets.first?.delivery)
         XCTAssertEqual(telemetry.observations.last?.captureKind, "writing")
 
-        let all = try searchContext(["query": .string("AirPods")], dictationDir: dictationDir, writingDir: writingDir)
+        let all = try search(["query": .string("AirPods")], dictationDir: dictationDir, writingDir: writingDir)
         XCTAssertEqual(all.results.map(\.kind), [.writing], "kind all includes writing")
 
-        let dictationOnly = try handleSearchContext(
-            params: CallTool.Parameters(name: "search_context", arguments: ["query": .string("AirPods"), "kind": .string("dictation")]),
+        let dictationOnly = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("AirPods"), "kind": .string("dictation")]),
             index: index,
             meetingDirs: [],
             dictationDirs: [dictationDir],
@@ -295,8 +295,8 @@ final class WritingToolTests: XCTestCase {
         let dictationPayload = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(try text(dictationOnly).utf8))
         XCTAssertEqual(dictationPayload.searchedDirectories, [dictationDir.path], "a dictation-only query doesn't search the writing folder")
 
-        let withSpeaker = try handleSearchContext(
-            params: CallTool.Parameters(name: "search_context", arguments: ["query": .string("AirPods"), "speaker": .string("Jenny")]),
+        let withSpeaker = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("AirPods"), "speaker": .string("Jenny")]),
             index: index,
             meetingDirs: [],
             dictationDirs: [dictationDir],
@@ -384,9 +384,9 @@ final class WritingToolTests: XCTestCase {
         return writingDir
     }
 
-    private func searchContext(_ arguments: [String: Value], dictationDir: URL, writingDir: URL) throws -> ContextSearchResult {
-        let result = try handleSearchContext(
-            params: CallTool.Parameters(name: "search_context", arguments: arguments),
+    private func search(_ arguments: [String: Value], dictationDir: URL, writingDir: URL) throws -> ContextSearchResult {
+        let result = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: arguments),
             index: index,
             meetingDirs: [],
             dictationDirs: [dictationDir],

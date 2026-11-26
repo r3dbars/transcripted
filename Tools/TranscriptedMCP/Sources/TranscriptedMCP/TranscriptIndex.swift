@@ -115,8 +115,9 @@ final class TranscriptIndex: @unchecked Sendable {
     /// metadata using the app-compatible scalar decoder; v8 reindexes legacy day
     /// entries with stable IDs instead of old per-parse random IDs; v9 reclassifies
     /// metadata-identified dictation days that older indexes treated as meetings;
-    /// v10 reparses dictation bodies whose Markdown headings became false entries.
-    private static let schemaVersion: Int32 = 10
+    /// v10 reparses dictation bodies whose Markdown headings became false entries;
+    /// v11 drops the retired `meeting_summary_items` rollup tables.
+    private static let schemaVersion: Int32 = 11
 
     /// An already-indexed meeting whose transcript mtime is unchanged is skipped
     /// by `reconcile`, so a schema addition (new table/column) would never
@@ -373,7 +374,6 @@ final class TranscriptIndex: @unchecked Sendable {
         )
 
         if let summary = TranscriptLoader.loadMeetingSummary(forTranscript: url) {
-            try insertSummaryItems(summary, filename: filename)
             try insertSummarySearchDocument(summary, filename: filename)
         }
 
@@ -381,36 +381,6 @@ final class TranscriptIndex: @unchecked Sendable {
         committed = true
         log("Indexed meeting (utterance_count_bucket=\(MCPLogPrivacy.countBucket(transcript.utterances.count)))")
         return true
-    }
-
-    /// Parse the meeting's structured summary (inline transcript summary, then a
-    /// generated sidecar) and write one row per Decision / Action Item / Open
-    /// Question. Called inside the meeting index transaction. A meeting with no
-    /// summary inserts nothing.
-    private func insertSummaryItems(_ summary: ParsedMeetingSummary, filename: String) throws {
-        try bindExecRows(
-            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
-            rows: summary.decisions.enumerated().map { position, text -> [SQLBinding] in
-                [.text(filename), .text(SummaryItemKind.decision), .int(position), .null, .text(text)]
-            }
-        )
-        try bindExecRows(
-            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due) VALUES (?,?,?,?,?,?,?)",
-            rows: summary.actionItems.enumerated().map { position, item -> [SQLBinding] in
-                [
-                    .text(filename), .text(SummaryItemKind.actionItem), .int(position),
-                    item.owner.map { .text($0) } ?? .null, .text(item.text),
-                    item.status.map { .text($0) } ?? .null,
-                    item.due.map { .text($0) } ?? .null
-                ]
-            }
-        )
-        try bindExecRows(
-            "INSERT INTO meeting_summary_items (filename, kind, position, owner, text) VALUES (?,?,?,?,?)",
-            rows: summary.openQuestions.enumerated().map { position, text -> [SQLBinding] in
-                [.text(filename), .text(SummaryItemKind.openQuestion), .int(position), .null, .text(text)]
-            }
-        )
     }
 
     private func insertSummarySearchDocument(_ summary: ParsedMeetingSummary, filename: String) throws {
@@ -504,7 +474,6 @@ final class TranscriptIndex: @unchecked Sendable {
     /// clears rows the same way the meeting and dictation indexers do.
     func deleteIndexedRows(filename: String) throws {
         try bindExec("DELETE FROM utterances WHERE filename = ?", bindings: [.text(filename)])
-        try bindExec("DELETE FROM meeting_summary_items WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_summary_documents WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meeting_speakers WHERE filename = ?", bindings: [.text(filename)])
         try bindExec("DELETE FROM meetings WHERE filename = ?", bindings: [.text(filename)])

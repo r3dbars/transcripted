@@ -98,7 +98,7 @@ extension TranscriptIndex {
 
         // Writing day files (`Writing_<date>.md`), shaped like the dictation
         // tables above: one row per day file, one row per entry, plus FTS5 over
-        // the entry text/title/app so search_context can reach writing.
+        // the entry text/title/app so unified search can reach writing.
         exec("""
             CREATE TABLE IF NOT EXISTS writing_days (
                 filename TEXT PRIMARY KEY,
@@ -172,47 +172,9 @@ extension TranscriptIndex {
             END
         """)
 
-        // Structured summary fields (Decisions / Action Items / Open Questions)
-        // parsed from each meeting's legacy summary fields. One row per bullet, keyed to
-        // the meeting filename, with a `kind` discriminator so cross-meeting tools
-        // (list_action_items, open_questions roll-ups) can aggregate over all
-        // meetings without a per-category table. Mirrors the utterances + FTS5 +
-        // triggers pattern above.
-        exec("""
-            CREATE TABLE IF NOT EXISTS meeting_summary_items (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                filename TEXT NOT NULL,
-                kind TEXT NOT NULL,
-                position INTEGER NOT NULL,
-                owner TEXT,
-                text TEXT NOT NULL,
-                status TEXT,
-                due TEXT
-            )
-        """)
-
-        exec("""
-            CREATE VIRTUAL TABLE IF NOT EXISTS meeting_summary_items_fts USING fts5(
-                text, owner, status, due,
-                content='meeting_summary_items', content_rowid='rowid',
-                tokenize='porter unicode61'
-            )
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ai AFTER INSERT ON meeting_summary_items BEGIN
-                INSERT INTO meeting_summary_items_fts(rowid, text, owner, status, due)
-                VALUES (new.rowid, new.text, new.owner, new.status, new.due);
-            END
-        """)
-
-        exec("""
-            CREATE TRIGGER IF NOT EXISTS meeting_summary_items_ad AFTER DELETE ON meeting_summary_items BEGIN
-                INSERT INTO meeting_summary_items_fts(meeting_summary_items_fts, rowid, text, owner, status, due)
-                VALUES ('delete', old.rowid, old.text, old.owner, old.status, old.due);
-            END
-        """)
-
+        // Meeting summary search document (title, attendees, decisions, action
+        // items, open questions) so unified search finds summary hits alongside
+        // raw transcript utterances.
         exec("""
             CREATE TABLE IF NOT EXISTS meeting_summary_documents (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -257,9 +219,6 @@ extension TranscriptIndex {
         exec("CREATE INDEX IF NOT EXISTS idx_writing_days_date ON writing_days(date)")
         exec("CREATE INDEX IF NOT EXISTS idx_writing_entries_filename ON writing_entries(filename)")
         exec("CREATE INDEX IF NOT EXISTS idx_writing_entries_created_at ON writing_entries(created_at)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_filename ON meeting_summary_items(filename)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_kind ON meeting_summary_items(kind)")
-        exec("CREATE INDEX IF NOT EXISTS idx_summary_items_owner ON meeting_summary_items(owner COLLATE NOCASE)")
         exec("CREATE INDEX IF NOT EXISTS idx_summary_documents_filename ON meeting_summary_documents(filename)")
     }
 }

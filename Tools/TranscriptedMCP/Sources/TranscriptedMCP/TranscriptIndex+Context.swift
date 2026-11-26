@@ -17,8 +17,6 @@ extension TranscriptIndex {
         let dictationEntries: Int
         let writingDays: Int
         let writingEntries: Int
-        let summaryItems: Int
-        let summarizedMeetings: Int
     }
 
     func counts() throws -> IndexCounts {
@@ -28,9 +26,7 @@ extension TranscriptIndex {
                 dictationDays: try scalarCount("SELECT COUNT(*) FROM dictation_days"),
                 dictationEntries: try scalarCount("SELECT COUNT(*) FROM dictation_entries"),
                 writingDays: try scalarCount("SELECT COUNT(*) FROM writing_days"),
-                writingEntries: try scalarCount("SELECT COUNT(*) FROM writing_entries"),
-                summaryItems: try scalarCount("SELECT COUNT(*) FROM meeting_summary_items"),
-                summarizedMeetings: try scalarCount("SELECT COUNT(DISTINCT filename) FROM meeting_summary_items")
+                writingEntries: try scalarCount("SELECT COUNT(*) FROM writing_entries")
             )
         }
     }

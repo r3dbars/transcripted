@@ -18,24 +18,17 @@ func testAgentConnectionGuide() {
         let prompt = AgentConnectionGuide.starterPrompt(filename: "Planning Sync")
 
         assertTrue(
-            prompt.contains("Use the Transcripted tools first if they are connected (start with recent_context and search_context)."),
-            "prompt should tell local agents to use the tools when available, naming only where to start"
+            prompt.contains("Use the Transcripted tools first if they are connected (start with recent_context and search):"),
+            "prompt should tell local agents to use the tools when available, naming where to start"
         )
-        assertTrue(
-            AgentConnectionGuide.directToolNames.count == 15,
-            "the guide should track the full Transcripted MCP direct tool set"
+        assertEqual(
+            AgentConnectionGuide.starterToolNames,
+            ["recent_context", "search"],
+            "starter tools should point agents at recent_context and unified search"
         )
-        for toolName in AgentConnectionGuide.directToolNames where !AgentConnectionGuide.starterToolNames.contains(toolName) {
-            assertFalse(
-                prompt.contains("- \(toolName)\n") || prompt.hasSuffix("- \(toolName)"),
-                "the pasted prompt should not list raw tool names like \(toolName)"
-            )
-        }
         assertEqual(
             Set(AgentConnectionGuide.directToolNames),
             Set([
-                "recent_context",
-                "search_context",
                 "list_meetings",
                 "read_meeting",
                 "list_dictations",
@@ -43,14 +36,33 @@ func testAgentConnectionGuide() {
                 "list_writing",
                 "read_writing",
                 "search",
+                "recent_context",
                 "who_is",
-                "recap",
-                "decisions",
-                "commitments",
-                "open_questions",
-                "search_meetings",
+                "status",
             ]),
             "direct tool list should mirror Tools/TranscriptedMCP tool registration"
+        )
+        for toolName in AgentConnectionGuide.directToolNames {
+            assertTrue(
+                prompt.contains(toolName),
+                "the starter prompt should list core tool \(toolName)"
+            )
+        }
+        assertTrue(
+            prompt.contains("Meetings: list_meetings, read_meeting"),
+            "prompt should list meeting tools cleanly"
+        )
+        assertTrue(
+            prompt.contains("Dictations: list_dictations, read_dictation"),
+            "prompt should list dictation tools cleanly"
+        )
+        assertTrue(
+            prompt.contains("Writing (opt-in): list_writing, read_writing"),
+            "prompt should list opt-in writing tools cleanly"
+        )
+        assertTrue(
+            prompt.contains("Search & lookup: search, recent_context, who_is, status"),
+            "prompt should list cross-capture and lookup tools cleanly"
         )
         assertTrue(
             prompt.contains("If direct tools are not connected, read my saved Transcripted Markdown files directly:"),
@@ -73,7 +85,7 @@ func testAgentConnectionGuide() {
             "prompt should give agents a concrete first-answer ask"
         )
         assertTrue(
-            prompt.contains("Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today."),
+            prompt.contains("Review yesterday. Use recent_context or search to tell me what I promised, what changed, and what I should follow up on today."),
             "prompt should make the next-day return ask obvious"
         )
         assertTrue(

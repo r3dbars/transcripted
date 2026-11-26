@@ -79,8 +79,6 @@ enum AgentConnectionGuide {
     }
 
     static let directToolNames = [
-        "recent_context",
-        "search_context",
         "list_meetings",
         "read_meeting",
         "list_dictations",
@@ -88,12 +86,9 @@ enum AgentConnectionGuide {
         "list_writing",
         "read_writing",
         "search",
+        "recent_context",
         "who_is",
-        "recap",
-        "decisions",
-        "commitments",
-        "open_questions",
-        "search_meetings",
+        "status",
     ]
 
     static func skillFileURL(for skill: AgentConnectionStarterSkill) -> URL {
@@ -102,14 +97,18 @@ enum AgentConnectionGuide {
 
     /// The two tools a fresh agent should reach for first. The full set is
     /// `directToolNames`; an agent with the tools connected already sees them.
-    static let starterToolNames = ["recent_context", "search_context"]
+    static let starterToolNames = ["recent_context", "search"]
 
     static func starterPrompt(filename: String?) -> String {
         let starterTools = starterToolNames.joined(separator: " and ")
         var prompt = """
         I use Transcripted on this Mac.
 
-        Use the Transcripted tools first if they are connected (start with \(starterTools)).
+        Use the Transcripted tools first if they are connected (start with \(starterTools)):
+        - Meetings: list_meetings, read_meeting
+        - Dictations: list_dictations, read_dictation
+        - Writing (opt-in): list_writing, read_writing
+        - Search & lookup: search, recent_context, who_is, status
 
         If direct tools are not connected, read my saved Transcripted Markdown files directly:
 
@@ -126,7 +125,7 @@ enum AgentConnectionGuide {
 
         Good first asks:
         - Summarize my latest meeting. Tell me which Transcripted source you used, including the filename/date, then list decisions and action items.
-        - Review yesterday. Use recent context or a recap to tell me what I promised, what changed, and what I should follow up on today.
+        - Review yesterday. Use recent_context or search to tell me what I promised, what changed, and what I should follow up on today.
 
         Rules:
         - Prefer Transcripted direct tools when available; otherwise search meetings, dictations, and writing together from files.

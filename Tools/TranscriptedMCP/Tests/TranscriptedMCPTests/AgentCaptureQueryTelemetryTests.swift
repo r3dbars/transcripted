@@ -130,8 +130,8 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
         XCTAssertNil(sanitized["token"])
     }
 
-    func testTelemetryPolicyAllowsOrientationToolKinds() throws {
-        for toolKind in ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "recent"] {
+    func testTelemetryPolicyAllowsCoreToolKindsOnly() throws {
+        for toolKind in ["list", "read", "recent", "search", "speaker_lookup"] {
             let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
                 "client_family": "mcp",
                 "capture_kind": "meeting",
@@ -143,6 +143,20 @@ final class AgentCaptureQueryTelemetryTests: XCTestCase {
             ])
 
             XCTAssertEqual(sanitized["tool_kind"], toolKind)
+        }
+
+        for retiredKind in ["action_items", "commitments", "decisions", "digest", "open_questions", "recap"] {
+            let sanitized = AgentCaptureQueryTelemetryPolicy.sanitize([
+                "client_family": "mcp",
+                "capture_kind": "meeting",
+                "latency_bucket": "lt_100ms",
+                "result": "success",
+                "result_count_bucket": "1",
+                "source_count_bucket": "1",
+                "tool_kind": retiredKind,
+            ])
+
+            XCTAssertNil(sanitized["tool_kind"])
         }
     }
 

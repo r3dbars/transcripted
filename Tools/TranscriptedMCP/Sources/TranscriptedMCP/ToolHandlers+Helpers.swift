@@ -5,20 +5,9 @@ import TranscriptedCaptureKit
 // MARK: - Shared Helpers
 //
 // Small utilities used across the tool-family files in this directory
-// (ToolHandlers+Meetings.swift, +Dictations.swift, +Search.swift,
-// +Rollups.swift, +Receipts.swift). Kept internal (not `private`) because
-// `private` is file-scoped in Swift and these are shared across files.
-
-extension DateFormatter {
-    /// YYYY-MM-DD formatter in the local timezone, matching how transcript dates are stored.
-    static let localYYYYMMDD: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        f.locale = Locale(identifier: "en_US_POSIX")
-        // Intentionally uses the system (local) timezone — transcript dates are stored in local time.
-        return f
-    }()
-}
+// (ToolHandlers+Meetings.swift, +Dictations.swift, +Writing.swift,
+// +Search.swift). Kept internal (not `private`) because `private` is
+// file-scoped in Swift and these are shared across files.
 
 func textResult(_ text: String, isError: Bool = false) -> CallTool.Result {
     .init(content: [.text(text: text, annotations: nil, _meta: nil)], isError: isError)
@@ -70,7 +59,6 @@ enum EmptyResultScope {
     case dictations
     case writing
     case mixed
-    case summaries
 }
 
 /// Self-describing zero-result response: where the server looked, what is
@@ -88,7 +76,6 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedMeetings: counts.meetings,
             indexedDictationDays: nil,
             indexedDictationEntries: nil,
-            indexedSummaryItems: nil,
             hint: counts.meetings == 0
                 ? "No meetings are indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No meetings matched these filters — try widening the date range or changing the query."
@@ -99,7 +86,6 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedMeetings: nil,
             indexedDictationDays: counts.dictationDays,
             indexedDictationEntries: counts.dictationEntries,
-            indexedSummaryItems: nil,
             hint: counts.dictationDays == 0
                 ? "No dictations are indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No dictations matched these filters — try widening the date range or changing the query."
@@ -112,7 +98,6 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedDictationEntries: nil,
             indexedWritingDays: counts.writingDays,
             indexedWritingEntries: counts.writingEntries,
-            indexedSummaryItems: nil,
             hint: counts.writingDays == 0
                 ? "No writing is indexed. Writing is saved only when Save my writing is on in Transcripted's Writing settings; call the status tool to see the writing folder."
                 : "No writing matched these filters — try widening the date range or changing the query."
@@ -125,21 +110,9 @@ func emptyResult(scope: EmptyResultScope, searchedDirectories: [URL], index: Tra
             indexedDictationEntries: nil,
             indexedWritingDays: counts.writingDays,
             indexedWritingEntries: counts.writingEntries,
-            indexedSummaryItems: nil,
             hint: counts.meetings == 0 && counts.dictationDays == 0 && counts.writingDays == 0
                 ? "Nothing is indexed — check that the directories above contain capture Markdown, or call the status tool."
                 : "No items matched these filters — try widening the date range or changing the query."
-        )
-    case .summaries:
-        payload = EmptyQueryResult(
-            searchedDirectories: directories,
-            indexedMeetings: counts.meetings,
-            indexedDictationDays: nil,
-            indexedDictationEntries: nil,
-            indexedSummaryItems: counts.summaryItems,
-            hint: counts.summaryItems == 0
-                ? "No structured summaries are indexed. Rollups only cover meetings with saved summary fields."
-                : "No summary items matched these filters — try widening the date range or removing filters."
         )
     }
 
@@ -204,27 +177,11 @@ private struct AgentCaptureQueryDescriptor {
         case "read_writing":
             self.init(toolKind: "read", captureKind: "writing")
         case "search":
-            self.init(toolKind: "search", captureKind: "meeting")
-        case "search_context":
             self.init(toolKind: "search", captureKind: Self.requestedCaptureKind(params))
         case "recent_context":
             self.init(toolKind: "recent", captureKind: Self.requestedCaptureKind(params))
         case "who_is":
             self.init(toolKind: "speaker_lookup", captureKind: "meeting")
-        case "recap":
-            self.init(toolKind: "recap", captureKind: "meeting")
-        case "list_action_items":
-            self.init(toolKind: "action_items", captureKind: "meeting")
-        case "list_decisions", "decisions":
-            self.init(toolKind: "decisions", captureKind: "meeting")
-        case "digest":
-            self.init(toolKind: "digest", captureKind: "meeting")
-        case "commitments":
-            self.init(toolKind: "commitments", captureKind: "meeting")
-        case "open_questions":
-            self.init(toolKind: "open_questions", captureKind: "meeting")
-        case "search_meetings":
-            self.init(toolKind: "search", captureKind: "meeting")
         default:
             return nil
         }

@@ -59,7 +59,7 @@ func handleReadWriting(params: CallTool.Parameters, writingDirs: [URL]) throws -
     if let entryId = params.arguments?["entry_id"]?.stringValue {
         guard let entry = day.entries.first(where: { $0.id == entryId }) else {
             return emptyOrMissingAgentCaptureQueryResult(
-                "Entry not found: \(entryId). Use recent_context or search_context to inspect entry IDs.",
+                "Entry not found: \(entryId). Use recent_context or search to inspect entry IDs.",
                 isError: true
             )
         }

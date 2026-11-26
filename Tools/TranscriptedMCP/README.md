@@ -13,17 +13,14 @@ For Claude Desktop users, the best setup is inside the app:
 That path installs the bundled helper, updates Claude Desktop's config, and
 runs a local self-test.
 
-## Interactive UI (MCP Apps)
+## Tools
 
-The server exposes one interactive widget via the MCP Apps extension
-(`io.modelcontextprotocol/ui`, SEP-1865): call `show_recent_meetings` to render a
-card list of recent meetings — each with inline audio playback and a raw-transcript
-view — that draws inside a rendering-capable client. It is fully self-contained
-(no network; local audio/transcripts travel over the local transport), and falls
-back to a plain-text list in clients that do not render inline UI (e.g. the Claude
-Code CLI). Renders inline today in ChatGPT, VS Code, Cursor, and Goose; see
-[`docs/mcp-ui-recent-meetings.md`](../../docs/mcp-ui-recent-meetings.md) for the
-per-client support matrix and how to try it.
+The server exposes 10 read-only tools:
+
+- Meetings: `list_meetings`, `read_meeting`
+- Dictations: `list_dictations`, `read_dictation`
+- Writing (opt-in): `list_writing`, `read_writing`
+- Cross-capture & lookup: `search` (meetings, dictations, and writing, with `kind` filter and on-device semantic matching), `recent_context`, `who_is`, `status`
 
 ## Source Build
 
@@ -69,7 +66,7 @@ overrides, writing is read only when `TRANSCRIPTED_WRITING_DIR` is set too.
 
 `list_writing` and `read_writing` mirror `list_dictations` and
 `read_dictation` for `Writing_<date>.md` day files (what the user typed with
-the Transcripted keyboard). `search_context` and `recent_context` take
+the Transcripted keyboard). `search` and `recent_context` take
 `kind: "writing"` and include writing in `all`. Writing search is full-text
 only; the on-device embeddings cover meetings and dictations.
 
@@ -97,20 +94,6 @@ It is gated twice:
   `TranscriptedPostHogAPIKey`; source builds have none by default
 
 Transcripts and audio never leave the Mac in any mode.
-
-## Cross-Meeting Receipt Tools
-
-WS2.3 adds local structured retrieval tools for agents:
-
-- `decisions(topic, range)`
-- `commitments(person, range)`
-- `open_questions(project, range)`
-- `search_meetings(query, range)`
-
-Each returns JSON receipts shaped around `meetingId`, `timestamp`, and `quote`.
-Summary-derived receipts have `timestamp: null` until exact audio anchors are
-available; raw utterance search includes the transcript timestamp. These tools
-use only the local SQLite index and saved summary/parser output.
 
 ## MCP Bundle and Registry
 

@@ -70,7 +70,7 @@ final class NextSentenceHistory: @unchecked Sendable {
     private func search(_ query: String, count: Int) -> [[String: Any]] {
         guard let helper = try? ensureStarted(),
               let result = try? call(helper, method: "tools/call",
-                                     params: ["name": "search_context", "arguments": ["query": query, "count": count]]),
+                                     params: ["name": "search", "arguments": ["query": query, "count": count]]),
               let content = result["content"] as? [[String: Any]],
               let text = content.first?["text"] as? String,
               let json = try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any] else { return [] }

@@ -286,7 +286,7 @@ enum AgentCaptureQueryTelemetryPolicy {
         "result": Set(AgentCaptureQueryResult.allCases.map(\.rawValue)),
         "result_count_bucket": ["0", "1", "2_3", "4_9", "10_plus", "unknown"],
         "source_count_bucket": ["0", "1", "2_3", "4_9", "10_plus", "unknown"],
-        "tool_kind": ["action_items", "commitments", "decisions", "digest", "list", "open_questions", "read", "recap", "recent", "search", "speaker_lookup"],
+        "tool_kind": ["list", "read", "recent", "search", "speaker_lookup"],
     ]
 
     static func sanitize(_ properties: [String: String]) -> [String: String] {
