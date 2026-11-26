@@ -15,6 +15,40 @@ extension Transcription {
         let newlyCreatedProfileIds: Set<UUID>
     }
 
+    /// Pure, read-only match + clustering plan for split-mic diarization.
+    /// Holds everything needed to commit `speakerDB` writes AFTER all STT stages,
+    /// any last-chance sweep, and final cancellation checks succeed — matching
+    /// `SystemSpeakerIdentityPlan` so a failed or cancelled transcription stage
+    /// never mutates the speaker database.
+    struct MicChannelPlan {
+        struct NewProfileSpec {
+            let speakerId: Int
+            let meanEmbedding: [Float]
+        }
+
+        let speakerSegments: [SpeakerSegment]
+        let transcribedSegments: [(segment: SpeakerSegment, text: String)]
+        let embeddingsPerSpeaker: [Int: [[Float]]]
+        let nonGhostMeans: [Int: [Float]]
+        let matchResults: [Int: SystemSpeakerMatch]
+        let idRemap: [Int: Int]
+        let newProfileSpecs: [NewProfileSpec]
+        let speakerThresholds: SpeakerEmbeddingThresholds
+
+        var isEmpty: Bool { transcribedSegments.isEmpty }
+
+        static let empty = MicChannelPlan(
+            speakerSegments: [],
+            transcribedSegments: [],
+            embeddingsPerSpeaker: [:],
+            nonGhostMeans: [:],
+            matchResults: [:],
+            idRemap: [:],
+            newProfileSpecs: [],
+            speakerThresholds: .weSpeaker
+        )
+    }
+
     struct GhostSpeakerMergeCandidate: Equatable {
         let speakerId: Int
         let similarity: Double
@@ -62,21 +96,21 @@ extension Transcription {
         return bestCandidate
     }
 
-    /// Diarize + transcribe the mic channel when local-speaker split is on.
-    /// Mirrors the system-audio classification path but skips the cross-channel
-    /// contamination gate (there's nothing to gate against inside mic processing itself).
-    /// Uses the pre-run `existingProfiles` snapshot so both channels match against
-    /// the same stable set of DB profiles.
-    nonisolated static func processMicChannelWithDiarization(
+    /// Diarize, transcribe, and plan speaker identity resolution for the mic channel
+    /// when local-speaker split is on — WITHOUT mutating `speakerDB`.
+    /// Mirrors `planSystemSpeakerIdentities` so callers can defer all speaker-store
+    /// writes until every throwing/cancellable stage (including last-chance sweeps)
+    /// has completed.
+    nonisolated static func planMicChannelWithDiarization(
         samples: [Float],
         diarization: any DiarizationEngine,
         parakeet: any SpeechToTextEngine,
-        speakerDB: any SpeakerStore,
         existingProfiles: [SpeakerProfile],
+        negativeExemplarsByProfile: [UUID: [[Float]]],
         droppedSegments: inout Int,
         language: TranscriptionLanguageContext = .init(selection: .automatic, languageCode: nil, resolution: .unsupported),
         onProgress: ((Double) -> Void)?
-    ) async throws -> MicChannelResult {
+    ) async throws -> MicChannelPlan {
 
         AppLogger.transcription.info("Running offline diarization on mic audio")
         let rawSegments = try await diarization.diarizeOffline(samples: samples, sampleRate: 16000)
@@ -98,10 +132,9 @@ extension Transcription {
             "segments": "\(speakerSegments.count)"
         ])
 
-        // Finish every throwing/cancellable mic operation before mutating the
-        // speaker database. If mic STT fails after the system channel already
-        // succeeded, the caller can safely keep the system-only transcript
-        // without leaving partial mic speaker profiles behind.
+        // Finish every throwing/cancellable mic operation before planning identities.
+        // All `speakerDB` writes happen later in `commitMicChannelPlan`, after the
+        // pipeline's final cancellation check.
         var transcribedSegments: [(segment: SpeakerSegment, text: String)] = []
         let totalSegments = speakerSegments.count
         for (index, segment) in speakerSegments.enumerated() {
@@ -140,6 +173,9 @@ extension Transcription {
             onProgress?(progress)
         }
         try Task.checkCancellation()
+        guard !transcribedSegments.isEmpty else {
+            return .empty
+        }
 
         // Aggregate embeddings per diarizer speaker ID. Same quality gates as the system
         // path (>=0.3 quality, >=1.0s duration). No cross-channel contamination gate —
@@ -164,7 +200,7 @@ extension Transcription {
         let allSpeakerIds = Set(speakerSegments.map { $0.speakerId })
         let ghostSpeakerIds = allSpeakerIds.subtracting(embeddingsPerSpeaker.keys)
         var ghostSpeakerIdSet = Set<Int>()
-        for ghostId in ghostSpeakerIds {
+        for ghostId in ghostSpeakerIds.sorted() {
             let bestSegment = speakerSegments
                 .filter { segment in
                     guard segment.speakerId == ghostId, let embedding = segment.embedding else { return false }
@@ -177,10 +213,9 @@ extension Transcription {
             }
         }
 
-        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double, averageSimilarity: Double, secondAverageSimilarity: Double)] = [:]
-        var speakerNewProfiles: [Int: UUID] = [:]
+        var speakerMatchResults: [Int: SystemSpeakerMatch] = [:]
         var speakerIdRemap: [Int: Int] = [:]
-        var newlyCreatedProfileIds: Set<UUID> = []
+        var newProfileSpecs: [MicChannelPlan.NewProfileSpec] = []
 
         // Pre-compute unweighted means for non-ghost speakers so the ghost merge inner
         // loop doesn't recompute the same means once per ghost (O(G×N) → O(N)).
@@ -188,10 +223,8 @@ extension Transcription {
             .filter { !ghostSpeakerIdSet.contains($0.key) }
             .reduce(into: [:]) { $0[$1.key] = Self.computeMeanEmbedding($1.value) }
 
-        // Rejected-sample vetoes for matching (empty until a correction records one).
-        let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
-
-        for (speakerId, embeddings) in embeddingsPerSpeaker {
+        for speakerId in embeddingsPerSpeaker.keys.sorted() {
+            guard let embeddings = embeddingsPerSpeaker[speakerId] else { continue }
             let meanEmbedding = Self.computeMeanEmbedding(embeddings)
             let isGhost = ghostSpeakerIdSet.contains(speakerId)
 
@@ -203,25 +236,27 @@ extension Transcription {
                 if let candidate = mergeCandidate, candidate.similarity >= speakerThresholds.ghostMergeFloor {
                     speakerIdRemap[speakerId] = candidate.speakerId
                 } else {
-                    let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
-                    speakerNewProfiles[speakerId] = newProfile.id
-                    newlyCreatedProfileIds.insert(newProfile.id)
+                    newProfileSpecs.append(MicChannelPlan.NewProfileSpec(
+                        speakerId: speakerId,
+                        meanEmbedding: meanEmbedding
+                    ))
                 }
                 continue
             }
 
             let adaptiveThreshold = speakerThresholds.adaptiveMatch(forSegmentCount: embeddings.count)
 
-            // Write-back is DEFERRED until after the cross-cluster decision below (#6/#8 — same
+            // Write-back is DEFERRED until `commitMicChannelPlan` (#6/#8 — same
             // rationale as the system path: matching reads only the existingProfiles snapshot, so
             // deferring the blend changes no match decision, and a spun-off distinct voice never
             // contaminates the shared profile).
             if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile, thresholds: speakerThresholds) {
                 speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity, matchResult.averageSimilarity, matchResult.secondBestAverageSimilarity)
             } else {
-                let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
-                speakerNewProfiles[speakerId] = newProfile.id
-                newlyCreatedProfileIds.insert(newProfile.id)
+                newProfileSpecs.append(MicChannelPlan.NewProfileSpec(
+                    speakerId: speakerId,
+                    meanEmbedding: meanEmbedding
+                ))
             }
         }
 
@@ -238,10 +273,11 @@ extension Transcription {
         for rep in micLinkPlan.spinOffs {
             let repMean = nonGhostMeans[rep]
                 ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[rep] ?? [])
-            let spinoff = speakerDB.addOrUpdateSpeaker(embedding: repMean, existingId: nil)
             speakerMatchResults.removeValue(forKey: rep)
-            speakerNewProfiles[rep] = spinoff.id
-            newlyCreatedProfileIds.insert(spinoff.id)
+            newProfileSpecs.append(MicChannelPlan.NewProfileSpec(
+                speakerId: rep,
+                meanEmbedding: repMean
+            ))
         }
         for (other, rep) in micLinkPlan.remaps {
             speakerIdRemap[other] = rep
@@ -251,14 +287,48 @@ extension Transcription {
         // comment on the system-audio path above.
         speakerIdRemap = Self.resolvingRemapChains(speakerIdRemap)
 
+        return MicChannelPlan(
+            speakerSegments: speakerSegments,
+            transcribedSegments: transcribedSegments,
+            embeddingsPerSpeaker: embeddingsPerSpeaker,
+            nonGhostMeans: nonGhostMeans,
+            matchResults: speakerMatchResults,
+            idRemap: speakerIdRemap,
+            newProfileSpecs: newProfileSpecs,
+            speakerThresholds: speakerThresholds
+        )
+    }
+
+    /// Commit a planned split-mic identity resolution to `speakerDB`.
+    /// Call ONLY after all STT stages, last-chance sweeps, and cancellation checks
+    /// have succeeded.
+    nonisolated static func commitMicChannelPlan(
+        _ plan: MicChannelPlan,
+        existingProfiles: [SpeakerProfile],
+        speakerDB: any SpeakerStore
+    ) -> MicChannelResult {
+        guard !plan.isEmpty else {
+            return MicChannelResult(utterances: [], speakerContexts: [:], newlyCreatedProfileIds: [])
+        }
+
+        var speakerNewProfiles: [Int: UUID] = [:]
+        var newlyCreatedProfileIds: Set<UUID> = []
+
+        for spec in plan.newProfileSpecs {
+            let newProfile = speakerDB.addOrUpdateSpeaker(embedding: spec.meanEmbedding, existingId: nil)
+            speakerNewProfiles[spec.speakerId] = newProfile.id
+            newlyCreatedProfileIds.insert(newProfile.id)
+        }
+
         // Deferred write-back (#6): blend each surviving matched cluster under the contamination
-        // gate. Spun-off clusters were removed above and never write into the shared profile.
-        for (speakerId, match) in speakerMatchResults {
-            guard let meanEmbedding = nonGhostMeans[speakerId] else { continue }
+        // gate. Spun-off clusters were removed during planning and never write into the shared profile.
+        for speakerId in plan.matchResults.keys.sorted() {
+            guard let match = plan.matchResults[speakerId],
+                  let meanEmbedding = plan.nonGhostMeans[speakerId] else { continue }
             let writeAlpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
                 similarity: match.similarity,
                 secondBestSimilarity: match.secondSimilarity,
-                thresholds: speakerThresholds
+                thresholds: plan.speakerThresholds
             )
             _ = speakerDB.addOrUpdateSpeaker(
                 embedding: meanEmbedding,
@@ -269,41 +339,40 @@ extension Transcription {
 
         // Build speaker contexts keyed by effective speakerId (post-remap).
         var speakerContexts: [String: ChannelSpeakerContext] = [:]
-        let effectiveSpeakerIds = Set(speakerSegments.map { speakerIdRemap[$0.speakerId] ?? $0.speakerId })
+        let effectiveSpeakerIds = Set(plan.speakerSegments.map { plan.idRemap[$0.speakerId] ?? $0.speakerId })
         for effectiveSpeakerId in effectiveSpeakerIds {
-            let persistentId = speakerMatchResults[effectiveSpeakerId]?.persistentId
+            let persistentId = plan.matchResults[effectiveSpeakerId]?.persistentId
                 ?? speakerNewProfiles[effectiveSpeakerId]
             guard let persistentId else { continue }
 
             let sessionEmbedding: [Float]?
-            if let embeddings = embeddingsPerSpeaker[effectiveSpeakerId], !embeddings.isEmpty {
+            if let embeddings = plan.embeddingsPerSpeaker[effectiveSpeakerId], !embeddings.isEmpty {
                 sessionEmbedding = Self.computeMeanEmbedding(embeddings)
             } else {
                 sessionEmbedding = nil
             }
-            let matchedProfileSnapshot = speakerMatchResults[effectiveSpeakerId]
+            let matchedProfileSnapshot = plan.matchResults[effectiveSpeakerId]
                 .flatMap { match in existingProfiles.first(where: { $0.id == match.persistentId }) }
 
             speakerContexts[String(effectiveSpeakerId)] = ChannelSpeakerContext(
                 persistentSpeakerId: persistentId,
                 sessionEmbedding: sessionEmbedding,
                 matchedProfileSnapshot: matchedProfileSnapshot,
-                matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity,
-                matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity,
-                matchAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.averageSimilarity,
-                matchSecondBestAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondAverageSimilarity
+                matchSimilarity: plan.matchResults[effectiveSpeakerId]?.similarity,
+                matchSecondSimilarity: plan.matchResults[effectiveSpeakerId]?.secondSimilarity,
+                matchAverageSimilarity: plan.matchResults[effectiveSpeakerId]?.averageSimilarity,
+                matchSecondBestAverageSimilarity: plan.matchResults[effectiveSpeakerId]?.secondAverageSimilarity
             )
         }
 
-        // All mic STT completed before the speaker-store writes above. Building
-        // utterances from those local results is now non-throwing.
         var utterances: [TranscriptionUtterance] = []
-        for transcribed in transcribedSegments {
+        utterances.reserveCapacity(plan.transcribedSegments.count)
+        for transcribed in plan.transcribedSegments {
             let segment = transcribed.segment
-            let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
+            let effectiveSpeakerId = plan.idRemap[segment.speakerId] ?? segment.speakerId
             let persistentId: UUID?
             let similarity: Double?
-            if let match = speakerMatchResults[effectiveSpeakerId] {
+            if let match = plan.matchResults[effectiveSpeakerId] {
                 persistentId = match.persistentId
                 similarity = match.similarity
             } else {
@@ -326,6 +395,35 @@ extension Transcription {
             utterances: utterances,
             speakerContexts: speakerContexts,
             newlyCreatedProfileIds: newlyCreatedProfileIds
+        )
+    }
+
+    /// Convenience wrapper that plans and commits mic-channel diarization in one call.
+    /// Mirrors `resolveSystemSpeakerIdentities`.
+    nonisolated static func processMicChannelWithDiarization(
+        samples: [Float],
+        diarization: any DiarizationEngine,
+        parakeet: any SpeechToTextEngine,
+        speakerDB: any SpeakerStore,
+        existingProfiles: [SpeakerProfile],
+        droppedSegments: inout Int,
+        language: TranscriptionLanguageContext = .init(selection: .automatic, languageCode: nil, resolution: .unsupported),
+        onProgress: ((Double) -> Void)?
+    ) async throws -> MicChannelResult {
+        let plan = try await Self.planMicChannelWithDiarization(
+            samples: samples,
+            diarization: diarization,
+            parakeet: parakeet,
+            existingProfiles: existingProfiles,
+            negativeExemplarsByProfile: speakerDB.negativeExemplarsByProfile(),
+            droppedSegments: &droppedSegments,
+            language: language,
+            onProgress: onProgress
+        )
+        return Self.commitMicChannelPlan(
+            plan,
+            existingProfiles: existingProfiles,
+            speakerDB: speakerDB
         )
     }
 

@@ -57,7 +57,8 @@ extension TranscriptionTaskManager {
         let invitedNameKeys: Set<String>
         let lineupIsFromInvite: Bool
         if !isImport, let request = await lineupProvider?(recordingDate) {
-            let profilesBefore = await MainActor.run { transcription.speakerDB.allSpeakers() }
+            let speakerDB = await MainActor.run { transcription.speakerDB }
+            let profilesBefore = speakerDB.allSpeakers()
             invitedNameKeys = SpeakerNamingPolicy.lineupNameKeys(request, profilesBeforeMeeting: profilesBefore)
             lineupIsFromInvite = SpeakerNamingPolicy.lineupIsFromInvite(request)
         } else {
@@ -268,8 +269,6 @@ extension TranscriptionTaskManager {
         // profile an open review points at made that review's Save fail later.
         let cleanupProtectedProfileIds = protectedReviewProfileIds
             .union(speakerReviewProfileProtection.protectedProfileIds)
-        speakerDB.mergeDuplicates(protecting: cleanupProtectedProfileIds)
-        speakerDB.pruneWeakProfiles(protecting: cleanupProtectedProfileIds)
 
         // Build diarizer-channel-qualified speaker key → persistent DB UUID mapping for YAML.
         // Keyed "system_0" / "mic_0" so mic and system speakers with the same diarizer
@@ -312,6 +311,11 @@ extension TranscriptionTaskManager {
         let transcriptId = replacementTranscriptRollback?.transcriptId
             ?? stableTranscriptId
             ?? UUID()
+        // Check cancellation BEFORE mutating speakerDB so a cancelled task never merges
+        // duplicates or prunes profiles on its way out.
+        try Task.checkCancellation()
+        speakerDB.mergeDuplicates(protecting: cleanupProtectedProfileIds)
+        speakerDB.pruneWeakProfiles(protecting: cleanupProtectedProfileIds)
         try Task.checkCancellation()
         // Phase 2: Save transcript with speaker names
         let notifier: TranscriptNotifier? = await MainActor.run {

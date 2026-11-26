@@ -70,28 +70,30 @@ extension Transcription {
                 micSamples = []
                 var droppedSegments = 0
                 let existingProfiles = speakerDB.allSpeakers()
-                let micResult: MicChannelResult
+                let negativeExemplarsByProfile = speakerDB.negativeExemplarsByProfile()
+                var pendingMicPlan: MicChannelPlan?
                 let diarizationRun = await Self.diarizationRunDescriptor(of: diarization)
                 do {
-                    micResult = try await Self.processMicChannelWithDiarization(
+                    let plan = try await Self.planMicChannelWithDiarization(
                         samples: diarizationMicSamples,
                         diarization: diarization,
                         parakeet: parakeet,
-                        speakerDB: speakerDB,
                         existingProfiles: existingProfiles,
+                        negativeExemplarsByProfile: negativeExemplarsByProfile,
                         droppedSegments: &droppedSegments,
                         language: languageContext,
                         onProgress: onProgress
                     )
+                    pendingMicPlan = plan.isEmpty ? nil : plan
                 } catch let error where Self.isExplicitNoSpeechError(error) {
                     // Empty, not broken: fall through to the last-chance pass.
                     AppLogger.transcription.info("Mic diarizer found no speech; deferring to the last-chance pass")
-                    micResult = MicChannelResult(utterances: [], speakerContexts: [:], newlyCreatedProfileIds: [])
+                    pendingMicPlan = nil
                 }
-                var splitMicUtterances = micResult.utterances
-                var splitMicSpeakerContexts = micResult.speakerContexts
-                var splitNewlyCreatedProfileIds = micResult.newlyCreatedProfileIds
-                if splitMicUtterances.isEmpty {
+                var splitMicUtterances: [TranscriptionUtterance] = []
+                var splitMicSpeakerContexts: [String: ChannelSpeakerContext] = [:]
+                var splitNewlyCreatedProfileIds: Set<UUID> = []
+                if pendingMicPlan == nil {
                     // Same last-chance pass as the two-track pipeline: the
                     // diarizer found no words, so silence-split the mic track
                     // the way the default single-"You" mode does.
@@ -104,9 +106,19 @@ extension Transcription {
                         language: languageContext,
                         droppedSegments: &droppedSegments
                     ).micUtterances
-                    // Recovered words are not tied to any diarized voice.
-                    splitMicSpeakerContexts = [:]
-                    splitNewlyCreatedProfileIds = []
+                }
+                // All throwing/cancellable STT stages and sweeps have now completed. Verify
+                // cancellation before committing split-mic speaker identities to `speakerDB`.
+                try Task.checkCancellation()
+                if let micPlan = pendingMicPlan {
+                    let micResult = Self.commitMicChannelPlan(
+                        micPlan,
+                        existingProfiles: existingProfiles,
+                        speakerDB: speakerDB
+                    )
+                    splitMicUtterances = micResult.utterances
+                    splitMicSpeakerContexts = micResult.speakerContexts
+                    splitNewlyCreatedProfileIds = micResult.newlyCreatedProfileIds
                 }
                 let mergedMicUtterances = Self.mergeConsecutiveUtterances(splitMicUtterances, maxGap: 1.5)
                 guard !mergedMicUtterances.isEmpty else {

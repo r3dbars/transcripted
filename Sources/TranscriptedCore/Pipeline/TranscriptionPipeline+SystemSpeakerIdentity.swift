@@ -22,17 +22,51 @@ extension Transcription {
         let speakerContexts: [String: ChannelSpeakerContext]
     }
 
-    /// Step 3a of `transcribeMultichannel`: aggregate embeddings per diarizer
-    /// speaker, match them against the speaker DB, resolve ghost speakers and
-    /// cross-cluster links, and write matched voiceprints back.
-    nonisolated static func resolveSystemSpeakerIdentities(
+    /// Pure, read-only match + clustering plan for system-audio diarizer speakers.
+    /// Holds everything needed to commit `speakerDB` writes AFTER system STT, mic STT,
+    /// and cancellation checks succeed — so a failed or cancelled transcription stage
+    /// never mutates the speaker database.
+    struct SystemSpeakerIdentityPlan {
+        struct StandaloneGhost {
+            let speakerId: Int
+            let meanEmbedding: [Float]
+            let mergeCandidate: GhostSpeakerMergeCandidate?
+        }
+
+        struct UnmatchedSpeaker {
+            let speakerId: Int
+            let meanEmbedding: [Float]
+            let adaptiveThreshold: Double
+            let segmentCount: Int
+        }
+
+        struct SpinOffSpeaker {
+            let speakerId: Int
+            let meanEmbedding: [Float]
+        }
+
+        let embeddingsPerSpeaker: [Int: [[Float]]]
+        let embeddingWeights: [Int: [Float]]
+        let matchedMeanPerSpeaker: [Int: [Float]]
+        let matchResults: [Int: SystemSpeakerMatch]
+        let idRemap: [Int: Int]
+        let standaloneGhosts: [StandaloneGhost]
+        let unmatchedSpeakers: [UnmatchedSpeaker]
+        let spinOffSpeakers: [SpinOffSpeaker]
+        let effectiveSpeakerIds: Set<Int>
+        let speakerThresholds: SpeakerEmbeddingThresholds
+    }
+
+    /// Pure read-only planning step: aggregate embeddings per diarizer speaker,
+    /// match them against `existingProfiles`, and resolve ghost merges and
+    /// cross-cluster links without touching `speakerDB`.
+    nonisolated static func planSystemSpeakerIdentities(
         speakerSegments: [SpeakerSegment],
         existingProfiles: [SpeakerProfile],
         negativeExemplarsByProfile: [UUID: [[Float]]],
         speakerThresholds: SpeakerEmbeddingThresholds,
-        speakerDB: any SpeakerStore,
         micActiveFraction: (_ startTime: Double, _ endTime: Double) -> Double
-    ) -> SystemSpeakerIdentities {
+    ) -> SystemSpeakerIdentityPlan {
         // Aggregate embeddings per diarizer speaker ID for stable matching.
         // Instead of matching each segment independently (noisy), we compute
         // a mean embedding per speaker and match that once against the DB.
@@ -84,7 +118,7 @@ extension Transcription {
         let allSpeakerIds = Set(speakerSegments.map { $0.speakerId })
         let ghostSpeakerIds = allSpeakerIds.subtracting(embeddingsPerSpeaker.keys)
         var ghostSpeakerIdSet = Set<Int>()
-        for ghostId in ghostSpeakerIds {
+        for ghostId in ghostSpeakerIds.sorted() {
             let bestSegment = speakerSegments
                 .filter { segment in
                     guard segment.speakerId == ghostId, let embedding = segment.embedding else { return false }
@@ -101,11 +135,12 @@ extension Transcription {
             }
         }
 
-        // Match each speaker's mean embedding against the DB once
-        // (existingProfiles was snapshotted by the caller for post-processing)
-        var speakerMatchResults: [Int: (persistentId: UUID, similarity: Double, secondSimilarity: Double, averageSimilarity: Double, secondAverageSimilarity: Double)] = [:]
-        var speakerNewProfiles: [Int: UUID] = [:]
+        // Match each speaker's mean embedding against the DB snapshot once.
+        // All DB writes are deferred to `commitSystemSpeakerIdentities`.
+        var speakerMatchResults: [Int: SystemSpeakerMatch] = [:]
         var speakerIdRemap: [Int: Int] = [:]
+        var standaloneGhosts: [SystemSpeakerIdentityPlan.StandaloneGhost] = []
+        var unmatchedSpeakers: [SystemSpeakerIdentityPlan.UnmatchedSpeaker] = []
         // Session mean embedding actually matched for each non-ghost speaker, kept so the
         // cross-cluster link/merge step can compare clusters directly to each other (#8)
         // instead of relying only on "matched the same profile".
@@ -117,7 +152,8 @@ extension Transcription {
             .filter { !ghostSpeakerIdSet.contains($0.key) }
             .reduce(into: [:]) { $0[$1.key] = Self.computeMeanEmbedding($1.value) }
 
-        for (speakerId, embeddings) in embeddingsPerSpeaker {
+        for speakerId in embeddingsPerSpeaker.keys.sorted() {
+            guard let embeddings = embeddingsPerSpeaker[speakerId] else { continue }
             let weights = embeddingWeights[speakerId] ?? Array(repeating: Float(1.0), count: embeddings.count)
             let meanEmbedding = Self.computeWeightedMeanEmbedding(embeddings, weights: weights)
 
@@ -127,7 +163,7 @@ extension Transcription {
             // Ghost speakers have unreliable embeddings (laughter, coughs, codec artifacts).
             // Prefer force-merging into the closest real speaker, but if every detected
             // speaker is a ghost we still need a persistent UUID for later transcript
-            // metadata updates, so fall back to creating a best-effort profile.
+            // metadata updates, so fall back to creating a best-effort profile on commit.
             if isGhost {
                 let mergeCandidate = Self.bestGhostSpeakerMergeCandidate(
                     for: meanEmbedding,
@@ -142,20 +178,11 @@ extension Transcription {
                         "threshold": String(format: "%.2f", speakerThresholds.ghostMergeFloor)
                     ])
                 } else {
-                    let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
-                    speakerNewProfiles[speakerId] = newProfile.id
-                    var context = [
-                        "speakerId": "\(speakerId)",
-                        "threshold": String(format: "%.2f", speakerThresholds.ghostMergeFloor)
-                    ]
-                    if let candidate = mergeCandidate {
-                        context["bestNonGhostSpk"] = "\(candidate.speakerId)"
-                        context["similarity"] = String(format: "%.3f", candidate.similarity)
-                        context["reason"] = "below-minimum-similarity"
-                    } else {
-                        context["reason"] = "no-non-ghost-speaker-to-merge-into"
-                    }
-                    AppLogger.transcription.warning("Ghost speaker kept as standalone best-effort profile", context)
+                    standaloneGhosts.append(SystemSpeakerIdentityPlan.StandaloneGhost(
+                        speakerId: speakerId,
+                        meanEmbedding: meanEmbedding,
+                        mergeCandidate: mergeCandidate
+                    ))
                 }
                 continue
             }
@@ -164,11 +191,6 @@ extension Transcription {
             // A single 2s segment can false-match at 0.79; 4+ segments give a reliable mean.
             let adaptiveThreshold = speakerThresholds.adaptiveMatch(forSegmentCount: embeddings.count)
 
-            // Match only against profiles that existed BEFORE this recording.
-            // Write-back is DEFERRED until after the cross-cluster link/merge decision below,
-            // so a cluster that turns out to be a distinct voice (spun off) never blends into
-            // the shared profile. Matching reads only the `existingProfiles` snapshot, so
-            // deferring the blend cannot change any match decision.
             if let matchResult = Self.matchAgainstProfiles(meanEmbedding, profiles: existingProfiles, threshold: adaptiveThreshold, negativeExemplarsByProfile: negativeExemplarsByProfile, thresholds: speakerThresholds) {
                 speakerMatchResults[speakerId] = (matchResult.profileId, matchResult.similarity, matchResult.secondBestSimilarity, matchResult.averageSimilarity, matchResult.secondBestAverageSimilarity)
                 let matchedProfile = existingProfiles.first(where: { $0.id == matchResult.profileId })
@@ -182,13 +204,12 @@ extension Transcription {
                     "profileCallCount": "\(matchedProfile?.callCount ?? 0)"
                 ])
             } else {
-                let newProfile = speakerDB.addOrUpdateSpeaker(embedding: meanEmbedding, existingId: nil)
-                speakerNewProfiles[speakerId] = newProfile.id
-                AppLogger.transcription.info("Speaker new profile created", [
-                    "speakerId": "\(speakerId)",
-                    "threshold": String(format: "%.2f", adaptiveThreshold),
-                    "segmentsAveraged": "\(embeddings.count)"
-                ])
+                unmatchedSpeakers.append(SystemSpeakerIdentityPlan.UnmatchedSpeaker(
+                    speakerId: speakerId,
+                    meanEmbedding: meanEmbedding,
+                    adaptiveThreshold: adaptiveThreshold,
+                    segmentCount: embeddings.count
+                ))
             }
         }
 
@@ -208,14 +229,17 @@ extension Transcription {
             thresholds: speakerThresholds
         )
         // Spin-off representatives: a distinct voice (or fragments of one) that only resembled the
-        // matched profile — give it its own identity so review names it separately. Removed from
-        // the matched set so it never writes back into the shared profile.
+        // matched profile — give it its own identity on commit so review names it separately.
+        // Removed from the matched set so it never writes back into the shared profile.
+        var spinOffSpeakers: [SystemSpeakerIdentityPlan.SpinOffSpeaker] = []
         for rep in linkPlan.spinOffs {
             let repMean = matchedMeanPerSpeaker[rep]
                 ?? Self.computeMeanEmbedding(embeddingsPerSpeaker[rep] ?? [])
-            let spinoff = speakerDB.addOrUpdateSpeaker(embedding: repMean, existingId: nil)
             speakerMatchResults.removeValue(forKey: rep)
-            speakerNewProfiles[rep] = spinoff.id
+            spinOffSpeakers.append(SystemSpeakerIdentityPlan.SpinOffSpeaker(
+                speakerId: rep,
+                meanEmbedding: repMean
+            ))
         }
         // Group members fuse into their representative; drop their own match so only the
         // representative writes back (keeper group → shared profile, spin-off group → new profile).
@@ -245,17 +269,77 @@ extension Transcription {
             ])
         }
 
-        // Deferred write-back (#6): now that fusion/spin-off is resolved, blend each surviving
-        // matched cluster's session mean into its profile under the write-time contamination
-        // gate. A weak or ambiguous match freezes the voiceprint (alpha 0) — still recorded as
-        // an appearance, never silently drifting the stored fingerprint. Spun-off clusters were
-        // removed from speakerMatchResults above and so never contaminate the shared profile.
-        for (speakerId, match) in speakerMatchResults {
-            guard let meanEmbedding = matchedMeanPerSpeaker[speakerId] else { continue }
+        let effectiveSpeakerIds = Set(
+            speakerSegments.map { speakerIdRemap[$0.speakerId] ?? $0.speakerId }
+        )
+
+        return SystemSpeakerIdentityPlan(
+            embeddingsPerSpeaker: embeddingsPerSpeaker,
+            embeddingWeights: embeddingWeights,
+            matchedMeanPerSpeaker: matchedMeanPerSpeaker,
+            matchResults: speakerMatchResults,
+            idRemap: speakerIdRemap,
+            standaloneGhosts: standaloneGhosts,
+            unmatchedSpeakers: unmatchedSpeakers,
+            spinOffSpeakers: spinOffSpeakers,
+            effectiveSpeakerIds: effectiveSpeakerIds,
+            speakerThresholds: speakerThresholds
+        )
+    }
+
+    /// Commit a planned system-channel identity resolution to `speakerDB`.
+    /// Call ONLY after system STT, mic STT, and cancellation checks have succeeded.
+    nonisolated static func commitSystemSpeakerIdentities(
+        _ plan: SystemSpeakerIdentityPlan,
+        existingProfiles: [SpeakerProfile],
+        speakerDB: any SpeakerStore
+    ) -> SystemSpeakerIdentities {
+        var speakerNewProfiles: [Int: UUID] = [:]
+
+        for ghost in plan.standaloneGhosts {
+            let newProfile = speakerDB.addOrUpdateSpeaker(embedding: ghost.meanEmbedding, existingId: nil)
+            speakerNewProfiles[ghost.speakerId] = newProfile.id
+            var context = [
+                "speakerId": "\(ghost.speakerId)",
+                "threshold": String(format: "%.2f", plan.speakerThresholds.ghostMergeFloor)
+            ]
+            if let candidate = ghost.mergeCandidate {
+                context["bestNonGhostSpk"] = "\(candidate.speakerId)"
+                context["similarity"] = String(format: "%.3f", candidate.similarity)
+                context["reason"] = "below-minimum-similarity"
+            } else {
+                context["reason"] = "no-non-ghost-speaker-to-merge-into"
+            }
+            AppLogger.transcription.warning("Ghost speaker kept as standalone best-effort profile", context)
+        }
+
+        for unmatched in plan.unmatchedSpeakers {
+            let newProfile = speakerDB.addOrUpdateSpeaker(embedding: unmatched.meanEmbedding, existingId: nil)
+            speakerNewProfiles[unmatched.speakerId] = newProfile.id
+            AppLogger.transcription.info("Speaker new profile created", [
+                "speakerId": "\(unmatched.speakerId)",
+                "threshold": String(format: "%.2f", unmatched.adaptiveThreshold),
+                "segmentsAveraged": "\(unmatched.segmentCount)"
+            ])
+        }
+
+        for spinOff in plan.spinOffSpeakers {
+            let spinoff = speakerDB.addOrUpdateSpeaker(embedding: spinOff.meanEmbedding, existingId: nil)
+            speakerNewProfiles[spinOff.speakerId] = spinoff.id
+        }
+
+        // Deferred write-back (#6): blend each surviving matched cluster's session mean into its
+        // profile under the write-time contamination gate. A weak or ambiguous match freezes the
+        // voiceprint (alpha 0) — still recorded as an appearance, never silently drifting the
+        // stored fingerprint. Spun-off clusters were removed from matchResults above and so never
+        // contaminate the shared profile.
+        for speakerId in plan.matchResults.keys.sorted() {
+            guard let match = plan.matchResults[speakerId],
+                  let meanEmbedding = plan.matchedMeanPerSpeaker[speakerId] else { continue }
             let writeAlpha = SpeakerWritePathPolicy.voiceprintBlendAlpha(
                 similarity: match.similarity,
                 secondBestSimilarity: match.secondSimilarity,
-                thresholds: speakerThresholds
+                thresholds: plan.speakerThresholds
             )
             _ = speakerDB.addOrUpdateSpeaker(
                 embedding: meanEmbedding,
@@ -273,25 +357,21 @@ extension Transcription {
         }
 
         var systemSpeakerContexts: [String: ChannelSpeakerContext] = [:]
-        let effectiveSpeakerIds = Set(
-            speakerSegments.map { speakerIdRemap[$0.speakerId] ?? $0.speakerId }
-        )
-
-        for effectiveSpeakerId in effectiveSpeakerIds {
-            let persistentId = speakerMatchResults[effectiveSpeakerId]?.persistentId
+        for effectiveSpeakerId in plan.effectiveSpeakerIds {
+            let persistentId = plan.matchResults[effectiveSpeakerId]?.persistentId
                 ?? speakerNewProfiles[effectiveSpeakerId]
             guard let persistentId else { continue }
 
             let sessionEmbedding: [Float]?
-            if let embeddings = embeddingsPerSpeaker[effectiveSpeakerId], !embeddings.isEmpty {
-                let weights = embeddingWeights[effectiveSpeakerId]
+            if let embeddings = plan.embeddingsPerSpeaker[effectiveSpeakerId], !embeddings.isEmpty {
+                let weights = plan.embeddingWeights[effectiveSpeakerId]
                     ?? Array(repeating: Float(1.0), count: embeddings.count)
                 sessionEmbedding = Self.computeWeightedMeanEmbedding(embeddings, weights: weights)
             } else {
                 sessionEmbedding = nil
             }
 
-            let matchedProfileSnapshot = speakerMatchResults[effectiveSpeakerId]
+            let matchedProfileSnapshot = plan.matchResults[effectiveSpeakerId]
                 .flatMap { match in
                     existingProfiles.first(where: { $0.id == match.persistentId })
                 }
@@ -300,18 +380,41 @@ extension Transcription {
                 persistentSpeakerId: persistentId,
                 sessionEmbedding: sessionEmbedding,
                 matchedProfileSnapshot: matchedProfileSnapshot,
-                matchSimilarity: speakerMatchResults[effectiveSpeakerId]?.similarity,
-                matchSecondSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondSimilarity,
-                matchAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.averageSimilarity,
-                matchSecondBestAverageSimilarity: speakerMatchResults[effectiveSpeakerId]?.secondAverageSimilarity
+                matchSimilarity: plan.matchResults[effectiveSpeakerId]?.similarity,
+                matchSecondSimilarity: plan.matchResults[effectiveSpeakerId]?.secondSimilarity,
+                matchAverageSimilarity: plan.matchResults[effectiveSpeakerId]?.averageSimilarity,
+                matchSecondBestAverageSimilarity: plan.matchResults[effectiveSpeakerId]?.secondAverageSimilarity
             )
         }
 
         return SystemSpeakerIdentities(
-            matchResults: speakerMatchResults,
+            matchResults: plan.matchResults,
             newProfiles: speakerNewProfiles,
-            idRemap: speakerIdRemap,
+            idRemap: plan.idRemap,
             speakerContexts: systemSpeakerContexts
+        )
+    }
+
+    /// Convenience wrapper that plans and commits system-channel speaker identities in one call.
+    nonisolated static func resolveSystemSpeakerIdentities(
+        speakerSegments: [SpeakerSegment],
+        existingProfiles: [SpeakerProfile],
+        negativeExemplarsByProfile: [UUID: [[Float]]],
+        speakerThresholds: SpeakerEmbeddingThresholds,
+        speakerDB: any SpeakerStore,
+        micActiveFraction: (_ startTime: Double, _ endTime: Double) -> Double
+    ) -> SystemSpeakerIdentities {
+        let plan = planSystemSpeakerIdentities(
+            speakerSegments: speakerSegments,
+            existingProfiles: existingProfiles,
+            negativeExemplarsByProfile: negativeExemplarsByProfile,
+            speakerThresholds: speakerThresholds,
+            micActiveFraction: micActiveFraction
+        )
+        return commitSystemSpeakerIdentities(
+            plan,
+            existingProfiles: existingProfiles,
+            speakerDB: speakerDB
         )
     }
 }

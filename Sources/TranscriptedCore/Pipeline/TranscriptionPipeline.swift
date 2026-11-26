@@ -284,50 +284,20 @@ extension Transcription {
                 self.processingStatus = "Transcribing system audio..."
             }
 
+            var transcribedSystemSegments: [(segment: SpeakerSegment, text: String)] = []
             var systemUtterances: [TranscriptionUtterance] = []
+            var speakerIdRemap: [Int: Int] = [:]
+            var systemSpeakerContexts: [String: ChannelSpeakerContext] = [:]
             var droppedSegments = 0
             let totalSegments = speakerSegments.count
 
-            let identities = Self.resolveSystemSpeakerIdentities(
-                speakerSegments: speakerSegments,
-                existingProfiles: existingProfiles,
-                negativeExemplarsByProfile: negativeExemplarsByProfile,
-                speakerThresholds: speakerThresholds,
-                speakerDB: speakerDB,
-                micActiveFraction: { micActivity.activeFraction(startTime: $0, endTime: $1) }
-            )
-            let speakerMatchResults = identities.matchResults
-            let speakerNewProfiles = identities.newProfiles
-            let speakerIdRemap = identities.idRemap
-            var systemSpeakerContexts = identities.speakerContexts
-
-            func appendSystemUtterance(segment: SpeakerSegment, text: String) {
-                // Skip empty transcriptions
+            // Finish every throwing/cancellable STT step before mutating `speakerDB`
+            // (mirrors `processMicChannelWithDiarization`). If system STT fails or the
+            // task is cancelled, no new profiles, call-count bumps, or voiceprint blends
+            // are persisted.
+            func recordTranscribedSystemSegment(_ segment: SpeakerSegment, text: String) {
                 guard !text.isEmpty else { return }
-
-                // Apply remap (unifies speakers that matched the same DB profile)
-                let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
-
-                // Use the pre-computed per-speaker match result
-                let persistentId: UUID?
-                let similarity: Double?
-                if let match = speakerMatchResults[effectiveSpeakerId] {
-                    persistentId = match.persistentId
-                    similarity = match.similarity
-                } else {
-                    persistentId = speakerNewProfiles[effectiveSpeakerId]
-                    similarity = nil
-                }
-
-                systemUtterances.append(TranscriptionUtterance(
-                    start: segment.startTime,
-                    end: segment.endTime,
-                    channel: 1,
-                    speakerId: effectiveSpeakerId,
-                    persistentSpeakerId: persistentId,
-                    matchSimilarity: similarity,
-                    transcript: text
-                ))
+                transcribedSystemSegments.append((segment: segment, text: text))
             }
 
             // Short segments are packed into one full speech-to-text window
@@ -361,7 +331,7 @@ extension Transcription {
                         language: languageContext
                     )
                     for (entry, text) in zip(batch, texts) {
-                        appendSystemUtterance(segment: entry.item, text: text)
+                        recordTranscribedSystemSegment(entry.item, text: text)
                     }
                 }
 
@@ -370,6 +340,7 @@ extension Transcription {
                 onProgress?(segmentProgress)
             }
             for batch in systemBatcher.finish() {
+                try Task.checkCancellation()
                 let texts = try await Self.transcribeSegmentBatch(
                     batch.map(\.samples),
                     engine: parakeet,
@@ -377,20 +348,25 @@ extension Transcription {
                     language: languageContext
                 )
                 for (entry, text) in zip(batch, texts) {
-                    appendSystemUtterance(segment: entry.item, text: text)
+                    recordTranscribedSystemSegment(entry.item, text: text)
                 }
             }
+            try Task.checkCancellation()
 
             // Segment slicing above was the last use of the whole-meeting
             // system buffer — release it before the mic phase so both
             // channels are never held through the rest of the pipeline.
             systemSamples = []
 
-            AppLogger.transcription.info("System audio transcribed", ["utterances": "\(systemUtterances.count)", "speakers": "\(Set(systemUtterances.map { $0.speakerId }).count)"])
+            AppLogger.transcription.info("System audio transcribed", [
+                "utterances": "\(transcribedSystemSegments.count)",
+                "speakers": "\(Set(transcribedSystemSegments.map { $0.segment.speakerId }).count)"
+            ])
 
             var micUtterances: [TranscriptionUtterance] = []
             var micSpeakerContexts: [String: ChannelSpeakerContext] = [:]
             var newlyCreatedMicProfileIds: Set<UUID> = []
+            var pendingMicPlan: MicChannelPlan? = nil
             var micDiarizerFoundNoSpeech = false
 
             if microphoneAudioOutcome == .usable, micURL != nil {
@@ -410,7 +386,8 @@ extension Transcription {
                     }
 
                     if splitLocalSpeakers {
-                        // B) Mic diarization path
+                        // B) Mic diarization path (pure planning; speakerDB writes commit
+                        // below alongside system identities after all STT + cancellation checks).
                         let diarizationMicSamples = AudioSignalRecovery.normalizeForSpeech(
                             samples: micSamples,
                             sampleRate: 16000,
@@ -425,24 +402,17 @@ extension Transcription {
                         if diarizationRun == nil {
                             diarizationRun = await Self.diarizationRunDescriptor(of: diarization)
                         }
-                        let micResult = try await Self.processMicChannelWithDiarization(
+                        let micPlan = try await Self.planMicChannelWithDiarization(
                             samples: diarizationMicSamples,
                             diarization: diarization,
                             parakeet: parakeet,
-                            speakerDB: speakerDB,
                             existingProfiles: existingProfiles,
+                            negativeExemplarsByProfile: negativeExemplarsByProfile,
                             droppedSegments: &droppedSegments,
                             language: languageContext,
                             onProgress: onProgress
                         )
-                        micUtterances = micResult.utterances
-                        micSpeakerContexts = micResult.speakerContexts
-                        newlyCreatedMicProfileIds = micResult.newlyCreatedProfileIds
-                        AppLogger.transcription.info("Mic audio diarized + transcribed", [
-                            "utterances": "\(micUtterances.count)",
-                            "speakers": "\(Set(micUtterances.map { $0.speakerId }).count)",
-                            "newProfiles": "\(newlyCreatedMicProfileIds.count)"
-                        ])
+                        pendingMicPlan = micPlan.isEmpty ? nil : micPlan
                     } else {
                         // A) Default: silence-split, single speaker
                         // `micSamples` holds the same samples `micSignalAnalysis`
@@ -564,16 +534,18 @@ extension Transcription {
                         micUtterances = []
                         micSpeakerContexts = [:]
                         newlyCreatedMicProfileIds = []
+                        pendingMicPlan = nil
                         micDiarizerFoundNoSpeech = true
                         AppLogger.transcription.info("Mic diarizer found no speech; deferring to the last-chance pass")
                     } else {
-                        guard !systemUtterances.isEmpty else {
+                        guard !transcribedSystemSegments.isEmpty else {
                             throw error
                         }
                         micSamples = []
                         micUtterances = []
                         micSpeakerContexts = [:]
                         newlyCreatedMicProfileIds = []
+                        pendingMicPlan = nil
                         microphoneAudioOutcome = .unusable
                         AppLogger.transcription.warning("Microphone processing failed; continuing with system audio", [
                             "fallback": "system_audio_only",
@@ -598,8 +570,9 @@ extension Transcription {
             //   call side did, so voices in the room are not dropped silently.
             // The default mic path already silence-split the whole mic track,
             // so repeating it would only reproduce the same empty result.
-            let sweepsSystem = systemUtterances.isEmpty && micUtterances.isEmpty && hasUsableSystemAudio
-            let sweepsMic = splitLocalSpeakers && microphoneAudioOutcome == .usable && micUtterances.isEmpty
+            let hasMicSpeech = !micUtterances.isEmpty || pendingMicPlan != nil
+            let sweepsSystem = transcribedSystemSegments.isEmpty && !hasMicSpeech && hasUsableSystemAudio
+            let sweepsMic = splitLocalSpeakers && microphoneAudioOutcome == .usable && !hasMicSpeech
             if sweepsSystem || sweepsMic {
                 await MainActor.run {
                     self.processingStatus = "Checking again for quiet speech..."
@@ -628,12 +601,73 @@ extension Transcription {
                     micUtterances = sweep.micUtterances
                     micSpeakerContexts = [:]
                     newlyCreatedMicProfileIds = []
-                } else if micDiarizerFoundNoSpeech, !systemUtterances.isEmpty {
+                    pendingMicPlan = nil
+                } else if micDiarizerFoundNoSpeech, (!transcribedSystemSegments.isEmpty || !systemUtterances.isEmpty) {
                     // Nothing recoverable in the room either. Say so in the
                     // saved transcript's health, as before this pass existed,
                     // instead of listing a healthy mic with no lines.
                     microphoneAudioOutcome = .unusable
                 }
+            }
+
+            // All throwing/cancellable STT stages and sweeps have now completed. Verify
+            // cancellation before committing system and split-mic speaker identities to `speakerDB`.
+            try Task.checkCancellation()
+
+            if !transcribedSystemSegments.isEmpty {
+                let identityPlan = Self.planSystemSpeakerIdentities(
+                    speakerSegments: speakerSegments,
+                    existingProfiles: existingProfiles,
+                    negativeExemplarsByProfile: negativeExemplarsByProfile,
+                    speakerThresholds: speakerThresholds,
+                    micActiveFraction: { micActivity.activeFraction(startTime: $0, endTime: $1) }
+                )
+                let identities = Self.commitSystemSpeakerIdentities(
+                    identityPlan,
+                    existingProfiles: existingProfiles,
+                    speakerDB: speakerDB
+                )
+                speakerIdRemap = identities.idRemap
+                systemSpeakerContexts = identities.speakerContexts
+                systemUtterances.reserveCapacity(transcribedSystemSegments.count)
+                for transcribed in transcribedSystemSegments {
+                    let segment = transcribed.segment
+                    let effectiveSpeakerId = speakerIdRemap[segment.speakerId] ?? segment.speakerId
+                    let persistentId: UUID?
+                    let similarity: Double?
+                    if let match = identities.matchResults[effectiveSpeakerId] {
+                        persistentId = match.persistentId
+                        similarity = match.similarity
+                    } else {
+                        persistentId = identities.newProfiles[effectiveSpeakerId]
+                        similarity = nil
+                    }
+                    systemUtterances.append(TranscriptionUtterance(
+                        start: segment.startTime,
+                        end: segment.endTime,
+                        channel: 1,
+                        speakerId: effectiveSpeakerId,
+                        persistentSpeakerId: persistentId,
+                        matchSimilarity: similarity,
+                        transcript: transcribed.text
+                    ))
+                }
+            }
+
+            if let micPlan = pendingMicPlan {
+                let micResult = Self.commitMicChannelPlan(
+                    micPlan,
+                    existingProfiles: existingProfiles,
+                    speakerDB: speakerDB
+                )
+                micUtterances = micResult.utterances
+                micSpeakerContexts = micResult.speakerContexts
+                newlyCreatedMicProfileIds = micResult.newlyCreatedProfileIds
+                AppLogger.transcription.info("Mic audio diarized + transcribed", [
+                    "utterances": "\(micUtterances.count)",
+                    "speakers": "\(Set(micUtterances.map { $0.speakerId }).count)",
+                    "newProfiles": "\(newlyCreatedMicProfileIds.count)"
+                ])
             }
 
             // Merge consecutive utterances from the same speaker when the gap is small.
