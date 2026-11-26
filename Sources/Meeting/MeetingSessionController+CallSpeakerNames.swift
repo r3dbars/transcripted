@@ -98,11 +98,9 @@ extension MeetingSessionController {
         }
     }
 
-    /// Called from `transition` before `state` changes. Also starts the live
-    /// transcript capture on entering `.recording`, as before.
+    /// Called from `transition` before `state` changes.
     func recordingStateHooks(from oldState: State, to newState: State) {
         if case .recording = newState {
-            beginLiveTranscriptCaptureIfNeeded()
             if oldState != .recording, let startedAt = activeRecordingStartedAt {
                 callSpeakerNames.recordingStarted(at: startedAt)
             }

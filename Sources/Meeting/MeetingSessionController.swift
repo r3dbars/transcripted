@@ -45,8 +45,7 @@ extension MeetingSessionController {
         trigger: StartTrigger = .unknown,
         suggestedTitle: String? = nil,
         promptTelemetryProperties: [String: String]? = nil,
-        detectedCallCandidate: MeetingPromptDetector.Candidate? = nil,
-        autoStarted: Bool = false
+        detectedCallCandidate: MeetingPromptDetector.Candidate? = nil
     ) async -> Bool {
         guard recordingStartAllowed() else { return false }
         let admission = MeetingSessionStateMachine.startAdmission(
@@ -273,7 +272,6 @@ extension MeetingSessionController {
         }
 
         activeRecordingStartedAt = Date()
-        activeRecordingWasAutoStarted = autoStarted
         unexpectedCaptureStopEvidence = nil
         if trigger == .detectedPrompt {
             activeDetectedPromptRecordingStartedAt = activeRecordingStartedAt
@@ -302,7 +300,6 @@ extension MeetingSessionController {
                 "mic_only_by_choice": activeRecordingIsMicOnlyByChoice ? "true" : "false",
                 "system_permission_check": lastSystemAudioPermissionCheck,
                 "models_warm": meetingModelsWarmAtStart ? "true" : "false",
-                "auto_started": activeRecordingWasAutoStarted ? "true" : "false",
             ],
             uniquingKeysWith: { _, new in new }
         )
@@ -330,7 +327,6 @@ extension MeetingSessionController {
         audioInactivityWarning = nil
         isMicBoostPromptVisible = false
         audioRouteWarning = nil
-        finishAutoStartedRecording(stopReason: reason)
         clearActiveRecordingIdentity(keepingForStopTeardown: true)
 
         DiagnosticsTrail.record(

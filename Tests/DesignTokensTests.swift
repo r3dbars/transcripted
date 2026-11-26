@@ -60,12 +60,6 @@ func testDesignTokens() {
     }
 
     runSuite("DesignTokens — island prompt buttons take their style from what they do") {
-        let note = MeetingAutoRecordNoteCopy.prompt
-        assertEqual(note.primaryTitle, "Stop", "auto-record note primary is Stop")
-        assertEqual(note.primaryRole, .primary, "Stop keeps the recording, so it is the safe primary, not red")
-        assertEqual(note.secondaryTitle, "Discard", "auto-record note secondary is Discard")
-        assertEqual(note.secondaryRole, .standard, "the first Discard only asks, so it stays grey; red is the confirm")
-
         let warning = NotchIslandMeetingContent.Prompt(
             title: "No sound",
             detail: "Nothing heard for 2 minutes.",

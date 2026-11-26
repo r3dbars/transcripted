@@ -128,7 +128,6 @@ private func makeRecordingOverlapDetector(recording: @escaping () -> Bool) -> Me
     detector.frontmostBundleIDProvider = { nil }
     detector.runningBundleIDsProvider = { [] }
     detector.browserWindowTitlesProvider = { _ in [] }
-    detector.isAutoRecordEnabled = { false }
     detector.isMicInputPromptEnabled = { true }
     detector.callShortcutProvider = { _ in nil }
     detector.isOwnCaptureActive = recording

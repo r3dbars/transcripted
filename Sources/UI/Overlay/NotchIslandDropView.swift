@@ -25,8 +25,6 @@ final class NotchIslandDropView: NSView {
     /// The island's "Who was on this call?" view, kept alive by the
     /// controller so typing and playback survive the drop-down being rebuilt.
     private let speakerReviewView: NSView?
-    /// The live transcript, kept alive by the controller like the review.
-    private let liveTranscriptView: NotchIslandLiveTranscriptView?
     /// The dictation's live words, kept alive by the controller the same way.
     let dictationPreviewView: NotchIslandDictationPreviewView?
 
@@ -35,12 +33,10 @@ final class NotchIslandDropView: NSView {
         live: NotchIslandLiveValues,
         targetIcon: () -> NSImage?,
         speakerReviewView: NSView? = nil,
-        liveTranscriptView: NotchIslandLiveTranscriptView? = nil,
         dictationPreviewView: NotchIslandDictationPreviewView? = nil
     ) {
         self.drop = drop
         self.speakerReviewView = speakerReviewView
-        self.liveTranscriptView = liveTranscriptView
         self.dictationPreviewView = dictationPreviewView
         super.init(frame: NSRect(x: 0, y: 0, width: NotchIslandGeometry.dropWidth, height: 10))
         stack.orientation = .vertical
@@ -126,7 +122,7 @@ final class NotchIslandDropView: NSView {
             return
         case .meetingPreparing(let title, let detail):
             add(titleBlock(title, detail, wrapsDetail: true))
-        case .meetingControls(let note, let unverified, let showsTranscript, _, let micAction):
+        case .meetingControls(let note, let unverified, _, let micAction):
             let muted: Bool
             if case .meetingMicUnmute? = micAction { muted = true } else { muted = false }
             let subtitle: String
@@ -140,19 +136,12 @@ final class NotchIslandDropView: NSView {
                 }
             }
             add(titleBlock("Recording", subtitle))
-            if showsTranscript, let liveTranscriptView {
-                liveTranscriptView.removeFromSuperview()
-                stack.addArrangedSubview(liveTranscriptView) // not add(): it pins its own size
-                readableText.append(liveTranscriptView)
-                DispatchQueue.main.async { [weak liveTranscriptView] in liveTranscriptView?.scrollToNewest() }
-            } else {
-                let you = NotchIslandBarsView(count: 46, maxHeight: 20, color: NotchIslandPalette.accent)
-                let call = NotchIslandBarsView(count: 46, maxHeight: 20, color: NSColor(white: 1, alpha: 0.8))
-                youLane = you
-                callLane = call
-                add(lane("You", you))
-                add(lane(NotchIslandMeetingCopy.otherSideLane, call))
-            }
+            let you = NotchIslandBarsView(count: 46, maxHeight: 20, color: NotchIslandPalette.accent)
+            let call = NotchIslandBarsView(count: 46, maxHeight: 20, color: NSColor(white: 1, alpha: 0.8))
+            youLane = you
+            callLane = call
+            add(lane("You", you))
+            add(lane(NotchIslandMeetingCopy.otherSideLane, call))
         case .meetingPrompt(let prompt):
             // A countdown is the ring on the button that fires, never a line.
             add(titleBlock(prompt.title, prompt.detail, wrapsDetail: true))
@@ -185,14 +174,9 @@ final class NotchIslandDropView: NSView {
         var leading: [NSView] = []
         var trailing: [NSView] = []
         for spec in specs {
-            let view: NotchIslandButton
-            if spec.action == .meetingCopyTranscript {
-                view = copyTranscriptButton()
-            } else {
-                view = button(spec.title, Self.style(for: spec.role), spec.action, symbol: spec.symbol,
+            let view = button(spec.title, Self.style(for: spec.role), spec.action, symbol: spec.symbol,
                               appIcon: spec.showsTargetAppIcon ? targetIcon() : nil,
                               accessibilityLabel: spec.accessibilityLabel)
-            }
             if let ring = spec.countdown {
                 let action = spec.action
                 view.startCountdown(seconds: ring.secondsLeft, fromFraction: ring.fraction) { secondsLeft in
@@ -284,22 +268,6 @@ final class NotchIslandDropView: NSView {
         label.translatesAutoresizingMaskIntoConstraints = false
         label.widthAnchor.constraint(equalToConstant: 40).isActive = true
         return row([label, bars])
-    }
-
-    /// Copy all, which says "Copied" for a beat.
-    private func copyTranscriptButton() -> NotchIslandButton {
-        let button = NotchIslandButton(title: "Copy all", style: .plain, symbolName: "doc.on.doc")
-        button.onPress = { [weak self, weak button] in
-            self?.onAction?(.meetingCopyTranscript)
-            button?.replaceTitle("Copied")
-            Task { @MainActor [weak button] in
-                try? await Task.sleep(for: .seconds(1.4))
-                button?.replaceTitle("Copy all")
-            }
-        }
-        button.setContentHuggingPriority(.required, for: .horizontal)
-        button.setContentCompressionResistancePriority(.required, for: .horizontal)
-        return button
     }
 
     /// A button's style comes from its role, not its title.

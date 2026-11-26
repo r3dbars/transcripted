@@ -268,30 +268,6 @@ struct MeetingMicMuteControlRow: View {
     }
 }
 
-/// Whether a recording meeting shows its live transcript in the island.
-struct NotchIslandLiveTranscriptRow: View {
-    var showsDivider = true
-
-    @AppStorage(NotchIslandPreferences.showsLiveTranscriptKey)
-    private var showsLiveTranscript = false
-
-    var body: some View {
-        GeneralToggleRow(
-            title: "Live transcript",
-            isOn: $showsLiveTranscript,
-            help: showsLiveTranscript
-                ? "Hover the island during a meeting to read and copy it."
-                : "Meetings are transcribed after they end.",
-            info: GeneralInfo(
-                title: "Live transcript",
-                message: "Hover the island during a meeting to read the transcript so far. The saved meeting is transcribed again, with names, after you stop."
-            ),
-            automationIdentifier: "transcripted.settings.general.live-transcript",
-            showsDivider: showsDivider
-        )
-    }
-}
-
 struct GeneralToggleRow: View {
     let title: String
     @Binding var isOn: Bool

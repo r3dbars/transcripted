@@ -19,53 +19,11 @@ final class MeetingPromptDetector {
         /// What convinced us this is a call. Set on ad-hoc (mic / camera /
         /// output) candidates; `.none` for calendar and runtime prompts.
         var callEvidence: MeetingPromptCallEvidence = .none
-        /// The call app or browser is actually on the mic.
-        var holdsMicrophone: Bool = false
-        /// The named call is in the focused/front tab or window.
-        var isFocusedFrontWindow: Bool = false
-        /// Meet's pre-join / lobby screen, not an in-call tab.
-        var isMeetPreJoin: Bool = false
-        /// How long the auto-start evidence has been true.
-        var evidenceAge: TimeInterval = 0
-        /// The browser is playing call audio. Tab-title auto-start needs this.
-        var isPlayingCallAudio: Bool = false
-        /// Live proof this calendar/runtime candidate borrowed. Stays `.none`
-        /// on ad-hoc candidates that already have `callEvidence`.
-        var borrowedProofSource: MeetingBorrowedCallProofSource = .none
-        /// The native Zoom or Teams process (not a browser helper) is on the mic.
-        var nativeProcessHoldsMicrophone: Bool = false
-        /// Set by the detector on the candidate it hands over: this call
-        /// already had a recording that stopped, or a declined auto-start.
-        var autoStartBlockedThisCall: Bool = false
-
-        /// Keep a calendar event's title and `call_evidence` while copying
-        /// live-call proof that auto-record needs. Telemetry and call-end
-        /// `isBrowserCall` stay calendar-shaped. Native vs tab-title proof
-        /// keeps its own source so a background web tab cannot auto-start.
-        func borrowingCallProof(from live: Candidate) -> Candidate {
-            var copy = self
-            copy.holdsMicrophone = live.holdsMicrophone
-            copy.isFocusedFrontWindow = live.isFocusedFrontWindow
-            copy.isMeetPreJoin = live.isMeetPreJoin
-            copy.evidenceAge = live.evidenceAge
-            copy.isPlayingCallAudio = live.isPlayingCallAudio
-            copy.nativeProcessHoldsMicrophone = live.nativeProcessHoldsMicrophone
-            switch live.callEvidence {
-            case .nativeApp:
-                copy.borrowedProofSource = .nativeApp
-            case .tabTitle:
-                copy.borrowedProofSource = .tabTitle
-            default:
-                copy.borrowedProofSource = .none
-            }
-            return copy
-        }
     }
 
     /// What the island hook did with a candidate.
     enum RequestResult: Equatable {
         case presented
-        case autoStarted
         case skipped
     }
 
@@ -75,9 +33,6 @@ final class MeetingPromptDetector {
     }
 
     var onPromptRequest: ((Candidate) -> RequestResult)?
-    /// Present the island without taking the auto-start path. Used when
-    /// capture already reported `.autoStarted` and then bailed.
-    var onPromptFallback: ((Candidate) -> RequestResult)?
     var onPromptSuppressed: ((MeetingPromptSuppression) -> Void)?
     var shouldSkipPromptEvaluation: (() -> Bool)?
     /// While prompts are held back (a meeting is recording), a different
@@ -131,11 +86,6 @@ final class MeetingPromptDetector {
     /// How long an unrecognized browser has to hold the mic before it prompts.
     /// Tests shrink these.
     var browserEvidenceTiming: BrowserCallEvidence.Timing = .standard
-    /// How long proven auto-start evidence must last. Tests set this to 0.
-    var autoRecordEvidenceHoldDuration: TimeInterval = MeetingAutoRecordPolicy.evidenceHoldDuration
-    /// Tests inject a fixed answer so UserDefaults on the machine running
-    /// the suite cannot turn the 3-second hold on by accident.
-    var isAutoRecordEnabled: () -> Bool = { AutoRecordDetectedCallsPreferences.isEnabled() }
 
     // State below that isn't `private` is only internal because the
     // MeetingPromptDetector+*.swift extensions use it. Treat it as private
@@ -184,11 +134,6 @@ final class MeetingPromptDetector {
     private var suppressionTelemetryUntil: [String: Date] = [:]
     // Bundle IDs currently holding the mic input, pushed by MicActivityMonitor.
     var micActiveBundleIDs: Set<String> = []
-    /// When each native conferencing app first showed up on the mic this call.
-    var nativeMicSince: [MeetingPromptProvider: Date] = [:]
-    /// A detected call that had a recording, or a declined auto-start, ended
-    /// recently: auto-start stays off (the prompt still shows) until then.
-    var autoStartBlockedUntil: Date?
     // Whether a camera is confirmed in use, pushed by CameraActivityMonitor.
     var cameraInUse = false
     // Native conferencing bundle IDs confirmed playing audio output, pushed by
@@ -444,13 +389,9 @@ final class MeetingPromptDetector {
 
 
         let sortedCandidates = candidates.sorted(by: sortCandidates)
-        let declinedProviders = detectedCallSession?.autoStartDeclinedProviders ?? []
-        let visibleCandidates = declinedProviders.isEmpty
-            ? sortedCandidates
-            : sortedCandidates.filter { !declinedProviders.contains($0.candidate.provider) }
         let promptsBlocked = shouldSkipPromptEvaluation?() == true
         if promptsBlocked, let onSplitRequest {
-            let eligible = visibleCandidates.map(\.candidate).filter {
+            let eligible = sortedCandidates.map(\.candidate).filter {
                 $0.source == .calendarEvent &&
                     (snoozedUntil[$0.id] ?? .distantPast) <= now &&
                     (pendingUntil[$0.id] ?? .distantPast) <= now
@@ -459,54 +400,7 @@ final class MeetingPromptDetector {
             if onSplitRequest(eligible) { return }
         }
         if browserFirstTitleReadPending { return }
-        if visibleCandidates.isEmpty, let blocked = sortedCandidates.first,
-           declinedProviders.contains(blocked.candidate.provider) {
-            recordSuppression(
-                candidate: blocked.candidate,
-                reason: .declinedThisCall,
-                now: now,
-                cooldownReason: MeetingPromptSuppressionReason.declinedThisCall.rawValue
-            )
-            return
-        }
-        guard let match = preferredCandidate(from: visibleCandidates) else { return }
-
-        var handedCandidate = match.candidate
-        handedCandidate.autoStartBlockedThisCall = isAutoStartBlockedThisCall(now: now)
-
-        if isAutoRecordEnabled(),
-           !handedCandidate.autoStartBlockedThisCall,
-           match.candidate.evidenceAge < autoRecordEvidenceHoldDuration {
-            let held = MeetingAutoRecordPolicy.Request(
-                autoRecordEnabled: true,
-                evidence: match.candidate.callEvidence,
-                provider: match.candidate.provider,
-                reason: match.candidate.reason,
-                microphoneGranted: true,
-                systemAudioGranted: true,
-                otherCaptureActive: false,
-                holdsMicrophone: match.candidate.holdsMicrophone,
-                isFocusedFrontWindow: match.candidate.isFocusedFrontWindow,
-                isMeetPreJoin: match.candidate.isMeetPreJoin,
-                evidenceAge: MeetingAutoRecordPolicy.evidenceHoldDuration,
-                // Native call audio usually starts a beat after the mic: hold for
-                // it instead of prompting on the first mic edge. After the hold
-                // the real decision still needs the output.
-                isPlayingCallAudio: match.candidate.isPlayingCallAudio
-                    || match.candidate.callEvidence == .nativeApp
-                    || match.candidate.borrowedProofSource == .nativeApp,
-                borrowedProofSource: match.candidate.borrowedProofSource,
-                nativeProcessHoldsMicrophone: match.candidate.nativeProcessHoldsMicrophone
-            )
-            if MeetingAutoRecordPolicy.isCallProven(held) {
-                let remaining = max(
-                    0.05,
-                    autoRecordEvidenceHoldDuration - match.candidate.evidenceAge
-                )
-                scheduleBrowserEvidenceRecheck(at: now.addingTimeInterval(remaining), now: now)
-                return
-            }
-        }
+        guard let match = preferredCandidate(from: sortedCandidates) else { return }
 
         if promptsBlocked {
             recordSuppression(
@@ -537,16 +431,13 @@ final class MeetingPromptDetector {
             return
         }
 
-        switch onPromptRequest?(handedCandidate) ?? .skipped {
+        switch onPromptRequest?(match.candidate) ?? .skipped {
         case .presented:
             pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
             cooldownReasons[match.candidate.id] = "prompt_pending"
             // Any prompt shown while a call is live feeds the funnel outcome:
             // an unrecorded end now counts as "ignored", not "no_prompt".
             detectedCallSession?.promptShown = true
-        case .autoStarted:
-            pendingUntil[match.candidate.id] = now.addingTimeInterval(pendingCooldown)
-            cooldownReasons[match.candidate.id] = "prompt_pending"
         case .skipped:
             recordSuppression(
                 candidate: match.candidate,
@@ -575,11 +466,7 @@ final class MeetingPromptDetector {
         // could be any provider, so it only defers to a calendar prompt that
         // is already showing or snoozed.
         guard first.candidate.isGenericBrowserCall else {
-            guard let calendarCandidate else { return first }
-            return ScoredCandidate(
-                candidate: calendarCandidate.candidate.borrowingCallProof(from: first.candidate),
-                score: calendarCandidate.score
-            )
+            return calendarCandidate ?? first
         }
         return sortedCandidates.first {
             $0.candidate.source == .calendarEvent &&

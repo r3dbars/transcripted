@@ -102,8 +102,6 @@ struct GeneralSettingsPage<
                     automationIdentifier: "transcripted.settings.general.auto-detect-calls"
                 )
 
-                NotchIslandLiveTranscriptRow()
-
                 MeetingTitlesSettingsRow(showsDivider: false)
             }
             .padding(.top, 16)
@@ -142,8 +140,6 @@ struct AdvancedSettingsSection<
 >: View {
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationMuffleEnabled: Bool
-    let autoDetectCallsEnabled: Bool
-    @Binding var autoRecordDetectedCallsEnabled: Bool
     @Binding var launchAtLoginEnabled: Bool
     let launchAtLoginStatus: String
     /// Inline line under the switch when it failed or macOS is waiting for
@@ -201,20 +197,6 @@ struct AdvancedSettingsSection<
             }
 
             SettingsGroup(title: "Meetings", identifier: "transcripted.settings.section.advanced-meetings") {
-                GeneralToggleRow(
-                    title: "Record detected calls automatically",
-                    isOn: $autoRecordDetectedCallsEnabled,
-                    help: autoRecordDetectedCallsEnabled
-                        ? "Starts recording proven Zoom, Teams, and Meet calls."
-                        : "Ask before recording a detected call.",
-                    info: GeneralInfo(
-                        title: "Record detected calls automatically",
-                        message: "Starts recording Zoom, Teams and Meet calls without asking. Needs Auto-detect calls. Others on the call aren't asked, so it's off by default."
-                    ),
-                    automationIdentifier: "transcripted.settings.general.auto-record-detected-calls",
-                    isEnabled: autoDetectCallsEnabled
-                )
-
                 MeetingMicMuteControlRow()
 
                 micProcessingEditor()

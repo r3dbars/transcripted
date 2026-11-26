@@ -111,7 +111,6 @@ private final class CalendarRefreshFetchFixture {
         detector.runningBundleIDsProvider = { [] }
         detector.browserWindowTitlesProvider = { _ in [] }
         detector.callShortcutProvider = { _ in nil }
-        detector.isAutoRecordEnabled = { false }
         detector.isOwnCaptureActive = { false }
         return detector
     }

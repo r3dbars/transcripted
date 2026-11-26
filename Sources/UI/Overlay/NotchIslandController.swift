@@ -92,11 +92,9 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     /// everywhere except over the island itself, and hover is judged from
     /// the pointer instead of tracking areas on a window that may ignore it.
     private var pointerMonitors: [Any] = []
-    var liveTranscriptWatch: AnyCancellable?
     var dictationPreviewWatch: AnyCancellable?
 
     init() {
-        watchLiveTranscript()
         watchDictationPreview()
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
@@ -207,9 +205,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
     // MARK: - Meetings
 
     func updateMeeting(_ content: NotchIslandMeetingContent?) {
-        var content = content
-        let showsTranscript = Self.showsLiveTranscript(content)
-        content?.showsLiveTranscript = showsTranscript
         switch NotchIslandPresentation.meetingUpdate(from: meeting, to: content) {
         case .unchanged:
             return
@@ -227,11 +222,7 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
         case .full:
             break
         }
-        // The view must exist before a drop-down asks for it, or the first
-        // hover would draw the level lanes instead.
-        if showsTranscript { ensureLiveTranscriptView() }
         meeting = content
-        if !showsTranscript { releaseLiveTranscriptViewIfRecordingEnded() }
         live.meetingElapsed = content?.duration ?? 0
         if case .transcribing(let progress, _)? = content?.phase {
             live.transcriptionProgress = progress ?? 0
@@ -768,8 +759,6 @@ final class NotchIslandController: NotchIslandCallPromptPresenting {
 
     private func handleOwnAction(_ action: NotchIslandAction) {
         switch action {
-        case .meetingCopyTranscript:
-            copyLiveTranscript()
         case .copyLastDictation:
             guard let text = recentInsert?.text, !text.isEmpty else { return }
             let pasteboard = NSPasteboard.general

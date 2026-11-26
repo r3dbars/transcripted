@@ -146,7 +146,6 @@ func testNotchIslandMessageTier() {
         assertEqual(NotchIslandMeetingCopy.callAudioNextMeeting, "Call audio: next meeting")
         assertEqual(NotchIslandMeetingCopy.micMuted, "Mic muted", "one name for a muted mic, wing and drop-down")
         assertFalse(NotchIslandMeetingCopy.bothSides.lowercased().contains("call"), "a recording is a meeting, not a call")
-        assertEqual(MeetingAutoRecordNoteCopy.detail, "", "Recording automatically says it all")
     }
 
     runSuite("A calendar call prompt doesn't repeat the meeting's title") {

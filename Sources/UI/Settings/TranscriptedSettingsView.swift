@@ -81,8 +81,6 @@ struct TranscriptedSettingsView: View {
     @State var useSystemMeetingMicrophone = MeetingMicrophonePreferences.usesSystemInput()
     @State var splitLocalSpeakersEnabled = LocalSpeakerPreferences.isEnabled()
     @State var autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
-    @State var autoRecordDetectedCallsEnabled = AutoRecordDetectedCallsPreferences.isStoredOn()
-    @State var confirmsAutoRecordConsent = false
     @State var audioRetentionWindow = AudioStoragePreferences.deleteAudioAfter()
     @State var dictationAudioKeepWindow = AudioStoragePreferences.dictationAudioKeepWindow()
     @StateObject var homeViewModel = HomeViewModel()
@@ -259,10 +257,6 @@ struct TranscriptedSettingsView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .autoCallDetectionPrefsDidChange)) { _ in
             autoDetectCallsEnabled = AutoCallDetectionPreferences.isEnabled()
-            autoRecordDetectedCallsEnabled = AutoRecordDetectedCallsPreferences.isStoredOn()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .autoRecordDetectedCallsPrefsDidChange)) { _ in
-            autoRecordDetectedCallsEnabled = AutoRecordDetectedCallsPreferences.isStoredOn()
         }
         .onReceive(NotificationCenter.default.publisher(for: .microphoneProcessingPrefsDidChange)) { _ in
             // The Home row's "Boost mic next meeting" action and the launch

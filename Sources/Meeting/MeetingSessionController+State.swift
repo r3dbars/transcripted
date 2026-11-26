@@ -172,8 +172,6 @@ final class MeetingSessionController: ObservableObject {
     var activeDetectedPromptTranscriptionTelemetryProperties: [String: String]?
     var activeDetectedPromptTranscriptionRecordingStartedAt: Date?
     var activeRecordingTrigger: StartTrigger = .unknown
-    var activeRecordingWasAutoStarted = false
-    var onAutoStartedRecordingWillEnd: (() -> Void)?
     var activeRecordingIdentity: UUID?
     /// Set while stop/cancel tears down, so a borrowed-mic claim stays current until dictation is handed back.
     var stoppingRecordingIdentity: UUID?
@@ -653,24 +651,9 @@ final class MeetingSessionController: ObservableObject {
         }
     }
 
-    func finishAutoStartedRecording(stopReason: StopReason? = nil, cancelReason: RecordingCancelReason? = nil) {
-        if MeetingAutoRecordPolicy.recordsDeclineOnEnd(
-            wasAutoStarted: activeRecordingWasAutoStarted,
-            stopReason: stopReason?.rawValue,
-            cancelReason: cancelReason?.rawValue
-        ) {
-            onAutoStartedRecordingWillEnd?()
-        }
-        activeRecordingWasAutoStarted = false
-    }
-
     func clearActiveRecordingIdentity(keepingForStopTeardown: Bool = false) {
         stoppingRecordingIdentity = keepingForStopTeardown ? activeRecordingIdentity : nil
-        if let identity = activeRecordingIdentity {
-            LiveMeetingTranscriptService.shared.finishCapture(sessionID: identity)
-        }
         activeRecordingIdentity = nil
-        finishAutoStartedRecording()
         micBoostPromptRecordingIdentity = nil
         audioRouteWarning = nil
         systemAudioDegradationWarning = nil

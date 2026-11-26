@@ -93,7 +93,7 @@ extension MeetingPromptDetector {
                 let cooldown = runtimeSuppressionReasons[provider]
                 recordSuppression(
                     candidate: runtimeCandidate(for: provider, now: now),
-                    reason: MeetingAutoRecordPolicy.runtimeSuppressionReason(cooldownReason: cooldown),
+                    reason: cooldown == MeetingPromptSuppressionReason.declinedThisCall.rawValue ? .declinedThisCall : .runtimeSuppressed,
                     now: now,
                     cooldownReason: cooldown
                 )

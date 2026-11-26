@@ -4,12 +4,10 @@ import SwiftUI
 /// Settings' Agent page, connecting first: one status line, then a row per
 /// detected agent (connected ones stay listed with a check), the universal
 /// copy-prompt row, and Get Claude Desktop when it isn't installed. The
-/// ChatGPT companion card follows, then the capture folders behind Folders.
+/// capture folders follow behind Folders.
 /// Every row points the agent's own config at the same installed
 /// `transcripted-mcp` helper. There is no Disconnect: the connector has no
-/// safe way to remove its entry from an agent's config yet. The Codex inbox
-/// automation stays implemented but off the view tree (see
-/// `codexInboxDetails`).
+/// safe way to remove its entry from an agent's config yet.
 struct AgentConnectionSettingsPage: View {
     private enum RowPhase: Equatable {
         case idle
@@ -30,9 +28,6 @@ struct AgentConnectionSettingsPage: View {
     @State private var claudeDesktopSelfTest: TranscriptedMCPSelfTest?
     @State private var copiedLocalAgentPrompt = false
     @State private var copiedFolderPaths = false
-    @State private var openedCodexInboxSetup = false
-    @State private var codexInboxSetupError: String?
-    @State private var codexInboxSetupErrorDetails: String?
     @State private var showAdvancedAgentSetup = false
     /// False until the first detection pass finishes, so the empty state
     /// doesn't flash "No agents found" while it's still looking.
@@ -49,7 +44,6 @@ struct AgentConnectionSettingsPage: View {
                 agentListSection
             }
             .frame(maxWidth: 620, alignment: .leading)
-            CompanionSettingsCard()
             advancedSection
         }
         .accessibilityElement(children: .contain)
@@ -367,40 +361,6 @@ struct AgentConnectionSettingsPage: View {
         }
     }
 
-    // The Codex inbox automation group is intentionally not on the view tree
-    // (see `advancedSection` above). Its implementation stays in place —
-    // including telemetry, failure copy, and automation identifiers — so
-    // restoring it to Advanced is a one-line change, not a rewrite.
-
-    private var codexInboxDetails: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Label("Codex meeting watcher", systemImage: "tray.and.arrow.down")
-                .font(.subheadline.weight(.semibold))
-
-            Text("A pinned Codex chat that checks for new meetings during work hours and posts a short after-action report.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-
-            SettingsInlineActionButton(
-                title: openedCodexInboxSetup ? "Opened Codex Setup" : "Set up Codex Inbox",
-                symbolName: openedCodexInboxSetup ? "checkmark" : "tray.and.arrow.down",
-                tone: .accent,
-                automationIdentifier: "transcripted.settings.agent.codex-inbox"
-            ) {
-                setupCodexInbox()
-            }
-
-            if let codexInboxSetupError {
-                failureNotice(
-                    message: codexInboxSetupError,
-                    details: codexInboxSetupErrorDetails,
-                    detailsAutomationIdentifier: "transcripted.settings.agent.codex-inbox.error-details"
-                )
-            }
-        }
-    }
-
     // MARK: - State refresh
 
     private func refreshAgentStates() {
@@ -605,70 +565,6 @@ struct AgentConnectionSettingsPage: View {
             priorStatus: priorStatus,
             result: result
         )
-    }
-
-    // MARK: - Codex inbox
-
-    private func setupCodexInbox() {
-        codexInboxSetupError = nil
-        codexInboxSetupErrorDetails = nil
-
-        do {
-            let inboxURL = try AgentConnectionGuide.ensureCodexInboxFolder()
-            copyText(AgentConnectionGuide.codexInboxSetupPrompt(inboxURL: inboxURL))
-            ActivationTelemetry.trackAgentPromptAction(
-                promptKind: .codexInboxSetup,
-                actionKind: .copied,
-                agentTarget: .codex,
-                surface: .agentSettings
-            )
-
-            guard let setupURL = AgentConnectionGuide.codexInboxSetupURL(inboxURL: inboxURL) else {
-                NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
-                codexInboxSetupError = "The setup prompt was copied. Open Codex and paste it."
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .codexInbox,
-                    agentTarget: .codex,
-                    surface: .agentSettings,
-                    result: .fallbackCopied
-                )
-                return
-            }
-
-            if NSWorkspace.shared.open(setupURL) {
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .codexInbox,
-                    agentTarget: .codex,
-                    surface: .agentSettings
-                )
-                ActivationTelemetry.trackAgentPromptAction(
-                    promptKind: .codexInboxSetup,
-                    actionKind: .opened,
-                    agentTarget: .codex,
-                    surface: .agentSettings
-                )
-                showCopiedFeedback($openedCodexInboxSetup)
-            } else {
-                NSWorkspace.shared.activateFileViewerSelecting([inboxURL])
-                codexInboxSetupError = "Codex was not found. The setup prompt was copied and the inbox folder is open."
-                ActivationTelemetry.trackAgentSetupCTA(
-                    setupKind: .codexInbox,
-                    agentTarget: .codex,
-                    surface: .agentSettings,
-                    result: .fallbackCopied
-                )
-            }
-        } catch {
-            let failure = AgentSetupFailureCopy.codexInboxFailure(error: error)
-            codexInboxSetupError = failure.message
-            codexInboxSetupErrorDetails = failure.details
-            ActivationTelemetry.trackAgentSetupCTA(
-                setupKind: .codexInbox,
-                agentTarget: .codex,
-                surface: .agentSettings,
-                result: .failed
-            )
-        }
     }
 
     // MARK: - Small helpers

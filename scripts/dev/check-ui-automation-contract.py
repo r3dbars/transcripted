@@ -78,8 +78,6 @@ SETTINGS_CLICK_FLOW_IDS = [
 ]
 # Icon-only Speakers controls stay scriptable without using speaker names.
 SPEAKERS_IDS = [
-    "transcripted.speakers.voice-to-name.play",
-    "transcripted.speakers.voice-to-name.menu",
     "transcripted.speakers.search.field",
     "transcripted.speakers.person.play",
     "transcripted.speakers.person.menu",

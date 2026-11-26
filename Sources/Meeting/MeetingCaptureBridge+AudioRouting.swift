@@ -3,12 +3,6 @@ import TranscriptedCore
 
 @available(macOS 14.0, *)
 extension MeetingCaptureBridge {
-    func setLivePCMDeliveryEnabled(_ enabled: Bool, previewEpoch: UInt64) {
-        audio.setLivePCMDeliveryEnabled(enabled, previewEpoch: previewEpoch)
-    }
-
-    var livePCMDroppedBufferCount: Int { audio.livePCMDroppedBufferCount }
-
     /// Snapshot of Core's recording health metadata for transcript
     /// frontmatter.
     ///

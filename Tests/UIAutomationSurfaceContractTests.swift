@@ -402,10 +402,10 @@ func testUIAutomationSurfaceContract() async {
 
         // Person rows play from their voice print (its automation id is
         // pinned by check-ui-automation-contract.py); there's no second play
-        // control. The compact icon label backs the two overflow menus.
+        // control. The compact icon label backs the person overflow menu.
         assertTrue(
-            speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 2,
-            "queue and person overflow menus should use the compact 40pt hit-target label"
+            speakersSettingsSource().components(separatedBy: "SpeakerCompactIconLabel(").count - 1 >= 1,
+            "person overflow menu should use the compact 40pt hit-target label"
         )
 
         // Review speakers and re-transcribe in the meeting row menu are

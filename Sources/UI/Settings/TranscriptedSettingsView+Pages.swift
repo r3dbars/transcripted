@@ -240,9 +240,9 @@ extension TranscriptedSettingsView {
         VStack(alignment: .leading, spacing: 16) {
             generalPage
 
-            // Write for Me and the ChatGPT companion can send text off this Mac
-            // (DeveloperPreview.nextSentence, CompanionSettingsCard), so say when.
-            Text("Recordings and transcripts stay on this Mac. Write for Me and the ChatGPT companion send text only when you use them.")
+            // Write for Me can send text off this Mac
+            // (DeveloperPreview.nextSentence), so say when.
+            Text("Recordings and transcripts stay on this Mac. Write for Me sends text only when you use it.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: 620)
