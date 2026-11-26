@@ -366,4 +366,77 @@ func testMeetingStartFailureClassifier() {
         )
     }
 
+    runSuite("MeetingStartRetryPolicy retries transient mic graph failures once and skips permanent blockers") {
+        assertTrue(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "mic_unavailable",
+                startFailureStage: "microphone_graph",
+                message: "Recording failed to start: The microphone route did not become ready. Check your input device and try again.",
+                explicitSystemAudioPermissionDenialObserved: false,
+                recordingStartAllowed: true
+            ),
+            "transient microphone_graph route failures should get one settle retry"
+        )
+        assertTrue(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "mic_unavailable",
+                startFailureStage: "microphone_tap_raised",
+                message: "Recording failed to start: Input tap format mismatch.",
+                explicitSystemAudioPermissionDenialObserved: false,
+                recordingStartAllowed: true
+            ),
+            "transient microphone_tap_raised failures should get one settle retry"
+        )
+        assertFalse(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "mic_unavailable",
+                startFailureStage: "unknown",
+                message: "No microphone found. Connect a microphone or headset and try again.",
+                explicitSystemAudioPermissionDenialObserved: false,
+                recordingStartAllowed: true
+            ),
+            "preflight missing-hardware failures must not retry"
+        )
+        assertFalse(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "mic_unavailable",
+                startFailureStage: "microphone_graph",
+                message: "Recording couldn't start safely because its recovery record could not be saved.",
+                explicitSystemAudioPermissionDenialObserved: false,
+                recordingStartAllowed: true
+            ),
+            "journal/disk persistence failures must not retry"
+        )
+        assertFalse(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "mic_unavailable",
+                startFailureStage: "microphone_graph",
+                message: "The microphone route did not become ready.",
+                explicitSystemAudioPermissionDenialObserved: true,
+                recordingStartAllowed: true
+            ),
+            "explicit system audio permission denial must not retry"
+        )
+        assertFalse(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "mic_unavailable",
+                startFailureStage: "microphone_graph",
+                message: "The microphone route did not become ready.",
+                explicitSystemAudioPermissionDenialObserved: false,
+                recordingStartAllowed: false
+            ),
+            "disallowed starts (app terminating) must not retry"
+        )
+        assertFalse(
+            MeetingStartRetryPolicy.shouldRetryTransientMicStartFailure(
+                failureKind: "system_stream_unavailable",
+                startFailureStage: "system_audio",
+                message: "System audio capture could not start.",
+                explicitSystemAudioPermissionDenialObserved: false,
+                recordingStartAllowed: true
+            ),
+            "system audio failures must not use the mic-graph retry"
+        )
+    }
+
 }

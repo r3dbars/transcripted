@@ -65,6 +65,16 @@ private enum PinnedDictationPrepareResult: @unchecked Sendable {
     case unavailable(String)
 }
 
+enum PinnedDictationWarmupDecision: Equatable {
+    case skipEngineWarmup(engineRecordsBluetoothInput: Bool)
+    case runEngineWarmup
+    /// The system-input work coordinator timed out or its circuit is open.
+    /// Callers must neither touch `AVAudioEngine.inputNode` (AirPods-safe)
+    /// nor publish `inputFormatReady = true` (which would spin the readiness
+    /// wait into another failing start every 100 ms).
+    case systemInputBlocked
+}
+
 extension ParakeetEngine {
     /// Budget for the device lookup plus IOProc setup. Longer than a plain
     /// HAL read because it also starts the device.
@@ -99,34 +109,35 @@ extension ParakeetEngine {
         publishRecoveryState()
     }
 
-    /// Idle warmup and readiness recovery touch the macOS default input.
-    /// Skip them while that input is a Bluetooth headset, and whenever the
-    /// recorder will record the mic, judged on the same selection the start
-    /// makes (`PinnedDictationInputPolicy.skipsEngineWarmup`). Otherwise a key
-    /// press after a wake or route change waited on an engine it never used.
-    /// An unreadable route counts as a headset.
-    func pinnedDictationSkipsEngineWarmup() async -> Bool {
-        await pinnedDictationWarmupDecision().skipsEngineWarmup
-    }
-
     /// The warmup decision plus whether the engine will record a Bluetooth
     /// macOS input (`PinnedDictationInputPolicy.engineRecordsBluetoothInput`),
-    /// judged on one selection read. An unreadable route skips warmup and
-    /// replaces nothing.
-    func pinnedDictationWarmupDecision() async -> (skipsEngineWarmup: Bool, engineRecordsBluetoothInput: Bool) {
-        let warmup = pinnedDictationWarmup
-        let decision = try? await Self.systemInputWorkCoordinator.run(
-            operation: "pinned_dictation_warmup_decision",
-            timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
-        ) { () -> (Bool, Bool) in
-            let selection = try? Self.pinnedDictationInputSelection()
-            return (
-                warmup.skipsEngineWarmup(for: selection),
-                PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: selection)
-            )
+    /// judged on one selection read. A blocked/open system-input circuit
+    /// returns `.systemInputBlocked` so readiness neither touches the engine's
+    /// input node (AirPods-safe) nor falsely publishes `inputFormatReady`.
+    func pinnedDictationWarmupDecision() async -> PinnedDictationWarmupDecision {
+        if Self.systemInputWorkCoordinator.circuitOpenError(
+            operation: "pinned_dictation_warmup_decision"
+        ) != nil {
+            return .systemInputBlocked
         }
-        guard let decision else { return (true, false) }
-        return (decision.0, decision.1)
+        let warmup = pinnedDictationWarmup
+        do {
+            let decision = try await Self.systemInputWorkCoordinator.run(
+                operation: "pinned_dictation_warmup_decision",
+                timeoutNanoseconds: TranscriptedConstants.systemInputOperationTimeout
+            ) { () -> (Bool, Bool) in
+                let selection = try? Self.pinnedDictationInputSelection()
+                return (
+                    warmup.skipsEngineWarmup(for: selection),
+                    PinnedDictationInputPolicy.engineRecordsBluetoothInput(for: selection)
+                )
+            }
+            return decision.0
+                ? .skipEngineWarmup(engineRecordsBluetoothInput: decision.1)
+                : .runEngineWarmup
+        } catch {
+            return .systemInputBlocked
+        }
     }
 
     /// `pinnedDictationFellBackToEngine` (stored on ParakeetEngine) seen
@@ -194,6 +205,24 @@ extension ParakeetEngine {
                     return .unavailable("prepare: \(error.localizedDescription)")
                 }
             }
+        } catch let systemInputError as ParakeetSystemInputWorkError where systemInputError.isCircuitOpen {
+            // Do not fall back to AVAudioEngine while the system-input circuit
+            // is open: the engine's snapshot calls the exact same coordinator
+            // and touching AVAudioEngine.inputNode would flip AirPods into call
+            // mode for a guaranteed refusal. Fail closed instead.
+            lastRecordingStartFailureReason = .audioEngineStartTimedOut
+            reportWorkCircuitOpenIfNeeded(
+                message: "Audio engine start was blocked by a prior timed operation",
+                context: [
+                    "attempt": "1",
+                    "failure_kind": "audio_engine_work_circuit_open",
+                    "start_mode": "normal",
+                    "error": systemInputError.localizedDescription
+                ].merging(systemInputError.boundedWorkContext) { _, diagnostic in diagnostic }
+            )
+            markFormatUnreadyAndPublish()
+            schedulePrewarmRetry()
+            return false
         } catch {
             AppLogger.transcription.warning("PARAKEET | pinned microphone setup timed out; using the audio engine", [
                 "error": error.localizedDescription
@@ -259,6 +288,22 @@ extension ParakeetEngine {
                     return error.localizedDescription
                 }
             }
+        } catch let systemInputError as ParakeetSystemInputWorkError where systemInputError.isCircuitOpen {
+            delivery.cancel()
+            stopPinnedCaptureOffMain(capture)
+            lastRecordingStartFailureReason = .audioEngineStartTimedOut
+            reportWorkCircuitOpenIfNeeded(
+                message: "Audio engine start was blocked by a prior timed operation",
+                context: [
+                    "attempt": "1",
+                    "failure_kind": "audio_engine_work_circuit_open",
+                    "start_mode": "normal",
+                    "error": systemInputError.localizedDescription
+                ].merging(systemInputError.boundedWorkContext) { _, diagnostic in diagnostic }
+            )
+            markFormatUnreadyAndPublish()
+            schedulePrewarmRetry()
+            return false
         } catch {
             startError = "start timed out: \(error.localizedDescription)"
         }

@@ -641,8 +641,14 @@ enum ClaudeDesktopIntegrationInstaller {
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let backupURL = configURL.deletingLastPathComponent()
+        let directory = configURL.deletingLastPathComponent()
+        var backupURL = directory
             .appendingPathComponent("\(configURL.lastPathComponent).backup-\(timestamp)", isDirectory: false)
+        if fileManager.fileExists(atPath: backupURL.path) {
+            let suffix = UUID().uuidString.prefix(8).lowercased()
+            backupURL = directory
+                .appendingPathComponent("\(configURL.lastPathComponent).backup-\(timestamp)-\(suffix)", isDirectory: false)
+        }
         try fileManager.copyItem(at: configURL, to: backupURL)
         fileManager.restrictFileToOwnerOnly(at: backupURL)
         return backupURL
@@ -688,12 +694,21 @@ enum BoundedProcessRunner {
     static func run(
         executable: URL,
         arguments: [String],
+        environment: [String: String]? = nil,
+        currentDirectoryURL: URL? = nil,
         timeout: TimeInterval,
         pipeDrainTimeout: TimeInterval = defaultPipeDrainTimeout
     ) throws -> Output {
         let process = Process()
         process.executableURL = executable
         process.arguments = arguments
+        if let environment {
+            process.environment = environment
+        }
+        if let currentDirectoryURL {
+            process.currentDirectoryURL = currentDirectoryURL
+        }
+        process.standardInput = FileHandle.nullDevice
 
         let stdout = Pipe()
         let stderr = Pipe()

@@ -725,6 +725,259 @@ func testAgentMCPConnector() {
             "ensure should refresh a stale installed helper"
         )
     }
+
+    runSuite("AgentMCPConnector.claudeCodeBinary — discovers nvm, volta, bun, npm-global, local/node, and login shell installs") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeDiscoveryTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        func makeExecutable(_ relativePath: String) -> URL {
+            let url = tempRoot.appendingPathComponent(relativePath, isDirectory: false)
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? "#!/bin/sh\nexit 0\n".write(to: url, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: url.path)
+            return url
+        }
+
+        // 1. nvm version preference: prefers alias/default, otherwise highest semver.
+        let nvmOld = makeExecutable(".nvm/versions/node/v18.20.0/bin/claude")
+        let nvmNew = makeExecutable(".nvm/versions/node/v22.14.0/bin/claude")
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [], systemBinaryDirectories: [])
+        assertEqual(
+            AgentMCPConnector.claudeCodeBinary(paths: paths)?.standardizedFileURL.path,
+            nvmNew.standardizedFileURL.path,
+            "nvm discovery should prefer the highest node semver when no default alias is set"
+        )
+
+        let aliasURL = tempRoot.appendingPathComponent(".nvm/alias/default", isDirectory: false)
+        try? FileManager.default.createDirectory(at: aliasURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "18\n".write(to: aliasURL, atomically: true, encoding: .utf8)
+        assertEqual(
+            AgentMCPConnector.claudeCodeBinary(paths: paths)?.standardizedFileURL.path,
+            nvmOld.standardizedFileURL.path,
+            "nvm discovery should honor ~/.nvm/alias/default when present"
+        )
+
+        // 2. volta, bun, npm-global, and .local/node/bin static locations.
+        let bunBinary = makeExecutable(".bun/bin/claude")
+        assertEqual(
+            AgentMCPConnector.claudeCodeBinary(paths: paths)?.standardizedFileURL.path,
+            bunBinary.standardizedFileURL.path,
+            "bun install should be discovered"
+        )
+        let voltaBinary = makeExecutable(".volta/bin/claude")
+        assertEqual(
+            AgentMCPConnector.claudeCodeBinary(paths: paths)?.standardizedFileURL.path,
+            voltaBinary.standardizedFileURL.path,
+            "volta install should be discovered"
+        )
+        let localNodeBinary = makeExecutable(".local/node/bin/claude")
+        assertEqual(
+            AgentMCPConnector.claudeCodeBinary(paths: paths)?.standardizedFileURL.path,
+            localNodeBinary.standardizedFileURL.path,
+            "~/.local/node/bin/claude install should be discovered"
+        )
+
+        // 3. Login-shell PATH lookup when nothing matches static or version-manager paths.
+        let customRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeShellPathTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: customRoot) }
+        let customBinDir = customRoot.appendingPathComponent("custom-tools/bin", isDirectory: true)
+        let customClaude = customBinDir.appendingPathComponent("claude", isDirectory: false)
+        try? FileManager.default.createDirectory(at: customBinDir, withIntermediateDirectories: true)
+        try? "#!/bin/sh\nexit 0\n".write(to: customClaude, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: customClaude.path)
+
+        let shellPaths = AgentMCPConnectorPaths(
+            homeDirectory: customRoot,
+            applicationDirectories: [],
+            systemBinaryDirectories: [],
+            loginShellPATHLookup: { [customBinDir] }
+        )
+        assertNil(
+            AgentMCPConnector.claudeCodeBinary(paths: shellPaths, allowLoginShellLookup: false),
+            "UI detection must not invoke login-shell lookup"
+        )
+        assertEqual(
+            AgentMCPConnector.claudeCodeBinary(paths: shellPaths, allowLoginShellLookup: true)?.standardizedFileURL.path,
+            customClaude.standardizedFileURL.path,
+            "connect-time lookup should find claude via login-shell PATH"
+        )
+    }
+
+    runSuite("AgentMCPConnector.connect(.claudeCode) — augments PATH for Node-based claude CLIs and clears CLAUDECODE") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeEnvTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [], systemBinaryDirectories: [])
+        let nvmBin = tempRoot.appendingPathComponent(".nvm/versions/node/v22.14.0/bin", isDirectory: true)
+        let fakeNode = nvmBin.appendingPathComponent("transcripted-fake-node-runtime", isDirectory: false)
+        let fakeClaude = nvmBin.appendingPathComponent("claude", isDirectory: false)
+        let observedEnvURL = tempRoot.appendingPathComponent("observed-env.txt", isDirectory: false)
+
+        try? FileManager.default.createDirectory(at: nvmBin, withIntermediateDirectories: true)
+        try? "#!/bin/sh\necho \"CLAUDECODE=$CLAUDECODE\" > \"\(observedEnvURL.path)\"\nexit 0\n"
+            .write(to: fakeNode, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: fakeNode.path)
+        try? "#!/usr/bin/env transcripted-fake-node-runtime\n"
+            .write(to: fakeClaude, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: fakeClaude.path)
+
+        let env = AgentMCPConnector.claudeCodeCLIEnvironment(
+            for: fakeClaude,
+            paths: paths,
+            baseEnvironment: ["PATH": "/usr/bin:/bin", "CLAUDECODE": "1"]
+        )
+        assertNil(env["CLAUDECODE"], "nested CLAUDECODE env var must be cleared before invoking claude CLI")
+        assertTrue(
+            env["PATH"]?.hasPrefix(nvmBin.standardizedFileURL.path) == true,
+            "claude executable's own bin directory must be prepended to PATH so #!/usr/bin/env node works from GUI app"
+        )
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        } catch {
+            assertTrue(false, "nvm-installed claude CLI using #!/usr/bin/env should succeed: \(error)")
+        }
+        assertEqual(
+            (try? String(contentsOf: observedEnvURL, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines),
+            "CLAUDECODE=",
+            "invoked claude CLI should run with sibling runtime on PATH and CLAUDECODE unset"
+        )
+    }
+
+    runSuite("AgentMCPConnector.connect(.claudeCode) — repairs stale already-exists registrations cleanly") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeRepairTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [], systemBinaryDirectories: [])
+        let binaryURL = tempRoot.appendingPathComponent(".local/bin/claude", isDirectory: false)
+        let stateFile = tempRoot.appendingPathComponent("removed-unscoped", isDirectory: false)
+        let callLogURL = tempRoot.appendingPathComponent("calls.log", isDirectory: false)
+
+        try? FileManager.default.createDirectory(at: binaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let fakeCLI = """
+        #!/bin/sh
+        echo "$@" >> "\(callLogURL.path)"
+        if [ "$1" = "mcp" ] && [ "$2" = "remove" ] && [ "$3" = "transcripted" ]; then
+            touch "\(stateFile.path)"
+            exit 0
+        fi
+        if [ "$1" = "mcp" ] && [ "$2" = "add" ]; then
+            if [ ! -f "\(stateFile.path)" ]; then
+                echo "MCP server transcripted already exists" >&2
+                exit 1
+            fi
+            exit 0
+        fi
+        exit 0
+        """
+        try? fakeCLI.write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        } catch {
+            assertTrue(false, "already-exists error should trigger unscoped remove + retry and succeed: \(error)")
+        }
+
+        let calls = ((try? String(contentsOf: callLogURL, encoding: .utf8)) ?? "")
+            .split(separator: "\n")
+            .map(String.init)
+        assertEqual(calls.count, 4, "repair should run scoped remove, add, unscoped remove, retry add")
+        assertEqual(calls[2], "mcp remove transcripted", "repair should fall back to unscoped remove")
+    }
+
+    runSuite("AgentMCPConnector.connect(.claudeCode) — safely falls back to ~/.claude.json when CLI is missing or fails") {
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeFallbackTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [], systemBinaryDirectories: [])
+
+        try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        let existingConfig = """
+        {
+          "numStartups": 42,
+          "projects": { "/Users/me/app": { "hasTrustDialogAccepted": true } },
+          "mcpServers": {
+            "other": { "type": "stdio", "command": "/usr/local/bin/other-mcp" }
+          }
+        }
+        """
+        try? existingConfig.write(to: paths.claudeCodeUserConfigURL, atomically: true, encoding: .utf8)
+
+        assertTrue(
+            AgentMCPConnector.isDetected(.claudeCode, paths: paths),
+            "existing ~/.claude.json should detect Claude Code even when the CLI isn't in standard paths"
+        )
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths)
+        } catch {
+            assertTrue(false, "missing CLI with valid writable ~/.claude.json should succeed via safe merge: \(error)")
+        }
+
+        assertTrue(
+            AgentMCPConnector.isConnected(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths),
+            "fallback merge should connect Claude Code"
+        )
+        assertEqual(
+            filePermissions(at: paths.claudeCodeUserConfigURL)?.intValue,
+            0o600,
+            "updated ~/.claude.json should stay owner-only"
+        )
+        let backups = ((try? FileManager.default.contentsOfDirectory(atPath: tempRoot.path)) ?? [])
+            .filter { $0.hasPrefix(".claude.json.backup-") }
+        assertEqual(backups.count, 1, "fallback merge should keep a pre-write backup of ~/.claude.json")
+
+        if let data = try? Data(contentsOf: paths.claudeCodeUserConfigURL),
+           let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let servers = root["mcpServers"] as? [String: Any] {
+            assertEqual(root["numStartups"] as? Int, 42, "existing top-level keys must be preserved")
+            assertNotNil(root["projects"], "existing projects state must be preserved")
+            assertNotNil(servers["other"], "existing MCP servers must be preserved")
+        } else {
+            assertTrue(false, "updated ~/.claude.json must remain valid JSON")
+        }
+
+        // When CLI fails with non-zero exit and valid ~/.claude.json exists, fallback updates the stale path.
+        let binaryURL = tempRoot.appendingPathComponent(".local/bin/claude", isDirectory: false)
+        try? FileManager.default.createDirectory(at: binaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? "#!/bin/sh\necho 'broken cli' >&2\nexit 1\n".write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp-v2", paths: paths)
+        } catch {
+            assertTrue(false, "failing CLI with valid ~/.claude.json should fall back to safe JSON merge: \(error)")
+        }
+        assertTrue(
+            AgentMCPConnector.isConnected(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp-v2", paths: paths),
+            "CLI failure fallback should update mcpServers.transcripted to the new helper path"
+        )
+
+        // Corrupt ~/.claude.json is NEVER overwritten; original CLI error is surfaced instead.
+        let corruptRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeCorruptTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: corruptRoot) }
+        let corruptPaths = AgentMCPConnectorPaths(homeDirectory: corruptRoot, applicationDirectories: [], systemBinaryDirectories: [])
+        try? FileManager.default.createDirectory(at: corruptRoot, withIntermediateDirectories: true)
+        try? "{ not valid json".write(to: corruptPaths.claudeCodeUserConfigURL, atomically: true, encoding: .utf8)
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: corruptPaths)
+            assertTrue(false, "corrupt ~/.claude.json with missing CLI must refuse to overwrite and throw")
+        } catch let error as AgentMCPConnectorError {
+            assertEqual(error, .agentCLINotFound(.claudeCode), "should surface agentCLINotFound instead of wiping corrupt state")
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+        assertEqual(
+            (try? String(contentsOf: corruptPaths.claudeCodeUserConfigURL, encoding: .utf8)) ?? "",
+            "{ not valid json",
+            "corrupt ~/.claude.json must be left untouched"
+        )
+    }
 }
 
 private func filePermissions(at url: URL) -> NSNumber? {

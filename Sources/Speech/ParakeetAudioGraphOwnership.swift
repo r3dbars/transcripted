@@ -282,6 +282,11 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
     private var queue: DispatchQueue
     private var generation: UInt64 = 0
     private var activeTimedOutWorkerCount = 0
+    /// True when the current `queue` timed out while the hard circuit was full
+    /// and could not be swapped immediately. Replaced lazily on the next
+    /// admitted work once a stuck worker returns and closes the circuit, so
+    /// recovery work never queues behind the remaining blocked worker.
+    private var currentQueueHasTimedOutWork = false
 
     init(label: String, scheduleTimeout: @escaping TimeoutScheduler = wallClockTimeouts) {
         self.label = label
@@ -321,13 +326,16 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
         completion: @escaping (Result<T, Error>) -> Void,
         _ work: @escaping () -> T
     ) {
-        let admission = lock.withLock {
-            (
-                lease: activeTimedOutWorkerCount < Self.maximumTimedOutWorkers
-                    ? (queue, generation)
-                    : nil,
-                activeTimeouts: activeTimedOutWorkerCount
-            )
+        let admission = lock.withLock { () -> (lease: (DispatchQueue, UInt64)?, activeTimeouts: Int) in
+            guard activeTimedOutWorkerCount < Self.maximumTimedOutWorkers else {
+                return (nil, activeTimedOutWorkerCount)
+            }
+            if currentQueueHasTimedOutWork {
+                generation &+= 1
+                queue = DispatchQueue(label: "\(label).\(generation)", qos: .utility)
+                currentQueueHasTimedOutWork = false
+            }
+            return ((queue, generation), activeTimedOutWorkerCount)
         }
         guard let lease = admission.lease else {
             completion(
@@ -409,9 +417,13 @@ final class ParakeetReplaceableSystemInputWorkCoordinator: @unchecked Sendable {
                 activeTimedOutWorkerCount += 1
             }
             guard generation == expectedGeneration else { return }
-            guard activeTimedOutWorkerCount < Self.maximumTimedOutWorkers else { return }
+            guard activeTimedOutWorkerCount < Self.maximumTimedOutWorkers else {
+                currentQueueHasTimedOutWork = true
+                return
+            }
             generation &+= 1
             queue = DispatchQueue(label: "\(label).\(generation)", qos: .utility)
+            currentQueueHasTimedOutWork = false
         }
     }
 

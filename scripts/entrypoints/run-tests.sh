@@ -428,6 +428,7 @@ APP_SOURCES=(
     "Sources/Support/UserDefaultsChangeOnlyWrites.swift"
     "Sources/Support/ClaudeDesktopIntegrationInstaller.swift"
     "Sources/Support/AgentMCPConnector.swift"
+    "Sources/Support/AgentMCPConnector+ClaudeCode.swift"
     "Sources/Support/CompanionProtocol.swift"
     "Sources/Support/CompanionSocketServer.swift"
     "Sources/Support/LaunchAtLoginPreferences.swift"
