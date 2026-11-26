@@ -57,10 +57,7 @@ enum FirstRunExperience {
         "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
     }
 
-    private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
-        _ = model
-        return "Downloading from huggingface.co."
-    }
+    private static let downloadSourceDetail = "Downloading from huggingface.co."
 
     static func hasRequiredMeetingSetup(
         microphoneGranted: Bool
@@ -180,7 +177,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use Retry download.",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail) Keep Transcripted open; if the download fails, use Retry download.",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working

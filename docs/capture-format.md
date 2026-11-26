@@ -88,7 +88,7 @@ Written at initial save (all flat unless noted):
 | `transcription_engine` | `parakeet_local` | Engine identifier. |
 | `transcription_language` | `"auto"` / `"fi"` | Optional immutable requested language for this job. Absent legacy files retry as Automatic. |
 | `transcription_language_resolution` | `detected` | Optional `explicit`, `detected`, `automaticUncertain`, `multilingual`, or `unsupported`. Detection is bounded evidence, not proof of a recording's only language. |
-| `transcription_language_resolved` | `"fi"` | Optional language passed to the recognizer; absent when Automatic remains uncertain, multilingual, or unsupported by that engine. Exception: Apple Speech (`apple_speech_local`) can't detect languages, so its Automatic uses the Mac's language and writes `automaticUncertain` together with that code. |
+| `transcription_language_resolved` | `"fi"` | Optional language passed to the recognizer; absent when Automatic remains uncertain, multilingual, or unsupported by that engine. Historical exception: transcripts saved by retired Apple Speech (`apple_speech_local`) could not detect languages, so their Automatic runs used the Mac's language and wrote `automaticUncertain` together with that code. |
 | `diarization_engine` | `nemotron_offline` | The diarizer that actually ran for this meeting. See below. |
 | `voiceprint_model` | `"redimnet2-b4"` | Optional, quoted. The model that embedded each speaker's voiceprint. Absent in files saved before 2026-09-29 and when no diarizer ran. |
 | `sources` | `[mic, system_audio]` | Inline list of captured channels. |
@@ -107,11 +107,11 @@ later picker selection. Current identifiers are additive within format version 1
 | Identifier | Model | Raw transcript footer name |
 | --- | --- | --- |
 | `parakeet_local` | Parakeet TDT v3 (default) | `Parakeet` (preserved for compatibility) |
-| `parakeet_v2_local` | Parakeet TDT v2 (English only) | `Parakeet V2` |
 | `parakeet_ultra_local` | Parakeet Ultra (experimental, installed by `scripts/models/parakeet-ultra`) | `Parakeet Ultra` |
 | `whisper_large_v3_turbo_local` | Whisper Large v3 Turbo | `Whisper Large V3 Turbo` |
-| `whisper_large_v3_local` | Whisper Large v3 | `Whisper Large V3` |
-| `apple_speech_local` | Apple Speech (macOS SpeechTranscriber) | `Apple Speech` |
+| `parakeet_v2_local` | Parakeet TDT v2 (retired, read-only legacy) | `Parakeet V2` |
+| `whisper_large_v3_local` | Whisper Large v3 (retired, read-only legacy) | `Whisper Large V3` |
+| `apple_speech_local` | Apple Speech (retired, read-only legacy) | `Apple Speech` |
 
 Readers should preserve unknown identifiers rather than assuming every local
 capture uses Parakeet v3.

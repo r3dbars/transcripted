@@ -91,15 +91,19 @@ extension ClipboardRestoringTextPaster {
     func copyTextForManualPaste(
         _ text: String,
         to pasteboard: any ClipboardPasteboard,
-        isCurrentOperation: () -> Bool,
+        isCurrentOperation: @escaping () -> Bool,
         snapshotRead: ClipboardSnapshotReadContext = .production()
     ) -> ClipboardManualCopyResult {
-        let snapshot = snapshotClipboardForPaste(from: pasteboard, read: snapshotRead)
-        if let refusal = snapshot.refusal {
-            return .refused(refusal)
-        }
+        let snapshot = snapshotClipboardForPaste(
+            from: pasteboard,
+            read: snapshotRead,
+            isCurrentOperation: isCurrentOperation
+        )
         guard isCurrentOperation() else {
             return .refused(.failed("Paste was cancelled.", reason: .cancelled))
+        }
+        if let refusal = snapshot.refusal {
+            return .refused(refusal)
         }
         guard copyTextToClipboard(text, to: pasteboard) else { return .writeFailed }
         saveClipboardForNextPaste(

@@ -660,8 +660,10 @@ final class TranscriptionQueueCoordinator {
                 continue
             }
 
-            let model = TranscriptionModelPreferences.migratedModel(forStoredRawValue: record.sttModelRawValue)
-                ?? controller.sttRouter.selectedModel
+            let model = TranscriptionModelPreferences.migratedModel(
+                forStoredRawValue: record.sttModelRawValue,
+                languageRawValue: record.languageRawValue
+            ) ?? controller.sttRouter.selectedModel
             queuedTranscriptionJobs.append(
                 QueuedTranscriptionJob(
                     id: record.id,

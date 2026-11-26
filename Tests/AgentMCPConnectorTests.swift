@@ -888,11 +888,17 @@ func testAgentMCPConnector() {
         assertEqual(calls[2], "mcp remove transcripted", "repair should fall back to unscoped remove")
     }
 
-    runSuite("AgentMCPConnector.connect(.claudeCode) — safely falls back to ~/.claude.json when CLI is missing or fails") {
+    runSuite("AgentMCPConnector.connect(.claudeCode) — safely falls back to ~/.claude.json only when CLI is missing or cannot execute") {
         let tempRoot = FileManager.default.temporaryDirectory
             .appendingPathComponent("TranscriptedClaudeCodeFallbackTests-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: tempRoot) }
-        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [], systemBinaryDirectories: [])
+        let appSupportRoot = tempRoot.appendingPathComponent("AppSupport", isDirectory: true)
+        let paths = AgentMCPConnectorPaths(
+            homeDirectory: tempRoot,
+            applicationDirectories: [],
+            systemBinaryDirectories: [],
+            appSupportRoot: appSupportRoot
+        )
 
         try? FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
         let existingConfig = """
@@ -926,9 +932,23 @@ func testAgentMCPConnector() {
             0o600,
             "updated ~/.claude.json should stay owner-only"
         )
-        let backups = ((try? FileManager.default.contentsOfDirectory(atPath: tempRoot.path)) ?? [])
+        let homeBackups = ((try? FileManager.default.contentsOfDirectory(atPath: tempRoot.path)) ?? [])
             .filter { $0.hasPrefix(".claude.json.backup-") }
-        assertEqual(backups.count, 1, "fallback merge should keep a pre-write backup of ~/.claude.json")
+        assertEqual(homeBackups.count, 0, "fallback merge must not leave backup files next to ~/.claude.json")
+        assertTrue(
+            FileManager.default.fileExists(atPath: paths.claudeCodeFallbackBackupURL.path),
+            "fallback merge should store a single rotating backup inside Application Support"
+        )
+        assertEqual(
+            filePermissions(at: paths.claudeCodeFallbackBackupURL)?.intValue,
+            0o600,
+            "App Support backup of ~/.claude.json must be owner-only"
+        )
+        assertEqual(
+            (try? String(contentsOf: paths.claudeCodeFallbackBackupURL, encoding: .utf8)) ?? "",
+            existingConfig,
+            "App Support backup should preserve the pre-write ~/.claude.json bytes"
+        )
 
         if let data = try? Data(contentsOf: paths.claudeCodeUserConfigURL),
            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -940,21 +960,71 @@ func testAgentMCPConnector() {
             assertTrue(false, "updated ~/.claude.json must remain valid JSON")
         }
 
-        // When CLI fails with non-zero exit and valid ~/.claude.json exists, fallback updates the stale path.
+        // Deliberate CLI refusal (non-126/127 exit code) MUST NOT trigger direct JSON fallback.
         let binaryURL = tempRoot.appendingPathComponent(".local/bin/claude", isDirectory: false)
         try? FileManager.default.createDirectory(at: binaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try? "#!/bin/sh\necho 'broken cli' >&2\nexit 1\n".write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? "#!/bin/sh\necho 'policy refused' >&2\nexit 1\n".write(to: binaryURL, atomically: true, encoding: .utf8)
+        try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
+
+        do {
+            try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp-refused", paths: paths)
+            assertTrue(false, "exit 1 CLI refusal must throw instead of silently editing ~/.claude.json")
+        } catch let error as AgentMCPConnectorError {
+            assertTrue(
+                error.errorDescription?.contains("policy refused") == true,
+                "exit 1 CLI error should surface its stderr"
+            )
+        } catch {
+            assertTrue(false, "unexpected error type: \(error)")
+        }
+        assertTrue(
+            AgentMCPConnector.isConnected(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp", paths: paths),
+            "exit 1 CLI refusal must leave ~/.claude.json untouched"
+        )
+
+        // Exit 127 (command/runtime cannot execute, e.g. broken env node) DOES trigger safe fallback.
+        try? "#!/bin/sh\necho 'env: node: No such file or directory' >&2\nexit 127\n".write(to: binaryURL, atomically: true, encoding: .utf8)
         try? FileManager.default.setAttributes([.posixPermissions: NSNumber(value: 0o755)], ofItemAtPath: binaryURL.path)
 
         do {
             try AgentMCPConnector.connect(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp-v2", paths: paths)
         } catch {
-            assertTrue(false, "failing CLI with valid ~/.claude.json should fall back to safe JSON merge: \(error)")
+            assertTrue(false, "exit 127 CLI failure with valid ~/.claude.json should fall back to safe JSON merge: \(error)")
         }
         assertTrue(
             AgentMCPConnector.isConnected(.claudeCode, helperCommandPath: "/tmp/transcripted-mcp-v2", paths: paths),
-            "CLI failure fallback should update mcpServers.transcripted to the new helper path"
+            "exit 127 fallback should update mcpServers.transcripted to the new helper path"
         )
+        let backupFiles = (try? FileManager.default.contentsOfDirectory(
+            atPath: paths.claudeCodeFallbackBackupURL.deletingLastPathComponent().path
+        )) ?? []
+        assertEqual(backupFiles, ["claude.json.backup"], "App Support backup should rotate in place as a single file")
+
+        // Concurrent modification of ~/.claude.json before rename aborts fallback without clobbering.
+        let concurrentJSON = """
+        {
+          "numStartups": 99,
+          "mcpServers": {
+            "other": { "type": "stdio", "command": "/usr/local/bin/other-mcp" }
+          }
+        }
+        """
+        let mergedDuringRace = AgentMCPConnector.mergeClaudeCodeUserConfigIfSafelyWritable(
+            helperCommandPath: "/tmp/transcripted-mcp-raced",
+            paths: paths,
+            beforeCommit: {
+                try? concurrentJSON.write(to: paths.claudeCodeUserConfigURL, atomically: true, encoding: .utf8)
+            }
+        )
+        assertFalse(mergedDuringRace, "concurrent change to ~/.claude.json before rename must abort the fallback write")
+        assertEqual(
+            (try? String(contentsOf: paths.claudeCodeUserConfigURL, encoding: .utf8)) ?? "",
+            concurrentJSON,
+            "aborted fallback must preserve the concurrent writer's bytes"
+        )
+        let leftoverTemps = ((try? FileManager.default.contentsOfDirectory(atPath: tempRoot.path)) ?? [])
+            .filter { $0.contains(".tmp-") }
+        assertEqual(leftoverTemps.count, 0, "aborted fallback must clean up its staged temp file")
 
         // Corrupt ~/.claude.json is NEVER overwritten; original CLI error is surfaced instead.
         let corruptRoot = FileManager.default.temporaryDirectory
@@ -977,6 +1047,38 @@ func testAgentMCPConnector() {
             "{ not valid json",
             "corrupt ~/.claude.json must be left untouched"
         )
+    }
+
+    runSuite("AgentMCPConnector — login-shell PATH sentinel ignores startup noise and CLI env strips relative PATH entries") {
+        let noisyStdout = "Welcome to zsh!\nWarning: nvm loaded:ignored__TX__/opt/custom/bin:./relative:/usr/local/bin:/usr/bin\n"
+        let parsed = AgentMCPConnector.parseLoginShellPATHOutput(noisyStdout)
+        assertEqual(
+            parsed.map(\.path),
+            ["/opt/custom/bin", "/usr/local/bin", "/usr/bin"],
+            "sentinel parser should ignore startup noise before __TX__ and keep only absolute directories"
+        )
+        assertEqual(
+            AgentMCPConnector.parseLoginShellPATHOutput("/opt/homebrew/bin:/usr/bin"),
+            [],
+            "output missing the __TX__ sentinel should return no directories"
+        )
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedClaudeCodeRelPathTests-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        let paths = AgentMCPConnectorPaths(homeDirectory: tempRoot, applicationDirectories: [], systemBinaryDirectories: [])
+        let fakeClaude = tempRoot.appendingPathComponent(".local/bin/claude", isDirectory: false)
+        let env = AgentMCPConnector.claudeCodeCLIEnvironment(
+            for: fakeClaude,
+            paths: paths,
+            baseEnvironment: ["PATH": ".:./bin:node_modules/.bin:/opt/tools/bin::relative/dir:/usr/bin"]
+        )
+        let components = (env["PATH"] ?? "").split(separator: ":").map(String.init)
+        assertTrue(components.allSatisfy { $0.hasPrefix("/") }, "every PATH entry in claudeCodeCLIEnvironment must be absolute")
+        assertFalse(components.contains("."), "'.' must be stripped from PATH")
+        assertFalse(components.contains("./bin"), "'./bin' must be stripped from PATH")
+        assertFalse(components.contains("node_modules/.bin"), "'node_modules/.bin' must be stripped from PATH")
+        assertTrue(components.contains("/opt/tools/bin"), "absolute inherited PATH entries must be preserved")
     }
 }
 

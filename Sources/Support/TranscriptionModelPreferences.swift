@@ -198,32 +198,99 @@ enum TranscriptionModelPreferences {
 
     private static let preferredModelKey = "transcription-model-preference"
 
+    /// ISO 639-1 codes for the 25 European languages supported by Parakeet TDT V3.
+    static let parakeetTDTv3SupportedLanguageCodes: Set<String> = [
+        "bg", "cs", "da", "de", "el", "en", "es", "et", "fi", "fr",
+        "hr", "hu", "it", "lt", "lv", "mt", "nl", "pl", "pt", "ro",
+        "ru", "sk", "sl", "sv", "uk",
+    ]
+
+    /// Extracts the normalized lowercase ISO 639-1 language code from the first
+    /// entry in `preferredLanguages` (e.g. `"ja-JP"` -> `"ja"`, `"zh-Hans-CN"` -> `"zh"`).
+    static func normalizedPrimaryLanguageCode(
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> String? {
+        guard let first = preferredLanguages.first?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !first.isEmpty else {
+            return nil
+        }
+        if let code = Locale(identifier: first).language.languageCode?.identifier,
+           !code.isEmpty {
+            return code.lowercased()
+        }
+        return first
+            .split(whereSeparator: { $0 == "-" || $0 == "_" })
+            .first
+            .map { String($0).lowercased() }
+    }
+
+    private static func normalizedExplicitLanguageCode(_ rawValue: String?) -> String? {
+        guard let trimmed = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !trimmed.isEmpty,
+              trimmed != TranscriptionLanguagePreferences.automaticValue else {
+            return nil
+        }
+        return normalizedPrimaryLanguageCode(preferredLanguages: [trimmed]) ?? trimmed
+    }
+
     /// Resolves a stored preference rawValue to an active model choice,
-    /// migrating retired choices to their closest supported successor
-    /// (`whisper-large-v3` -> `.whisperLargeV3Turbo`, retired Parakeet V2 /
-    /// Apple Speech / Nemotron / legacy aliases -> `.parakeetTDTv3`).
-    static func migratedModel(forStoredRawValue rawValue: String) -> TranscriptionModelChoice? {
+    /// migrating retired choices to their closest supported successor:
+    /// - `whisper-large-v3` -> `.whisperLargeV3Turbo`
+    /// - `apple-speech` -> `.whisperLargeV3Turbo` when the saved meeting
+    ///   language (if explicit) or the Mac's primary language is outside
+    ///   Parakeet V3's 25 supported languages; otherwise `.parakeetTDTv3`
+    /// - retired Parakeet V2 / legacy `parakeet-ultra` / Nemotron -> `.parakeetTDTv3`
+    static func migratedModel(
+        forStoredRawValue rawValue: String,
+        languageRawValue: String? = nil,
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> TranscriptionModelChoice? {
         if let model = TranscriptionModelChoice(rawValue: rawValue) {
             return model
         }
         switch rawValue {
         case "whisper-large-v3":
             return .whisperLargeV3Turbo
-        case "parakeet-tdt-v2", "apple-speech", "parakeet-ultra", "nemotron-streaming-0.6b":
+        case "apple-speech":
+            if let explicitLanguage = normalizedExplicitLanguageCode(languageRawValue),
+               !parakeetTDTv3SupportedLanguageCodes.contains(explicitLanguage) {
+                return .whisperLargeV3Turbo
+            }
+            if let primaryLanguage = normalizedPrimaryLanguageCode(preferredLanguages: preferredLanguages),
+               !parakeetTDTv3SupportedLanguageCodes.contains(primaryLanguage) {
+                return .whisperLargeV3Turbo
+            }
+            return .parakeetTDTv3
+        case "parakeet-tdt-v2", "parakeet-ultra", "nemotron-streaming-0.6b":
             return .parakeetTDTv3
         default:
             return nil
         }
     }
 
-    /// Retired stored raw values migrate to their closest supported model;
-    /// unknown raw values fall back to the default model.
-    static func preferredModel(userDefaults: UserDefaults = .standard) -> TranscriptionModelChoice {
+    /// Retired stored raw values migrate once to their closest supported model
+    /// and persist the migrated choice so a later Mac locale change never flips
+    /// the user's model silently; unknown raw values fall back to the default model.
+    static func preferredModel(
+        userDefaults: UserDefaults = .standard,
+        preferredLanguages: [String] = Locale.preferredLanguages
+    ) -> TranscriptionModelChoice {
         guard let rawValue = userDefaults.string(forKey: preferredModelKey) else {
             return defaultModel
         }
-
-        return migratedModel(forStoredRawValue: rawValue) ?? defaultModel
+        if let active = TranscriptionModelChoice(rawValue: rawValue) {
+            return active
+        }
+        let savedLanguage = TranscriptionLanguagePreferences.preferredLanguageCode(userDefaults: userDefaults)
+        guard let migrated = migratedModel(
+            forStoredRawValue: rawValue,
+            languageRawValue: savedLanguage,
+            preferredLanguages: preferredLanguages
+        ) else {
+            return defaultModel
+        }
+        setPreferredModel(migrated, userDefaults: userDefaults)
+        return migrated
     }
 
     static func setPreferredModel(_ model: TranscriptionModelChoice, userDefaults: UserDefaults = .standard) {

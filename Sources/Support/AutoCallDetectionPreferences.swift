@@ -23,9 +23,11 @@ enum AutoCallDetectionPreferences {
 
     /// In-memory cache for `UserDefaults.standard` so hot-path checks (such as
     /// `MicActivityMonitor.scanAndEmit` on the main actor every 5 s) never block
-    /// on a stalled `cfprefsd` XPC read. External writes refresh off-main via
-    /// `UserDefaults.didChangeNotification`, while explicit writes through
-    /// `setEnabled` update the cached value synchronously.
+    /// on a stalled `cfprefsd` XPC read. Direct writes through `setEnabled`
+    /// update the cached value synchronously; other in-process `UserDefaults`
+    /// writes refresh off-main via `UserDefaults.didChangeNotification` (macOS
+    /// only posts that notification for in-process changes, not cross-process
+    /// writes).
     final class PreferenceCache: @unchecked Sendable {
         private let lock = NSLock()
         private let userDefaults: UserDefaults
@@ -154,17 +156,21 @@ enum AutoCallDetectionPreferences {
         }
 
         private func refreshImmediatelyIfExternal() {
+            let startGeneration: UInt64
             lock.lock()
             if directWriteDepth > 0 {
                 lock.unlock()
                 return
             }
+            startGeneration = generation
             lock.unlock()
 
             let fresh = readFromBackingStore()
             lock.lock()
-            generation &+= 1
-            cachedValue = fresh
+            if generation == startGeneration {
+                generation &+= 1
+                cachedValue = fresh
+            }
             lock.unlock()
         }
 
@@ -193,12 +199,6 @@ enum AutoCallDetectionPreferences {
             return
         }
         persistAndNotify(enabled, userDefaults: userDefaults)
-    }
-
-    /// Warms the `.standard` cache off the main thread so even the first
-    /// hot-path read from `MicActivityMonitor` does not hit `cfprefsd`.
-    static func warmStandardCache() {
-        standardCache.warmAsync()
     }
 
     static func readUncached(from userDefaults: UserDefaults) -> Bool {

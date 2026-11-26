@@ -102,6 +102,49 @@ func testAutoCallDetectionPreferences() {
         assertFalse(cache.isEnabled(), "subsequent hot-path read sees the warmed value")
         assertEqual(readCounter.value, 1, "hot-path read after warming must not hit UserDefaults again")
     }
+
+    runSuite("AutoCallDetectionPreferences.PreferenceCache discards stale external refresh after overlapping direct write") {
+        let (defaults, suiteName) = makeAutoCallDetectionDefaults()
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let center = NotificationCenter()
+        let readStarted = DispatchSemaphore(value: 0)
+        let allowReadFinish = DispatchSemaphore(value: 0)
+        let shouldBlockNextRead = LockedBool(false)
+        let cache = AutoCallDetectionPreferences.PreferenceCache(
+            userDefaults: defaults,
+            notificationCenter: center,
+            readValue: {
+                if shouldBlockNextRead.value {
+                    shouldBlockNextRead.value = false
+                    readStarted.signal()
+                    allowReadFinish.wait()
+                    return true
+                }
+                return true
+            }
+        )
+
+        assertTrue(cache.isEnabled(), "seed initial cache")
+        shouldBlockNextRead.value = true
+
+        let refreshDone = DispatchSemaphore(value: 0)
+        DispatchQueue.global(qos: .userInitiated).async {
+            center.post(name: .autoCallDetectionPrefsDidChange, object: nil)
+            refreshDone.signal()
+        }
+
+        readStarted.wait()
+        // A direct write arrives while the external refresh is mid-read.
+        cache.updateForDirectWrite(false) {}
+        allowReadFinish.signal()
+        refreshDone.wait()
+
+        assertFalse(
+            cache.isEnabled(),
+            "a stale external refresh that started before a direct write must not overwrite the newer cached value"
+        )
+    }
 }
 
 private final class LockedCounter: @unchecked Sendable {

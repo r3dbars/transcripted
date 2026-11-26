@@ -1,3 +1,4 @@
+import Darwin
 import Foundation
 
 extension AgentMCPConnectorPaths {
@@ -165,7 +166,7 @@ extension AgentMCPConnector {
         var seen: Set<String> = []
         func appendDir(_ path: String) {
             let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { return }
+            guard !trimmed.isEmpty, trimmed.hasPrefix("/"), seen.insert(trimmed).inserted else { return }
             pathEntries.append(trimmed)
         }
 
@@ -198,10 +199,12 @@ extension AgentMCPConnector {
     }
 
     /// Registers through the `claude` CLI first, with expanded discovery, a
-    /// GUI-safe `PATH`, and already-exists repair. When the CLI cannot be found
-    /// or exits non-zero (never on a hung/timed-out CLI) and an existing,
-    /// readable `~/.claude.json` is present, falls back to an atomic, backed-up
-    /// JSON merge of `mcpServers.transcripted` preserving every other key.
+    /// GUI-safe `PATH`, and already-exists repair. Only when the CLI cannot
+    /// execute (binary not found or exit 126/127 — never on a hung CLI or a
+    /// deliberate policy/validation refusal) and an existing, readable
+    /// `~/.claude.json` is present, falls back to an atomic `0o600` JSON merge
+    /// of `mcpServers.transcripted` with a concurrent-change check and a single
+    /// rotating backup inside Application Support.
     static func connectClaudeCode(
         helperCommandPath: String,
         paths: AgentMCPConnectorPaths,
@@ -270,7 +273,8 @@ extension AgentMCPConnector {
         }
 
         guard result.status == 0 else {
-            if mergeClaudeCodeUserConfigIfSafelyWritable(
+            if cliExitIndicatesCannotExecute(result.status),
+               mergeClaudeCodeUserConfigIfSafelyWritable(
                 helperCommandPath: helperCommandPath,
                 paths: paths,
                 fileManager: fileManager
@@ -281,6 +285,10 @@ extension AgentMCPConnector {
         }
     }
 
+    private static func cliExitIndicatesCannotExecute(_ status: Int32) -> Bool {
+        status == 126 || status == 127
+    }
+
     private static func outputIndicatesAlreadyExists(_ output: String) -> Bool {
         let lower = output.lowercased()
         return lower.contains("already exists")
@@ -288,19 +296,45 @@ extension AgentMCPConnector {
             || lower.contains("duplicate")
     }
 
+    private struct ConfigFileSnapshot: Equatable {
+        let size: Int64
+        let mtimeSec: Int
+        let mtimeNsec: Int
+        let data: Data
+
+        static func capture(at url: URL) -> ConfigFileSnapshot? {
+            var st = stat()
+            guard stat(url.path, &st) == 0,
+                  (st.st_mode & S_IFMT) == S_IFREG,
+                  let data = try? Data(contentsOf: url),
+                  Int64(data.count) == Int64(st.st_size) else {
+                return nil
+            }
+            return ConfigFileSnapshot(
+                size: Int64(st.st_size),
+                mtimeSec: st.st_mtimespec.tv_sec,
+                mtimeNsec: st.st_mtimespec.tv_nsec,
+                data: data
+            )
+        }
+    }
+
     /// Safely updates `mcpServers.transcripted` in an existing, valid JSON
-    /// `~/.claude.json` while preserving every other key and taking a backup
-    /// first. Never creates a brand-new `~/.claude.json` from scratch and never
-    /// overwrites an unreadable/corrupt state file.
-    private static func mergeClaudeCodeUserConfigIfSafelyWritable(
+    /// `~/.claude.json` while preserving every other key, keeping a single
+    /// rotating `0o600` backup inside Application Support, staging the update
+    /// in a `0o600` temp file before rename, and aborting if `~/.claude.json`
+    /// changed concurrently. Never creates `~/.claude.json` from scratch and
+    /// never overwrites an unreadable/corrupt state file.
+    static func mergeClaudeCodeUserConfigIfSafelyWritable(
         helperCommandPath: String,
         paths: AgentMCPConnectorPaths,
-        fileManager: FileManager
+        fileManager: FileManager = .default,
+        beforeCommit: (() -> Void)? = nil
     ) -> Bool {
         let configURL = paths.claudeCodeUserConfigURL.resolvingSymlinksInPath()
         guard fileManager.fileExists(atPath: configURL.path),
-              let existingData = try? Data(contentsOf: configURL),
-              var root = (try? JSONSerialization.jsonObject(with: existingData)) as? [String: Any] else {
+              let initialSnapshot = ConfigFileSnapshot.capture(at: configURL),
+              var root = (try? JSONSerialization.jsonObject(with: initialSnapshot.data)) as? [String: Any] else {
             return false
         }
 
@@ -321,19 +355,127 @@ extension AgentMCPConnector {
         ]
         root["mcpServers"] = servers
 
+        var stagedTempURL: URL?
+        defer {
+            if let stagedTempURL {
+                _ = unlink(stagedTempURL.path)
+            }
+        }
+
         do {
             let encoded = try JSONSerialization.data(
                 withJSONObject: root,
                 options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes]
             )
-            _ = try ClaudeDesktopIntegrationInstaller.backupConfig(at: configURL, fileManager: fileManager)
-            try encoded.write(to: configURL, options: [.atomic])
-            fileManager.restrictFileToOwnerOnly(at: configURL)
+            try writeRotatingClaudeCodeBackup(
+                data: initialSnapshot.data,
+                to: paths.claudeCodeFallbackBackupURL,
+                fileManager: fileManager
+            )
+            let tempURL = try writeOwnerOnlyTempFile(
+                data: encoded,
+                in: configURL.deletingLastPathComponent(),
+                prefix: configURL.lastPathComponent
+            )
+            stagedTempURL = tempURL
+
+            beforeCommit?()
+
+            // Re-verify size, mtime, and bytes immediately before rename so a
+            // concurrent update from a running Claude Code is never lost.
+            guard ConfigFileSnapshot.capture(at: configURL) == initialSnapshot else {
+                return false
+            }
+            guard Darwin.rename(tempURL.path, configURL.path) == 0 else {
+                return false
+            }
+            stagedTempURL = nil
         } catch {
             return false
         }
 
         return configuredCommandPath(inJSONConfigAt: configURL, fileManager: fileManager) == helperCommandPath
+    }
+
+    private static func writeRotatingClaudeCodeBackup(
+        data: Data,
+        to backupURL: URL,
+        fileManager: FileManager
+    ) throws {
+        let backupDirectory = backupURL.deletingLastPathComponent()
+        try fileManager.createPrivateDirectory(at: backupDirectory)
+        let tempBackupURL = try writeOwnerOnlyTempFile(
+            data: data,
+            in: backupDirectory,
+            prefix: backupURL.lastPathComponent
+        )
+        if Darwin.rename(tempBackupURL.path, backupURL.path) != 0 {
+            let err = errno
+            _ = unlink(tempBackupURL.path)
+            throw POSIXError(POSIXErrorCode(rawValue: err) ?? .EIO)
+        }
+    }
+
+    /// Creates a unique temp file with `0o600` permissions from birth (no
+    /// `0o644` window), writes all bytes, fsyncs, and closes it.
+    private static func writeOwnerOnlyTempFile(
+        data: Data,
+        in directory: URL,
+        prefix: String
+    ) throws -> URL {
+        let tempURL = directory.appendingPathComponent(
+            ".\(prefix).tmp-\(UUID().uuidString)",
+            isDirectory: false
+        )
+        let fd = open(tempURL.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, S_IRUSR | S_IWUSR)
+        guard fd >= 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+        var closed = false
+        do {
+            try data.withUnsafeBytes { rawBuffer in
+                guard let baseAddress = rawBuffer.baseAddress else { return }
+                var totalWritten = 0
+                while totalWritten < rawBuffer.count {
+                    let written = Darwin.write(
+                        fd,
+                        baseAddress.advanced(by: totalWritten),
+                        rawBuffer.count - totalWritten
+                    )
+                    if written < 0 {
+                        if errno == EINTR { continue }
+                        throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                    }
+                    totalWritten += written
+                }
+            }
+            _ = fchmod(fd, S_IRUSR | S_IWUSR)
+            if fsync(fd) != 0, errno != ENOTSUP, errno != EINVAL {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            if close(fd) != 0 {
+                closed = true
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            closed = true
+            return tempURL
+        } catch {
+            if !closed {
+                _ = close(fd)
+            }
+            _ = unlink(tempURL.path)
+            throw error
+        }
+    }
+
+    static let loginShellPATHSentinel = "__TX__"
+
+    static func parseLoginShellPATHOutput(_ rawOutput: String) -> [URL] {
+        guard let range = rawOutput.range(of: loginShellPATHSentinel, options: .backwards) else {
+            return []
+        }
+        let payload = String(rawOutput[range.upperBound...])
+        return AgentMCPConnectorPaths.parsePATHDirectories(payload)
     }
 
     private static func resolveLoginShellPATHDirectories() -> [URL] {
@@ -343,13 +485,13 @@ extension AgentMCPConnector {
         guard FileManager.default.isExecutableFile(atPath: shellURL.path) else { return [] }
         guard let output = try? BoundedProcessRunner.run(
             executable: shellURL,
-            arguments: ["-lc", #"printf '%s' "$PATH""#],
+            arguments: ["-lc", #"printf '__TX__%s' "$PATH""#],
             timeout: loginShellPATHLookupTimeout,
             pipeDrainTimeout: 1.0
         ), output.status == 0 else {
             return []
         }
-        let pathValue = String(decoding: output.stdoutData, as: UTF8.self)
-        return AgentMCPConnectorPaths.parsePATHDirectories(pathValue)
+        let rawOutput = String(decoding: output.stdoutData, as: UTF8.self)
+        return parseLoginShellPATHOutput(rawOutput)
     }
 }

@@ -37,6 +37,7 @@ struct AgentMCPConnectorPaths {
     let systemBinaryDirectories: [URL]
     let searchEnvironmentPATH: Bool
     let loginShellPATHLookup: (() -> [URL])?
+    let appSupportRoot: URL
 
     init(
         homeDirectory: URL = FileManager.default.homeDirectoryForCurrentUser,
@@ -46,7 +47,8 @@ struct AgentMCPConnectorPaths {
             URL(fileURLWithPath: "/usr/local/bin", isDirectory: true),
         ],
         searchEnvironmentPATH: Bool? = nil,
-        loginShellPATHLookup: (() -> [URL])? = nil
+        loginShellPATHLookup: (() -> [URL])? = nil,
+        appSupportRoot: URL? = nil
     ) {
         self.homeDirectory = homeDirectory.standardizedFileURL
         self.applicationDirectories = applicationDirectories ?? [
@@ -56,10 +58,26 @@ struct AgentMCPConnectorPaths {
         self.systemBinaryDirectories = systemBinaryDirectories
         self.searchEnvironmentPATH = searchEnvironmentPATH ?? !systemBinaryDirectories.isEmpty
         self.loginShellPATHLookup = loginShellPATHLookup
+        let defaultHome = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL
+        if let appSupportRoot {
+            self.appSupportRoot = appSupportRoot.standardizedFileURL
+        } else if self.homeDirectory == defaultHome {
+            self.appSupportRoot = FileManager.default.transcriptedAppSupportRootURL.standardizedFileURL
+        } else {
+            self.appSupportRoot = self.homeDirectory
+                .appendingPathComponent("Library/Application Support/Transcripted", isDirectory: true)
+                .standardizedFileURL
+        }
     }
 
     var claudeCodeUserConfigURL: URL {
         homeDirectory.appendingPathComponent(".claude.json", isDirectory: false)
+    }
+
+    var claudeCodeFallbackBackupURL: URL {
+        appSupportRoot
+            .appendingPathComponent("backups", isDirectory: true)
+            .appendingPathComponent("claude.json.backup", isDirectory: false)
     }
 
     var claudeCodeStateDirectory: URL {
