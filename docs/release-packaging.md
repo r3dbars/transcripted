@@ -72,7 +72,6 @@ Both app build flows build and sign these release helpers under
 `Transcripted.app/Contents/Helpers/`:
 
 - `transcripted-mcp`, for the in-app Claude Desktop installer.
-- `transcripted-live`, the live meeting helper the Claude Code mod starts.
 - `llama-server`, Writing's inference helper (pinned by `build-deps.sh`).
 - `transcripted-cli`, with the full macOS 26+ meeting-import pipeline enabled.
   Packaging checks its compiled `build-info` capabilities and fails if a stale
@@ -80,10 +79,9 @@ Both app build flows build and sign these release helpers under
   still has an rpath into the build checkout (`deps-frameworks/`), so it can
   only load frameworks from the app bundle. No PATH shim is installed.
 
-The copy steps are `bundle_mcp_server`, `bundle_live_helper` and
-`bundle_llama_server` in `scripts/entrypoints/build.sh`, plus
-`scripts/entrypoints/lib/bundle-cli.sh`; `build-beta.sh` has its own copies of
-the bundle functions, so change both scripts.
+The copy steps are `bundle_mcp_server` and `bundle_llama_server` in
+`scripts/entrypoints/build.sh`, plus `scripts/entrypoints/lib/bundle-cli.sh`;
+`build-beta.sh` has its own copies of the bundle functions, so change both scripts.
 
 No helper requires users to install Swift or clone the repo. To import a
 file using an installed app:

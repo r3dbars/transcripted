@@ -125,6 +125,255 @@ final class ToolHandlersTests: XCTestCase {
         let writingDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(writingOnly).utf8))
         XCTAssertEqual(writingDecoded.results.map(\.kind), [.writing])
         XCTAssertEqual(telemetry.observations.last?.captureKind, "writing")
+
+        // Filter to dictation only.
+        let dictationOnly = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("roadmap"), "kind": .string("dictation")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        XCTAssertNotEqual(dictationOnly.isError, true)
+        let dictationDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(dictationOnly).utf8))
+        XCTAssertEqual(dictationDecoded.results.map(\.kind), [.dictation])
+        XCTAssertEqual(dictationDecoded.results.map(\.filename), ["Dictations_2026-04-07"])
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "dictation")
+
+        // Speaker filter with a non-meeting kind skips non-meeting tables cleanly
+        // and returns a kind-scoped empty response (not an error).
+        let dictationWithSpeaker = try handleSearch(
+            params: CallTool.Parameters(
+                name: "search",
+                arguments: [
+                    "query": .string("roadmap"),
+                    "kind": .string("dictation"),
+                    "speaker": .string("Jenny"),
+                ]
+            ),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        XCTAssertNotEqual(dictationWithSpeaker.isError, true)
+        let dictationWithSpeakerPayload = try JSONDecoder().decode(
+            EmptyQueryResult.self,
+            from: Data(resultText(dictationWithSpeaker).utf8)
+        )
+        XCTAssertEqual(dictationWithSpeakerPayload.searchedDirectories, [dictationDir.path])
+        XCTAssertEqual(dictationWithSpeakerPayload.indexedDictationDays, 1)
+        XCTAssertNil(dictationWithSpeakerPayload.indexedMeetings)
+        XCTAssertTrue(dictationWithSpeakerPayload.hint.contains("No dictations matched"))
+
+        let writingWithSpeaker = try handleSearch(
+            params: CallTool.Parameters(
+                name: "search",
+                arguments: [
+                    "query": .string("roadmap"),
+                    "kind": .string("writing"),
+                    "speaker": .string("Jenny"),
+                ]
+            ),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        XCTAssertNotEqual(writingWithSpeaker.isError, true)
+        let writingWithSpeakerPayload = try JSONDecoder().decode(
+            EmptyQueryResult.self,
+            from: Data(resultText(writingWithSpeaker).utf8)
+        )
+        XCTAssertEqual(writingWithSpeakerPayload.searchedDirectories, [writingDir.path])
+        XCTAssertEqual(writingWithSpeakerPayload.indexedWritingDays, 1)
+        XCTAssertNil(writingWithSpeakerPayload.indexedMeetings)
+        XCTAssertTrue(writingWithSpeakerPayload.hint.contains("No writing matched"))
+    }
+
+    func testSearchSemanticModeMatchesParaphraseThroughHandler() throws {
+        let semanticDir = makeTempDir()
+        defer { removeTempDir(semanticDir) }
+        let semanticIndex = try TranscriptIndex(
+            indexDir: semanticDir,
+            embeddingProvider: ToolHandlerStubEmbeddingProvider()
+        )
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Pricing Review",
+                date: "2026-03-26T16:04:11-0500",
+                utterances: [
+                    ("system_0", 0.0, 5.0, "Honestly they balked at the cost"),
+                    ("mic_0", 5.0, 10.0, "The weather looks sunny tomorrow"),
+                ]
+            ),
+            filename: "Call_2026-03-26_16-04-11",
+            to: semanticDir
+        )
+        try semanticIndex.reconcile(meetingsDir: semanticDir, dictationsDir: semanticDir)
+
+        let lexicalResult = try handleSearch(
+            params: CallTool.Parameters(
+                name: "search",
+                arguments: ["query": .string("pricing pushback"), "mode": .string("lexical")]
+            ),
+            index: semanticIndex,
+            meetingDirs: [semanticDir],
+            dictationDirs: [semanticDir]
+        )
+        XCTAssertNotEqual(lexicalResult.isError, true)
+        let lexicalEmpty = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(resultText(lexicalResult).utf8))
+        XCTAssertEqual(lexicalEmpty.indexedMeetings, 1)
+
+        let semanticResult = try handleSearch(
+            params: CallTool.Parameters(
+                name: "search",
+                arguments: ["query": .string("pricing pushback"), "mode": .string("semantic")]
+            ),
+            index: semanticIndex,
+            meetingDirs: [semanticDir],
+            dictationDirs: [semanticDir]
+        )
+        XCTAssertNotEqual(semanticResult.isError, true)
+        let decoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(semanticResult).utf8))
+        XCTAssertEqual(decoded.results.map(\.filename), ["Call_2026-03-26_16-04-11"])
+        XCTAssertEqual(decoded.results.first?.title, "Pricing Review")
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+    }
+
+    func testSearchRespectsDateFromOnlyAndDateToOnlyWindows() throws {
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Early Sync",
+                date: "2026-03-10T10:00:00-0500",
+                utterances: [("system_0", 0.0, 5.0, "Discussing launch readiness")]
+            ),
+            filename: "Call_2026-03-10_10-00-00",
+            to: tempDir
+        )
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Mid Sync",
+                date: "2026-03-20T10:00:00-0500",
+                utterances: [("system_0", 0.0, 5.0, "Discussing launch readiness")]
+            ),
+            filename: "Call_2026-03-20_10-00-00",
+            to: tempDir
+        )
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Late Sync",
+                date: "2026-03-30T10:00:00-0500",
+                utterances: [("system_0", 0.0, 5.0, "Discussing launch readiness")]
+            ),
+            filename: "Call_2026-03-30_10-00-00",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let fromOnly = try handleSearch(
+            params: CallTool.Parameters(
+                name: "search",
+                arguments: ["query": .string("launch"), "date_from": .string("2026-03-20")]
+            ),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        let fromDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(fromOnly).utf8))
+        XCTAssertEqual(
+            Set(fromDecoded.results.map(\.filename)),
+            ["Call_2026-03-20_10-00-00", "Call_2026-03-30_10-00-00"]
+        )
+
+        let toOnly = try handleSearch(
+            params: CallTool.Parameters(
+                name: "search",
+                arguments: ["query": .string("launch"), "date_to": .string("2026-03-20")]
+            ),
+            index: index,
+            meetingDirs: [tempDir]
+        )
+        let toDecoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(resultText(toOnly).utf8))
+        XCTAssertEqual(
+            Set(toDecoded.results.map(\.filename)),
+            ["Call_2026-03-10_10-00-00", "Call_2026-03-20_10-00-00"]
+        )
+    }
+
+    func testSearchSingleKindEmptyRepliesReportOnlyRequestedKindScope() throws {
+        let meetingDir = tempDir.appendingPathComponent("meetings", isDirectory: true)
+        let dictationDir = tempDir.appendingPathComponent("dictations", isDirectory: true)
+        let writingDir = tempDir.appendingPathComponent("writing", isDirectory: true)
+        for dir in [meetingDir, dictationDir, writingDir] {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+
+        let meetingEmpty = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("missing"), "kind": .string("meeting")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let meetingPayload = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(resultText(meetingEmpty).utf8))
+        XCTAssertEqual(meetingPayload.searchedDirectories, [meetingDir.path])
+        XCTAssertEqual(meetingPayload.indexedMeetings, 0)
+        XCTAssertNil(meetingPayload.indexedDictationDays)
+        XCTAssertNil(meetingPayload.indexedWritingDays)
+        XCTAssertTrue(meetingPayload.hint.contains("No meetings are indexed"))
+
+        let dictationEmpty = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("missing"), "kind": .string("dictation")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let dictationPayload = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(resultText(dictationEmpty).utf8))
+        XCTAssertEqual(dictationPayload.searchedDirectories, [dictationDir.path])
+        XCTAssertNil(dictationPayload.indexedMeetings)
+        XCTAssertEqual(dictationPayload.indexedDictationDays, 0)
+        XCTAssertEqual(dictationPayload.indexedDictationEntries, 0)
+        XCTAssertNil(dictationPayload.indexedWritingDays)
+        XCTAssertTrue(dictationPayload.hint.contains("No dictations are indexed"))
+
+        let writingEmpty = try handleSearch(
+            params: CallTool.Parameters(name: "search", arguments: ["query": .string("missing"), "kind": .string("writing")]),
+            index: index,
+            meetingDirs: [meetingDir],
+            dictationDirs: [dictationDir],
+            writingDirs: [writingDir]
+        )
+        let writingPayload = try JSONDecoder().decode(EmptyQueryResult.self, from: Data(resultText(writingEmpty).utf8))
+        XCTAssertEqual(writingPayload.searchedDirectories, [writingDir.path])
+        XCTAssertNil(writingPayload.indexedMeetings)
+        XCTAssertNil(writingPayload.indexedDictationDays)
+        XCTAssertEqual(writingPayload.indexedWritingDays, 0)
+        XCTAssertEqual(writingPayload.indexedWritingEntries, 0)
+        XCTAssertTrue(writingPayload.hint.contains("No writing is indexed"))
+    }
+
+    func testSearchContextAliasTracksSearchTelemetry() throws {
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Roadmap Sync",
+                date: "2026-03-26T16:04:11-0500",
+                utterances: [("system_0", 0.0, 5.0, "Legacy alias roadmap discussion")]
+            ),
+            filename: "Call_2026-03-26_16-04-11",
+            to: tempDir
+        )
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+
+        let params = CallTool.Parameters(name: "search_context", arguments: ["query": .string("roadmap")])
+        let result = try withAgentCaptureQueryTelemetry(params: params) {
+            try handleSearch(params: params, index: index, meetingDirs: [tempDir])
+        }
+        XCTAssertNotEqual(result.isError, true)
+        XCTAssertEqual(telemetry.observations.last?.toolKind, "search")
+        XCTAssertEqual(telemetry.observations.last?.captureKind, "meeting")
+        XCTAssertEqual(telemetry.observations.last?.result, "success")
     }
 
     func testWhoIsReturnsSpeakerProfileAndTracksTelemetry() throws {
@@ -731,5 +980,33 @@ private final class RequestCapturingAgentCaptureQueryTelemetry: AgentCaptureQuer
             return
         }
         self.properties = properties.compactMapValues { $0 as? String }
+    }
+}
+
+private struct ToolHandlerStubEmbeddingProvider: EmbeddingProvider {
+    let modelID = "tool-handler-stub.v1"
+    var dimension: Int { Self.concepts.count }
+    var isAvailable: Bool { true }
+
+    private static let concepts: [[String]] = [
+        ["cost", "pricing", "price", "expensive", "balked", "pushback", "budget"],
+        ["weather", "sunny", "rain", "cloudy", "forecast"],
+    ]
+
+    func embed(_ text: String) -> [Float]? {
+        var lex: [String: Int] = [:]
+        for (idx, words) in Self.concepts.enumerated() {
+            for word in words { lex[word] = idx }
+        }
+        var vec = [Float](repeating: 0, count: Self.concepts.count)
+        var hits = 0
+        for token in text.lowercased().split(whereSeparator: { !$0.isLetter }) {
+            if let idx = lex[String(token)] {
+                vec[idx] += 1
+                hits += 1
+            }
+        }
+        guard hits > 0 else { return nil }
+        return VectorMath.normalized(vec)
     }
 }

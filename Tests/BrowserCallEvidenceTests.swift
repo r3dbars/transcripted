@@ -511,30 +511,6 @@ func testBrowserCallEvidence() {
         )
     }
 
-    runSuite("BrowserCallEvidence.focusedInCallProof — only the front tab counts") {
-        let backgroundMeet = [
-            BrowserWindowTitle(title: "Meet - Weekly design sync", isFocused: false),
-            BrowserWindowTitle(title: "Hacker News", isFocused: true),
-        ]
-        assertTrue(
-            BrowserCallEvidence.focusedInCallProof(in: backgroundMeet) == nil,
-            "a Meet tab left in the background is not auto-record proof"
-        )
-        let focusedMeet = [
-            BrowserWindowTitle(title: "Meet - Weekly design sync", isFocused: true),
-        ]
-        let focused = BrowserCallEvidence.focusedInCallProof(in: focusedMeet)
-        assertEqual(focused?.provider, .googleMeet, "the focused Meet tab names Meet")
-        assertTrue(focused?.isMeetPreJoin == false, "a named meeting is not the lobby")
-
-        let lobby = [
-            BrowserWindowTitle(title: "Meet - abc-defg-hij", isFocused: true),
-        ]
-        let preJoin = BrowserCallEvidence.focusedInCallProof(in: lobby)
-        assertEqual(preJoin?.provider, .googleMeet, "the lobby still names Meet for prompting")
-        assertTrue(preJoin?.isMeetPreJoin == true, "and auto-record can tell it is pre-join")
-    }
-
     runSuite("BrowserWindowTitle.isSystemFront — a background browser's focused tab is not the front window") {
         assertTrue(
             BrowserWindowTitle.isSystemFront(appPID: 10, frontmostPID: 10, windowIsAppFocused: true),
@@ -551,25 +527,6 @@ func testBrowserCallEvidence() {
         assertFalse(
             BrowserWindowTitle.isSystemFront(appPID: 10, frontmostPID: nil, windowIsAppFocused: true),
             "without a front app, nothing is the front window"
-        )
-    }
-
-    runSuite("BrowserCallEvidence.focusedInCallProof — AX focus on a background browser is not auto-record proof") {
-        let backgroundChrome = [
-            BrowserWindowTitle(
-                title: "Meet - Weekly design sync",
-                isFocused: true,
-                isSystemFront: false
-            ),
-        ]
-        assertTrue(
-            BrowserCallEvidence.focusedInCallProof(in: backgroundChrome) == nil,
-            "a Meet tab focused inside background Chrome must not auto-record"
-        )
-        assertEqual(
-            BrowserCallEvidence.classify(backgroundChrome),
-            .call(provider: .googleMeet),
-            "prompting still names a Meet tab in a background window"
         )
     }
 

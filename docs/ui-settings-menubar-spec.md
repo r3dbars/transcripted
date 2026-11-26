@@ -231,7 +231,7 @@ Auto-send), Meetings (Meetings key, Auto-detect calls, Live transcript),
 Library (Folder, Keep meeting audio, Keep dictation audio, Free up space) and
 Privacy (Crash reports, Usage stats, Send diagnostics). One disclosure,
 Advanced, holds everything else, grouped: Dictation (Sounds, Muffle, island in
-screen sharing, Keyboard shortcuts), Meetings (auto-record, mic mute control,
+screen sharing, Keyboard shortcuts), Meetings (mic mute control,
 mic processing, People in the room), Transcription (voice model, meeting
 language, Corrections, Transcribe a file), App (Launch at login, Show in Dock,
 Support files), Permissions, About (version, Automatic updates, Feedback) and

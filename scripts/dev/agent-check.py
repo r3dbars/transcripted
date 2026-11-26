@@ -34,9 +34,6 @@ MAX_COMMAND_LENGTH = 512
 # BLOCKED (manual-proof-required), which keeps the proof "unknown", not FAIL.
 MANUAL_COMMAND_FRAGMENTS = (
     "run-live-capture-smoke.sh",
-    # Blocked at its source gate until genuine isolated SDK proof exists. When
-    # SDK_BOOTSTRAP_VERIFIED flips to True in that script, remove this line.
-    "scripts/dev/test-live-claude-mod.py",
 )
 # Smokes that open a native window and read the account's macOS preferences.
 # They run only where scripts/ops/native-smoke-isolation.py allows an app-launch
@@ -726,11 +723,6 @@ def self_test() -> None:
             "BLOCKED",
             "manual-proof-required",
         ),
-        "python3 scripts/dev/test-live-claude-mod.py": (
-            "BLOCKED",
-            "manual-proof-required",
-        ),
-        "python3 scripts/dev/test-live-claude-mod-tests.py": ("RUN", None),
         "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test": ("RUN", None),
         "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness meeting-series": ("BLOCKED", "invalid-command"),
         "Tools/SpeakerEvalHarness/.build/debug/speaker-eval-harness autoeval-self-test --force": ("BLOCKED", "invalid-command"),
@@ -757,7 +749,6 @@ def self_test() -> None:
     syntax_checks = [
         "bash -n scripts/dev/test-capture-list-load-more-scroll.sh",
         "bash -n run-live-capture-smoke.sh",
-        "python3 -m py_compile scripts/dev/test-live-claude-mod.py",
     ]
     for isolated, expected in ((False, ("BLOCKED", "native-smoke-isolation")), (True, ("RUN", None))):
         actual = classify_command(capture_smoke, isolation_probe=lambda: isolated)
@@ -766,11 +757,6 @@ def self_test() -> None:
     for command in syntax_checks:
         if classify_command(command, isolation_probe=lambda: False) != ("RUN", None):
             raise ProofError("a syntax-only check of a gated script must stay runnable")
-    if classify_command(
-        "python3 scripts/dev/test-live-claude-mod-tests.py",
-        isolation_probe=lambda: False,
-    ) != ("RUN", None):
-        raise ProofError("the wrapper-contract tests must not be classed with the blocked SDK wrapper")
     gated_results = run_commands(
         [capture_smoke],
         runner=lambda command: 3,

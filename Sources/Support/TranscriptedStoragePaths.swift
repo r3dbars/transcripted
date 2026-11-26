@@ -405,3 +405,130 @@ extension FileManager {
         restrictFileToOwnerOnly(at: manifestURL)
     }
 }
+
+/// One-time launch cleanup for the retired experimental ChatGPT companion's
+/// `Application Support/Transcripted/companion/` directory (which stored
+/// `connection.json` with a bearer token and a Unix socket). Strictly bounded
+/// to the direct `companion` child of the Transcripted app-support root and
+/// refuses any symlinked root, symlinked target, or out-of-root path.
+enum LegacyCompanionDirectoryCleanup {
+    static let directoryName = "companion"
+    static let completedDefaultsKey = "legacyCompanionDirectoryCleanedUp"
+
+    enum Outcome: Equatable {
+        case alreadyCompleted
+        case absent
+        case removed
+        case refused(String)
+        case failed
+    }
+
+    @discardableResult
+    static func runOnceIfNeeded(
+        appSupportRoot: URL = FileManager.default.transcriptedAppSupportRootURL,
+        userDefaults: UserDefaults = .standard,
+        fileManager: FileManager = .default
+    ) -> Outcome {
+        if userDefaults.bool(forKey: completedDefaultsKey) {
+            return .alreadyCompleted
+        }
+
+        let targetURL = appSupportRoot.appendingPathComponent(directoryName, isDirectory: true)
+        let outcome = removeLegacyDirectory(
+            targetURL: targetURL,
+            inside: appSupportRoot,
+            fileManager: fileManager
+        )
+        switch outcome {
+        case .removed, .absent:
+            userDefaults.set(true, forKey: completedDefaultsKey)
+        case .alreadyCompleted, .refused, .failed:
+            break
+        }
+        return outcome
+    }
+
+    static func removeLegacyDirectory(
+        targetURL: URL,
+        inside appSupportRoot: URL,
+        fileManager: FileManager = .default
+    ) -> Outcome {
+        guard appSupportRoot.isFileURL,
+              targetURL.isFileURL,
+              appSupportRoot.path.hasPrefix("/"),
+              targetURL.path.hasPrefix("/") else {
+            return .refused("non_absolute_path")
+        }
+
+        guard !targetURL.pathComponents.contains(".."),
+              !appSupportRoot.pathComponents.contains("..") else {
+            return .refused("path_traversal")
+        }
+
+        let rootPath = trimmedPath(appSupportRoot.standardizedFileURL.path)
+        guard !rootPath.isEmpty, rootPath != "/" else {
+            return .refused("invalid_root")
+        }
+
+        var rootStat = stat()
+        if lstat(rootPath, &rootStat) != 0 {
+            return errno == ENOENT ? .absent : .refused("unreadable_root")
+        }
+        if (rootStat.st_mode & S_IFMT) == S_IFLNK {
+            return .refused("symlinked_root")
+        }
+        guard (rootStat.st_mode & S_IFMT) == S_IFDIR else {
+            return .refused("non_directory_root")
+        }
+
+        let canonicalRoot = trimmedPath(appSupportRoot.standardizedFileURL.resolvingSymlinksInPath().path)
+        guard !canonicalRoot.isEmpty, canonicalRoot != "/" else {
+            return .refused("invalid_canonical_root")
+        }
+
+        let standardizedTarget = targetURL.standardizedFileURL
+        guard standardizedTarget.lastPathComponent == directoryName else {
+            return .refused("unexpected_directory_name")
+        }
+
+        let targetParent = trimmedPath(standardizedTarget.deletingLastPathComponent().resolvingSymlinksInPath().path)
+        guard targetParent == canonicalRoot else {
+            return .refused("outside_app_support_root")
+        }
+
+        let rawTargetPath = trimmedPath(standardizedTarget.path)
+        var targetStat = stat()
+        if lstat(rawTargetPath, &targetStat) != 0 {
+            return errno == ENOENT ? .absent : .failed
+        }
+        if (targetStat.st_mode & S_IFMT) == S_IFLNK {
+            return .refused("symlinked_target")
+        }
+        guard (targetStat.st_mode & S_IFMT) == S_IFDIR else {
+            return .refused("non_directory_target")
+        }
+
+        let canonicalTarget = trimmedPath(standardizedTarget.resolvingSymlinksInPath().path)
+        let expectedCanonicalTarget = canonicalRoot + "/" + directoryName
+        guard canonicalTarget == expectedCanonicalTarget,
+              canonicalTarget.hasPrefix(canonicalRoot + "/") else {
+            return .refused("canonical_path_mismatch")
+        }
+
+        do {
+            try fileManager.removeItem(atPath: canonicalTarget)
+            return .removed
+        } catch {
+            return .failed
+        }
+    }
+
+    private static func trimmedPath(_ path: String) -> String {
+        guard path.count > 1 else { return path }
+        var result = path
+        while result.count > 1, result.hasSuffix("/") {
+            result.removeLast()
+        }
+        return result
+    }
+}

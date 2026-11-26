@@ -8,7 +8,7 @@ Machine-read config for agent workflow and the ratchet baselines behind the repo
 - `test-matrix.yml` — changed path to required checks. Drives `bash check.sh`, `scripts/dev/agent-preflight.sh`, and `scripts/dev/test-matrix-checks.py`. Commands run only from the allowed executables in `scripts/dev/agent-check.py`.
 - `qa-gates.yml`, `board-scorecard.yml` — risk-to-gate map and per-board scoring registry (`docs/board-scorecard.md`).
 - `modules.json` — every `Sources/**/*.swift` file maps to one module, with the modules and Core tiers it may name. A new top-level `Sources/` folder needs an entry here and an `AGENTS.md`.
-- `plugins/marketplace.json` — local plugin marketplace entry for the companion build.
+- `plugins/marketplace.json` — local plugin marketplace manifest (currently empty).
 - `rules.json` — registry of every rule and the check that enforces it. `docs/rules.md` is generated from it by `python3 scripts/dev/check-rule-registry.py --write`.
 - `window-inventory.json` — every NSWindow/NSPanel in `Sources/` and its screen-sharing policy. Checked by `scripts/dev/check-window-inventory.py`.
 - `auto-merge-lanes.json` — the lanes `scripts/ops/auto-merge-gate.py` may merge without the owner. Owner-only; see `docs/auto-merge-gate.md`.

@@ -337,17 +337,6 @@ enum BrowserCallEvidence {
         return isMeetCodeOnlyTitle(title)
     }
 
-    /// The focused/front window's in-call provider, if that window names a
-    /// call. Auto-record uses this so a Meet tab in the background cannot
-    /// start capture. Prompting still classifies every window.
-    static func focusedInCallProof(
-        in windows: [BrowserWindowTitle]
-    ) -> (provider: MeetingPromptProvider, isMeetPreJoin: Bool)? {
-        guard let focused = windows.first(where: \.isSystemFront) else { return nil }
-        guard let provider = inCallProvider(forTitle: focused.title) else { return nil }
-        return (provider, provider == .googleMeet && isMeetPreJoinTitle(focused.title))
-    }
-
     /// The provider when `rawTitle` only exists while a call is on, else `nil`.
     static func inCallProvider(forTitle rawTitle: String) -> MeetingPromptProvider? {
         let title = normalized(rawTitle)

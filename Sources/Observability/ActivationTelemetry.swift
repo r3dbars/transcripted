@@ -81,7 +81,6 @@ enum ActivationTelemetry {
     enum AgentPromptKind: String {
         case localAgentPrompt = "local_agent_prompt"
         case folderPaths = "folder_paths"
-        case codexInboxSetup = "codex_inbox_setup"
         case meetingBundle = "meeting_bundle"
         case meetingMarkdown = "meeting_markdown"
     }
@@ -110,7 +109,6 @@ enum ActivationTelemetry {
     enum AgentSetupKind: String {
         case claudeDesktop = "claude_desktop"
         case claudeCode = "claude_code"
-        case codexInbox = "codex_inbox"
         case codexTools = "codex_tools"
         case cursor
         case localPrompt = "local_prompt"

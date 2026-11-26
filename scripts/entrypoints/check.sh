@@ -141,8 +141,6 @@ case "$tier" in
         step "Tools: CLI" "swift test --package-path Tools/TranscriptedCLI"
         step "Tools: MCP" "swift test --package-path Tools/TranscriptedMCP"
         step "Tools: QA" "swift test --package-path Tools/TranscriptedQA"
-        step "Tools: Live" "swift test --package-path Tools/TranscriptedLive"
-        step "Claude mod wrapper contracts" "python3 scripts/dev/test-live-claude-mod-tests.py"
         step "CLI mode: audio" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=audio TRANSCRIPTEDCLI_ENABLE_TRANSCRIPTION=1 swift test --package-path Tools/TranscriptedCLI"
         step "CLI mode: meeting" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=meeting TRANSCRIPTEDCLI_ENABLE_MEETING_IMPORT=1 swift test --package-path Tools/TranscriptedCLI"
         step "CLI mode: retrieval" "TRANSCRIPTEDCLI_EXPECT_BUILD_MODE=retrieval swift test --package-path Tools/TranscriptedCLI"

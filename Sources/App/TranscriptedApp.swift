@@ -172,6 +172,11 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         Task.detached(priority: .background) {
             DictionaryPastMeetingBackupStore.default().prune(meetingsDirectory: MeetingStoragePaths.transcriptsFolder)
         }
+        if !AutomatedLaunchEnvironment.isActive() {
+            Task.detached(priority: .background) {
+                _ = LegacyCompanionDirectoryCleanup.runOnceIfNeeded()
+            }
+        }
 
         let activationController = ActivationPolicyController(
             actualPolicy: { NSApp.activationPolicy() }

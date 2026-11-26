@@ -241,7 +241,7 @@
         "Tools/TranscriptedMCP/AGENTS.md"
       ],
       "keywords": ["mcp", "host-client"],
-      "owns": "Saved-capture MCP tools and opt-in companion controls.",
+      "owns": "Saved-capture read-only MCP tools.",
       "invariants": [
         "Tools remain local-first and consume saved artifacts through documented seams."
       ],
@@ -293,42 +293,6 @@
         "Tools remain local-first and consume saved artifacts through documented seams."
       ],
       "manual_proof": []
-    },
-    {
-      "id": "tools-live",
-      "path_prefixes": [
-        "Tools/TranscriptedLive/",
-        ".claude-plugin/marketplace.json"
-      ],
-      "docs": [
-        "Tools/TranscriptedLive/AGENTS.md"
-      ],
-      "keywords": ["live broker", "live transport"],
-      "owns": "Opt-in live meeting broker and transports.",
-      "invariants": [
-        "Tools remain local-first and consume saved artifacts through documented seams."
-      ],
-      "manual_proof": [
-        "Live transport and client connection behavior.",
-        "With CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1, run claude plugin validate . and claude plugin test . from Tools/TranscriptedLive/claude-mod."
-      ]
-    },
-    {
-      "id": "tools-companion",
-      "path_prefixes": [
-        "Tools/TranscriptedCompanion/"
-      ],
-      "docs": [
-        "Tools/TranscriptedCompanion/AGENTS.md"
-      ],
-      "keywords": ["companion plugin", "plugin packaging"],
-      "owns": "Portable plugin packaging and fixture tests.",
-      "invariants": [
-        "Tools remain local-first and consume saved artifacts through documented seams."
-      ],
-      "manual_proof": [
-        "Host-client connection behavior for installed companion tooling."
-      ]
     },
     {
       "id": "scripts-ops",

@@ -210,6 +210,105 @@ final class ProcessStartupTests: XCTestCase {
                 "status",
             ]
         )
+        XCTAssertEqual(names.count, 10)
+        XCTAssertFalse(names.contains("search_context"), "legacy search_context alias stays hidden from tools/list")
+    }
+
+    func testExecutableDispatchesHiddenSearchContextAliasOverStdio() throws {
+        let executable = builtExecutable()
+        XCTAssertTrue(FileManager.default.isExecutableFile(atPath: executable.path))
+
+        let dataRoot = makeTempDir()
+        defer { removeTempDir(dataRoot) }
+        try writeFixture(
+            makeFixtureJSON(
+                title: "Roadmap Sync",
+                date: "2026-03-26T16:04:11-0500",
+                utterances: [("system_0", 0.0, 5.0, "Backwards compatibility alias roadmap check")]
+            ),
+            filename: "Call_2026-03-26_16-04-11",
+            to: dataRoot
+        )
+
+        let process = Process()
+        let standardInput = Pipe()
+        let standardOutput = Pipe()
+        process.executableURL = executable
+        process.standardInput = standardInput
+        process.standardOutput = standardOutput
+        process.standardError = Pipe()
+
+        var environment = ProcessInfo.processInfo.environment
+        environment["TRANSCRIPTED_DATA_DIR"] = dataRoot.path
+        environment["TRANSCRIPTED_INDEX_DIR"] = dataRoot.appendingPathComponent("index").path
+        environment["TRANSCRIPTED_DISABLE_FILE_LOGGER"] = "1"
+        environment["TRANSCRIPTED_MCP_DISABLE_ANALYTICS"] = "1"
+        process.environment = environment
+
+        let toolsReceived = expectation(description: "tools/list response")
+        let callReceived = expectation(description: "search_context call response")
+        let toolsBox = ProcessResponseBox()
+        let callBox = ProcessResponseBox()
+        let outputLock = NSLock()
+        var outputBuffer = Data()
+        standardOutput.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty else { return }
+
+            outputLock.lock()
+            outputBuffer.append(data)
+            while let newline = outputBuffer.firstIndex(of: 0x0A) {
+                let line = outputBuffer[..<newline]
+                outputBuffer.removeSubrange(...newline)
+                guard let object = try? JSONSerialization.jsonObject(with: Data(line)),
+                      let response = object as? [String: Any],
+                      let id = (response["id"] as? NSNumber)?.intValue else {
+                    continue
+                }
+                if id == 2 {
+                    toolsBox.set(response)
+                    toolsReceived.fulfill()
+                } else if id == 3 {
+                    callBox.set(response)
+                    callReceived.fulfill()
+                }
+            }
+            outputLock.unlock()
+        }
+
+        try process.run()
+        defer {
+            standardOutput.fileHandleForReading.readabilityHandler = nil
+            try? standardInput.fileHandleForWriting.close()
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
+        }
+
+        let frames = [
+            #"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"synthetic-test-client","version":"1.0"}}}"#,
+            #"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+            #"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#,
+            #"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"search_context","arguments":{"query":"roadmap"}}}"#,
+        ].joined(separator: "\n") + "\n"
+        try standardInput.fileHandleForWriting.write(contentsOf: Data(frames.utf8))
+
+        XCTAssertEqual(XCTWaiter.wait(for: [toolsReceived, callReceived], timeout: 5), .completed)
+
+        let toolsResponse = try XCTUnwrap(toolsBox.get())
+        let toolsResult = try XCTUnwrap(toolsResponse["result"] as? [String: Any])
+        let tools = try XCTUnwrap(toolsResult["tools"] as? [[String: Any]])
+        XCTAssertEqual(tools.count, 10)
+        XCTAssertFalse(tools.compactMap { $0["name"] as? String }.contains("search_context"))
+
+        let callResponse = try XCTUnwrap(callBox.get())
+        let callResult = try XCTUnwrap(callResponse["result"] as? [String: Any])
+        XCTAssertNotEqual(callResult["isError"] as? Bool, true)
+        let content = try XCTUnwrap(callResult["content"] as? [[String: Any]])
+        let text = try XCTUnwrap(content.first?["text"] as? String)
+        let decoded = try JSONDecoder().decode(ContextSearchResult.self, from: Data(text.utf8))
+        XCTAssertEqual(decoded.results.map(\.filename), ["Call_2026-03-26_16-04-11"])
     }
 
     func testSelfTestFlagExitsCleanlyWithValidJSON() throws {

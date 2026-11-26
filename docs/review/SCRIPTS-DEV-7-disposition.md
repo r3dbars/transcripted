@@ -9,7 +9,7 @@ report ID for missing Companion-check coverage. BUILD-CI-13 records the related
 CI-lane omission. This dedicated script-mapping record adds no second code fix.
 
 The proposal maps `Tools/TranscriptedCompanion/**` and `script/build_and_run.sh`
-to source validation, `test-package.py` and `test-launcher.py`. It also includes
+to source validation, `test-package.py` and `test-launcher.py` (all companion files since retired). It also includes
 those checks in the existing Repo Hygiene Linux-check lane, replaces the two
 fixtures' macOS-specific temporary-root argument with the OS default, and updates
 the Companion guide's automated/manual distinction. These are shared changes,

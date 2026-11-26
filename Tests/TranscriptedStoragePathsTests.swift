@@ -704,6 +704,115 @@ func testTranscriptedStoragePaths() {
         )
     }
 
+    runSuite("LegacyCompanionDirectoryCleanup — removes leftover companion directory once inside app-support root") {
+        let suiteName = "LegacyCompanionCleanupTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "expected isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-companion-\(UUID().uuidString)", isDirectory: true)
+        let appSupportRoot = tempRoot.appendingPathComponent("Transcripted", isDirectory: true)
+        let companionDir = appSupportRoot.appendingPathComponent("companion", isDirectory: true)
+        let connectionFile = companionDir.appendingPathComponent("connection.json", isDirectory: false)
+        let siblingStateFile = appSupportRoot.appendingPathComponent("mcp-directories.json", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: companionDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: connectionFile.path, contents: Data(#"{"token":"secret"}"#.utf8))
+        FileManager.default.createFile(atPath: siblingStateFile.path, contents: Data("{}".utf8))
+
+        let first = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: appSupportRoot,
+            userDefaults: defaults
+        )
+        assertEqual(first, .removed, "cleanup should remove leftover companion/ directory under app-support root")
+        assertFalse(
+            FileManager.default.fileExists(atPath: companionDir.path),
+            "leftover companion/ directory and connection.json should be gone"
+        )
+        assertTrue(
+            FileManager.default.fileExists(atPath: siblingStateFile.path),
+            "cleanup must leave sibling app-support files untouched"
+        )
+
+        // Recreate companion/ to prove the one-time guard prevents repeated runs.
+        try? FileManager.default.createDirectory(at: companionDir, withIntermediateDirectories: true)
+        let second = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: appSupportRoot,
+            userDefaults: defaults
+        )
+        assertEqual(second, .alreadyCompleted, "cleanup should record completion so subsequent launches skip I/O")
+        assertTrue(
+            FileManager.default.fileExists(atPath: companionDir.path),
+            "already-completed guard should skip touching the filesystem"
+        )
+    }
+
+    runSuite("LegacyCompanionDirectoryCleanup — refuses outside and symlinked paths") {
+        let suiteName = "LegacyCompanionCleanupSafetyTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "expected isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-companion-safety-\(UUID().uuidString)", isDirectory: true)
+        let appSupportRoot = tempRoot.appendingPathComponent("Transcripted", isDirectory: true)
+        let outsideDir = tempRoot.appendingPathComponent("outside", isDirectory: true)
+        let outsideCompanion = outsideDir.appendingPathComponent("companion", isDirectory: true)
+        let outsideFile = outsideCompanion.appendingPathComponent("keep.txt", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: appSupportRoot, withIntermediateDirectories: true)
+        try? FileManager.default.createDirectory(at: outsideCompanion, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: outsideFile.path, contents: Data("keep".utf8))
+
+        // 1. Target outside appSupportRoot is refused.
+        let outsideOutcome = LegacyCompanionDirectoryCleanup.removeLegacyDirectory(
+            targetURL: outsideCompanion,
+            inside: appSupportRoot
+        )
+        assertEqual(outsideOutcome, .refused("outside_app_support_root"), "cleanup must refuse paths outside app-support root")
+        assertTrue(FileManager.default.fileExists(atPath: outsideFile.path), "outside directory must stay intact")
+
+        // 2. Traversal path (../outside/companion) is refused.
+        let traversalTarget = appSupportRoot
+            .appendingPathComponent("..", isDirectory: true)
+            .appendingPathComponent("outside", isDirectory: true)
+            .appendingPathComponent("companion", isDirectory: true)
+        let traversalOutcome = LegacyCompanionDirectoryCleanup.removeLegacyDirectory(
+            targetURL: traversalTarget,
+            inside: appSupportRoot
+        )
+        assertEqual(traversalOutcome, .refused("path_traversal"), "cleanup must refuse path traversal")
+        assertTrue(FileManager.default.fileExists(atPath: outsideFile.path), "traversal target must stay intact")
+
+        // 3. Symlinked companion directory pointing outside is refused (and does not mark complete).
+        let symlinkedCompanion = appSupportRoot.appendingPathComponent("companion", isDirectory: true)
+        try? FileManager.default.createSymbolicLink(atPath: symlinkedCompanion.path, withDestinationPath: outsideCompanion.path)
+        let symlinkTargetOutcome = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: appSupportRoot,
+            userDefaults: defaults
+        )
+        assertEqual(symlinkTargetOutcome, .refused("symlinked_target"), "cleanup must refuse a symlinked companion directory")
+        assertFalse(defaults.bool(forKey: LegacyCompanionDirectoryCleanup.completedDefaultsKey), "refusal must not mark cleanup completed")
+        assertTrue(FileManager.default.fileExists(atPath: outsideFile.path), "symlink destination must stay intact")
+
+        // 4. Symlinked appSupportRoot itself is refused.
+        let symlinkedRoot = tempRoot.appendingPathComponent("SymlinkedTranscripted", isDirectory: true)
+        try? FileManager.default.createSymbolicLink(atPath: symlinkedRoot.path, withDestinationPath: outsideDir.path)
+        let symlinkRootOutcome = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: symlinkedRoot,
+            userDefaults: defaults
+        )
+        assertEqual(symlinkRootOutcome, .refused("symlinked_root"), "cleanup must refuse a symlinked app-support root")
+        assertTrue(FileManager.default.fileExists(atPath: outsideFile.path), "directory behind symlinked root must stay intact")
+    }
+
     runSuite("Transcripted MCP directory manifest — the suites above left the real manifest untouched") {
         assertEqual(
             fingerprint(of: realManifestURL),

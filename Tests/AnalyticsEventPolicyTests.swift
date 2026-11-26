@@ -1799,7 +1799,6 @@ func testAnalyticsEventPolicy() {
         let dismissed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_dismissed")
         let outcome = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_outcome_recorded")
         let recorded = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_record_selected")
-        let autoStarted = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_auto_started")
         let suppressed = AnalyticsEventPolicy.policy(forEvent: "meeting_prompt_suppressed")
 
         assertEqual(shown?.allowedProperties.contains("provider"), true, "prompt shown should allow provider attribution")
@@ -1809,7 +1808,7 @@ func testAnalyticsEventPolicy() {
         assertEqual(shown?.allowedProperties.contains("app_signal"), true, "prompt shown should keep coarse app signal")
         assertEqual(shown?.allowedProperties.contains("route_ready"), true, "prompt shown should preserve route readiness")
         assertEqual(shown?.allowedProperties.contains("missing_permission"), true, "prompt shown should preserve missing-permission buckets")
-        for policy in [shown, dismissed, recorded, autoStarted, suppressed] {
+        for policy in [shown, dismissed, recorded, suppressed] {
             assertEqual(
                 policy?.allowedProperties.contains("call_evidence"),
                 true,

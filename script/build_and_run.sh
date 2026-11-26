@@ -25,16 +25,15 @@ for row in rows:
     if command == target: own.append(int(parts[0]))
     elif command.endswith('/Transcripted.app/Contents/MacOS/Transcripted'): other = True
 if own or (other and sys.argv[2] != '--build-only'):
-    raise SystemExit('Finish any active meeting and quit Transcripted, then run this script again to test the companion build.')
+    raise SystemExit('Finish any active meeting and quit Transcripted, then run this script again to test the local build.')
 PY
 
 if [ "$MODE" != --launch-only ]; then
   bash "$TASK_ROOT/build.sh" --no-open
-  python3 "$TASK_ROOT/Tools/TranscriptedCompanion/package.py" --no-build
 fi
 if [ "$MODE" = --build-only ]; then exit 0; fi
 if [ ! -x "$TASK_APP/Contents/MacOS/Transcripted" ]; then
-  echo "Build the companion app first with $TASK_ROOT/script/build_and_run.sh --build-only" >&2
+  echo "Build the app first with $TASK_ROOT/script/build_and_run.sh --build-only" >&2
   exit 1
 fi
 
@@ -50,7 +49,7 @@ import time
 for attempt in range(30):
     rows = subprocess.check_output(['ps', '-axo', 'command='], text=True).splitlines()
     if sys.argv[1] in [row.strip() for row in rows]:
-        print('The companion build is running.')
+        print('The local build is running.')
         break
     time.sleep(0.2)
 else:

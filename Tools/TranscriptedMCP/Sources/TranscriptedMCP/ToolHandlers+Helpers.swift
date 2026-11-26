@@ -176,7 +176,7 @@ private struct AgentCaptureQueryDescriptor {
             self.init(toolKind: "list", captureKind: "writing")
         case "read_writing":
             self.init(toolKind: "read", captureKind: "writing")
-        case "search":
+        case "search", "search_context":
             self.init(toolKind: "search", captureKind: Self.requestedCaptureKind(params))
         case "recent_context":
             self.init(toolKind: "recent", captureKind: Self.requestedCaptureKind(params))

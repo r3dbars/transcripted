@@ -170,7 +170,6 @@ allowlist.
 - `meeting_system_audio_prompt_answered`
 - `meeting_detected_call_ended`
 - `meeting_prompt_shown`
-- `meeting_prompt_auto_started`
 - `meeting_prompt_choice_made`
 - `meeting_prompt_dismissed`
 - `meeting_prompt_outcome_recorded`

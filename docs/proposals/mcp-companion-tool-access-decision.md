@@ -19,7 +19,7 @@ Reviewed against main at `8a38235eef00816a79daa1324387a21ef880204d`.
   the companion interceptor for ordinary and companion-mode clients alike.
   `companionMode` currently withholds the legacy audio widget; it does not
   restrict these nine companion tools to that mode.
-- `CompanionTools.swift` marks `start_meeting`, `stop_meeting`, and
+- `CompanionTools.swift` (retired) marked `start_meeting`, `stop_meeting`, and
   `set_live_context_sharing` as writes. The remaining companion tools include
   recording status, saved-context browsing, and live-context reads.
 - The bundle's `Tools/TranscriptedMCP/mcpb/manifest.json` describes the extension

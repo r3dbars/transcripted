@@ -196,6 +196,89 @@ final class SummaryItemIndexTests: XCTestCase {
         XCTAssertEqual(try newerServer.listMeetings(count: 10).count, 1)
     }
 
+    func testV10UpgradeKeepsLegacySummaryItemsWorkingAndPreservesEmbeddings() throws {
+        // Keeping schemaVersion at 10 preserves user embeddings on upgrade and
+        // lets live v10 MCP helpers keep touching meeting_summary_items while
+        // the current server ignores it except for row cleanup on reindex/remove.
+        try writeFixture(makeMeetingWithInlineSummary(), filename: "Call_2026-04-18_09-15-00", to: tempDir)
+        try index.reconcile(meetingsDir: tempDir, dictationsDir: tempDir)
+        index = nil
+
+        let dbPath = tempDir.appendingPathComponent("mcp_index.sqlite").path
+        var liveV10: OpaquePointer?
+        XCTAssertEqual(sqlite3_open(dbPath, &liveV10), SQLITE_OK)
+        defer { sqlite3_close(liveV10) }
+
+        let seedSQL = """
+            PRAGMA user_version=10;
+            INSERT INTO meeting_summary_items (filename, kind, position, owner, text, status, due)
+                VALUES ('Call_2026-04-18_09-15-00', 'action_item', 0, 'Priya', 'Send launch checklist', 'open', '2026-04-20');
+            CREATE TABLE IF NOT EXISTS embedding_meta (
+                id INTEGER PRIMARY KEY CHECK (id = 0),
+                model_id TEXT NOT NULL,
+                dimension INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS utterance_vectors (
+                rowid INTEGER PRIMARY KEY,
+                vec BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS dictation_entry_vectors (
+                rowid INTEGER PRIMARY KEY,
+                vec BLOB NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS embedding_cache (
+                key BLOB PRIMARY KEY,
+                vec BLOB NOT NULL,
+                last_used INTEGER NOT NULL
+            ) WITHOUT ROWID;
+            INSERT OR REPLACE INTO embedding_meta (id, model_id, dimension) VALUES (0, 'stub.v1', 3);
+            INSERT OR REPLACE INTO utterance_vectors (rowid, vec) VALUES (1, X'0000803F0000000000000000');
+            INSERT OR REPLACE INTO dictation_entry_vectors (rowid, vec) VALUES (1, X'0000803F0000000000000000');
+            INSERT OR REPLACE INTO embedding_cache (key, vec, last_used) VALUES (X'010203', X'0000803F', 100);
+        """
+        XCTAssertEqual(sqlite3_exec(liveV10, seedSQL, nil, nil, nil), SQLITE_OK)
+
+        // Open the current index against the stamped v10 DB.
+        let currentIndex = try TranscriptIndex(indexDir: tempDir)
+        XCTAssertEqual(try currentIndex.listMeetings(count: 10).count, 1)
+
+        // Pre-existing embeddings must NOT be wiped on open.
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM embedding_meta"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM utterance_vectors"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM dictation_entry_vectors"), 1)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM embedding_cache"), 1)
+
+        // Second (live v10) connection can still SELECT and DELETE on meeting_summary_items.
+        var stmt: OpaquePointer?
+        XCTAssertEqual(
+            sqlite3_prepare_v2(liveV10, "SELECT COUNT(*) FROM meeting_summary_items", -1, &stmt, nil),
+            SQLITE_OK
+        )
+        XCTAssertEqual(sqlite3_step(stmt), SQLITE_ROW)
+        XCTAssertEqual(sqlite3_column_int64(stmt, 0), 1)
+        sqlite3_finalize(stmt)
+
+        XCTAssertEqual(
+            sqlite3_exec(liveV10, "DELETE FROM meeting_summary_items WHERE filename = 'Call_2026-04-18_09-15-00'", nil, nil, nil),
+            SQLITE_OK
+        )
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items"), 0)
+
+        // Re-inserting a stale row and removing the meeting clears meeting_summary_items via deleteIndexedRows.
+        XCTAssertEqual(
+            sqlite3_exec(
+                liveV10,
+                "INSERT INTO meeting_summary_items (filename, kind, position, text) VALUES ('Call_2026-04-18_09-15-00', 'decision', 0, 'Stale decision')",
+                nil, nil, nil
+            ),
+            SQLITE_OK
+        )
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items"), 1)
+        try FileManager.default.removeItem(at: tempDir.appendingPathComponent("Call_2026-04-18_09-15-00.md"))
+        try currentIndex.reconcile(meetingsDir: tempDir, dictationsDir: tempDir, updateEmbeddings: false)
+        XCTAssertEqual(try rowCount("SELECT COUNT(*) FROM meeting_summary_items"), 0)
+    }
+
     func testOpeningNeverLowersANewerSchemaVersion() throws {
         // An older helper opening an index a newer one already rebuilt must not
         // stamp its own, lower version back, or the newer helper would rebuild

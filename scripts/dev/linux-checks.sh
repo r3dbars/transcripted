@@ -312,9 +312,6 @@ fi
 check "vnc driver self-test" "python3 scripts/vm/vnc.py --self-test"
 check "clean VM script guards" "bash scripts/vm/test-transcripted-vm.sh"
 
-# Companion source validation is build-independent and safe on any OS.
-check "companion package source" "python3 Tools/TranscriptedCompanion/package.py --validate-only"
-
 # ---------------------------------------------------------------- ops/release self-tests
 # Explicit opt-in lists: anything here is a REQUIRED check on every PR (the
 # repo-hygiene job runs this script). To add yours, append its path to the
@@ -345,12 +342,9 @@ SELF_TEST_SCRIPTS=(
 )
 PY_TEST_SUITES=(
     Tests/BuildDependencies/TestFailureLocationsTests.py
-    Tools/TranscriptedCompanion/test-package.py
-    Tools/TranscriptedCompanion/test-launcher.py
     scripts/release/test-register-sentry-release.py
     scripts/release/test-write-model-manifest.py
     scripts/release/test-mcp-publish-tools.py
-    scripts/dev/test-live-claude-mod-tests.py
     scripts/dev/test-verify-receipts.py
     scripts/dev/test-call-app-hint-harness.py
     scripts/ops/test-native-smoke-isolation.py

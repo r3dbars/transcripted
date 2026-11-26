@@ -93,10 +93,9 @@ commands = [line.split('|')[1] for line in lines]
 required = [
     'scripts/dev/test-speaker-settings-model.sh',
     'scripts/dev/test-speakers-directory-scroll.sh',
-    'test --package-path Tools/TranscriptedLive',
     'scripts/dev/test-sqlite-handle-open.sh',
     'scripts/dev/test-capture-list-load-more-scroll.sh',
-    'scripts/dev/test-live-claude-mod-tests.py',
+    'test --package-path Tools/TranscriptedMCP',
     'scripts/dev/typecheck-lab-build.sh',
 ]
 for command in required:
@@ -107,10 +106,9 @@ for line, expected in zip(cli, ['', 'audio', 'meeting', 'retrieval']):
     fields = dict(item.split('=', 1) for item in line.split('|')[2:])
     assert fields == {'mode': expected, 'audio': '1' if expected == 'audio' else '',
                       'meeting': '1' if expected == 'meeting' else '', 'diarization': '', 'bundled': ''}, fields
-assert commands.index(required[0]) < commands.index(required[1]) < commands.index(required[2])
+assert commands.index(required[0]) < commands.index(required[1]) < commands.index('test --package-path Tools/TranscriptedMCP')
 assert commands.index('build-deps.sh') < commands.index('scripts/dev/test-sqlite-handle-open.sh') < commands.index('test')
 assert commands.index('scripts/dev/test-speakers-directory-scroll.sh') < commands.index('scripts/dev/test-capture-list-load-more-scroll.sh')
-assert commands.index('test --package-path Tools/TranscriptedLive') < commands.index('scripts/dev/test-live-claude-mod-tests.py')
 budget = [command for command in commands if command.startswith('scripts/ops/performance-budget.rb ')]
 assert len(budget) == 1, 'full gate omitted required CI performance budget'
 assert '--launch-ui-smoke build/launch-ui-smoke.json' in budget[0]
