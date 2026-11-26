@@ -180,66 +180,6 @@ struct PersonalHistoryDeletionTests {
         #expect(entry.text == "cafe")
     }
 
-    @Test("The personal predictor ignores deletions")
-    func predictorIgnoresDeletions() throws {
-        let start = PersonalNextWordShadow.evaluationStartMilliseconds + 1_000
-        let typing = [
-            Self.typed(" alpha beta alpha beta alpha beta ", session: "chain", at: start),
-            Self.typed(" alpha beta alpha beta ", session: "chain_1", at: start + 1_000),
-        ]
-        let withDeletion = [
-            typing[0],
-            try #require(Self.deletion(1, session: "chain_1", at: start + 500)),
-            typing[1],
-        ]
-        var plain = PersonalNextWordShadow()
-        plain.consume(typing)
-        var deleting = PersonalNextWordShadow()
-        deleting.consume(withDeletion)
-        #expect(deleting.snapshot == plain.snapshot)
-        #expect(deleting.trainedModel == plain.trainedModel)
-    }
-
-    @Test("The encrypted log never stores a deletion")
-    func controllerDropsDeletions() async throws {
-        let store = MemoryStore()
-        let suite = "transcripted.tests.deletions.\(UUID().uuidString)"
-        let keyboard = WritingTestDefaults()
-        let app = WritingTestDefaults()
-        defer {
-            keyboard.removePersistentDomain(forName: suite + ".keyboard")
-            app.removePersistentDomain(forName: suite + ".app")
-        }
-        let settings = TildeSettings(keyboard: keyboard, app: app)
-        let controller = PersonalHistoryController(store: store, settings: settings)
-        controller.isEnabled = true
-        let history = try #require(settings.personalHistoryIdentifier)
-        let consent = try #require(settings.personalHistoryConsentIdentifier)
-
-        let typed = try #require(PersonalHistoryEvent(
-            id: "typed",
-            timestampMilliseconds: 1_786_600_000_000,
-            historyIdentifier: history,
-            consentIdentifier: consent,
-            sessionIdentifier: "chain",
-            appBundleIdentifier: "com.example.Editor",
-            source: .typed,
-            text: "teh"
-        ))
-        let deletion = try #require(PersonalHistoryEvent(
-            deletionID: "deletion",
-            timestampMilliseconds: 1_786_600_000_100,
-            historyIdentifier: history,
-            consentIdentifier: consent,
-            sessionIdentifier: "chain_1",
-            appBundleIdentifier: "com.example.Editor",
-            deletedCharacters: 1
-        ))
-        #expect(await controller.ingest([typed, deletion]))
-        #expect(await controller.ingest([deletion]))
-        #expect(await store.events == [typed])
-    }
-
     // MARK: - Helpers
 
     static func typed(
@@ -303,32 +243,6 @@ struct PersonalHistoryDeletionTests {
                 now: { Date(timeIntervalSince1970: 1_786_600_000) },
                 sender: { await sink.record($0) }
             )
-        }
-    }
-
-    private actor MemoryStore: PersonalHistoryStore {
-        nonisolated let location = URL(fileURLWithPath: "/nonexistent/transcripted-deletion-test")
-        private(set) var events: [PersonalHistoryEvent] = []
-        private var sequence: Int64 = 0
-
-        func append(
-            _ events: [PersonalHistoryEvent],
-            checkpoint: PersonalNextWordStoredCheckpoint?
-        ) async throws -> Int64 {
-            self.events.append(contentsOf: events)
-            sequence += 1
-            return sequence
-        }
-
-        func loadReplay(maximumBytes: Int64) async throws -> PersonalHistoryReplay {
-            PersonalHistoryReplay(records: [], checkpoint: nil)
-        }
-
-        func saveTrainedModel(_ model: PersonalNextWordStoredModel) async throws {}
-        func deleteAll() async throws { events.removeAll() }
-
-        func summary() async throws -> PersonalHistorySummary {
-            PersonalHistorySummary(location: location, approximateBytes: 0)
         }
     }
 }

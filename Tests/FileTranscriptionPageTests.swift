@@ -6,10 +6,12 @@ import Foundation
 @MainActor
 func testFileTranscriptionPage() async {
     runSuite("The retired file page redirects to Meetings and leaves the sidebar") {
-        assertFalse(SettingsSidebarSection.primarySection.pages.contains(.files), "the sidebar has six places, no file page")
+        assertFalse(SettingsSidebarSection.primarySection.pages.contains(.files), "the sidebar has five places, no file page")
+        assertFalse(SettingsSidebarSection.primarySection.pages.contains(.writing), "the sidebar has five places, no Writing tab")
         assertEqual(TranscriptedSettingsPage.files.redirected, .home, "a request for the file page opens Meetings")
-        for page in TranscriptedSettingsPage.allCases where page != .files {
-            assertEqual(page.redirected, page, "only the retired page moves")
+        assertEqual(TranscriptedSettingsPage.writing.redirected, .connectAgent, "a request for the retired Writing tab opens Agent")
+        for page in TranscriptedSettingsPage.allCases where page != .files && page != .writing {
+            assertEqual(page.redirected, page, "only retired pages redirect")
         }
         assertEqual(TranscriptedSettingsPage.files.automationIdentifier, "transcripted.settings.sidebar.files",
                     "the old id stays stable for anything that still names it")

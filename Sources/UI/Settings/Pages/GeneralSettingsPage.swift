@@ -115,7 +115,7 @@ struct GeneralSettingsPage<
             .padding(.top, 16)
 
             SettingsAdvancedDisclosure(
-                summary: "Sounds, call recording, mic processing, voice model, corrections, login and Dock, permissions, updates, feedback and Developer Preview."
+                summary: "Sounds, call recording, mic processing, voice model, corrections, login and Dock, permissions, updates and feedback."
             ) {
                 advanced()
             }
@@ -135,8 +135,7 @@ struct AdvancedSettingsSection<
     ModelEditor: View,
     PermissionsEditor: View,
     AboutEditor: View,
-    SupportFilesEditor: View,
-    DeveloperPreviewEditor: View
+    SupportFilesEditor: View
 >: View {
     @Binding var uiSoundsEnabled: Bool
     @Binding var dictationMuffleEnabled: Bool
@@ -164,7 +163,6 @@ struct AdvancedSettingsSection<
     let permissionsEditor: () -> PermissionsEditor
     let aboutEditor: () -> AboutEditor
     let supportFilesEditor: () -> SupportFilesEditor
-    let developerPreviewEditor: () -> DeveloperPreviewEditor
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -249,11 +247,6 @@ struct AdvancedSettingsSection<
 
             aboutEditor()
                 .padding(.top, 8)
-
-            SettingsGroup(title: "Developer Preview", identifier: "transcripted.settings.section.developer-preview") {
-                developerPreviewEditor()
-            }
-            .padding(.top, 8)
         }
     }
 

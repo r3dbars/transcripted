@@ -1,13 +1,12 @@
 # Accessibility
 
-Two files, `AccessibilityBridge.swift` and `AccessibilityBridge+Caret.swift`: the AX (AXUIElement) queries that find the focused text field, read its text and locate the caret in the target app. Part of the `Support` module in `.agents/modules.json` (with `Sources/Support/` and `Sources/Reliability/`), so it may depend only on Core's `core-vocab` tier. The module card is in `Sources/AGENTS.md`.
+One file, `AccessibilityBridge.swift`: the AX (AXUIElement) queries that find the focused text field and its screen rect in the target app. Part of the `Support` module in `.agents/modules.json` (with `Sources/Support/` and `Sources/Reliability/`), so it may depend only on Core's `core-vocab` tier. The module card is in `Sources/AGENTS.md`.
 
 ## What it does
 
 - `AccessibilityBridge` is `@MainActor`. `focusedTextElement(for:)` returns the focused element only if AX is trusted and the role passes `AccessibilityFocusedTextPolicy`. `focusedTextFieldRect(for:)` returns its screen rect.
 - Overlay caller: `focusedFieldRect()` in `Sources/UI/Overlay/NotchIslandController.swift`. On a dictation opening with multiple displays, `NotchIslandScreenChoice.screenFrame` uses the field's center to choose its display, then the mouse display, then the main or first display. The island anchors on the chosen display; it does not position itself beside the field.
-- `AccessibilityBridge+Caret.swift` reads the full field text through `kAXValueAttribute` and the caret bounds through the selected range, falling back to the field's first line. Both use `focusedTextElement(for:)`, so secure fields still return nil. `Sources/Writing/NextSentence/NextSentenceContext.swift` reads text and caret position; `NextSentenceController.swift` refreshes the caret position. The context caller caps and scrubs the text before using it.
-- Other AX code does its own queries and doesn't go through this file: `Sources/Support/FocusedTextPasteConfirmation.swift` (did the paste land), `Sources/Meeting/BrowserWindowTitleReader.swift`, and the Writing Screen Memory readers in `Sources/TranscriptedWriting/Runtime/ScreenMemory/`.
+- Other AX code does its own queries and doesn't go through this file: `Sources/Support/FocusedTextPasteConfirmation.swift` (did the paste land) and `Sources/Meeting/BrowserWindowTitleReader.swift`.
 
 ## Rules
 

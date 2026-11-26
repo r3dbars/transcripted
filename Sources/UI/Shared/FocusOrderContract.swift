@@ -56,11 +56,10 @@ enum FocusOrderContract {
     // MARK: - Settings sidebar
 
     /// Primary sidebar navigation, top to bottom, matching the visual order.
-    /// Six rows on ⌘1–⌘6; file import is ⌘O on Meetings, not a row.
+    /// Five rows on ⌘1–⌘5; file import is ⌘O on Meetings, not a row.
     static let settingsSidebarOrder: [String] = [
         "transcripted.settings.sidebar.home",
         "transcripted.settings.sidebar.dictations",
-        "transcripted.settings.sidebar.writing",
         "transcripted.settings.sidebar.people",
         "transcripted.settings.sidebar.connect-agent",
         "transcripted.settings.sidebar.today",

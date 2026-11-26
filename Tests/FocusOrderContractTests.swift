@@ -57,7 +57,6 @@ func testFocusOrderContract() async {
                     "transcripted.settings.sidebar.today",
                     "transcripted.settings.sidebar.home",
                     "transcripted.settings.sidebar.dictations",
-                    "transcripted.settings.sidebar.writing",
                     "transcripted.settings.sidebar.people",
                     "transcripted.settings.sidebar.connect-agent",
                 ],
@@ -201,7 +200,7 @@ func testFocusOrderContract() async {
             )
         }
 
-        // Numbered Go shortcuts match the sidebar's six rows, in order.
+        // Numbered Go shortcuts match the sidebar's five rows, in order.
         let shortcutOrder = TranscriptedSettingsPage.allCases
             .compactMap { page in page.navigationShortcutKey.map { (key: $0, identifier: page.automationIdentifier) } }
             .sorted { $0.key < $1.key }
@@ -210,7 +209,7 @@ func testFocusOrderContract() async {
         assertEqual(
             shortcutOrder,
             numberedFocusOrder,
-            "the ⌘1–⌘6 navigation pages should stay in the settings navigation surface, in the declared focus order"
+            "the ⌘1–⌘5 navigation pages should stay in the settings navigation surface, in the declared focus order"
         )
 
         // The sidebar's primary rows come from this list, in this order.
@@ -225,7 +224,7 @@ func testFocusOrderContract() async {
             TranscriptedSettingsPage.allCases
                 .filter { $0.navigationShortcutKey != nil }
                 .map(\.automationIdentifier),
-            "settings sidebar focus order should preserve the six numbered pages in ⌘1–⌘6 order"
+            "settings sidebar focus order should preserve the five numbered pages in ⌘1–⌘5 order"
         )
     }
 }

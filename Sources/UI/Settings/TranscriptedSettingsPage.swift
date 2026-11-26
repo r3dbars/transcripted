@@ -19,9 +19,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// The page a request for this one actually shows. Only `.files` moves.
+    /// The page a request for this one actually shows. Retired pages
+    /// (`.files` and `.writing`) redirect to where their surface lives now.
     var redirected: TranscriptedSettingsPage {
-        self == .files ? .home : self
+        switch self {
+        case .files: return .home
+        case .writing: return .connectAgent
+        default: return self
+        }
     }
 
     var automationIdentifier: String {
@@ -71,15 +76,14 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
 
     /// Conventional ⌘ shortcut for the primary sidebar sections, surfaced in
     /// the "Go" menu and as the sidebar row tooltip. `nil` for the Settings
-    /// page (⌘, instead) and the retired file page.
+    /// page (⌘, instead) and retired pages.
     var navigationShortcutKey: String? {
         switch self {
         case .home: return "1"
         case .dictations: return "2"
-        case .writing: return "3"
-        case .people: return "4"
-        case .connectAgent: return "5"
-        case .today: return "6"
+        case .people: return "3"
+        case .connectAgent: return "4"
+        case .today: return "5"
         default: return nil
         }
     }
@@ -102,13 +106,5 @@ enum TranscriptedSettingsPage: String, CaseIterable, Identifiable {
         case .today: return "chart.bar.fill"
         case .general: return "gearshape.fill"
         }
-    }
-}
-
-/// Whether the Writing row shows its "New" badge. The badge's defaults key
-/// lives with Writing (`Sources/Writing/WritingSidebarNewBadge.swift`).
-extension WritingSidebarNewBadge {
-    static func isShown(for page: TranscriptedSettingsPage, dismissed: Bool) -> Bool {
-        page == .writing && !dismissed
     }
 }

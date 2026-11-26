@@ -2,67 +2,39 @@
 
 ## What this owns
 
-`Sources/Writing/` is the app side of Writing (shipped in 1.1.67, off until the user turns it on in the Writing tab). It hosts the runtime from `Sources/TranscriptedWriting/` inside Transcripted, writes Save my writing day files, and feeds the Writing tab. Everything here is `@MainActor` app glue; the logic it runs lives in the library.
+`Sources/Writing/` is the app side of opt-in **"Save my writing"** (capture-only, off by default). Users opt in on the **Agent** page (`Sources/UI/Settings/AgentConnectionSettingsPage.swift` → `Sources/UI/Settings/WritingCaptureSettingsCard.swift`) to capture what they type into local, secret-scrubbed Markdown day files (`captures/writing/Writing_YYYY-MM-DD.md`) so AI tools and Today have context across meetings, dictations, and writing.
 
-The library (`Sources/TranscriptedWriting/`) and the keyboard (`Sources/TranscriptedKeyboard/`) have their own `AGENTS.md`. The tab's views are in `Sources/UI/Settings/Writing/` and `Sources/UI/Settings/Pages/WritingSettingsPage.swift`.
+Autocomplete, local LLMs (`llama-server`), GGUF model downloads, Screen Memory, Personal History learning, and Write for Me (`NextSentence`) were spun out; zero LLM downloads and zero Screen Recording permission are required.
+
+The library (`Sources/TranscriptedWriting/`) and the capture-only IMKit keyboard (`Sources/TranscriptedKeyboard/`) have their own `AGENTS.md`.
 
 ## Module
 
 `WritingBridge` in `.agents/modules.json`.
 
-- **Public surface:** `WritingController`, `WritingSettingsModel`, `WritingSetupState`, `WritingSetupPresentation`, `WritingSidebarNewBadge`, `WritingDayFileReader`, `WritingDayFileWriter`, `WritingStorageUsage`, `WritingAnalytics`.
-- **May depend on:** WritingCore, WritingRuntime, Support, Observability. It's the only app module besides UISettings and AppShell that may name the runtime.
-- **No grandfathered crossings.** `WritingSetupPresentation.swift` (the tab's copy) and `WritingSidebarNewBadge.swift` (the sidebar badge's defaults key) live here so the model never names `UI/Settings`. The badge's `isShown(for:dismissed:)` stays next to `TranscriptedSettingsPage`.
+- **Public surface:** `WritingController`, `WritingCaptureCardModel`, `WritingSetupState`, `WritingDayFileReader`, `WritingDayFileWriter`, `WritingStorageUsage`, `WritingAnalytics`.
+- **May depend on:** WritingCore, WritingRuntime, Support, Observability. `WritingCaptureCardModel` bridges `WritingCore` types cleanly so `UISettings` never needs to import `WritingCore`.
 - **WritingCore is a real Swift module** (`TranscriptedWritingCore`). Files here that name its types start with `#if canImport(TranscriptedWritingCore) import TranscriptedWritingCore #endif`.
-- **Tests:** see "Tests" below.
 
 ## Entry points
 
-- `WritingController.swift` — the runtime host. `TranscriptedAppState` owns one, calls `startIfEnabled(log:)` at launch, `handleSystemWake()` on wake and `stop()` at quit; `TranscriptedApp` calls `noteTerminationRequest()`. It starts the keyboard socket (`GhostBrainServerHost`), the `llama-server` helper and its model, Screen Memory, Personal History and the keyboard installer. With only Save my writing on, the model, helper and Screen Memory stay off. The Writing tab calls `applyRunState()` after "Turn on writing" and after any feature toggle.
-- `WritingController+Actions.swift` and `WritingController+Server.swift` — extensions of the controller: the Writing tab's actions (model switch, pause, delete, keyboard install) and the socket server host plus its closures. Stored state stays in the main file, so members the extensions share are internal, not `private`.
-- `WritingSetupState.swift` — whether setup finished, and `WritingActivation`: run once setup is done and at least one feature is on (or the dev-only `WritingDebugEnabled` default). Once setup is done, launch also reaps a helper a crash left running.
-- `WritingSettingsModel.swift` — the Writing tab's state (the two setup screens and their draft, everyday view). One per controller (`shared(for:)`) so a setup in progress survives tab switches. It only reads and asks; every runtime change goes through `WritingController`.
-  Edit setup with both features off commits through `finishSetupStep1()`, preserving setup completion and saved writing while applying the reversible runtime stop; it requests no permissions, model activation or keyboard installation.
-- `WritingRefreshTimers.swift` — the Writing tab's refresh timers, suspended while its window is closed or occluded and resumed on show; Foundation-only so a fast test drives it.
-- `WritingFrontWindowPoller.swift` / `WritingFrontWindowChangeDetector.swift` — Screen Memory's front-window poll: a `DispatchSourceTimer` on its own queue that hops to main only when the front window changes; the pure change rule is in the detector (Foundation-only, fast-tested).
-- `WritingFrontWindowObserver.swift` owns activation observation and that poll. Pause stops both and cancels scaffold prewarming while keeping the helper/cache available; `WritingPauseWakeup` in `WritingSetupState.swift` schedules one expiry callback and refreshes the policy on resume.
-- `WritingDayFileWriter.swift` — Save my writing's host side: builds `WritingDayFileRecorder` against `<capture-library>/writing`, closes idle entries on a timer, flushes at quit, and posts a notification after each append so Home and Today refresh. Entries that close with nothing to scrub go on to Personal History.
-- `WritingDayFileReader.swift` — reads one `Writing_<YYYY-MM-dd>.md` for the tab's Today list. Never writes.
-- `WritingAnalytics.swift` — the two count-only Writing events, through `AnalyticsReporter.track`.
-- `WritingStorageUsage.swift` — byte sizes for the tab's storage meter (models, saved writing, learning data). Never opens file contents.
-- `WritingController+ModelRemoval.swift` — Delete model (`deleteDownloadedModels()`, next to the storage meter; split out because `WritingController.swift` is at its size cap) — turns Autocomplete off if it's on, cancels model work and waits for the helper to exit, then empties the model root through `WritingModelStore.removeAll(under:)` (refuses a symlinked root; never follows links). The sequence is `WritingModelRemoval` in the runtime library, tested with a fake host. Delete all writing never touches the model.
-- `WritingSetupPresentation.swift` — the tab's words and small rules from the approved design (`docs/writing-plan.md`). Foundation plus two WritingCore value types, so the fast tests compile it.
-- `WritingPausableIngest.swift` — wraps Personal History ingest so "Pause for 1 hour" drops typed text (acknowledged, never kept) as well as suggestions.
-- `WritingSidebarNewBadge.swift` — the defaults key the Writing tab sets when setup finishes, which drops the sidebar's "New" badge.
-- `NextSentence/` — Write for Me (Developer Preview, off by default; the one exception to "Writing never sends text"). `NextSentenceController` is owned by `TranscriptedAppState`. Its guards, each with a fast test in `Tests/NextSentenceGuardsTests.swift`:
-  - Only its own key opens it (`NextSentenceKeyGesture`; there's no second shortcut). Another key during a hold cancels the hold, and the key does nothing while dictation or meetings use it too.
-  - `NextSentencePrivacy` refuses secure input, password managers and the Screen Memory exclusion list, and scrubs the draft, window text and title with `WritingSecretScrubber` before anything is sent.
-  - No `claude` process starts before the first press; `NextSentenceWarmPool.stop()` ends every one, including a respawn still starting.
-  - The meaning index only talks to a loopback embedding server, reads the current capture library, and runs a `llama-server` it starts under `NextSentenceTetheredProcess`, so it can't outlive the app.
-  - Its voice is a hand-off take on dictation (`DictationHandOffPolicy`, `Tests/DictationHandOffTests.swift`): words go back to the card, never pasted, with no completion telemetry or notice, and it never starts over or stops the person's own dictation.
+- `WritingController.swift` — the `@MainActor` runtime host. `TranscriptedAppState` owns one, calls `startIfEnabled(log:)` at launch, `handleSystemWake()` on wake, and `stop()` at quit; `TranscriptedApp` calls `noteTerminationRequest()`. Starts only the owner-only unix socket (`GhostBrainServerHost`), the local Markdown day-file writer (`WritingDayFileWriter`), and the keyboard installer (`GhostKeyboardInstallerHost`). Runs only while `Save my writing` is on (or `WritingDebugEnabled` is set).
+- `WritingCaptureCardModel.swift` — `@MainActor` view model for `WritingCaptureSettingsCard` on the Agent page: toggle opt-in, keyboard install/activation status, `All apps` vs `Picked apps` scope, saved-writing byte summary, and "Delete all saved writing".
+- `WritingSetupState.swift` — `WritingSetupState` and `WritingActivation` (Foundation-only for fast tests).
+- `WritingDayFileWriter.swift` — host side of Save my writing: builds `WritingDayFileRecorder` against `<capture-library>/writing`, closes idle entries on a timer, flushes at quit (with recovery journal in app state), and posts a notification after each append so Home and Today refresh.
+- `WritingDayFileReader.swift` — reads one `Writing_<YYYY-MM-dd>.md` for Today. Never writes.
+- `WritingAnalytics.swift` — count-only `writing_setup_completed` event through `AnalyticsReporter.track` (keeps allowlist schema valid with `autocomplete_enabled: "false"`, `model_choice: "none"`).
+- `WritingStorageUsage.swift` — byte size of `Writing_*.md` files on disk (Foundation-only for fast tests). Never opens file contents.
 
 ## Rules
 
-- **Writing never sends text.** Analytics are counts and setup choices only, read from the text-free outcome ledger summary. No app names, bundle IDs, or per-suggestion events. Adding an event is the lockstep edit in `Sources/Observability/AGENTS.md`; run `python3 scripts/dev/check-telemetry-keys.py`.
-- **The app owns every disk write.** The keyboard sends events over the socket; this folder and the library write day files and Personal History. Day-file folders are 0700 and files 0600, and every entry goes through `WritingSecretScrubber` before it lands. `WritingDayFileWriter.defaultPendingDirectory` injects a separate app-owned recovery journal for closed scrubbed entries, never raw/open events. `finishWritingForTermination()` seals batch admission only once its final closed entry is durable. A failed flush asks before Quit (Keep Open / Quit Anyway); logout, restart and shutdown go ahead without asking, so an offline library can't block Quit or an update forever. Delete all erases recovery even when the runtime is stopped.
-- **Paths, preferences and analytics are injected into the library from here.** Don't make `Sources/TranscriptedWriting/` read app types or app paths. UI may use pure Core value types like `TildeModelChoice`.
-- **Off the main thread.** Front-window reads and helper probes don't block the main actor. The keyboard install's copy and signature checks run detached (`GhostKeyboardInstallerHost.installOrUpdate(using:)`); only the Text Input Sources calls, which a UI app must make on main, come back. `TISRegisterInputSource` rebuilds the shared input-source cache under a cross-process file lock (Sentry APPLE-MACOS-6N hung main 5 s on it at launch), so it runs only for a fresh copy or a keyboard Input Sources no longer lists. Screen Memory never reads Transcripted's own windows.
-- **Screen Recording ask.** Meeting-only users never see it, and granting it must not relaunch the app during a meeting.
-- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`, `WritingSetupPresentation`, `WritingSidebarNewBadge`, `WritingRefreshTimers`, `WritingFrontWindowChangeDetector`) stay Foundation-only (plus WritingCore value types). They're in the hand-kept list in `scripts/entrypoints/run-tests.sh`; a new file a fast test needs goes there too.
+- **Writing never sends text.** Analytics are setup booleans/scope only. No app names, bundle IDs, or writing text leave the device.
+- **The app owns every disk write.** The keyboard sends events over the socket; this folder and the library write day files. Day-file folders are 0700 and files 0600, and every closed entry goes through `WritingSecretScrubber` before it lands. `WritingDayFileWriter.defaultPendingDirectory` injects a separate app-owned recovery journal for closed scrubbed entries, never raw/open events. `finishWritingForTermination()` seals batch admission once its final closed entry is durable. Delete all erases recovery even when the runtime is stopped.
+- **Paths, preferences and analytics are injected into the library from here.** Don't make `Sources/TranscriptedWriting/` read app types or app paths.
+- **Off the main thread.** Keyboard install copy and signature checks run detached (`GhostKeyboardInstallerHost.installOrUpdate(using:)`); only Text Input Sources calls return to main, and `TISRegisterInputSource` runs only for a fresh copy or an unlisted keyboard.
+- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`) stay Foundation-only and live in `APP_SOURCES` in `scripts/entrypoints/run-tests.sh`.
 
 ## Tests
 
-- Root fast tests: `Tests/WritingAnalyticsTests.swift`, `Tests/WritingSetupStateTests.swift`, `Tests/WritingPauseWakeupTests.swift`, `Tests/WritingDayFileReaderTests.swift`, `Tests/WritingSetupPresentationTests.swift`, `Tests/WritingRefreshTimersTests.swift`, `Tests/WritingFrontWindowChangeDetectorTests.swift`, and the tab's `Tests/WritingDemoScriptTests.swift`. Run them with `bash run-tests.sh --filter Writing` (case-insensitive substring).
-- Library behavior (recorder, composer, scrubber, Personal History) is tested under `swift test --filter '^TranscriptedWritingTests\.'`.
-- `WritingController` has no unit tests; check it with a real signed build (autocomplete needs a real signing identity, see `Sources/TranscriptedWriting/AGENTS.md`).
-
-```bash
-bash build.sh --no-open
-bash run-tests.sh
-```
-
-## Background
-
-- `docs/writing-plan.md` — the design record and the approved tab copy; code comments cite its sections.
-- `docs/writing-port-ledger.md` — which Tilde file became which file here.
-- `docs/capture-format.md` ("Writing day files") and `docs/storage-paths.md` ("Writing") — the day-file format and every Writing path.
+- Root fast tests: `Tests/WritingAnalyticsTests.swift`, `Tests/WritingSetupStateTests.swift`, `Tests/WritingDayFileReaderTests.swift`. Run with `bash run-tests.sh --filter Writing`.
+- Library behavior (recorder, composer, scrubber, keyboard capture, installer): `TRANSCRIPTED_DISABLE_FILE_LOGGER=1 swift test --filter '^TranscriptedWritingTests\.'`.

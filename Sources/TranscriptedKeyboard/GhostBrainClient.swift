@@ -4,9 +4,8 @@ import TranscriptedWritingCore
 import Foundation
 import Security
 
-/// One cancellable, newline-delimited streaming request to Tilde's owner-only
-/// unix socket. The connection is closed on task cancellation, which also
-/// gives the app a concrete disconnect signal to cancel model inference.
+/// Authenticated client for sending writing-capture batches to Transcripted's
+/// owner-only unix socket.
 enum GhostBrainClient {
     static var socketPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -23,29 +22,6 @@ enum GhostBrainClient {
         attributes: .concurrent
     )
 
-    /// `onPartial` is invoked on the client's worker queue with each stable
-    /// streamed prefix (a non-final line carrying non-empty text, plus the
-    /// app's register receipt); callers must hop to their own actor.
-    static func complete(
-        context: String,
-        app: String?,
-        fieldSessionIdentifier: String? = nil,
-        experimentArm: String? = nil,
-        opportunityID: String? = nil,
-        onPartial: (@Sendable (GhostBrainResponse) -> Void)? = nil
-    ) async -> GhostBrainResponse {
-        await send(
-            GhostBrainRequest(
-                context: context,
-                app: app,
-                fieldSessionIdentifier: fieldSessionIdentifier,
-                experimentArm: experimentArm,
-                opportunityID: opportunityID
-            ),
-            onPartial: onPartial
-        )
-    }
-
     static func recordPersonalHistory(
         _ events: [PersonalHistoryEvent]
     ) async -> GhostBrainResponse {
@@ -53,25 +29,18 @@ enum GhostBrainClient {
         return await send(GhostBrainRequest(personalHistoryEvents: events))
     }
 
-    static func notifyScreenMemory(_ event: ScreenMemoryInputEvent) async -> GhostBrainResponse {
-        await send(GhostBrainRequest(screenMemoryEvent: event))
-    }
-
     static func personalHistoryPayloadFits(_ events: [PersonalHistoryEvent]) -> Bool {
         PersonalHistoryEvent.validBatch(events)
             && encoded(GhostBrainRequest(personalHistoryEvents: events)) != nil
     }
 
-    private static func send(
-        _ request: GhostBrainRequest,
-        onPartial: (@Sendable (GhostBrainResponse) -> Void)? = nil
-    ) async -> GhostBrainResponse {
+    private static func send(_ request: GhostBrainRequest) async -> GhostBrainResponse {
         guard let payload = encoded(request) else { return .invalidRequest }
         guard let connection = Connection(path: socketPath) else { return .unavailable }
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 worker.async {
-                    continuation.resume(returning: connection.run(payload: payload, onPartial: onPartial))
+                    continuation.resume(returning: connection.run(payload: payload))
                 }
             }
         } onCancel: {
@@ -87,8 +56,6 @@ enum GhostBrainClient {
 
     private final class Connection: @unchecked Sendable {
         private let fd: Int32
-        /// Idle deadline: every received line extends it, so a stream that is
-        /// still producing stable words is never torn down mid-sentence.
         private var deadline: UInt64
         private let lock = NSLock()
         private var cancelled = false
@@ -124,26 +91,14 @@ enum GhostBrainClient {
             lock.unlock()
         }
 
-        func run(
-            payload: Data,
-            onPartial: (@Sendable (GhostBrainResponse) -> Void)? = nil
-        ) -> GhostBrainResponse {
+        func run(payload: Data) -> GhostBrainResponse {
             defer { finish() }
             guard !isCancelled, connect(), !isCancelled, verifyPeer() else { return .unavailable }
             guard write(payload + [0x0A]) else { return timedOut ? .timeout : .unavailable }
-            while !timedOut, !isCancelled {
-                guard let line = readLine(maximumBytes: 8_192) else {
-                    return timedOut ? .timeout : .unavailable
-                }
-                deadline = DispatchTime.now().uptimeNanoseconds + timeoutNanoseconds
-                let event = GhostBrainResponse.decode(line)
-                if !event.final {
-                    if let text = event.suggestion, !text.isEmpty { onPartial?(event) }
-                    continue
-                }
-                return event
+            guard !timedOut, !isCancelled, let line = readLine(maximumBytes: 8_192) else {
+                return timedOut ? .timeout : .unavailable
             }
-            return timedOut ? .timeout : .unavailable
+            return GhostBrainResponse.decode(line)
         }
 
         private func connect() -> Bool {
@@ -204,13 +159,6 @@ enum GhostBrainClient {
 #endif
         }
 
-        /// Two Security-framework identity resolutions (the app's and our
-        /// own) ran on every completion request — per typed word — and were
-        /// the largest fixed cost on the socket. A live process instance
-        /// cannot change its code, so the answer is remembered per (pid,
-        /// kernel start time); see `ProcessPeerIdentityCache`. When the
-        /// start time cannot be read the identity is resolved uncached,
-        /// exactly as before.
         private static let identityCache = ProcessPeerIdentityCache<CodeSigningIdentity>()
 
         private static func cachedIdentity(pid: pid_t) -> CodeSigningIdentity? {

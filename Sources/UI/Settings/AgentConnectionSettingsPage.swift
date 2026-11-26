@@ -9,6 +9,8 @@ import SwiftUI
 /// `transcripted-mcp` helper. There is no Disconnect: the connector has no
 /// safe way to remove its entry from an agent's config yet.
 struct AgentConnectionSettingsPage: View {
+    let writingController: WritingController
+
     private enum RowPhase: Equatable {
         case idle
         case connecting
@@ -44,6 +46,7 @@ struct AgentConnectionSettingsPage: View {
                 agentListSection
             }
             .frame(maxWidth: 620, alignment: .leading)
+            WritingCaptureSettingsCard(controller: writingController)
             advancedSection
         }
         .accessibilityElement(children: .contain)

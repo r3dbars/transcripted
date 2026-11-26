@@ -135,13 +135,14 @@ func testSettingsRecentCaptureRefreshPolicy() {
     runSuite("TranscriptedSettingsPage keeps user-facing navigation metadata stable") {
         assertEqual(TranscriptedSettingsPage.connectAgent.analyticsValue, "connect_agent", "agent page analytics should stay snake_case")
         assertEqual(TranscriptedSettingsPage.allCases.first, .home, "Meetings should lead the page list")
-        assertEqual(SettingsSidebarSection.primarySection.pages, [.home, .dictations, .writing, .people, .connectAgent, .today], "Meetings leads the sidebar and Stats sits at the end")
+        assertEqual(SettingsSidebarSection.primarySection.pages, [.home, .dictations, .people, .connectAgent, .today], "Meetings leads the sidebar and Stats sits at the end")
         assertEqual(TranscriptedSettingsPage.home.navigationShortcutKey, "1", "Meetings should own ⌘1")
         assertEqual(TranscriptedSettingsPage.dictations.navigationShortcutKey, "2", "Dictations should move to ⌘2")
-        assertEqual(TranscriptedSettingsPage.writing.navigationShortcutKey, "3", "Writing takes ⌘3, right after Dictations")
-        assertEqual(TranscriptedSettingsPage.people.navigationShortcutKey, "4", "Speakers should move to ⌘4")
-        assertEqual(TranscriptedSettingsPage.connectAgent.navigationShortcutKey, "5", "Agent should move to ⌘5")
-        assertEqual(TranscriptedSettingsPage.today.navigationShortcutKey, "6", "Stats should own ⌘6")
+        assertEqual(TranscriptedSettingsPage.people.navigationShortcutKey, "3", "Speakers should move to ⌘3")
+        assertEqual(TranscriptedSettingsPage.connectAgent.navigationShortcutKey, "4", "Agent should move to ⌘4")
+        assertEqual(TranscriptedSettingsPage.today.navigationShortcutKey, "5", "Stats should own ⌘5")
+        assertEqual(TranscriptedSettingsPage.writing.navigationShortcutKey, nil, "retired Writing tab has no Go shortcut")
+        assertEqual(TranscriptedSettingsPage.writing.redirected, .connectAgent, "legacy Writing deep links redirect to Agent")
         assertEqual(TranscriptedSettingsPage.general.navigationShortcutKey, nil, "the gear-gated settings page has no Go shortcut")
         assertEqual(TranscriptedSettingsPage.home.rawValue, "home", "Meetings keeps the home raw value for automation ids and analytics")
         assertEqual(TranscriptedSettingsPage.home.analyticsValue, "home", "Meetings analytics page id should stay home")
@@ -150,35 +151,14 @@ func testSettingsRecentCaptureRefreshPolicy() {
         assertEqual(TranscriptedSettingsPage.today.automationIdentifier, "transcripted.settings.sidebar.today", "Stats sidebar automation id stays stable")
         assertEqual(TranscriptedSettingsPage.today.title, "Stats", "Stats page title")
         assertEqual(TranscriptedSettingsPage.today.systemImage, "chart.bar.fill", "Stats uses the bar chart symbol")
-        assertEqual(TranscriptedSettingsPage.today.navigationHelp, "Stats  ⌘6", "Stats row tooltip names its shortcut")
+        assertEqual(TranscriptedSettingsPage.today.navigationHelp, "Stats  ⌘5", "Stats row tooltip names its shortcut")
         assertEqual(TranscriptedSettingsPage.connectAgent.title, "Agent", "agent page title should stay short")
         assertEqual(TranscriptedSettingsPage.people.title, "Speakers", "people page should stay focused on speaker naming")
-        assertEqual(TranscriptedSettingsPage.writing.title, "Writing", "Writing page title")
-        assertEqual(TranscriptedSettingsPage.writing.systemImage, "keyboard.fill", "Writing uses a filled symbol like the other sidebar rows")
-        assertEqual(TranscriptedSettingsPage.writing.automationIdentifier, "transcripted.settings.sidebar.writing", "Writing sidebar automation id")
-        assertEqual(TranscriptedSettingsPage.writing.analyticsValue, "writing", "Writing analytics page id")
-        assertEqual(TranscriptedSettingsPage.writing.navigationHelp, "Writing  ⌘3", "Writing row tooltip names its shortcut")
         assertEqual(
             Set(TranscriptedSettingsPage.allCases.map(\.rawValue)).count,
             TranscriptedSettingsPage.allCases.count,
             "settings page raw values should stay unique for selection persistence"
         )
-    }
-
-    runSuite("WritingSidebarNewBadge shows New on Writing until setup dismisses it") {
-        assertEqual(
-            WritingSidebarNewBadge.dismissedDefaultsKey,
-            "WritingSidebarNewBadgeDismissed",
-            "the Writing page sets this key when setup finishes, so it must not drift"
-        )
-        assertTrue(WritingSidebarNewBadge.isShown(for: .writing, dismissed: false), "Writing shows New before setup")
-        assertFalse(WritingSidebarNewBadge.isShown(for: .writing, dismissed: true), "New goes away once dismissed")
-        for page in TranscriptedSettingsPage.allCases where page != .writing {
-            assertFalse(
-                WritingSidebarNewBadge.isShown(for: page, dismissed: false),
-                "\(page.rawValue) should never show the Writing badge"
-            )
-        }
     }
 
     runSuite("SettingsDashboardRefreshPolicy.shouldStartRefresh — allows the first passive refresh") {

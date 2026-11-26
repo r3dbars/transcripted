@@ -5,27 +5,19 @@ import AppKit
 import Foundation
 
 extension Notification.Name {
-    /// Posted on the main thread after Save my writing appends to a day file.
-    /// The object is the file's URL. Home and Today refresh on it.
+    /// Posted on the main thread after opt-in writing capture appends to a day
+    /// file. The object is the file's URL. Home and Today refresh on it.
     static let writingDayFileDidSave = Notification.Name("Transcripted.WritingDayFileDidSave")
 }
 
-/// Save my writing's host side: builds the `WritingDayFileRecorder` against
-/// the capture library, closes idle entries on a timer, and flushes at quit.
-/// Entries that close with nothing to scrub go on to Personal History through
-/// `personalHistory`.
-/// The recorder, composer and formatter live in `TranscriptedWriting/Runtime`
-/// so they're tested under `swift test`; this owns only what needs AppKit or
-/// the app's paths.
+/// Host side of opt-in writing capture: builds `WritingDayFileRecorder`
+/// against `<capture-library>/writing`, closes idle entries on a timer,
+/// rescrubs older day files when scrubber rules advance, and flushes at quit.
 @MainActor
 final class WritingDayFileWriter {
-    /// How often an entry idle for 2 minutes is looked for.
     private static let idleSweepInterval: TimeInterval = 15
     private static let idleSweepTolerance: TimeInterval = 3
 
-    /// `<capture-library>/writing`, from the storage-path helper that owns the
-    /// capture-library folder names. The pure form doesn't create the folder;
-    /// `WritingDayFileStore` creates it 0700 on first write.
     nonisolated static let defaultDirectory: @Sendable () -> URL = {
         FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
     }
@@ -37,24 +29,16 @@ final class WritingDayFileWriter {
     }
 
     let recorder: WritingDayFileRecorder
-    /// Where cleared entries go to Personal History.
-    let personalHistory: PersonalHistoryRelay
     private var idleTimer: Timer?
-    /// Cleared at `stop()` so a rescrub still running stops between files.
     private let rescrubAllowed = RescrubFlag()
 
-    /// `problemStarted` runs on the main actor once per write problem (see
-    /// `WritingDayFileRecorder.lastWriteFailure`), with the error case only.
     init(
         directory: @escaping @Sendable () -> URL,
         pendingDirectory: @escaping @Sendable () -> URL,
         preferences: @escaping @Sendable () -> WritingPreferences,
-        personalHistory: any PersonalHistoryIngesting,
         problemStarted: @escaping @MainActor @Sendable (WritingDayFileStore.StoreError) -> Void = { _ in }
     ) {
         let names = WritingAppDisplayNames()
-        let relay = PersonalHistoryRelay(personalHistory: personalHistory)
-        self.personalHistory = relay
         recorder = WritingDayFileRecorder(
             directory: directory,
             pendingDirectory: pendingDirectory,
@@ -70,13 +54,10 @@ final class WritingDayFileWriter {
             },
             writeProblemStarted: { error in
                 Task { @MainActor in problemStarted(error) }
-            },
-            releaseToPersonalHistory: { relay.send($0) }
+            }
         )
     }
 
-    /// The `WritingSecretScrubber.rulesVersion` the day files on disk were
-    /// last scrubbed with.
     nonisolated static let scrubbedRulesVersionKey = "WritingDayFilesScrubbedRulesVersion"
 
     func start() {
@@ -85,20 +66,12 @@ final class WritingDayFileWriter {
         let timer = Timer.scheduledTimer(withTimeInterval: Self.idleSweepInterval, repeats: true) { _ in
             DispatchQueue.global(qos: .utility).async { recorder.closeIdleEntries() }
         }
-        // Lets macOS coalesce the sweep with other wakeups. The 2-minute idle
-        // deadline is the recorder's; this only moves when it's checked.
         timer.tolerance = Self.idleSweepTolerance
         idleTimer = timer
-        // Replay durable entries on start, not only after new typing arrives.
         DispatchQueue.global(qos: .utility).async { recorder.closeIdleEntries() }
         rescrubOlderDayFilesIfNeeded()
     }
 
-    /// Once per scrubber rules version: files written before the scrubber
-    /// (or under older rules) get the current rules. Retried next launch if
-    /// Writing stopped part way or a file couldn't be written; a file that
-    /// can never be read as a day file (a symlink, another user's file, not
-    /// UTF-8) is skipped and doesn't hold the version back.
     private func rescrubOlderDayFilesIfNeeded() {
         let version = WritingSecretScrubber.rulesVersion
         guard UserDefaults.standard.integer(forKey: Self.scrubbedRulesVersionKey) < version else { return }
@@ -121,9 +94,6 @@ final class WritingDayFileWriter {
         }
     }
 
-    /// The final flush. Synchronous on purpose: it runs from the app's quit.
-    /// The open entry's day-file write finishes here; its Personal History
-    /// batch is handed off and lands only if the app lives long enough.
     @discardableResult
     func stop() -> Bool {
         guard recorder.flush() else { return false }
@@ -134,7 +104,6 @@ final class WritingDayFileWriter {
     }
 }
 
-/// A flag the rescrub reads from its background queue.
 private final class RescrubFlag: @unchecked Sendable {
     private let lock = NSLock()
     private var stored = false
@@ -146,8 +115,6 @@ private final class RescrubFlag: @unchecked Sendable {
     }
 }
 
-/// `Source app:` names. Asks the running app, then the installed bundle;
-/// reads nothing else about the app.
 private final class WritingAppDisplayNames: @unchecked Sendable {
     private let lock = NSLock()
     private var names: [String: String] = [:]

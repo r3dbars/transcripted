@@ -4,9 +4,9 @@ import TranscriptedWritingCore
 import Foundation
 import Security
 
-/// Owner-only unix socket between Tilde and its input method. Completion
-/// context remains memory-only; explicit Personal History batches are routed
-/// to the app-owned encrypted store.
+/// Owner-only unix socket between Transcripted and its capture keyboard.
+/// Accepts only authenticated writing-capture batches from the signed keyboard
+/// and routes them to the app-owned Markdown day-file recorder.
 final class GhostBrainServerHost: @unchecked Sendable {
     static var socketPath: String {
         FileManager.default.homeDirectoryForCurrentUser
@@ -16,106 +16,15 @@ final class GhostBrainServerHost: @unchecked Sendable {
             .path
     }
 
-    private let runtime: LlamaServerProcessHost
-    private let engine: LlamaCompletionEngine
     private let personalHistory: any PersonalHistoryIngesting
-    /// Fired whenever a completion request reaches the socket — a bare
-    /// timestamp pulse, never the request's content. Screen Memory's
-    /// typing-pause trigger uses this as its "is a completion session
-    /// active" signal; this file otherwise knows nothing about Screen
-    /// Memory and never sees a `ScreenSnapshot`.
-    private let onCompletionActivity: (@Sendable () -> Void)?
-    /// Content-free field lifecycle pulses from the IME. The app turns
-    /// these into Screen Memory capture triggers; no document text is
-    /// carried by this callback.
-    private let onScreenMemoryEvent: (@Sendable (ScreenMemoryInputEvent) -> Void)?
-    /// Screen Memory plan Phase 2 PR 2b: resolves the current request's
-    /// scene, already settings-gated by whoever constructs this host (see
-    /// `AppDelegate`). `nil` — no provider, or the provider itself returning
-    /// `nil` — means exactly today's (no-context) completion behavior; this
-    /// file never inspects capture state itself.
-    private let sceneProvider: (@Sendable (
-        String?, String, String?, TypingTargetIdentity?
-    ) async -> ScreenScene.Scene?)?
-    /// Resolves the exact current field/window. Production fails closed when
-    /// it cannot prove this identity; tests and proof hosts may omit it.
-    private let targetProvider: (@Sendable (String?, String?) -> TypingTargetIdentity?)?
-    /// 2026-08-16 owner directive: Screen Recording permission is required
-    /// for Tilde to suggest at all, not merely to enrich suggestions with
-    /// screen context. `nil` means "always allowed" (release-proof mode and
-    /// tests that don't care about this gate); `WritingController` wires the
-    /// real closure to `WritingSuggestionsGate.allows` (which ends in
-    /// `ScreenMemoryStatus.evaluate(...).allowsSuggestions`, Core, pure,
-    /// tested), read fresh on every request so a permission revoked or a
-    /// toggle flipped mid-session takes effect on the very next completion,
-    /// and a permission granted mid-session resumes suggestions on the next
-    /// completion too — no restart, no cached state to go stale.
-    /// Transcripted: takes the request's app, so the Writing app scope and
-    /// the exclusion list silence suggestions too (a Tilde bug fix).
-    private let suggestionsGate: (@Sendable (String?) -> Bool)?
-    /// "Personal suggestions (experimental)". Read fresh on every completion
-    /// request, same shape and contract as `suggestionsGate`: `nil` means "always off" (release-
-    /// proof mode and tests that don't care about this feature), so
-    /// existing call sites are unaffected by this feature's addition.
-    private let personalSuggestionsGate: (@Sendable () -> Bool)?
-    /// The read-only lookup into `PersonalHistoryController`'s live trained
-    /// model (see its `personalNextWordPrediction` doc comment). Takes the
-    /// already-extracted tail words and the request's app bundle
-    /// identifier — per-app exclusions are checked on the other end of this
-    /// closure, inside the controller, using the exact same
-    /// `personalHistoryExcludedApps` list capture already enforces (the
-    /// covenant). `nil` means "no personal serving available" (release-
-    /// proof mode and tests).
-    private let personalNextWordProvider: (@Sendable ([String], String?) async -> PersonalNextWordPrediction?)?
-    private let productProfile: TildeProductProfile
-    /// The whole behaviour the app serves, stamped on every response line
-    /// so the keyboard runs the same interaction policy and every outcome
-    /// event names the configuration that produced it.
-    private let configuration: TildeEffectiveConfiguration
     private let queue = DispatchQueue(label: "com.justinbetker.draft.ghost-brain-server")
     private var listenerFD: Int32 = -1
     private var lockFD: Int32 = -1
     private var source: DispatchSourceRead?
     private var ownsSocket = false
 
-    init(
-        runtime: LlamaServerProcessHost,
-        personalHistory: any PersonalHistoryIngesting,
-        sceneProvider: (@Sendable (
-            String?, String, String?, TypingTargetIdentity?
-        ) async -> ScreenScene.Scene?)? = nil,
-        targetProvider: (@Sendable (String?, String?) -> TypingTargetIdentity?)? = nil,
-        onCompletionActivity: (@Sendable () -> Void)? = nil,
-        onScreenMemoryEvent: (@Sendable (ScreenMemoryInputEvent) -> Void)? = nil,
-        suggestionsGate: (@Sendable (String?) -> Bool)? = nil,
-        personalSuggestionsGate: (@Sendable () -> Bool)? = nil,
-        personalNextWordProvider: (@Sendable ([String], String?) async -> PersonalNextWordPrediction?)? = nil,
-        configuration: TildeEffectiveConfiguration? = nil,
-        productProfile: TildeProductProfile = TildeModelSelection.completionProfile(
-            for: TildeProductProfile.current,
-            productionChoice: TildeModelSelection.choice(for: TildeProductProfile.current)
-        )
-    ) {
-        self.runtime = runtime
-        self.productProfile = productProfile
-        self.configuration = configuration ?? TildeEffectiveConfiguration.resolve(
-            build: .current,
-            completionProfile: productProfile,
-            modelIdentifier: "unspecified"
-        )
-        self.engine = LlamaCompletionEngine(
-            baseURL: runtime.baseURL,
-            accessKey: runtime.accessKey,
-            productProfile: productProfile
-        )
+    init(personalHistory: any PersonalHistoryIngesting) {
         self.personalHistory = personalHistory
-        self.sceneProvider = sceneProvider
-        self.targetProvider = targetProvider
-        self.onCompletionActivity = onCompletionActivity
-        self.onScreenMemoryEvent = onScreenMemoryEvent
-        self.suggestionsGate = suggestionsGate
-        self.personalSuggestionsGate = personalSuggestionsGate
-        self.personalNextWordProvider = personalNextWordProvider
     }
 
     func start() -> Bool {
@@ -136,6 +45,13 @@ final class GhostBrainServerHost: @unchecked Sendable {
             }
             lockFD = -1
         }
+    }
+
+    static func personalHistoryResponse(
+        _ events: [PersonalHistoryEvent],
+        ingest: any PersonalHistoryIngesting
+    ) async -> GhostBrainResponse {
+        await ingest.recordingResponse(events)
     }
 
     private func bindAndListen() -> Bool {
@@ -219,11 +135,6 @@ final class GhostBrainServerHost: @unchecked Sendable {
         var noSigpipe: Int32 = 1
         setsockopt(connection, SOL_SOCKET, SO_NOSIGPIPE, &noSigpipe, socklen_t(MemoryLayout<Int32>.size))
 
-        // Clock starts here, not inside the task: the wait for a cooperative
-        // pool slot is part of accept-to-parsed, and under load it is exactly
-        // the tail this measurement exists to expose. Monotonic, so a clock
-        // step cannot fabricate a 0ms sample for the percentiles.
-        let acceptedAt = ProcessInfo.processInfo.systemUptime
         Task.detached(priority: .userInitiated) { [weak self] in
             defer { close(connection) }
             guard let self else { return }
@@ -231,382 +142,29 @@ final class GhostBrainServerHost: @unchecked Sendable {
                 _ = Self.write(.unavailable, to: connection)
                 return
             }
-            guard case let .success(request) = Self.readRequest(
-                connection,
-                allowingPunctuation: self.configuration.interaction.requestsAfterPunctuation,
-                allowingMidWord: self.configuration.interaction.requestsMidWordContinuation
-            ) else {
+            guard case let .success(request) = Self.readRequest(connection) else {
                 _ = Self.write(.invalidRequest, to: connection)
                 return
             }
-            // `authorizedPeer` resolves two full code-signing identities (the
-            // peer's and our own) per accepted connection; that plus the wire
-            // read is the most expensive fixed cost on the request path, and it
-            // runs before `ghost-request-timing` starts counting. Its own event
-            // rather than a second field on that one: a second timing field
-            // would re-key the existing series and hand its whole-request
-            // budget to this segment alone, leaving the sum unbudgeted.
-            DiagnosticsLog.shared.record("ghost-handshake-timing", metadata: [
-                "handshakeMilliseconds": String(Self.milliseconds(since: acceptedAt)),
-            ])
-            if case let .personalHistory(events) = request {
+            switch request {
+            case let .personalHistory(events):
                 let response = await Self.personalHistoryResponse(events, ingest: self.personalHistory)
                 _ = Self.write(response, to: connection)
-                return
-            }
-            // Transcripted: a newer keyboard's events this app can't read.
-            // Terminal, so the keyboard drops them instead of retrying.
-            if case let .unsupportedPersonalHistory(rejectedEventIDs) = request {
+            case let .unsupportedPersonalHistory(rejectedEventIDs):
                 DiagnosticsLog.shared.record("personal-history-unsupported-version", metadata: [:])
                 _ = Self.write(.unsupported(rejectedEventIDs: rejectedEventIDs), to: connection)
-                return
-            }
-            if case let .screenMemory(event) = request {
-                self.onScreenMemoryEvent?(event)
-                _ = Self.write(.recorded, to: connection)
-                return
-            }
-            guard case let .completion(completionRequest) = request else { return }
-            // "P99 at every section" (2026-08-18): request total, parse to
-            // response write. `defer` — not a single emit call at the
-            // bottom of the closure — so every early return below (runtime
-            // not ready, suggestions gate silence, sensitive-scene silence,
-            // plus the normal completed path) still reports its own
-            // duration, the same way `defer { close(connection) }` above
-            // already guarantees cleanup on every exit.
-            let requestStartedAt = Date()
-            defer {
-                DiagnosticsLog.shared.record("ghost-request-timing", metadata: [
-                    "requestMilliseconds": String(Self.milliseconds(from: requestStartedAt, to: Date())),
-                ])
-            }
-            self.onCompletionActivity?()
-            let opportunityID = completionRequest.opportunityID
-            guard await self.runtime.isReadyForCompletion() else {
-                _ = self.writeStamped(
-                    GhostBrainResponse.unavailable.stamped(
-                        opportunityID: opportunityID, reason: .runtimeUnavailable, generated: false
-                    ),
-                    to: connection
-                )
-                return
-            }
-            // All-or-nothing gate (2026-08-16 owner directive): `.silence`,
-            // never `.unavailable` — `.unavailable` tells the IME the brain
-            // itself is missing and to try to summon it back
-            // (`GhostInputController.summonBrainIfNeeded`), which is wrong
-            // here: the app and model are fully up, Tilde is simply
-            // withholding a suggestion by policy. `.silence` is the same
-            // "nothing to show this time" outcome an ordinary empty
-            // completion already produces, so the IME does nothing special
-            // and nothing gets logged as a failure.
-            guard self.suggestionsGate?(completionRequest.app) ?? true else {
-                _ = self.writeStamped(.silence(reason: .suggestionsPaused, opportunityID: opportunityID), to: connection)
-                return
-            }
-
-            let expectedTarget = self.targetProvider?(
-                completionRequest.app,
-                completionRequest.fieldSessionIdentifier
-            )
-            if self.targetProvider != nil, expectedTarget == nil {
-                _ = self.writeStamped(.silence(reason: .fieldTargetLost, opportunityID: opportunityID), to: connection)
-                return
-            }
-            let targetIsCurrent: @Sendable () -> Bool = { [targetProvider = self.targetProvider] in
-                guard let targetProvider else { return true }
-                return targetProvider(
-                    completionRequest.app,
-                    completionRequest.fieldSessionIdentifier
-                ) == expectedTarget
-            }
-
-            // Read-only and fast (an actor property read, not a capture) —
-            // resolved before the completion Task starts so the request
-            // that follows already carries whatever context exists.
-            let scene = await self.sceneProvider?(
-                completionRequest.app,
-                completionRequest.context,
-                completionRequest.fieldSessionIdentifier,
-                expectedTarget
-            )
-            guard targetIsCurrent() else {
-                _ = self.writeStamped(.silence(reason: .fieldTargetLost, opportunityID: opportunityID), to: connection)
-                return
-            }
-
-            // Trust-critical fix (2026-08-16, build 2705 dogfood): a grief
-            // conversation produced a garbled-relationship suggestion and,
-            // worse, a lateness cliché overpowering visible grief context.
-            // Small models cannot reliably do relationship reasoning or
-            // grief register, so when the current scene is emotionally
-            // sensitive Tilde stays silent rather than guesses — same
-            // `.silence` outcome (never `.unavailable`) as the permission
-            // gate above, so the IME treats it as an ordinary empty
-            // completion. Count-only diagnostic: never the matched category
-            // or any scene text, only that suppression happened.
-            if SensitiveScenePolicy.isSensitive(scene: scene) {
-                _ = self.writeStamped(.silence(reason: .sensitiveScene, opportunityID: opportunityID), to: connection)
-                DiagnosticsLog.shared.record("suggestion-suppressed", metadata: ["reason": "sensitive-scene"])
-                return
-            }
-            if let reason = SceneSuggestionPolicy.suppressionReason(
-                scene: scene,
-                textBeforeCursor: completionRequest.context,
-                options: self.productProfile.sceneSuggestionOptions
-            ) {
-                _ = self.writeStamped(
-                    .silence(reason: SuggestionDecisionReason(scene: reason), opportunityID: opportunityID),
-                    to: connection
-                )
-                DiagnosticsLog.shared.record(
-                    "suggestion-suppressed",
-                    metadata: ["reason": reason.rawValue]
-                )
-                return
-            }
-
-            // Read fresh, before either task starts, so the personal lookup
-            // (if any) runs CONCURRENTLY with the llama call, not after it —
-            // "never lengthen latency".
-            let personalSuggestionsEnabled = self.personalSuggestionsGate?() ?? false
-            // The register the generator composes with: the same pure
-            // function of the same scene and host the engine applies, sent
-            // back on every response line so the outcome ledger records
-            // what actually ran instead of re-deriving a register from the
-            // host bundle (which calls a Screen-Memory chat reply in a
-            // browser "prose").
-            let register = ContinuationRegister.following(
-                scene: scene,
-                hostBundleIdentifier: completionRequest.app
-            )
-            // The provider resolves the race itself when it finishes, so every
-            // waiter (the streaming gate, the terminal await) registers with
-            // the race and can be released by its own deadline; nothing is
-            // ever left blocked on the provider's task.
-            let personalRace: PersonalLookupRace? = {
-                guard personalSuggestionsEnabled, self.personalNextWordProvider != nil else {
-                    return nil
-                }
-                let tailWords = Self.personalTailWords(fromContext: completionRequest.context)
-                guard !tailWords.isEmpty else { return nil }
-                return PersonalLookupRace()
-            }()
-            let personalPredictionTask: Task<Void, Never>? = personalRace.map { race in
-                let tailWords = Self.personalTailWords(fromContext: completionRequest.context)
-                let provider = self.personalNextWordProvider!
-                return Task { race.resolve(await provider(tailWords, completionRequest.app)) }
-            }
-            // Stream stable complete-word prefixes to peers that asked for
-            // them. A personal prediction may replace the base ghost's first
-            // word, so when one is actually racing the sink holds the first
-            // prefix for a bounded window rather than giving up streaming
-            // for the whole request (see `PartialResponseSink`).
-            let configuration = self.configuration
-            let midWordContext = RawContinuationPrompt.endsMidWord(completionRequest.context)
-            let partials = PartialResponseSink(
-                enabled: completionRequest.supportsStreamingResponses,
-                holdingForPersonal: personalPredictionTask != nil,
-                register: register,
-                midWordContext: midWordContext,
-                opportunityID: opportunityID,
-                holdDeadlineNanoseconds: Self.personalStreamHoldNanoseconds,
-                targetIsCurrent: targetIsCurrent,
-                write: { response in
-                    Self.write(response.stamped(configuration: configuration), to: connection)
-                }
-            )
-            let completion = Task {
-                try await self.engine.decide(
-                    textBeforeCursor: completionRequest.context,
-                    appBundleIdentifier: completionRequest.app,
-                    scene: scene,
-                    onPartialSuggestion: { partials.send($0, firstStableWordMilliseconds: $1) }
-                )
-            }
-            partials.onWriteFailure = { completion.cancel() }
-            // The gate must learn the answer as soon as it exists rather than
-            // after generation finishes; its waiter is released by the same
-            // deadline the terminal await uses.
-            // Its clock is the request's, not the 250 ms terminal deadline: a
-            // late answer that still precedes a slow model's first partial
-            // must reach the gate. The waiter leaves the race when this task
-            // is cancelled at the end of the request.
-            let personalObserver: Task<Void, Never>? = personalRace.map { race in
-                Task { [weak partials] in
-                    if case let .predicted(prediction) = await race.value(
-                        deadlineNanoseconds: Self.personalObserverCeilingNanoseconds
-                    ) {
-                        partials?.resolvePersonal(prediction)
-                    }
-                }
-            }
-            let disconnect = DispatchSource.makeReadSource(
-                fileDescriptor: connection,
-                queue: .global(qos: .userInitiated)
-            )
-            disconnect.setEventHandler {
-                var byte: UInt8 = 0
-                let count = recv(connection, &byte, 1, MSG_PEEK | MSG_DONTWAIT)
-                if count == 0 || (count < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR) {
-                    completion.cancel()
-                    personalPredictionTask?.cancel()
-                }
-            }
-            disconnect.resume()
-            let result = await completion.result
-            // No partial may be written from here on: the terminal line is
-            // next, and a held prefix flushed after it would land inside or
-            // behind the answer it is supposed to precede.
-            partials.finish()
-            let personalPrediction: PersonalNextWordPrediction?
-            switch result {
-            case .success:
-                personalPrediction = await Self.awaitPersonalPrediction(personalRace)
-            case .failure:
-                // This result is about to become an error/timeout response
-                // and the personal prediction would be discarded either
-                // way — don't let a slow personal lookup hold up writing it.
-                personalPredictionTask?.cancel()
-                personalPrediction = nil
-            }
-            personalObserver?.cancel()
-            // Whatever the terminal wait decided, the provider's work is over:
-            // a lookup that missed its deadline must not queue behind the
-            // next request's on the shared actor.
-            personalPredictionTask?.cancel()
-            if personalSuggestionsEnabled, completionRequest.supportsStreamingResponses {
-                DiagnosticsLog.shared.record(
-                    "personal-stream-hold",
-                    metadata: partials.holdDiagnostics()
-                )
-            }
-            await withCheckedContinuation { continuation in
-                disconnect.setCancelHandler { continuation.resume() }
-                disconnect.cancel()
-            }
-            guard !completion.isCancelled else { return }
-            guard targetIsCurrent() else {
-                _ = self.writeStamped(.silence(reason: .fieldTargetLost, opportunityID: opportunityID), to: connection)
-                return
-            }
-
-            let response: GhostBrainResponse
-            let servedMetadata: [String: String]?
-            var source: PersonalSuggestionSource?
-            switch result {
-            case let .success(decision):
-                let baseText = decision.suggestion.map {
-                    Self.servedText($0.visibleText, midWord: midWordContext)
-                } ?? ""
-                var text = baseText
-                if personalSuggestionsEnabled {
-                    // `streamedPrefix` is the grow-only promise: a prefix
-                    // already on screen is never replaced, so a personal
-                    // answer that arrives after the stream opened loses to
-                    // the base ghost the writer is reading.
-                    let applied = PersonalSuggestionPolicy.finalSuggestion(
-                        baseGhost: baseText,
-                        personalPrediction: personalPrediction,
-                        streamedPrefix: partials.didStream
-                    )
-                    text = applied.text
-                    source = applied.source
-                }
-                // The receipt names the engine's reason when nothing is
-                // served; a base candidate the personal layer emptied is
-                // an empty output, not a policy verdict the engine reached.
-                let reason: SuggestionDecisionReason = text.isEmpty
-                    ? (decision.suggestion == nil ? decision.reason : .emptyOutput)
-                    : .shown
-                response = GhostBrainResponse.suggestion(
-                    text,
-                    register: register,
-                    source: TextFreeCandidateSource(personal: source)
-                ).stamped(
-                    opportunityID: opportunityID,
-                    reason: reason,
-                    generated: decision.generated,
-                    generatorMilliseconds: decision.generatorMilliseconds,
-                    firstStableWordMilliseconds: decision.firstStableWordMilliseconds
-                )
-                servedMetadata = text.isEmpty ? nil : Self.servedMetadata(
-                    app: completionRequest.app,
-                    text: text,
-                    source: source
-                )
-            case let .failure(error):
-                self.runtime.reportCompletionFailure()
-                let timedOut = (error as? URLError)?.code == .timedOut
-                response = (timedOut ? GhostBrainResponse.timeout : .error).stamped(
-                    opportunityID: opportunityID,
-                    reason: timedOut ? .timeout : .protocolError,
-                    generated: false
-                )
-                servedMetadata = nil
-            }
-            if self.writeStamped(response, to: connection), let servedMetadata {
-                DiagnosticsLog.shared.record("suggestion-served", metadata: servedMetadata)
-                if let source {
-                    PersonalSuggestionStats.record(source: source)
-                }
             }
         }
     }
 
-    /// Adds `source` only when the "Personal suggestions (experimental)"
-    /// toggle was actually consulted this request — toggle-off behavior
-    /// stays byte-identical to before this feature existed, no `source`
-    /// key appears at all.
-    private static func servedMetadata(
-        app: String?,
-        text: String,
-        source: PersonalSuggestionSource?
-    ) -> [String: String] {
-        var metadata = [
-            "app": app ?? "unknown",
-            "chars": String(text.count),
-        ]
-        if let source { metadata["source"] = source.rawValue }
-        return metadata
-    }
-
     private enum ValidatedRequest {
-        case completion(GhostBrainRequest)
         case personalHistory([PersonalHistoryEvent])
-        /// Transcripted: a history batch with events of an unknown version.
         case unsupportedPersonalHistory([String])
-        case screenMemory(ScreenMemoryInputEvent)
     }
 
-    /// Where a completion request is allowed to have left the caret.
-    ///
-    /// A word boundary always, request punctuation when the served
-    /// interaction policy allows it, and — only when that policy turns
-    /// mid-word continuation on — a context that ends inside a word the
-    /// writer has already typed at least
-    /// `RawContinuationPrompt.minimumMidWordPartialLetters` letters of. The
-    /// wire is the boundary where the two processes could disagree, so the
-    /// check is made against the same served policy the keyboard adopted,
-    /// not against this build's own bundle. `internal` for tests: the socket
-    /// itself is not unit-testable, this predicate is.
-    static func acceptsCompletionContext(
-        _ context: String,
-        allowingPunctuation: Bool,
-        allowingMidWord: Bool
-    ) -> Bool {
-        RawContinuationPrompt.requestBoundary(
-            in: context,
-            allowingPunctuation: allowingPunctuation,
-            allowingMidWord: allowingMidWord
-        ) != nil
-    }
+    private enum WireError: Error { case invalid }
 
-    private static func readRequest(
-        _ fd: Int32,
-        allowingPunctuation: Bool,
-        allowingMidWord: Bool
-    ) -> Result<ValidatedRequest, Error> {
+    private static func readRequest(_ fd: Int32) -> Result<ValidatedRequest, Error> {
         var data = Data()
         var buffer = [UInt8](repeating: 0, count: 4_096)
         while data.count < GhostBrainRequest.maximumWireBytes {
@@ -626,48 +184,14 @@ final class GhostBrainServerHost: @unchecked Sendable {
                 }
                 return .failure(WireError.invalid)
             }
-            if let events = request.personalHistoryEvents {
-                guard request.context.isEmpty, request.app == nil,
-                      request.screenMemoryEvent == nil,
-                      request.fieldSessionIdentifier == nil,
-                      request.experimentArm == nil,
-                      PersonalHistoryEvent.validBatch(events) else {
-                    return .failure(WireError.invalid)
-                }
-                return .success(.personalHistory(events))
-            }
-            if let event = request.screenMemoryEvent {
-                guard request.context.isEmpty, request.app == nil,
-                      request.personalHistoryEvents == nil,
-                      request.fieldSessionIdentifier == nil,
-                      request.experimentArm == nil,
-                      UUID(uuidString: event.sessionIdentifier) != nil else {
-                    return .failure(WireError.invalid)
-                }
-                return .success(.screenMemory(event))
-            }
-            guard !request.context.isEmpty,
-                  request.screenMemoryEvent == nil,
-                  request.context.count <= 3_000,
-                  Self.acceptsCompletionContext(
-                      request.context,
-                      allowingPunctuation: allowingPunctuation,
-                      allowingMidWord: allowingMidWord
-                  ),
-                  request.fieldSessionIdentifier.map({ UUID(uuidString: $0) != nil }) ?? true,
-                  (request.app?.count ?? 0) <= 512 else {
+            guard let events = request.personalHistoryEvents,
+                  request.context.isEmpty,
+                  PersonalHistoryEvent.validBatch(events) else {
                 return .failure(WireError.invalid)
             }
-            return .success(.completion(request))
+            return .success(.personalHistory(events))
         }
         return .failure(WireError.invalid)
-    }
-
-    private enum WireError: Error { case invalid }
-
-    /// Every completion-path line carries the configuration stamp.
-    private func writeStamped(_ response: GhostBrainResponse, to fd: Int32) -> Bool {
-        Self.write(response.stamped(configuration: configuration), to: fd)
     }
 
     private static func write(_ response: GhostBrainResponse, to fd: Int32) -> Bool {
@@ -717,12 +241,6 @@ final class GhostBrainServerHost: @unchecked Sendable {
 #endif
     }
 
-    /// `authorizedPeer` resolved two Security-framework identities (the
-    /// keyboard's and our own) per accepted connection — the cost the
-    /// `ghost-handshake-timing` budget exists to watch. A live process
-    /// instance cannot change its code, so each answer is remembered per
-    /// (pid, kernel start time); see `ProcessPeerIdentityCache`. When the
-    /// start time cannot be read the identity is resolved uncached, as before.
     private static let identityCache = ProcessPeerIdentityCache<CodeSigningIdentity>()
 
     private static func cachedIdentity(pid: pid_t) -> CodeSigningIdentity? {
@@ -791,5 +309,4 @@ final class GhostBrainServerHost: @unchecked Sendable {
             && info.st_uid == getuid()
             && info.st_mode & 0o777 == 0o600
     }
-
 }

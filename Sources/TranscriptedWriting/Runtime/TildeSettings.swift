@@ -3,24 +3,14 @@ import TranscriptedWritingCore
 #endif
 import Foundation
 
-/// Every menu setting, the process that owns it, and its default.
-///
-/// The keyboard is a separate process, so its settings must be written to the
-/// InlineGhost settings shared with the keyboard process.
+/// Settings shared between Transcripted and its capture keyboard process.
 struct TildeSettings {
-    enum AppKey: String {
-        case screenRecordingRequested = "ScreenRecordingRequested"
-    }
-
     enum KeyboardKey: String {
-        case suggestions = "GhostSuggestionsEnabled"
         case pausedUntil = "GhostPausedUntil"
         case personalHistory = "PersonalHistoryEnabled"
         case personalHistoryExcludedApps = "PersonalHistoryExcludedApps"
         case personalHistoryIdentifier = "PersonalHistoryIdentifier"
         case personalHistoryConsentIdentifier = "PersonalHistoryConsentIdentifier"
-        case personalNextWordExperimentIdentifier = "PersonalNextWordExperimentIdentifier"
-        case screenMemoryEnabled = "ScreenMemoryEnabled"
     }
 
     static let keyboardSuiteName = PersonalHistorySettingsContract.keyboardSuiteName
@@ -34,16 +24,6 @@ struct TildeSettings {
     ) {
         self.keyboard = keyboard ?? .standard
         self.app = app
-    }
-
-    var screenRecordingRequested: Bool {
-        get { app.bool(forKey: AppKey.screenRecordingRequested.rawValue) }
-        nonmutating set { app.set(newValue, forKey: AppKey.screenRecordingRequested.rawValue) }
-    }
-
-    var suggestionsEnabled: Bool {
-        get { flag(.suggestions) }
-        nonmutating set { keyboard.set(newValue, forKey: KeyboardKey.suggestions.rawValue) }
     }
 
     var personalHistoryEnabled: Bool {
@@ -88,33 +68,6 @@ struct TildeSettings {
         }
     }
 
-    var personalNextWordExperimentIdentifier: String? {
-        get {
-            guard let value = keyboard.string(
-                forKey: KeyboardKey.personalNextWordExperimentIdentifier.rawValue
-            ), PersonalHistoryEvent.validIdentifier(value) else { return nil }
-            return value
-        }
-        nonmutating set {
-            keyboard.set(newValue, forKey: KeyboardKey.personalNextWordExperimentIdentifier.rawValue)
-        }
-    }
-
-    /// The covenant's master toggle. On by default (2026-08-16 owner
-    /// directive: Screen Memory is a first-class, required-permission
-    /// feature, not an exotic opt-in) — like every other flag in this file,
-    /// a fresh install with no persisted key reads `flag()`'s default of
-    /// `true`. An existing install that explicitly turned this off keeps
-    /// that choice: this changes the DEFAULT for installs that never set the
-    /// key, not a forced flip of anyone's saved preference. Exclusions are
-    /// deliberately NOT a separate key: the covenant requires them shared
-    /// with Personal History, so callers read `personalHistoryExcludedApps`
-    /// for both features.
-    var screenMemoryEnabled: Bool {
-        get { flag(.screenMemoryEnabled) }
-        nonmutating set { keyboard.set(newValue, forKey: KeyboardKey.screenMemoryEnabled.rawValue) }
-    }
-
     var pausedUntil: Date? {
         let stamp = keyboard.double(forKey: KeyboardKey.pausedUntil.rawValue)
         guard stamp > 0 else { return nil }
@@ -131,9 +84,5 @@ struct TildeSettings {
 
     func resume() {
         keyboard.set(0, forKey: KeyboardKey.pausedUntil.rawValue)
-    }
-
-    private func flag(_ key: KeyboardKey) -> Bool {
-        keyboard.object(forKey: key.rawValue) as? Bool ?? true
     }
 }

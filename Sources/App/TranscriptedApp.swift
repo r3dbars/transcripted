@@ -199,7 +199,6 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
         notchIsland.onPasteLastDictation = { [weak self] text in
             self?.pasteRecentDictation(text)
         }
-        wireNextSentenceVoice()
         notchIsland.prewarm()
         AppLaunchSteps.runAfterOverlaySetup(dictation: sessionController)
 

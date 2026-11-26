@@ -14,6 +14,5 @@ import Testing
         #expect(profile.inputMethodBundleIdentifier == "com.justinbetker.draft.inputmethod.Transcripted")
         #expect(profile.inputMethodInstalledBundleName == "Transcripted Keyboard.app")
         #expect(profile.displayName == "Transcripted")
-        #expect(profile.llamaServerPort == 17_891)
     }
 }

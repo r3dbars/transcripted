@@ -162,13 +162,14 @@ func testAutomationSurfaceBehavior() async {
         assertTrue(go.contains { $0.action == .findSpeaker && $0.key == "f" && $0.usesShift }, "Go should keep ⌘⇧F for finding a speaker")
     }
 
-    runSuite("The Go menu's page shortcuts are the sidebar's ⌘1–⌘6") {
+    runSuite("The Go menu's page shortcuts are the sidebar's ⌘1–⌘5") {
         let pageItems = TranscriptedMenuCommandCatalog.go.compactMap { item -> (TranscriptedSettingsPage, Character, String)? in
             guard case let .openPage(page) = item.action else { return nil }
             return (page, item.key, item.title)
         }
-        // The retired file page has no ⌘ number: ⌘O in Capture opens file import.
+        // Retired pages have no ⌘ number.
         assertNil(TranscriptedSettingsPage.files.navigationShortcutKey, "file import should leave ⌘O to Capture's file import")
+        assertNil(TranscriptedSettingsPage.writing.navigationShortcutKey, "retired Writing tab has no Go shortcut")
         let numberedSidebarOrder = FocusOrderContract.settingsSidebarOrder
         assertEqual(
             pageItems.map { $0.0.automationIdentifier },
@@ -177,13 +178,13 @@ func testAutomationSurfaceBehavior() async {
         )
         assertEqual(
             pageItems.map { $0.0 },
-            [.home, .dictations, .writing, .people, .connectAgent, .today],
-            "all six Go destinations match the sidebar order with Meetings first and Stats last"
+            [.home, .dictations, .people, .connectAgent, .today],
+            "all five Go destinations match the sidebar order with Meetings first and Stats last"
         )
         assertEqual(
             pageItems.map { String($0.1) },
-            ["1", "2", "3", "4", "5", "6"],
-            "the existing Go destinations keep their numbered keys"
+            ["1", "2", "3", "4", "5"],
+            "the Go destinations keep their numbered keys"
         )
         for (page, key, title) in pageItems {
             assertEqual(page.navigationShortcutKey, String(key), "\(page) should use the same ⌘ key in Go as in its sidebar tooltip")
