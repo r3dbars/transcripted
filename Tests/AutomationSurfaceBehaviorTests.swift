@@ -177,8 +177,8 @@ func testAutomationSurfaceBehavior() async {
         )
         assertEqual(
             pageItems.map { $0.0 },
-            [.today, .home, .dictations, .writing, .people, .connectAgent],
-            "all six existing Go destinations keep their order"
+            [.home, .dictations, .writing, .people, .connectAgent, .today],
+            "all six Go destinations match the sidebar order with Meetings first and Stats last"
         )
         assertEqual(
             pageItems.map { String($0.1) },

@@ -143,13 +143,12 @@ enum DictationTranscriptStore {
         }.entries
     }
 
-    /// Entry and word counts per day file on or after `since`, keyed by the
-    /// day's start. Reads through the same stats cache as
-    /// `savedDictationCounts`, and never prunes it (this sees only part of the
-    /// library). Backs the Today page.
+    /// Entry and word counts per day file on or after `since` (or every day
+    /// file when `since` is nil), keyed by the day's start. Reads through the
+    /// same stats cache as `savedDictationCounts`, and never prunes it.
     static func savedDictationDayCounts(
         directory: URL? = nil,
-        since: Date,
+        since: Date? = nil,
         calendar: Calendar = .current
     ) -> [(day: Date, entries: Int, words: Int)] {
         let folder = directory ?? DictationStoragePaths.transcriptsFolder
@@ -166,7 +165,7 @@ enum DictationTranscriptStore {
         parser.calendar = Calendar(identifier: .gregorian)
         parser.timeZone = calendar.timeZone
         parser.dateFormat = "yyyy-MM-dd"
-        let earliest = calendar.startOfDay(for: since)
+        let earliest = since.map { calendar.startOfDay(for: $0) }
 
         var result: [(day: Date, entries: Int, words: Int)] = []
         for file in files where isDictationDayFile(file) {
@@ -174,8 +173,8 @@ enum DictationTranscriptStore {
             let stamp = file.deletingPathExtension().lastPathComponent.dropFirst(dictationDayPrefix.count)
             guard let parsed = parser.date(from: String(stamp)) else { continue }
             let day = calendar.startOfDay(for: parsed)
-            guard day >= earliest,
-                  let signature = DictationFileStatsCache.Signature(url: file) else { continue }
+            if let earliest, day < earliest { continue }
+            guard let signature = DictationFileStatsCache.Signature(url: file) else { continue }
             let stats = statsCache.stats(for: signature) {
                 fileStats(in: file)
             }

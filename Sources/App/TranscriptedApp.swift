@@ -509,7 +509,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             onboardingCompleted: PermissionsOnboardingPreferences.hasCompleted(),
             isAutomatedLaunch: AutomatedLaunchEnvironment.isActive()
         ) {
-            showSettingsWindow(page: .today, source: "app_launch")
+            showSettingsWindow(page: .home, source: "app_launch")
         }
 
         // Initialize engines
@@ -541,7 +541,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
             return false
         }
 
-        showSettingsWindow(page: .today, source: "dock_icon")
+        showSettingsWindow(page: .home, source: "dock_icon")
         return false
     }
 
@@ -702,7 +702,7 @@ class TranscriptedAppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegat
                 showMainPopover(relativeTo: button, popover: popover, entrypoint: "single_instance_reopen")
             }
         case .settingsFallback:
-            showSettingsWindow(page: .today, source: "single_instance_reopen")
+            showSettingsWindow(page: .home, source: "single_instance_reopen")
         }
     }
 
