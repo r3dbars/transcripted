@@ -16,10 +16,10 @@ func testFirstRunExperience() {
         assertFalse(needs(.ready))
     }
 
-    runSuite("Parakeet v2 persistence copy uses the approximate required CoreML download size") {
-        let detail = FirstRunExperience.modelPersistenceDetail(for: .parakeetTDTv2)
-        assertTrue(detail.hasPrefix("One-time ~460 MB download."))
-        assertEqual(TranscriptionModelChoice.parakeetTDTv2.approximateDownloadSize, "~460 MB")
+    runSuite("Parakeet v3 persistence copy uses the approximate required CoreML download size") {
+        let detail = FirstRunExperience.modelPersistenceDetail(for: .parakeetTDTv3)
+        assertTrue(detail.hasPrefix("One-time ~600 MB download."))
+        assertEqual(TranscriptionModelChoice.parakeetTDTv3.approximateDownloadSize, "~600 MB")
         assertTrue(detail.contains("saved on this Mac"))
     }
 
@@ -324,27 +324,6 @@ func testFirstRunExperience() {
         assertEqual(card.title, "Downloading Whisper Large V3 Turbo", "advanced model card should name Whisper")
         assertTrue(card.detail.contains("~632 MB"), "Whisper Turbo card should show the expected model size")
         assertEqual(card.status, "25% complete", "Whisper card should keep progress behavior")
-    }
-
-    runSuite("FirstRunExperience.modelCard — Apple Speech shows its own errors, not framework text") {
-        let language = FirstRunExperience.modelCard(
-            for: .failed("Apple Speech can't transcribe your Mac's language (Finnish) yet. Choose another model in Settings."),
-            model: .appleSpeech
-        )
-        assertTrue(language.detail.contains("Finnish"), "Apple Speech's own message names the fix")
-
-        let raw = FirstRunExperience.modelCard(
-            for: .failed("The operation couldn't be completed. (NSURLErrorDomain error -1009.)"),
-            model: .appleSpeech
-        )
-        assertFalse(raw.detail.contains("NSURLErrorDomain"), "raw download errors stay out of the card")
-        assertTrue(raw.detail.contains("Try again"), "the card names the retry button Apple Speech gets")
-
-        let loading = FirstRunExperience.modelCard(for: .loading, model: .appleSpeech)
-        assertFalse(loading.detail.contains("has the model files"), "Apple Speech may still need to download")
-
-        let parakeet = FirstRunExperience.modelCard(for: .failed("anything"), model: .parakeetTDTv3)
-        assertTrue(parakeet.detail.contains("Retry download"), "other models keep their copy")
     }
 
     runSuite("FirstRunExperience.onboardingDoneModelPresentation — Done only says You're set once the model is on this Mac") {

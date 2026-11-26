@@ -2,7 +2,6 @@ import Foundation
 
 /// App-owned model identity; conversion to FluidAudio stays at the Speech boundary.
 enum ParakeetModelVariant: String, CaseIterable, Sendable {
-    case v2
     case v3
     /// Moondream's Parakeet Ultra: a retrained parakeet-tdt-0.6b-v3 with the
     /// same architecture and tokenizer, so FluidAudio loads it as v3. There is
@@ -16,17 +15,15 @@ enum ParakeetModelVariant: String, CaseIterable, Sendable {
     static let localInstallMarkerFileName = "transcripted-model.json"
 
     var directoryName: String { "parakeet-tdt-0.6b-\(rawValue)" }
-    var jointModelName: String { self == .v2 ? "JointDecision.mlmodelc" : "JointDecisionv3.mlmodelc" }
+    var jointModelName: String { "JointDecisionv3.mlmodelc" }
     var requiredModelDirectoryNames: [String] {
         ["Encoder.mlmodelc", jointModelName, "Decoder.mlmodelc", "Preprocessor.mlmodelc"]
     }
     var requiredFileNames: [String] {
         // FluidAudio v0.17.0: ModelNames.swift and AsrModels.getRequiredModels
-        // define the compiled model set; AsrModels loads the shared vocabulary
-        // for v2. Recheck this contract when changing the dependency version.
+        // define the compiled model set. Recheck this contract when changing
+        // the dependency version.
         switch self {
-        case .v2:
-            return ["parakeet_vocab.json"]
         case .v3:
             return ["config.json", "parakeet_v3_vocab.json", "parakeet_vocab.json"]
         case .ultra:
@@ -44,7 +41,7 @@ enum ParakeetModelVariant: String, CaseIterable, Sendable {
     /// and the parent folder carries the identity.
     var localInstallRelativePath: String? {
         switch self {
-        case .v2, .v3: return nil
+        case .v3: return nil
         case .ultra: return "parakeet-ultra/parakeet-tdt-0.6b-v3"
         }
     }
@@ -52,10 +49,7 @@ enum ParakeetModelVariant: String, CaseIterable, Sendable {
 
 enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
     case parakeetTDTv3 = "parakeet-tdt-v3"
-    case parakeetTDTv2 = "parakeet-tdt-v2"
     case whisperLargeV3Turbo = "whisper-large-v3-turbo"
-    case whisperLargeV3 = "whisper-large-v3"
-    case appleSpeech = "apple-speech"
     case parakeetUltraExperimental = "parakeet-ultra-experimental"
 
     var id: String { rawValue }
@@ -64,14 +58,8 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .parakeetTDTv3:
             return "Parakeet TDT V3"
-        case .parakeetTDTv2:
-            return "Parakeet TDT V2 (English only)"
         case .whisperLargeV3Turbo:
             return "Whisper Large V3 Turbo"
-        case .whisperLargeV3:
-            return "Whisper Large V3"
-        case .appleSpeech:
-            return "Apple Speech (built into macOS)"
         case .parakeetUltraExperimental:
             return "Parakeet Ultra (Experimental)"
         }
@@ -81,14 +69,8 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .parakeetTDTv3:
             return "Parakeet V3"
-        case .parakeetTDTv2:
-            return "Parakeet V2"
         case .whisperLargeV3Turbo:
             return "Whisper Turbo"
-        case .whisperLargeV3:
-            return "Whisper"
-        case .appleSpeech:
-            return "Apple Speech"
         case .parakeetUltraExperimental:
             return "Parakeet Ultra"
         }
@@ -98,14 +80,8 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
         switch self {
         case .parakeetTDTv3:
             return "Default multilingual local model for dictation and meetings."
-        case .parakeetTDTv2:
-            return "English-only local model for dictation and meetings."
         case .whisperLargeV3Turbo:
             return "Local Whisper with broad language coverage."
-        case .whisperLargeV3:
-            return "Local Whisper for maximum multilingual accuracy."
-        case .appleSpeech:
-            return "Apple's on-device speech engine. macOS downloads each language the first time you use it."
         case .parakeetUltraExperimental:
             // CC-BY-4.0 attribution for Moondream's weights.
             return "Experimental. Moondream's retrained Parakeet V3 (Parakeet Ultra, CC-BY-4.0), converted to run on this Mac."
@@ -114,52 +90,49 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
 
     var isWhisper: Bool {
         switch self {
-        case .parakeetTDTv2, .parakeetTDTv3, .appleSpeech, .parakeetUltraExperimental:
+        case .parakeetTDTv3, .parakeetUltraExperimental:
             return false
-        case .whisperLargeV3Turbo, .whisperLargeV3:
+        case .whisperLargeV3Turbo:
             return true
         }
     }
 
-    var isAppleSpeech: Bool {
-        self == .appleSpeech
-    }
-
-    /// Whisper and Apple Speech can transcribe a meeting in a chosen language;
+    /// Whisper can transcribe a meeting in a chosen language;
     /// Parakeet is always automatic.
     var supportsMeetingLanguageChoice: Bool {
-        isWhisper || isAppleSpeech
+        isWhisper
     }
 
     var engineName: String {
         switch self {
-        case .parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental:
+        case .parakeetTDTv3, .parakeetUltraExperimental:
             return "parakeet"
-        case .whisperLargeV3Turbo, .whisperLargeV3:
+        case .whisperLargeV3Turbo:
             return "whisper"
-        case .appleSpeech:
-            return "apple_speech"
         }
     }
+
+    /// Historical engine identifiers from retired models so older saved
+    /// transcripts still show the model that made them.
+    private static let legacyEngineShortTitles: [String: String] = [
+        "parakeet_v2_local": "Parakeet V2",
+        "whisper_large_v3_local": "Whisper",
+        "apple_speech_local": "Apple Speech",
+    ]
 
     /// Short model name for a saved transcript's `transcription_engine` id,
     /// or nil for an id this build doesn't know.
     static func shortTitle(forTranscriptionEngineIdentifier identifier: String) -> String? {
         allCases.first { $0.transcriptionEngineIdentifier == identifier }?.shortTitle
+            ?? legacyEngineShortTitles[identifier]
     }
 
     var transcriptionEngineIdentifier: String {
         switch self {
-        case .parakeetTDTv2:
-            return "parakeet_v2_local"
         case .parakeetTDTv3:
             return "parakeet_local"
         case .whisperLargeV3Turbo:
             return "whisper_large_v3_turbo_local"
-        case .whisperLargeV3:
-            return "whisper_large_v3_local"
-        case .appleSpeech:
-            return "apple_speech_local"
         case .parakeetUltraExperimental:
             return "parakeet_ultra_local"
         }
@@ -167,16 +140,10 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
 
     var transcriptionEngineDisplayName: String {
         switch self {
-        case .parakeetTDTv2:
-            return "Parakeet V2"
         case .parakeetTDTv3:
             return "Parakeet"
         case .whisperLargeV3Turbo:
             return "Whisper Large V3 Turbo"
-        case .whisperLargeV3:
-            return "Whisper Large V3"
-        case .appleSpeech:
-            return "Apple Speech"
         case .parakeetUltraExperimental:
             return "Parakeet Ultra"
         }
@@ -184,28 +151,19 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
 
     var whisperKitModelName: String? {
         switch self {
-        case .parakeetTDTv2, .parakeetTDTv3, .appleSpeech, .parakeetUltraExperimental:
+        case .parakeetTDTv3, .parakeetUltraExperimental:
             return nil
         case .whisperLargeV3Turbo:
             return "large-v3-v20240930_turbo_632MB"
-        case .whisperLargeV3:
-            return "large-v3-v20240930_626MB"
         }
     }
 
     var approximateDownloadSize: String {
         switch self {
-        case .parakeetTDTv2:
-            return "~460 MB"
         case .parakeetTDTv3:
             return "~600 MB"
         case .whisperLargeV3Turbo:
             return "~632 MB"
-        case .whisperLargeV3:
-            return "~626 MB"
-        case .appleSpeech:
-            // Apple sizes and hosts these per language; macOS keeps them.
-            return "per-language"
         case .parakeetUltraExperimental:
             // Installed locally by the conversion script, never downloaded.
             return "~600 MB"
@@ -214,10 +172,9 @@ enum TranscriptionModelChoice: String, CaseIterable, Identifiable {
 
     var parakeetVariant: ParakeetModelVariant? {
         switch self {
-        case .parakeetTDTv2: return .v2
         case .parakeetTDTv3: return .v3
         case .parakeetUltraExperimental: return .ultra
-        case .whisperLargeV3Turbo, .whisperLargeV3, .appleSpeech: return nil
+        case .whisperLargeV3Turbo: return nil
         }
     }
 }
@@ -241,18 +198,32 @@ enum TranscriptionModelPreferences {
 
     private static let preferredModelKey = "transcription-model-preference"
 
-    /// Unknown stored raw values (for example a model choice removed in a
-    /// later release, like the retired Nemotron beta) fall back to the
-    /// default model, so removals self-heal without a migration step.
+    /// Resolves a stored preference rawValue to an active model choice,
+    /// migrating retired choices to their closest supported successor
+    /// (`whisper-large-v3` -> `.whisperLargeV3Turbo`, retired Parakeet V2 /
+    /// Apple Speech / Nemotron / legacy aliases -> `.parakeetTDTv3`).
+    static func migratedModel(forStoredRawValue rawValue: String) -> TranscriptionModelChoice? {
+        if let model = TranscriptionModelChoice(rawValue: rawValue) {
+            return model
+        }
+        switch rawValue {
+        case "whisper-large-v3":
+            return .whisperLargeV3Turbo
+        case "parakeet-tdt-v2", "apple-speech", "parakeet-ultra", "nemotron-streaming-0.6b":
+            return .parakeetTDTv3
+        default:
+            return nil
+        }
+    }
+
+    /// Retired stored raw values migrate to their closest supported model;
+    /// unknown raw values fall back to the default model.
     static func preferredModel(userDefaults: UserDefaults = .standard) -> TranscriptionModelChoice {
-        guard
-            let rawValue = userDefaults.string(forKey: preferredModelKey),
-            let model = TranscriptionModelChoice(rawValue: rawValue)
-        else {
+        guard let rawValue = userDefaults.string(forKey: preferredModelKey) else {
             return defaultModel
         }
 
-        return model
+        return migratedModel(forStoredRawValue: rawValue) ?? defaultModel
     }
 
     static func setPreferredModel(_ model: TranscriptionModelChoice, userDefaults: UserDefaults = .standard) {

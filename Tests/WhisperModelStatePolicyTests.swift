@@ -2,24 +2,22 @@ import Foundation
 
 func testWhisperModelStatePolicy() {
     let turbo = TranscriptionModelChoice.whisperLargeV3Turbo
-    let large = TranscriptionModelChoice.whisperLargeV3
+    let parakeet = TranscriptionModelChoice.parakeetTDTv3
     let states: [ParakeetModelState] = [
         .notLoaded, .downloading(progress: 0.37), .cached,
         .loading, .ready, .failed("Synthetic load failure")
     ]
 
-    runSuite("A Whisper variant preserves its own exact state and never borrows another's") {
-        for (owner, other) in [(turbo, large), (large, turbo)] {
-            for state in states {
-                assertEqual(
-                    WhisperModelStatePolicy.state(for: owner, owner: owner, storedState: state),
-                    state
-                )
-                assertEqual(
-                    WhisperModelStatePolicy.state(for: other, owner: owner, storedState: state),
-                    .notLoaded
-                )
-            }
+    runSuite("Whisper Turbo preserves its own exact state and never leaks to non-Whisper models") {
+        for state in states {
+            assertEqual(
+                WhisperModelStatePolicy.state(for: turbo, owner: turbo, storedState: state),
+                state
+            )
+            assertEqual(
+                WhisperModelStatePolicy.state(for: parakeet, owner: turbo, storedState: state),
+                .notLoaded
+            )
         }
     }
 
@@ -40,14 +38,14 @@ func testWhisperModelStatePolicy() {
         }
     }
 
-    runSuite("A supplied failure belongs only to its explicit model owner") {
+    runSuite("A supplied failure belongs only to its explicit Whisper owner") {
         let failure = ParakeetModelState.failed("Synthetic completed load failure")
         assertEqual(
-            WhisperModelStatePolicy.state(for: large, owner: large, storedState: failure),
+            WhisperModelStatePolicy.state(for: turbo, owner: turbo, storedState: failure),
             failure
         )
         assertEqual(
-            WhisperModelStatePolicy.state(for: turbo, owner: large, storedState: failure),
+            WhisperModelStatePolicy.state(for: turbo, owner: parakeet, storedState: failure),
             .notLoaded
         )
     }
@@ -68,7 +66,7 @@ func testWhisperModelStatePolicy() {
                 emitted
             )
             assertEqual(
-                WhisperModelStatePolicy.state(for: large, owner: turbo, storedState: olderStoredState, emittedState: emitted),
+                WhisperModelStatePolicy.state(for: parakeet, owner: turbo, storedState: olderStoredState, emittedState: emitted),
                 .notLoaded
             )
         }
@@ -77,25 +75,19 @@ func testWhisperModelStatePolicy() {
     runSuite("Explicit owner and state snapshots distinguish old, unowned and new progress") {
         // Input snapshots only; this does not execute engine unload or initialization.
         assertEqual(
-            WhisperModelStatePolicy.state(for: turbo, owner: large, storedState: .ready),
+            WhisperModelStatePolicy.state(for: turbo, owner: parakeet, storedState: .ready),
             .notLoaded
         )
         assertEqual(
-            WhisperModelStatePolicy.state(for: large, owner: large, storedState: .ready),
-            .ready
+            WhisperModelStatePolicy.state(for: turbo, owner: nil, storedState: .notLoaded),
+            .notLoaded
         )
-        for model in [large, turbo] {
-            assertEqual(
-                WhisperModelStatePolicy.state(for: model, owner: nil, storedState: .notLoaded),
-                .notLoaded
-            )
-        }
         assertEqual(
             WhisperModelStatePolicy.state(for: turbo, owner: turbo, storedState: .downloading(progress: 0.12)),
             .downloading(progress: 0.12)
         )
         assertEqual(
-            WhisperModelStatePolicy.state(for: large, owner: turbo, storedState: .downloading(progress: 0.12)),
+            WhisperModelStatePolicy.state(for: parakeet, owner: turbo, storedState: .downloading(progress: 0.12)),
             .notLoaded
         )
     }

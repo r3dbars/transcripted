@@ -28,13 +28,8 @@ func testTranscriptionLanguagePreferences() {
                 assertEqual(TranscriptionLanguagePreferences.preferredLanguageCode(userDefaults: defaults), "fi")
             }
             assertEqual(
-                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3, userDefaults: defaults),
+                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3Turbo, userDefaults: defaults),
                 "fi"
-            )
-            assertEqual(
-                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .appleSpeech, userDefaults: defaults),
-                "fi",
-                "Apple Speech honors a saved meeting language"
             )
             assertEqual(
                 TranscriptionLanguagePreferences.effectiveLanguageCode(for: .parakeetTDTv3, userDefaults: defaults),
@@ -80,7 +75,7 @@ func testTranscriptionLanguagePreferences() {
                 defaults.set(invalid, forKey: TranscriptionLanguagePreferences.preferenceKey)
                 assertEqual(TranscriptionLanguagePreferences.preferredLanguageCode(userDefaults: defaults), "auto")
                 assertEqual(
-                    TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3, userDefaults: defaults),
+                    TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3Turbo, userDefaults: defaults),
                     "auto"
                 )
                 assertEqual(defaults.string(forKey: TranscriptionLanguagePreferences.preferenceKey), invalid)
@@ -103,11 +98,11 @@ func testTranscriptionLanguagePreferences() {
     runSuite("Meeting language snapshot remains a value when future preferences change") {
         withLanguageTestDefaults { defaults in
             TranscriptionLanguagePreferences.setPreferredLanguageCode("fi", userDefaults: defaults)
-            let snapshot = TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3, userDefaults: defaults)
+            let snapshot = TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3Turbo, userDefaults: defaults)
             TranscriptionLanguagePreferences.setPreferredLanguageCode("de", userDefaults: defaults)
             assertEqual(snapshot, "fi")
             assertEqual(
-                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3, userDefaults: defaults),
+                TranscriptionLanguagePreferences.effectiveLanguageCode(for: .whisperLargeV3Turbo, userDefaults: defaults),
                 "de"
             )
         }

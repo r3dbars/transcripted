@@ -15,7 +15,6 @@ import TranscriptedCore
 extension ParakeetModelVariant {
     var fluidAudioVersion: AsrModelVersion {
         switch self {
-        case .v2: return .v2
         // Ultra keeps v3's architecture, tokenizer and Core ML contract.
         case .v3, .ultra: return .v3
         }

@@ -36,16 +36,19 @@ import FluidAudio
     // remains the production lifecycle executor's decision.
     static var legacyVariant: ParakeetModelVariant?
     static var cachedVariant: ParakeetModelVariant?
+    static var cachedDirectoryOverride: URL?
     static var migrationAttempts: [ParakeetModelVariant] = []
 
     static func reset() {
         legacyVariant = nil
         cachedVariant = nil
+        cachedDirectoryOverride = nil
         migrationAttempts = []
     }
 
     static func activeParakeetModelDirectory(variant: ParakeetModelVariant) -> URL? {
-        cachedVariant == variant ? AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion) : nil
+        guard cachedVariant == variant else { return nil }
+        return cachedDirectoryOverride ?? AsrModels.defaultCacheDirectory(for: variant.fluidAudioVersion)
     }
 
     static func migrateLegacyParakeetModelDirectory(variant: ParakeetModelVariant, fluidAudioModelsDirectory: URL) throws -> Bool {

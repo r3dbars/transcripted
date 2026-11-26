@@ -6,6 +6,12 @@ struct ModelCacheSnapshot: Equatable {
     let whisperModelsBytes: Int64
     let staleFluidAudioModelBytes: Int64
     let staleFluidAudioModelNames: [String]
+    /// Retired Whisper model folders (such as the removed non-turbo
+    /// Whisper Large V3) that can be reclaimed even while Whisper Turbo stays
+    /// selected. Counted inside `whisperModelsBytes`, so never added on top of
+    /// `whisperModelsBytes` when `includeWhisper` is true.
+    var staleWhisperModelBytes: Int64 = 0
+    var staleWhisperModelNames: [String] = []
     /// The on-device meeting titles model (Settings > Meetings > Titles and
     /// summaries), plus any partial download.
     var meetingTitlesModelBytes: Int64 = 0
@@ -42,7 +48,7 @@ struct ModelCacheSnapshot: Equatable {
     /// its downloaded model is no longer needed.
     func reclaimableBytes(includeWhisper: Bool, includeMeetingTitles: Bool = false) -> Int64 {
         staleFluidAudioModelBytes
-            + (includeWhisper ? whisperModelsBytes : 0)
+            + (includeWhisper ? whisperModelsBytes : staleWhisperModelBytes)
             + (includeMeetingTitles ? meetingTitlesModelBytes : 0)
     }
 
@@ -85,9 +91,13 @@ struct ModelCacheCleanupResult: Equatable {
 
 enum ModelCacheInventory {
     static let knownStaleFluidAudioModelDirectories: Set<String> = [
-        // Both v2 folder spellings are supported: FluidAudio 0.7.9 already
-        // downloaded the modern v2 model set into the -coreml directory.
+        // Legacy FluidAudio 0.7.9 -coreml v3 folder; 0.15+ uses parakeet-tdt-0.6b-v3.
         "parakeet-tdt-0.6b-v3-coreml",
+        // Retired Parakeet V2 (removed when narrowing the STT matrix to
+        // Parakeet V3 + Whisper Large V3 Turbo): both the 0.15+ folder and
+        // the 0.7.9 -coreml folder are reclaimable.
+        "parakeet-tdt-0.6b-v2",
+        "parakeet-tdt-0.6b-v2-coreml",
         // The retired Nemotron streaming beta (removed 2026-08) downloaded
         // ~600 MB via FluidAudio; both folder-name derivations of its repo
         // (raw basename and suffix-stripped) are listed so whichever exists
@@ -95,6 +105,15 @@ enum ModelCacheInventory {
         "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b-CoreML",
         "Nemotron-3.5-ASR-Streaming-Multilingual-0.6b",
         "nemotron-3.5-asr-streaming-multilingual-0.6b",
+    ]
+
+    /// Retired Whisper model directories/manifests under `cache/whisperkit/models`
+    /// (Whisper Large V3 non-turbo was retired in favor of Whisper Large V3 Turbo).
+    /// Reclaimable even while Whisper Turbo stays selected.
+    static let knownStaleWhisperModelRelativePaths: [String] = [
+        "argmaxinc/whisperkit-coreml/openai_whisper-large-v3-v20240930_626MB",
+        "openai_whisper-large-v3-v20240930_626MB",
+        ".transcripted/whisper-large-v3-v20240930_626MB.json",
     ]
 
     static func snapshot(
@@ -114,12 +133,23 @@ enum ModelCacheInventory {
             }
             .filter { _, bytes in bytes > 0 }
 
+        let staleWhisperEntries = knownStaleWhisperModelRelativePaths
+            .map { relativePath in
+                (relativePath, whisperModelsDirectory.appendingPathComponent(relativePath))
+            }
+            .map { relativePath, url in
+                (relativePath, directorySize(at: url, fileManager: fileManager))
+            }
+            .filter { _, bytes in bytes > 0 }
+
         return ModelCacheSnapshot(
             fluidAudioModelsBytes: directorySize(at: fluidAudioModelsDirectory, fileManager: fileManager),
             transcriptedCacheBytes: directorySize(at: transcriptedCacheDirectory, fileManager: fileManager),
             whisperModelsBytes: directorySize(at: whisperModelsDirectory, fileManager: fileManager),
             staleFluidAudioModelBytes: staleEntries.reduce(0) { $0 + $1.1 },
             staleFluidAudioModelNames: staleEntries.map(\.0),
+            staleWhisperModelBytes: staleWhisperEntries.reduce(0) { $0 + $1.1 },
+            staleWhisperModelNames: staleWhisperEntries.map { URL(fileURLWithPath: $0.0).lastPathComponent },
             meetingTitlesModelBytes: directorySize(at: meetingTitlesModelsDirectory, fileManager: fileManager)
         )
     }
@@ -253,6 +283,78 @@ enum ModelCacheInventory {
         )
     }
 
+    static func removeKnownStaleWhisperModels(
+        fileManager: FileManager = .default,
+        transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
+        whisperModelsDirectory: URL = defaultWhisperModelsDirectory()
+    ) throws -> ModelCacheCleanupResult {
+        let cacheRoot = transcriptedCacheDirectory.standardizedFileURL
+        let directory = whisperModelsDirectory.standardizedFileURL
+        let expectedDirectory = cacheRoot
+            .appendingPathComponent("whisperkit", isDirectory: true)
+            .appendingPathComponent("models", isDirectory: true)
+            .standardizedFileURL
+
+        guard
+            directory.path == expectedDirectory.path,
+            resolvedDirectoryIsInsideAppCache(
+                directory,
+                cacheRoot: cacheRoot,
+                fileManager: fileManager
+            ),
+            fileManager.fileExists(atPath: directory.path)
+        else {
+            return .empty
+        }
+
+        let resolvedRoot = directory.resolvingSymlinksInPath()
+        var removedBytes: Int64 = 0
+        var removedNames: [String] = []
+
+        for relativePath in knownStaleWhisperModelRelativePaths {
+            let candidate = directory.appendingPathComponent(relativePath).standardizedFileURL
+            guard fileManager.fileExists(atPath: candidate.path),
+                  !containsSymbolicLinkAlongRelativePath(
+                      relativePath,
+                      from: directory,
+                      fileManager: fileManager
+                  )
+            else {
+                continue
+            }
+
+            let resolvedCandidate = candidate.resolvingSymlinksInPath()
+            guard resolvedCandidate.path.hasPrefix(resolvedRoot.path + "/") else {
+                continue
+            }
+
+            let bytes = directorySize(at: candidate, fileManager: fileManager)
+            try fileManager.removeItem(at: candidate)
+            removedBytes += bytes
+            removedNames.append(candidate.lastPathComponent)
+        }
+
+        return ModelCacheCleanupResult(
+            removedBytes: removedBytes,
+            removedNames: removedNames
+        )
+    }
+
+    private static func containsSymbolicLinkAlongRelativePath(
+        _ relativePath: String,
+        from baseDirectory: URL,
+        fileManager: FileManager
+    ) -> Bool {
+        var current = baseDirectory.standardizedFileURL
+        for component in relativePath.split(separator: "/").map(String.init) {
+            current = current.appendingPathComponent(component)
+            if isSymbolicLink(at: current, fileManager: fileManager) {
+                return true
+            }
+        }
+        return false
+    }
+
     static func removeReclaimableCaches(
         includeWhisper: Bool,
         includeMeetingTitles: Bool = false,
@@ -269,6 +371,12 @@ enum ModelCacheInventory {
 
         if includeWhisper {
             result = result.merging(try removeWhisperModels(
+                fileManager: fileManager,
+                transcriptedCacheDirectory: transcriptedCacheDirectory,
+                whisperModelsDirectory: whisperModelsDirectory
+            ))
+        } else {
+            result = result.merging(try removeKnownStaleWhisperModels(
                 fileManager: fileManager,
                 transcriptedCacheDirectory: transcriptedCacheDirectory,
                 whisperModelsDirectory: whisperModelsDirectory

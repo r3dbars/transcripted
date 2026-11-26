@@ -65,9 +65,7 @@ extension TranscriptedSettingsView {
         case .cached:
             return "Load Now"
         case .failed:
-            // Apple Speech failures are usually a language setting, not a
-            // download to redo.
-            return effectiveTranscriptionModel.isAppleSpeech ? "Try again" : "Retry download"
+            return "Retry download"
         case .downloading, .loading, .ready:
             return nil
         }

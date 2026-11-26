@@ -175,7 +175,7 @@ final class MeetingSTTAdapter: ObservableObject, SpeechToTextEngine {
     }
 
     /// Only Whisper reads the language windows (STTRouter.resolveLanguage);
-    /// Parakeet and Apple Speech ignore them, so the pipeline skips the scan.
+    /// Parakeet ignores them, so the pipeline skips the scan.
     var usesRepresentativeLanguageSamples: Bool {
         (activeJobModel ?? preparedModel ?? router.selectedModel).isWhisper
     }

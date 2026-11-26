@@ -14,12 +14,10 @@ func testSTTRouterPolicy() {
     runSuite("A recording model waits on its own engine's load progress") {
         // STTRouter.waitForRecordingModelLoadProgress picks the engine to watch
         // by runtime. The wait itself is deadline-bound: ModelLoadProgressWaiterTests.
-        for model in [TranscriptionModelChoice.parakeetTDTv2, .parakeetTDTv3, .parakeetUltraExperimental] {
+        for model in [TranscriptionModelChoice.parakeetTDTv3, .parakeetUltraExperimental] {
             assertEqual(model.runtime, .parakeet, "\(model.rawValue) must watch Parakeet progress, not Whisper")
         }
-        assertEqual(TranscriptionModelChoice.whisperLargeV3.runtime, .whisper)
         assertEqual(TranscriptionModelChoice.whisperLargeV3Turbo.runtime, .whisper)
-        assertEqual(TranscriptionModelChoice.appleSpeech.runtime, .appleSpeech)
         for model in TranscriptionModelChoice.allCases {
             assertEqual(
                 model.parakeetVariant != nil,
@@ -34,27 +32,13 @@ func testSTTRouterPolicy() {
         // variant and stores that same model as the recording lease.
         var warmup = TranscriptionModelWarmupOwnership()
         _ = warmup.claimForegroundUse(of: .parakeetTDTv3)
-        let claim = warmup.claimForegroundUse(of: .parakeetTDTv2)
+        let claim = warmup.claimForegroundUse(of: .parakeetUltraExperimental)
         assertEqual(claim.model.parakeetVariant, .v3, "a meeting holding v3 decides the dictation's variant")
 
         var recording = TranscriptionRecordingModelOwnership()
         let replacement = recording.replace(with: claim.model)
         assertEqual(recording.activeLease?.model, .parakeetTDTv3, "the lease records the resolved model")
         assertEqual(replacement.lease.model.parakeetVariant, claim.model.parakeetVariant)
-    }
-
-    runSuite("Parakeet v2 shares the backend but has a distinct artifact identity") {
-        let model = TranscriptionModelChoice.parakeetTDTv2
-        assertEqual(model.engineName, "parakeet")
-        assertFalse(model.isWhisper)
-        assertNil(model.whisperKitModelName)
-        assertEqual(model.rawValue, "parakeet-tdt-v2")
-        assertEqual(model.transcriptionEngineIdentifier, "parakeet_v2_local")
-        assertEqual(model.transcriptionEngineDisplayName, "Parakeet V2")
-        assertEqual(TranscriptionModelChoice.parakeetTDTv3.transcriptionEngineDisplayName, "Parakeet",
-                    "existing v3 transcript footer text must remain stable")
-        assertTrue(model.title.contains("English only"))
-        assertFalse(model.shortTitle == TranscriptionModelChoice.parakeetTDTv3.shortTitle)
     }
 
     runSuite("Saved transcript engine ids map back to short model names") {
@@ -65,6 +49,10 @@ func testSTTRouterPolicy() {
                 "Home shows \(model.shortTitle) for transcripts it made"
             )
         }
+        // Retired engine identifiers in older transcripts keep readable labels.
+        assertEqual(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier: "parakeet_v2_local"), "Parakeet V2")
+        assertEqual(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier: "whisper_large_v3_local"), "Whisper")
+        assertEqual(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier: "apple_speech_local"), "Apple Speech")
         assertNil(TranscriptionModelChoice.shortTitle(forTranscriptionEngineIdentifier: "future_engine_local"),
                   "an unknown id shows no label rather than a wrong one")
     }
@@ -74,7 +62,10 @@ func testSTTRouterPolicy() {
 
         assertEqual(model.engineName, "parakeet", "Parakeet must dispatch to the parakeet engine path")
         assertFalse(model.isWhisper, "Parakeet must not be classified as a Whisper model")
+        assertFalse(model.supportsMeetingLanguageChoice, "Parakeet stays automatic for meeting language")
         assertNil(model.whisperKitModelName, "Parakeet must not request a WhisperKit model name")
+        assertEqual(model.transcriptionEngineDisplayName, "Parakeet",
+                    "existing v3 transcript footer text must remain stable")
     }
 
     runSuite("STTRouter policy — Whisper Large V3 Turbo routes to the whisper engine") {
@@ -82,6 +73,7 @@ func testSTTRouterPolicy() {
 
         assertEqual(model.engineName, "whisper", "Whisper Turbo must dispatch to the whisper engine path")
         assertTrue(model.isWhisper, "Whisper Turbo must be classified as a Whisper model")
+        assertTrue(model.supportsMeetingLanguageChoice, "Whisper Turbo supports explicit meeting language choice")
         assertEqual(
             model.whisperKitModelName,
             "large-v3-v20240930_turbo_632MB",
@@ -89,57 +81,13 @@ func testSTTRouterPolicy() {
         )
     }
 
-    runSuite("STTRouter policy — Whisper Large V3 routes to the whisper engine") {
-        let model: TranscriptionModelChoice = .whisperLargeV3
-
-        assertEqual(model.engineName, "whisper", "Whisper must dispatch to the whisper engine path")
-        assertTrue(model.isWhisper, "Whisper must be classified as a Whisper model")
-        assertEqual(
-            model.whisperKitModelName,
-            "large-v3-v20240930_626MB",
-            "Whisper must resolve to the non-turbo WhisperKit bundle"
-        )
-    }
-
-    runSuite("STTRouter policy — Apple Speech routes to its own engine with a language choice") {
-        let model: TranscriptionModelChoice = .appleSpeech
-
-        assertEqual(model.engineName, "apple_speech")
-        assertEqual(model.runtime, .appleSpeech, "Apple Speech must not share a warmup runtime with Parakeet or Whisper")
-        assertTrue(model.isAppleSpeech)
-        assertFalse(model.isWhisper, "Apple Speech must not dispatch to WhisperKit")
-        assertNil(model.whisperKitModelName)
-        assertNil(model.parakeetVariant)
-        assertTrue(model.supportsMeetingLanguageChoice)
-        assertFalse(TranscriptionModelChoice.parakeetTDTv3.supportsMeetingLanguageChoice)
-        assertTrue(TranscriptionModelChoice.whisperLargeV3.supportsMeetingLanguageChoice)
-        assertEqual(model.rawValue, "apple-speech")
-        assertEqual(model.transcriptionEngineIdentifier, "apple_speech_local")
-        assertEqual(model.transcriptionEngineDisplayName, "Apple Speech")
-    }
-
     runSuite("A saved language the model can't do sends the person to the settings fix") {
-        let appleError = TranscriptionLanguageModelErrors.appleSpeechUnsupportedLanguage(
-            languageName: "Welsh",
-            isExplicitSelection: true
-        )
-        assertNotNil(appleError)
-        assertEqual(
-            MeetingFailureKind.classify(message: appleError?.localizedDescription ?? ""),
-            .languageNeedsWhisperModel,
-            "Apple Speech missing a saved language shows the pick-a-Whisper-model fix"
-        )
-        assertTrue(appleError?.localizedDescription.contains("Welsh") == true, "the message names the language")
-        assertNil(
-            TranscriptionLanguageModelErrors.appleSpeechUnsupportedLanguage(languageName: "Welsh", isExplicitSelection: false),
-            "automatic language saved nothing, so the engine's own error stands"
-        )
         assertEqual(
             MeetingFailureKind.classify(
                 message: TranscriptionLanguageModelErrors.savedLanguageNeedsLanguageModel().localizedDescription
             ),
             .languageNeedsWhisperModel,
-            "Parakeet with a saved language shows the same settings fix"
+            "Parakeet with a saved language shows the pick-a-Whisper-model settings fix"
         )
     }
 
@@ -147,7 +95,7 @@ func testSTTRouterPolicy() {
         // Mirror STTRouter's switch: every case must map to exactly one of the
         // parakeet or whisper engine paths.
         for model in TranscriptionModelChoice.allCases {
-            let enginePaths = ["parakeet", "whisper", "apple_speech"].filter { $0 == model.engineName }
+            let enginePaths = ["parakeet", "whisper"].filter { $0 == model.engineName }
             assertEqual(
                 enginePaths.count,
                 1,
@@ -189,14 +137,6 @@ func testSTTRouterPolicy() {
             "whisper_large_v3_turbo_local"
         )
         assertEqual(
-            TranscriptionModelChoice.whisperLargeV3.transcriptionEngineIdentifier,
-            "whisper_large_v3_local"
-        )
-        assertEqual(
-            TranscriptionModelChoice.appleSpeech.transcriptionEngineIdentifier,
-            "apple_speech_local"
-        )
-        assertEqual(
             TranscriptionModelChoice.parakeetUltraExperimental.transcriptionEngineIdentifier,
             "parakeet_ultra_local"
         )
@@ -230,7 +170,6 @@ func testSTTRouterPolicy() {
         // reroute their audio to the default model after upgrade.
         assertEqual(TranscriptionModelChoice.parakeetTDTv3.rawValue, "parakeet-tdt-v3")
         assertEqual(TranscriptionModelChoice.whisperLargeV3Turbo.rawValue, "whisper-large-v3-turbo")
-        assertEqual(TranscriptionModelChoice.whisperLargeV3.rawValue, "whisper-large-v3")
         assertEqual(TranscriptionModelChoice.parakeetUltraExperimental.rawValue, "parakeet-ultra-experimental")
 
         for model in TranscriptionModelChoice.allCases {
@@ -242,16 +181,17 @@ func testSTTRouterPolicy() {
         }
     }
 
-    runSuite("STTRouter policy — unknown rawValues do not resolve to any model") {
-        // Guards against accidental fallbacks routing unknown saved models
-        // into Parakeet at the enum layer (TranscriptionModelPreferences
-        // handles the default-substitution separately). The retired Nemotron
-        // beta rawValue must also stay unresolvable so old saved preferences
-        // fall back to the default model.
+    runSuite("STTRouter policy — unknown and retired rawValues do not resolve directly on the enum") {
+        // Guards against accidental fallbacks routing unknown or retired saved models
+        // at the enum layer (TranscriptionModelPreferences.migratedModel handles
+        // explicit migration separately).
         assertNil(TranscriptionModelChoice(rawValue: "not-a-real-model"))
         assertNil(TranscriptionModelChoice(rawValue: ""))
         assertNil(TranscriptionModelChoice(rawValue: "parakeet"))
         assertNil(TranscriptionModelChoice(rawValue: "nemotron-streaming-0.6b"))
+        assertNil(TranscriptionModelChoice(rawValue: "parakeet-tdt-v2"))
+        assertNil(TranscriptionModelChoice(rawValue: "whisper-large-v3"))
+        assertNil(TranscriptionModelChoice(rawValue: "apple-speech"))
         assertNil(TranscriptionModelChoice(rawValue: "whisper-large-v3-turbo "))  // trailing space
     }
 

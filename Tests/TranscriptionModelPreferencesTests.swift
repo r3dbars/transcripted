@@ -1,24 +1,34 @@
 import Foundation
 
 func testTranscriptionModelPreferences() {
-    runSuite("Parakeet v2 preference persists without changing the default") {
-        let name = "TranscriptionModelPreferencesTests.v2.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defer { defaults.removePersistentDomain(forName: name) }
-        TranscriptionModelPreferences.setPreferredModel(.parakeetTDTv2, userDefaults: defaults)
-        assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .parakeetTDTv2)
+    runSuite("User-facing STT choices narrow to Parakeet V3 and Whisper Large V3 Turbo") {
         assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3)
-        assertEqual(TranscriptionModelChoice.allCases.count, 6)
-        assertEqual(TranscriptionModelChoice.parakeetTDTv2.parakeetVariant, .v2)
+        assertEqual(TranscriptionModelChoice.allCases, [
+            .parakeetTDTv3,
+            .whisperLargeV3Turbo,
+            .parakeetUltraExperimental,
+        ])
         assertEqual(TranscriptionModelChoice.parakeetTDTv3.parakeetVariant, .v3)
         assertEqual(TranscriptionModelChoice.parakeetUltraExperimental.parakeetVariant, .ultra)
-        assertNil(TranscriptionModelChoice.whisperLargeV3.parakeetVariant)
+        assertNil(TranscriptionModelChoice.whisperLargeV3Turbo.parakeetVariant)
+
+        let visibleWithoutLocalInstall = TranscriptionModelChoice.allCases.filter { model in
+            TranscriptionModelVisibilityPolicy.isVisible(
+                model,
+                selectedModel: .parakeetTDTv3,
+                isLocallyInstalled: { _ in false }
+            )
+        }
+        assertEqual(
+            visibleWithoutLocalInstall,
+            [.parakeetTDTv3, .whisperLargeV3Turbo],
+            "normal installs should see strictly 2 choices in the picker"
+        )
     }
 
     runSuite("Parakeet Ultra is an experimental v3-shaped model that is never downloaded") {
         let ultra = ParakeetModelVariant.ultra
         assertTrue(ultra.isLocalInstallOnly)
-        assertFalse(ParakeetModelVariant.v2.isLocalInstallOnly)
         assertFalse(ParakeetModelVariant.v3.isLocalInstallOnly)
         assertEqual(ultra.jointModelName, ParakeetModelVariant.v3.jointModelName)
         assertEqual(ultra.requiredModelDirectoryNames, ParakeetModelVariant.v3.requiredModelDirectoryNames)
@@ -28,7 +38,6 @@ func testTranscriptionModelPreferences() {
         // keep that name while the parent carries Ultra's identity.
         assertEqual(ultra.localInstallRelativePath, "parakeet-ultra/parakeet-tdt-0.6b-v3")
         assertNil(ParakeetModelVariant.v3.localInstallRelativePath)
-        assertNil(ParakeetModelVariant.v2.localInstallRelativePath)
         assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3, "Ultra is opt-in only")
     }
 
@@ -73,21 +82,36 @@ func testTranscriptionModelPreferences() {
         assertEqual(
             TranscriptionModelPreferences.preferredModel(userDefaults: defaults),
             .whisperLargeV3Turbo,
-            "advanced users should be able to save a Whisper preference"
+            "users should be able to save Whisper Large V3 Turbo"
         )
     }
 
-    runSuite("TranscriptionModelPreferences stores an Apple Speech preference") {
-        let suiteName = "TranscriptionModelPreferencesTests.apple.\(UUID().uuidString)"
+    runSuite("TranscriptionModelPreferences migrates every retired stored model ID to its successor") {
+        let suiteName = "TranscriptionModelPreferencesTests.migrate.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        TranscriptionModelPreferences.setPreferredModel(.appleSpeech, userDefaults: defaults)
+        let expectedMigrations: [(legacyRawValue: String, expected: TranscriptionModelChoice)] = [
+            ("parakeet-tdt-v2", .parakeetTDTv3),
+            ("apple-speech", .parakeetTDTv3),
+            ("parakeet-ultra", .parakeetTDTv3),
+            ("nemotron-streaming-0.6b", .parakeetTDTv3),
+            ("whisper-large-v3", .whisperLargeV3Turbo),
+        ]
 
-        assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .appleSpeech)
-        assertEqual(defaults.string(forKey: "transcription-model-preference"), "apple-speech")
-        assertEqual(TranscriptionModelPreferences.defaultModel, .parakeetTDTv3,
-                    "adding Apple Speech must not change the default engine")
+        for (legacyRawValue, expected) in expectedMigrations {
+            defaults.set(legacyRawValue, forKey: "transcription-model-preference")
+            assertEqual(
+                TranscriptionModelPreferences.migratedModel(forStoredRawValue: legacyRawValue),
+                expected,
+                "legacy rawValue '\(legacyRawValue)' should explicitly map to \(expected.rawValue)"
+            )
+            assertEqual(
+                TranscriptionModelPreferences.preferredModel(userDefaults: defaults),
+                expected,
+                "stored '\(legacyRawValue)' must seamlessly migrate to \(expected.rawValue)"
+            )
+        }
     }
 
     runSuite("TranscriptionModelPreferences ignores unknown saved values") {
@@ -95,28 +119,17 @@ func testTranscriptionModelPreferences() {
         let defaults = UserDefaults(suiteName: suiteName)!
         defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        defaults.set("not-a-real-model", forKey: "transcription-model-preference")
-
-        assertEqual(
-            TranscriptionModelPreferences.preferredModel(userDefaults: defaults),
-            .parakeetTDTv3,
-            "unknown saved model identifiers should fall back to Parakeet"
-        )
-    }
-
-    runSuite("TranscriptionModelPreferences self-heals retired saved models to Parakeet") {
-        // The Nemotron streaming beta was removed; installs that still have its
-        // rawValue persisted must silently fall back to the default model.
-        let suiteName = "TranscriptionModelPreferencesTests.retired.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suiteName)!
-        defer { defaults.removePersistentDomain(forName: suiteName) }
-
-        defaults.set("nemotron-streaming-0.6b", forKey: "transcription-model-preference")
-
-        assertEqual(
-            TranscriptionModelPreferences.preferredModel(userDefaults: defaults),
-            .parakeetTDTv3,
-            "the retired Nemotron rawValue should fall back to Parakeet"
-        )
+        for invalid in ["not-a-real-model", "", "parakeet", "whisper-large-v3-turbo "] {
+            defaults.set(invalid, forKey: "transcription-model-preference")
+            assertNil(
+                TranscriptionModelPreferences.migratedModel(forStoredRawValue: invalid),
+                "unknown stored value '\(invalid)' should not match a migration entry"
+            )
+            assertEqual(
+                TranscriptionModelPreferences.preferredModel(userDefaults: defaults),
+                .parakeetTDTv3,
+                "unknown saved model identifier '\(invalid)' should fall back to Parakeet V3"
+            )
+        }
     }
 }

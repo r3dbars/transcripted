@@ -71,11 +71,11 @@ func testParakeetModelInitDiagnostics() async {
 
     runSuite("Model work tokens reject stale success, failure and progress after switching back") {
         let oldV3 = ParakeetModelWorkToken(variant: .v3, generation: 1)
-        let v2 = ParakeetModelWorkToken(variant: .v2, generation: 2)
+        let ultra = ParakeetModelWorkToken(variant: .ultra, generation: 2)
         let newV3 = ParakeetModelWorkToken(variant: .v3, generation: 3)
-        assertFalse(oldV3.isCurrent(variant: .v2, generation: 1))
+        assertFalse(oldV3.isCurrent(variant: .ultra, generation: 1))
         assertFalse(oldV3.isCurrent(variant: .v3, generation: 3))
-        assertFalse(v2.isCurrent(variant: .v3, generation: 3))
+        assertFalse(ultra.isCurrent(variant: .v3, generation: 3))
         assertTrue(newV3.isCurrent(variant: .v3, generation: 3))
         assertFalse(newV3.isCurrent(variant: .v3, generation: 4), "cancellation/retry invalidates even the same model")
     }
@@ -87,10 +87,6 @@ func testParakeetModelInitDiagnostics() async {
                 + variant.requiredFileNames).map { prefix + $0 })
             assertNotNil(ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
                 resourcePath: "/fixture", variant: variant, fileExists: { files.contains($0) }
-            ))
-            let other: ParakeetModelVariant = variant == .v2 ? .v3 : .v2
-            assertNil(ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
-                resourcePath: "/fixture", variant: other, fileExists: { files.contains($0) }
             ))
             for missing in files {
                 assertNil(ParakeetBundledModelLayoutPolicy.resolveBundledModelPath(
@@ -132,7 +128,7 @@ func testParakeetModelInitDiagnostics() async {
         }
         assertEqual(replacement as? ParakeetLocalModelError, .replacedDuringLoad,
             "a folder that lost its marker mid-load must not count as Ultra")
-        for variant in [ParakeetModelVariant.v2, .v3] {
+        for variant in [ParakeetModelVariant.v3] {
             do {
                 try ParakeetLocalModelPolicy.verifyLoadedFromLocalInstall(
                     variant: variant, directory: directory, fileExists: { _ in false }

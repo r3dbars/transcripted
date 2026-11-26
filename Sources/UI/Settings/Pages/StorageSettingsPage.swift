@@ -275,9 +275,11 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 .textRole(.heading)
 
             VStack(alignment: .leading, spacing: 6) {
+                let staleBytes = snapshot.staleFluidAudioModelBytes
+                    + (includeWhisperInCleanup ? 0 : snapshot.staleWhisperModelBytes)
                 breakdownLine("Speech models", snapshot.formattedFluidAudioModelsSize)
-                breakdownLine("Old models", snapshot.staleFluidAudioModelBytes > 0
-                    ? "\(snapshot.formattedStaleFluidAudioModelSize), can go"
+                breakdownLine("Old models", staleBytes > 0
+                    ? "\(ModelCacheInventory.formattedByteCount(staleBytes)), can go"
                     : "None")
                 breakdownLine("Whisper", snapshot.whisperModelsBytes > 0
                     ? (includeWhisperInCleanup

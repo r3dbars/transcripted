@@ -54,23 +54,12 @@ enum FirstRunExperience {
     private static let failedModelSetupDetail = "Local voice setup needs another try. Retry download will try the same one-time local model setup again."
 
     static func modelPersistenceDetail(for model: TranscriptionModelChoice) -> String {
-        if model.isAppleSpeech {
-            return "macOS downloads each language once from Apple and keeps it with the system, so Transcripted updates do not download it again."
-        }
-        return "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
-    }
-
-    /// Apple Speech's own errors ("Apple Speech can't transcribe…") say what
-    /// to change, so show them. Anything else (a raw download or system
-    /// error) gets plain retry copy instead of framework text.
-    private static func appleSpeechFailureDetail(message: String, model: TranscriptionModelChoice) -> String? {
-        guard model.isAppleSpeech else { return nil }
-        if message.hasPrefix("Apple Speech") { return message }
-        return "Apple Speech couldn't get your Mac's language from Apple. Check your internet connection, then use Try again."
+        "One-time \(model.approximateDownloadSize) download. The model is saved on this Mac outside the app bundle, so normal Transcripted updates do not download it again."
     }
 
     private static func downloadSourceDetail(for model: TranscriptionModelChoice) -> String {
-        model.isAppleSpeech ? "Downloading from Apple." : "Downloading from huggingface.co."
+        _ = model
+        return "Downloading from huggingface.co."
     }
 
     static func hasRequiredMeetingSetup(
@@ -191,7 +180,7 @@ enum FirstRunExperience {
             let percentage = max(0, min(100, Int(progress * 100)))
             return FirstRunModelCardState(
                 title: "Downloading \(model.title)",
-                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use \(model.isAppleSpeech ? "Try again" : "Retry download").",
+                detail: "\(modelPersistenceDetail(for: model)) \(downloadSourceDetail(for: model)) Keep Transcripted open; if the download fails, use Retry download.",
                 status: progress > 0 ? "\(percentage)% complete" : "Starting download",
                 progress: max(0.12, min(0.84, 0.12 + progress * 0.72)),
                 tone: .working
@@ -207,11 +196,7 @@ enum FirstRunExperience {
         case .loading:
             return FirstRunModelCardState(
                 title: "Loading \(model.title)",
-                // Apple Speech reports loading before it knows whether macOS
-                // still has to download the language.
-                detail: model.isAppleSpeech
-                    ? "Transcripted is checking your Mac's language with Apple Speech. macOS may download it first."
-                    : "Transcripted has the model files on this Mac and is loading them into memory.",
+                detail: "Transcripted has the model files on this Mac and is loading them into memory.",
                 status: "Almost ready",
                 progress: 0.92,
                 tone: .working
@@ -226,10 +211,10 @@ enum FirstRunExperience {
                 progress: nil,
                 tone: .ready
             )
-        case .failed(let message):
+        case .failed:
             return FirstRunModelCardState(
                 title: "Couldn't load \(model.title)",
-                detail: appleSpeechFailureDetail(message: message, model: model) ?? failedModelSetupDetail,
+                detail: failedModelSetupDetail,
                 status: "Retry needed",
                 progress: nil,
                 tone: .failed

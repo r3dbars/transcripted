@@ -36,23 +36,23 @@ import FluidAudio
     @MainActor static func joiningAndReadyPrefetch() async {
         await FakeFluidAudio.shared.reset()
         let engine = ParakeetEngine()
-        let first = Task { await engine.initialize(variant: .v2) }
-        await waitFor("download-v2#1")
+        let first = Task { await engine.initialize(variant: .v3) }
+        await waitFor("download-v3#1")
         var secondFinished = false
         let second = Task {
-            await engine.initialize(variant: .v2)
+            await engine.initialize(variant: .v3)
             secondFinished = true
         }
         await settle()
         check(!secondFinished, "same-variant initialization waits for the shared load")
-        await finishLoad("v2")
+        await finishLoad("v3")
         await first.value; await second.value
         check(secondFinished, "same-variant initialization resumes when the shared load completes")
-        check(engine.isModelLoaded(for: .v2), "v2 ready")
+        check(engine.isModelLoaded(for: .v3), "v3 ready")
         check(await FakeFluidAudio.shared.events.filter { $0.hasPrefix("download-") }.count == 1, "one shared download")
         let manager = engine.asrManager
-        await engine.prefetchModelFilesIfNeeded(variant: .v3)
-        check(engine.asrManager === manager && engine.modelVariant == .v2, "prefetch preserves idle loaded manager")
+        await engine.prefetchModelFilesIfNeeded(variant: .ultra)
+        check(engine.asrManager === manager && engine.modelVariant == .v3, "prefetch preserves idle loaded manager")
         check(engine.modelDownloadState == .ready, "prefetch preserves readiness")
         await dispose(engine)
     }
@@ -93,25 +93,25 @@ import FluidAudio
         let fake = FakeFluidAudio.shared
         await fake.reset()
         let engine = ParakeetEngine()
-        let prefetch = Task { await engine.prefetchModelFilesIfNeeded(variant: .v2) }
-        await waitFor("download-v2#1")
-        await fake.progress("download-v2#1", 0.8)
+        let prefetch = Task { await engine.prefetchModelFilesIfNeeded(variant: .v3) }
+        await waitFor("download-v3#1")
+        await fake.progress("download-v3#1", 0.8)
         await settle()
         check(engine.modelDownloadState == .downloading(progress: 0.2), "current progress reaches published state")
-        let initialization = Task { await engine.initialize(variant: .v2) }
+        let initialization = Task { await engine.initialize(variant: .v3) }
         await settle()
-        check(await fake.events == ["download-v2#1"], "initialize joins existing prefetch")
-        await fake.release("download-v2#1", fail: true)
+        check(await fake.events == ["download-v3#1"], "initialize joins existing prefetch")
+        await fake.release("download-v3#1", fail: true)
         await prefetch.value; await initialization.value
         if case .failed = engine.modelDownloadState { check(true, "current failure is visible") }
         else { check(false, "current download error must publish failure") }
         check(engine.modelFilePrefetchTask == nil && engine.modelInitializationTask == nil, "failed work relinquishes task ownership")
-        let retry = Task { await engine.initialize(variant: .v2) }
-        await waitFor("download-v2#2"); await fake.release("download-v2#2")
-        await waitFor("load-v2#1"); await fake.release("load-v2#1")
-        await waitFor("manager-v2#1"); await fake.release("manager-v2#1")
+        let retry = Task { await engine.initialize(variant: .v3) }
+        await waitFor("download-v3#2"); await fake.release("download-v3#2")
+        await waitFor("load-v3#1"); await fake.release("load-v3#1")
+        await waitFor("manager-v3#1"); await fake.release("manager-v3#1")
         await retry.value
-        check(engine.isModelLoaded(for: .v2), "retry succeeds after current error")
+        check(engine.isModelLoaded(for: .v3), "retry succeeds after current error")
         await dispose(engine)
     }
 
@@ -121,9 +121,9 @@ import FluidAudio
         let engine = ParakeetEngine()
         let old = Task { await engine.initialize(variant: .v3) }
         await waitFor("download-v3#1")
-        let middle = Task { await engine.initialize(variant: .v2) }
+        let middle = Task { await engine.initialize(variant: .ultra) }
         await settle()
-        check(engine.modelVariant == .v2, "middle selection installed")
+        check(engine.modelVariant == .ultra, "middle selection installed")
         let latest = Task { await engine.initialize(variant: .v3) }
         await settle()
         check(engine.modelVariant == .v3, "latest selection installed")
@@ -140,39 +140,51 @@ import FluidAudio
         await waitFor("manager-v3#1"); await fake.release("manager-v3#1")
         await old.value; await middle.value; await latest.value
         check(engine.isModelLoaded(for: .v3), "latest v3 ready")
-        check(!(await fake.events.contains("download-v2#1")), "superseded middle selection never allocates")
         await dispose(engine)
     }
 
     @MainActor static func staleManagerResult(fail: Bool) async {
         let fake = FakeFluidAudio.shared
         await fake.reset()
+        ModelCacheInventory.reset()
+        let ultraDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ParakeetLifecycleUltra-\(UUID().uuidString)", isDirectory: true)
+        try! FileManager.default.createDirectory(at: ultraDir, withIntermediateDirectories: true)
+        FileManager.default.createFile(
+            atPath: ultraDir.appendingPathComponent(ParakeetModelVariant.localInstallMarkerFileName).path,
+            contents: Data("{}".utf8)
+        )
+        defer { try? FileManager.default.removeItem(at: ultraDir) }
         let engine = ParakeetEngine()
         let first = Task { await engine.initialize(variant: .v3) }
         await waitFor("download-v3#1"); await fake.release("download-v3#1")
         await waitFor("load-v3#1"); await fake.release("load-v3#1")
         await waitFor("manager-v3#1")
-        let next = Task { await engine.initialize(variant: .v2) }
+        ModelCacheInventory.cachedVariant = .ultra
+        ModelCacheInventory.cachedDirectoryOverride = ultraDir
+        let next = Task { await engine.initialize(variant: .ultra) }
         await settle()
-        check(!(await fake.events.contains("download-v2#1")), "native manager initialization drains before replacement")
+        check(!(await fake.events.contains("load-v3#2")), "native manager initialization drains before replacement")
         await fake.release("manager-v3#1", fail: fail)
-        await waitFor("download-v2#1")
+        await waitFor("load-v3#2")
         let events = await fake.events
-        check(events.firstIndex(of: "cleanup-v3")! < events.firstIndex(of: "download-v2#1")!, "stale manager cleaned before next allocation")
+        check(events.firstIndex(of: "cleanup-v3")! < events.firstIndex(of: "load-v3#2")!, "stale manager cleaned before next allocation")
         check(!engine.asrManagerReady && engine.loadedModelVariant == nil, "stale success/error cannot publish readiness")
-        check(engine.modelDownloadState == .downloading(progress: 0), "stale error cannot replace successor state")
-        await finishLoad("v2")
+        check(engine.modelDownloadState == .loading, "stale error cannot replace successor state")
+        await fake.release("load-v3#2")
+        await waitFor("manager-v3#2"); await fake.release("manager-v3#2")
         await first.value; await next.value
-        check(engine.isModelLoaded(for: .v2), "replacement ready after stale manager result")
+        check(engine.isModelLoaded(for: .ultra), "replacement ready after stale manager result")
         await dispose(engine)
+        ModelCacheInventory.reset()
     }
 
     @MainActor static func watchdogRetry() async {
         let fake = FakeFluidAudio.shared
         await fake.reset()
         let engine = ParakeetEngine()
-        let first = Task { await engine.initialize(variant: .v2) }
-        await waitFor("download-v2#1")
+        let first = Task { await engine.initialize(variant: .v3) }
+        await waitFor("download-v3#1")
         engine.scheduleModelDownloadWatchdog(
             generation: engine.modelDownloadAttemptGeneration,
             progressTracker: ParakeetModelDownloadProgressTracker(initialActivityUptime: ProcessInfo.processInfo.systemUptime - 301)
@@ -181,19 +193,19 @@ import FluidAudio
         if case .failed = engine.modelDownloadState { check(true, "watchdog failed stalled download") }
         else { check(false, "watchdog must fail stalled download") }
         check(engine.modelInitializationTask == nil && engine.modelFilePrefetchTask == nil, "watchdog cancels task ownership")
-        let retry = Task { await engine.initialize(variant: .v2) }
+        let retry = Task { await engine.initialize(variant: .v3) }
         await settle()
-        check(await fake.events == ["download-v2#1"], "retry waits for stalled native task")
-        await fake.release("download-v2#1", fail: true)
-        await waitFor("download-v2#2")
-        await fake.progress("download-v2#1", 1)
+        check(await fake.events == ["download-v3#1"], "retry waits for stalled native task")
+        await fake.release("download-v3#1", fail: true)
+        await waitFor("download-v3#2")
+        await fake.progress("download-v3#1", 1)
         await settle()
         check(engine.modelDownloadState == .downloading(progress: 0), "stalled callback cannot overwrite retry")
-        await fake.release("download-v2#2")
-        await waitFor("load-v2#1"); await fake.release("load-v2#1")
-        await waitFor("manager-v2#1"); await fake.release("manager-v2#1")
+        await fake.release("download-v3#2")
+        await waitFor("load-v3#1"); await fake.release("load-v3#1")
+        await waitFor("manager-v3#1"); await fake.release("manager-v3#1")
         await first.value; await retry.value
-        check(engine.isModelLoaded(for: .v2), "retry succeeds after watchdog")
+        check(engine.isModelLoaded(for: .v3), "retry succeeds after watchdog")
         await dispose(engine)
     }
 
@@ -208,9 +220,9 @@ import FluidAudio
             engine.isRecording = kind == 0
             engine.isTranscribing = kind == 1
             engine.hasActiveASRWork = kind == 2
-            await engine.initialize(variant: .v2)
+            await engine.initialize(variant: .ultra)
             check(engine.modelVariant == .v3 && engine.isModelLoaded(for: .v3), "active work rejects selection before mutation")
-            await engine.prefetchModelFilesIfNeeded(variant: .v2)
+            await engine.prefetchModelFilesIfNeeded(variant: .ultra)
             check(engine.asrManager === manager, "active work rejects prefetch")
         }
         engine.teardownModel()
