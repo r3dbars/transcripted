@@ -11,6 +11,8 @@ import SwiftUI
 /// automation stays implemented but off the view tree (see
 /// `codexInboxDetails`).
 struct AgentConnectionSettingsPage: View {
+    let writingController: WritingController
+
     private enum RowPhase: Equatable {
         case idle
         case connecting
@@ -50,6 +52,7 @@ struct AgentConnectionSettingsPage: View {
             }
             .frame(maxWidth: 620, alignment: .leading)
             CompanionSettingsCard()
+            WritingCaptureSettingsCard(controller: writingController)
             advancedSection
         }
         .accessibilityElement(children: .contain)

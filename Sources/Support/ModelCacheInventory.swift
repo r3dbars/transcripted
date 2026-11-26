@@ -9,13 +9,20 @@ struct ModelCacheSnapshot: Equatable {
     /// The on-device meeting titles model (Settings > Meetings > Titles and
     /// summaries), plus any partial download.
     var meetingTitlesModelBytes: Int64 = 0
+    /// Leftover GGUF models under `models/writing/` from older builds that
+    /// offered local writing autocomplete. Always reclaimable.
+    var writingModelBytes: Int64 = 0
 
     var totalKnownBytes: Int64 {
-        fluidAudioModelsBytes + transcriptedCacheBytes + meetingTitlesModelBytes
+        fluidAudioModelsBytes + transcriptedCacheBytes + meetingTitlesModelBytes + writingModelBytes
     }
 
     var formattedMeetingTitlesModelSize: String {
         ModelCacheInventory.formattedByteCount(meetingTitlesModelBytes)
+    }
+
+    var formattedWritingModelSize: String {
+        ModelCacheInventory.formattedByteCount(writingModelBytes)
     }
 
     var formattedTotalKnownSize: String {
@@ -39,11 +46,13 @@ struct ModelCacheSnapshot: Equatable {
     }
 
     /// `includeMeetingTitles` is true while Titles and summaries is off, so
-    /// its downloaded model is no longer needed.
+    /// its downloaded model is no longer needed. Any leftover writing
+    /// autocomplete models are always reclaimable.
     func reclaimableBytes(includeWhisper: Bool, includeMeetingTitles: Bool = false) -> Int64 {
         staleFluidAudioModelBytes
             + (includeWhisper ? whisperModelsBytes : 0)
             + (includeMeetingTitles ? meetingTitlesModelBytes : 0)
+            + writingModelBytes
     }
 
     func formattedReclaimableSize(includeWhisper: Bool, includeMeetingTitles: Bool = false) -> String {
@@ -102,7 +111,8 @@ enum ModelCacheInventory {
         fluidAudioModelsDirectory: URL = defaultFluidAudioModelsDirectory(),
         transcriptedCacheDirectory: URL = defaultTranscriptedCacheDirectory(),
         whisperModelsDirectory: URL = defaultWhisperModelsDirectory(),
-        meetingTitlesModelsDirectory: URL = defaultMeetingTitlesModelsDirectory()
+        meetingTitlesModelsDirectory: URL = defaultMeetingTitlesModelsDirectory(),
+        writingModelsDirectory: URL = defaultWritingModelsDirectory()
     ) -> ModelCacheSnapshot {
         let staleEntries = knownStaleFluidAudioModelDirectories
             .sorted()
@@ -120,7 +130,8 @@ enum ModelCacheInventory {
             whisperModelsBytes: directorySize(at: whisperModelsDirectory, fileManager: fileManager),
             staleFluidAudioModelBytes: staleEntries.reduce(0) { $0 + $1.1 },
             staleFluidAudioModelNames: staleEntries.map(\.0),
-            meetingTitlesModelBytes: directorySize(at: meetingTitlesModelsDirectory, fileManager: fileManager)
+            meetingTitlesModelBytes: directorySize(at: meetingTitlesModelsDirectory, fileManager: fileManager),
+            writingModelBytes: directorySize(at: writingModelsDirectory, fileManager: fileManager)
         )
     }
 
@@ -280,7 +291,42 @@ enum ModelCacheInventory {
                 modelsRootDirectory: modelsRootDirectory
             ))
         }
+        result = result.merging(try removeWritingModels(
+            fileManager: fileManager,
+            modelsRootDirectory: modelsRootDirectory
+        ))
         return result
+    }
+
+    /// Leftover GGUF models downloaded by older builds that included local
+    /// writing autocomplete. Kept inspectable and removable from Settings >
+    /// Library > Free up space.
+    static func defaultWritingModelsDirectory() -> URL {
+        writingModelsDirectory(in: defaultLocalModelsDirectory())
+    }
+
+    static func writingModelsDirectory(in modelsRoot: URL) -> URL {
+        modelsRoot.appendingPathComponent("writing", isDirectory: true)
+    }
+
+    /// Removes only `<models>/writing`, and only when neither it nor the
+    /// models folder is a symlink pointing elsewhere.
+    static func removeWritingModels(
+        fileManager: FileManager = .default,
+        modelsRootDirectory: URL = defaultLocalModelsDirectory()
+    ) throws -> ModelCacheCleanupResult {
+        let root = modelsRootDirectory.standardizedFileURL
+        let directory = writingModelsDirectory(in: root).standardizedFileURL
+        guard !isSymbolicLink(at: root, fileManager: fileManager),
+              !isSymbolicLink(at: directory, fileManager: fileManager),
+              directory.resolvingSymlinksInPath().path.hasPrefix(root.resolvingSymlinksInPath().path + "/"),
+              fileManager.fileExists(atPath: directory.path)
+        else {
+            return .empty
+        }
+        let bytes = directorySize(at: directory, fileManager: fileManager)
+        try fileManager.removeItem(at: directory)
+        return ModelCacheCleanupResult(removedBytes: bytes, removedNames: ["old writing models"])
     }
 
     /// Where the on-device meeting titles model lives. The model store in

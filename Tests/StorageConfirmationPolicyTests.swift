@@ -64,6 +64,15 @@ func testStorageConfirmationPolicy() {
             StorageConfirmationPolicy.dictationAudioMessage(for: .off),
             "Your dictation text stays. All kept dictation audio is deleted now, and new dictations won't keep any."
         )
+        let withWritingModels = StorageConfirmationPolicy.freeUpSpaceMessage(
+            whisperIsSelected: false,
+            removesMeetingTitlesModel: false,
+            removesWritingModels: true
+        )
+        assertTrue(
+            withWritingModels.contains("Leftover writing autocomplete models go too; your saved writing Markdown files stay."),
+            "Free up space explains leftover writing models go while saved writing Markdown stays"
+        )
     }
 
     // MARK: Meeting and dictation audio windows stay independent

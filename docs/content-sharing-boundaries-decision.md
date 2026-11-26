@@ -44,10 +44,7 @@ The remaining asset list and boundary rows are unchanged by this proposal.
 
 ## Source basis and limits
 
-The Screen Memory permission and capture services establish the local window
-boundary. `Sources/Support/NextSentencePreferences.swift` and the context,
-controller, privacy, prompt and Claude files under `Sources/Writing/NextSentence/`
-establish the preview's default, request inputs and text-only scrubbing.
+The Screen Memory permission and capture services (since removed in the Writing spin-out) and the former NextSentence preferences/context/controller/privacy/prompt/Claude modules originally established the local window and cloud preview boundaries.
 `Sources/UI/Settings/FeedbackComposerModel.swift` gates sending on review;
 `Sources/UI/Shared/FeedbackSubmissionClient.swift` defines the fixed HTTPS
 destination and validates optional diagnostics and attachment limits.

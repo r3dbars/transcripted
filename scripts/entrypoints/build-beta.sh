@@ -107,9 +107,6 @@ BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
 LIVE_PACKAGE_DIR="Tools/TranscriptedLive"
 LIVE_BINARY="$LIVE_PACKAGE_DIR/.build/release/transcripted-live"
 BUNDLED_LIVE_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-live"
-# Pinned by build-deps.sh: Tilde 0.1.0 beta 1's llama-server, signature removed.
-LLAMA_SERVER_BINARY="deps-tools/llama-server"
-BUNDLED_LLAMA_SERVER="$APP_BUNDLE/Contents/Helpers/llama-server"
 
 # NOTE: build.sh, build-deps.sh, and run-integration-smoke.sh share their
 # dependency-staleness-check functions via scripts/entrypoints/lib/deps-staleness.sh.
@@ -202,18 +199,12 @@ bundle_live_helper() {
     chmod 755 "$BUNDLED_LIVE_BINARY"
 }
 
-# Writing's inference helper. sign_embedded_payloads' Helpers loop signs it.
-bundle_llama_server() {
-    cp "$LLAMA_SERVER_BINARY" "$BUNDLED_LLAMA_SERVER"
-    chmod 755 "$BUNDLED_LLAMA_SERVER"
-}
-
 if [ ! -f "$BETA_ENTITLEMENTS" ]; then
     echo "❌ Missing entitlements file: $BETA_ENTITLEMENTS"
     exit 1
 fi
 
-if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ] || [ ! -x "$LLAMA_SERVER_BINARY" ]; then
+if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d "deps-modules" ] || [ ! -f "$TRANSCRIPTED_CORE_MODULE" ] || [ ! -f "$ARGMAX_CORE_MODULE" ] || [ ! -f "$WHISPERKIT_MODULE" ] || [ ! -d "$SENTRY_FRAMEWORK" ] || [ ! -d "$SPARKLE_FRAMEWORK" ]; then
     echo "❌ Dependencies missing or stale — required for beta builds"
     echo "   Missing stamp: $DEPS_BUILD_STAMP"
     echo "   Missing module: $TRANSCRIPTED_CORE_MODULE"
@@ -221,7 +212,6 @@ if [ ! -f "deps-libs/libDraftDeps.a" ] || [ ! -f "$DEPS_BUILD_STAMP" ] || [ ! -d
     echo "   Missing module: $WHISPERKIT_MODULE"
     echo "   Missing framework: $SENTRY_FRAMEWORK"
     echo "   Missing framework: $SPARKLE_FRAMEWORK"
-    echo "   Missing helper: $LLAMA_SERVER_BINARY"
     echo "   Run build-deps.sh --force first to rebuild dependencies."
     exit 1
 fi
@@ -436,7 +426,6 @@ compile_app_icon "$APP_BUNDLE"
 
 bundle_mcp_server
 bundle_live_helper
-bundle_llama_server
 
 # Unified dependencies (FluidAudio + WhisperKit)
 echo "Dependencies found"

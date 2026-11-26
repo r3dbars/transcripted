@@ -5,19 +5,18 @@ public API, model selection, eligibility, download or runtime behavior changes.
 
 ## Current checked-in contracts
 
-Reviewed against main at `8a38235eef00816a79daa1324387a21ef880204d`.
+Reviewed against main at `8a38235eef00816a79daa1324387a21ef880204d` (note: local Writing autocomplete and its model picker were subsequently spun out, removing WritingSetupPresentation, TildeModelChoice, and WritingSetupPresentationTests):
 
-- `Sources/Writing/WritingSetupPresentation.swift` defines the picker details
+- WritingSetupPresentation defined the picker details
   as Gemma "3.4 GB, faster" and Qwen "5.6 GB, better". Both
-  `WritingSetupFlowView.swift` and `WritingSettingsSection.swift` render those
+  WritingSetupFlowView and WritingSettingsSection rendered those
   `modelOptions` details through `WritingChoiceRow`.
 - `docs/writing-plan.md` specifies that same visible model copy.
-  `Tests/WritingSetupPresentationTests.swift` asserts those exact details.
+  WritingSetupPresentationTests asserted those exact details.
   These establish the checked-in presentation contract, not measured speed
   or quality evidence.
-- The public `TildeModelChoice.resourceGuidance` getter in
-  `Sources/TranscriptedWriting/Core/Runtime/TildeModelChoice.swift` instead
-  says Gemma is the "Measured default, uses less memory and storage" and Qwen
+- The former `TildeModelChoice.resourceGuidance` getter instead
+  said Gemma is the "Measured default, uses less memory and storage" and Qwen
   "Needs more memory and storage, still under study". Its comment says these
   lines appear in the pickers, but current production pickers do not call it.
 - `Tests/TranscriptedWritingTests/Core/TildeProductProfileTests.swift` checks

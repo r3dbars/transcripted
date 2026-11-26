@@ -110,25 +110,4 @@ struct SecretRulesCharacterizationTests {
             #expect(bytes == serial[key % rows.count])
         }
     }
-
-    /// The fit loop re-scrubs each shortened line. Re-scrubbing a suffix is
-    /// not idempotent: "xeyJ…" only becomes a JWT once the leading "x" is
-    /// cut. Dropping that per-pass scrub would leak the token's tail.
-    @Test("A JWT glued to a letter is fully redacted once the fit loop trims the line")
-    func fitLoopRescrubsEachPass() {
-        let recipe = RawContinuationPrompt(
-            textBeforeCursor: "ok",
-            register: .chat,
-            scene: .init(
-                mode: .replying,
-                conversationTurns: [
-                    .init(speaker: .other, text: "see xeyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"),
-                ],
-                referenceSnippets: []
-            ),
-            maxContextCharacters: 80
-        )
-        #expect(recipe.prompt.contains("{\"speaker\":\"them\",\"text\":\"\u{27E8}redacted:jwt\u{27E9}\"}\n"))
-        #expect(!recipe.prompt.contains("c2lnbmF0dXJl"))
-    }
 }

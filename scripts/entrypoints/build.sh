@@ -30,9 +30,6 @@ BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
 LIVE_PACKAGE_DIR="Tools/TranscriptedLive"
 LIVE_BINARY="$LIVE_PACKAGE_DIR/.build/release/transcripted-live"
 BUNDLED_LIVE_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-live"
-# Pinned by build-deps.sh: Tilde 0.1.0 beta 1's llama-server, signature removed.
-LLAMA_SERVER_BINARY="deps-tools/llama-server"
-BUNDLED_LLAMA_SERVER="$APP_BUNDLE/Contents/Helpers/llama-server"
 KEYBOARD_ENTITLEMENTS="config/entitlements/keyboard.plist"
 DEPS_ARCHIVE="deps-libs/libDraftDeps.a"
 DEPS_BUILD_STAMP="deps-libs/.build-deps-stamp"
@@ -89,7 +86,7 @@ ensure_deps_ready() {
     local build_stamp_mtime
     local build_stamp_path
 
-    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ] && [ -x "$LLAMA_SERVER_BINARY" ]; then
+    if [ -f "$DEPS_ARCHIVE" ] && [ -f "$DEPS_BUILD_STAMP" ] && [ -d "$DEPS_MODULE_ROOT" ] && [ -f "$TRANSCRIPTED_CORE_MODULE" ] && [ -f "$ARGMAX_CORE_MODULE" ] && [ -f "$WHISPERKIT_MODULE" ] && [ -d "$SENTRY_FRAMEWORK" ] && [ -d "$SPARKLE_FRAMEWORK" ]; then
         if ! deps_toolchain_matches_stamp; then
             echo "Dependencies are stale for the current Swift toolchain."
             echo "Run: bash build-deps.sh --force"
@@ -132,7 +129,6 @@ ensure_deps_ready() {
     echo "  $WHISPERKIT_MODULE"
     echo "  $SENTRY_FRAMEWORK"
     echo "  $SPARKLE_FRAMEWORK"
-    echo "  $LLAMA_SERVER_BINARY"
     echo ""
     echo "Run: bash build-deps.sh --force"
     exit 1
@@ -451,12 +447,6 @@ bundle_live_helper() {
     chmod 755 "$BUNDLED_LIVE_BINARY"
 }
 
-# Writing's inference helper. sign_embedded_code's Helpers loop signs it.
-bundle_llama_server() {
-    cp "$LLAMA_SERVER_BINARY" "$BUNDLED_LLAMA_SERVER"
-    chmod 755 "$BUNDLED_LLAMA_SERVER"
-}
-
 echo "Building Transcripted..."
 
 refuse_if_bundle_running "$APP_BUNDLE"
@@ -582,7 +572,6 @@ compile_app_icon "$APP_BUNDLE"
 
 bundle_mcp_server
 bundle_live_helper
-bundle_llama_server
 
 # Unified dependencies (FluidAudio + WhisperKit)
 echo "Dependencies found"

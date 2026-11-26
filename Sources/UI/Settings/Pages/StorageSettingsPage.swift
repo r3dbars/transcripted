@@ -25,9 +25,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     let modelCacheCleanupStatus: String?
     let modelCacheCleanupStatusDetails: String?
     let effectiveTranscriptionModelIsWhisper: Bool
-    /// Where Writing keeps its model, so the breakdown can list its size.
-    /// Read-only here; Writing's own page deletes it.
-    let writingModelRoot: URL?
     /// Titles and summaries is off, so its downloaded model can go.
     let meetingTitlesModelIsReclaimable: Bool
 
@@ -47,7 +44,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
     @State private var retentionPrompts = StorageRetentionPrompts()
     @State private var showReclaimableCacheCleanupConfirmation = false
     @State private var showsModelBreakdown = false
-    @State private var writingModelBytes: Int64?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -290,10 +286,8 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                         ? "\(snapshot.formattedMeetingTitlesModelSize), can go"
                         : "\(snapshot.formattedMeetingTitlesModelSize), in use")
                     : "None")
-                if writingModelRoot != nil {
-                    breakdownLine("Writing model", writingModelBytes.map { bytes in
-                        bytes > 0 ? "\(ModelCacheInventory.formattedByteCount(bytes)), on the Writing page" : "None"
-                    } ?? "…")
+                if snapshot.writingModelBytes > 0 {
+                    breakdownLine("Old writing models", "\(snapshot.formattedWritingModelSize), can go")
                 }
             }
 
@@ -316,7 +310,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
 
                 SettingsInlineActionButton(title: "Rescan", symbolName: "arrow.clockwise") {
                     onRefreshModelCacheSnapshot()
-                    loadWritingModelBytes()
                 }
                 .disabled(modelCacheLoading)
                 .help("Rescan model storage sizes.")
@@ -324,7 +317,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
         }
         .padding(16)
         .frame(width: 300, alignment: .leading)
-        .task { loadWritingModelBytes() }
     }
 
     private func breakdownLine(_ title: String, _ value: String) -> some View {
@@ -337,18 +329,6 @@ struct StorageSettingsPage<FailureDetailsButton: View>: View {
                 .font(LibraryTokens.meta)
                 .monospacedDigit()
                 .foregroundStyle(LibraryTokens.ink2)
-        }
-    }
-
-    /// Writing's model size, measured off the main thread. Only file sizes
-    /// are read, the same walk Writing's own storage meter does.
-    private func loadWritingModelBytes() {
-        guard let root = writingModelRoot else { return }
-        Task {
-            let bytes = await Task.detached(priority: .utility) {
-                WritingStorageUsage.fileBytes(under: root)
-            }.value
-            writingModelBytes = bytes
         }
     }
 
@@ -481,7 +461,8 @@ private extension StorageSettingsPage {
             Text(StorageConfirmationPolicy.freeUpSpaceMessage(
                 whisperIsSelected: effectiveTranscriptionModelIsWhisper,
                 removesMeetingTitlesModel: meetingTitlesModelIsReclaimable
-                    && (modelCacheSnapshot?.meetingTitlesModelBytes ?? 0) > 0
+                    && (modelCacheSnapshot?.meetingTitlesModelBytes ?? 0) > 0,
+                removesWritingModels: (modelCacheSnapshot?.writingModelBytes ?? 0) > 0
             ))
         }
     }

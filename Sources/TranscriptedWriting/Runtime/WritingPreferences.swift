@@ -3,21 +3,11 @@ import TranscriptedWritingCore
 #endif
 import Foundation
 
-/// Writing's own preferences next to Tilde's `TildeSettings` (plan decisions
-/// 3, 4 and 11). Each lives where its readers can see it:
-///
-/// - **Save my writing** is Tilde's Personal History switch, in the keyboard
-///   suite, because the keyboard checks it before capturing. Change it
-///   through `PersonalHistoryController.isEnabled` so consent rotates.
-/// - **Personalized suggestions** is app-only, off by default. Only the app
-///   serves personal suggestions.
-/// - **App scope** is in the keyboard suite with a revision, because the
-///   keyboard gates capture and suggestions on it.
+/// Opt-in writing capture preferences shared with the keyboard process:
+/// - **Save my writing** (`personalHistoryEnabled`), off by default.
+/// - **App scope** (`WritingAppScope`), stored with a revision so the keyboard
+///   re-reads it only when it changes.
 struct WritingPreferences {
-    enum AppKey: String {
-        case personalizedSuggestions = "PersonalizedSuggestionsEnabled"
-    }
-
     private let keyboard: UserDefaults
     private let app: UserDefaults
 
@@ -34,17 +24,6 @@ struct WritingPreferences {
     }
 
     var saveMyWritingEnabled: Bool { tildeSettings.personalHistoryEnabled }
-
-    var personalizedSuggestionsEnabled: Bool {
-        get { app.bool(forKey: AppKey.personalizedSuggestions.rawValue) }
-        nonmutating set { app.set(newValue, forKey: AppKey.personalizedSuggestions.rawValue) }
-    }
-
-    /// `GhostBrainServerHost`'s `personalSuggestionsGate`. The predictor only
-    /// learns while Save my writing is on, so both have to be on.
-    var personalSuggestionsAllowed: Bool {
-        saveMyWritingEnabled && personalizedSuggestionsEnabled
-    }
 
     var appScope: WritingAppScope {
         get {
@@ -64,8 +43,7 @@ struct WritingPreferences {
         }
     }
 
-    /// The one scope rule: capture, the day files, Screen Memory context and
-    /// suggestions all ask this (the keyboard asks the same `WritingAppScope`).
+    /// The one scope rule for both the keyboard and the day-file recorder.
     func allows(appBundleIdentifier: String?) -> Bool {
         appScope.allows(appBundleIdentifier, excludedApps: tildeSettings.personalHistoryExcludedApps)
     }

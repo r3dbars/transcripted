@@ -85,8 +85,7 @@ extension TranscriptedSettingsView {
             aboutEditor: { aboutPage },
             supportFilesEditor: {
                 SupportFilesSettingsRow(folder: appStateFolder.deletingLastPathComponent())
-            },
-            developerPreviewEditor: { DeveloperPreviewSettingsRows() }
+            }
         )
     }
 

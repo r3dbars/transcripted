@@ -3,10 +3,9 @@ import TranscriptedWritingCore
 #endif
 import Foundation
 
-/// Transcripted: the app scope the Writing tab saves in this keyboard's
-/// suite (`WritingAppScope`), read on every key. Only the revision is read
-/// each time; the mode and the picked apps are parsed again when it moves.
-/// Not part of Tilde.
+/// Reads the opt-in writing app scope (`WritingAppScope`) from the keyboard's
+/// shared suite. Only the integer revision is read on every key; the mode and
+/// picked apps are re-parsed when the revision changes.
 final class WritingAppScopeReader: @unchecked Sendable {
     static let shared = WritingAppScopeReader(defaults: .standard)
 
@@ -29,16 +28,5 @@ final class WritingAppScopeReader: @unchecked Sendable {
         )
         cached = (revision, scope)
         return scope
-    }
-
-    /// The Tilde bug fix: the scope and the exclusion list gate suggestions,
-    /// not only capture and screen context.
-    func allowsSuggestions(in bundleIdentifier: String) -> Bool {
-        current().allows(
-            bundleIdentifier,
-            excludedApps: Set(defaults.stringArray(
-                forKey: PersonalHistorySettingsContract.excludedAppsKey
-            ) ?? [])
-        )
     }
 }

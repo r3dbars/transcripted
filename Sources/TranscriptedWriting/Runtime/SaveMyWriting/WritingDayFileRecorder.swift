@@ -3,15 +3,23 @@ import TranscriptedWritingCore
 #endif
 import Foundation
 
+protocol PersonalHistoryIngesting: Sendable {
+    func ingest(_ events: [PersonalHistoryEvent]) async -> Bool
+    func recordingResponse(_ events: [PersonalHistoryEvent]) async -> GhostBrainResponse
+}
+
+extension PersonalHistoryIngesting {
+    func recordingResponse(_ events: [PersonalHistoryEvent]) async -> GhostBrainResponse {
+        await ingest(events) ? .recorded : .error
+    }
+}
+
 /// Save my writing inside the app: keyboard events in, Markdown day files
 /// out. Gates every batch (Save my writing on, the current history and
-/// consent, the app scope), composes entries, and appends each closed entry
-/// to `<writing folder>/Writing_<date>.md`. It's also the only way into
-/// Personal History: the events of each entry that closed with nothing to
-/// scrub go to `releaseToPersonalHistory`, and an entry with a secret in it
-/// never does. One serial queue owns the composer and every write, so
-/// `flush()` at quit and `deleteAll()` never race an append. Not part of
-/// Tilde.
+/// consent, the app scope), composes entries, scrubs secrets, and appends each
+/// closed entry to `<writing folder>/Writing_<date>.md`. One serial queue owns
+/// the composer and every write, so `flush()` at quit and `deleteAll()` never
+/// race an append.
 final class WritingDayFileRecorder: @unchecked Sendable {
     /// Read fresh for every batch and every write, like Tilde's settings.
     struct Gate: Equatable, Sendable {
@@ -83,7 +91,6 @@ final class WritingDayFileRecorder: @unchecked Sendable {
     private let didWrite: @Sendable (URL) -> Void
     private let writeFailed: @Sendable () -> Void
     private let writeProblemStarted: @Sendable (WritingDayFileStore.StoreError) -> Void
-    private let releaseToPersonalHistory: @Sendable ([PersonalHistoryEvent]) -> Void
     private var composer: WritingEntryComposer
     private var rememberedEventIDs: Set<String> = []
     private var rememberedEventOrder: [String] = []
@@ -139,8 +146,6 @@ final class WritingDayFileRecorder: @unchecked Sendable {
     /// `writeFailed` runs on every failed append. `writeProblemStarted` runs
     /// once per problem: on the first failure after a success (or before any
     /// write), not again until every pending entry is resolved and another fails.
-    /// `releaseToPersonalHistory` gets cleared events in keyboard order, on
-    /// the recorder's queue; it must hand them off, not wait on them.
     init(
         directory: @escaping @Sendable () -> URL,
         pendingDirectory: @escaping @Sendable () -> URL,
@@ -157,8 +162,7 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         },
         didWrite: @escaping @Sendable (URL) -> Void = { _ in },
         writeFailed: @escaping @Sendable () -> Void = {},
-        writeProblemStarted: @escaping @Sendable (WritingDayFileStore.StoreError) -> Void = { _ in },
-        releaseToPersonalHistory: @escaping @Sendable ([PersonalHistoryEvent]) -> Void = { _ in }
+        writeProblemStarted: @escaping @Sendable (WritingDayFileStore.StoreError) -> Void = { _ in }
     ) {
         self.directory = directory
         self.pendingDirectory = pendingDirectory
@@ -171,7 +175,6 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         self.didWrite = didWrite
         self.writeFailed = writeFailed
         self.writeProblemStarted = writeProblemStarted
-        self.releaseToPersonalHistory = releaseToPersonalHistory
         composer = WritingEntryComposer { milliseconds in
             WritingDayFileFormatter.entryID(
                 forMilliseconds: milliseconds,
@@ -199,7 +202,6 @@ final class WritingDayFileRecorder: @unchecked Sendable {
             var next = composer
             if admit(next.closeIdle(now: now())) {
                 composer = next
-                releaseClearedHistory()
             }
             publishPending()
         }
@@ -216,7 +218,6 @@ final class WritingDayFileRecorder: @unchecked Sendable {
             var next = composer
             guard admit(next.closeAll()) else { return false }
             composer = next
-            releaseClearedHistory()
             publishPending()
             if sealForTermination { accepting = false }
             // The library may still be offline; the journal now owns every
@@ -298,27 +299,8 @@ final class WritingDayFileRecorder: @unchecked Sendable {
         guard admit(next.ingest(admitted, receivedAt: now())) else { return false }
         composer = next
         for event in admitted { _ = remember(event.id) }
-        releaseClearedHistory()
         publishPending()
         return true
-    }
-
-    /// Hands Personal History the events of entries that closed clean,
-    /// re-checked against the gate like a write: turning Save my writing off
-    /// or narrowing the scope drops them here too.
-    private func releaseClearedHistory() {
-        let cleared = composer.takeClearedHistory()
-        guard !cleared.isEmpty else { return }
-        let gate = gate()
-        let admitted = cleared.filter {
-            gate.admits(
-                appBundleIdentifier: $0.appBundleIdentifier,
-                historyIdentifier: $0.historyIdentifier,
-                consentIdentifier: $0.consentIdentifier
-            )
-        }
-        guard !admitted.isEmpty else { return }
-        releaseToPersonalHistory(admitted)
     }
 
     private func remember(_ eventID: String) -> Bool {
@@ -496,24 +478,18 @@ final class WritingDayFileRecorder: @unchecked Sendable {
 }
 
 /// What the socket server ingests. Every batch goes to the day files'
-/// recorder, which is also the way into Tilde's controller (the encrypted
-/// log and the predictor): an entry reaches it once it has closed with
-/// nothing to scrub (`WritingDayFileRecorder`, `PersonalHistoryRelay`).
-/// In Tilde a batch went to the controller as it arrived. The app scope is
-/// re-checked here the way Tilde's app re-checks its exclusions; the
-/// keyboard applied it already. Not part of Tilde.
+/// recorder, re-checking the app scope the keyboard already applied.
 struct WritingHistoryIngest: PersonalHistoryIngesting {
     let dayFiles: WritingDayFileRecorder
     let appScope: @Sendable () -> WritingAppScope
 
     /// `true` once composed; any entries closed by this batch have durable
     /// ownership. Open raw text is still memory-only. The keyboard won't resend.
-    /// Personal History takes it later, when its entry closes.
     func ingest(_ events: [PersonalHistoryEvent]) async -> Bool {
         guard PersonalHistoryEvent.validBatch(events) else { return false }
         let scope = appScope()
         let inScope = events.filter { scope.includes($0.appBundleIdentifier) }
-        // Acknowledged and never kept, like an excluded app in Tilde.
+        // Acknowledged and never kept, like an excluded app.
         guard !inScope.isEmpty else { return true }
         return await dayFiles.ingest(inScope)
     }
@@ -523,52 +499,5 @@ struct WritingHistoryIngest: PersonalHistoryIngesting {
     func recordingResponse(_ events: [PersonalHistoryEvent]) async -> GhostBrainResponse {
         guard PersonalHistoryEvent.validBatch(events) else { return .error }
         return await ingest(events) ? .recorded : .unavailable
-    }
-}
-
-/// Hands the events Save my writing cleared to Personal History, in the
-/// order they cleared, in batches the controller takes. A batch the
-/// controller refuses (storage down) is not retried. Failures update internal
-/// storage health and local diagnostics; the Writing tab does not display that
-/// health yet. Not part of Tilde.
-final class PersonalHistoryRelay: @unchecked Sendable {
-    private let personalHistory: any PersonalHistoryIngesting
-    private let lock = NSLock()
-    private var tail = OrderedAsyncTaskTail()
-
-    init(personalHistory: any PersonalHistoryIngesting) {
-        self.personalHistory = personalHistory
-    }
-
-    /// Returns at once; the batches go out in call order.
-    func send(_ events: [PersonalHistoryEvent]) {
-        let batches = Self.batches(events)
-        guard !batches.isEmpty else { return }
-        let personalHistory = personalHistory
-        lock.withLock {
-            _ = tail.enqueue {
-                for batch in batches { _ = await personalHistory.ingest(batch) }
-            }
-        }
-    }
-
-    /// Waits until everything sent so far has been handed over.
-    func drain() async {
-        let marker = lock.withLock { tail.enqueue {} }
-        _ = await marker.result
-    }
-
-    /// Consecutive batches the controller accepts, in order.
-    private static func batches(_ events: [PersonalHistoryEvent]) -> [[PersonalHistoryEvent]] {
-        var batches: [[PersonalHistoryEvent]] = []
-        var remaining = events[...]
-        while !remaining.isEmpty {
-            let batch = PersonalHistoryEvent.boundedBatchPrefix(Array(remaining))
-            // Every event fits a batch on its own; this only guards the loop.
-            guard !batch.isEmpty else { break }
-            batches.append(batch)
-            remaining = remaining.dropFirst(batch.count)
-        }
-        return batches
     }
 }

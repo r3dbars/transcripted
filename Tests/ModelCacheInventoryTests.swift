@@ -342,6 +342,51 @@ func testModelCacheInventory() {
         assertTrue(FileManager.default.fileExists(atPath: outsideModelFile.path), "symlinked cache targets outside the app cache must stay untouched")
         assertTrue(FileManager.default.fileExists(atPath: cacheLink.path), "cleanup should not remove the cache-root symlink")
     }
+
+    runSuite("ModelCacheInventory measures and reclaims leftover writing autocomplete models safely") {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ModelCacheWriting-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let fluid = root.appendingPathComponent("FluidAudio/Models", isDirectory: true)
+        let cache = root.appendingPathComponent("Transcripted/cache", isDirectory: true)
+        let whisper = cache.appendingPathComponent("whisperkit/models", isDirectory: true)
+        let modelsRoot = root.appendingPathComponent("Transcripted/models", isDirectory: true)
+        let writingDir = ModelCacheInventory.writingModelsDirectory(in: modelsRoot)
+        let gguf = writingDir.appendingPathComponent("gemma-4-E2B-it-Q4_K_M.gguf")
+        let otherModel = modelsRoot.appendingPathComponent("parakeet-ultra/keep.bin")
+        writeTestFile(gguf, bytes: 47)
+        writeTestFile(otherModel, bytes: 19)
+
+        let before = ModelCacheInventory.snapshot(
+            fluidAudioModelsDirectory: fluid,
+            transcriptedCacheDirectory: cache,
+            whisperModelsDirectory: whisper,
+            meetingTitlesModelsDirectory: ModelCacheInventory.meetingTitlesModelsDirectory(in: modelsRoot),
+            writingModelsDirectory: writingDir
+        )
+        assertEqual(before.writingModelBytes, 47, "leftover writing models are measured")
+        assertEqual(before.reclaimableBytes(includeWhisper: false), 47, "leftover writing models are always reclaimable")
+
+        let result = try? ModelCacheInventory.removeReclaimableCaches(
+            includeWhisper: false,
+            fluidAudioModelsDirectory: fluid,
+            transcriptedCacheDirectory: cache,
+            whisperModelsDirectory: whisper,
+            modelsRootDirectory: modelsRoot
+        )
+        assertEqual(result?.removedBytes, 47)
+        assertEqual(result?.removedNames, ["old writing models"])
+        assertFalse(FileManager.default.fileExists(atPath: writingDir.path), "leftover writing models directory is removed")
+        assertTrue(FileManager.default.fileExists(atPath: otherModel.path), "other local models stay untouched")
+
+        // Refuse symlinks pointing outside modelsRoot.
+        let outside = root.appendingPathComponent("outside/model.gguf")
+        writeTestFile(outside, bytes: 13)
+        try? FileManager.default.createSymbolicLink(at: writingDir, withDestinationURL: outside.deletingLastPathComponent())
+        let linkResult = try? ModelCacheInventory.removeWritingModels(modelsRootDirectory: modelsRoot)
+        assertEqual(linkResult?.removedBytes, 0, "symlinked writing models dir must not be deleted")
+        assertTrue(FileManager.default.fileExists(atPath: outside.path), "symlink target stays untouched")
+    }
 }
 
 private func writeTestFile(_ url: URL, bytes: Int) {

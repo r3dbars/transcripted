@@ -222,13 +222,12 @@ extension TranscriptedSettingsView {
             homePage
         case .dictations:
             dictationsPage
-        case .writing:
-            writingPage
         case .general:
             settingsPage
         case .people:
             peoplePage
-        case .connectAgent:
+        case .connectAgent, .writing:
+            // `.writing` redirects to Agent (where opt-in writing capture lives).
             connectAgentPage
         }
     }
@@ -240,9 +239,7 @@ extension TranscriptedSettingsView {
         VStack(alignment: .leading, spacing: 16) {
             generalPage
 
-            // Write for Me and the ChatGPT companion can send text off this Mac
-            // (DeveloperPreview.nextSentence, CompanionSettingsCard), so say when.
-            Text("Recordings and transcripts stay on this Mac. Write for Me and the ChatGPT companion send text only when you use them.")
+            Text("Recordings and transcripts stay on this Mac. The ChatGPT companion sends text only when you use it.")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
                 .frame(maxWidth: 620)
@@ -634,7 +631,6 @@ extension TranscriptedSettingsView {
             modelCacheCleanupStatus: modelCacheCleanupStatus,
             modelCacheCleanupStatusDetails: modelCacheCleanupStatusDetails,
             effectiveTranscriptionModelIsWhisper: effectiveTranscriptionModel.isWhisper,
-            writingModelRoot: writingController.modelRoot,
             meetingTitlesModelIsReclaimable: !MeetingTitlesController.shared.isEnabled,
             onChooseCaptureLibrary: {
                 trackSettingsAction("choose_capture_library", page: .general)
@@ -676,18 +672,7 @@ extension TranscriptedSettingsView {
     }
 
     private var connectAgentPage: some View {
-        AgentConnectionSettingsPage()
-    }
-
-    private var writingPage: some View {
-        WritingSettingsPage(
-            controller: writingController,
-            isCaptureBusy: {
-                sttRouter.isRecording
-                    || meetingSession.isCaptureSessionActive
-                    || meetingSession.hasRuntimeDiagnosticsWork
-            }
-        )
+        AgentConnectionSettingsPage(writingController: writingController)
     }
 
     var aboutPage: some View {

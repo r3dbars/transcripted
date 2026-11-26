@@ -3,10 +3,11 @@ import SwiftUI
 struct SettingsSidebarSection {
     let pages: [TranscriptedSettingsPage]
 
-    /// The six places, on ⌘1 to ⌘6: Today, the capture library, plus the
-    /// agent connection. File import is an action on Meetings, not a place.
+    /// The five places, on ⌘1 to ⌘5: Today, the capture library, Speakers,
+    /// and the agent connection. File import is an action on Meetings, not a
+    /// place; opt-in writing capture lives on Agent.
     static let primarySection = SettingsSidebarSection(
-        pages: [.today, .home, .dictations, .writing, .people, .connectAgent]
+        pages: [.today, .home, .dictations, .people, .connectAgent]
     )
 
     /// Configuration lives on one combined scrolling page (.general),
@@ -65,9 +66,6 @@ struct SettingsSidebarRow: View {
     let isSelected: Bool
     var isRecordingMeeting = false
 
-    // Observed, so the badge goes away as soon as the Writing page sets it.
-    @AppStorage(WritingSidebarNewBadge.dismissedDefaultsKey) private var writingNewBadgeDismissed = false
-
     var body: some View {
         SettingsSidebarRowLabel(
             title: page.title,
@@ -77,8 +75,6 @@ struct SettingsSidebarRow: View {
         ) {
             if page == .home && isRecordingMeeting {
                 SidebarRecordingTimer()
-            } else if WritingSidebarNewBadge.isShown(for: page, dismissed: writingNewBadgeDismissed) {
-                SettingsSidebarNewBadge()
             }
         }
     }
@@ -144,16 +140,5 @@ struct SidebarRecordingTimer: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Recording, \(elapsed)")
         .accessibilityIdentifier("transcripted.settings.sidebar.recording-timer")
-    }
-}
-
-/// Trailing "New" on a sidebar row: quiet text only. A dot would read as
-/// "needs action", which is what the update row's attention dot means.
-struct SettingsSidebarNewBadge: View {
-    var body: some View {
-        Text("New")
-            .textRole(.small)
-            .foregroundStyle(LibraryTokens.ink3)
-            .accessibilityLabel("New")
     }
 }

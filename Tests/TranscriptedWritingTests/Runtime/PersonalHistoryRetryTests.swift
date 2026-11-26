@@ -45,7 +45,7 @@ struct PersonalHistoryRetryTests {
         unsafeID["id"] = "not/an-id"
         #expect(GhostBrainRequest.unsupportedPersonalHistoryEventIDs(in: try Self.line([unsafeID])) == nil)
         #expect(GhostBrainRequest.unsupportedPersonalHistoryEventIDs(
-            in: try JSONEncoder().encode(GhostBrainRequest(context: "hello ", app: "com.example.Editor"))
+            in: Data(#"{"v":1,"context":"hello "}"#.utf8)
         ) == nil)
         #expect(GhostBrainRequest.unsupportedPersonalHistoryEventIDs(in: Data("not-json".utf8)) == nil)
     }
@@ -56,15 +56,13 @@ struct PersonalHistoryRetryTests {
         let data = try JSONEncoder().encode(unsupported)
         let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
         #expect(object["outcome"] as? String == "unsupported")
-        #expect(object["final"] as? Bool == true)
         #expect(object["rejectedEventIDs"] as? [String] == ["future-1"])
-        #expect(object["suggestion"] == nil)
         #expect(GhostBrainResponse.decode(data) == unsupported)
 
         let recorded = try #require(
             try JSONSerialization.jsonObject(with: JSONEncoder().encode(GhostBrainResponse.recorded)) as? [String: Any]
         )
-        #expect(Set(recorded.keys) == ["outcome", "final"])
+        #expect(Set(recorded.keys) == ["outcome"])
 
         // A list this keyboard can't read is no list, never a lost line.
         let garbled = GhostBrainResponse.decode(Data(#"{"outcome":"unsupported","rejectedEventIDs":7}"#.utf8))

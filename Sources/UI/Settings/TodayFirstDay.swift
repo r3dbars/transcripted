@@ -96,7 +96,7 @@ struct TodaySetupChecklistState: Equatable {
 }
 
 /// Plain app preferences for the checklist, next to the other window prefs
-/// (`SettingsAdvancedExpanded`, `WritingSidebarNewBadgeDismissed`). Tests
+/// (`SettingsAdvancedExpanded`). Tests
 /// pass their own suite; nothing here touches real prefs on its own.
 enum TodaySetupChecklistPreferences {
     static let dismissedKey = "TodaySetupChecklistDismissed"

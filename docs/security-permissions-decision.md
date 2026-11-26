@@ -62,15 +62,12 @@ content. Storage and companion-trust wording are separate review items.
 
 ## Source basis and limits
 
-- `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenRecordingPermission.swift`
-  contains the CoreGraphics permission check and request.
-- `Sources/TranscriptedWriting/Runtime/ScreenMemory/ScreenCaptureService.swift`
-  holds Screen Memory snapshots and reads focused-window context.
-- `Sources/Support/NextSentencePreferences.swift` defaults Write for Me off.
-- `Sources/Writing/NextSentence/NextSentenceContext.swift` captures window text
-  and a JPEG; `NextSentenceController.swift` assembles matching saved context
-  and dictation or writing examples. `NextSentencePrompt.swift` and `NextSentenceClaude.swift`
-  construct the request for the user's Claude CLI.
+Note: Screen Memory and Write for Me (NextSentence) were subsequently removed in the Writing spin-out. At the time of review (`8a38235eef00816a79daa1324387a21ef880204d`):
+
+- The former ScreenRecordingPermission service contained the CoreGraphics permission check and request.
+- The former ScreenCaptureService held Screen Memory snapshots and read focused-window context.
+- The former NextSentencePreferences defaulted Write for Me off.
+- The former NextSentenceContext captured window text and a JPEG; NextSentenceController assembled matching saved context and dictation or writing examples, and NextSentencePrompt / NextSentenceClaude constructed the request for the user's Claude CLI.
 
 This is source evidence, not a live TCC or cloud-content test. Provider handling
 and retention were not verified. The draft makes no claim of screenshot

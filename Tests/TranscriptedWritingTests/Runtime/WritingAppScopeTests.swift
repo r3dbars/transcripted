@@ -54,8 +54,7 @@ struct WritingAppScopeTests {
         defer { suites.remove() }
         let preferences = WritingPreferences(keyboard: suites.keyboard, app: suites.app)
         #expect(preferences.appScope == .all)
-        #expect(!preferences.personalizedSuggestionsEnabled)
-        #expect(!preferences.personalSuggestionsAllowed)
+        #expect(!preferences.saveMyWritingEnabled)
 
         preferences.appScope = .picked([Self.slack])
         #expect(preferences.appScope == .picked([Self.slack]))
@@ -66,14 +65,8 @@ struct WritingAppScopeTests {
         #expect(preferences.allows(appBundleIdentifier: Self.mail))
         #expect(!preferences.allows(appBundleIdentifier: Self.onePassword))
 
-        // Personalized suggestions are app-only and need Save my writing.
-        preferences.personalizedSuggestionsEnabled = true
-        #expect(suites.app.bool(forKey: WritingPreferences.AppKey.personalizedSuggestions.rawValue))
-        #expect(suites.keyboard.object(forKey: WritingPreferences.AppKey.personalizedSuggestions.rawValue) == nil)
-        #expect(!preferences.personalSuggestionsAllowed)
         preferences.tildeSettings.personalHistoryEnabled = true
         #expect(preferences.saveMyWritingEnabled)
-        #expect(preferences.personalSuggestionsAllowed)
     }
 
     @Test("The keyboard re-reads the scope only when its revision moves")
@@ -86,8 +79,6 @@ struct WritingAppScopeTests {
 
         preferences.appScope = .picked([Self.slack])
         #expect(reader.current() == .picked([Self.slack]))
-        #expect(reader.allowsSuggestions(in: Self.slack))
-        #expect(!reader.allowsSuggestions(in: Self.mail))
 
         // A write that skips the revision isn't seen; the next bump is.
         suites.keyboard.set([Self.mail], forKey: WritingAppScope.bundleIdentifiersKey)
@@ -96,10 +87,7 @@ struct WritingAppScopeTests {
         #expect(reader.current() == .picked([Self.mail]))
 
         preferences.appScope = .all
-        #expect(reader.allowsSuggestions(in: Self.mail))
-        #expect(!reader.allowsSuggestions(in: Self.onePassword))
-        suites.keyboard.set([Self.mail], forKey: PersonalHistorySettingsContract.excludedAppsKey)
-        #expect(!reader.allowsSuggestions(in: Self.mail))
+        #expect(reader.current() == .all)
     }
 
     @Test("Capture checks the scope in the keyboard's policy")
@@ -149,43 +137,17 @@ struct WritingAppScopeTests {
         #expect(await sink.events.isEmpty)
     }
 
-    @Test("Suggestions check the same scope as capture")
-    func suggestionsGate() {
-        func allows(_ app: String?, scope: WritingAppScope, excluded: Set<String> = []) -> Bool {
-            WritingSuggestionsGate.allows(WritingSuggestionsGate.Inputs(
-                suggestionsEnabled: true,
-                pausedUntil: nil,
-                screenMemoryEnabled: true,
-                screenRecordingGranted: true,
-                now: Date(timeIntervalSince1970: 1_800_000_000),
-                appBundleIdentifier: app,
-                appScope: scope,
-                excludedApps: excluded
-            ))
-        }
-        #expect(allows(Self.mail, scope: .all))
-        // The Tilde bug: an ignored app still got ghosts.
-        #expect(!allows(Self.mail, scope: .all, excluded: [Self.mail]))
-        #expect(!allows(Self.onePassword, scope: .all))
-        #expect(allows(Self.slack, scope: .picked([Self.slack])))
-        #expect(!allows(Self.mail, scope: .picked([Self.slack])))
-        #expect(!allows(nil, scope: .picked([Self.slack])))
-    }
-
-    @Test("The app re-checks the scope before a batch reaches the log or the day files")
+    @Test("The app re-checks the scope before a batch reaches the day files")
     func ingestRechecksScope() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("transcripted-scope-\(UUID().uuidString)", isDirectory: true)
             .appendingPathComponent("writing", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: directory.deletingLastPathComponent()) }
-        let controller = Controller()
-        let relay = PersonalHistoryRelay(personalHistory: controller)
         let recorder = WritingDayFileRecorder(
             directory: { directory },
             pendingDirectory: { WritingDayFileStore.resolved(directory.deletingLastPathComponent()).appendingPathComponent("pending", isDirectory: true) },
             gate: { .init(enabled: true, historyIdentifier: "history", consentIdentifier: "consent") },
-            appName: { _ in "App" },
-            releaseToPersonalHistory: { relay.send($0) }
+            appName: { _ in "App" }
         )
         let ingest = WritingHistoryIngest(
             dayFiles: recorder,
@@ -203,8 +165,6 @@ struct WritingAppScopeTests {
         )!
         #expect(await ingest.ingest([mailEvent]))
         recorder.flush()
-        await relay.drain()
-        #expect(await controller.batches.isEmpty)
         #expect(!FileManager.default.fileExists(atPath: directory.path))
     }
 
@@ -216,15 +176,6 @@ struct WritingAppScopeTests {
         func record(_ batch: [PersonalHistoryEvent]) -> GhostBrainResponse {
             events.append(contentsOf: batch)
             return .recorded
-        }
-    }
-
-    private actor Controller: PersonalHistoryIngesting {
-        private(set) var batches: [[PersonalHistoryEvent]] = []
-
-        func ingest(_ events: [PersonalHistoryEvent]) async -> Bool {
-            batches.append(events)
-            return true
         }
     }
 

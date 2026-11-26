@@ -68,12 +68,21 @@ enum StorageConfirmationPolicy {
         "Your transcripts and saved voices stay, and starred meetings keep their audio. Meeting audio older than \(window.title) is deleted now, and again automatically from then on."
     }
 
-    static func freeUpSpaceMessage(whisperIsSelected: Bool, removesMeetingTitlesModel: Bool) -> String {
-        let base = whisperIsSelected
+    static func freeUpSpaceMessage(
+        whisperIsSelected: Bool,
+        removesMeetingTitlesModel: Bool,
+        removesWritingModels: Bool = false
+    ) -> String {
+        var message = whisperIsSelected
             ? "Transcripted will remove known old Parakeet folders. Whisper stays because it is selected."
             : "Transcripted will remove known old Parakeet folders and downloaded Whisper model files. The Parakeet model you use stays."
-        guard removesMeetingTitlesModel else { return base }
-        return base + " The meeting titles model goes too, since Titles and summaries is off. Your saved titles and summaries stay."
+        if removesMeetingTitlesModel {
+            message += " The meeting titles model goes too, since Titles and summaries is off. Your saved titles and summaries stay."
+        }
+        if removesWritingModels {
+            message += " Leftover writing autocomplete models go too; your saved writing Markdown files stay."
+        }
+        return message
     }
 
     static func dictationAudioMessage(for window: DictationAudioKeepWindow) -> String {

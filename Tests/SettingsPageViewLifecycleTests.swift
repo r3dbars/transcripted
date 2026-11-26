@@ -8,9 +8,9 @@ func testSettingsPageViewLifecycle() {
     }
 
     runSuite("Navigation model initialization does not manufacture a page view") {
-        let fixture = SettingsPageViewFixture(page: .writing)
-        assertEqual(fixture.model.selectedPage, .writing)
-        assertEqual(fixture.model.presentedPage, .writing)
+        let fixture = SettingsPageViewFixture(page: .dictations)
+        assertEqual(fixture.model.selectedPage, .dictations)
+        assertEqual(fixture.model.presentedPage, .dictations)
         assertEqual(fixture.model.presentationSource, "unknown")
         assertTrue(fixture.recorder.events.isEmpty)
     }
@@ -54,13 +54,22 @@ func testSettingsPageViewLifecycle() {
 
     runSuite("A real page selection emits one navigation view and same-page selection retains only product navigation") {
         let fixture = SettingsPageViewFixture(page: .today)
-        fixture.model.select(.writing, source: .sidebar)
-        fixture.model.select(.writing, source: .sidebar)
-        assertEqual(fixture.model.selectedPage, .writing)
+        fixture.model.select(.dictations, source: .sidebar)
+        fixture.model.select(.dictations, source: .sidebar)
+        assertEqual(fixture.model.selectedPage, .dictations)
         assertEqual(fixture.model.presentedPage, .today, "selection must not rewrite the presentation identity")
         assertEqual(fixture.recorder.events, [
-            .navigation(.writing, .today, .sidebar), .viewed(.writing, "navigation"),
-            .navigation(.writing, .writing, .sidebar)
+            .navigation(.dictations, .today, .sidebar), .viewed(.dictations, "navigation"),
+            .navigation(.dictations, .dictations, .sidebar)
+        ])
+    }
+
+    runSuite("Selecting or presenting the retired Writing page redirects to Agent") {
+        let fixture = SettingsPageViewFixture(page: .today)
+        fixture.model.select(.writing, source: .sidebar)
+        assertEqual(fixture.model.selectedPage, .connectAgent)
+        assertEqual(fixture.recorder.events, [
+            .navigation(.agent, .today, .sidebar), .viewed(.connectAgent, "navigation")
         ])
     }
 
