@@ -392,6 +392,13 @@ extension SpeakerDatabase {
             AppLogger.speakers.warning("Un-merge skipped — event missing or already undone", ["mergeId": mergeId.uuidString])
             return false
         }
+        // Never resurrect a target profile that was explicitly deleted after the merge.
+        guard getSpeakerImpl(id: event.targetId) != nil else {
+            AppLogger.speakers.warning("Un-merge skipped — target profile no longer exists", [
+                "mergeId": mergeId.uuidString, "targetId": event.targetId.uuidString
+            ])
+            return false
+        }
         guard let sourceSnapshot = Self.decodeProfileSnapshot(event.sourceSnapshot),
               let targetSnapshot = Self.decodeProfileSnapshot(event.targetSnapshot) else {
             AppLogger.speakers.error("Un-merge failed — snapshot decode error", ["mergeId": mergeId.uuidString])

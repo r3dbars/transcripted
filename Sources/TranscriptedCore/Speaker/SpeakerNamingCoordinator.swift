@@ -31,7 +31,7 @@ extension TranscriptionTaskManager {
     enum PlannedSpeakerMutation {
         case merge(sourceId: UUID, into: UUID)
         case setDisplayName(id: UUID, name: String)
-        case revertMatchContribution(SpeakerProfile)
+        case revertMatchContribution(SpeakerProfile, rejectedEmbedding: [Float]? = nil)
         case addOrUpdateEmbedding(embedding: [Float], existingId: UUID?)
         /// Adds a voice sample to a saved person who existed at Save. Unlike
         /// `addOrUpdateEmbedding`, it never creates the person: if they were removed
@@ -55,7 +55,7 @@ extension TranscriptionTaskManager {
         transcriptId: UUID,
         transcriptionResult: TranscriptionResult,
         micURL: URL?,
-        systemURL: URL,
+        systemURL: URL?,
         splitLocalSpeakers: Bool = false,
         shouldRemoveTemporaryAudio: Bool = true,
         shouldRemoveMicAudio: Bool? = nil,
@@ -511,7 +511,7 @@ extension TranscriptionTaskManager {
             let deferredProfileId = UUID()
             redirectedSpeakerIdsByKey[key] = deferredProfileId
             reviewClipSpeakerIdsByKey[key] = deferredProfileId
-            mutations.append(.revertMatchContribution(matchedProfile))
+            mutations.append(.revertMatchContribution(matchedProfile, rejectedEmbedding: embedding))
             mutations.append(.addOrUpdateEmbedding(embedding: embedding, existingId: deferredProfileId))
         }
 
@@ -538,9 +538,10 @@ extension TranscriptionTaskManager {
     ) {
         for update in updates {
             let key = update.channel.speakerKey(diarizerSpeakerId: update.diarizerSpeakerId)
-            guard let snapshot = clipsBySpeakerId[key]?.matchedProfileSnapshot else { continue }
+            guard let entry = clipsBySpeakerId[key],
+                  let snapshot = entry.matchedProfileSnapshot else { continue }
 
-            speakerDB.revertMatchContribution(snapshot: snapshot)
+            speakerDB.revertMatchContribution(snapshot: snapshot, rejectedEmbedding: entry.sessionEmbedding)
             speakerDB.incrementDisputeCount(id: snapshot.id)
             AppLogger.speakers.info("Collapsed mic speaker — restored matched profile", [
                 "profileId": snapshot.id.uuidString,
@@ -570,7 +571,7 @@ extension TranscriptionTaskManager {
                 // record a negative exemplar: unlike an explicit correction, a discard says "don't
                 // save this sample", not "this voice is a different known person". Negative
                 // exemplars are scoped to the `.corrected` path.
-                speakerDB.revertMatchContribution(snapshot: snapshot)
+                speakerDB.revertMatchContribution(snapshot: snapshot, rejectedEmbedding: entry.sessionEmbedding)
                 speakerDB.incrementDisputeCount(id: snapshot.id)
                 AppLogger.speakers.info("Discarded speaker sample and restored matched profile", [
                     "profileId": snapshot.id.uuidString,

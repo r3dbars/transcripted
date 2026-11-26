@@ -76,4 +76,73 @@ public enum SQLiteHandle {
             }
         }
     }
+
+    /// Move a corrupt SQLite file together with its `-wal` and `-shm` sidecars to `backupURL`
+    /// so the backup keeps any uncheckpointed frames and a freshly created database at `dbURL`
+    /// can never replay stale WAL frames.
+    ///
+    /// Call BEFORE closing the last handle on `dbURL` (closing truncates `-wal` in place).
+    /// If `backupURL` (or one of its sidecars) already exists, appends a unique suffix so
+    /// back-to-back recoveries never collide. If a `-wal` or `-shm` sidecar cannot be moved,
+    /// it is removed so it cannot contaminate the recreated database.
+    ///
+    /// Returns `true` when the main database file was moved aside (or was already absent),
+    /// and `false` if moving the main file failed (in which case `-wal` and `-shm` are
+    /// left untouched so uncheckpointed frames are never stripped from the unmoved file).
+    @discardableResult
+    public static func quarantineCorruptArtifacts(
+        at dbURL: URL,
+        to backupURL: URL,
+        onMoveFailure: (String, Error) -> Void = { _, _ in }
+    ) -> Bool {
+        let fm = FileManager.default
+        let resolvedBackup = uniqueBackupURL(startingAt: backupURL, fileManager: fm)
+
+        for suffix in ["", "-wal", "-shm"] {
+            let source = URL(fileURLWithPath: dbURL.path + suffix)
+            guard fm.fileExists(atPath: source.path) else { continue }
+            let destination = URL(fileURLWithPath: resolvedBackup.path + suffix)
+            do {
+                try fm.moveItem(at: source, to: destination)
+            } catch {
+                onMoveFailure(suffix, error)
+                if suffix.isEmpty {
+                    // Stop immediately: never move or delete -wal/-shm while the main
+                    // database file remains in place.
+                    return false
+                }
+                // The -shm is a rebuildable index; a stale -wal must never stay next to the new file.
+                try? fm.removeItem(at: source)
+            }
+        }
+
+        return true
+    }
+
+    /// Remove any lingering `-wal` or `-shm` sidecars next to `dbURL` (for example after
+    /// closing a corrupt handle and before opening a fresh database file).
+    public static func removeSidecars(at dbURL: URL) {
+        let fm = FileManager.default
+        for suffix in ["-wal", "-shm"] {
+            let sidecar = URL(fileURLWithPath: dbURL.path + suffix)
+            guard fm.fileExists(atPath: sidecar.path) else { continue }
+            try? fm.removeItem(at: sidecar)
+        }
+    }
+
+    private static func uniqueBackupURL(startingAt base: URL, fileManager fm: FileManager) -> URL {
+        let suffixes = ["", "-wal", "-shm"]
+        let collides = suffixes.contains { fm.fileExists(atPath: base.path + $0) }
+        guard collides else { return base }
+
+        let dir = base.deletingLastPathComponent()
+        let ext = base.pathExtension
+        let stem = ext.isEmpty
+            ? base.lastPathComponent
+            : String(base.lastPathComponent.dropLast(ext.count + 1))
+        let uniqueName = ext.isEmpty
+            ? "\(stem)_\(UUID().uuidString.prefix(8))"
+            : "\(stem)_\(UUID().uuidString.prefix(8)).\(ext)"
+        return dir.appendingPathComponent(uniqueName)
+    }
 }

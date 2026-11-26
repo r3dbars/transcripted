@@ -67,7 +67,7 @@ extension SpeakerDatabase {
     }
 
     /// Full exemplars (with segment counts) for the write-path policy. Ordered oldest-first.
-    private func exemplarsImpl(forProfileId profileId: UUID) -> [SpeakerExemplarPolicy.Exemplar] {
+    func exemplarsImpl(forProfileId profileId: UUID) -> [SpeakerExemplarPolicy.Exemplar] {
         guard isDatabaseOpen else { return [] }
         var rows: [SpeakerExemplarPolicy.Exemplar] = []
         let sql = "SELECT embedding, segment_count FROM speaker_exemplars WHERE profile_id = ? ORDER BY rowid;"
@@ -117,8 +117,9 @@ extension SpeakerDatabase {
     }
 
     /// Replace all of a profile's exemplar rows with `exemplars`. Simple delete-then-insert keeps the
-    /// stored set an exact image of the policy output without diff bookkeeping.
-    private func persistExemplarsImpl(profileId: UUID, exemplars: [SpeakerExemplarPolicy.Exemplar]) {
+    /// stored set an exact image of the policy output without diff bookkeeping. Records mutation
+    /// failures so callers running inside a transaction roll back instead of committing a partial set.
+    func persistExemplarsImpl(profileId: UUID, exemplars: [SpeakerExemplarPolicy.Exemplar]) {
         deleteExemplarsImpl(profileId: profileId)
         guard !exemplars.isEmpty else { return }
         let now = ISO8601DateFormatter().string(from: Date())
@@ -137,11 +138,68 @@ extension SpeakerDatabase {
                 sqlite3_bind_text(statement, 5, (now as NSString).utf8String, -1, SQLITE_TRANSIENT)
                 if sqlite3_step(statement) != SQLITE_DONE {
                     AppLogger.speakers.error("Failed to insert exemplar", ["sqlite_error": dbErrorMessage(), "profileId": profileId.uuidString])
+                    recordMutationFailure(operation: "insert speaker exemplar", code: sqlite3_errcode(db))
                 }
             } else {
                 AppLogger.speakers.error("Failed to prepare exemplar insert", ["sqlite_error": dbErrorMessage()])
+                recordMutationFailure(operation: "prepare insert speaker exemplar", code: sqlite3_errcode(db))
             }
             sqlite3_finalize(statement)
+        }
+    }
+
+    /// Replace a profile's stored exemplars with a snapshot's exact exemplar embeddings,
+    /// preserving existing `segmentCount` values for matching exemplars where available.
+    /// Used when rolling back a rejected match or restoring a profile snapshot.
+    func replaceExemplarsImpl(profileId: UUID, embeddings: [[Float]]) {
+        guard isDatabaseOpen else { return }
+        let existing = exemplarsImpl(forProfileId: profileId)
+        var usedExistingIndices: Set<Int> = []
+        let exemplars: [SpeakerExemplarPolicy.Exemplar] = embeddings
+            .filter { !$0.isEmpty }
+            .map { embedding in
+                var exactMatchIndex: Int?
+                var similarMatchIndex: Int?
+                var bestSimilarity = -Double.infinity
+                for (index, candidate) in existing.enumerated() where !usedExistingIndices.contains(index) {
+                    guard candidate.embedding.count == embedding.count else { continue }
+                    if candidate.embedding == embedding {
+                        exactMatchIndex = index
+                        break
+                    }
+                    let sim = SpeakerVectorMath.cosineSimilarity(candidate.embedding, embedding)
+                    if sim >= thresholds.exemplarSameCondition && sim > bestSimilarity {
+                        bestSimilarity = sim
+                        similarMatchIndex = index
+                    }
+                }
+                let segmentCount: Int
+                if let exactMatchIndex {
+                    usedExistingIndices.insert(exactMatchIndex)
+                    segmentCount = existing[exactMatchIndex].segmentCount
+                } else if let similarMatchIndex {
+                    usedExistingIndices.insert(similarMatchIndex)
+                    segmentCount = max(1, existing[similarMatchIndex].segmentCount - 1)
+                } else {
+                    segmentCount = 1
+                }
+                return SpeakerExemplarPolicy.Exemplar(embedding: embedding, segmentCount: segmentCount)
+            }
+        persistExemplarsImpl(profileId: profileId, exemplars: exemplars)
+    }
+
+    /// Remove only stored exemplars that share the same capture condition as
+    /// `rejectedEmbedding`, keeping distinct exemplars (and their real segment counts)
+    /// intact when reverting an earlier overlapping meeting.
+    func removeMatchingExemplarsImpl(profileId: UUID, matching rejectedEmbedding: [Float]) {
+        guard isDatabaseOpen, !rejectedEmbedding.isEmpty else { return }
+        let existing = exemplarsImpl(forProfileId: profileId)
+        let remaining = existing.filter { exemplar in
+            guard exemplar.embedding.count == rejectedEmbedding.count else { return true }
+            return SpeakerVectorMath.cosineSimilarity(exemplar.embedding, rejectedEmbedding) < thresholds.exemplarSameCondition
+        }
+        if remaining != existing {
+            persistExemplarsImpl(profileId: profileId, exemplars: remaining)
         }
     }
 

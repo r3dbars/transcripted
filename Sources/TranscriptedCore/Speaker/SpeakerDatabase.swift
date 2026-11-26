@@ -146,19 +146,21 @@ public final class SpeakerDatabase: @unchecked Sendable {
             // Move before closing: closing the last handle truncates the -wal in place.
             let backupName = "speakers_corrupt_\(DateFormattingHelper.formatFilename(Date())).sqlite"
             let backupPath = dbPath.deletingLastPathComponent().appendingPathComponent(backupName)
-            for suffix in ["", "-wal", "-shm"] {
-                let source = URL(fileURLWithPath: dbPath.path + suffix)
-                guard FileManager.default.fileExists(atPath: source.path) else { continue }
-                do {
-                    try FileManager.default.moveItem(at: source, to: URL(fileURLWithPath: backupPath.path + suffix))
-                } catch {
+            let movedMain = SQLiteHandle.quarantineCorruptArtifacts(
+                at: dbPath,
+                to: backupPath,
+                onMoveFailure: { suffix, _ in
                     AppLogger.speakers.error("Failed to move corrupt speaker database file aside", ["suffix": suffix])
-                    // The -shm is a rebuildable index; a stale -wal must never stay next to the new file.
-                    if !suffix.isEmpty { try? FileManager.default.removeItem(at: source) }
                 }
-            }
+            )
             sqlite3_close(db)
             db = nil
+            guard movedMain else {
+                isDatabaseOpen = false
+                AppLogger.speakers.error("Refusing to reopen corrupt speaker database after backup move failed")
+                return
+            }
+            SQLiteHandle.removeSidecars(at: dbPath)
             // Recreate fresh database
             db = SQLiteHandle.open(
                 at: dbPath,
@@ -744,9 +746,18 @@ public final class SpeakerDatabase: @unchecked Sendable {
             recordMutationFailure(operation: "delete speaker", code: SQLITE_MISUSE)
             return
         }
+        // Never touch merge history if this ID is already gone (for example an absorbed
+        // alias of a surviving keeper): scrubbing by source_id would wipe the keeper's
+        // live undo-merge history.
+        guard getSpeakerImpl(id: id) != nil else { return }
+        // Collect every profile absorbed into `id` (direct or chained) before scrubbing
+        // `speaker_merge_events`, so deleting a merged profile leaves no orphaned
+        // snapshots, provenance embeddings, or confirmation-move rows behind.
+        let affectedIds = Array(mergedAliasIdsImpl(of: id).union([id]))
         deleteExemplarsImpl(profileId: id)
         deleteNegativeExemplarsImpl(profileId: id)
         deleteConfirmationsImpl(profileId: id)
+        deleteProvenanceAndMergeHistoryImpl(forProfileIds: affectedIds)
         let sql = "DELETE FROM speakers WHERE id = ?;"
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {

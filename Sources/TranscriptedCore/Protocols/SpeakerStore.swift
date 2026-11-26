@@ -37,6 +37,11 @@ public protocol SpeakerStore: Sendable {
     /// without overwriting its name or any match that landed after the snapshot.
     func revertMatchContribution(snapshot: SpeakerProfile)
 
+    /// Take one meeting's match back from a profile, identifying the rejected session's
+    /// embedding when available so its provenance row can be removed precisely even if
+    /// another meeting landed before review finished.
+    func revertMatchContribution(snapshot: SpeakerProfile, rejectedEmbedding: [Float]?)
+
     /// Delete a speaker profile
     func deleteSpeaker(id: UUID)
 
@@ -140,6 +145,10 @@ public extension SpeakerStore {
     /// Back-compat default: stores without match history fall back to the full snapshot restore.
     func revertMatchContribution(snapshot: SpeakerProfile) {
         restoreProfile(snapshot)
+    }
+
+    func revertMatchContribution(snapshot: SpeakerProfile, rejectedEmbedding _: [Float]?) {
+        revertMatchContribution(snapshot: snapshot)
     }
 
     /// Back-compat default: conformers that don't model an EMA blend weight (test doubles, simple

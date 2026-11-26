@@ -60,7 +60,16 @@ extension SpeakerDatabase {
             return
         }
         queue.sync {
-            restoreProfileImpl(profile)
+            pendingMutationError = nil
+            defer { pendingMutationError = nil }
+            do {
+                try throwingTransaction {
+                    restoreProfileImpl(profile)
+                    if let pendingMutationError { throw pendingMutationError }
+                }
+            } catch {
+                AppLogger.speakers.error("restoreProfile rolled back", ["error": error.localizedDescription, "id": profile.id.uuidString])
+            }
         }
     }
 
@@ -70,21 +79,36 @@ extension SpeakerDatabase {
     /// snapshot only when this meeting was the profile's one match since; otherwise newer
     /// matches keep their voiceprint and only this meeting's call is taken off.
     public func revertMatchContribution(snapshot: SpeakerProfile) {
+        revertMatchContribution(snapshot: snapshot, rejectedEmbedding: nil)
+    }
+
+    public func revertMatchContribution(snapshot: SpeakerProfile, rejectedEmbedding: [Float]?) {
         if isExecutingOnQueue {
-            revertMatchContributionImpl(snapshot)
+            revertMatchContributionImpl(snapshot, rejectedEmbedding: rejectedEmbedding)
             return
         }
         queue.sync {
-            revertMatchContributionImpl(snapshot)
+            pendingMutationError = nil
+            defer { pendingMutationError = nil }
+            do {
+                try throwingTransaction {
+                    revertMatchContributionImpl(snapshot, rejectedEmbedding: rejectedEmbedding)
+                    if let pendingMutationError { throw pendingMutationError }
+                }
+            } catch {
+                AppLogger.speakers.error("revertMatchContribution rolled back", ["error": error.localizedDescription, "id": snapshot.id.uuidString])
+            }
         }
     }
 
-    private func revertMatchContributionImpl(_ snapshot: SpeakerProfile) {
+    private func revertMatchContributionImpl(_ snapshot: SpeakerProfile, rejectedEmbedding: [Float]?) {
         guard isDatabaseOpen else {
             AppLogger.speakers.error("revertMatchContribution failed — database not open", ["speakerId": snapshot.id.uuidString])
             recordMutationFailure(operation: "revert match contribution", code: SQLITE_MISUSE)
             return
         }
+
+        let existingCallCount = getSpeakerImpl(id: snapshot.id)?.callCount
 
         // SET expressions all read the row as it was, so every CASE sees the same call_count.
         let sql = """
@@ -96,6 +120,7 @@ extension SpeakerDatabase {
         WHERE id = ?5;
         """
 
+        var sqlSucceeded = false
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             let embeddingData = snapshot.embedding.withUnsafeBufferPointer { Data(buffer: $0) }
@@ -109,12 +134,45 @@ extension SpeakerDatabase {
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to revert match contribution", ["sqlite_error": dbErrorMessage(), "id": snapshot.id.uuidString])
                 recordMutationFailure(operation: "revert match contribution", code: sqlite3_errcode(db))
+            } else {
+                sqlSucceeded = true
             }
         } else {
             AppLogger.speakers.error("Failed to prepare revertMatchContribution", ["sqlite_error": dbErrorMessage()])
             recordMutationFailure(operation: "prepare revert match contribution", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
+
+        guard sqlSucceeded, let existingCallCount, existingCallCount > snapshot.callCount else {
+            return
+        }
+
+        if existingCallCount == snapshot.callCount + 1 {
+            // Single match since snapshot: restore the exact pre-meeting exemplar set and
+            // drop this meeting's provenance row so it cannot poison matching or un-merge.
+            replaceExemplarsImpl(profileId: snapshot.id, embeddings: snapshot.exemplars)
+            deleteRejectedContributionImpl(
+                profileId: snapshot.id,
+                embedding: rejectedEmbedding,
+                fallbackToLatest: true
+            )
+        } else {
+            // Another meeting landed while the review stayed open: remove only exemplars
+            // matching the rejected session's embedding so valid later meetings' distinct
+            // exemplars (and their segment counts) survive. Only wipe all exemplars when
+            // no rejected embedding is available. Never fall back to deleting the newest
+            // provenance row here, because that row belongs to the newer valid meeting.
+            if let rejectedEmbedding, !rejectedEmbedding.isEmpty {
+                removeMatchingExemplarsImpl(profileId: snapshot.id, matching: rejectedEmbedding)
+            } else {
+                deleteExemplarsImpl(profileId: snapshot.id)
+            }
+            deleteRejectedContributionImpl(
+                profileId: snapshot.id,
+                embedding: rejectedEmbedding,
+                fallbackToLatest: false
+            )
+        }
     }
 
     func setDisplayNameImpl(id: UUID, name: String, source: String) {
@@ -170,6 +228,7 @@ extension SpeakerDatabase {
             return
         }
 
+        let previousCallCount = getSpeakerImpl(id: profile.id)?.callCount
         let isoFormatter = ISO8601DateFormatter()
         let sql = """
         UPDATE speakers
@@ -177,6 +236,7 @@ extension SpeakerDatabase {
         WHERE id = ?;
         """
 
+        var sqlSucceeded = false
         var statement: OpaquePointer?
         if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
             let embeddingData = profile.embedding.withUnsafeBufferPointer { Data(buffer: $0) }
@@ -208,12 +268,20 @@ extension SpeakerDatabase {
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to restore profile snapshot", ["sqlite_error": dbErrorMessage(), "id": profile.id.uuidString])
                 recordMutationFailure(operation: "restore profile snapshot", code: sqlite3_errcode(db))
+            } else {
+                sqlSucceeded = true
             }
         } else {
             AppLogger.speakers.error("Failed to prepare restoreProfile", ["sqlite_error": dbErrorMessage()])
             recordMutationFailure(operation: "prepare restore profile", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
+
+        guard sqlSucceeded else { return }
+        replaceExemplarsImpl(profileId: profile.id, embeddings: profile.exemplars)
+        if let previousCallCount, previousCallCount > profile.callCount {
+            deleteLatestContributionsImpl(profileId: profile.id, limit: previousCallCount - profile.callCount)
+        }
     }
 
     /// Increment the dispute count for a speaker (inference disagreed with DB name)
@@ -425,7 +493,7 @@ extension SpeakerDatabase {
         return queue.sync { mergedAliasIdsImpl(of: profileId) }
     }
 
-    private func mergedAliasIdsImpl(of profileId: UUID) -> Set<UUID> {
+    func mergedAliasIdsImpl(of profileId: UUID) -> Set<UUID> {
         guard isDatabaseOpen else { return [] }
         let sql = "SELECT source_id FROM speaker_merge_events WHERE target_id = ? AND undone_at IS NULL;"
         var visited: Set<UUID> = [profileId]
@@ -573,82 +641,101 @@ extension SpeakerDatabase {
     /// speaker review still points at. A review can stay open longer than the one hour
     /// age cutoff, and pruning its profile made the eventual Save fail.
     public func pruneWeakProfiles(protecting protectedIds: Set<UUID>) {
-        queue.sync {
+        if isExecutingOnQueue {
             pruneWeakProfilesImpl(protecting: protectedIds)
+            return
+        }
+        queue.sync {
+            pendingMutationError = nil
+            defer { pendingMutationError = nil }
+            do {
+                try throwingTransaction {
+                    pruneWeakProfilesImpl(protecting: protectedIds)
+                    if let pendingMutationError { throw pendingMutationError }
+                }
+            } catch {
+                AppLogger.speakers.error("pruneWeakProfiles rolled back", ["error": error.localizedDescription])
+            }
         }
     }
 
     private func pruneWeakProfilesImpl(protecting reviewProtectedIds: Set<UUID>) {
-        guard isDatabaseOpen else { return }
+        guard isDatabaseOpen else {
+            recordMutationFailure(operation: "prune weak profiles", code: SQLITE_MISUSE)
+            return
+        }
         // Only prune profiles created more than 1 hour ago — don't prune profiles from
         // the current recording that are about to be named in the speaker naming flow.
         let cutoff = ISO8601DateFormatter().string(from: Date().addingTimeInterval(-3600))
         let protectedIds = persistedReviewClipSpeakerIds()
             .union(reviewProtectedIds)
             .sorted { $0.uuidString < $1.uuidString }
-        let protectedClause: String
-        if protectedIds.isEmpty {
-            protectedClause = ""
-        } else {
-            protectedClause = "AND id NOT IN (\(Array(repeating: "?", count: protectedIds.count).joined(separator: ",")))"
-        }
+        let protectedClause = protectedIds.isEmpty
+            ? ""
+            : "AND id NOT IN (\(Array(repeating: "?", count: protectedIds.count).joined(separator: ",")))"
 
-        // Clean identity-bound caches and confirmation rows before deleting the matching profiles. These tables are
-        // intentionally not foreign-key cascades because older databases may predate them, so a
-        // direct bulk profile delete must remove their identity-bound embeddings explicitly.
-        for table in [
-            "speaker_exemplars",
-            "speaker_negative_exemplars",
-            "speaker_profile_confirmations",
-        ] {
-            let cleanupSQL = """
-            DELETE FROM \(table)
-            WHERE profile_id IN (
-                SELECT id FROM speakers
-                WHERE display_name IS NULL
-                  AND call_count <= 1
-                  AND confidence <= 0.5
-                  AND first_seen < ?
-                  \(protectedClause)
-            );
-            """
-            var cleanupStatement: OpaquePointer?
-            if sqlite3_prepare_v2(db, cleanupSQL, -1, &cleanupStatement, nil) == SQLITE_OK {
-                sqlite3_bind_text(cleanupStatement, 1, (cutoff as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                for (offset, id) in protectedIds.enumerated() {
-                    sqlite3_bind_text(cleanupStatement, Int32(offset + 2), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
-                }
-                if sqlite3_step(cleanupStatement) != SQLITE_DONE {
-                    AppLogger.speakers.error("Failed to clean pruned speaker exemplars", [
-                        "sqlite_error": dbErrorMessage(),
-                        "table": table
-                    ])
-                }
-            } else {
-                AppLogger.speakers.error("Failed to prepare pruned speaker exemplar cleanup", [
-                    "sqlite_error": dbErrorMessage(),
-                    "table": table
-                ])
-            }
-            sqlite3_finalize(cleanupStatement)
-        }
-
-        let sql = """
-        DELETE FROM speakers
+        let selectSQL = """
+        SELECT id FROM speakers
         WHERE display_name IS NULL
           AND call_count <= 1
           AND confidence <= 0.5
           AND first_seen < ?
           \(protectedClause);
         """
-        var statement: OpaquePointer?
-        if sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK {
-            sqlite3_bind_text(statement, 1, (cutoff as NSString).utf8String, -1, SQLITE_TRANSIENT)
+        var prunedIds: [UUID] = []
+        var selectStmt: OpaquePointer?
+        if sqlite3_prepare_v2(db, selectSQL, -1, &selectStmt, nil) == SQLITE_OK {
+            sqlite3_bind_text(selectStmt, 1, (cutoff as NSString).utf8String, -1, SQLITE_TRANSIENT)
             for (offset, id) in protectedIds.enumerated() {
-                sqlite3_bind_text(statement, Int32(offset + 2), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+                sqlite3_bind_text(selectStmt, Int32(offset + 2), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
+            }
+            while true {
+                let step = sqlite3_step(selectStmt)
+                if step == SQLITE_ROW {
+                    if let text = sqlite3_column_text(selectStmt, 0),
+                       let id = UUID(uuidString: String(cString: text)) {
+                        prunedIds.append(id)
+                    }
+                } else if step == SQLITE_DONE {
+                    break
+                } else {
+                    AppLogger.speakers.error("Failed to scan weak profiles", ["sqlite_error": dbErrorMessage()])
+                    recordMutationFailure(operation: "scan prune weak profiles", code: step)
+                    sqlite3_finalize(selectStmt)
+                    return
+                }
+            }
+        } else {
+            AppLogger.speakers.error("Failed to prepare pruneWeakProfiles lookup", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare prune weak profiles lookup", code: sqlite3_errcode(db))
+            sqlite3_finalize(selectStmt)
+            return
+        }
+        sqlite3_finalize(selectStmt)
+        guard !prunedIds.isEmpty else { return }
+
+        // Clean identity-bound caches, confirmations, provenance, and any merge history
+        // (including transitive merged-in aliases) before deleting the matching profiles
+        // so no voice embeddings linger on disk.
+        var affectedIdSet = Set(prunedIds)
+        for id in prunedIds {
+            affectedIdSet.formUnion(mergedAliasIdsImpl(of: id))
+            deleteExemplarsImpl(profileId: id)
+            deleteNegativeExemplarsImpl(profileId: id)
+            deleteConfirmationsImpl(profileId: id)
+        }
+        deleteProvenanceAndMergeHistoryImpl(forProfileIds: Array(affectedIdSet))
+
+        let placeholders = Array(repeating: "?", count: prunedIds.count).joined(separator: ",")
+        let deleteSQL = "DELETE FROM speakers WHERE id IN (\(placeholders));"
+        var statement: OpaquePointer?
+        if sqlite3_prepare_v2(db, deleteSQL, -1, &statement, nil) == SQLITE_OK {
+            for (offset, id) in prunedIds.enumerated() {
+                sqlite3_bind_text(statement, Int32(offset + 1), (id.uuidString as NSString).utf8String, -1, SQLITE_TRANSIENT)
             }
             if sqlite3_step(statement) != SQLITE_DONE {
                 AppLogger.speakers.error("Failed to prune weak profiles", ["sqlite_error": dbErrorMessage()])
+                recordMutationFailure(operation: "prune weak profiles", code: sqlite3_errcode(db))
             } else {
                 let pruned = Int(sqlite3_changes(db))
                 if pruned > 0 {
@@ -657,6 +744,7 @@ extension SpeakerDatabase {
             }
         } else {
             AppLogger.speakers.error("Failed to prepare pruneWeakProfiles", ["sqlite_error": dbErrorMessage()])
+            recordMutationFailure(operation: "prepare prune weak profiles", code: sqlite3_errcode(db))
         }
         sqlite3_finalize(statement)
     }
