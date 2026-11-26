@@ -1,10 +1,14 @@
 import Foundation
 
 func testModelCacheInventory() {
-    runSuite("Retired Parakeet v2 caches are reclaimable while active Parakeet v3 stays intact") {
+    runSuite("Retired Parakeet v2 caches stay untouched unless Transcripted migrated from Parakeet v2") {
         let root = FileManager.default.temporaryDirectory
             .appendingPathComponent("ModelCacheV2Retired-\(UUID().uuidString)", isDirectory: true)
         defer { try? FileManager.default.removeItem(at: root) }
+        let suiteName = "ModelCacheV2GateTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
         let v3 = root.appendingPathComponent(ParakeetModelVariant.v3.directoryName)
         for name in ParakeetModelVariant.v3.requiredModelDirectoryNames {
             writeTestFile(v3.appendingPathComponent("\(name)/coremldata.bin"), bytes: 1)
@@ -17,16 +21,44 @@ func testModelCacheInventory() {
         writeTestFile(v2.appendingPathComponent("model.bin"), bytes: 13)
         writeTestFile(v2Legacy.appendingPathComponent("model.bin"), bytes: 19)
 
-        let snapshot = ModelCacheInventory.snapshot(fluidAudioModelsDirectory: root)
-        assertEqual(snapshot.staleFluidAudioModelBytes, 32, "both retired Parakeet v2 folders should count as stale")
-        assertEqual(snapshot.staleFluidAudioModelNames, ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2-coreml"])
+        // Without migration from parakeet-tdt-v2, shared FluidAudio V2 caches must NOT be flagged or deleted.
+        let unmigratedSnapshot = ModelCacheInventory.snapshot(
+            fluidAudioModelsDirectory: root,
+            userDefaults: defaults
+        )
+        assertEqual(unmigratedSnapshot.staleFluidAudioModelBytes, 0, "shared Parakeet v2 caches must not count as stale when Transcripted did not migrate from v2")
+        assertEqual(unmigratedSnapshot.staleFluidAudioModelNames, [])
 
-        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(fluidAudioModelsDirectory: root)
+        let unmigratedResult = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(
+            fluidAudioModelsDirectory: root,
+            userDefaults: defaults
+        )
+        assertEqual(unmigratedResult?.removedBytes, 0)
+        assertEqual(unmigratedResult?.removedNames, [])
+        assertTrue(FileManager.default.fileExists(atPath: v2.path), "other FluidAudio apps' Parakeet v2 cache must stay untouched")
+        assertTrue(FileManager.default.fileExists(atPath: v2Legacy.path), "other FluidAudio apps' Parakeet v2 legacy cache must stay untouched")
+
+        // Once Transcripted migrates this user from parakeet-tdt-v2, V2 caches become reclaimable.
+        defaults.set("parakeet-tdt-v2", forKey: "transcription-model-preference")
+        assertEqual(TranscriptionModelPreferences.preferredModel(userDefaults: defaults), .parakeetTDTv3)
+        assertTrue(TranscriptionModelPreferences.didMigrateFromParakeetV2(userDefaults: defaults))
+
+        let migratedSnapshot = ModelCacheInventory.snapshot(
+            fluidAudioModelsDirectory: root,
+            userDefaults: defaults
+        )
+        assertEqual(migratedSnapshot.staleFluidAudioModelBytes, 32, "both retired Parakeet v2 folders should count as stale after v2 migration")
+        assertEqual(migratedSnapshot.staleFluidAudioModelNames, ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2-coreml"])
+
+        let result = try? ModelCacheInventory.removeKnownStaleFluidAudioModels(
+            fluidAudioModelsDirectory: root,
+            userDefaults: defaults
+        )
         assertEqual(result?.removedBytes, 32)
         assertEqual(result?.removedNames, ["parakeet-tdt-0.6b-v2", "parakeet-tdt-0.6b-v2-coreml"])
         assertTrue(FileManager.default.fileExists(atPath: v3.path), "active Parakeet v3 cache must stay")
-        assertFalse(FileManager.default.fileExists(atPath: v2.path), "retired Parakeet v2 cache must be removed")
-        assertFalse(FileManager.default.fileExists(atPath: v2Legacy.path), "retired Parakeet v2 legacy cache must be removed")
+        assertFalse(FileManager.default.fileExists(atPath: v2.path), "retired Parakeet v2 cache must be removed after v2 migration")
+        assertFalse(FileManager.default.fileExists(atPath: v2Legacy.path), "retired Parakeet v2 legacy cache must be removed after v2 migration")
 
         let decoder = v3.appendingPathComponent("Decoder.mlmodelc")
         try! FileManager.default.removeItem(at: decoder)

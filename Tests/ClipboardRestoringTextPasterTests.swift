@@ -167,6 +167,91 @@ func testClipboardRestoringTextPaster() async {
             assertNotNil(paster.lastPasteTiming?.measurements()["paste_clipboard_snapshot_ms"], "snapshot has separate timing")
         }
 
+        runSuite("ClipboardRestoringTextPaster falls back to manual copy when focus changes during lazy snapshot") {
+            let board = FakeClipboardPasteboard(initialString: "original clipboard")
+            var targetIsFocused = true
+            var dispatched = false
+            board.onPasteboardItemsRead = {
+                targetIsFocused = false
+            }
+            let paster = ClipboardRestoringTextPaster()
+            let target = DictationPasteTarget(processIdentifier: 4242, bundleIdentifier: "com.example.target")
+
+            let outcome = paster.paste(
+                "dictated words",
+                target: target,
+                pasteboard: board,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    dispatched = true
+                    return true
+                },
+                targetMatchesFrontmost: { _ in targetIsFocused }
+            )
+            board.onPasteboardItemsRead = nil
+
+            assertFalse(dispatched, "Cmd+V must NOT be posted when focus moves during clipboard snapshot")
+            assertEqual(
+                outcome,
+                .copied(
+                    "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
+                    reason: .focusChanged
+                ),
+                "focus change during snapshot must take the focus-changed manual-copy fallback"
+            )
+            assertEqual(
+                board.string(forType: .string),
+                "dictated words",
+                "dictation text should be on the clipboard for manual Cmd+V"
+            )
+
+            // Verify original clipboard was saved for restoration on the next paste.
+            var nextDispatched = false
+            let nextOutcome = paster.paste(
+                "next dictation",
+                target: target,
+                pasteboard: board,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    nextDispatched = true
+                    return true
+                },
+                pasteConfirmed: { true },
+                targetMatchesFrontmost: { _ in true },
+                restoreDelay: 0
+            )
+            assertTrue(nextDispatched, "next paste with target focused should dispatch normally")
+            assertEqual(nextOutcome, .pasted)
+            paster.restorePendingClipboardNow()
+            assertEqual(
+                board.string(forType: .string),
+                "original clipboard",
+                "original clipboard captured before focus-changed fallback must survive for restoration"
+            )
+
+            // When manual clipboard write fails after post-snapshot focus loss, report write failure and never dispatch.
+            let unwritableBoard = FakeClipboardPasteboard(initialString: "keep me", setStringSucceeds: false)
+            var unwritableFocused = true
+            var unwritableDispatched = false
+            unwritableBoard.onPasteboardItemsRead = { unwritableFocused = false }
+            let failedOutcome = paster.paste(
+                "dictated words",
+                target: target,
+                pasteboard: unwritableBoard,
+                accessibilityTrusted: { true },
+                requestAccessibilityTrust: {},
+                pasteDispatcher: {
+                    unwritableDispatched = true
+                    return true
+                },
+                targetMatchesFrontmost: { _ in unwritableFocused }
+            )
+            assertFalse(unwritableDispatched, "Cmd+V must NOT be posted when focus changed and fallback copy failed")
+            assertEqual(failedOutcome.failureReason, .focusChangeClipboardWriteFailed)
+        }
+
         runSuite("DictationTargetConfirmationMode stays coarse and privacy-safe") {
             assertEqual(
                 DictationTargetConfirmationMode.resolve(

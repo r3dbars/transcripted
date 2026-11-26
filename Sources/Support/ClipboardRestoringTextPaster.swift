@@ -157,6 +157,7 @@ final class ClipboardRestoringTextPaster {
         confirmationSource: (@MainActor () -> (any ClipboardPasteConfirmationSource)?)? = nil,
         pasteConfirmed: (@MainActor () -> Bool)? = nil,
         targetIsFrontmost: (@MainActor () -> Bool)? = nil,
+        targetMatchesFrontmost: (@MainActor (DictationPasteTarget) -> Bool)? = nil,
         restoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreDelay,
         fallbackRestoreDelay: UInt64 = TranscriptedConstants.clipboardRestoreFallbackDelay,
         pasteConfirmationWait: TimeInterval = TranscriptedConstants.clipboardPasteConfirmationWait,
@@ -219,23 +220,23 @@ final class ClipboardRestoringTextPaster {
             return .pasted
         }
 
+        let targetIsActiveApp: @MainActor (DictationPasteTarget) -> Bool = { candidate in
+            targetMatchesFrontmost?(candidate) ?? candidate.matchesCurrentFrontmostApp()
+        }
         if let target,
-           !target.matchesCurrentFrontmostApp(),
-           !waitForTargetActivation(target, timeout: activationWait, isCurrentOperation: isCurrentOperation) {
+           !targetIsActiveApp(target),
+           !waitForTargetActivation(
+               target,
+               timeout: activationWait,
+               isCurrentOperation: isCurrentOperation,
+               targetIsFrontmost: targetIsActiveApp
+           ) {
             guard isCurrentOperation() else { return cancelledOutcome }
-            return outcomeForManualCopy(
+            return focusChangedManualCopyOutcome(
                 copyTextForManualPaste(
                     text, to: pasteboard, isCurrentOperation: isCurrentOperation, snapshotRead: snapshotRead
                 ),
-                isCurrentOperation: isCurrentOperation,
-                copied: .copied(
-                    "Focus moved before the text could paste. It's on your clipboard — press ⌘V to paste it.",
-                    reason: .focusChanged
-                ),
-                writeFailed: .failed(
-                    "Focus moved, and Transcripted couldn't put the text on your clipboard. It's still saved in your dictation history.",
-                    reason: .focusChangeClipboardWriteFailed
-                )
+                isCurrentOperation: isCurrentOperation
             )
         }
 
@@ -274,6 +275,27 @@ final class ClipboardRestoringTextPaster {
         guard isCurrentOperation() else { return cancelledOutcome }
         if let refusal = snapshot.refusal { return refusal }
         let savedItems = snapshot.savedItems
+
+        // `snapshotClipboardForPaste` may pump the main runloop for lazy
+        // pasteboard providers, during which app/window focus can move away.
+        // Revalidate the destination before borrowing the clipboard or posting Cmd+V.
+        if let target {
+            let targetStillFocused = targetMatchesFrontmost?(target)
+                ?? (target.matchesCurrentFrontmostApp() && target.ownsCurrentFocusedElement())
+            guard isCurrentOperation() else { return cancelledOutcome }
+            if !targetStillFocused {
+                return focusChangedManualCopyOutcome(
+                    copyTextForManualPasteUsingSnapshot(
+                        text,
+                        savedItems: savedItems,
+                        expectedChangeCount: snapshot.changeCount,
+                        to: pasteboard,
+                        isCurrentOperation: isCurrentOperation
+                    ),
+                    isCurrentOperation: isCurrentOperation
+                )
+            }
+        }
         let pasteToken = pasteEpoch.begin()
         var temporaryChangeCount = 0
         var restoreInstalled = false
@@ -350,7 +372,7 @@ final class ClipboardRestoringTextPaster {
         timingDispatchFinishedAt = CFAbsoluteTimeGetCurrent()
 
         let confirmationUnavailable = pasteConfirmed == nil && accessibilityConfirmation?.canObservePaste != true
-        let targetRemainsFrontmost = targetIsFrontmost ?? { target?.matchesCurrentFrontmostApp() != false }
+        let targetRemainsFrontmost = targetIsFrontmost ?? { target.map(targetIsActiveApp) != false }
         var accessibilityConfirmedMode: String?
         let confirmPasteReceived = pasteConfirmed ?? {
             // The text cannot have landed before the target read the borrowed
@@ -668,7 +690,8 @@ final class ClipboardRestoringTextPaster {
 
     private func waitForTargetActivation(
         _ target: DictationPasteTarget, timeout: TimeInterval,
-        isCurrentOperation: () -> Bool
+        isCurrentOperation: () -> Bool,
+        targetIsFrontmost: @MainActor (DictationPasteTarget) -> Bool = { $0.matchesCurrentFrontmostApp() }
     ) -> Bool {
         guard timeout > 0 else { return false }
 
@@ -680,11 +703,11 @@ final class ClipboardRestoringTextPaster {
         ) {
             _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.02))
             guard isCurrentOperation() else { return false }
-            if target.matchesCurrentFrontmostApp() {
+            if targetIsFrontmost(target) {
                 return true
             }
         }
-        return target.matchesCurrentFrontmostApp()
+        return targetIsFrontmost(target)
     }
 
     @discardableResult

@@ -32,15 +32,22 @@ func testLegacyWritingDataCleanup() {
         var deletedAccounts: [String] = []
         var deletedClasses: [String] = []
         var deletedSyncFlags: [Bool] = []
+        var deletedAuthUIMode: [String] = []
+
+        let suiteName = "LegacyWritingDataCleanupTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
         let result = LegacyWritingDataCleanup.cleanUp(
             appSupportRoot: appSupport,
+            userDefaults: defaults,
             fileManager: fm,
             deleteKeychainItem: { query in
                 if let cls = query[kSecClass] as? String { deletedClasses.append(cls) }
                 if let service = query[kSecAttrService] as? String { deletedServices.append(service) }
                 if let account = query[kSecAttrAccount] as? String { deletedAccounts.append(account) }
                 if let sync = query[kSecAttrSynchronizable] as? Bool { deletedSyncFlags.append(sync) }
+                if let authUI = query[kSecUseAuthenticationUI] as? String { deletedAuthUIMode.append(authUI) }
                 return (query[kSecAttrService] as? String) == "com.justinbetker.draft.writing.personal-history"
                     ? errSecSuccess
                     : errSecItemNotFound
@@ -80,6 +87,11 @@ func testLegacyWritingDataCleanup() {
             "cleanup must delete generic password items"
         )
         assertEqual(deletedSyncFlags, [false, false], "cleanup must match non-synchronizable local key")
+        assertEqual(
+            deletedAuthUIMode,
+            [kSecUseAuthenticationUISkip as String, kSecUseAuthenticationUISkip as String],
+            "cleanup must pass kSecUseAuthenticationUISkip so locked keychains never prompt during background cleanup"
+        )
     }
 
     runSuite("LegacyWritingDataCleanup refuses symlinks and out-of-root paths") {
@@ -198,5 +210,181 @@ func testLegacyWritingDataCleanup() {
         )
         assertTrue(failedKeychain.keychainDeleteFailed, "unexpected SecItemDelete status should be reported")
         assertFalse(failedKeychain.succeeded, "failed keychain deletion should mark result unsuccessful")
+    }
+
+    runSuite("LegacyWritingDataCleanup succeeds cleanly when symlinked root or intermediate folder holds no legacy targets") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory
+            .appendingPathComponent("LegacyWritingDataCleanupSymlinkEmpty-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let suiteName = "LegacyWritingDataCleanupSymlinkEmpty.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let emptyOutside = tempRoot.appendingPathComponent("EmptyOutside", isDirectory: true)
+        try? fm.createDirectory(at: emptyOutside, withIntermediateDirectories: true)
+
+        // Intermediate symlink Transcripted/writing -> EmptyOutside (no legacy folders inside)
+        let appSupport = tempRoot.appendingPathComponent("Transcripted", isDirectory: true)
+        try? fm.createDirectory(at: appSupport, withIntermediateDirectories: true)
+        let writingLink = appSupport.appendingPathComponent("writing")
+        try? fm.createSymbolicLink(at: writingLink, withDestinationURL: emptyOutside)
+
+        let intermediateResult = LegacyWritingDataCleanup.cleanUp(
+            appSupportRoot: appSupport,
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in errSecItemNotFound }
+        )
+        assertTrue(
+            intermediateResult.succeeded,
+            "symlinked intermediate folder with no legacy targets behind it must not fail cleanup"
+        )
+        assertEqual(intermediateResult.refusedUnsafePaths, [], "absent targets behind intermediate symlink should not be reported refused")
+
+        // Symlinked appSupportRoot -> EmptyOutside (no legacy folders inside)
+        let linkedRoot = tempRoot.appendingPathComponent("LinkedSupport")
+        try? fm.createSymbolicLink(at: linkedRoot, withDestinationURL: emptyOutside)
+        let rootResult = LegacyWritingDataCleanup.cleanUp(
+            appSupportRoot: linkedRoot,
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in errSecItemNotFound }
+        )
+        assertTrue(
+            rootResult.succeeded,
+            "symlinked appSupportRoot with no legacy targets behind it must not fail cleanup"
+        )
+        assertEqual(rootResult.refusedUnsafePaths, [], "absent targets behind symlinked root should not be reported refused")
+    }
+
+    runSuite("LegacyWritingDataCleanup refuses targets overlapping configured or unmounted capture library paths") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory
+            .appendingPathComponent("LegacyWritingDataCleanupCaptureGuard-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let suiteName = "LegacyWritingDataCleanupCaptureGuard.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let appSupport = tempRoot.appendingPathComponent("Transcripted", isDirectory: true)
+        let personalHistory = appSupport.appendingPathComponent("writing/Personal History", isDirectory: true)
+        let outcomeLedger = appSupport.appendingPathComponent("writing/Outcome Ledger", isDirectory: true)
+        let wordDiary = appSupport.appendingPathComponent("writing/Word Diary", isDirectory: true)
+        let nextSentence = appSupport.appendingPathComponent("next-sentence", isDirectory: true)
+        for dir in [personalHistory, outcomeLedger, wordDiary, nextSentence] {
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        }
+        let phFile = personalHistory.appendingPathComponent("meetings/note.md")
+        try? fm.createDirectory(at: phFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? Data("keep".utf8).write(to: phFile)
+        let nsFile = nextSentence.appendingPathComponent("keep.txt")
+        try? Data("keep".utf8).write(to: nsFile)
+
+        // 1. Target equals configured capture library path.
+        defaults.set(personalHistory.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        let exactResult = LegacyWritingDataCleanup.cleanUp(
+            appSupportRoot: appSupport,
+            relativePaths: ["writing/Personal History", "writing/Word Diary"],
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in errSecItemNotFound }
+        )
+        assertFalse(exactResult.succeeded, "refusing a target equal to the configured capture library should report refusal")
+        assertEqual(exactResult.refusedUnsafePaths, ["writing/Personal History"])
+        assertEqual(exactResult.removedRelativePaths, ["writing/Word Diary"])
+        assertTrue(fm.fileExists(atPath: phFile.path), "capture library equal to a legacy path must never be deleted")
+
+        // 2. Target is an ancestor of an unmounted/unavailable configured capture library path.
+        let unmountedLibrary = nextSentence.appendingPathComponent("unmounted-drive/captures", isDirectory: true)
+        assertFalse(fm.fileExists(atPath: unmountedLibrary.path), "unmounted child must not exist on disk")
+        defaults.set(unmountedLibrary.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        let ancestorResult = LegacyWritingDataCleanup.cleanUp(
+            appSupportRoot: appSupport,
+            relativePaths: ["next-sentence", "writing/Outcome Ledger"],
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in errSecItemNotFound }
+        )
+        assertFalse(ancestorResult.succeeded, "refusing an ancestor of an unmounted capture library should report refusal")
+        assertEqual(ancestorResult.refusedUnsafePaths, ["next-sentence"])
+        assertEqual(ancestorResult.removedRelativePaths, ["writing/Outcome Ledger"])
+        assertTrue(fm.fileExists(atPath: nsFile.path), "ancestor of an unavailable capture library must stay intact")
+    }
+
+    runSuite("LegacyWritingDataCleanup launch cleanup persists one-time completion while explicit cleanUp stays unconditional") {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory
+            .appendingPathComponent("LegacyWritingDataCleanupOnce-\(UUID().uuidString)", isDirectory: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        let suiteName = "LegacyWritingDataCleanupOnce.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let appSupport = tempRoot.appendingPathComponent("Transcripted", isDirectory: true)
+        let nextSentence = appSupport.appendingPathComponent("next-sentence", isDirectory: true)
+        try? fm.createDirectory(at: nextSentence, withIntermediateDirectories: true)
+
+        // Failed keychain (e.g., interaction not allowed) must NOT persist completion.
+        var keychainCalls = 0
+        let failedLaunch = LegacyWritingDataCleanup.runLaunchCleanupIfNeeded(
+            appSupportRoot: appSupport,
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in
+                keychainCalls += 1
+                return errSecInteractionNotAllowed
+            }
+        )
+        assertEqual(failedLaunch?.succeeded, false, "locked keychain failure must not mark launch cleanup succeeded")
+        assertFalse(defaults.bool(forKey: LegacyWritingDataCleanup.launchCleanupCompletedDefaultsKey), "failed launch cleanup must retry on next launch")
+        assertEqual(keychainCalls, LegacyWritingDataCleanup.legacyKeychainServices.count)
+
+        // Succeeding launch cleanup persists the completion flag.
+        let succeededLaunch = LegacyWritingDataCleanup.runLaunchCleanupIfNeeded(
+            appSupportRoot: appSupport,
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in
+                keychainCalls += 1
+                return errSecItemNotFound
+            }
+        )
+        assertEqual(succeededLaunch?.succeeded, true, "retry after unlock should succeed")
+        assertTrue(defaults.bool(forKey: LegacyWritingDataCleanup.launchCleanupCompletedDefaultsKey), "successful launch cleanup must persist completion flag")
+
+        // Subsequent launch cleanup is a complete no-op (no filesystem or keychain touch).
+        try? fm.createDirectory(at: nextSentence, withIntermediateDirectories: true)
+        let callsBeforeSkip = keychainCalls
+        let skippedLaunch = LegacyWritingDataCleanup.runLaunchCleanupIfNeeded(
+            appSupportRoot: appSupport,
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in
+                keychainCalls += 1
+                return errSecItemNotFound
+            }
+        )
+        assertNil(skippedLaunch, "completed launch cleanup must skip work on subsequent launches")
+        assertEqual(keychainCalls, callsBeforeSkip, "completed launch cleanup must not query Keychain again")
+        assertTrue(fm.fileExists(atPath: nextSentence.path), "skipped launch cleanup must not touch disk")
+
+        // Explicit cleanUp (used by deleteAllWriting) still runs unconditionally.
+        let explicit = LegacyWritingDataCleanup.cleanUp(
+            appSupportRoot: appSupport,
+            userDefaults: defaults,
+            fileManager: fm,
+            deleteKeychainItem: { _ in
+                keychainCalls += 1
+                return errSecItemNotFound
+            }
+        )
+        assertTrue(explicit.succeeded, "explicit cleanup must still run after launch completion")
+        assertEqual(explicit.removedRelativePaths, ["next-sentence"])
+        assertFalse(fm.fileExists(atPath: nextSentence.path), "explicit cleanup must remove legacy folder unconditionally")
+        assertEqual(keychainCalls, callsBeforeSkip + LegacyWritingDataCleanup.legacyKeychainServices.count)
     }
 }

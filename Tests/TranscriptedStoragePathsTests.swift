@@ -813,6 +813,56 @@ func testTranscriptedStoragePaths() {
         assertTrue(FileManager.default.fileExists(atPath: outsideFile.path), "directory behind symlinked root must stay intact")
     }
 
+    runSuite("LegacyCompanionDirectoryCleanup — refuses companion directory overlapping configured or unmounted capture library") {
+        let suiteName = "LegacyCompanionCaptureGuardTests.\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            assertTrue(false, "expected isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        let tempRoot = FileManager.default.temporaryDirectory
+            .appendingPathComponent("TranscriptedStoragePathsTests-companion-guard-\(UUID().uuidString)", isDirectory: true)
+        let appSupportRoot = tempRoot.appendingPathComponent("Transcripted", isDirectory: true)
+        let companionDir = appSupportRoot.appendingPathComponent("companion", isDirectory: true)
+        let keepFile = companionDir.appendingPathComponent("meetings/keep.md", isDirectory: false)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+
+        try? FileManager.default.createDirectory(at: keepFile.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: keepFile.path, contents: Data("keep".utf8))
+
+        // 1. Capture library equals companion/
+        defaults.set(companionDir.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        let equalOutcome = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: appSupportRoot,
+            userDefaults: defaults
+        )
+        assertEqual(equalOutcome, .refused("overlaps_capture_library"), "cleanup must refuse when companion equals configured capture library")
+        assertFalse(defaults.bool(forKey: LegacyCompanionDirectoryCleanup.completedDefaultsKey), "refusal must not mark companion cleanup complete")
+        assertTrue(FileManager.default.fileExists(atPath: keepFile.path), "configured capture library inside companion/ must stay intact")
+
+        // 2. Capture library is an unmounted/non-existent descendant of companion/
+        let unmountedChild = companionDir.appendingPathComponent("offline-mount/library", isDirectory: true)
+        defaults.set(unmountedChild.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        let ancestorOutcome = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: appSupportRoot,
+            userDefaults: defaults
+        )
+        assertEqual(ancestorOutcome, .refused("overlaps_capture_library"), "cleanup must refuse when companion is an ancestor of an unmounted capture library")
+        assertFalse(defaults.bool(forKey: LegacyCompanionDirectoryCleanup.completedDefaultsKey), "ancestor refusal must not mark companion cleanup complete")
+        assertTrue(FileManager.default.fileExists(atPath: keepFile.path), "ancestor of an unavailable capture library must stay intact")
+
+        // 3. Sibling path with shared string prefix (companion-captures) does not block removal.
+        let siblingPath = appSupportRoot.appendingPathComponent("companion-captures", isDirectory: true)
+        defaults.set(siblingPath.path, forKey: TranscriptedStoragePreferences.captureLibraryLocationKey)
+        let siblingOutcome = LegacyCompanionDirectoryCleanup.runOnceIfNeeded(
+            appSupportRoot: appSupportRoot,
+            userDefaults: defaults
+        )
+        assertEqual(siblingOutcome, .removed, "sibling path sharing only a prefix must not block legacy companion cleanup")
+        assertFalse(FileManager.default.fileExists(atPath: companionDir.path), "unrelated legacy companion/ should be removed")
+    }
+
     runSuite("Transcripted MCP directory manifest — the suites above left the real manifest untouched") {
         assertEqual(
             fingerprint(of: realManifestURL),

@@ -162,6 +162,7 @@ extension ClipboardRestoringTextPaster {
 
     struct ClipboardSnapshotAttempt {
         let savedItems: PasteboardSnapshot
+        let changeCount: Int
         let snapshotMS: Int
         let refusal: TextPasteOutcome?
     }
@@ -457,7 +458,12 @@ extension ClipboardRestoringTextPaster {
         } else {
             refusal = nil
         }
-        return ClipboardSnapshotAttempt(savedItems: savedItems, snapshotMS: snapshotMS, refusal: refusal)
+        return ClipboardSnapshotAttempt(
+            savedItems: savedItems,
+            changeCount: snapshotChangeCount,
+            snapshotMS: snapshotMS,
+            refusal: refusal
+        )
     }
 
     func restorePasteboardItems(

@@ -139,7 +139,9 @@ final class WritingController {
         // Leaves `<capture-library>/writing/` day files untouched.
         let appSupportRoot = self.appSupportRoot
         Task.detached(priority: .utility) {
-            let result = LegacyWritingDataCleanup.cleanUp(appSupportRoot: appSupportRoot())
+            guard let result = LegacyWritingDataCleanup.runLaunchCleanupIfNeeded(
+                appSupportRoot: appSupportRoot()
+            ) else { return }
             if !result.removedRelativePaths.isEmpty || result.keychainItemsDeleted > 0 {
                 DiagnosticsLog.shared.record(
                     "legacy-writing-data-cleaned",

@@ -197,6 +197,11 @@ enum TranscriptionModelPreferences {
     static let defaultModel: TranscriptionModelChoice = .parakeetTDTv3
 
     private static let preferredModelKey = "transcription-model-preference"
+    static let migratedFromParakeetV2Key = "transcription-migrated-from-parakeet-v2"
+
+    static func didMigrateFromParakeetV2(userDefaults: UserDefaults = .standard) -> Bool {
+        userDefaults.bool(forKey: migratedFromParakeetV2Key)
+    }
 
     /// ISO 639-1 codes for the 25 European languages supported by Parakeet TDT V3.
     static let parakeetTDTv3SupportedLanguageCodes: Set<String> = [
@@ -236,9 +241,11 @@ enum TranscriptionModelPreferences {
     /// Resolves a stored preference rawValue to an active model choice,
     /// migrating retired choices to their closest supported successor:
     /// - `whisper-large-v3` -> `.whisperLargeV3Turbo`
-    /// - `apple-speech` -> `.whisperLargeV3Turbo` when the saved meeting
-    ///   language (if explicit) or the Mac's primary language is outside
-    ///   Parakeet V3's 25 supported languages; otherwise `.parakeetTDTv3`
+    /// - `apple-speech` -> `.whisperLargeV3Turbo` when any explicit saved
+    ///   meeting language is configured (since `STTRouter` rejects Parakeet V3
+    ///   with `.explicit` language on recovered imports and failed-meeting
+    ///   retries) or when the Mac's primary language is outside Parakeet V3's
+    ///   25 supported languages; otherwise `.parakeetTDTv3`
     /// - retired Parakeet V2 / legacy `parakeet-ultra` / Nemotron -> `.parakeetTDTv3`
     static func migratedModel(
         forStoredRawValue rawValue: String,
@@ -252,8 +259,7 @@ enum TranscriptionModelPreferences {
         case "whisper-large-v3":
             return .whisperLargeV3Turbo
         case "apple-speech":
-            if let explicitLanguage = normalizedExplicitLanguageCode(languageRawValue),
-               !parakeetTDTv3SupportedLanguageCodes.contains(explicitLanguage) {
+            if normalizedExplicitLanguageCode(languageRawValue) != nil {
                 return .whisperLargeV3Turbo
             }
             if let primaryLanguage = normalizedPrimaryLanguageCode(preferredLanguages: preferredLanguages),
@@ -271,6 +277,9 @@ enum TranscriptionModelPreferences {
     /// Retired stored raw values migrate once to their closest supported model
     /// and persist the migrated choice so a later Mac locale change never flips
     /// the user's model silently; unknown raw values fall back to the default model.
+    /// Writes directly without posting `.transcriptionModelPreferenceDidChange`,
+    /// and skips writing when the key is profile-forced or overridden via
+    /// `UserDefaults.argumentDomain`.
     static func preferredModel(
         userDefaults: UserDefaults = .standard,
         preferredLanguages: [String] = Locale.preferredLanguages
@@ -289,7 +298,14 @@ enum TranscriptionModelPreferences {
         ) else {
             return defaultModel
         }
-        setPreferredModel(migrated, userDefaults: userDefaults)
+        let isManagedOrArgumentOverride = userDefaults.objectIsForced(forKey: preferredModelKey)
+            || userDefaults.volatileDomain(forName: UserDefaults.argumentDomain)[preferredModelKey] != nil
+        if !isManagedOrArgumentOverride {
+            userDefaults.set(migrated.rawValue, forKey: preferredModelKey)
+            if rawValue == "parakeet-tdt-v2" {
+                userDefaults.set(true, forKey: migratedFromParakeetV2Key)
+            }
+        }
         return migrated
     }
 

@@ -35,9 +35,7 @@
       "default": "parakeet-tdt-v3",
       "choices": [
         "parakeet-tdt-v3",
-        "parakeet-tdt-v2",
-        "whisper-large-v3-turbo",
-        "whisper-large-v3"
+        "whisper-large-v3-turbo"
       ],
       "status": "needs-seam",
       "apply": [
@@ -50,8 +48,8 @@
         "dictation-stop-latency",
         "meeting-turnaround"
       ],
-      "source": "Sources/Support/TranscriptionModelPreferences.swift:150",
-      "risk": "Whisper models are much slower and bigger; v2 is English-only. A bad pick makes dictation feel laggy or drops non-English words.",
+      "source": "Sources/Support/TranscriptionModelPreferences.swift:50",
+      "risk": "Whisper models are much slower and bigger than Parakeet V3. A bad pick makes dictation feel laggy.",
       "notes": "Real user setting stored in UserDefaults under the apply key. No bench writes UserDefaults yet, so this stays needs-seam until one does (a bench would need its own defaults domain so it never touches the user's settings). The CLI import path is hardwired to Parakeet v3, so meeting-import cannot measure this either."
     },
     {

@@ -58,6 +58,83 @@ enum TranscriptedStoragePreferences {
         return customPath
     }
 
+    /// Raw configured capture-library paths from preferences, including paths
+    /// that are currently unmounted or unavailable on disk, so legacy cleanup
+    /// never deletes a directory that equals or contains the user's library.
+    static func configuredCaptureLibraryPaths(
+        userDefaults: UserDefaults = .standard
+    ) -> [String] {
+        guard let rawPath = storedCustomCaptureLibraryPath(userDefaults: userDefaults),
+              rawPath.hasPrefix("/") else {
+            return []
+        }
+        return [rawPath]
+    }
+
+    /// True when `targetURL` equals or is an ancestor of any configured capture
+    /// library path (checked on both standardized raw paths and symlink-resolved
+    /// existing prefixes so offline/unmounted destinations stay protected).
+    static func targetOverlapsConfiguredCaptureLibrary(
+        _ targetURL: URL,
+        configuredPaths: [String],
+        fileManager: FileManager = .default
+    ) -> Bool {
+        guard !configuredPaths.isEmpty else { return false }
+        let rawTarget = trimmedStoragePath(targetURL.standardizedFileURL.path)
+        let resolvedTarget = canonicalPathResolvingExistingAncestors(targetURL, fileManager: fileManager)
+
+        for rawPath in configuredPaths {
+            let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("/") else { continue }
+            let libraryURL = URL(fileURLWithPath: trimmed, isDirectory: true)
+            let rawLibrary = trimmedStoragePath(libraryURL.standardizedFileURL.path)
+            let resolvedLibrary = canonicalPathResolvingExistingAncestors(libraryURL, fileManager: fileManager)
+
+            if path(rawTarget, equalsOrIsAncestorOf: rawLibrary)
+                || path(resolvedTarget, equalsOrIsAncestorOf: resolvedLibrary) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func canonicalPathResolvingExistingAncestors(
+        _ url: URL,
+        fileManager: FileManager
+    ) -> String {
+        var current = url.standardizedFileURL
+        var trailingComponents: [String] = []
+        while current.path != "/", !fileManager.fileExists(atPath: current.path) {
+            let last = current.lastPathComponent
+            let parent = current.deletingLastPathComponent()
+            if parent.path == current.path { break }
+            trailingComponents.append(last)
+            current = parent
+        }
+        var resolved = current.resolvingSymlinksInPath().standardizedFileURL
+        for component in trailingComponents.reversed() {
+            resolved = resolved.appendingPathComponent(component)
+        }
+        return trimmedStoragePath(resolved.path)
+    }
+
+    private static func path(_ ancestor: String, equalsOrIsAncestorOf descendant: String) -> Bool {
+        let a = trimmedStoragePath(ancestor)
+        let d = trimmedStoragePath(descendant)
+        if a == d { return true }
+        if a == "/" { return d.hasPrefix("/") }
+        return d.hasPrefix(a + "/")
+    }
+
+    private static func trimmedStoragePath(_ path: String) -> String {
+        guard path.count > 1 else { return path }
+        var result = path
+        while result.count > 1, result.hasSuffix("/") {
+            result.removeLast()
+        }
+        return result
+    }
+
     static func speakerReviewMeetingsDirectory(
         readConfiguredPath: () -> String? = { storedCustomCaptureLibraryPath() },
         defaultLibrary: () -> URL = { FileManager.default.transcriptedDefaultCaptureLibraryDir },
@@ -437,6 +514,7 @@ enum LegacyCompanionDirectoryCleanup {
         let outcome = removeLegacyDirectory(
             targetURL: targetURL,
             inside: appSupportRoot,
+            userDefaults: userDefaults,
             fileManager: fileManager
         )
         switch outcome {
@@ -451,6 +529,7 @@ enum LegacyCompanionDirectoryCleanup {
     static func removeLegacyDirectory(
         targetURL: URL,
         inside appSupportRoot: URL,
+        userDefaults: UserDefaults = .standard,
         fileManager: FileManager = .default
     ) -> Outcome {
         guard appSupportRoot.isFileURL,
@@ -496,6 +575,17 @@ enum LegacyCompanionDirectoryCleanup {
             return .refused("outside_app_support_root")
         }
 
+        let configuredLibraryPaths = TranscriptedStoragePreferences.configuredCaptureLibraryPaths(
+            userDefaults: userDefaults
+        )
+        if TranscriptedStoragePreferences.targetOverlapsConfiguredCaptureLibrary(
+            standardizedTarget,
+            configuredPaths: configuredLibraryPaths,
+            fileManager: fileManager
+        ) {
+            return .refused("overlaps_capture_library")
+        }
+
         let rawTargetPath = trimmedPath(standardizedTarget.path)
         var targetStat = stat()
         if lstat(rawTargetPath, &targetStat) != 0 {
@@ -513,6 +603,14 @@ enum LegacyCompanionDirectoryCleanup {
         guard canonicalTarget == expectedCanonicalTarget,
               canonicalTarget.hasPrefix(canonicalRoot + "/") else {
             return .refused("canonical_path_mismatch")
+        }
+
+        if TranscriptedStoragePreferences.targetOverlapsConfiguredCaptureLibrary(
+            URL(fileURLWithPath: canonicalTarget, isDirectory: true),
+            configuredPaths: configuredLibraryPaths,
+            fileManager: fileManager
+        ) {
+            return .refused("overlaps_capture_library")
         }
 
         do {
