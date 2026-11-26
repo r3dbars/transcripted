@@ -395,11 +395,20 @@ enum MeetingInputDeviceSelectionPolicy {
     }
 
     private static func isBluetoothHeadsetInput(_ device: MeetingAudioDevice) -> Bool {
-        isBluetoothTransport(device.transport) || isBluetoothHeadsetName(normalize(device.name))
+        isBluetoothAudioDevice(device)
     }
 
     private static func isBluetoothAudioDevice(_ device: MeetingAudioDevice) -> Bool {
-        isBluetoothTransport(device.transport) || isBluetoothHeadsetName(normalize(device.name))
+        isBluetooth(normalizedName: normalize(device.name), transport: device.transport)
+    }
+
+    /// A known USB or built-in transport is trusted over the name, so a wired
+    /// "USB Headset" isn't treated as Bluetooth. The name only decides when
+    /// the transport is unknown.
+    private static func isBluetooth(normalizedName: String, transport: MeetingAudioTransport) -> Bool {
+        if isBluetoothTransport(transport) { return true }
+        if transport == .usb || transport == .builtIn { return false }
+        return isBluetoothHeadsetName(normalizedName)
     }
 
     private static func isBluetoothTransport(_ transport: MeetingAudioTransport) -> Bool {

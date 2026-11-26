@@ -87,11 +87,15 @@ extension ParakeetEngine {
 
     func stopRecording() async {
         // A duplicate stop joins the stop already running, so every caller
-        // waits for the one tap removal and buffer drain.
-        await audioStopLifecycle.run { [weak self] in
-            guard let self else { return }
-            await ParakeetStopRecordingSequence.run(graph: self.audioGraph, host: self)
-        }
+        // waits for the one tap removal and buffer drain. If a caller joins a
+        // superseded stop that finishes without touching a newer active take,
+        // `runSerialized` re-runs the stop sequence for that take.
+        await ParakeetStopRecordingSequence.runSerialized(
+            lifecycle: audioStopLifecycle,
+            graph: audioGraph,
+            host: self,
+            recordingIdentity: { self.recordingIdentity }
+        )
     }
 
     func cancelPendingRecordingRecovery() {
@@ -137,9 +141,6 @@ extension ParakeetEngine {
         pendingSamplesLock.withLock {
             pendingSamples.removeAll(keepingCapacity: true)
         }
-        audioGraphGeneration += 1
-        let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()
-        guard ownsAudioEngineQueue(failedStartCleanupOwner) else { return }
         isRecording = false
         isTranscribing = false
         audioLevel = 0
@@ -147,6 +148,9 @@ extension ParakeetEngine {
         didReceiveNonZeroAudioSamples = false
         recordingStartedOnLikelyBluetoothHandsFreeRoute = false
         clearRecoveredRecordingTimeline(keepingCapacity: true)
+        audioGraphGeneration += 1
+        let failedStartCleanupOwner = currentAudioEngineQueueOwnerToken()
+        guard ownsAudioEngineQueue(failedStartCleanupOwner) else { return }
         _ = await releaseIdleAudioHardware(
             removeTap: true,
             expectedGeneration: failedStartCleanupOwner.graphOwner.generation

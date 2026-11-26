@@ -18,6 +18,21 @@ enum PhysicalShortcutAction: Equatable {
     case meeting
 }
 
+enum PhysicalShortcutPhase: Equatable {
+    case press
+    case release
+    /// A Push to Talk release after a quick press with no other key in
+    /// between (`DictationHoldKeyTapPolicy`).
+    case tapRelease
+    /// A Push to Talk release after another key or modifier went down while
+    /// it was held (Fn+arrow). Stops like `.release`; named apart for
+    /// diagnostics only.
+    case chordRelease
+    /// Another key went down while a hands-free modifier that fired on press
+    /// was held, or inside a shared Push to Talk modifier's chord window.
+    case comboInterrupted
+}
+
 struct PhysicalShortcutBinding {
     let action: PhysicalShortcutAction
     let binding: PhysicalDictationTriggerBinding
@@ -157,6 +172,22 @@ enum PhysicalShortcutMatcher {
         isDictating: Bool
     ) -> Bool {
         !isDictating && secondsSinceLastTypedKey >= typingWindowForModifierCombos
+    }
+
+    /// Gates queued physical shortcut callbacks to the registered-hotkey window.
+    /// Presses are dropped once `unregisterHotkey()` clears routing (so a late
+    /// queued MainActor Task can't start dictation or toggle a meeting during
+    /// wake recovery or shutdown); releases and combo drops still pass through
+    /// so a take that already started can end cleanly.
+    static func shouldRoute(
+        _ action: PhysicalShortcutAction,
+        phase: PhysicalShortcutPhase,
+        isHotkeyRoutingActive: Bool
+    ) -> Bool {
+        if phase == .press {
+            return isHotkeyRoutingActive
+        }
+        return true
     }
 
     static func shouldActivateDelayedModifierPress(

@@ -717,57 +717,61 @@ extension ParakeetEngine {
         guard let recording = pinnedDictationRecording else { return }
         // Before the drain: it only delivers audio captured before Stop.
         let stoppedUptime = ProcessInfo.processInfo.systemUptime
-        recording.stopping = true
         let capture = recording.capture
-        let drained = (try? await Self.systemInputWorkCoordinator.run(
-            operation: "pinned_dictation_stop",
-            timeoutNanoseconds: Self.pinnedDictationStartTimeout
-        ) { capture.finishAndDrain() }) != nil
-        recording.delivery.cancel()
-        if pinnedDictationRecording === recording {
-            pinnedDictationRecording = nil
-        }
-        let segments = pendingSamplesLock.withLock { pendingSamples.drain() }
-        for segment in segments {
-            recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)
-        }
-        isRecording = false
-        audioLevel = 0
-        guard drained else {
-            // Releases the device if the drain never got to run.
-            stopPinnedCaptureOffMain(capture)
-            EventReporter.shared.capture(
-                level: .error,
-                engine: "parakeet",
-                event: "pinned_microphone_stop_timed_out",
-                message: "Pinned dictation microphone did not finish stopping in time",
-                context: [
-                    "backend": PinnedMicrophoneCapture.diagnosticBackendName,
-                    "timeout_ms": "\(Self.pinnedDictationStartTimeout / 1_000_000)"
-                ]
-            )
-            return
-        }
-        let diagnostics = capture.diagnostics
-        let stoppedDuration = recoveredRecordingTimeline.totalDurationSeconds
-        AppLogger.transcription.info("PARAKEET | pinned recording stopped", [
-            "seconds": String(format: "%.1f", stoppedDuration),
-            "restarts": "\(diagnostics.restarts)",
-            "gaps": "\(diagnostics.gaps)",
-            "droppedCallbacks": "\(diagnostics.droppedCallbacks)"
-        ])
-        if PinnedDictationInputPolicy.recorderIsSpeedOnly(for: recording.selection) {
-            pendingPinnedSpeedPathTake = PinnedDictationSpeedPathTake(
-                input: recording.selection.selectedInput,
-                channelCount: recording.channelCount,
-                sampleRate: recording.sampleRate,
-                restarts: diagnostics.restarts,
-                gaps: diagnostics.gaps,
-                droppedCallbacks: diagnostics.droppedCallbacks,
-                heldSeconds: stoppedUptime - recording.startedUptime,
-                audioSeconds: stoppedDuration
-            )
-        }
+        await ParakeetPinnedDictationStopSequence.run(
+            markStopping: { recording.stopping = true },
+            drain: {
+                (try? await Self.systemInputWorkCoordinator.run(
+                    operation: "pinned_dictation_stop",
+                    timeoutNanoseconds: Self.pinnedDictationStartTimeout
+                ) { capture.finishAndDrain() }) != nil
+            },
+            cancelDelivery: { recording.delivery.cancel() },
+            isStillActive: { self.pinnedDictationRecording === recording },
+            stopCaptureOffMain: { self.stopPinnedCaptureOffMain(capture) },
+            onDrainTimedOut: {
+                EventReporter.shared.capture(
+                    level: .error,
+                    engine: "parakeet",
+                    event: "pinned_microphone_stop_timed_out",
+                    message: "Pinned dictation microphone did not finish stopping in time",
+                    context: [
+                        "backend": PinnedMicrophoneCapture.diagnosticBackendName,
+                        "timeout_ms": "\(Self.pinnedDictationStartTimeout / 1_000_000)"
+                    ]
+                )
+            },
+            commitStoppedRecording: { drained in
+                self.pinnedDictationRecording = nil
+                let segments = self.pendingSamplesLock.withLock { self.pendingSamples.drain() }
+                for segment in segments {
+                    self.recoveredRecordingTimeline.append(segment.samples, sampleRate: segment.sampleRate)
+                }
+                self.isRecording = false
+                self.audioLevel = 0
+                guard drained else { return }
+                let diagnostics = capture.diagnostics
+                let stoppedDuration = self.recoveredRecordingTimeline.totalDurationSeconds
+                AppLogger.transcription.info("PARAKEET | pinned recording stopped", [
+                    "seconds": String(format: "%.1f", stoppedDuration),
+                    "restarts": "\(diagnostics.restarts)",
+                    "gaps": "\(diagnostics.gaps)",
+                    "droppedCallbacks": "\(diagnostics.droppedCallbacks)"
+                ])
+                if PinnedDictationInputPolicy.recorderIsSpeedOnly(for: recording.selection) {
+                    self.pendingPinnedSpeedPathTake = PinnedDictationSpeedPathTake(
+                        input: recording.selection.selectedInput,
+                        channelCount: recording.channelCount,
+                        sampleRate: recording.sampleRate,
+                        restarts: diagnostics.restarts,
+                        gaps: diagnostics.gaps,
+                        droppedCallbacks: diagnostics.droppedCallbacks,
+                        heldSeconds: stoppedUptime - recording.startedUptime,
+                        audioSeconds: stoppedDuration
+                    )
+                }
+            }
+        )
     }
 
     /// Cancel and cleanup: drop the recording without delivering its tail.

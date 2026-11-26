@@ -271,7 +271,9 @@ class ContextCaptureEngine: ObservableObject {
 
     private func handlePhysicalShortcut(_ action: PhysicalShortcutAction, phase: PhysicalShortcutPhase) {
         // Releases and combo drops still run, so a take already started can end.
-        if phase == .press, !isHotkeyRoutingActive { return }
+        guard PhysicalShortcutMatcher.shouldRoute(action, phase: phase, isHotkeyRoutingActive: isHotkeyRoutingActive) else {
+            return
+        }
         switch (action, phase) {
         case (.dictationPushToTalk, .press):
             handlePhysicalDictationPushToTalkPress()
@@ -309,6 +311,7 @@ class ContextCaptureEngine: ObservableObject {
     }
 
     private func handlePhysicalMeetingPress() {
+        guard isHotkeyRoutingActive else { return }
         guard shouldAcceptHotkeyAction(.meeting) else {
             EventReporter.shared.capture(
                 level: .info,

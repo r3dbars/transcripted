@@ -6,6 +6,7 @@ import AppKit
 
 extension ContextCaptureEngine {
     func handlePhysicalDictationPushToTalkPress() {
+        guard isHotkeyRoutingActive else { return }
         let frontApp = NSWorkspace.shared.frontmostApplication
         guard let session = sessionController else { return }
         DiagnosticsTrail.record(
@@ -78,6 +79,7 @@ extension ContextCaptureEngine {
     }
 
     func handlePhysicalDictationHandsFreePress() {
+        guard isHotkeyRoutingActive else { return }
         handsFreePressStartedSessionID = nil
         guard shouldAcceptHotkeyAction(.dictationHandsFree) else {
             DiagnosticsTrail.record(
@@ -115,7 +117,7 @@ extension ContextCaptureEngine {
 
     func routeHandsFreeToggle(sourceApp: NSRunningApplication?) {
         let trigger = DictationTrigger.physicalKey
-        guard let session = sessionController else { return }
+        guard isHotkeyRoutingActive, let session = sessionController else { return }
         DiagnosticsTrail.record(
             logger: session.appState?.logger,
             engine: "capture",

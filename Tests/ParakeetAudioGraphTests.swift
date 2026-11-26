@@ -774,6 +774,7 @@ private final class FakeStopHost: ParakeetStopRecordingHost {
     var isRecording = false
     var idleAction: ParakeetIdleStopAction = .settleIdleGraph
     var hasPinnedDictationRecording = false
+    var onStopPinned: (@MainActor () async -> Void)?
     var continuityEnded = 0
 
     init(fixture: GraphFixture) {
@@ -801,7 +802,10 @@ private final class FakeStopHost: ParakeetStopRecordingHost {
     func idleStopAction() -> ParakeetIdleStopAction { idleAction }
     func cancelPendingRecordingRecovery() { log.record("cancelPendingRecovery") }
     func clearRecoveredRecordingTimeline(keepingCapacity: Bool) { log.record("clearTimeline") }
-    func stopPinnedDictationRecording() async { log.record("stopPinned") }
+    func stopPinnedDictationRecording() async {
+        log.record("stopPinned")
+        await onStopPinned?()
+    }
 
     func finishStoppedRecording() {
         log.record("finishRecording")
@@ -931,6 +935,362 @@ private func runStopSequenceSuites() async {
         assertTrue(log.contains("stopPinned"), "a pinned recording stops through its recorder")
         assertEqual(host.continuityEnded, 3, "a pinned stop ends the recovery hold")
         assertFalse(log.events.contains { $0.contains("@q") }, "a pinned stop touches no engine hardware")
+    }
+
+    await runSuite("Pinned stop commits only while the same recording is still active across its drain") {
+        final class FakePinnedRecording {
+            var stopping = false
+            var deliveryCancelled = false
+        }
+
+        // Case 1: Normal stop (drained = true and drained = false).
+        for drainedResult in [true, false] {
+            let recording = FakePinnedRecording()
+            var activeRecording: FakePinnedRecording? = recording
+            var events: [String] = []
+            var committedDrained: Bool?
+            var offMainStops = 0
+            var timeoutTelemetryCount = 0
+
+            await ParakeetPinnedDictationStopSequence.run(
+                markStopping: {
+                    recording.stopping = true
+                    events.append("markStopping")
+                },
+                drain: {
+                    events.append("drain")
+                    return drainedResult
+                },
+                cancelDelivery: {
+                    recording.deliveryCancelled = true
+                    events.append("cancelDelivery")
+                },
+                isStillActive: { activeRecording === recording },
+                stopCaptureOffMain: {
+                    offMainStops += 1
+                    events.append("stopOffMain")
+                },
+                onDrainTimedOut: {
+                    timeoutTelemetryCount += 1
+                    events.append("timeoutTelemetry")
+                },
+                commitStoppedRecording: { drained in
+                    activeRecording = nil
+                    committedDrained = drained
+                    events.append("commit:\(drained)")
+                }
+            )
+
+            assertTrue(recording.stopping, "recording was marked stopping before draining")
+            assertTrue(recording.deliveryCancelled, "sample delivery was cancelled after drain")
+            assertNil(activeRecording, "active recording was cleared on commit")
+            assertEqual(committedDrained, drainedResult, "commit receives the exact drain outcome")
+            assertEqual(offMainStops, drainedResult ? 0 : 1, "an unfinished active drain releases the capture off-main")
+            assertEqual(timeoutTelemetryCount, drainedResult ? 0 : 1, "an unfinished active drain emits timeout telemetry")
+            let expectedEvents = drainedResult
+                ? ["markStopping", "drain", "cancelDelivery", "commit:true"]
+                : ["markStopping", "drain", "cancelDelivery", "commit:false", "stopOffMain", "timeoutTelemetry"]
+            assertEqual(events, expectedEvents)
+        }
+
+        // Case 2: Superseded by a newer recording during drain.
+        for drainedResult in [true, false] {
+            let oldRecording = FakePinnedRecording()
+            let newRecording = FakePinnedRecording()
+            var activeRecording: FakePinnedRecording? = oldRecording
+            var isRecording = true
+            var audioLevel: Float = 0.7
+            var pendingSampleCount = 128
+            var commitCalls = 0
+            var offMainStops = 0
+            var timeoutTelemetryCount = 0
+            let drainGate = ParakeetAsyncInterleavingGate()
+
+            let stopTask = Task { @MainActor in
+                await ParakeetPinnedDictationStopSequence.run(
+                    markStopping: { oldRecording.stopping = true },
+                    drain: {
+                        await drainGate.wait()
+                        return drainedResult
+                    },
+                    cancelDelivery: { oldRecording.deliveryCancelled = true },
+                    isStillActive: { activeRecording === oldRecording },
+                    stopCaptureOffMain: { offMainStops += 1 },
+                    onDrainTimedOut: { timeoutTelemetryCount += 1 },
+                    commitStoppedRecording: { _ in
+                        commitCalls += 1
+                        activeRecording = nil
+                        isRecording = false
+                        audioLevel = 0
+                        pendingSampleCount = 0
+                    }
+                )
+            }
+
+            for _ in 0..<50 {
+                if oldRecording.stopping { break }
+                await Task.yield()
+            }
+            assertTrue(oldRecording.stopping, "old recording entered stopping state before suspending")
+
+            // Simulate cancel() followed by a brand new recording starting while old drain is suspended.
+            activeRecording = newRecording
+
+            await drainGate.open()
+            await stopTask.value
+
+            assertTrue(oldRecording.deliveryCancelled, "old recording delivery is still cancelled")
+            assertEqual(commitCalls, 0, "a superseded stop must never commit over cancel or a newer recording")
+            assertTrue(activeRecording === newRecording, "newer recording remains active")
+            assertTrue(isRecording, "newer recording's isRecording bit stays intact")
+            assertEqual(audioLevel, 0.7, "newer recording's audioLevel stays intact")
+            assertEqual(pendingSampleCount, 128, "newer recording's pendingSamples stay untouched")
+            assertEqual(
+                offMainStops,
+                drainedResult ? 0 : 1,
+                "an unfinished superseded drain still releases the old hardware off-main"
+            )
+            assertEqual(
+                timeoutTelemetryCount,
+                drainedResult ? 0 : 1,
+                "an unfinished superseded drain still reports timeout telemetry"
+            )
+        }
+
+        // Case 3: Cancelled during drain (activeRecording = nil, no replacement recording).
+        for drainedResult in [true, false] {
+            let oldRecording = FakePinnedRecording()
+            var activeRecording: FakePinnedRecording? = oldRecording
+            var commitCalls = 0
+            var offMainStops = 0
+            var timeoutTelemetryCount = 0
+            let drainGate = ParakeetAsyncInterleavingGate()
+
+            let stopTask = Task { @MainActor in
+                await ParakeetPinnedDictationStopSequence.run(
+                    markStopping: { oldRecording.stopping = true },
+                    drain: {
+                        await drainGate.wait()
+                        return drainedResult
+                    },
+                    cancelDelivery: { oldRecording.deliveryCancelled = true },
+                    isStillActive: { activeRecording === oldRecording },
+                    stopCaptureOffMain: { offMainStops += 1 },
+                    onDrainTimedOut: { timeoutTelemetryCount += 1 },
+                    commitStoppedRecording: { _ in
+                        commitCalls += 1
+                        activeRecording = nil
+                    }
+                )
+            }
+
+            for _ in 0..<50 {
+                if oldRecording.stopping { break }
+                await Task.yield()
+            }
+            assertTrue(oldRecording.stopping, "cancelled recording entered stopping state before suspending")
+
+            // Simulate cancel() clearing pinnedDictationRecording to nil with no successor take.
+            activeRecording = nil
+
+            await drainGate.open()
+            await stopTask.value
+
+            assertTrue(oldRecording.deliveryCancelled, "cancelled recording delivery is still cancelled")
+            assertEqual(commitCalls, 0, "a stop superseded by cancel() must not commit")
+            assertNil(activeRecording, "active recording stays nil after cancel()")
+            assertEqual(
+                offMainStops,
+                drainedResult ? 0 : 1,
+                "a cancelled stop whose drain timed out still releases the old hardware off-main"
+            )
+            assertEqual(
+                timeoutTelemetryCount,
+                drainedResult ? 0 : 1,
+                "a cancelled stop whose drain timed out still reports timeout telemetry"
+            )
+        }
+    }
+
+    await runSuite("A stop that joins a superseded in-flight stop re-runs to stop the active recording") {
+        // Case 1: Stop A hangs in pinned drain -> cancel() -> take B starts on AVAudioEngine ->
+        // stop B joins stop A -> stop A finishes superseded -> stop B re-runs and stops take B.
+        do {
+            let fixture = GraphFixture()
+            let graph = fixture.graph
+            let log = fixture.log
+            let host = FakeStopHost(fixture: fixture)
+            let lifecycle = ParakeetSingleFlightLifecycle()
+            let drainGate = ParakeetAsyncInterleavingGate()
+            var recordingIdentity = UUID()
+            var pinnedStopEntered = false
+
+            host.isRecording = true
+            host.hasPinnedDictationRecording = true
+            host.onStopPinned = {
+                pinnedStopEntered = true
+                await drainGate.wait()
+                // Superseded before drain returns: does not clear take B's recording state.
+            }
+
+            let stopA = Task { @MainActor in
+                await ParakeetStopRecordingSequence.runSerialized(
+                    lifecycle: lifecycle,
+                    graph: graph,
+                    host: host,
+                    recordingIdentity: { recordingIdentity }
+                )
+            }
+            for _ in 0..<100 {
+                if pinnedStopEntered { break }
+                await Task.yield()
+            }
+            assertTrue(pinnedStopEntered, "stop A entered pinned drain and suspended")
+            assertTrue(lifecycle.isInProgress, "stop A holds the single-flight lifecycle")
+
+            // Simulate cancel() followed by take B starting on AVAudioEngine.
+            recordingIdentity = UUID()
+            host.hasPinnedDictationRecording = false
+            host.isRecording = true
+            graph.generation += 1
+            graph.inputTapInstalled = true
+
+            // User stops take B while stop A is still draining.
+            let stopB = Task { @MainActor in
+                await ParakeetStopRecordingSequence.runSerialized(
+                    lifecycle: lifecycle,
+                    graph: graph,
+                    host: host,
+                    recordingIdentity: { recordingIdentity }
+                )
+            }
+            for _ in 0..<50 { await Task.yield() }
+            assertTrue(host.isRecording, "take B stays active while stop B waits on stop A")
+
+            // Stop A's drain finally finishes superseded.
+            await drainGate.open()
+            await stopA.value
+            await stopB.value
+
+            assertFalse(host.isRecording, "joined stop B re-runs and stops take B")
+            assertFalse(graph.inputTapInstalled, "take B's input tap is removed")
+            assertTrue(log.contains("finishRecording"), "take B settles its recording")
+            assertTrue(log.contains("reportStopped"), "take B reports recording stopped")
+            assertTrue(log.events.contains { $0.hasPrefix("removeTap:") }, "take B removes its engine tap")
+            assertTrue(log.events.contains { $0.hasPrefix("stop:") }, "take B stops its engine")
+            assertFalse(lifecycle.isInProgress, "single-flight lifecycle clears after stop B finishes")
+        }
+
+        // Case 2: Stop A finishes superseded while take B is live and nobody stopped take B.
+        // Leader stop A must NOT re-enter and kill take B.
+        do {
+            let fixture = GraphFixture()
+            let graph = fixture.graph
+            let log = fixture.log
+            let host = FakeStopHost(fixture: fixture)
+            let lifecycle = ParakeetSingleFlightLifecycle()
+            let drainGate = ParakeetAsyncInterleavingGate()
+            var recordingIdentity = UUID()
+            var pinnedStopEntered = false
+
+            host.isRecording = true
+            host.hasPinnedDictationRecording = true
+            host.onStopPinned = {
+                pinnedStopEntered = true
+                await drainGate.wait()
+            }
+
+            let stopA = Task { @MainActor in
+                await ParakeetStopRecordingSequence.runSerialized(
+                    lifecycle: lifecycle,
+                    graph: graph,
+                    host: host,
+                    recordingIdentity: { recordingIdentity }
+                )
+            }
+            for _ in 0..<100 {
+                if pinnedStopEntered { break }
+                await Task.yield()
+            }
+            assertTrue(pinnedStopEntered, "stop A suspended inside pinned drain")
+
+            // A duplicate stop for take A joins BEFORE cancel() + take B.
+            let duplicateStopA = Task { @MainActor in
+                await ParakeetStopRecordingSequence.runSerialized(
+                    lifecycle: lifecycle,
+                    graph: graph,
+                    host: host,
+                    recordingIdentity: { recordingIdentity }
+                )
+            }
+            for _ in 0..<50 { await Task.yield() }
+
+            // Now cancel() + start take B while user keeps speaking (no stop for take B).
+            recordingIdentity = UUID()
+            host.hasPinnedDictationRecording = false
+            host.isRecording = true
+            graph.generation += 1
+            graph.inputTapInstalled = true
+
+            await drainGate.open()
+            await stopA.value
+            await duplicateStopA.value
+
+            assertTrue(host.isRecording, "neither superseded stop A nor its duplicate may stop take B")
+            assertTrue(graph.inputTapInstalled, "take B's tap stays installed")
+            assertFalse(log.contains("finishRecording"), "take B is never settled by take A's stops")
+            assertFalse(lifecycle.isInProgress, "single-flight lifecycle clears cleanly")
+        }
+
+        // Case 3: Bounded re-entry prevents an infinite loop if a stop leaves recording active.
+        do {
+            let fixture = GraphFixture()
+            let graph = fixture.graph
+            let host = FakeStopHost(fixture: fixture)
+            let lifecycle = ParakeetSingleFlightLifecycle()
+            let drainGate = ParakeetAsyncInterleavingGate()
+            let recordingIdentity = UUID()
+            var pinnedStopCalls = 0
+
+            host.isRecording = true
+            host.hasPinnedDictationRecording = true
+            host.onStopPinned = {
+                pinnedStopCalls += 1
+                if pinnedStopCalls == 1 {
+                    await drainGate.wait()
+                }
+                // Intentionally leave isRecording = true to verify re-entry is bounded.
+            }
+
+            let first = Task { @MainActor in
+                await ParakeetStopRecordingSequence.runSerialized(
+                    lifecycle: lifecycle,
+                    graph: graph,
+                    host: host,
+                    recordingIdentity: { recordingIdentity }
+                )
+            }
+            for _ in 0..<100 {
+                if pinnedStopCalls == 1 { break }
+                await Task.yield()
+            }
+            let joiner = Task { @MainActor in
+                await ParakeetStopRecordingSequence.runSerialized(
+                    lifecycle: lifecycle,
+                    graph: graph,
+                    host: host,
+                    recordingIdentity: { recordingIdentity }
+                )
+            }
+            for _ in 0..<50 { await Task.yield() }
+
+            await drainGate.open()
+            await first.value
+            await joiner.value
+
+            assertEqual(pinnedStopCalls, 2, "a joiner re-runs at most once instead of looping forever")
+            assertFalse(lifecycle.isInProgress, "lifecycle is idle after bounded re-entry")
+        }
     }
 }
 

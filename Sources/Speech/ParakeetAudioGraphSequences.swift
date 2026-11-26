@@ -418,6 +418,85 @@ enum ParakeetStopRecordingSequence {
             host.reportRecordingStopped()
         }
     }
+
+    /// Serializes concurrent stops through `lifecycle`. A duplicate stop for
+    /// the same take joins the stop already running and returns once it ends.
+    /// If a caller joins an in-flight stop that was superseded (e.g. stop A is
+    /// draining on a stuck driver, `cancel()` runs, take B starts, then stop B
+    /// joins A and A finishes superseded without touching B), the joiner sees
+    /// its own recording still active and runs a follow-up stop for it.
+    ///
+    /// Re-entry is restricted to joiners whose target recording is still
+    /// active, and bounded to at most one follow-up pass so a path that leaves
+    /// recording active cannot infinite-loop.
+    @MainActor
+    static func runSerialized<Driver>(
+        lifecycle: ParakeetSingleFlightLifecycle,
+        graph: ParakeetAudioGraph<Driver>,
+        host: some ParakeetStopRecordingHost,
+        recordingIdentity: () -> UUID
+    ) async {
+        let targetRecordingIdentity = recordingIdentity()
+        for attempt in 0..<2 {
+            var didRunWork = false
+            await lifecycle.run {
+                didRunWork = true
+                await run(graph: graph, host: host)
+            }
+            // If we ran the stop sequence ourselves, we already handled the
+            // active recording at entry; never re-enter as leader (for instance,
+            // when stop A finishes superseded while a newer take B is live).
+            if didRunWork {
+                return
+            }
+            // Only re-enter after joining a superseded stop if the exact
+            // recording we arrived to stop still needs stopping.
+            let targetStillNeedsStop = recordingIdentity() == targetRecordingIdentity && (
+                host.isRecording
+                    || host.hasSharedMeetingMicClaim
+                    || host.hasPinnedDictationRecording
+                    || graph.startAdmission.isInProgress
+            )
+            guard targetStillNeedsStop, attempt == 0 else {
+                return
+            }
+        }
+    }
+}
+
+/// Runs the pinned dictation stop sequence without letting a superseded stop
+/// clobber a cancel or a newer recording. Marks stopping, awaits the off-main
+/// capture drain, cancels sample delivery, and commits stopped recording state
+/// only if the same recording is still active after suspension. Whenever the
+/// drain did not finish in time (`!drained`), releases the old capture off-main
+/// and reports timeout telemetry whether or not the stop was superseded.
+enum ParakeetPinnedDictationStopSequence {
+    @MainActor
+    static func run(
+        markStopping: () -> Void,
+        drain: () async -> Bool,
+        cancelDelivery: () -> Void,
+        isStillActive: () -> Bool,
+        stopCaptureOffMain: () -> Void,
+        onDrainTimedOut: () -> Void,
+        commitStoppedRecording: (_ drained: Bool) -> Void
+    ) async {
+        markStopping()
+        let drained = await drain()
+        cancelDelivery()
+        guard isStillActive() else {
+            if !drained {
+                stopCaptureOffMain()
+                onDrainTimedOut()
+            }
+            return
+        }
+        commitStoppedRecording(drained)
+        if !drained {
+            stopCaptureOffMain()
+            onDrainTimedOut()
+        }
+    }
 }
 
 // MARK: - Route change

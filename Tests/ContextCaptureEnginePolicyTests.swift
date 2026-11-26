@@ -856,6 +856,37 @@ func testContextCaptureEnginePolicy() {
             "bare V with no modifiers should match no keyDown binding"
         )
     }
+
+    runSuite("PhysicalShortcutMatcher.shouldRoute — stale queued presses are ignored when hotkey routing is inactive") {
+        let allActions: [PhysicalShortcutAction] = [.dictationPushToTalk, .dictationHandsFree, .meeting]
+
+        for action in allActions {
+            assertTrue(
+                PhysicalShortcutMatcher.shouldRoute(action, phase: .press, isHotkeyRoutingActive: true),
+                "press for \(action) routes while hotkey routing is active"
+            )
+            assertFalse(
+                PhysicalShortcutMatcher.shouldRoute(action, phase: .press, isHotkeyRoutingActive: false),
+                "stale queued press for \(action) is dropped after unregisterHotkey()"
+            )
+        }
+
+        // Releases and combo drops still pass through when routing is inactive
+        // so an already-started push-to-talk or shared-modifier take can end cleanly.
+        let completionPhases: [PhysicalShortcutPhase] = [.release, .tapRelease, .chordRelease, .comboInterrupted]
+        for action in allActions {
+            for phase in completionPhases {
+                assertTrue(
+                    PhysicalShortcutMatcher.shouldRoute(action, phase: phase, isHotkeyRoutingActive: false),
+                    "\(phase) for \(action) still routes so an in-flight take can finish"
+                )
+                assertTrue(
+                    PhysicalShortcutMatcher.shouldRoute(action, phase: phase, isHotkeyRoutingActive: true),
+                    "\(phase) for \(action) routes while active"
+                )
+            }
+        }
+    }
 }
 
 private func makeContextCaptureDefaults() -> (UserDefaults, String) {

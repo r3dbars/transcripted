@@ -617,6 +617,109 @@ final class MeetingInputDeviceSelectionPolicyTests: XCTestCase {
         )
     }
 
+    func testWiredUSBAndBuiltInHeadsetsAreNotMisclassifiedAsBluetooth() {
+        let logitechHeadset = device(id: 10, name: "Logitech USB Headset", transport: .usb, channels: 1)
+        let logitechOutput = device(id: 11, name: "Logitech USB Headset", transport: .usb, channels: 0)
+        let jabraHeadset = device(id: 12, name: "Jabra USB Headset", transport: .usb, channels: 1)
+        let jackHeadset = device(id: 13, name: "External Headset Microphone", transport: .builtIn, channels: 1)
+        let macBookMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let usbMic = device(id: 30, name: "Shure MV7", transport: .usb, channels: 1)
+        let airPods = device(id: 40, name: "AirPods Pro", transport: .bluetooth, channels: 1)
+
+        // Automatic mode keeps a wired USB or built-in headset as default input
+        // instead of overriding it to the Mac mic.
+        for (headset, output) in [
+            (logitechHeadset, logitechOutput as MeetingAudioDevice?),
+            (logitechHeadset, nil),
+            (jabraHeadset, airPods),
+            (jackHeadset, nil)
+        ] {
+            let selection = MeetingInputDeviceSelectionPolicy.selectionForMeetingStart(
+                defaultInput: headset,
+                defaultOutput: output,
+                availableInputs: [headset, macBookMic]
+            )
+            XCTAssertEqual(selection.selectedInput, headset, "\(headset.name) should not be overridden to Mac mic")
+            XCTAssertEqual(selection.reason, .defaultIsSafe)
+            XCTAssertFalse(selection.didOverrideDefault)
+            XCTAssertFalse(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: selection))
+            XCTAssertNil(
+                MeetingInputDeviceSelectionPolicy.preferredBuiltInFallback(
+                    for: headset,
+                    availableInputs: [headset, macBookMic]
+                )
+            )
+        }
+
+        // User-chosen USB headsets are accepted by usableChosenInput (not rejected as Bluetooth).
+        for chosenHeadset in [logitechHeadset, jabraHeadset] {
+            let overMacDefault = MeetingInputDeviceSelectionPolicy.selection(
+                defaultInput: macBookMic,
+                defaultOutput: nil,
+                availableInputs: [macBookMic, chosenHeadset],
+                preferredInputID: chosenHeadset.id
+            )
+            XCTAssertEqual(overMacDefault.selectedInput, chosenHeadset)
+            XCTAssertEqual(overMacDefault.reason, .userChosenInput)
+            XCTAssertFalse(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: overMacDefault))
+
+            let overAirPodsDefault = MeetingInputDeviceSelectionPolicy.selection(
+                defaultInput: airPods,
+                defaultOutput: airPods,
+                availableInputs: [airPods, macBookMic, chosenHeadset],
+                preferredInputID: chosenHeadset.id
+            )
+            XCTAssertEqual(overAirPodsDefault.selectedInput, chosenHeadset)
+            XCTAssertEqual(overAirPodsDefault.reason, .userChosenInput)
+            XCTAssertTrue(
+                MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: overAirPodsDefault),
+                "overriding an AirPods default still needs the pinned recorder"
+            )
+        }
+
+        // Overriding a wired USB headset default with another chosen mic does not need the pinned recorder.
+        let overrideWiredHeadsetDefault = MeetingInputDeviceSelectionPolicy.selection(
+            defaultInput: logitechHeadset,
+            defaultOutput: logitechOutput,
+            availableInputs: [logitechHeadset, usbMic, macBookMic],
+            preferredInputID: usbMic.id
+        )
+        XCTAssertEqual(overrideWiredHeadsetDefault.selectedInput, usbMic)
+        XCTAssertEqual(overrideWiredHeadsetDefault.reason, .userChosenInput)
+        XCTAssertTrue(overrideWiredHeadsetDefault.didOverrideDefault)
+        XCTAssertFalse(
+            MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: overrideWiredHeadsetDefault),
+            "default is a wired USB headset, not Bluetooth, so the engine can move off it safely"
+        )
+    }
+
+    func testBluetoothHeadsetsStillAvoidedByTransportOrUnknownTransportName() {
+        let leMic = device(id: 10, name: "Studio Mic", transport: .bluetoothLE, channels: 1)
+        let unknownHeadset = device(id: 11, name: "Bose Headset", transport: .other, channels: 1)
+        let macBookMic = device(id: 20, name: "MacBook Pro Microphone", transport: .builtIn, channels: 1)
+        let usbMic = device(id: 30, name: "Shure MV7", transport: .usb, channels: 1)
+
+        for headset in [leMic, unknownHeadset] {
+            let selection = MeetingInputDeviceSelectionPolicy.selection(
+                defaultInput: headset,
+                defaultOutput: headset,
+                availableInputs: [headset, macBookMic]
+            )
+            XCTAssertEqual(selection.selectedInput, macBookMic)
+            XCTAssertEqual(selection.reason, .preferredBuiltInForBluetoothHeadset)
+            XCTAssertTrue(MeetingInputDeviceSelectionPolicy.pinnedRecorderIsNeeded(for: selection))
+
+            let chosen = MeetingInputDeviceSelectionPolicy.selection(
+                defaultInput: usbMic,
+                defaultOutput: nil,
+                availableInputs: [usbMic, headset, macBookMic],
+                preferredInputID: headset.id
+            )
+            XCTAssertEqual(chosen.selectedInput, usbMic, "Bluetooth or unknown-transport headset pick stays rejected")
+            XCTAssertEqual(chosen.reason, .defaultIsSafe)
+        }
+    }
+
     private func device(
         id: AudioDeviceID,
         name: String,
