@@ -239,8 +239,6 @@ stt_calls
 stt_input_seconds
 stt_model
 stt_ms
-suggestions_accepted
-suggestions_shown
 summary_action
 suppression_reason
 surface

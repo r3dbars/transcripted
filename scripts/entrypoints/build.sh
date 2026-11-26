@@ -27,7 +27,7 @@ SWIFTC_NUM_THREADS="${SWIFTC_NUM_THREADS:-$(sysctl -n hw.ncpu 2>/dev/null || pri
 MCP_PACKAGE_DIR="Tools/TranscriptedMCP"
 MCP_BINARY="$MCP_PACKAGE_DIR/.build/release/transcripted-mcp"
 BUNDLED_MCP_BINARY="$APP_BUNDLE/Contents/Helpers/transcripted-mcp"
-# Pinned by build-deps.sh: Tilde 0.1.0 beta 1's llama-server, signature removed.
+# Pinned by build-deps.sh: Meeting Titles' llama-server helper, signature removed.
 LLAMA_SERVER_BINARY="deps-tools/llama-server"
 BUNDLED_LLAMA_SERVER="$APP_BUNDLE/Contents/Helpers/llama-server"
 KEYBOARD_ENTITLEMENTS="config/entitlements/keyboard.plist"
@@ -433,7 +433,7 @@ bundle_mcp_server() {
     chmod 755 "$BUNDLED_MCP_BINARY"
 }
 
-# Writing's inference helper. sign_embedded_code's Helpers loop signs it.
+# Meeting Titles' local inference helper. sign_embedded_code's Helpers loop signs it.
 bundle_llama_server() {
     cp "$LLAMA_SERVER_BINARY" "$BUNDLED_LLAMA_SERVER"
     chmod 755 "$BUNDLED_LLAMA_SERVER"

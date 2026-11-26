@@ -18,22 +18,6 @@ and the original hasn't changed since it was copied; anything else stays in
 the old folder. App-owned state, cache, logs, and temp
 files always stay under `~/Library/Application Support/Transcripted/`.
 
-## Write for Me meaning index
-
-The local derived-vector cache is
-`~/Library/Application Support/Transcripted/next-sentence/embeddings-256.json`.
-It stays in app state when the capture library moves. It contains 256-dimensional
-vectors keyed by passage title/text hashes, not capture files or raw text; the
-existing format does not encode a model identifier.
-
-While the meaning index is active, a complete scan of its current meeting,
-dictation, and writing corpus removes vectors whose content keys are no longer
-referenced. Shared passage keys stay while any current passage references them.
-Prune-only refreshes do not start an embedding server. Failed or cancelled scans,
-unreachable libraries, and unreadable or corrupt cache files do not authorize
-pruning or replacement of unreadable cache data. This cleans derived cache data;
-it does not delete captures or change capture-retention settings.
-
 ## Dictation
 
 Dictation artifacts live under:
@@ -88,23 +72,23 @@ App-owned Writing state stays under Application Support when the capture
 library moves:
 
 - state root: `~/Library/Application Support/Transcripted/writing/`, holding
-  the keyboard socket `ghost.sock`, `runtime.lock`, the text-free
-  `Outcome Ledger/` and `Word Diary/` (Tilde's plaintext word diary isn't
-  ported; accepted text is saved only by Save my writing), and the encrypted
-  `Personal History/`. `Outcome Ledger/events.jsonl` is cut back to its newest
-  12 MiB once it passes 24 MiB, which still covers the seven-day window
-- models: `~/Library/Application Support/Transcripted/models/writing/<id>/model.gguf`,
-  excluded from backup. The Writing tab's **Delete model** empties this folder
-  (never Delete all writing); it refuses the folder if it's a symlink
+  the keyboard socket `ghost.sock`, `runtime.lock`, and `Pending Entries/`.
+  Legacy `Personal History/`, `Outcome Ledger/`, `Word Diary/`, and
+  `~/Library/Application Support/Transcripted/next-sentence/` folders left
+  behind by older builds (along with the legacy Personal History Keychain key)
+  are cleaned up automatically on launch and by Delete all saved writing
+- leftover models: any old `~/Library/Application Support/Transcripted/models/writing/`
+  files left behind by older builds are reclaimable from Settings › Storage ›
+  Free up space (refusing symlinks)
+- diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`,
+  rolled to `writing-diagnostics.log.1` at 4 MB (one old generation kept)
 
 The on-device meeting titles model (Settings › Meetings › Titles and
-summaries, off by default) is separate from Writing's model:
+summaries, off by default) lives at:
 `~/Library/Application Support/Transcripted/models/meeting-titles/gemma-4-e2b-it-q4km/model.gguf`
 (3.1 GB, owner-only, excluded from backup; `model.gguf.partial` while
 downloading). It stays when the capture library moves. Storage › Free up space
 removes the `meeting-titles` folder while the feature is off.
-- diagnostics log: `~/Library/Application Support/Transcripted/logs/writing-diagnostics.log`,
-  rolled to `writing-diagnostics.log.1` at 4 MB (one old generation kept)
 
 Closed, secret-scrubbed writing waiting for its day-file save is owned by
 `~/Library/Application Support/Transcripted/writing/Pending Entries/pending-writing.json`.

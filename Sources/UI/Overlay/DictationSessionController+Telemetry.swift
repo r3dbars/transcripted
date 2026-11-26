@@ -75,7 +75,6 @@ extension DictationSessionController {
         _ failureKind: String,
         extra: [String: String] = [:]
     ) {
-        guard sendsDictationAnalytics else { return }
         emitDictationStartFailed(
             failureKind,
             properties: dictationAnalyticsProperties(extra: extra),

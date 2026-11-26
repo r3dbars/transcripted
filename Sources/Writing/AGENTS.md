@@ -25,6 +25,7 @@ The library (`Sources/TranscriptedWriting/`) and the capture-only IMKit keyboard
 - `WritingDayFileReader.swift` — reads one `Writing_<YYYY-MM-dd>.md` for Today. Never writes.
 - `WritingAnalytics.swift` — count-only `writing_setup_completed` event through `AnalyticsReporter.track` (keeps allowlist schema valid with `autocomplete_enabled: "false"`, `model_choice: "none"`).
 - `WritingStorageUsage.swift` — byte size of `Writing_*.md` files on disk (Foundation-only for fast tests). Never opens file contents.
+- `LegacyWritingDataCleanup.swift` — removes legacy Personal History, Outcome Ledger, Word Diary, and `next-sentence` folders under app support plus the legacy Personal History Keychain key on launch (outside automated harnesses) and on Delete all saved writing; refuses symlinks and out-of-root paths, and leaves `captures/writing/` day files untouched on launch.
 
 ## Rules
 
@@ -32,7 +33,7 @@ The library (`Sources/TranscriptedWriting/`) and the capture-only IMKit keyboard
 - **The app owns every disk write.** The keyboard sends events over the socket; this folder and the library write day files. Day-file folders are 0700 and files 0600, and every closed entry goes through `WritingSecretScrubber` before it lands. `WritingDayFileWriter.defaultPendingDirectory` injects a separate app-owned recovery journal for closed scrubbed entries, never raw/open events. `finishWritingForTermination()` seals batch admission once its final closed entry is durable. Delete all erases recovery even when the runtime is stopped.
 - **Paths, preferences and analytics are injected into the library from here.** Don't make `Sources/TranscriptedWriting/` read app types or app paths.
 - **Off the main thread.** Keyboard install copy and signature checks run detached (`GhostKeyboardInstallerHost.installOrUpdate(using:)`); only Text Input Sources calls return to main, and `TISRegisterInputSource` runs only for a fresh copy or an unlisted keyboard.
-- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`) stay Foundation-only and live in `APP_SOURCES` in `scripts/entrypoints/run-tests.sh`.
+- **Files the root fast tests compile** (`WritingAnalytics`, `WritingSetupState`, `WritingDayFileReader`, `WritingStorageUsage`, `LegacyWritingDataCleanup`) stay Foundation-only and live in `APP_SOURCES` in `scripts/entrypoints/run-tests.sh`.
 
 ## Tests
 

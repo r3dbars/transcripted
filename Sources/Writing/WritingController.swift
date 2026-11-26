@@ -16,6 +16,12 @@ struct WritingKeyboardState: Equatable {
     let setup: WritingKeyboardSetupState?
 }
 
+extension Notification.Name {
+    /// Posted on the main actor when Writing capture's runtime status (running,
+    /// start failure, or pause window) changes.
+    static let writingRuntimeStateDidChange = Notification.Name("Transcripted.WritingRuntimeStateDidChange")
+}
+
 /// Hosts opt-in writing capture inside Transcripted: the owner-only unix
 /// socket the lightweight keyboard sends typed text over, the secret-scrubbed
 /// Markdown day-file writer (`captures/writing/`), and the keyboard installer.
@@ -27,7 +33,6 @@ struct WritingKeyboardState: Equatable {
 final class WritingController {
     nonisolated static let appSuiteName = "com.justinbetker.draft.writing"
     nonisolated static let debugEnabledKey = "WritingDebugEnabled"
-    nonisolated static let quietQuitKey = "GhostBrainQuietQuit"
     nonisolated static let keyboardFirstSetupKey = "KeyboardEnabledAndSelectedOnce"
     private nonisolated static let automaticTerminationReason = "Transcripted Writing capture serves the keyboard"
 
@@ -63,6 +68,7 @@ final class WritingController {
     // MARK: - State
 
     private(set) var isRunning = false
+    private(set) var startFailed = false
     private var keyboardInstallTask: Task<GhostKeyboardInstallerHost.KeyboardInstallResult, Never>?
     private(set) var runtimeStopCount = 0
     var keyboardActionAdmission: Int? { isTerminated ? nil : runtimeStopCount }
@@ -71,6 +77,7 @@ final class WritingController {
     var saveMyWritingProblem: WritingDayFileRecorder.WriteFailure? { dayFiles?.recorder.lastWriteFailure }
     var appScope: WritingAppScope { Self.preferences().appScope }
     var setupCompleted: Bool { WritingSetupState.isCompleted(defaults: Self.appDefaults()) }
+    var pausedUntil: Date? { Self.settings().pausedUntil }
 
     nonisolated static var keyboardIsInstalled: Bool {
         let installedPath = FileManager.default.homeDirectoryForCurrentUser
@@ -89,6 +96,7 @@ final class WritingController {
 
     let writingDirectory: @Sendable () -> URL
     let writingPendingDirectory: @Sendable () -> URL
+    let appSupportRoot: @Sendable () -> URL
     let keyboardInstaller = GhostKeyboardInstallerHost()
     var inputSources: SystemWritingInputSources {
         SystemWritingInputSources(installer: keyboardInstaller)
@@ -101,13 +109,16 @@ final class WritingController {
     private var isTerminated = false
     private var quitAbandonsUnsavedWriting = false
     private var activationAllowed = false
+    private var hasScheduledLaunchMaintenance = false
 
     init(
         writingDirectory: @escaping @Sendable () -> URL = WritingDayFileWriter.defaultDirectory,
-        writingPendingDirectory: @escaping @Sendable () -> URL = WritingDayFileWriter.defaultPendingDirectory
+        writingPendingDirectory: @escaping @Sendable () -> URL = WritingDayFileWriter.defaultPendingDirectory,
+        appSupportRoot: @escaping @Sendable () -> URL = { FileManager.default.transcriptedAppSupportRootURL }
     ) {
         self.writingDirectory = writingDirectory
         self.writingPendingDirectory = writingPendingDirectory
+        self.appSupportRoot = appSupportRoot
     }
 
     // MARK: - Lifecycle
@@ -116,6 +127,39 @@ final class WritingController {
         self.log = log
         activationAllowed = true
         applyRunState()
+        runLaunchMaintenanceOnce()
+    }
+
+    private func runLaunchMaintenanceOnce() {
+        guard !hasScheduledLaunchMaintenance, !isTerminated, !AutomatedLaunchEnvironment.isActive() else { return }
+        hasScheduledLaunchMaintenance = true
+
+        // Clean up legacy Personal History / Outcome Ledger / Word Diary /
+        // next-sentence files and Keychain key left behind by older builds.
+        // Leaves `<capture-library>/writing/` day files untouched.
+        let appSupportRoot = self.appSupportRoot
+        Task.detached(priority: .utility) {
+            let result = LegacyWritingDataCleanup.cleanUp(appSupportRoot: appSupportRoot())
+            if !result.removedRelativePaths.isEmpty || result.keychainItemsDeleted > 0 {
+                DiagnosticsLog.shared.record(
+                    "legacy-writing-data-cleaned",
+                    metadata: [
+                        "removed": String(result.removedRelativePaths.count),
+                        "keychain": String(result.keychainItemsDeleted),
+                    ]
+                )
+            }
+        }
+
+        // If `Transcripted Keyboard.app` is already installed from an older
+        // build, update it to the silent pass-through keyboard even while
+        // capture is off so an outdated keyboard doesn't hammer the socket.
+        if !isRunning, Self.keyboardIsInstalled {
+            Task { @MainActor [weak self] in
+                guard let self, !Task.isCancelled, self.keyboardActionAdmission != nil else { return }
+                _ = await self.installKeyboardRecordingFirstInstall()
+            }
+        }
     }
 
     func applyRunState() {
@@ -128,6 +172,9 @@ final class WritingController {
             if hasStarted {
                 log("WRITING | capture off; stopping")
                 tearDown()
+            } else if startFailed {
+                startFailed = false
+                NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
             }
         } else if !hasStarted {
             start(log: log)
@@ -160,18 +207,21 @@ final class WritingController {
             DiagnosticsLog.shared.record("duplicate-instance", metadata: [:])
             log("WRITING | socket server did not start (runtime lock held); capture stays off")
             hasStarted = false
+            startFailed = true
             self.dayFiles = nil
+            NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
             return
         }
         ghostBrainServerHost = server
+        startFailed = false
         isRunning = true
         dayFiles.start()
 
         ProcessInfo.processInfo.disableAutomaticTermination(Self.automaticTerminationReason)
         installKeyboard()
-        UserDefaults(suiteName: TildeSettings.keyboardSuiteName)?.removeObject(forKey: Self.quietQuitKey)
         DiagnosticsLog.shared.record("launch", metadata: ["mode": "capture_only"])
         log("WRITING | capture started")
+        NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
     }
 
     func stop() {
@@ -203,9 +253,7 @@ final class WritingController {
         runtimeStopCount &+= 1
         let wasRunning = isRunning
         isRunning = false
-        if wasRunning && !Self.terminationIsSystemInitiated {
-            UserDefaults(suiteName: TildeSettings.keyboardSuiteName)?.set(true, forKey: Self.quietQuitKey)
-        }
+        startFailed = false
         DiagnosticsLog.shared.record("shutdown", metadata: [:])
         DiagnosticsLog.shared.flush()
         ghostBrainServerHost?.stop()
@@ -214,9 +262,20 @@ final class WritingController {
         if wasRunning {
             ProcessInfo.processInfo.enableAutomaticTermination(Self.automaticTerminationReason)
         }
+        NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
     }
 
     // MARK: - Opt-in actions
+
+    func pauseForOneHour() {
+        Self.settings().pause(for: 3_600)
+        NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
+    }
+
+    func resumeCapture() {
+        Self.settings().resume()
+        NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
+    }
 
     func setSaveMyWriting(_ enabled: Bool) {
         let settings = Self.settings()
@@ -263,12 +322,14 @@ final class WritingController {
     func deleteAllWriting() async -> Bool {
         let settings = Self.settings()
         settings.personalHistoryEnabled = false
+        settings.resume()
         settings.personalHistoryIdentifier = UUID().uuidString
         settings.personalHistoryConsentIdentifier = UUID().uuidString
 
         let recorder = dayFiles?.recorder
         let directory = writingDirectory
         let pendingDirectory = writingPendingDirectory
+        let appSupportRoot = self.appSupportRoot
         let filesDeleted: Bool
         if let recorder {
             filesDeleted = await Task.detached(priority: .userInitiated) { recorder.deleteAll() }.value
@@ -278,9 +339,14 @@ final class WritingController {
                 pendingDirectory: pendingDirectory()
             )
         }
+        let legacyResult = await Task.detached(priority: .userInitiated) {
+            LegacyWritingDataCleanup.cleanUp(appSupportRoot: appSupportRoot())
+        }.value
+        let allDeleted = filesDeleted && legacyResult.succeeded
         applyRunState()
-        log("WRITING | delete all writing: \(filesDeleted ? "done" : "incomplete")")
-        return filesDeleted
+        NotificationCenter.default.post(name: .writingRuntimeStateDidChange, object: nil)
+        log("WRITING | delete all writing: \(allDeleted ? "done" : "incomplete")")
+        return allDeleted
     }
 
     func storageUsage() async -> WritingStorageUsage {

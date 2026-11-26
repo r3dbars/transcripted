@@ -43,6 +43,9 @@ final class WritingCaptureCardModel: ObservableObject {
     let controller: WritingController
 
     @Published private(set) var isEnabled = false
+    @Published private(set) var isRunning = false
+    @Published private(set) var startFailed = false
+    @Published private(set) var pausedUntil: Date?
     @Published private(set) var scopeMode: ScopeMode = .all
     @Published private(set) var pickedBundleIdentifiers: Set<String> = []
     @Published private(set) var keyboardStatus: KeyboardStatus = .checking
@@ -58,10 +61,20 @@ final class WritingCaptureCardModel: ObservableObject {
     private var hasLoadedInstalledApps = false
     private var observers: [NSObjectProtocol] = []
     private var distributedObservers: [NSObjectProtocol] = []
+    private var pauseExpiryTask: Task<Void, Never>?
 
     init(controller: WritingController) {
         self.controller = controller
         refreshState()
+    }
+
+    var isPaused: Bool {
+        pausedUntil != nil
+    }
+
+    var pauseResumeTimeText: String? {
+        guard let pausedUntil else { return nil }
+        return pausedUntil.formatted(date: .omitted, time: .shortened)
     }
 
     var savedSummary: String {
@@ -95,6 +108,8 @@ final class WritingCaptureCardModel: ObservableObject {
 
     func disappear() {
         isMounted = false
+        pauseExpiryTask?.cancel()
+        pauseExpiryTask = nil
         keyboardRefresh.setEnabled(false)
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
@@ -124,6 +139,18 @@ final class WritingCaptureCardModel: ObservableObject {
             refreshKeyboard()
         }
         refreshStorage()
+    }
+
+    func pauseForOneHour() {
+        guard isRunning, !isDeleting else { return }
+        controller.pauseForOneHour()
+        refreshState()
+    }
+
+    func resumeCapture() {
+        guard !isDeleting else { return }
+        controller.resumeCapture()
+        refreshState()
     }
 
     func setScopeMode(_ mode: ScopeMode) {
@@ -177,6 +204,13 @@ final class WritingCaptureCardModel: ObservableObject {
     func refreshState() {
         let enabled = controller.saveMyWritingEnabled
         if isEnabled != enabled { isEnabled = enabled }
+        let running = controller.isRunning
+        if isRunning != running { isRunning = running }
+        let failed = controller.startFailed
+        if startFailed != failed { startFailed = failed }
+        let paused = running ? controller.pausedUntil : nil
+        if pausedUntil != paused { pausedUntil = paused }
+        schedulePauseExpiryRefresh(until: paused)
         let scope = controller.appScope
         let mode: ScopeMode = scope.mode == .all ? .all : .picked
         if scopeMode != mode { scopeMode = mode }
@@ -184,6 +218,18 @@ final class WritingCaptureCardModel: ObservableObject {
         if pickedBundleIdentifiers != picked { pickedBundleIdentifiers = picked }
         let problem = controller.saveMyWritingProblem != nil
         if saveProblem != problem { saveProblem = problem }
+    }
+
+    private func schedulePauseExpiryRefresh(until date: Date?) {
+        pauseExpiryTask?.cancel()
+        pauseExpiryTask = nil
+        guard isMounted, let date else { return }
+        let delay = max(0.5, date.timeIntervalSinceNow + 0.5)
+        pauseExpiryTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard !Task.isCancelled, let self, self.isMounted else { return }
+            self.refreshState()
+        }
     }
 
     func refreshKeyboard() {
@@ -238,6 +284,12 @@ final class WritingCaptureCardModel: ObservableObject {
             Task { @MainActor in
                 self?.refreshState()
                 self?.refreshStorage()
+            }
+        })
+        observers.append(center.addObserver(forName: .writingRuntimeStateDidChange, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.isMounted else { return }
+                self.refreshState()
             }
         })
         observers.append(center.addObserver(forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main) { [weak self] _ in

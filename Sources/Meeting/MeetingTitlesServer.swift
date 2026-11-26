@@ -1,16 +1,16 @@
 import Foundation
 import Security
 
-/// A short-lived `llama-server` child just for meeting titles. It reuses the
-/// helper binary the app bundles for Writing but never shares Writing's
-/// process, port or model: its own port, its own per-launch API key, bound to
-/// 127.0.0.1 with the web UI off, and the model passed as an already-verified
-/// open file. Every request first rechecks that the listener on the port is
-/// this child. It is started when the titles queue has work and stopped when
-/// the queue empties. It takes the first free port of a small fixed range, so
-/// a second copy of the app (a dev build beside the release) gets its own.
+/// A short-lived `llama-server` child for on-device meeting titles. Runs the
+/// helper binary bundled at `Contents/Helpers/llama-server` on its own port
+/// with a per-launch API key, bound to 127.0.0.1 with the web UI off, and the
+/// model passed as an already-verified open file. Every request first rechecks
+/// that the listener on the port is this child. It is started when the titles
+/// queue has work and stopped when the queue empties. It takes the first free
+/// port of a small fixed range, so a second copy of the app (a dev build beside
+/// the release) gets its own.
 final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngine, @unchecked Sendable {
-    /// Writing's helper uses 17891 (17875 for its preview build).
+    /// Fixed localhost port range for Meeting Titles' short-lived helper.
     static let defaultPorts = 17_893...17_899
     static var defaultPort: Int { defaultPorts.lowerBound }
 
@@ -19,8 +19,8 @@ final class MeetingTitlesLlamaServer: MeetingTitlesEngineHost, MeetingTitlesEngi
         /// Tried in order; the first one nothing listens on is used.
         var ports: ClosedRange<Int> = MeetingTitlesLlamaServer.defaultPorts
         /// The app checks its own code signature (nested code included) before
-        /// launching the helper, as Writing does. Off only for the lab check
-        /// that runs a helper outside an app bundle.
+        /// launching the helper. Off only for the lab check that runs a helper
+        /// outside an app bundle.
         var requiresBundleSeal = true
         var healthTimeout: Duration = .seconds(180)
         var requestTimeout: TimeInterval = 600
