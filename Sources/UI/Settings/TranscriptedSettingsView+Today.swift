@@ -1,8 +1,9 @@
 import SwiftUI
 import TranscriptedCore
 
-/// Today's host in the shell: its actions, the first-day key line, the
-/// setup checklist, and landing a Today dictation click on its entry.
+/// Stats' host in the shell (`.today` route): its actions, the shared
+/// first-day key line and setup checklist (also shown on Meetings' empty
+/// state), and landing a dictation click on its entry.
 extension TranscriptedSettingsView {
     var todayPage: some View {
         TodaySettingsPage(
@@ -23,7 +24,7 @@ extension TranscriptedSettingsView {
                         navigation.requestDictationReveal(entryID: entryID)
                     }
                 case .writing:
-                    // A writing mark opens its day's Markdown file.
+                    // A writing entry opens its day's Markdown file.
                     if let dayFile = item.transcriptURL {
                         NSWorkspace.shared.open(dayFile)
                     }
@@ -46,21 +47,15 @@ extension TranscriptedSettingsView {
                 for: PhysicalDictationTriggerPreferences.meetingBinding()
             ),
             setupChecklist: todaySetupChecklistState,
-            onSetupStep: { step in performTodaySetupStep(step) },
-            onDismissSetup: {
-                trackSettingsAction("today_setup_dismiss", page: .today)
-                todaySetupRetired = true
-            },
+            onSetupStep: { step in performTodaySetupStep(step, page: .today) },
+            onDismissSetup: { dismissTodaySetup(page: .today) },
             isRecordingMeeting: meetingSession.isRecording
         )
         .onAppear {
             todayViewModel.setShown(true)
         }
         .task {
-            // Reads the agents' own config files, so off main, and only
-            // while the checklist could still show.
-            guard todaySetupOffered, !todaySetupRetired else { return }
-            todayAgentConnected = await Self.anyAgentConnected()
+            await refreshTodayAgentConnectedIfNeeded()
         }
         .onChange(of: todaySetupChecklistState.isComplete, initial: true) { _, isComplete in
             // Done is done: it never comes back, even if, say, calendar
@@ -71,9 +66,9 @@ extension TranscriptedSettingsView {
             todayViewModel.cancel()
         }
         .onReceive(todayViewModel.$snapshot) { snapshot in
-            // The window opens on Today now, so the return signal Meetings
-            // used to send on open comes from Today's list. Home owns the
-            // once-per-window latch, so visiting Meetings after doesn't count twice.
+            // Meetings is the default landing page, while Stats (`.today`) can
+            // also be opened directly; both feed Home's once-per-window latch so
+            // visiting the other page afterward doesn't count twice.
             homeViewModel.trackActivationReturnProxyIfNeeded(todayRecent: snapshot.recent)
         }
     }
@@ -81,7 +76,7 @@ extension TranscriptedSettingsView {
     /// "Hold Right ⌥ in any app and talk." for the person's own key and
     /// behavior. Reads the shell's shortcut state, which `.hotkeysDidChange`
     /// refreshes.
-    private var todayKeyHint: TodayKeyHint {
+    var todayKeyHint: TodayKeyHint {
         TodayKeyHint.make(
             keyDisplay: dictationShortcutsEnabled
                 ? PhysicalDictationTriggerPreferences.displayString(for: PhysicalDictationTriggerPreferences.pushToTalkBinding())
@@ -90,7 +85,7 @@ extension TranscriptedSettingsView {
         )
     }
 
-    private var todaySetupChecklistState: TodaySetupChecklistState {
+    var todaySetupChecklistState: TodaySetupChecklistState {
         TodaySetupChecklistState(
             calendarConnected: permissionStates[.calendar] ?? false,
             calendarBlocked: TranscriptedPermissionAccess.calendarAccessBlocked(),
@@ -101,20 +96,32 @@ extension TranscriptedSettingsView {
         )
     }
 
+    /// Reads the agents' own config files off-main, only while the checklist
+    /// could still show.
+    func refreshTodayAgentConnectedIfNeeded() async {
+        guard todaySetupOffered, !todaySetupRetired else { return }
+        todayAgentConnected = await Self.anyAgentConnected()
+    }
+
+    func dismissTodaySetup(page: TranscriptedSettingsPage) {
+        trackSettingsAction("today_setup_dismiss", page: page)
+        todaySetupRetired = true
+    }
+
     /// Each step runs the same action its own page has.
-    private func performTodaySetupStep(_ step: TodaySetupStep) {
+    func performTodaySetupStep(_ step: TodaySetupStep, page: TranscriptedSettingsPage) {
         switch step {
         case .calendar:
-            trackSettingsAction("today_setup_calendar", page: .today)
+            trackSettingsAction("today_setup_calendar", page: page)
             Task { @MainActor in
                 await TranscriptedPermissionAccess.requestAccessOrOpenSettings(for: .calendar)
                 refreshPermissions()
             }
         case .agent:
-            trackSettingsAction("today_setup_agent", page: .today)
+            trackSettingsAction("today_setup_agent", page: page)
             navigation.select(.connectAgent, source: .settingsAction)
         case .transcribeFile:
-            trackSettingsAction("today_setup_transcribe_file", page: .today)
+            trackSettingsAction("today_setup_transcribe_file", page: page)
             todaySetupTriedFileImport = true
             actions.importAudioFile()
         }

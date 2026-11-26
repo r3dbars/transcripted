@@ -13,10 +13,10 @@ func testProductUsageTelemetry() {
             assertEqual(sanitized, properties, "every bounded navigation property survives privacy sanitization")
         }
         assertEqual(TranscriptedSettingsPage.home.telemetryDestination, .meetings, "legacy home page is Meetings")
-        assertEqual(TranscriptedSettingsPage.today.telemetryDestination, .today, "Open Transcripted lands on Today")
+        assertEqual(TranscriptedSettingsPage.today.telemetryDestination, .today, "Stats keeps the legacy today telemetry destination")
         assertNil(ProductUsageTelemetry.NavigationSource(rawValue: "private window title"), "unknown source cannot enter typed properties")
         assertEqual(ProductUsageTelemetry.NavigationSource(rawValue: "onboarding_completed"), .onboardingCompleted,
-                    "setup's Done opens Today with a known source, not unknown")
+                    "setup's Done opens Meetings with a known source, not unknown")
     }
 
     runSuite("Saved result copy emits the clipboard outcome after the write") {

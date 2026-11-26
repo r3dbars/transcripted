@@ -11,7 +11,7 @@ enum ProductUsageTelemetry {
         case menuCommand = "menu_command", appMenu = "app_menu", dockIcon = "dock_icon"
         case singleInstanceReopen = "single_instance_reopen", meetingOverlay = "meeting_overlay"
         case appLaunch = "app_launch"
-        /// Setup's Done opens the main window on Today by itself.
+        /// Setup's Done opens the main window on Meetings by itself.
         case onboardingCompleted = "onboarding_completed"
         case unknown
 

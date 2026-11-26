@@ -10,6 +10,8 @@ struct HomeListEmptyState {
     var secondaryActionTitle: String? = nil
     var secondaryAutomationIdentifier: String? = nil
     var secondaryAction: (() -> Void)? = nil
+    var keyHint: TodayKeyHint? = nil
+    var keyHintAutomationIdentifier: String = "transcripted.home.meetings.empty.key-hint"
 }
 
 private struct HomeEmptyStateView: View {
@@ -54,9 +56,18 @@ private struct HomeEmptyStateView: View {
                 }
             }
             .padding(.top, 2)
+
+            if let keyHint = state.keyHint {
+                TodayKeyHintLine(
+                    hint: keyHint,
+                    style: .compact,
+                    automationIdentifier: state.keyHintAutomationIdentifier
+                )
+                .padding(.top, 8)
+            }
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 40)
+        .padding(.vertical, state.keyHint == nil ? 40 : 28)
         .padding(.horizontal, 16)
     }
 }

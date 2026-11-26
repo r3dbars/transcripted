@@ -2,7 +2,7 @@
 // First-run setup for Transcripted's local dictation and meeting capture.
 //
 // One ask per screen (microphone, paste access, optional call audio), two
-// real dictations in between, the promise, then Done lands on Today. Steps
+// real dictations in between, the promise, then Done lands on Meetings. Steps
 // and buttons come from `OnboardingNavigation`; the screens are in
 // PermissionsOnboardingStages.swift, PermissionsOnboardingPractice.swift and
 // PermissionsOnboardingShell.swift.

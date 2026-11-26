@@ -48,7 +48,9 @@ func testTodayPresentation() {
         assertEqual(overview.today.totalWords, 380, "total words combines dictated and written")
 
         assertEqual(overview.last7Days.meetings, 4, "7-day window spans Sep 18 through Sep 24")
+        assertEqual(overview.last7Days.meetingsWithDurationCount, 3, "only meetings with positive duration count in the average denominator")
         assertEqual(overview.last7Days.meetingMinutes, 130, "unknown durations count as zero")
+        assertEqual(overview.last7Days.averageMeetingMinutes, 43, "130 / 3 = 43m (not 130 / 4 = 33m)")
         assertEqual(overview.last7Days.dictations, 7, "Sep 19 + Sep 24 dictations")
         assertEqual(overview.last7Days.dictationWords, 340, "7-day dictated words")
         assertEqual(overview.last7Days.writingWords, 80, "7-day writing words")
@@ -299,5 +301,238 @@ func testTodayPresentation() {
             TodayClockPolicy.needsRollover(storedDay: beforeSpring, now: afterSpring, calendar: la),
             "the next local midnight after DST still rolls over"
         )
+    }
+
+    runSuite("TodayStatsBuilder - average meeting duration divides only by meetings with positive duration") {
+        let overview = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: sep(24, 9), durationSeconds: 42 * 60),
+                TodayMeetingFact(date: sep(24, 11), durationSeconds: 28 * 60),
+                TodayMeetingFact(date: sep(23, 10), durationSeconds: 60 * 60),
+                TodayMeetingFact(date: sep(22, 10), durationSeconds: nil),
+                TodayMeetingFact(date: sep(21, 10), durationSeconds: 0),
+            ],
+            dictationDays: [],
+            now: now,
+            calendar: calendar
+        )
+        assertEqual(overview.last7Days.meetings, 5, "all five meetings are counted in total meetings")
+        assertEqual(overview.last7Days.meetingsWithDurationCount, 3, "nil and 0-second durations are excluded from denominator")
+        assertEqual(overview.last7Days.meetingMinutes, 130, "total minutes across meetings with durations")
+        assertEqual(overview.last7Days.averageMeetingMinutes, 43, "130 / 3 = 43m")
+
+        let onlyUnknown = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: sep(24, 9), durationSeconds: nil),
+                TodayMeetingFact(date: sep(24, 10), durationSeconds: 0),
+            ],
+            dictationDays: [],
+            now: now,
+            calendar: calendar
+        )
+        assertEqual(onlyUnknown.today.meetings, 2, "meetings still count without durations")
+        assertEqual(onlyUnknown.today.meetingsWithDurationCount, 0, "no meetings have positive duration")
+        assertNil(onlyUnknown.today.averageMeetingMinutes, "average is nil when no durations were recorded")
+    }
+
+    runSuite("TodayStatsBuilder - future-dated captures are skipped across all totals and streaks") {
+        let overview = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: sep(24, 9), durationSeconds: 30 * 60),
+                TodayMeetingFact(date: sep(25, 10), durationSeconds: 60 * 60), // tomorrow (future)
+                TodayMeetingFact(date: date(11, 1, 9), durationSeconds: 90 * 60), // far future
+            ],
+            dictationDays: [
+                TodayDictationDayFact(day: sep(24, 0), entries: 2, words: 50),
+                TodayDictationDayFact(day: sep(26, 0), entries: 5, words: 500), // future
+            ],
+            writing: [
+                TodayWritingFact(entryID: "w-now", date: sep(24, 11), appName: "Notes", words: 25, acceptedWords: 0, text: "now"),
+                TodayWritingFact(entryID: "w-future", date: sep(27, 11), appName: "Notes", words: 300, acceptedWords: 0, text: "future"),
+            ],
+            writingDays: [
+                TodayWritingDaySummary(day: sep(28, 0), entryCount: 4, wordCount: 400, latestEntryDate: sep(28, 10)),
+            ],
+            now: now,
+            calendar: calendar
+        )
+
+        assertEqual(overview.today.meetings, 1, "future meetings excluded from today")
+        assertEqual(overview.last7Days.meetings, 1, "future meetings excluded from 7d")
+        assertEqual(overview.last30Days.meetings, 1, "future meetings excluded from 30d")
+        assertEqual(overview.allTime.meetings, 1, "future meetings excluded from allTime")
+        assertEqual(overview.allTime.meetingMinutes, 30, "future meeting minutes excluded from allTime")
+        assertEqual(overview.allTime.dictations, 2, "future dictations excluded from allTime")
+        assertEqual(overview.allTime.dictationWords, 50, "future dictation words excluded from allTime")
+        assertEqual(overview.allTime.writingEntries, 1, "future writing entries excluded from allTime")
+        assertEqual(overview.allTime.writingWords, 25, "future writing words excluded from allTime")
+        assertEqual(overview.streak.currentDays, 1, "future days do not inflate current streak")
+        assertEqual(overview.streak.longestDays, 1, "future days do not inflate longest streak")
+        assertEqual(overview.streak.totalActiveDays, 1, "future days do not inflate active days")
+    }
+
+    runSuite("TodayStatsBuilder - writing summaries spanning more than 7 and 30 days") {
+        let dayFileContents = """
+        # Writing for September 10, 2026
+
+        ## 9:00 AM - Draft
+
+        Entry ID: `w-1`
+        Captured: 2026-09-10T14:00:00Z
+        Source app: Notes
+        Words: 120
+        Accepted words: 20
+
+        body text that should not be cached
+
+        ## 11:30 AM - Follow up
+
+        Entry ID: `w-2`
+        Captured: 2026-09-10T16:30:00Z
+        Source app: Slack
+        Words: 80
+        Accepted words: 0
+
+        more body text
+        """
+        let sep10Summary = TodayWritingParser.daySummary(
+            fromDayFile: dayFileContents,
+            day: calendar.startOfDay(for: sep(10))
+        )
+        assertEqual(sep10Summary.entryCount, 2, "daySummary counts all entries in the file")
+        assertEqual(sep10Summary.wordCount, 200, "daySummary sums words across entries")
+        assertEqual(
+            sep10Summary.latestEntryDate,
+            ISO8601DateFormatter().date(from: "2026-09-10T16:30:00Z"),
+            "daySummary tracks latest entry timestamp"
+        )
+
+        let overview = TodayStatsBuilder.buildOverview(
+            meetings: [],
+            dictationDays: [],
+            writingDays: [
+                TodayWritingDaySummary(day: calendar.startOfDay(for: sep(24)), entryCount: 1, wordCount: 40, latestEntryDate: sep(24, 10)),
+                TodayWritingDaySummary(day: calendar.startOfDay(for: sep(19)), entryCount: 2, wordCount: 60, latestEntryDate: sep(19, 10)),
+                sep10Summary, // >7d, within 30d
+                TodayWritingDaySummary(day: calendar.startOfDay(for: date(7, 15)), entryCount: 3, wordCount: 500, latestEntryDate: date(7, 15, 10)), // >30d
+            ],
+            now: now,
+            calendar: calendar
+        )
+
+        assertEqual(overview.today.writingEntries, 1, "today writing entries")
+        assertEqual(overview.today.writingWords, 40, "today writing words")
+        assertEqual(overview.last7Days.writingEntries, 3, "7-day writing entries")
+        assertEqual(overview.last7Days.writingWords, 100, "7-day writing words")
+        assertEqual(overview.last30Days.writingEntries, 5, "30-day writing entries include >7d day file")
+        assertEqual(overview.last30Days.writingWords, 300, "30-day writing words include >7d day file")
+        assertEqual(overview.allTime.writingEntries, 8, "all-time writing entries include >30d day file")
+        assertEqual(overview.allTime.writingWords, 800, "all-time writing words include >30d day file")
+        assertEqual(overview.streak.activeDaysLast7, 2, "writing days count toward 7d active days")
+        assertEqual(overview.streak.activeDaysLast30, 3, "writing days count toward 30d active days")
+        assertEqual(overview.streak.totalActiveDays, 4, "writing days count toward all-time active days")
+    }
+
+    runSuite("TodayStatsBuilder & TodayClockPolicy - America/Santiago 2026-09-06 DST midnight skip") {
+        var santiago = Calendar(identifier: .gregorian)
+        santiago.timeZone = TimeZone(identifier: "America/Santiago")!
+
+        func scl(_ day: Int, _ hour: Int = 12, _ minute: Int = 0) -> Date {
+            santiago.date(from: DateComponents(year: 2026, month: 9, day: day, hour: hour, minute: minute))!
+        }
+
+        // On 2026-09-06 in America/Santiago, midnight 00:00 is skipped and startOfDay is 01:00.
+        let dstDayNow = scl(6, 15)
+        let dstStart = santiago.startOfDay(for: dstDayNow)
+        assertEqual(santiago.component(.hour, from: dstStart), 1, "Santiago 2026-09-06 skips 00:00 and starts at 01:00")
+
+        // When today IS the DST day (Sep 6), subtracting days from 01:00 must still match startOfDay keys (00:00).
+        let onDstDay = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: scl(6, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(5, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(4, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(3, 10), durationSeconds: 1800),
+            ],
+            dictationDays: [],
+            now: dstDayNow,
+            calendar: santiago
+        )
+        assertEqual(onDstDay.dailyActivity.count, 7, "all 7 bars are emitted on the DST day")
+        assertEqual(onDstDay.dailyActivity.suffix(4).map(\.meetings), [1, 1, 1, 1], "none of the prior days drop out when subtracting from 01:00")
+        assertEqual(onDstDay.streak.currentDays, 4, "current streak crosses midnight-skip DST day intact")
+        assertEqual(onDstDay.streak.longestDays, 4, "longest streak crosses midnight-skip DST day intact")
+        assertEqual(TodayCopy.rowWhen(for: scl(5, 14), now: dstDayNow, locale: locale, calendar: santiago), "Yesterday", "Sep 5 is Yesterday on Sep 6")
+
+        // Next midnight after Sep 6 (01:00) must be Sep 7 00:00, not 01:00.
+        let sep7Midnight = TodayClockPolicy.nextMidnight(after: dstDayNow, calendar: santiago)
+        assertEqual(santiago.component(.day, from: sep7Midnight), 7, "nextMidnight lands on Sep 7")
+        assertEqual(santiago.component(.hour, from: sep7Midnight), 0, "nextMidnight lands at 00:00 on Sep 7")
+
+        // Two days later (Sep 8), the 7-day window and streak span across Sep 6.
+        let afterDstNow = scl(8, 15)
+        let acrossDst = TodayStatsBuilder.buildOverview(
+            meetings: [
+                TodayMeetingFact(date: scl(8, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(7, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(6, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(5, 10), durationSeconds: 1800),
+                TodayMeetingFact(date: scl(4, 10), durationSeconds: 1800),
+            ],
+            dictationDays: [],
+            now: afterDstNow,
+            calendar: santiago
+        )
+        assertEqual(acrossDst.dailyActivity.count, 7, "all 7 bars are emitted spanning Sep 6")
+        assertEqual(acrossDst.dailyActivity.suffix(5).map(\.meetings), [1, 1, 1, 1, 1], "Sep 6 bar is present and matched by startOfDay")
+        assertEqual(acrossDst.streak.currentDays, 5, "current streak spanning Sep 6 stays unbroken")
+        assertEqual(acrossDst.streak.longestDays, 5, "longest streak spanning Sep 6 stays unbroken")
+        assertEqual(TodayCopy.rowWhen(for: scl(6, 14), now: scl(7, 15), locale: locale, calendar: santiago), "Yesterday", "Sep 6 is Yesterday on Sep 7")
+    }
+
+    runSuite("TodayStatsBarLayout - stacked bar and capture mix clamping never overflow container") {
+        // Skewed 3-segment stacked bar at max height (68pt, spacing 1.5pt, floor 3pt).
+        let barHeights = TodayStatsBarLayout.segmentSizes(
+            weights: [1, 1, 100],
+            totalSize: 68,
+            spacing: 1.5,
+            minimumSegment: 3
+        )
+        assertEqual(barHeights.count, 3, "three segments returned")
+        assertTrue(barHeights.allSatisfy { $0 >= 3 - 0.0001 }, "every segment keeps its 3pt minimum when budget allows")
+        let barTotal = barHeights.reduce(0, +) + 1.5 * 2
+        assertTrue(barTotal <= 68 + 0.0001, "stacked bar height + spacing (\(barTotal)) never exceeds 68pt")
+
+        // Tiny 3-segment stacked bar (8pt total, spacing 1.5pt -> 5pt available for 3 segments).
+        let tinyBar = TodayStatsBarLayout.segmentSizes(
+            weights: [1, 1, 1],
+            totalSize: 8,
+            spacing: 1.5,
+            minimumSegment: 3
+        )
+        assertTrue(tinyBar.allSatisfy { $0 > 0 }, "tiny bar segments stay positive")
+        let tinyTotal = tinyBar.reduce(0, +) + 1.5 * 2
+        assertTrue(tinyTotal <= 8 + 0.0001, "tiny stacked bar (\(tinyTotal)) never exceeds scaledHeight 8pt")
+
+        // Capture Mix with 4pt minimum floor on skewed shares (204pt wide, spacing 2pt).
+        let mixWidths = TodayStatsBarLayout.segmentSizes(
+            weights: [0.99, 0.005, 0.005],
+            totalSize: 204,
+            spacing: 2,
+            minimumSegment: 4
+        )
+        assertEqual(mixWidths.count, 3, "three capture mix segments returned")
+        assertTrue(mixWidths[1] >= 4 - 0.0001 && mixWidths[2] >= 4 - 0.0001, "small capture mix segments keep 4pt floor")
+        let mixTotal = mixWidths.reduce(0, +) + 2 * 2
+        assertTrue(abs(mixTotal - 204) < 0.0001, "capture mix widths + spacing (\(mixTotal)) match container width 204pt without overflow")
+
+        // Zero or narrower-than-spacing containers never produce negative values.
+        let collapsed = TodayStatsBarLayout.segmentSizes(
+            weights: [1, 2, 3],
+            totalSize: 2,
+            spacing: 2,
+            minimumSegment: 4
+        )
+        assertEqual(collapsed, [0, 0, 0], "container narrower than spacing clamps cleanly to zero")
     }
 }

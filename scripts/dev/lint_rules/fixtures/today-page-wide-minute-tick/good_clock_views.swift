@@ -1,23 +1,18 @@
 // lint-fixture-path: Sources/UI/Settings/TodayClockViews.swift
 import SwiftUI
 
-struct TodayNowLabel: View {
-    var body: some View {
-        TimelineView(.everyMinute) { context in
-            Text(TodayClockPolicy.nowLabelText(now: context.date))
-        }
-    }
-}
-
-struct TodayNowMarker: View {
-    let tapeDay: Date
-    let width: CGFloat
+struct TodayDayRollover: View {
+    let storedDay: Date
+    let onRollover: () -> Void
 
     var body: some View {
-        TimelineView(.everyMinute) { context in
-            if let fraction = TodayClockPolicy.nowMarkerFraction(now: context.date, tapeDay: tapeDay) {
-                Rectangle().offset(x: width * fraction - 1)
-            }
+        TimelineView(TodayMidnightSchedule()) { context in
+            Color.clear
+                .onChange(of: TodayClockPolicy.dayKey(context.date)) { _, newDay in
+                    if TodayClockPolicy.needsRollover(storedDay: storedDay, now: newDay) {
+                        onRollover()
+                    }
+                }
         }
     }
 }

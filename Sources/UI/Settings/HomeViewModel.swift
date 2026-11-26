@@ -387,8 +387,9 @@ final class HomeViewModel: ObservableObject {
         trackActivationReturnProxyIfNeeded(candidates: dictationCandidates + meetingCandidates, surface: .home)
     }
 
-    /// Today is the page the window opens on, so it reports the return signal
-    /// through the same once-per-window latch as Meetings.
+    /// Stats (`.today`) reports the return signal through the same
+    /// once-per-window latch as Meetings, so opening Stats directly still
+    /// counts without double-counting when navigating between pages.
     func trackActivationReturnProxyIfNeeded(todayRecent: [TodayRecentItem]) {
         let candidates = todayRecent.map { item in
             (

@@ -394,9 +394,21 @@ private struct StatsSevenDayCard: View {
     private func dayColumn(_ day: TodayActivityDay) -> some View {
         let total = day.totalCaptures
         let scaledHeight = total > 0
-            ? max(8, Self.maxBarHeight * CGFloat(total) / CGFloat(peakCaptures))
+            ? min(Self.maxBarHeight, max(8, Self.maxBarHeight * CGFloat(total) / CGFloat(peakCaptures)))
             : 4
         let tooltip = TodayCopy.dayActivityTooltip(day)
+        let segmentSpacing: CGFloat = 1.5
+        let activeSegments: [(id: String, count: Int, color: Color)] = [
+            day.writingEntries > 0 ? ("writing", day.writingEntries, LibraryTokens.writingStream) : nil,
+            day.dictations > 0 ? ("dictations", day.dictations, LibraryTokens.dictationStream) : nil,
+            day.meetings > 0 ? ("meetings", day.meetings, LibraryTokens.meetingsStream) : nil,
+        ].compactMap { $0 }
+        let segmentHeights = TodayStatsBarLayout.segmentSizes(
+            weights: activeSegments.map { Double($0.count) },
+            totalSize: Double(scaledHeight),
+            spacing: Double(segmentSpacing),
+            minimumSegment: 3
+        )
 
         return VStack(spacing: 6) {
             Text(total > 0 ? "\(total)" : " ")
@@ -413,18 +425,15 @@ private struct StatsSevenDayCard: View {
                         .frame(maxWidth: 26)
                         .frame(height: 3)
                 } else {
-                    VStack(spacing: 1.5) {
-                        if day.writingEntries > 0 {
-                            segment(count: day.writingEntries, total: total, barHeight: scaledHeight, color: LibraryTokens.writingStream)
-                        }
-                        if day.dictations > 0 {
-                            segment(count: day.dictations, total: total, barHeight: scaledHeight, color: LibraryTokens.dictationStream)
-                        }
-                        if day.meetings > 0 {
-                            segment(count: day.meetings, total: total, barHeight: scaledHeight, color: LibraryTokens.meetingsStream)
+                    VStack(spacing: segmentSpacing) {
+                        ForEach(Array(activeSegments.enumerated()), id: \.element.id) { index, seg in
+                            Rectangle()
+                                .fill(seg.color)
+                                .frame(height: CGFloat(segmentHeights[index]))
                         }
                     }
                     .frame(maxWidth: 26)
+                    .frame(height: scaledHeight)
                     .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
                 }
             }
@@ -443,13 +452,6 @@ private struct StatsSevenDayCard: View {
         .help(tooltip)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(tooltip)
-    }
-
-    private func segment(count: Int, total: Int, barHeight: CGFloat, color: Color) -> some View {
-        let height = max(3, barHeight * CGFloat(count) / CGFloat(total))
-        return Rectangle()
-            .fill(color)
-            .frame(height: height)
     }
 }
 
@@ -512,20 +514,26 @@ private struct StatsCaptureMixCard: View {
             GeometryReader { geo in
                 let active = segments.filter { $0.count > 0 }
                 let spacing: CGFloat = 2
-                let availableWidth = max(0, geo.size.width - spacing * CGFloat(max(0, active.count - 1)))
+                let widths = TodayStatsBarLayout.segmentSizes(
+                    weights: active.map(\.share),
+                    totalSize: Double(geo.size.width),
+                    spacing: Double(spacing),
+                    minimumSegment: 4
+                )
                 HStack(spacing: spacing) {
                     if active.isEmpty {
                         Capsule()
                             .fill(LibraryTokens.hairline)
                             .frame(maxWidth: .infinity)
                     } else {
-                        ForEach(active) { segment in
+                        ForEach(Array(active.enumerated()), id: \.element.id) { index, segment in
                             Rectangle()
                                 .fill(segment.kind.streamColor)
-                                .frame(width: max(4, availableWidth * CGFloat(segment.share)))
+                                .frame(width: CGFloat(widths[index]))
                         }
                     }
                 }
+                .frame(width: geo.size.width, alignment: .leading)
                 .clipShape(Capsule())
             }
             .frame(height: 8)

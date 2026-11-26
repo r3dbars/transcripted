@@ -63,12 +63,15 @@ func testSettingsClosedWindowPolicy() {
         assertNil(hold.windowWillShow(), "nothing built while closed, nothing to swap in")
     }
 
-    runSuite("Today writing cache - unchanged day files aren't parsed again") {
+    runSuite("Today writing cache - unchanged day files reuse lightweight summaries without re-reading") {
         let folder = FileManager.default.temporaryDirectory
             .appendingPathComponent("today-writing-cache-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let file = folder.appendingPathComponent("Writing_2026-09-24.md")
+        let day = Calendar.current.startOfDay(
+            for: Calendar.current.date(from: DateComponents(year: 2026, month: 9, day: 24, hour: 12))!
+        )
         func entry(_ id: Int) -> String {
             """
 
@@ -87,30 +90,36 @@ func testSettingsClosedWindowPolicy() {
 
         let cache = TodayWritingDayFileCache()
         var reads = 0
-        func facts() -> [TodayWritingFact]? {
+        func summary(forDay targetDay: Date = day) -> TodayWritingDaySummary? {
             // A fresh URL, like each scan's directory listing gives: URLs
             // cache their resource values.
             let listed = URL(fileURLWithPath: file.path)
-            return cache.facts(for: listed, signature: TodayWritingDayFileCache.signature(of: listed)) {
+            return cache.summary(for: listed, day: targetDay, signature: TodayWritingDayFileCache.signature(of: listed)) {
                 reads += 1
                 return try? String(contentsOf: file, encoding: .utf8)
             }
         }
-        assertEqual(facts()?.map(\.entryID), ["writing-1"], "first read parses the file")
-        assertEqual(facts()?.map(\.entryID), ["writing-1"], "same entries from the cache")
+        let first = summary()
+        assertEqual(first?.entryCount, 1, "first read summarizes the file")
+        assertEqual(first?.wordCount, 2, "word count comes from the parsed summary")
+        assertEqual(first?.day, day, "day is preserved on the cached summary")
+        let second = summary()
+        assertEqual(second, first, "same lightweight summary from the cache")
         assertEqual(reads, 1, "an unchanged file isn't read twice")
 
         try? ("# Writing" + entry(1) + entry(2)).write(to: file, atomically: true, encoding: .utf8)
-        assertEqual(facts()?.map(\.entryID), ["writing-1", "writing-2"], "a saved entry shows up")
+        let updated = summary()
+        assertEqual(updated?.entryCount, 2, "a saved entry updates the cached entry count")
+        assertEqual(updated?.wordCount, 4, "a saved entry updates the cached word count")
         assertEqual(reads, 2, "a changed file is read again")
 
         cache.retainOnly([])
-        _ = facts()
+        _ = summary()
         assertEqual(reads, 3, "a file dropped from the scan is forgotten")
 
         let unknown = TodayWritingDayFileCache.Signature(modifiedAt: nil, size: nil)
-        _ = cache.facts(for: file, signature: unknown) { reads += 1; return "" }
-        _ = cache.facts(for: file, signature: unknown) { reads += 1; return "" }
+        _ = cache.summary(for: file, day: day, signature: unknown) { reads += 1; return "" }
+        _ = cache.summary(for: file, day: day, signature: unknown) { reads += 1; return "" }
         assertEqual(reads, 5, "without a date and size the cache never trusts a hit")
     }
 }

@@ -1,12 +1,12 @@
 # Sources/UI
 
-Every surface the person sees: the Notch island and dictation session, the menu bar popover, the main window (Today, Meetings, Dictations, Writing, Speakers, Agent, Settings), onboarding, and the helpers they share. Four modules, one folder each; each has its own card with the file list, rules and tests.
+Every surface the person sees: the Notch island and dictation session, the menu bar popover, the main window (Meetings, Dictations, Writing, Speakers, Agent, Stats, Settings), onboarding, and the helpers they share. Four modules, one folder each; each has its own card with the file list, rules and tests.
 
 | Folder | Module | Card |
 |---|---|---|
 | `Overlay/` | `UIOverlay` | `Sources/UI/Overlay/AGENTS.md`: Notch island, dictation session, meeting and call-prompt controllers |
 | `MenuBar/` | `UIMenuBar` | `Sources/UI/MenuBar/AGENTS.md`: status item and popover |
-| `Settings/` | `UISettings` | `Sources/UI/Settings/AGENTS.md`: main window, Home, Today, speakers, onboarding, Agent page |
+| `Settings/` | `UISettings` | `Sources/UI/Settings/AGENTS.md`: main window, Meetings, Dictations, Stats, speakers, onboarding, Agent page |
 | `Shared/` | `UIShared` | `Sources/UI/Shared/AGENTS.md`: scanners, rename/delete/undo, playback, design tokens |
 
 Read the card for the folder you're editing first. Dependency edges live in `.agents/modules.json`; `python3 scripts/dev/check-module-boundaries.py --explain <file>` names one file's module and what it may import. UIShared sits at the bottom and may not name UIOverlay, UIMenuBar, UISettings or AppState.
@@ -25,7 +25,7 @@ Read the card for the folder you're editing first. Dependency edges live in `.ag
 
 ## Cross-surface behavior
 
-- **Main window is content-first.** Sidebar order: Today, Meetings, Dictations, Writing, Speakers, Agent (⌘1-⌘6); it opens on Today. File import is an action on Meetings (header, page drop, ⌘O); the retired `.files` page id redirects to Meetings. Under the six, a Settings row (it used to be an unlabeled gear), Feedback and the quiet version line; Meetings shows the live recording time (green) while a meeting records. The Settings row opens one combined scrolling settings page (no tab strip): four groups plus one Advanced disclosure. Meetings is the `.home` page case; the raw value stays `home` so automation ids and analytics `page_id` don't change. `HomeView` loads small paged slices, and `SettingsRecentCaptureRefreshPolicy` limits refreshes to the pages that need them.
+- **Main window is content-first.** Sidebar order: Meetings, Dictations, Writing, Speakers, Agent, Stats (⌘1-⌘6); it opens on Meetings. File import is an action on Meetings (header, page drop, ⌘O); the retired `.files` page id redirects to Meetings. Under the six, a Settings row (it used to be an unlabeled gear), Feedback and the quiet version line; Meetings shows the live recording time (green) while a meeting records. The Settings row opens one combined scrolling settings page (no tab strip): four groups plus one Advanced disclosure. Meetings is the `.home` page case and Stats keeps the `.today` page case so automation ids and analytics `page_id` don't change. `HomeView` loads small paged slices, and `SettingsRecentCaptureRefreshPolicy` limits refreshes to the pages that need them.
 - **Speaker naming happens in the island.** After a meeting, the island's speaker review (`NotchIslandSpeakerReviewView`, Overlay) names or confirms voices; `Settings/SpeakerNamingSheet.swift` only presents it, and never on top of a recording meeting. The Speakers page (Settings) is where unnamed voices wait, asked again one meeting at a time with the same review drawn as a card. `TranscriptedSettingsView` owns the persisted local-mic diarization toggle.
 - **Agent connect is a Settings page.** Connecting comes first: one row per agent found on the Mac with one Connect button (connected agents stay listed with a check), all pointing the agent's MCP config at the same installed helper; a copy-prompt row covers agents we can't configure; then the ChatGPT companion card; the capture folders and Copy folder paths sit under Folders (the Codex inbox setup is implemented but hidden). Onboarding has no connect stage. Copy and paths: `Shared/AgentConnectionGuide.swift`.
 - **Dictation shortcut.** One key with a behavior (hold or tap, hold only, tap to toggle; `Sources/Support/HotkeyPreferences.swift`). Presentation code takes the take's `DictationShortcutMode` (push-to-talk vs a take kept listening hands-free) only to word notices.

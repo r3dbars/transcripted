@@ -208,7 +208,7 @@ final class TodayViewModel: ObservableObject {
         let overview = TodayStatsBuilder.buildOverview(
             meetings: meetingFacts,
             dictationDays: dictationDays,
-            writing: writing.map(\.fact),
+            writingDays: writing.map(\.summary),
             now: now,
             calendar: calendar
         )
@@ -241,20 +241,18 @@ final class TodayViewModel: ObservableObject {
             )
         }
         let recentWriting = writing
-            .sorted { $0.fact.date > $1.fact.date }
+            .filter { $0.summary.entryCount > 0 }
+            .sorted { ($0.summary.latestEntryDate ?? $0.summary.day) > ($1.summary.latestEntryDate ?? $1.summary.day) }
             .prefix(recentLimit)
             .map { entry in
                 TodayRecentItem(
                     kind: .writing,
-                    id: "writing-\(entry.fact.entryID)",
-                    title: TodayWritingParser.title(for: entry.fact.text),
-                    date: entry.fact.date,
+                    id: "writing-\(entry.file.lastPathComponent)",
+                    title: "Writing",
+                    date: entry.summary.latestEntryDate ?? entry.summary.day,
                     durationSeconds: nil,
                     transcriptURL: entry.file,
-                    preview: entry.fact.text,
-                    appName: entry.fact.appName,
-                    words: entry.fact.words,
-                    acceptedWords: entry.fact.acceptedWords
+                    words: entry.summary.wordCount
                 )
             }
         if Task.isCancelled { return nil }
@@ -275,11 +273,11 @@ final class TodayViewModel: ObservableObject {
         return (snapshot, meetingIndexByPath)
     }
 
-    /// Writing entries from `Writing_<date>.md` day files in the capture
-    /// library's `writing/` folder, cached by file signature.
+    /// Lightweight per-day writing summaries from `Writing_<date>.md` day files
+    /// in the capture library's `writing/` folder, cached by file signature.
     nonisolated private static func loadWriting(
         calendar: Calendar
-    ) -> [(fact: TodayWritingFact, file: URL)] {
+    ) -> [(summary: TodayWritingDaySummary, file: URL)] {
         let folder = FileManager.writingDirectory(in: FileManager.default.transcriptedCaptureLibraryDir)
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: folder,
@@ -292,20 +290,22 @@ final class TodayViewModel: ObservableObject {
         parser.calendar = calendar
         parser.timeZone = calendar.timeZone
         parser.dateFormat = "yyyy-MM-dd"
-        var result: [(fact: TodayWritingFact, file: URL)] = []
+        var result: [(summary: TodayWritingDaySummary, file: URL)] = []
         var scanned: [URL] = []
         for file in files {
+            if Task.isCancelled { return [] }
             let name = file.lastPathComponent
             guard name.hasPrefix("Writing_"), name.hasSuffix(".md"),
-                  parser.date(from: String(name.dropFirst(8).dropLast(3))) != nil else { continue }
+                  let parsedDate = parser.date(from: String(name.dropFirst(8).dropLast(3))) else { continue }
+            let day = calendar.startOfDay(for: parsedDate)
             scanned.append(file)
-            guard let facts = cache.facts(
+            guard let summary = cache.summary(
                 for: file,
+                day: day,
                 signature: TodayWritingDayFileCache.signature(of: file),
                 read: { try? String(contentsOf: file, encoding: .utf8) }
             ) else { continue }
-            if Task.isCancelled { return [] }
-            result += facts.map { ($0, file) }
+            result.append((summary, file))
         }
         cache.retainOnly(scanned)
         return result

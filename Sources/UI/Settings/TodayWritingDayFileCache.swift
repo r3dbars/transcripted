@@ -1,9 +1,9 @@
 import Foundation
 
-/// Parsed `Writing_<date>.md` day files, kept between Today rebuilds and
-/// reused while a file's size and modification date are unchanged. A rebuild
-/// after one save re-parses only the day file that changed instead of the
-/// whole week. Thread-safe: rebuilds run off the main thread and can overlap.
+/// Lightweight per-file summaries of `Writing_<date>.md` day files, kept
+/// between Stats rebuilds and reused while a file's size and modification date
+/// are unchanged. Only counts and timestamps are retained — never full entry
+/// body text. Thread-safe: rebuilds run off the main thread and can overlap.
 final class TodayWritingDayFileCache: @unchecked Sendable {
     struct Signature: Equatable, Sendable {
         let modifiedAt: Date?
@@ -13,7 +13,7 @@ final class TodayWritingDayFileCache: @unchecked Sendable {
     static let shared = TodayWritingDayFileCache()
 
     private let lock = NSLock()
-    private var entries: [String: (signature: Signature, facts: [TodayWritingFact])] = [:]
+    private var entries: [String: (signature: Signature, summary: TodayWritingDaySummary)] = [:]
 
     /// The file's signature. URLs cache their resource values, so pass one
     /// from this scan's directory listing (which prefetches both keys).
@@ -22,27 +22,32 @@ final class TodayWritingDayFileCache: @unchecked Sendable {
         return Signature(modifiedAt: values?.contentModificationDate, size: values?.fileSize)
     }
 
-    /// The day file's entries: the cached parse when `signature` matches,
-    /// else `read()` parsed and cached. Nil when the file can't be read.
-    func facts(
+    /// The day file's summary: cached counts when `signature` and `day` match,
+    /// else `read()` parsed into counts and cached. Nil when the file can't be read.
+    func summary(
         for file: URL,
+        day: Date,
         signature: Signature,
         read: () -> String?
-    ) -> [TodayWritingFact]? {
+    ) -> TodayWritingDaySummary? {
         let key = file.standardizedFileURL.path
         lock.lock()
         let cached = entries[key]
         lock.unlock()
         // A signature with no date or size can't prove the file is unchanged.
-        if let cached, cached.signature == signature, signature.modifiedAt != nil, signature.size != nil {
-            return cached.facts
+        if let cached,
+           cached.signature == signature,
+           cached.summary.day == day,
+           signature.modifiedAt != nil,
+           signature.size != nil {
+            return cached.summary
         }
         guard let contents = read() else { return nil }
-        let facts = TodayWritingParser.entries(fromDayFile: contents)
+        let summary = TodayWritingParser.daySummary(fromDayFile: contents, day: day)
         lock.lock()
-        entries[key] = (signature, facts)
+        entries[key] = (signature, summary)
         lock.unlock()
-        return facts
+        return summary
     }
 
     /// Drops files no longer in the scanned range (or deleted).

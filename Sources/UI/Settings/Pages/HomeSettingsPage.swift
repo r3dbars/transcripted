@@ -77,6 +77,11 @@ struct HomeSettingsPage: View {
     let onRevealFailedMeetingAudio: (MeetingSessionController.FailedMeetingItem) -> Void
     let onClearFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let failedMeetingAudioAttachment: (MeetingSessionController.FailedMeetingItem) -> MeetingAudioAttachment?
+    /// Dictation key hint and post-setup checklist surfaced on Meetings' empty state.
+    let keyHint: TodayKeyHint
+    let setupChecklist: TodaySetupChecklistState
+    let onSetupStep: (TodaySetupStep) -> Void
+    let onDismissSetup: () -> Void
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -202,6 +207,15 @@ struct HomeSettingsPage: View {
                 UndoLineView(offer: offer, manager: captureUndo)
             }
             homeMeetingsList
+            if !isSearchingMeetings && !homeViewModel.isLoading && daySections.isEmpty && setupChecklist.isShown {
+                TodaySetupChecklist(
+                    state: setupChecklist,
+                    onStep: onSetupStep,
+                    onDismiss: onDismissSetup
+                )
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.top, 4)
+            }
         }
     }
 
@@ -218,7 +232,8 @@ struct HomeSettingsPage: View {
                 action: onStartMeeting,
                 secondaryActionTitle: HomeCaptureListCopy.EmptyMeetingsImportAction.title,
                 secondaryAutomationIdentifier: HomeCaptureListCopy.EmptyMeetingsImportAction.automationIdentifier,
-                secondaryAction: onImportAudioFile
+                secondaryAction: onImportAudioFile,
+                keyHint: keyHint
             ),
             // A background refresh of the recent slice shouldn't hide search
             // results behind a spinner.
