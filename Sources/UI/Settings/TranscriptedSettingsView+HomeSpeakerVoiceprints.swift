@@ -34,6 +34,101 @@ extension TranscriptedSettingsView {
         )
     }
 
+    /// The "Who spoke?" a Meetings card opens in place from its "N voices to
+    /// name": the review queue's own card for this meeting (Done saves it
+    /// at once through the Speakers page's saves; Later closes it, saving
+    /// nothing), else the card built from the opened transcript (Done saves
+    /// like the per-line quick fix). Nil when neither can be built, and the
+    /// card falls back to Speakers.
+    func homeInlineWhoSpokeSession(
+        for item: RecentMeetingItem,
+        onClose: @escaping @MainActor () -> Void
+    ) -> HomeMeetingWhoSpokeSession? {
+        let model = speakerPeopleModel
+        let path = item.transcriptURL.standardizedFileURL.path
+        if let key = model.meetingNamingByTranscriptPath[path]?.callKey,
+           let call = model.reviewStack.calls.first(where: { $0.id == key }) {
+            trackSettingsAction("review_meeting_speakers_inline", page: .home)
+            let review = NotchIslandSpeakerReviewView(
+                input: model.meetingReviewInput(for: call),
+                chrome: .page(NotchIslandSpeakerReviewView.PageCard(
+                    title: SpeakerMeetingReviewPolicy.cardTitle(meetingTitle: call.meetingTitle),
+                    detail: nil,
+                    doneTitle: SpeakerMeetingReviewPolicy.doneTitle,
+                    skipTitle: SpeakerMeetingReviewPolicy.laterTitle,
+                    skipHelp: SpeakerMeetingReviewPolicy.laterHelp
+                )),
+                width: HomeMeetingWhoSpokeSession.contentWidth
+            )
+            review.setMeetingTitle(call.meetingTitle)
+            review.onDone = { [weak model] updates, _ in
+                if let model {
+                    model.finishMeeting(call, updates: updates)
+                    // No Undo banner on Meetings: save now.
+                    model.saveFinishedMeetingNow()
+                }
+                onClose()
+            }
+            review.onSkip = { _ in onClose() }
+            model.loadInvitees(for: call)
+            return HomeMeetingWhoSpokeSession(review: review, invitees: model.inviteesByCallKey[call.id] ?? [])
+        }
+
+        guard let preview = homeOpenPreview(for: item),
+              preview.content.transcriptLines.contains(where: { !$0.speaker.isEmpty }) else { return nil }
+        trackSettingsAction("review_meeting_speakers_inline_row", page: .home)
+        let card = SpeakerTranscriptCard(
+            meetingTitle: preview.title,
+            date: preview.date,
+            transcriptURL: preview.transcriptURL,
+            lines: preview.content.transcriptLines,
+            audio: preview.audio,
+            save: { assignments, completion in
+                assignMeetingSpeakers(assignments, in: preview, completion: completion)
+            }
+        )
+        let built = model.transcriptReviewInput(for: card)
+        let review = NotchIslandSpeakerReviewView(
+            input: built.input,
+            chrome: .page(NotchIslandSpeakerReviewView.PageCard(
+                title: SpeakerMeetingReviewPolicy.cardTitle(meetingTitle: card.meetingTitle),
+                detail: nil,
+                doneTitle: SpeakerMeetingReviewPolicy.doneTitle,
+                skipTitle: SpeakerMeetingReviewPolicy.laterTitle,
+                skipHelp: SpeakerMeetingReviewPolicy.laterHelp
+            )),
+            width: HomeMeetingWhoSpokeSession.contentWidth
+        )
+        review.setMeetingTitle(card.meetingTitle)
+        let session = HomeMeetingWhoSpokeSession(review: review, invitees: [])
+        let identities = built.identities
+        review.onDone = { [weak model, weak session] updates, _ in
+            guard let model, let session, !session.isSaving else { return }
+            let assignments = SpeakerTranscriptWhoSpokePolicy.assignments(
+                for: updates,
+                identities: identities,
+                savedNames: model.savedNamesByID,
+                ownerID: model.ownerProfileID
+            )
+            guard !assignments.isEmpty else {
+                onClose()
+                return
+            }
+            session.isSaving = true
+            session.saveError = nil
+            card.save(assignments) { [weak session] didSave in
+                session?.isSaving = false
+                if didSave {
+                    onClose()
+                } else {
+                    session?.saveError = SpeakerTranscriptWhoSpokeRequests.saveFailedLine
+                }
+            }
+        }
+        review.onSkip = { _ in onClose() }
+        return session
+    }
+
     /// Whether ⋯ lists "Who spoke?" for this meeting, and whether it can open
     /// a card yet (`HomeMeetingCardPresentation.whoSpokeAvailability`).
     func homeWhoSpokeAvailability(for item: RecentMeetingItem) -> HomeMeetingCardPresentation.WhoSpokeAvailability {

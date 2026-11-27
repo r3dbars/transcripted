@@ -2,15 +2,17 @@ import SwiftUI
 import TranscriptedCore
 
 /// The Settings > Home (Meetings) page. This owns pure view assembly only:
-/// the header (search, ⋯, Record), the titles opt-in line, scan-warning and
-/// activity rows, and the day-grouped meeting rows (saved and failed), one of
+/// the header (folded search, Import, Record), the titles opt-in line,
+/// scan-warning and activity rows, and the day-grouped meeting cards (saved
+/// and failed), one of
 /// which can be open in place (saved and failed rows share the shell's one
 /// open slot), with the open row's transcript reveal in the shell's
 /// `MeetingsPageOpenState`. Days and times read through its own
 /// `MeetingsPageClock`, refreshed at midnight and on time zone or locale
 /// changes. It is where files get transcribed:
-/// the header ⋯'s Transcribe a file… and a drop anywhere on the page both
-/// feed the same import queue as ⌘O. Everything with side effects — delete/rename/copy/
+/// the header's Import and a drop anywhere on the page both feed the same
+/// import queue as ⌘O (a meeting card's own Markdown dragged back onto the
+/// page is ignored). Everything with side effects — delete/rename/copy/
 /// retranscribe, the shared root alert, undo staging, and analytics — stays
 /// in `TranscriptedSettingsView` (several pieces are pinned there by
 /// `Tests/UIAutomationSurfaceContractTests.swift`) and arrives here as
@@ -41,7 +43,6 @@ struct HomeSettingsPage: View {
 
     @Binding var homeFindIsVisible: Bool
     @Binding var homeMeetingSearchQuery: String
-    @Binding var homeStarredOnly: Bool
     let homeFindFieldFocusToken: Int
     /// The open row's transcript reveal; follows `homeExpandedMeetingID`
     /// and survives a rename (the shell owns it so Rename can carry it).
@@ -71,6 +72,9 @@ struct HomeSettingsPage: View {
     /// Voices a meeting still has to name, and opening its "Who spoke?" card.
     let meetingVoicesToName: (RecentMeetingItem) -> Int
     let onWhoSpoke: (RecentMeetingItem) -> Void
+    /// The inline "Who spoke?" for a card's "N voices to name"; nil sends
+    /// `onWhoSpoke` instead. The closure closes the popover.
+    var makeWhoSpokeSession: (RecentMeetingItem, @escaping @MainActor () -> Void) -> HomeMeetingWhoSpokeSession? = { _, _ in nil }
     /// Opens a failed meeting in place, or closes it (the shared open slot).
     let onToggleFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
     let onRetryFailedMeeting: (MeetingSessionController.FailedMeetingItem) -> Void
@@ -114,12 +118,7 @@ struct HomeSettingsPage: View {
                     searchFocusToken: homeFindFieldFocusToken,
                     onSearchFocusChange: { isSearchFocused = $0 },
                     onStartMeeting: onStartMeeting,
-                    onImportAudioFile: onImportAudioFile,
-                    // The Only kept audio filter reads the same `starred` flag.
-                    isKeptAudioOnly: homeStarredOnly,
-                    onToggleKeptAudio: {
-                        withAnimation(reduceMotion ? nil : .snappy(duration: 0.18)) { homeStarredOnly.toggle() }
-                    }
+                    onImportAudioFile: onImportAudioFile
                 )
 
                 MeetingTitlesOptInLineView(hasMeetings: !meetingDaySections.isEmpty || isSearchingMeetings)
@@ -159,7 +158,9 @@ struct HomeSettingsPage: View {
         .animation(reduceMotion ? nil : .snappy(duration: 0.22), value: transcriptionActivity)
         .contentShape(Rectangle())
         .dropDestination(for: URL.self) { urls, _ in
-            let fileURLs = urls.filter(\.isFileURL)
+            // A card dragged back onto the page carries its own Markdown;
+            // that is not something to transcribe.
+            let fileURLs = urls.filter { $0.isFileURL && $0.pathExtension.lowercased() != "md" }
             guard !fileURLs.isEmpty else { return false }
             onDropAudioFiles(fileURLs)
             return true
@@ -176,7 +177,7 @@ struct HomeSettingsPage: View {
     }
 
     private var isSearchingMeetings: Bool {
-        HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery, starredOnly: homeStarredOnly)
+        HomeMeetingSearchPaging.isActive(query: homeMeetingSearchQuery, starredOnly: false)
     }
 
     private var meetingsEmptyMessage: String {
@@ -184,7 +185,7 @@ struct HomeSettingsPage: View {
         // don't claim "no matches" before it has looked.
         HomeCaptureListCopy.meetingsEmptyMessage(
             isSearching: isSearchingMeetings,
-            starredOnly: homeStarredOnly,
+            starredOnly: false,
             query: homeMeetingSearchQuery,
             isSearchPassRunning: homeViewModel.isSearchingMeetings
         )
@@ -246,7 +247,7 @@ struct HomeSettingsPage: View {
                 : homeViewModel.canLoadMoreMeetings,
             getID: { AnyHashable($0.item.id) },
             onLoadMore: onLoadMoreMeetings,
-            // Whitespace separates rows; the open one carries its own card.
+            // Every row is its own matte card; spacing comes from the card.
             showsRowDividers: false,
             headerStyle: .label
         ) { row in
@@ -297,6 +298,7 @@ struct HomeSettingsPage: View {
                     onCollapse: onCollapseMeetingExpansion,
                     onCopy: { onCopyMeeting(meeting) },
                     onWhoSpoke: { onWhoSpoke(meeting) },
+                    makeWhoSpokeSession: { onClose in makeWhoSpokeSession(meeting, onClose) },
                     onToggleTranscript: {
                         withAnimation(reduceMotion ? nil : .easeOut(duration: 0.2)) { openState.toggleTranscript() }
                     },

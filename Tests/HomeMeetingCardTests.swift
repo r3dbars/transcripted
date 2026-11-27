@@ -1,7 +1,9 @@
 // The Meetings page (QuietMeetingCard and its rows): day headers, what fills
 // a closed row's summary slot, the opened card's subtitle and menu, one open
 // row at a time with its transcript closed on open, and when the titles
-// opt-in line shows (HomeMeetingCardPresentation). Fictional names only.
+// opt-in line shows (HomeMeetingCardPresentation); the card's time range,
+// people stack, voices to name and the player's speed, clock and mini
+// transcript (HomeMeetingRailPresentation). Fictional names only.
 
 import Foundation
 
@@ -323,8 +325,8 @@ func testHomeMeetingCard() {
     }
 
     runSuite("The transcript reveal says what it holds") {
-        assertEqual(P.revealTitle(isShown: false), "Transcript")
-        assertEqual(P.revealTitle(isShown: true), "Hide transcript")
+        assertEqual(P.revealTitle(isShown: false), "Full transcript")
+        assertEqual(P.revealTitle(isShown: true), "Full transcript", "the chevron says open or closed")
         assertEqual(P.lineCountText(214), "214 lines")
         assertEqual(P.lineCountText(1), "1 line")
         assertNil(P.lineCountText(nil), "no count until the file is read")
@@ -466,6 +468,101 @@ func testHomeMeetingCard() {
         for name in ["You", "Priya", "Speaker Lee", "Speakerphone"] {
             assertFalse(P.isUnnamedVoice(name), "\(name) is a name")
         }
+    }
+
+    typealias R = HomeMeetingRailPresentation
+
+    runSuite("Row 2 says the time range once with its length, in the Mac's own clock") {
+        let today = clock(2026, 11, 27, 18)
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = pacific
+        let two = calendar.date(from: DateComponents(year: 2026, month: 11, day: 27, hour: 14, minute: 0))!
+        assertEqual(R.timeRangeText(start: two, end: two.addingTimeInterval(42 * 60), clock: today), "2:00 \u{2013} 2:42\u{202F}PM \u{00B7} 42m",
+                    "both ends in the afternoon say PM once")
+        let eleven = calendar.date(from: DateComponents(year: 2026, month: 11, day: 27, hour: 11, minute: 2))!
+        assertEqual(R.timeRangeText(start: eleven, end: eleven.addingTimeInterval(81 * 60), clock: today),
+                    "11:02\u{202F}AM \u{2013} 12:23\u{202F}PM \u{00B7} 1h 21m", "a range across noon keeps both")
+        let german = clock(2026, 11, 27, 18, locale: Locale(identifier: "de_DE"))
+        assertEqual(R.timeRangeText(start: two, end: two.addingTimeInterval(42 * 60), clock: german), "14:00 \u{2013} 14:42 \u{00B7} 42m")
+        assertEqual(R.timeRangeText(start: two, end: nil, clock: today), P.timeText(for: two, clock: today), "no end: just the start")
+        assertEqual(R.timeRangeParts(start: two, end: two.addingTimeInterval(42 * 60), clock: today).length, "42m")
+        assertEqual(R.compactDuration(start: two, end: two.addingTimeInterval(2 * 3600)), "2h")
+        assertEqual(R.compactDuration(start: two, end: two.addingTimeInterval(20)), "<1m")
+        assertNil(R.compactDuration(start: two, end: two))
+    }
+
+    runSuite("Small calls list each person; bigger ones fold into a stack") {
+        assertEqual(R.peopleLayout([]), .none)
+        assertEqual(R.peopleLayout(["You", "Priya", "Marcus"]), .list(["You", "Priya", "Marcus"]))
+        assertEqual(
+            R.peopleLayout(["You", "Priya", "Marcus", "Elena", "Sam", "Devon", "Hana"]),
+            .stack(rings: ["You", "Priya", "Marcus", "Elena", "Sam"], label: "You + 6 others"),
+            "at most five prints, and no pill"
+        )
+        assertEqual(R.stackLabel(["Priya", "Marcus"]), "Priya + 1 other")
+        assertEqual(R.peopleRoleLine(isYou: true, meetingCount: nil), "Your mic")
+        assertEqual(R.peopleRoleLine(isYou: false, meetingCount: 14), "14 meetings")
+        assertEqual(R.peopleRoleLine(isYou: false, meetingCount: 1), "1 meeting")
+        assertEqual(R.peopleRoleLine(isYou: false, meetingCount: nil), "On this call")
+    }
+
+    runSuite("A meeting with voices left says how many, quietly") {
+        assertNil(R.voicesToNameTitle(0))
+        assertEqual(R.voicesToNameTitle(1), "1 voice to name")
+        assertEqual(R.voicesToNameTitle(3), "3 voices to name")
+    }
+
+    runSuite("The card's paragraph is the full summary, else the one-line takeaway") {
+        assertEqual(R.summaryParagraph(summary: " Walked the pricing page. ", summaryLine: "Team tier goes."), "Walked the pricing page.")
+        assertEqual(R.summaryParagraph(summary: "  ", summaryLine: "Team tier goes."), "Team tier goes.")
+        assertNil(R.summaryParagraph(summary: nil, summaryLine: nil))
+        assertEqual(R.closedSummaryLineLimit, 4)
+    }
+
+    runSuite("The speed button steps 1x, 1.25x, 1.5x, 2x and back") {
+        assertEqual(MeetingAudioPlayback.nextPlaybackRate(after: 1), 1.25)
+        assertEqual(MeetingAudioPlayback.nextPlaybackRate(after: 1.25), 1.5)
+        assertEqual(MeetingAudioPlayback.nextPlaybackRate(after: 1.5), 2)
+        assertEqual(MeetingAudioPlayback.nextPlaybackRate(after: 2), 1)
+        assertEqual(MeetingAudioPlayback.nextPlaybackRate(after: 0.8), 1, "an odd speed starts over at 1x")
+        assertEqual(R.speedLabel(1), "1\u{00D7}")
+        assertEqual(R.speedLabel(1.25), "1.25\u{00D7}")
+        assertEqual(R.speedLabel(1.5), "1.5\u{00D7}")
+        assertEqual(R.speedLabel(2), "2\u{00D7}")
+    }
+
+    runSuite("The clock shows the length or the time left") {
+        let total: TimeInterval = 42 * 60 + 8
+        let elapsed: TimeInterval = 14 * 60 + 22
+        assertEqual(R.clockTexts(elapsed: elapsed, total: total, showsRemaining: false).elapsed, "14:22")
+        assertEqual(R.clockTexts(elapsed: elapsed, total: total, showsRemaining: false).trailing, "42:08")
+        assertEqual(R.clockTexts(elapsed: elapsed, total: total, showsRemaining: true).trailing, "-27:46")
+        assertEqual(R.clockTexts(elapsed: total + 30, total: total, showsRemaining: true).trailing, "-0:00", "never past the end")
+    }
+
+    runSuite("The rail knows who is speaking at a second, and silence") {
+        let starts: [TimeInterval?] = [0, 185, nil, 432, 680]
+        assertNil(R.activeLineIndex(starts: [10, 20], at: 5), "before the first line")
+        assertEqual(R.activeLineIndex(starts: starts, at: 200), 1)
+        assertEqual(R.activeLineIndex(starts: starts, at: 432), 3, "a line starts on its second")
+        assertEqual(R.activeLineIndex(starts: starts, at: 5_000), 4)
+        assertEqual(R.speakingLineIndex(starts: starts, at: 200), 1)
+        assertNil(R.speakingLineIndex(starts: starts, at: 300), "two minutes after a line began is silence")
+        assertNil(R.speakingLineIndex(starts: starts, at: 5_000))
+        assertEqual(R.hoverPillText(time: 865, speaker: "Priya"), "14:25 \u{00B7} Priya")
+        assertEqual(R.hoverPillText(time: 865, speaker: nil), "14:25")
+        assertEqual(R.hoverPillText(time: 865, speaker: " "), "14:25")
+    }
+
+    runSuite("The mini transcript lays out the lines around the one being spoken") {
+        assertEqual(R.miniTranscriptWindow(active: 10, count: 64), 7..<14)
+        assertEqual(R.miniTranscriptWindow(active: nil, count: 64), 0..<4, "before the first line it sits at the top")
+        assertEqual(R.miniTranscriptWindow(active: 63, count: 64), 60..<64)
+        assertEqual(R.miniTranscriptWindow(active: 2, count: 0), 0..<0)
+        assertFalse(R.showsMiniTranscript(hasStarted: false, isActive: false, hasLines: true), "closed until played")
+        assertTrue(R.showsMiniTranscript(hasStarted: true, isActive: false, hasLines: true), "stays once started")
+        assertTrue(R.showsMiniTranscript(hasStarted: false, isActive: true, hasLines: true), "Play & open shows it at once")
+        assertFalse(R.showsMiniTranscript(hasStarted: true, isActive: true, hasLines: false), "nothing to follow")
     }
 
     runSuite("The audio source picker says you and others, not devices") {

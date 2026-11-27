@@ -769,6 +769,7 @@ APP_SOURCES=(
     "Sources/UI/Settings/HomeDeleteConfirmationPolicy.swift"
     "Sources/UI/Settings/HomeHitTarget.swift"
     "Sources/UI/Settings/HomeMeetingCardPresentation.swift"
+    "Sources/UI/Settings/HomeMeetingRailPresentation.swift"
     "Sources/UI/Settings/HomeMeetingPreview.swift"
     "Sources/UI/Settings/HomeRowMenuPolicy.swift"
     "Sources/UI/Settings/SpeakerPeopleSettingsConstants.swift"

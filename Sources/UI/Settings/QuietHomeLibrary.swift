@@ -2,20 +2,19 @@ import AppKit
 import SwiftUI
 import TranscriptedCore
 
-// Quiet-library Home components (2026-08 redesign, minimal rows 2026-11-18).
+// Quiet-library Home components (2026-08 redesign, matte cards 2026-11-27).
 //
 // The Meetings page is for finding a meeting: one title, then day-grouped
-// rows (`HomeMeetingCard.swift`): play, title, one summary, start time.
-// Each row opens in place; there is no sheet and no separate meeting page.
-// The header carries a quiet search, one ⋯ menu (Transcribe a file… and the
-// Only kept audio filter; a drop anywhere on the page also transcribes), and
-// one ink Record button. Today owns the day's counts, so the header doesn't
-// repeat them.
+// cards (`HomeMeetingCard.swift`). Each card opens in place; there is no
+// sheet and no separate meeting page. The header carries only three quiet
+// controls: a search that sits folded as a magnifier until clicked or ⌘F,
+// Import (a drop anywhere on the page also transcribes), and one ink Record
+// button. Today owns the day's counts, so the header doesn't repeat them.
 
 // MARK: - Header
 
-/// Page title, quiet search, ⋯, Record, and at most one attention clause
-/// rendered as a link to the place where the work lives.
+/// Page title, the folded search, Import, Record, and at most one attention
+/// clause rendered as a link to the place where the work lives.
 struct QuietHomeHeader: View {
     let attentionTitle: String?
     let onAttention: () -> Void
@@ -26,12 +25,10 @@ struct QuietHomeHeader: View {
     var onSearchFocusChange: (Bool) -> Void = { _ in }
     let onStartMeeting: () -> Void
     let onImportAudioFile: () -> Void
-    var isKeptAudioOnly: Bool = false
-    var onToggleKeptAudio: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 10) {
+            HStack(alignment: .center, spacing: 8) {
                 // Same title treatment as SettingsPageIntro so Meetings,
                 // Dictations, and Speakers read as siblings.
                 Text("Meetings")
@@ -42,11 +39,12 @@ struct QuietHomeHeader: View {
                     focusRequestToken: searchFocusToken,
                     onFocusChange: onSearchFocusChange
                 )
-                QuietMeetingsMoreMenu(
-                    isKeptAudioOnly: isKeptAudioOnly,
-                    onImportAudioFile: onImportAudioFile,
-                    onToggleKeptAudio: onToggleKeptAudio
-                )
+                Button("Import", action: onImportAudioFile)
+                    .buttonStyle(.transcriptedSecondary)
+                    .controlSize(.small)
+                    .help(HomeCaptureListCopy.TranscribeFileAction.help)
+                    .accessibilityLabel(Text(HomeCaptureListCopy.TranscribeFileAction.title))
+                    .accessibilityIdentifier(HomeCaptureListCopy.TranscribeFileAction.automationIdentifier)
                 Button("Record", action: onStartMeeting)
                     .buttonStyle(.transcriptedPrimary)
                     .controlSize(.small)
@@ -68,9 +66,10 @@ struct QuietHomeHeader: View {
     }
 }
 
-/// "Search", quiet: no border at rest, wider with a hairline once focused or
-/// filled. It matches title, the on-device line and summary, date words and
-/// named speakers (`HomeMeetingListFilter`), never transcript bodies.
+/// Search, folded: a magnifier at rest. Clicking it or ⌘F opens the field
+/// in place; an empty field folds back on Esc or when it loses focus. It
+/// matches title, the on-device line and summary, date words and named
+/// speakers (`HomeMeetingListFilter`), never transcript bodies.
 struct QuietHeaderSearchField: View {
     @Binding var query: String
     /// Focus moves here when this changes while the page is showing (⌘F),
@@ -79,95 +78,96 @@ struct QuietHeaderSearchField: View {
     var onFocusChange: (Bool) -> Void = { _ in }
 
     @FocusState private var isFocused: Bool
+    @State private var isExpanded = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var isOpen: Bool { isFocused || !query.isEmpty }
+    private var isOpen: Bool { isExpanded || isFocused || !query.isEmpty }
 
     var body: some View {
-        HStack(spacing: 4) {
-            TextField("Search", text: $query, prompt: Text("Search").foregroundStyle(LibraryTokens.ink3))
+        Group {
+            if isOpen {
+                field
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .trailing)))
+            } else {
+                QuietHeaderIconButton(
+                    systemName: "magnifyingglass",
+                    help: "Search meetings (\u{2318}F)",
+                    automationIdentifier: "transcripted.home.find.toggle"
+                ) {
+                    open()
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isOpen)
+        .onChange(of: focusRequestToken) { _, _ in
+            open()
+        }
+    }
+
+    private var field: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundStyle(LibraryTokens.ink3)
+                .accessibilityHidden(true)
+            TextField("Search meetings", text: $query, prompt: Text("Search meetings").foregroundStyle(LibraryTokens.ink3))
                 .textFieldStyle(.plain)
                 .font(LibraryTokens.meta)
                 .focused($isFocused)
                 .onExitCommand {
                     query = ""
-                    isFocused = false
-                }
-                .onChange(of: focusRequestToken) { _, _ in
-                    isFocused = true
+                    close()
                 }
                 .onChange(of: isFocused) { _, focused in
                     onFocusChange(focused)
+                    // An empty field folds back once the reader moves on.
+                    if !focused, query.isEmpty { isExpanded = false }
                 }
                 .accessibilityLabel(Text("Search meetings"))
                 .accessibilityIdentifier("transcripted.home.meeting-search.field")
-            if !query.isEmpty {
-                Button {
-                    query = ""
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(LibraryTokens.ink3)
-                }
-                .buttonStyle(.plain)
-                .help("Clear search")
-                .accessibilityLabel(Text("Clear meeting filter"))
+            Button {
+                query = ""
+                close()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundStyle(LibraryTokens.ink3)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .help("Close search")
+            .accessibilityLabel(Text("Clear meeting filter"))
         }
         .padding(.horizontal, 8)
-        .padding(.vertical, 4)
-        .frame(width: isOpen ? 170 : 70)
+        .frame(width: 205, height: HomeHitTarget.compactVisibleSize + 4)
         .background(
-            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                .strokeBorder(isOpen ? LibraryTokens.hairline : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 1, style: .continuous)
+                .fill(DesignTokens.fill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: LibraryTokens.radiusControl + 1, style: .continuous)
+                .strokeBorder(DesignTokens.hairlineStrong, lineWidth: 1)
         )
         .contentShape(Rectangle())
         .onTapGesture { isFocused = true }
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.18), value: isOpen)
-        // The find affordance the QA smoke looks for (it was the magnifier).
+        // The find affordance the QA smoke looks for, open or folded.
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("transcripted.home.find.toggle")
     }
-}
 
-/// The header's one ⋯: Transcribe a file… and Only kept audio (checked while
-/// on). Both used to be header buttons; they stay one click away.
-struct QuietMeetingsMoreMenu: View {
-    let isKeptAudioOnly: Bool
-    let onImportAudioFile: () -> Void
-    let onToggleKeptAudio: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Menu {
-            Button(HomeCaptureListCopy.TranscribeFileAction.title, action: onImportAudioFile)
-                .help(HomeCaptureListCopy.TranscribeFileAction.help)
-                .accessibilityIdentifier(HomeCaptureListCopy.TranscribeFileAction.automationIdentifier)
-            Toggle("Only kept audio", isOn: Binding(
-                get: { isKeptAudioOnly },
-                set: { _ in onToggleKeptAudio() }
-            ))
-            .accessibilityIdentifier("transcripted.home.starred.toggle")
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isKeptAudioOnly || isHovering ? LibraryTokens.ink : LibraryTokens.ink3)
-                .frame(width: HomeHitTarget.compactVisibleSize, height: HomeHitTarget.compactVisibleSize)
-                .background {
-                    RoundedRectangle(cornerRadius: LibraryTokens.radiusControl, style: .continuous)
-                        .fill(isHovering ? LibraryTokens.rowHover : Color.clear)
-                }
-                .contentShape(Rectangle())
+    private func open() {
+        isExpanded = true
+        // Focus once the field exists.
+        Task { @MainActor in
+            isFocused = true
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .onHover { isHovering = $0 }
-        .help(isKeptAudioOnly ? "More (showing only meetings that keep their audio)" : "More")
-        .accessibilityLabel(Text("More"))
-        .accessibilityValue(Text(isKeptAudioOnly ? "Only kept audio" : ""))
-        .accessibilityIdentifier("transcripted.home.more")
+    }
+
+    private func close() {
+        isFocused = false
+        isExpanded = false
     }
 }
 

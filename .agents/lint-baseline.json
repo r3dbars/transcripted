@@ -32,7 +32,6 @@
     "Sources/UI/Settings/DictationPlaybackController.swift": 2,
     "Sources/UI/Settings/TranscriptedSettingsView+HomeMeetingActions.swift": 2,
     "Sources/UI/Settings/TranscriptedSettingsView.swift": 2,
-    "Sources/UI/Shared/MeetingAudioPlayback.swift": 1,
     "Sources/UI/Shared/SpeakerClipPlayback.swift": 2
   },
   "native-launch-without-isolation-guard": {

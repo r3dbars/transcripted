@@ -4,9 +4,11 @@ import Foundation
 /// failed and working rows, the titles opt-in line), so fast tests read the
 /// same values the views lay out from.
 ///
-/// The page is for finding a meeting: a closed row is play, title, one
-/// summary and the start time. Opening a row turns it into a quiet card in
-/// place; the transcript stays behind a "Transcript" reveal until asked for.
+/// The page is for finding a meeting: a closed card is the title, the time
+/// range with who was there, and the summary paragraph. Opening a card
+/// unfolds it in place; the transcript stays behind a "Full transcript"
+/// reveal until asked for. Row 2, the summary paragraph and the player's
+/// rules are `HomeMeetingRailPresentation`.
 enum HomeMeetingCardPresentation {
     /// An opened transcript shows this many lines before "Show all N lines".
     static let openedLineLimit = 60
@@ -188,9 +190,10 @@ enum HomeMeetingCardPresentation {
             .joined(separator: " \u{00B7} ")
     }
 
-    /// The reveal row: "Transcript" / "Hide transcript".
+    /// The reveal row under the player: "Full transcript", its chevron
+    /// turned while open.
     static func revealTitle(isShown: Bool) -> String {
-        isShown ? "Hide transcript" : "Transcript"
+        "Full transcript"
     }
 
     /// "214 lines" on the reveal row's right; nil until the file is read.

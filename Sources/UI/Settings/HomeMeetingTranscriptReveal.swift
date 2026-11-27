@@ -1,8 +1,8 @@
 import SwiftUI
 import TranscriptedCore
 
-// The opened Meetings card's last row: "Transcript" with a chevron and
-// "214 lines" on the right. It is closed every time the card opens
+// The opened Meetings card's last row, under the player: "› Full transcript
+// · 214 lines". It is closed every time the card opens
 // (`MeetingsPageOpenState`), so the lines are only laid out once asked for.
 // Revealed, each line is the speaker's name in bold, then the words, upright
 // and always selectable. Hovering a line shows "▶ 0:42" at its end and
@@ -50,14 +50,15 @@ struct HomeMeetingTranscriptReveal: View {
                     .rotationEffect(.degrees(isShown ? 90 : 0))
                     .frame(width: 10)
                 Text(P.revealTitle(isShown: isShown))
-                Spacer(minLength: 8)
+                    .fontWeight(.medium)
                 if let count = P.lineCountText(content?.transcriptLines.count) {
-                    Text(count)
+                    Text("\u{00B7} \(count)")
                         .monospacedDigit()
                         .foregroundStyle(LibraryTokens.ink3)
                 } else if isLoading {
                     ProgressView().controlSize(.mini)
                 }
+                Spacer(minLength: 8)
             }
             .font(LibraryTokens.meta)
             .foregroundStyle(isHovering ? LibraryTokens.ink : LibraryTokens.ink2)
@@ -68,10 +69,10 @@ struct HomeMeetingTranscriptReveal: View {
         .onHover { isHovering = $0 }
         .overlay(alignment: .top) {
             Rectangle()
-                .fill(DesignTokens.hairlineStrong)
+                .fill(LibraryTokens.hairline)
                 .frame(height: 1)
         }
-        .padding(.top, 10)
+        .padding(.top, 12)
         // Looks like the mockup's reveal row; reads as a disclosure.
         .accessibilityRepresentation {
             DisclosureGroup(isExpanded: Binding(get: { isShown }, set: { if $0 != isShown { onToggle() } })) {
@@ -83,9 +84,9 @@ struct HomeMeetingTranscriptReveal: View {
         .accessibilityIdentifier("transcripted.home.meeting.show-more")
     }
 
-    /// "Transcript, 214 lines".
+    /// "Full transcript, 214 lines".
     private var revealAccessibilityLabel: String {
-        ["Transcript", P.lineCountText(content?.transcriptLines.count)].compactMap { $0 }.joined(separator: ", ")
+        [P.revealTitle(isShown: isShown), P.lineCountText(content?.transcriptLines.count)].compactMap { $0 }.joined(separator: ", ")
     }
 
     @ViewBuilder

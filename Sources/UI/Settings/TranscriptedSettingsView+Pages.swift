@@ -267,7 +267,6 @@ extension TranscriptedSettingsView {
                 : nil,
             homeFindIsVisible: $homeFindIsVisible,
             homeMeetingSearchQuery: $homeMeetingSearchQuery,
-            homeStarredOnly: $homeStarredOnly,
             homeFindFieldFocusToken: homeFindFieldFocusToken,
             openState: $homeMeetingOpenState,
             onAttention: {
@@ -353,6 +352,9 @@ extension TranscriptedSettingsView {
             },
             onWhoSpoke: { item in
                 openWhoSpokeCard(for: item)
+            },
+            makeWhoSpokeSession: { item, onClose in
+                homeInlineWhoSpokeSession(for: item, onClose: onClose)
             },
             onToggleFailedMeeting: { failedMeeting in
                 toggleHomeFailedMeetingExpansion(failedMeeting)
